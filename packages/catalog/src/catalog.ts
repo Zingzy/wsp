@@ -85,6 +85,19 @@ export interface AgentAbout {
   license: string;
 }
 
+/** The agent's published mark, drawn inline wherever the agent is named and never fetched. A shape with no fill of its
+ * own takes the first ink, or the ink of whatever it sits in where there is none; a shape filled `var(--ink-N)` takes
+ * ink N; a shape with its own colour keeps it. */
+export interface AgentMark {
+  svg: string;
+  /** The brand's colours on each theme's ground, each at least 3:1 against the tile it sits in. */
+  inks?: readonly { light: string; dark: string }[];
+  /** Where the paths were taken from, at a commit, a release or an etag. */
+  source: string;
+  /** The source's license as an SPDX id; the mark itself stays its owner's trademark. */
+  license: string;
+}
+
 /** Where an agent's vendor publishes its newest version, which this host asks and no machine does: its npm package's
  * latest tag, its GitHub repository's latest release, or an address whose whole answer is the version. */
 export type LatestSource = { from: "npm"; package: string } | { from: "github"; repo: string } | { from: "text"; url: string };
@@ -93,6 +106,8 @@ export type LatestSource = { from: "npm"; package: string } | { from: "github"; 
 export interface AgentEntry extends EntryBase {
   kind: "agent";
   about: AgentAbout;
+  /** Absent for an agent no one has found a published mark for; it is drawn as its initials. */
+  mark?: AgentMark;
   /** Absent where the vendor's versions are not in the form the agent's own version flag prints, so the two are
    * never compared, and the catalog's pin is not set beside what stands either. */
   latest?: LatestSource;
@@ -373,6 +388,16 @@ export function catalogEntry(id: string): CatalogEntry | undefined {
 /** An entry as the catalog names it; an id the catalog does not know reads as itself. */
 export function agentName(id: string): string {
   return catalogEntry(id)?.name ?? id;
+}
+
+/** The agents with no mark: Crush's only published mark is under FSL-1.1, which does not come into this repo, and no
+ * MIT or CC0 icon set carries it. */
+export const UNMARKED_AGENTS: readonly string[] = ["crush"];
+
+/** An agent's mark by its id; nothing for an id that is not an agent or has no mark. */
+export function agentMark(id: string): AgentMark | undefined {
+  const e = catalogEntry(id);
+  return e?.kind === "agent" ? e.mark : undefined;
 }
 
 /** One row the Sign-ins screen can show, under the login id the collector files it: an entry's own sign-in (a

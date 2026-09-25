@@ -76,13 +76,13 @@ export function ActButton({ act, className }: { act: RowAct; className?: string 
 
 const TILE = "flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-foreground/[0.04]";
 
-/** A row's or a head's lead: the agent's own mark in its hue in a tile, faded where it is not installed; a server's
+/** A row's or a head's lead: the agent's own mark in its own colours in a tile, installed or not; a server's
  * glyph in its bordered box; the kind's glyph. */
 export function LeadMark({ lead, label, big = false }: { lead: Lead; label: string; big?: boolean }) {
   if (lead.kind === "agent") {
     return (
       <span data-k="lead-tile" className={TILE}>
-        <HarnessMark harness={lead.agent} label={label} className={cn("size-5", lead.faded === true && "text-foreground/40 grayscale")} />
+        <HarnessMark harness={lead.agent} label={label} className="size-5" />
       </span>
     );
   }
