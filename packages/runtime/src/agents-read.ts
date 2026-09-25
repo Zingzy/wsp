@@ -9,8 +9,9 @@ import type { Machine } from "@wsp/engine";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 
-/** What the host reads off a target: the report less what the runtime stamps on it. */
-export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale" | "reach">;
+/** What the host reads off a target: the report less what the runtime stamps on it, and the login its lines are handed
+ * to where the road runs as root and the home is somebody else's. */
+export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale" | "reach"> & { runAs?: string };
 
 /** Where a read runs: this computer, with a project's folder when a workspace here is the target; a computer you
  * joined, over its link, with the login and the sign-ins and versions its own report carries; or any other machine,
@@ -23,8 +24,9 @@ export type AgentsOn =
   | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; project?: string; relayed?: boolean };
 
 /** Where a sign-in page that returns to localhost reaches the harness on the target: the one rule the sign-in is
- * planned by and the report tells the app. */
-export const pageReachOf = (on: AgentsOn): PageReach => (on.kind === "here" ? "here" : on.relayed === true ? "relay" : "none");
+ * planned by and the report tells the app. A line handed to another login can open neither the pty's device its page
+ * is written to nor the socket of the root daemon its shim posts to, so its page never reaches this computer. */
+export const pageReachOf = (on: AgentsOn, runAs?: string): PageReach => (on.kind === "here" ? "here" : on.relayed === true && runAs === undefined ? "relay" : "none");
 
 /** One MCP server of one agent's config on a target, asked for its tools. `key` names the target, which is what an
  * answer is kept under. */
@@ -72,16 +74,19 @@ export interface SignInRun {
 }
 
 /** The host's callback relay as one sign-in uses it: the port the page returns to listened on here and carried to
- * the target, false where this computer could not listen on it; and then the address the browser landed on,
- * carried to that port as the one request the browser would have made. */
+ * the target, false where this computer could not listen on it; then the address the browser landed on, carried
+ * to that port as the one request the browser would have made; and the end of the sign-in, which closes its forward. */
 export interface SignInForward {
   arm(url: string): Promise<boolean>;
   deliver(landed: string): Promise<void>;
+  close(): void;
 }
 
-/** The relay's forward for a target, where it holds a link to it that carries callbacks. */
+/** The relay, for the targets it holds a link to that carries callbacks. */
 export interface CallbackForwards {
-  of(target: AgentsTarget): SignInForward | undefined;
+  reaches(target: AgentsTarget): boolean;
+  /** A forward for one sign-in, which lives until its close. */
+  open(target: AgentsTarget): SignInForward | undefined;
 }
 
 /** What the host writes and runs for the agents on a target, beside reading them. */
@@ -148,9 +153,10 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   const last = new Map<string, AgentsReport>();
   /** The host's callback relays, which register once they hold their links. */
   const relays = new Set<CallbackForwards>();
+  const reached = (target: AgentsTarget): boolean => [...relays].some(relay => relay.reaches(target));
   const forwardOf = (target: AgentsTarget): SignInForward | undefined => {
     for (const relay of relays) {
-      const forward = relay.of(target);
+      const forward = relay.open(target);
       if (forward !== undefined) return forward;
     }
     return undefined;
@@ -209,7 +215,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         ...(signIns !== undefined ? { signIns } : {}),
         ...(report?.agentVersions !== undefined ? { versions: report.agentVersions } : {}),
         ...(row.logins !== undefined ? { logins: row.logins } : {}),
-        ...(forwardOf(target) !== undefined ? { relayed: true } : {}),
+        ...(reached(target) ? { relayed: true } : {}),
       };
     }
     const ws = await o.workspace(target.workspaceId, origin);
@@ -225,7 +231,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         if (held === undefined) throw usage(nappingAgentsRefusal(on.napping));
         return { ...held, stale: "napping" };
       }
-      const report = stamped(target, { ...(await reader.read(on, JSON.stringify(target))), reach: pageReachOf(on) });
+      const { runAs, ...read } = await reader.read(on, JSON.stringify(target));
+      const report = stamped(target, { ...read, reach: pageReachOf(on, runAs) });
       if ("workspaceId" in target) last.set(target.workspaceId, report);
       return report;
     },
@@ -283,10 +290,12 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
           run.last = event;
           for (const tell of run.followers) tell(event);
         };
-        const forward = forwardOf(target);
+        // A tool's own login types its code on the terminal; only a server's browser flow returns to a callback port.
+        const forward = ask.server !== undefined ? forwardOf(target) : undefined;
         void plan({ link, emit: step, typing: write => (write === undefined ? delete run.type : (run.type = write)), stop: stopped, ...(forward !== undefined ? { forward } : {}) })
           .catch((e: unknown) => step({ state: "failed", said: e instanceof Error ? e.message : String(e) }))
           .finally(() => {
+            forward?.close();
             running.delete(signInId);
             if (starting.get(key) === begun) starting.delete(key);
             channel.close();

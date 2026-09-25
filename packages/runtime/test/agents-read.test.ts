@@ -2,7 +2,7 @@
 import type { Machine } from "@wsp/engine";
 import { nappingAgentsRefusal, nappingSignInRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type SignInForward } from "../src/agents-read.js";
+import { agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type SignInForward } from "../src/agents-read.js";
 import type { PlaceDoor } from "../src/places.js";
 
 const READ = { home: "/root", user: "root", agents: [], skills: [], servers: [], refused: [] };
@@ -119,7 +119,7 @@ describe("the sign-ins on a computer or a workspace", () => {
       exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
     }) as unknown as PlaceDoor;
 
-  function acting(phase: { now: WorkspacePhase }, relayed?: boolean, places?: PlaceDoor) {
+  function acting(phase: { now: WorkspacePhase }, relayed?: boolean, places?: PlaceDoor, read: AgentsRead = READ) {
     const ch = channel();
     const planned: { on: AgentsOn; ask: SignInAsk }[] = [];
     const handed: (SignInForward | undefined)[] = [];
@@ -149,7 +149,7 @@ describe("the sign-ins on a computer or a workspace", () => {
     const forgot: string[] = [];
     const logged: string[] = [];
     const api = agentsReads<undefined>({
-      reader: { read: async () => READ, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }), forget: key => void forgot.push(key) },
+      reader: { read: async () => read, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }), forget: key => void forgot.push(key) },
       log: line => void logged.push(line),
       ...(relayed === undefined ? {} : { relayed: () => relayed }),
       acts,
@@ -171,7 +171,7 @@ describe("the sign-ins on a computer or a workspace", () => {
     }
   });
 
-  it("tell the host a joined computer is relayed once the host's relay holds a link to it, and hand the sign-in that forward", async () => {
+  it("tell the host a joined computer is relayed once the host's relay holds a link to it, and hand each server sign-in a forward of its own that closes when it ends", async () => {
     const t = acting({ now: "running" }, undefined, spoo());
     const target = { placeId: "pl_1" };
     const first = await t.api.signIn(target, { agent: "codex", server: "notion" }, () => {});
@@ -181,21 +181,51 @@ describe("the sign-ins on a computer or a workspace", () => {
     expect((await t.api.read(target)).reach).toBe("none");
     t.api.signInStop(first.signInId);
     await tick();
-    const forward: SignInForward = { arm: async () => true, deliver: async () => undefined };
+    const opened: SignInForward[] = [];
+    const closed: SignInForward[] = [];
     const asked: unknown[] = [];
-    const unregister = t.api.forwards({ of: at => (asked.push(at), "placeId" in at && at.placeId === "pl_1" ? forward : undefined) });
+    const ours = (at: AgentsTarget): boolean => (asked.push(at), "placeId" in at && at.placeId === "pl_1");
+    const unregister = t.api.forwards({
+      reaches: ours,
+      open: at => {
+        if (!ours(at)) return undefined;
+        const forward: SignInForward = { arm: async () => true, deliver: async () => undefined, close: () => void closed.push(forward) };
+        opened.push(forward);
+        return forward;
+      },
+    });
+    expect((await t.api.read(target)).reach).toBe("relay");
+    expect(opened).toEqual([]);
     const second = await t.api.signIn(target, { agent: "codex", server: "notion" }, () => {});
     await tick();
     expect(t.planned[1]!.on).toMatchObject({ kind: "box", relayed: true });
-    expect((await t.api.read(target)).reach).toBe("relay");
-    expect(t.handed[1]).toBe(forward);
+    expect(opened).toHaveLength(1);
+    expect(t.handed[1]).toBe(opened[0]);
     expect(asked).toContainEqual(target);
+    expect(closed).toEqual([]);
     t.api.signInStop(second.signInId);
+    await tick();
+    expect(closed).toEqual([opened[0]]);
+    // A tool's own login types its code on the terminal, so it is handed no forward to arm or to carry a pasted address.
+    const login = await t.api.signIn(target, { agent: "codex" }, () => {});
+    await tick();
+    expect(t.handed[2]).toBeUndefined();
+    expect(opened).toHaveLength(1);
+    t.api.signInStop(login.signInId);
     await tick();
     unregister();
     await t.api.signIn(target, { agent: "codex", server: "notion" }, () => {});
     await tick();
-    expect(t.planned[2]!.on).not.toHaveProperty("relayed");
+    expect(t.planned[3]!.on).not.toHaveProperty("relayed");
+  });
+
+  it("report none for a joined computer whose lines go to another login, as the sign-in plans it, relay or not", async () => {
+    const t = acting({ now: "running" }, undefined, spoo(), { ...READ, home: "/home/ada", user: "ada", runAs: "ada" });
+    t.api.forwards({ reaches: () => true, open: () => undefined });
+    const report = await t.api.read({ placeId: "pl_1" });
+    expect(report.reach).toBe("none");
+    expect(report).not.toHaveProperty("runAs");
+    expect(pageReachOf({ kind: "box", machine: {} as never, login: {}, relayed: true }, "ada")).toBe("none");
   });
 
   it("drop what the reader kept for the target before saying it changed, and log each sign-in's start and end without its page or code", async () => {

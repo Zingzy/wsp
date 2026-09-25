@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The laptop half of the sign-in callback relay and of the localhost forwards.
 // One daemon link per running workspace (and the init builder), and one per
-// computer this host holds as a place, for sign-in callbacks only: a browser.open
-// from the guest is shown by the app (opened here only when autoOpen says so),
-// and the flow's callback port is listened on locally and tunnelled back over
-// that link for a bounded window. A local URL the guest printed forwards its
-// port the same way, one per port, until it sees no traffic for a while. The
-// URL is never logged.
+// computer this host holds as a place, for sign-in callbacks only and only
+// while a sign-in there runs: a browser.open from the guest is shown by the app
+// (opened here only when autoOpen says so), and the flow's callback port is
+// listened on locally and tunnelled back over that link for a bounded window.
+// A local URL the guest printed forwards its port the same way, one per port,
+// until it sees no traffic for a while. The URL is never logged.
 
 import { spawn } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
@@ -74,7 +74,7 @@ export interface RelayOptions {
   places?: boolean;
 }
 
-/** callback: a sign-in flow's redirect port, one per workspace, keyed on the guest listener's life.
+/** callback: a sign-in flow's redirect port, one per workspace and one more per sign-in running there, keyed on the guest listener's life.
  * url: a port a printed local URL named, one per port per workspace, kept while traffic flows. */
 export type ForwardKind = "callback" | "url";
 
@@ -116,6 +116,8 @@ export const CALLBACK_HOLD_MS = REDIAL_CEILING_MS * 1.5 + DAEMON_CONNECT_TIMEOUT
 export const DELIVER_MS = 10_000;
 /** A callback is a GET whose head is a few hundred bytes; a held socket that sends more is not one. */
 export const CALLBACK_HOLD_MAX_BYTES = 64 * 1024;
+/** The most of a harness's status line a refusal quotes back to the panel. */
+const QUOTE_MAX = 120;
 /** Held callback connections per forward; a browser opens a handful per host, a page probing loopback opens many. */
 export const CALLBACK_HOLD_MAX_CONNS = 8;
 
@@ -129,6 +131,9 @@ interface Target {
   kinds: readonly ForwardKind[];
   /** Whether the guest sessions on the far end are this link's. A place's are its workspaces', each on its own link. */
   guests: boolean;
+  /** Whether a callback forward opens only while a sign-in on the far end runs, and closes when the last one ends. Anything
+   * on a computer that can post to its daemon's socket could otherwise hold a port on this computer's loopback. */
+  armedBySignIn: boolean;
   /** How this link reaches the daemon answering for the target: a dial of the machine's own daemon, or the
    * channel the runtime holds over the link of the computer that answers for a workspace. */
   open(o: { onEvent: (event: Record<string, unknown>) => void; onEventError: (error: unknown) => void }): Promise<DaemonSocket>;
@@ -153,10 +158,16 @@ interface Link {
    * about thirty seconds and the link redials under it; a guest session streaming rows across that gap would
    * otherwise lose them, and its exit frame with them, and the process on the machine would wait for good. */
   waiting: ((sock: DaemonSocket | undefined) => void)[];
-  /** The callback port of the page a sign-in on this target last armed, which a landed address must name. */
-  page?: number;
+  /** The sign-ins on this target that hold a forward from the relay, each with the port its page returns to. */
+  signIns: Set<SignIn>;
   /** Tunnels carrying one landed address each, by id, while their answer comes back. */
   replays: Map<string, Socket>;
+}
+
+interface SignIn {
+  /** The callback port of the page this sign-in armed, which a landed address must name. */
+  page?: number;
+  ended: boolean;
 }
 
 interface Held {
@@ -258,7 +269,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   /** Forwards whose binds are in flight, by target, kind and port, so a second ask for the same port joins the first. */
   const binding = new Map<string, Promise<void>>();
   const links = new Map<string, Link>();
-  /** The one callback forward per target. */
+  /** callback forwards by target and port: one per target, and one more for each sign-in running there. */
   const forwards = new Map<string, Forward>();
   /** url forwards by target and port. */
   const urlForwards = new Map<string, Forward>();
@@ -282,9 +293,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   const urlKey = (targetId: string, port: number): string => `${targetId}:${port}`;
   const allForwards = (targetId: string): Forward[] => {
     const out: Forward[] = [];
-    const callback = forwards.get(targetId);
-    if (callback) out.push(callback);
-    for (const f of urlForwards.values()) if (f.target.id === targetId) out.push(f);
+    for (const f of [...forwards.values(), ...urlForwards.values()]) if (f.target.id === targetId) out.push(f);
     return out;
   };
   const forwardOn = (targetId: string, port: number): Forward | undefined => allForwards(targetId).find(f => f.port === port);
@@ -305,14 +314,10 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   // --- forwards -------------------------------------------------------------
 
   const closeForward = (f: Forward, why: string): void => {
-    if (f.kind === "callback") {
-      if (forwards.get(f.target.id) !== f) return;
-      forwards.delete(f.target.id);
-    } else {
-      const key = urlKey(f.target.id, f.port);
-      if (urlForwards.get(key) !== f) return;
-      urlForwards.delete(key);
-    }
+    const open = f.kind === "callback" ? forwards : urlForwards;
+    const key = urlKey(f.target.id, f.port);
+    if (open.get(key) !== f) return;
+    open.delete(key);
     f.cancel();
     for (const c of f.conns.values()) c.destroy();
     f.conns.clear();
@@ -512,9 +517,9 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       arm(f);
       o.log(`${target.name}: forwarding localhost:${port} on this computer to the workspace (closes after ${minutes(idleMs)} without traffic)`);
     } else {
-      const previous = forwards.get(target.id);
-      if (previous) closeForward(previous, `port ${port} replaces it`);
-      forwards.set(target.id, f);
+      const held = heldPorts(link);
+      for (const previous of callbacksOf(target.id)) if (!held.has(previous.port)) closeForward(previous, `port ${port} replaces it`);
+      forwards.set(urlKey(target.id, port), f);
       if (link.ports.has(port)) sawListener(f);
       arm(f);
       o.log(`${target.name}: forwarding localhost:${port} on this computer to the ${target.noun} for the sign-in callback (while the ${target.noun} listens, ${minutes(capMs)} at most)`);
@@ -538,6 +543,20 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     return sock.op(op, params);
   };
 
+  const heldPorts = (link: Link): Set<number> => new Set([...link.signIns].flatMap(s => (s.page !== undefined ? [s.page] : [])));
+  const callbacksOf = (targetId: string): Forward[] => allForwards(targetId).filter(f => f.kind === "callback");
+
+  /** A sign-in's end closes the forward on its page's port, unless another sign-in there holds that port; on a target
+   * armed only by sign-ins, the last one's end closes them all. */
+  const release = (link: Link, s: SignIn): void => {
+    s.ended = true;
+    link.signIns.delete(s);
+    if (links.get(link.target.id) !== link) return;
+    const held = heldPorts(link);
+    const all = link.target.armedBySignIn && link.signIns.size === 0;
+    for (const f of callbacksOf(link.target.id)) if (!held.has(f.port) && (all || f.port === s.page)) closeForward(f, "the sign-in ended");
+  };
+
   const tryForward = (link: Link, port: number, kind: ForwardKind): void => {
     if (!link.target.kinds.includes(kind)) return;
     forward(link, port, kind).catch((e: unknown) => o.log(`${link.target.name}: not forwarding port ${port} (${e instanceof Error ? e.message : String(e)})`));
@@ -559,16 +578,23 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       return;
     }
     const e = parsed.data;
-    const f = forwards.get(link.target.id);
+    if ((e.type === "browser.open" || e.type === "callback.port") && link.target.armedBySignIn && link.signIns.size === 0) {
+      o.log(`${link.target.name}: ignored ${e.type === "browser.open" ? "a sign-in page" : "a callback port"} from the ${link.target.noun}; no sign-in runs there`);
+      return;
+    }
     switch (e.type) {
-      case "port.open":
+      case "port.open": {
         link.ports.add(e.port);
-        if (f?.port === e.port) sawListener(f);
+        const f = forwards.get(urlKey(link.target.id, e.port));
+        if (f !== undefined) sawListener(f);
         return;
-      case "port.close":
+      }
+      case "port.close": {
         link.ports.delete(e.port);
-        if (f?.port === e.port && f.listener) closeForward(f, `the ${link.target.noun} stopped listening`);
+        const f = forwards.get(urlKey(link.target.id, e.port));
+        if (f?.listener === true) closeForward(f, `the ${link.target.noun} stopped listening`);
         return;
+      }
       case "browser.open":
         if (autoOpen(link.target.id, e.url, e.port)) {
           const returns = e.port !== undefined ? "; it returns to the machine on its own" : "";
@@ -734,7 +760,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
 
   const add = (target: Target): void => {
     if (closed || links.has(target.id)) return;
-    const link: Link = { target, ports: new Set(), stopped: false, done: Promise.resolve(), waiting: [], replays: new Map() };
+    const link: Link = { target, ports: new Set(), stopped: false, done: Promise.resolve(), waiting: [], replays: new Map(), signIns: new Set() };
     link.done = run(link);
     links.set(target.id, link);
   };
@@ -779,6 +805,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     noun: "workspace",
     kinds: workspaceKinds,
     guests: true,
+    armedBySignIn: false,
     ownPorts: true,
     open: async at => {
       const road = await reach();
@@ -796,6 +823,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     noun: "workspace",
     kinds: workspaceKinds,
     guests: true,
+    armedBySignIn: false,
     machineId,
     ownPorts: false,
     open: async at => daemonSocketOver(await rt.workspaces.daemonChannel(id, at.onEvent)),
@@ -818,6 +846,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     noun: "computer",
     kinds: ["callback"],
     guests: false,
+    armedBySignIn: true,
     ownPorts: true,
     open: async at => {
       const channel = rt.places?.channel(id, at.onEvent);
@@ -832,8 +861,9 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
 
   /** One landed address carried to the port the target's sign-in page returns to, as the one request a browser there
    * would have made, for a sign-in whose port this computer could not listen on. Only the outcome is logged. */
-  const deliver = async (link: Link, landed: string): Promise<void> => {
+  const deliver = async (link: Link, signIn: SignIn, landed: string): Promise<void> => {
     const { target } = link;
+    if (signIn.ended) throw new Error(`the sign-in on ${target.name} has ended; start it again`);
     let url: URL | undefined;
     try {
       url = new URL(landed.trim());
@@ -842,7 +872,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     }
     if (url === undefined || url.protocol !== "http:" || !isLoopback(url.hostname)) throw new Error("that is not an address on localhost: paste the address your browser landed on");
     const port = Number(url.port);
-    if (link.page === undefined || port !== link.page) throw new Error(`that address is on port ${url.port || "80"}, not the port the sign-in's page returns to`);
+    if (signIn.page === undefined || port !== signIn.page) throw new Error(`that address is on port ${url.port || "80"}, not the port the sign-in's page returns to`);
     const sock = link.sock;
     if (sock === undefined) throw new Error(linkDownLine(target.name));
     const tunnelId = `t${++seq}`;
@@ -850,17 +880,27 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     link.replays.set(tunnelId, answer as unknown as Socket);
     const status = new Promise<string>((resolve, reject) => {
       let head = "";
+      let settled = false;
       const cancel = clock.schedule(() => reject(new Error(`the sign-in on ${target.name} did not answer within ${seconds(DELIVER_MS)}`)), DELIVER_MS, { unref: true });
       const done = (line: string): void => {
+        settled = true;
         cancel();
         resolve(line);
       };
       answer.on("data", (d: Buffer) => {
+        if (settled) return;
         head += d.toString("latin1");
         const at = head.indexOf("\r\n");
-        if (at >= 0) done(head.slice(0, at));
+        if (at >= 0 && at <= CALLBACK_HOLD_MAX_BYTES) return done(head.slice(0, at));
+        if (head.length <= CALLBACK_HOLD_MAX_BYTES) return;
+        settled = true;
+        head = "";
+        cancel();
+        reject(new Error(`the sign-in on ${target.name} answered the address with more than ${CALLBACK_HOLD_MAX_BYTES / 1024} KB before its status line`));
       });
-      answer.on("end", () => done(head.split("\r\n")[0] ?? ""));
+      answer.on("end", () => {
+        if (!settled) done(head.split("\r\n")[0] ?? "");
+      });
     });
     // A deadline that passes while the open is still in flight is read below, not left unhandled.
     status.catch(() => undefined);
@@ -870,7 +910,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       await sock.op("tunnel.write", { tunnelId, data: Buffer.from(request).toString("base64") });
       const line = await status;
       const code = Number(line.split(" ")[1]);
-      if (!(code >= 200 && code < 400)) throw new Error(`the sign-in on ${target.name} answered the address with ${line === "" ? "nothing" : line}`);
+      if (!(code >= 200 && code < 400)) throw new Error(`the sign-in on ${target.name} answered the address with ${line === "" ? "nothing" : line.length > QUOTE_MAX ? `${line.slice(0, QUOTE_MAX)}...` : line}`);
       o.log(`${target.name}: carried the address your browser landed on to port ${port} for the sign-in`);
     } catch (e) {
       o.log(`${target.name}: the address your browser landed on did not reach port ${port}`);
@@ -881,20 +921,35 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     }
   };
 
-  /** What a sign-in on one target is handed: the forward for the page it saw, and the road for a landed address. */
-  const signInForward = (target: AgentsTarget): SignInForward | undefined => {
-    const id = "workspaceId" in target ? target.workspaceId : target.placeId;
-    const link = links.get(id);
-    if (link === undefined || !link.target.kinds.includes("callback")) return undefined;
+  const callbackLink = (target: AgentsTarget): Link | undefined => {
+    const link = links.get("workspaceId" in target ? target.workspaceId : target.placeId);
+    return link !== undefined && link.target.kinds.includes("callback") ? link : undefined;
+  };
+
+  /** What one sign-in on a target is handed: the forward for the page it saw, the road for a landed address, and its
+   * end, which closes that forward. */
+  const openSignIn = (target: AgentsTarget): SignInForward | undefined => {
+    const link = callbackLink(target);
+    if (link === undefined) return undefined;
+    const id = link.target.id;
+    const signIn: SignIn = { ended: false };
+    link.signIns.add(signIn);
     return {
       arm: async url => {
         const port = callbackPortOf(url);
-        if (port === undefined || links.get(id) !== link) return false;
-        link.page = port;
+        if (port === undefined || signIn.ended || links.get(id) !== link) return false;
+        signIn.page = port;
         await forward(link, port, "callback");
+        if (signIn.ended) {
+          release(link, signIn);
+          return false;
+        }
         return forwardOn(id, port) !== undefined;
       },
-      deliver: landed => deliver(link, landed),
+      deliver: landed => deliver(link, signIn, landed),
+      close: () => {
+        if (!signIn.ended) release(link, signIn);
+      },
     };
   };
 
@@ -971,7 +1026,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       },
       () => {},
     );
-    detaches.push(rt.agents.forwards({ of: signInForward }));
+    detaches.push(rt.agents.forwards({ reaches: target => callbackLink(target) !== undefined, open: openSignIn }));
   }
 
   const every = (): Forward[] => [...forwards.values(), ...urlForwards.values()];

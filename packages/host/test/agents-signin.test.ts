@@ -284,7 +284,7 @@ describe("a watched sign-in", () => {
     for (const bound of [true, false]) {
       const armed: string[] = [];
       const delivered: string[] = [];
-      const forward: SignInForward = { arm: async url => (armed.push(url), bound), deliver: async landed => void delivered.push(landed) };
+      const forward: SignInForward = { arm: async url => (armed.push(url), bound), deliver: async landed => void delivered.push(landed), close: () => {} };
       let finish: () => void = () => {};
       const t = await run(
         (l, pty, line) => {

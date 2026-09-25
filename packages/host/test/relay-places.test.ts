@@ -8,7 +8,7 @@ import { connect, createServer, type Server, type Socket } from "node:net";
 import type { DaemonResponse } from "@wsp/protocol";
 import type { CallbackForwards, DaemonChannel, EventUnion, Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
-import { startCallbackRelay, type CallbackRelay } from "../src/relay.js";
+import { CALLBACK_HOLD_MAX_BYTES, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 
 const AUTH = (port: number): string => `https://mcp.example.com/authorize?client_id=c&redirect_uri=http%3A%2F%2Flocalhost%3A${port}%2Fcallback&state=S`;
 
@@ -43,7 +43,7 @@ async function harness(): Promise<{ server: Server; port: number; heard: string[
 
 /** One joined computer's link as the runtime's place door hands it out: frames answered here, events pushed at every
  * channel open on it, and a tunnel to the callback port carried to the harness. */
-function joinedComputer(callbackPort: number, harnessPort: number) {
+function joinedComputer(callbackPorts: readonly number[], harnessPort: number) {
   const readers = new Set<(e: Record<string, unknown>) => void>();
   const ends = new Set<() => void>();
   const ops: { op: string; frame: Record<string, unknown> }[] = [];
@@ -58,7 +58,7 @@ function joinedComputer(callbackPort: number, harnessPort: number) {
     if (op === "ports.watch") return { ...ok, ports: [] } as DaemonResponse;
     const tunnelId = String(frame["tunnelId"]);
     if (op === "tunnel.open") {
-      if (frame["port"] !== callbackPort) return { id: null, ok: false, error: "nothing listens there" } as DaemonResponse;
+      if (!callbackPorts.includes(frame["port"] as number)) return { id: null, ok: false, error: "nothing listens there" } as DaemonResponse;
       const c = connect({ port: harnessPort, host: "127.0.0.1" });
       tunnels.set(tunnelId, c);
       c.on("data", d => push({ type: "tunnel.data", tunnelId, data: d.toString("base64") }));
@@ -132,11 +132,12 @@ describe("the callback relay on a joined computer", () => {
     for (const s of servers.splice(0)) await new Promise<void>(r => s.close(() => r()));
   });
 
-  async function setup() {
-    const h = await harness();
+  async function setup(h?: Awaited<ReturnType<typeof harness>>) {
+    h ??= await harness();
     servers.push(h.server);
     const port = await freePort();
-    const box = joinedComputer(port, h.port);
+    const second = await freePort();
+    const box = joinedComputer([port, second], h.port);
     const { rt, emit, forwards } = placeRuntime(box);
     const lines: string[] = [];
     const guestEvents: string[] = [];
@@ -149,11 +150,12 @@ describe("the callback relay on a joined computer", () => {
       guest: { event: (_l: unknown, e: { type: string }) => void guestEvents.push(e.type), closeAll: () => {} } as never,
     });
     await until(() => box.ops.some(o => o.op === "ports.watch"));
-    return { h, port, box, emit, forwards, lines, guestEvents };
+    return { h, port, second, box, emit, forwards, lines, guestEvents };
   }
 
   it("listens on this computer for the port a page opened there names and carries the one callback to the harness there, logging no address", async () => {
-    const { h, port, box, lines } = await setup();
+    const { h, port, box, forwards, lines } = await setup();
+    forwards()!.open({ placeId: "pl_1" });
     box.push({ type: "browser.open", url: AUTH(port), port });
     await until(() => relay!.list().some(f => f.port === port));
     expect(relay!.list()).toEqual([expect.objectContaining({ workspaceId: "pl_1", port, kind: "callback", name: "spoo" })]);
@@ -177,8 +179,10 @@ describe("the callback relay on a joined computer", () => {
 
   it("arms a sign-in's forward from the page it saw, says when this computer cannot listen, and carries a landed address to that port alone", async () => {
     const { h, port, box, forwards } = await setup();
-    expect(forwards()?.of({ placeId: "pl_2" })).toBeUndefined();
-    const forward = forwards()!.of({ placeId: "pl_1" })!;
+    expect(forwards()?.reaches({ placeId: "pl_2" })).toBe(false);
+    expect(forwards()?.open({ placeId: "pl_2" })).toBeUndefined();
+    expect(forwards()?.reaches({ placeId: "pl_1" })).toBe(true);
+    const forward = forwards()!.open({ placeId: "pl_1" })!;
     expect(await forward.arm("https://mcp.example.com/authorize?client_id=c")).toBe(false);
     expect(await forward.arm(AUTH(port))).toBe(true);
     expect(relay!.list().map(f => f.port)).toEqual([port]);
@@ -199,7 +203,8 @@ describe("the callback relay on a joined computer", () => {
   });
 
   it("closes a computer's forward when the computer is removed, and holds a callback across its link's gap", async () => {
-    const { port, box, emit } = await setup();
+    const { port, box, emit, forwards } = await setup();
+    forwards()!.open({ placeId: "pl_1" });
     box.push({ type: "browser.open", url: AUTH(port), port });
     await until(() => relay!.list().length === 1);
     box.drop();
@@ -209,5 +214,69 @@ describe("the callback relay on a joined computer", () => {
     expect(await landed).toContain("signed in");
     emit({ type: "place.removed", placeId: "pl_1" } as EventUnion);
     await until(() => relay!.list().length === 0);
+  });
+
+  it("takes a page or a callback port from the computer only while a sign-in there runs, and closes the forward when that sign-in ends", async () => {
+    const { port, box, forwards, lines } = await setup();
+    box.push({ type: "browser.open", url: AUTH(port), port });
+    box.push({ type: "callback.port", port });
+    await new Promise(r => setTimeout(r, 50));
+    expect(relay!.list()).toEqual([]);
+    expect(lines.filter(l => l.includes("no sign-in runs there"))).toHaveLength(2);
+    const signIn = forwards()!.open({ placeId: "pl_1" })!;
+    box.push({ type: "browser.open", url: AUTH(port), port });
+    await until(() => relay!.list().length === 1);
+    signIn.close();
+    expect(relay!.list()).toEqual([]);
+    expect(lines.some(l => l.includes(`stopped forwarding localhost:${port} (the sign-in ended)`))).toBe(true);
+    box.push({ type: "callback.port", port });
+    await new Promise(r => setTimeout(r, 50));
+    expect(relay!.list()).toEqual([]);
+    // A sign-in that ends while its bind is in flight leaves nothing listening, another sign-in there or not.
+    const other = forwards()!.open({ placeId: "pl_1" })!;
+    const brief = forwards()!.open({ placeId: "pl_1" })!;
+    const armed = brief.arm(AUTH(port));
+    brief.close();
+    expect(await armed).toBe(false);
+    expect(relay!.list()).toEqual([]);
+    other.close();
+    await expect(brief.deliver(`http://localhost:${port}/callback?code=LATE`)).rejects.toThrow(/ended/);
+  });
+
+  it("keeps a port for each sign-in running on one computer, and a landed address reaches its own sign-in's port only", async () => {
+    const { h, port, second, forwards } = await setup();
+    const one = forwards()!.open({ placeId: "pl_1" })!;
+    const two = forwards()!.open({ placeId: "pl_1" })!;
+    expect(await one.arm(AUTH(port))).toBe(true);
+    expect(await two.arm(AUTH(second))).toBe(true);
+    expect(relay!.list().map(f => f.port).sort()).toEqual([port, second].sort());
+    await one.deliver(`http://localhost:${port}/callback?code=ONE`);
+    await two.deliver(`http://localhost:${second}/callback?code=TWO`);
+    expect(h.heard.join("")).toMatch(/code=ONE[\s\S]*code=TWO/);
+    await expect(one.deliver(`http://localhost:${second}/callback?code=x`)).rejects.toThrow(/not the port/);
+    one.close();
+    expect(relay!.list().map(f => f.port)).toEqual([second]);
+    two.close();
+    expect(relay!.list()).toEqual([]);
+  });
+
+  it("stops reading a harness's answer to a landed address at the held-callback cap, closes that tunnel, and quotes a short line", async () => {
+    const flood = createServer(c => {
+      c.on("error", () => {});
+      c.on("data", () => c.write(Buffer.alloc(CALLBACK_HOLD_MAX_BYTES * 4, 0x41)));
+    });
+    await new Promise<void>(r => flood.listen(0, "127.0.0.1", r));
+    const { port, box, forwards } = await setup({ server: flood, port: (flood.address() as { port: number }).port, heard: [] });
+    const forward = forwards()!.open({ placeId: "pl_1" })!;
+    await forward.arm(AUTH(port));
+    const started = Date.now();
+    const refused = await forward.deliver(`http://localhost:${port}/callback?code=C`).then(
+      () => undefined,
+      (e: unknown) => e as Error,
+    );
+    expect(refused?.message).toMatch(/more than 64 KB/);
+    expect(refused!.message.length).toBeLessThan(300);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    await until(() => box.ops.some(o => o.op === "tunnel.close"));
   });
 });

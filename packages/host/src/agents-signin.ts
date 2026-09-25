@@ -91,9 +91,7 @@ export async function planSignIn(on: AgentsOn, ask: SignInAsk, o: { terminal?: b
   const entry = agentOf(ask.agent);
   if (ask.server !== undefined) {
     const login = await loginOf(on);
-    // A line handed to another login on a joined computer can open neither the pty's device its page is written to
-    // nor the socket of the root daemon its shim posts to, so its page never reaches this computer.
-    const reach = login?.runAs !== undefined ? "none" : pageReachOf(on);
+    const reach = pageReachOf(on, login?.runAs);
     const road = serverSignInRoad(entry.id, ask.server, reach);
     if (road === undefined) throw new Error(`${entry.name} has no sign-in for an MCP server that wsp knows`);
     if (road.kind === "copy") throw new Error(serverSignInCopyRefusal(entry.name, road.line, road.why));
