@@ -2137,6 +2137,11 @@ code {
   background: rgb(6 6 6 / var(--material-centre));
 }
 
+/* The composer floats over the chat column: a lifted pane of the same material, the text behind it blurred away. */
+.desktop-mac:is(.dark, [data-theme="dark"]) [data-shell-center] .group\/composer-surface {
+  --chat-composer-glass-surface: rgb(24 24 26);
+}
+
 .desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"] {
   background: rgb(6 6 6 / var(--material-panel));
   border-color: var(--contrast-border);

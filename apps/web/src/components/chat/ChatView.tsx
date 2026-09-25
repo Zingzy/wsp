@@ -206,7 +206,7 @@ export function ChatView({
         data-chat-composer-dock
         data-at-end={!showTranscript || atEnd || undefined}
         data-centred={(thread.hydrated && empty) || undefined}
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 *:pointer-events-auto [--glass-opacity:62%] [--glass-blur:8px] data-at-end:[--glass-opacity:100%] transition-[bottom] duration-300 ease-out data-centred:bottom-(--empty-lift) motion-reduce:transition-none"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 *:pointer-events-auto [--glass-opacity:94%] [--glass-blur:20px] transition-[bottom] duration-300 ease-out data-centred:bottom-(--empty-lift) motion-reduce:transition-none"
       >
         <ScrollToEnd hidden={!showTranscript || atEnd} onClick={() => void listRef.current?.scrollToEnd({ animated: true })} />
         {children?.(thread)}
