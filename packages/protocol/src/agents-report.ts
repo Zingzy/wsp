@@ -94,6 +94,63 @@ export const noSuchSkillRefusal = (name: string): string => `There is no skill n
 /** Why a napping workspace's skills were not read or changed: nothing here wakes a machine. */
 export const nappingSkillsRefusal = (name: string): string => `${name} is napping, and its skills are read and changed only while it runs; wake it first`;
 
+/** A command line as a person types it, in words: split at spaces, a word in single quotes as written, one in double
+ * quotes with its backslash escapes, and a backslash outside quotes taking the next character as it is. Nothing is
+ * expanded; a line with a quote it never closes has no words, as a shell refuses it. */
+export function commandWords(line: string): string[] | undefined {
+  const words: string[] = [];
+  let word: string | undefined;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (c === "'") {
+      const end = line.indexOf("'", i + 1);
+      if (end < 0) return undefined;
+      word = (word ?? "") + line.slice(i + 1, end);
+      i = end;
+    } else if (c === '"') {
+      word ??= "";
+      for (i++; i < line.length && line[i] !== '"'; i++) word += line[i] === "\\" && i + 1 < line.length ? line[++i]! : line[i]!;
+      if (i >= line.length) return undefined;
+    } else if (c === "\\" && i + 1 < line.length) word = (word ?? "") + line[++i]!;
+    else if (/\s/.test(c)) {
+      if (word !== undefined) words.push(word);
+      word = undefined;
+    } else word = (word ?? "") + c;
+  }
+  if (word !== undefined) words.push(word);
+  return words;
+}
+
+/** Why a command line was refused before anything was sent. */
+export const unclosedQuoteRefusal = "The command has a quote it never closes, so nothing was written.";
+
+/** Why a server's name was refused: the agent's own format would not read it back as that name. */
+export const serverNameFormatRefusal = (agent: string): string => `${agent} cannot keep a server under that name, so nothing was written.`;
+
+/** Why a server's name was refused before anything was written: empty, or holding a control character. */
+export const serverNameRefusal = "A server's name needs at least one character and no control character, so nothing was written.";
+
+/** Why an act named a server the agent's file does not define in that scope. */
+export const noSuchServerRefusal = (name: string, file: string): string => `There is no server named ${name} in ${file}.`;
+
+/** Why an add did not write over a server of the same name. */
+export const serverThereRefusal = (name: string, file: string): string => `${name} is already in ${file}, so nothing was written; remove it first or pick another name.`;
+
+/** Why a config that is a link out of the home, or out of the project for a project's file, was not written. */
+export const configLinkRefusal = (file: string, to: string): string => `${file} is a link to ${to}, outside the folder it belongs to, so wsp does not write through it.`;
+
+/** Why a write stopped: the agent or the person wrote the file between wsp's read and its write. */
+export const configChangedRefusal = (file: string): string => `${file} changed while wsp was writing it, so nothing was written; try again.`;
+
+/** Why a server was not turned off or on: its agent keeps no switch per server that wsp turns. */
+export const noServerSwitchRefusal = (agent: string): string => `${agent} keeps no switch per server that wsp turns, so nothing was changed.`;
+
+/** Why an agent's servers were not changed: it keeps none in a file wsp writes. */
+export const noServersConfigRefusal = (agent: string): string => `${agent} keeps no MCP servers in a file wsp writes.`;
+
+/** Why a napping workspace's servers were not changed: nothing here wakes a machine. */
+export const nappingServersRefusal = (name: string): string => `${name} is napping, and its servers are changed only while it runs; wake it first`;
+
 /** One tool a server lists, as its tools/list answers it. */
 export const McpTool = z.object({ name: z.string(), description: z.string().optional() });
 export type McpTool = z.infer<typeof McpTool>;
@@ -117,6 +174,26 @@ export type PageReach = z.infer<typeof PageReach>;
 
 export const McpScope = z.enum(["user", "home", "project"]);
 export type McpScope = z.infer<typeof McpScope>;
+
+/** One MCP server of one agent's config on a target, in the scope the report read it from; the person's own when
+ * unsaid. */
+export const ServerAsk = z.object({ agent: z.string(), name: z.string(), scope: McpScope.optional() });
+export type ServerAsk = z.infer<typeof ServerAsk>;
+
+/** One MCP server to write into an agent's config on a target, the project's with `project`: a command with its
+ * arguments and variables, or an address with its headers, as the person typed them. `env` and `headers` carry the
+ * values, which go into that file and nowhere else. */
+export const ServerAdd = z.object({
+  agent: z.string(),
+  name: z.string(),
+  project: z.boolean().optional(),
+  command: z.string().optional(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string()).optional(),
+  url: z.string().optional(),
+  headers: z.record(z.string()).optional(),
+});
+export type ServerAdd = z.infer<typeof ServerAdd>;
 
 export const McpRow = z.object({
   agent: z.string(),

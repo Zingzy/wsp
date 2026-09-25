@@ -8,7 +8,7 @@
 // the only home a second copy cannot grow beside.
 
 import { z } from "zod";
-import { AgentSignInState, AgentsChangedEvent, AgentsTarget } from "./agents-report.js";
+import { AgentSignInState, AgentsChangedEvent, AgentsTarget, ServerAdd, ServerAsk } from "./agents-report.js";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
@@ -5423,6 +5423,16 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Replies with { paths: string[] }: that skill turned off or on there, its SKILL.md renamed SKILL.md.off or back
    * in each of its folders. The skill wsp writes, a plugin's and a project's are refused. */
   z.object({ id: reqId, op: z.literal("skills.toggle"), target: AgentsTarget, name: z.string(), project: z.boolean().optional(), on: z.boolean() }),
+  /** Replies with { file }: one MCP server written into that agent's own config there, the project's with `project`,
+   * as that computer's login: a command with its arguments and variables, or an address with its headers. The values
+   * go into that file and nowhere else; a name already there is refused rather than written over. */
+  z.object({ id: reqId, op: z.literal("servers.add"), target: AgentsTarget, ...ServerAdd.shape }),
+  /** Replies with { file }: that one server's entry taken out of that agent's config there, in the scope it was read
+   * from, every other line of the file as it was. */
+  z.object({ id: reqId, op: z.literal("servers.remove"), target: AgentsTarget, ...ServerAsk.shape }),
+  /** Replies with { file }: that one server turned off or on in that agent's config there, by the switch the agent
+   * itself reads; refused for an agent that keeps no such switch per server. */
+  z.object({ id: reqId, op: z.literal("servers.toggle"), target: AgentsTarget, ...ServerAsk.shape, on: z.boolean() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
    * `on` prices the build at that place instead of the default one, by the name or id wsp places lists; once the
    * image stands, every build is priced at the image's own place whatever `on` says. */
@@ -5557,7 +5567,7 @@ export const RUNTIME_OPS: readonly string[] = RuntimeOp.options.map(o => o.shape
 
 /** The request fields above that carry a secret: a key, a token, a code, a passphrase, or a record of logins or
  * environment values a person puts keys into. A new field that carries one is added here, beside its schema. */
-export const SECRET_REQUEST_FIELDS: readonly string[] = ["token", "key", "rows", "code", "passphrase", "env", "envs"];
+export const SECRET_REQUEST_FIELDS: readonly string[] = ["token", "key", "rows", "code", "passphrase", "env", "envs", "headers"];
 
 /** The secret values a request frame carries, read one level into a record and no deeper: a record of logins is as
  * deep as a secret field goes, and the frame may be a stranger's. */
@@ -5895,7 +5905,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
 export * from "./exit.js";
 export * from "./format.js";

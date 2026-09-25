@@ -4,7 +4,8 @@
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
 import { computerWord, fmtThreads, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
-import type { HarnessCatalog, MachineFacts, MachineState, PauseMode, ProjectCopy, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
+import type { HarnessCatalog, MachineFacts, MachineState, PauseMode, PlaceBack, ProjectCopy, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
+import { LOOPBACK, authority } from "./app-ports.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
 
@@ -381,8 +382,9 @@ export const REPORTED_WORD = "reported";
  * together are what tells a computer that is off from a road that is broken. */
 export interface AbsentRoadInput {
   name: string;
-  /** The ssh login the host was given for it, and the address its last link dialled in from. */
-  road?: { readonly ssh?: string | undefined; readonly from?: string | undefined } | undefined;
+  /** The ssh login the host was given for it, the address its last link dialled in from, and the forward on its own
+   * loopback it dials back through where it reaches this host no other way. */
+  road?: { readonly ssh?: string | undefined; readonly from?: string | undefined; readonly back?: PlaceBack | undefined } | undefined;
   /** How long this host has not heard from it; null where it never has. */
   awayMs: number | null;
   /** What the last dial of it came to, where one has been made. */
@@ -395,6 +397,8 @@ export interface AbsentRoad {
   /** The Address row: the login the host dials, or the address the computer dialled in from, with the road it is.
    * Null on a computer this host was not installed on and has never held a link from. */
   address: string | null;
+  /** How it dials back through the forward on its own loopback, where it does; null for every other road. */
+  dialsBack: string | null;
   /** The Answered row, without its label. */
   answered: string;
   /** What the last dial said, where it was refused; null where it answered or where none was made. */
@@ -413,20 +417,39 @@ const OVER_SSH_WORD = "ssh";
 export const sshRoadOf = (road?: { readonly ssh?: string | undefined } | undefined): string | undefined =>
   road?.ssh === undefined || road.ssh === "" ? undefined : road.ssh;
 
+/** The address a box's link dials for a forward standing on its own loopback. */
+export const backUrl = (boxPort: number): string => `http://${authority(LOOPBACK, boxPort)}`;
+
+/** The road back to this host through the forward on a box's own loopback, the one spelling every surface says. */
+export const BACK_OVER_SSH = `back over ${OVER_SSH_WORD}`;
+
+/** A box's road back to this host through the forward on its own loopback, with where that forward stands. */
+export const dialsBackWord = (boxPort: number, name: string): string => `dials ${BACK_OVER_SSH} (${authority(LOOPBACK, boxPort)} on ${name})`;
+
+/** The road a link came in on, off the address the computer says it dialled. The box writes that address, so one
+ * this host did not hand out is never said: undefined, and the sentence names no road. */
+export const linkedOver = (dialed: string, back: PlaceBack | undefined, handed: readonly string[]): string | undefined =>
+  back !== undefined && dialed === backUrl(back.boxPort) ? `over ${OVER_SSH_WORD}` : handed.includes(dialed) ? `at ${dialed}` : undefined;
+
 export function absentRoad(input: AbsentRoadInput): AbsentRoad {
   const ssh = sshRoadOf(input.road);
-  const from = input.road?.from;
+  const back = input.road?.back;
+  const dialsBack = back === undefined ? null : dialsBackWord(back.boxPort, input.name);
+  // A link through the forward comes from this computer's own loopback, which is no address of that computer's.
+  const from = back === undefined ? input.road?.from : undefined;
   const address = ssh !== undefined ? `${ssh} · ${OVER_SSH_WORD}` : from !== undefined && from !== "" ? `${from} · ${DIALS_IN}` : null;
   const answered = input.awayMs === null ? "not since it joined" : `${offlineFor(input.awayMs)} ago`;
   const refused = input.dialled !== undefined && !input.dialled.answered && input.dialled.said !== undefined ? input.dialled.said : null;
   const where =
     ssh !== undefined
-      ? `wsp logs in to ${input.name} at ${ssh} over ssh`
-      : from !== undefined && from !== ""
-        ? `wsp waits for ${input.name} to dial in, last from ${from}`
-        : `wsp waits for ${input.name} to dial in`;
+      ? `wsp logs in to ${input.name} at ${ssh} over ssh${dialsBack === null ? "" : `, and ${input.name} ${dialsBack}`}`
+      : dialsBack !== null
+        ? `${input.name} ${dialsBack}`
+        : from !== undefined && from !== ""
+          ? `wsp waits for ${input.name} to dial in, last from ${from}`
+          : `wsp waits for ${input.name} to dial in`;
   const when = input.awayMs === null ? `it has not answered since it joined` : `it last answered ${offlineFor(input.awayMs)} ago`;
-  return { address, answered, refused, sentence: `${where}; ${when}.${refused === null ? "" : ` The last try said: ${refused}`}` };
+  return { address, dialsBack, answered, refused, sentence: `${where}; ${when}.${refused === null ? "" : ` The last try said: ${refused}`}` };
 }
 
 /** What one dial came to, in the slot the button that asked stands in. A computer holding its link answers the
