@@ -119,12 +119,13 @@ async function findSkill(road: Road, on: AgentsOn, ask: SkillAsk): Promise<{ row
   return { row, roots: roots.map(r => r.dir) };
 }
 
-/** Where a skill's folders stop being checked for a link above them: the project for a project's, else the home. */
-const baseOf = (road: Road, on: AgentsOn, row: SkillRow): string => (row.scope === "project" ? projectOf(on) : road.host.home);
+/** The skills folder a skill's folder sits in, the deepest that holds it; a link at or above it is the person's own setup. */
+const rootOf = (dir: string, roots: readonly string[]): string =>
+  roots.filter(r => dir.startsWith(`${r}/`)).sort((a, b) => b.length - a.length)[0] ?? posix.dirname(dir);
 
-/** A line that exits HELD_EXIT naming the link when any of the folders sits under one below `base`. */
-const heldLine = (dirs: readonly string[], base: string): string =>
-  [LINK_ABOVE, ...dirs.map(d => `linked ${shellQuote(d)} ${shellQuote(base)} && exit ${HELD_EXIT}`)].join("\n");
+/** A line that exits HELD_EXIT naming the link when any of the folders sits under one below its skills folder. */
+const heldLine = (dirs: readonly string[], roots: readonly string[]): string =>
+  [LINK_ABOVE, ...dirs.map(d => `linked ${shellQuote(d)} ${shellQuote(rootOf(d, roots))} && exit ${HELD_EXIT}`)].join("\n");
 
 /** The link and where it points, off a line that exited HELD_EXIT. */
 function linkSaid(res: ExecResult, home: string): { link: string; to: string } {
@@ -241,20 +242,20 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
     },
     remove: async (on, ask) => {
       const road = await roadOf(on, here);
-      const { row } = await findSkill(road, on, ask);
+      const { row, roots } = await findSkill(road, on, ask);
       mayChange(row, "remove");
       // rm -rf never follows a link it is handed, so a link goes and the folder it points to stays unless it is itself
-      // one of the skill's folders; a link above a folder it does follow, so such a skill is held.
+      // one of the skill's folders; a link between the skills folder and the skill it does follow, so such a skill is held.
       const paths = row.paths.map(p => p.path);
       const dirs = paths.map(p => expand(road.host, p));
-      const res = await road.run(`${heldLine(dirs, baseOf(road, on, row))}\nrm -rf -- ${dirs.map(shellQuote).join(" ")}`);
+      const res = await road.run(`${heldLine(dirs, roots)}\nrm -rf -- ${dirs.map(shellQuote).join(" ")}`);
       heldRefusal(res, road, row);
       if (res.exitCode !== 0) throw new Error(`${row.name} was not removed: ${firstLine(res)}`);
       return { removed: paths };
     },
     toggle: async (on, ask) => {
       const road = await roadOf(on, here);
-      const { row } = await findSkill(road, on, ask);
+      const { row, roots } = await findSkill(road, on, ask);
       mayChange(row, "toggle");
       const word = ask.on ? "on" : "off";
       // Renamed where the skill really lives; every link to it follows.
@@ -267,7 +268,7 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
       const renames = dirs.map(
         (dir, i) => `if [ -f ${q(`${dir}/${from}`)} ] && [ ! -e ${q(`${dir}/${to}`)} ]; then mv -- ${q(`${dir}/${from}`)} ${q(`${dir}/${to}`)} || exit 1; echo "moved ${i}"; elif [ -f ${q(`${dir}/${from}`)} ]; then echo "both ${i}"; fi`,
       );
-      const res = await road.run([heldLine(dirs, baseOf(road, on, row)), ...renames].join("\n"));
+      const res = await road.run([heldLine(dirs, roots), ...renames].join("\n"));
       heldRefusal(res, road, row);
       if (res.exitCode !== 0) throw new Error(`${row.name} was not turned ${word}: ${firstLine(res)}`);
       const said = res.stdout.split("\n").map(l => l.split(" "));

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { detectSkills, nodeHost, skillRoots, type Host } from "@wsp/collect";
@@ -233,7 +233,7 @@ describe("a skill's SKILL.md, turning it off and on, and removing it", () => {
     expect(existsSync(join(own, "SKILL.md"))).toBe(true);
   });
 
-  it("holds a skill under a linked folder anywhere on its path: Remove and Turn off refuse it and touch nothing", async () => {
+  it("holds a skill under a linked folder between its skills folder and itself: Remove and Turn off refuse it and touch nothing", async () => {
     const at = fixture();
     const checkout = join(at.root, "checkout");
     mkdirSync(join(checkout, "mine"), { recursive: true });
@@ -246,6 +246,23 @@ describe("a skill's SKILL.md, turning it off and on, and removing it", () => {
     await expect(acts.toggle({ kind: "here" }, { name: "mine", on: false })).rejects.toThrow(held);
     expect(readFileSync(join(checkout, "mine/SKILL.md"), "utf8")).toContain("name: mine");
     expect(existsSync(join(checkout, "work.txt"))).toBe(true);
+  });
+
+  it("acts on a skill whose skills folder is itself a link, or sits under one, as the person's own", async () => {
+    for (const linked of [".claude", ".claude/skills"]) {
+      const at = fixture();
+      const dots = join(at.root, "dotfiles", linked);
+      mkdirSync(dirname(dots), { recursive: true });
+      renameSync(join(at.home, linked), dots);
+      symlinkSync(dots, join(at.home, linked));
+      const acts = skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) });
+      const review = join(at.root, "dotfiles/.claude/skills/review");
+      expect((await acts.toggle({ kind: "here" }, { name: "review", on: false })).paths, linked).toEqual(["~/.claude/skills/review"]);
+      expect(existsSync(join(review, "SKILL.md.off")), linked).toBe(true);
+      expect((await acts.remove({ kind: "here" }, { name: "review" })).removed, linked).toEqual(["~/.claude/skills/review"]);
+      expect(existsSync(review), linked).toBe(false);
+      expect(lstatSync(join(at.home, linked)).isSymbolicLink(), linked).toBe(true);
+    }
   });
 
   it("groups by folder name, so a SKILL.md naming another skill or wsp neither joins nor hides behind that row", async () => {
