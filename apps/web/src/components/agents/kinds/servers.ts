@@ -11,7 +11,7 @@ import { agentName, mcpSwitch } from "@wsp/catalog";
 import type { AgentsReport, McpRow, ServerToolsAnswer } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, holdAll, notYet, onImage, serverSignInStart, signInAct, waitingFlow, type FlowView, type RowAct, type RowsContext } from "../agentsRows.js";
 import { AddServerForm } from "../AddServerForm.js";
-import { byName, kind, matchesAny, type Fact, type GroupBy, type GroupView, type KindModule, type ServerState, type ServerStatus } from "./kind.js";
+import { byName, kind, matchesAny, type Fact, type GroupBy, type GroupView, type KindModule, type Lead, type ServerState, type ServerStatus } from "./kind.js";
 
 /** Where a server is set up: the person's own files, or the project's. */
 type Scope = "global" | "project";
@@ -31,6 +31,8 @@ export interface ServerEntry {
 
 const scopeOf = (row: McpRow): Scope => (row.scope === "project" ? "project" : "global");
 const reachOf = (row: McpRow): string => (row.transport.kind === "stdio" ? row.transport.line : row.transport.host);
+/** The box a server's row and detail lead with: its own icon where it is reached over an address. */
+const leadOf = (entry: ServerEntry): Lead => ({ kind: "box", icon: ServerIcon, ...(entry.stdio || entry.reach === "" ? {} : { host: entry.reach }) });
 const rowId = (row: McpRow): string => `server-${row.agent}-${row.scope}-${row.name}`;
 
 /** One entry per server: the same name reached the same way in the same scope is one server set up for each agent. */
@@ -197,7 +199,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
     return {
       key: entry.key,
       title: entry.name,
-      lead: { kind: "box", icon: ServerIcon },
+      lead: leadOf(entry),
       marks: entry.rows.map(r => r.agent),
       subtext: entry.reach,
       status: waitingFlow(flow) ? { ...status, words: W.waitingOnYou } : status,
@@ -244,7 +246,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
     const refresh = ctx.tools === undefined || heldReason(ctx) !== undefined || onImage(ctx) ? undefined : () => ctx.tools!.list(tools, true);
     return {
       title: entry.name,
-      lead: { kind: "box", icon: ServerIcon },
+      lead: leadOf(entry),
       marks: entry.rows.map(r => r.agent),
       facts,
       acts,

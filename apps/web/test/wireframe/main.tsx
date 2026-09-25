@@ -349,6 +349,7 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-project": { kind: "project", id: "pr_spoo" },
   "settings-devices": { kind: "group", group: "devices" },
   "settings-account": { kind: "group", group: "account" },
+  "settings-privacy": { kind: "group", group: "privacy" },
   "settings-keybindings": { kind: "group", group: "keybindings" },
   "settings-about": { kind: "group", group: "about" },
   "settings-about-behind": { kind: "group", group: "about" },
@@ -363,6 +364,23 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   ...Object.fromEntries(IMAGE_SCREENS.map(name => [name, { kind: "computer", id: imageAt.id } as SettingsAt])),
 };
 const settingsAt = SETTINGS_SCREENS[screen];
+/** Stand-ins for the icons the host fetches, drawn here so no real site's mark ships with the tests. */
+const drawnIcon = (ink: string, paper: string, letter: string) => (): string => {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 64;
+  const g = canvas.getContext("2d")!;
+  g.fillStyle = paper;
+  g.beginPath();
+  g.roundRect(0, 0, 64, 64, 14);
+  g.fill();
+  g.fillStyle = ink;
+  g.font = "600 40px system-ui, sans-serif";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(letter, 32, 35);
+  return canvas.toDataURL("image/png");
+};
+const SERVER_ICON: Record<string, () => string> = { "mcp.notion.com": drawnIcon("#111111", "#ffffff", "N"), "mcp.linear.app": drawnIcon("#ffffff", "#5e6ad2", "L") };
 /** The add the host kept after it failed on the wsp step, read on bind as a reload reads it. */
 const FAILED_ADD: PlaceAddJob = {
   addId: "a_spoo",
@@ -506,6 +524,7 @@ const api = {
   initDraft: async () => new Promise<never>(() => {}),
   hostTerminalConfig: async () => ({ files: [] }),
   agentsRead: async () => AGENTS_REPORT,
+  serversIcon: async (host: string) => SERVER_ICON[host]?.() ?? null,
   serversTools: async (_target: unknown, _agent: string, name: string) => SERVER_TOOLS[name] ?? { auth: "open", tools: [], readAt: AGENTS_REPORT.readAt },
   // A sign-in whose tool prints its page at once: a device code for an agent, a page whose answer is pasted back for a server.
   // On this Mac a server's harness opens the browser itself and nothing is pasted back.

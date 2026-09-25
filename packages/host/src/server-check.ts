@@ -38,7 +38,8 @@ export interface Pin {
 
 export type Resolver = (hostname: string) => Promise<readonly Pin[]>;
 
-const resolve: Resolver = async hostname => (await lookup(hostname, { all: true, verbatim: true })).map(a => ({ address: a.address, family: a.family === 6 ? 6 : 4 }));
+/** Every address the name resolves to, as this computer's resolver answers it. */
+export const resolveAll: Resolver = async hostname => (await lookup(hostname, { all: true, verbatim: true })).map(a => ({ address: a.address, family: a.family === 6 ? 6 : 4 }));
 
 export type Knocker = (url: string, headers: Readonly<Record<string, string>>, timeoutMs: number, pin: Pin) => Promise<Knock | undefined>;
 
@@ -147,7 +148,7 @@ export function serverChecks(o: { knock: Knocker; resolve?: Resolver; now: () =>
       const now = o.now();
       const held = key === undefined ? undefined : kept.get(key);
       if (held !== undefined && now - held.at < CHECK_KEPT_MS) return held.auth;
-      const pin = await pinOf(url.hostname, o.resolve ?? resolve);
+      const pin = await pinOf(url.hostname, o.resolve ?? resolveAll);
       if (pin === undefined) return undefined;
       let auth = authOfKnock(await o.knock(t.url, t.headers, o.checkMs ?? CHECK_MS, pin));
       if (auth === "needs-sign-in" && agent.mcp.check !== undefined) {

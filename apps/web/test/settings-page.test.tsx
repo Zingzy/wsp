@@ -14,8 +14,9 @@ import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { ABOUT_WORDS, GROUP_BLURBS, SETTINGS_WORDS } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
-import { useThemeEffect } from "../src/settings/theme.js";
+import { SYSTEM_DARK_QUERY, useThemeEffect } from "../src/settings/theme.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
+import { THEMES } from "../src/themes/index.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { crumb, descriptionOf, liftedRowIds, lineLabels, mountSettings, pageAt, resetSettings, rowOf, rowTitles, settingsApi, settle, sidebarRowIds } from "./settings-harness.js";
 
@@ -31,6 +32,10 @@ const checked = (name: string): string[] => within(group(name)).getAllByRole("ra
 const segments = (name: string): string[] => within(group(name)).getAllByRole("radio").map(r => r.textContent ?? "");
 const field = (): HTMLInputElement => document.querySelector<HTMLInputElement>("[data-k=settings-search] input, input[data-k=settings-search]")!;
 const restore = (): HTMLElement | null => document.querySelector("[data-k=restore-defaults]");
+const cells = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-theme-option]")];
+const cellIds = (): string[] => cells().map(c => c.dataset["themeOption"] ?? "");
+const cellOf = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-theme-option="${id}"]`)!;
+const sideIds = (side: "light" | "dark"): string[] => THEMES.filter(t => t.side === side).map(t => t.id);
 
 function ThemeRule() {
   useThemeEffect();
@@ -52,10 +57,10 @@ afterEach(() => {
 });
 
 describe("the settings sidebar", () => {
-  it("lists the seven groups in order with Appearance the one lifted row on a fresh open, and no General", async () => {
+  it("lists the eight groups in order with Appearance the one lifted row on a fresh open, and no General", async () => {
     mountSettings({ api: settingsApi().api });
     await settle();
-    expect(sidebarRowIds()).toEqual(["group:appearance", "group:computers", "group:projects", "group:devices", "group:account", "group:keybindings", "group:about"]);
+    expect(sidebarRowIds()).toEqual(["group:appearance", "group:computers", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"]);
     expect(liftedRowIds()).toEqual(["group:appearance"]);
     expect(document.querySelector("[data-slot=sidebar]")!.textContent).not.toContain("General");
     // The field over the groups and Back at the foot with the chord that does the same.
@@ -74,7 +79,7 @@ describe("the settings sidebar", () => {
     expect(pageAt()).toBe("computers");
     expect(crumb()).toBe("Settings/Computers");
     expect(liftedRowIds()).toEqual(["group:computers"]);
-    expect(sidebarRowIds()).toEqual(["group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "group:devices", "group:account", "group:keybindings", "group:about"]);
+    expect(sidebarRowIds()).toEqual(["group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"]);
     fireEvent.click(document.querySelector("[data-row-id='computer:p_spoo']")!);
     expect(pageAt()).toBe("computer:p_spoo");
     expect(crumb()).toBe("Settings/Computers/spoo");
@@ -94,7 +99,7 @@ describe("the settings sidebar", () => {
     await settle();
     // Appearance is open and the two computers and the one project are already rows: the sub-rows are the
     // sidebar's shape, not a state of it.
-    const before = ["group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:keybindings", "group:about"];
+    const before = ["group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"];
     expect(sidebarRowIds()).toEqual(before);
     fireEvent.click(document.querySelector("[data-k=settings-computers]")!);
     expect(sidebarRowIds()).toEqual(before);
@@ -144,7 +149,7 @@ describe("search", () => {
     // A computer or a project under a dimmed group dims with it: left lit under a dimmed head it would read as
     // the one row that matched.
     const dimmed = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row][data-dimmed]")].map(row => row.dataset["rowId"]);
-    expect(dimmed).toEqual(["group:appearance", "group:computers", "computer:here", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:keybindings"]);
+    expect(dimmed).toEqual(["group:appearance", "group:computers", "computer:here", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
     // Standing back is an opacity, never another ink: the sidebar's rest ink is darker than its muted ink on the
     // dark side, so an ink swap read brighter there and did nothing at all on light.
     expect(document.querySelector<HTMLElement>("[data-row-id='computer:here']")?.className).toContain("opacity-50");
@@ -226,7 +231,7 @@ describe("the row grammar", () => {
     window.wsp = { version: "0.2.0" };
     mountSettings({ api });
     await settle();
-    for (const groupId of ["appearance", "computers", "projects", "devices", "account", "keybindings", "about"]) {
+    for (const groupId of ["appearance", "computers", "projects", "devices", "account", "privacy", "keybindings", "about"]) {
       fireEvent.click(document.querySelector(`[data-k=settings-${groupId}]`)!);
       await settle();
       expect(pageAt()).toBe(groupId);
@@ -254,8 +259,8 @@ describe("Appearance", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, children: <ThemeRule /> });
     await settle();
-    expect(segments(SETTINGS_WORDS.theme)).toEqual(["System", "Light", "Dark"]);
-    expect(checked(SETTINGS_WORDS.theme)).toEqual(["true", "false", "false"]);
+    expect(segments(SETTINGS_WORDS.theme)).toEqual(["Light", "Dark", "System"]);
+    expect(checked(SETTINGS_WORDS.theme)).toEqual(["false", "false", "true"]);
     fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Light" }));
     expect(useStore.getState().preferences.theme).toBe("light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);
@@ -265,6 +270,73 @@ describe("Appearance", () => {
     expect(setTheme).toHaveBeenLastCalledWith("dark");
     await settle();
     expect(sets).toEqual([{ theme: "light" }, { theme: "dark" }]);
+  });
+
+  it("the grid draws every registered theme of the side the segment shows, each picture in its own theme, and a cell writes that side's pick", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api, children: <ThemeRule /> });
+    await settle();
+    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Light" }));
+    expect(cellIds()).toEqual(sideIds("light"));
+    for (const cell of cells()) expect(cell.querySelector("[data-theme]")?.getAttribute("data-theme")).toBe(cell.dataset["themeOption"]);
+    expect(cells().map(c => c.textContent)).toEqual(THEMES.filter(t => t.side === "light").map(t => t.word));
+    expect(cells().map(c => c.getAttribute("aria-checked"))).toEqual(sideIds("light").map(id => String(id === "paper")));
+    fireEvent.click(cellOf("linen"));
+    expect(useStore.getState().preferences.lightTheme).toBe("linen");
+    expect(document.documentElement.dataset["theme"]).toBe("linen");
+    expect(cellOf("linen").getAttribute("aria-checked")).toBe("true");
+    expect(cellOf("paper").getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Dark" }));
+    expect(cellIds()).toEqual(sideIds("dark"));
+    for (const cell of cells()) expect(cell.querySelector("[data-theme]")?.getAttribute("data-theme")).toBe(cell.dataset["themeOption"]);
+    fireEvent.click(cellOf("denim"));
+    expect(useStore.getState().preferences).toMatchObject({ theme: "dark", lightTheme: "linen", darkTheme: "denim" });
+    expect(document.documentElement.dataset["theme"]).toBe("denim");
+    await settle();
+    expect(sets).toEqual([{ theme: "light" }, { lightTheme: "linen" }, { theme: "dark" }, { darkTheme: "denim" }]);
+  });
+
+  it("the grid is one tab stop on the chosen cell, and the arrow keys move the pick along the side shown", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api, children: <ThemeRule /> });
+    await settle();
+    fireEvent.click(within(group(SETTINGS_WORDS.theme)).getByRole("radio", { name: "Light" }));
+    const light = sideIds("light");
+    expect(cells().map(c => c.tabIndex)).toEqual(light.map(id => (id === "paper" ? 0 : -1)));
+    act(() => cellOf("paper").focus());
+    await act(async () => void fireEvent.keyDown(cellOf("paper"), { key: "ArrowRight" }));
+    const next = light[light.indexOf("paper") + 1]!;
+    expect(document.activeElement).toBe(cellOf(next));
+    expect(useStore.getState().preferences.lightTheme).toBe(next);
+    expect(cellOf(next).getAttribute("aria-checked")).toBe("true");
+    expect(cells().map(c => c.tabIndex)).toEqual(light.map(id => (id === next ? 0 : -1)));
+    await act(async () => void fireEvent.keyDown(cellOf(next), { key: "ArrowLeft" }));
+    expect(document.activeElement).toBe(cellOf("paper"));
+    expect(useStore.getState().preferences.lightTheme).toBe("paper");
+    await settle();
+    expect(sets).toEqual([{ theme: "light" }, { lightTheme: next }, { lightTheme: "paper" }]);
+    act(() => cellOf("paper").blur());
+    await settle();
+  });
+
+  it("under System the grid shows the side this Mac is on and follows it as it changes", async () => {
+    let systemDark = false;
+    const listeners = new Set<() => void>();
+    vi.spyOn(window, "matchMedia").mockImplementation(query => ({ get matches() { return query === SYSTEM_DARK_QUERY && systemDark; }, media: query, addEventListener: (_: string, fn: () => void) => listeners.add(fn), removeEventListener: (_: string, fn: () => void) => listeners.delete(fn), addListener: () => {}, removeListener: () => {} }) as unknown as MediaQueryList);
+    const { api, sets } = settingsApi();
+    mountSettings({ api });
+    await settle();
+    expect(checked(SETTINGS_WORDS.theme)).toEqual(["false", "false", "true"]);
+    expect(cellIds()).toEqual(sideIds("light"));
+    act(() => {
+      systemDark = true;
+      for (const fn of listeners) fn();
+    });
+    expect(cellIds()).toEqual(sideIds("dark"));
+    fireEvent.click(cellOf("pitch"));
+    expect(useStore.getState().preferences).toMatchObject({ theme: "system", darkTheme: "pitch" });
+    await settle();
+    expect(sets).toEqual([{ darkTheme: "pitch" }]);
   });
 
   it("is the page's head over the theme picker alone, with no line under the pictures", async () => {
