@@ -27,26 +27,25 @@ describe("index.css", () => {
     expect(appTerminalFontSize()).toBe(14);
   });
 
-  // A workspace's theme is painted by one formatter's custom properties; the stylesheet keys on the mark the
-  // formatter's caller sets and nothing else, so no colour id lives in CSS and no old hue rule lingers.
-  describe("the workspace theme", () => {
-    it("keys the gradient and the grain on the theme mark alone, with one pre-rendered tile and no per-hue rule", () => {
-      expect(css).not.toMatch(/data-space-tint/);
-      expect(css).not.toMatch(/--space-tint-[a-z]+:/);
-      expect(css.match(/--space-grain-tile: url\("data:image\/svg\+xml,/g)).toHaveLength(1);
-      expect(css).toContain("feTurbulence");
-      expect(css).toMatch(/\[data-app-sidebar\]\[data-space-theme\] > \[data-slot="sidebar-inner"\] \{[^}]*background-image: var\(--space-gradient\);/);
-      expect(css).toMatch(/\[data-app-sidebar\]\[data-space-theme\] > \[data-slot="sidebar-inner"\]::before \{[^}]*opacity: var\(--space-grain, 0\);/);
-      // The grain layer never filters the surface: it is a tile laid at an opacity, under the rows.
-      const grain = /::before \{([^}]*)\}/.exec(css.slice(css.indexOf("[data-space-theme]")))![1]!;
-      expect(grain).not.toMatch(/filter:/);
-      expect(grain).toContain("z-index: -1");
-    });
+  it("carries no second theme system: no contrast layer, no inherited theme ids, no workspace theme on the sidebar", () => {
+    expect(css).not.toMatch(/--contrast-|--appearance-contrast|--app-theme-|data-theme-id|theme-inspector|data-space-|--space-grain|--toolbar-/);
+    expect(css).not.toContain('[data-theme="dark"]');
+  });
 
-    it("a theme pinned to one side takes that side's sidebar tokens whatever the app draws, with one copy of each set", () => {
-      expect(css).toContain(':is(:where(.dark, .dark *):not([data-space-scheme="light"]), [data-space-scheme="dark"])');
-      expect(css.match(/--sidebar-row-selected: color-mix\(in srgb, var\(--contrast-foreground\) 7%, transparent\);/g)).toHaveLength(1);
-    });
+  it("the Mac's dark material takes its grounds from the theme, so a dark theme's window stands on its own ground", () => {
+    const material = css.slice(css.indexOf(".desktop-mac.dark [data-slot=\"sidebar-inset\"]"), css.indexOf("/* The window paints the glass behind the page"));
+    expect(material.length).toBeGreaterThan(0);
+    expect(material).not.toMatch(/rgb\((6 6 6|24 24 26|31 31 33)/);
+    expect(material).toContain("var(--material-ground)");
+    expect(material).toContain("var(--material-raised)");
+    expect(material).toContain("var(--material-edge)");
+  });
+
+  it("the sidebar's scope names no colour of its own: it maps the page's roles onto the theme's sidebar tokens, on both sides", () => {
+    const scope = /\n\[data-app-sidebar\] \{([^}]*)\}/.exec(css)![1]!;
+    expect(scope).not.toMatch(/#|rgb|oklch|--color-/);
+    expect(scope).toContain("--background: var(--sidebar-canvas);");
+    expect(scope).toContain("--muted-foreground: var(--sidebar-quiet);");
   });
 
   it("pins the sidebar glass utility added after the upstream set", () => {
@@ -86,15 +85,18 @@ describe("index.css", () => {
         }
       }
 
-      /* Dark mode on the Mac: the whole window stands on the glass, each region #060606 at its own share over it. The dev
-         build's Material panel moves these same variables, so a share changes here and there together. Inside the panel
-         every edge is a hairline and cards a faint tint; the line tokens are the contrast ones, which every border utility
+      /* Dark mode on the Mac: the whole window stands on the glass, each region the theme's material ground at its own
+         share over it. The dev build's Material panel moves these same variables, so a share changes here and there
+         together. Inside the panel every edge is a hairline and cards a faint tint, on the line tokens every border utility
          reads. Light mode keeps its solid ground. */
-      .desktop-mac:is(.dark, [data-theme="dark"]) [data-slot="sidebar-inset"] {
+      .desktop-mac.dark [data-slot="sidebar-inset"] {
         background: transparent;
       }
 
-      .desktop-mac:is(.dark, [data-theme="dark"]) {
+      .desktop-mac.dark {
+        /* Over a white desktop the glass reads as mid grey and the page's muted ink falls under AA on every share of it;
+           this step clears it under a hover fill and stays a step behind the body. */
+        --muted-foreground: color-mix(in oklab, var(--glass-ink) 85%, var(--material-ground));
         --material-centre: 67%;
         --material-panel: 74%;
         --material-sidebar: 40%;
@@ -102,48 +104,48 @@ describe("index.css", () => {
         --material-card: 2%;
       }
 
-      .desktop-mac:is(.dark, [data-theme="dark"]) [data-slot="sidebar-inner"] {
-        background: rgb(6 6 6 / var(--material-sidebar));
+      .desktop-mac.dark [data-slot="sidebar-inner"] {
+        background: color-mix(in srgb, var(--material-ground) var(--material-sidebar), transparent);
       }
 
-      .desktop-mac:is(.dark, [data-theme="dark"]) [data-shell-center] {
-        background: rgb(6 6 6 / var(--material-centre));
+      .desktop-mac.dark [data-shell-center] {
+        background: color-mix(in srgb, var(--material-ground) var(--material-centre), transparent);
       }
 
       /* The composer floats over the chat column: a lifted pane of the same material, the text behind it blurred away. */
-      .desktop-mac:is(.dark, [data-theme="dark"]) [data-shell-center] .group\\/composer-surface {
-        --chat-composer-glass-surface: rgb(24 24 26);
+      .desktop-mac.dark [data-shell-center] .group\\/composer-surface {
+        --chat-composer-glass-surface: var(--material-raised);
       }
 
       /* A translucent terminal shows the window's glass through its canvas, so with one open the centre's share moves off
          the whole column onto the thread and the header, and the drawer's own ground stays clear. */
-      html.desktop-mac:is(.dark, [data-theme="dark"]):has([data-terminal-translucent]) [data-shell-center] {
+      html.desktop-mac.dark:has([data-terminal-translucent]) [data-shell-center] {
         background: transparent;
       }
 
-      html.desktop-mac:is(.dark, [data-theme="dark"]):has([data-terminal-translucent]) :is([data-shell-center] > header, [data-terminal-beside], [data-shell-center] [data-terminal-tabs]) {
-        background: rgb(6 6 6 / var(--material-centre));
+      html.desktop-mac.dark:has([data-terminal-translucent]) :is([data-shell-center] > header, [data-terminal-beside], [data-shell-center] [data-terminal-tabs]) {
+        background: color-mix(in srgb, var(--material-ground) var(--material-centre), transparent);
       }
 
       /* The same in the right panel: holding a translucent terminal, its share moves onto the tab strip. */
-      html.desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) {
+      html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) {
         background: transparent;
         /* The hairline read against the share; over the bare glass it takes the grey it shows there, as a solid line. */
-        border-color: rgb(31 31 33);
+        border-color: var(--material-edge);
       }
 
-      html.desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) [data-right-panel-tabbar] {
-        background: rgb(6 6 6 / var(--material-panel));
+      html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) [data-right-panel-tabbar] {
+        background: color-mix(in srgb, var(--material-ground) var(--material-panel), transparent);
       }
 
-      .desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"] {
-        background: rgb(6 6 6 / var(--material-panel));
-        border-color: var(--contrast-border);
+      .desktop-mac.dark [data-preview-panel-mode="inline"] {
+        background: color-mix(in srgb, var(--material-ground) var(--material-panel), transparent);
+        border-color: var(--border);
         --background: transparent;
         --card: rgb(255 255 255 / var(--material-card));
         --muted: rgb(255 255 255 / calc(var(--material-card) + 1%));
-        --contrast-border: rgb(255 255 255 / var(--material-line));
-        --contrast-input: rgb(255 255 255 / calc(var(--material-line) + 6%));
+        --border: rgb(255 255 255 / var(--material-line));
+        --input: rgb(255 255 255 / calc(var(--material-line) + 6%));
       }
 
       /* The window paints the glass behind the page, so the page's own canvas is
@@ -161,50 +163,53 @@ describe("index.css", () => {
       }
 
       /* The counts in the top rows: the sidebar's quiet text at part opacity.
-         Declared where the contrast tokens are, so the sidebar's own step-ups
+         Declared on the sidebar as well as the root, so the sidebar's own step-ups
          reach it. Two surfaces read it, the sidebar's rows and the workspace
          switcher's cards, and the switcher is portaled outside [data-app-sidebar]:
          it takes the root's copy, which is why this token is declared on both and
          cannot be scoped to the sidebar alone. */
       :root,
       [data-app-sidebar] {
-        --top-row-meta: color-mix(in srgb, var(--contrast-sidebar-whisper) var(--top-row-meta-alpha), transparent);
+        --top-row-meta: color-mix(in srgb, var(--sidebar-whisper) var(--top-row-meta-alpha), transparent);
         /* A meta line that carries a sentence rather than a figure: the line for a provider out of
            reach, what the runtime is doing to a machine's daemon, a drop with memory near full. The
            whisper the counts take reads at 2.90:1 in light and 3.00:1 in dark, which is right for a
            number the eye lands on and wrong for a sentence someone has to read through, so prose takes
            a higher part of the same ink and clears AA on both surfaces. */
-        --sidebar-prose: color-mix(in srgb, var(--contrast-sidebar-whisper) 75%, transparent);
+        --sidebar-prose: color-mix(in srgb, var(--sidebar-whisper) 75%, transparent);
         /* The word a sidebar row at rest carries, the search row's included. The dark sidebar holds it
            at 80 percent of its quiet ink and still reads at 5.43:1; on a light surface that same 80
            percent lands at 4.47:1, and at 4.14:1 over the search row's tint, so light takes the ink
            whole. Zinc-600 whole still reads a step behind the zinc-800 a selected row's name takes. */
-        --sidebar-row-rest: var(--contrast-sidebar-muted-foreground);
+        --sidebar-row-rest: var(--sidebar-muted-foreground);
         /* The glyphs' quiet ink, mixed from the sidebar's own tokens; declared here beside the tiers for the same
-           reason, so a sidebar whose theme pins its side mixes it from that side's tokens. */
+           reason. */
         --sidebar-icon-color: color-mix(
           in srgb,
-          var(--contrast-sidebar-muted-foreground) 60%,
+          var(--sidebar-muted-foreground) 60%,
           var(--sidebar)
         );
       }
 
       /* oklab, not srgb: this is the space the utility's own 80 percent mixed in, and the dark side
-         is meant to come out of this pass with the pixels it went in with. The sidebar takes the dark
-         step on the app's dark side unless its theme pins light, and wherever its theme pins dark. */
+         is meant to come out of this pass with the pixels it went in with. */
       :root:where(.dark, .dark *),
-      [data-app-sidebar]:is(:where(.dark, .dark *):not([data-space-scheme="light"]), [data-space-scheme="dark"]) {
-        --sidebar-row-rest: color-mix(in oklab, var(--contrast-sidebar-muted-foreground) 80%, transparent);
+      [data-app-sidebar]:where(.dark, .dark *) {
+        --sidebar-row-rest: color-mix(in oklab, var(--sidebar-muted-foreground) 80%, transparent);
       }
 
       /* Over the glass the sidebar's quiet text and glyphs have no solid card
-         behind them: one step up, and the counts nearly opaque, keep
-         them at AA over a white desktop, where the glass reads as mid grey. */
+         behind them: one step up, the rows' words and the prose whole, and the
+         counts nearly opaque, keep them at AA over a white desktop, where the
+         glass reads as mid grey. */
       .desktop-mac [data-app-sidebar] {
         @variant dark {
-          --muted-foreground: var(--color-neutral-300);
-          --sidebar-muted-foreground: var(--color-neutral-300);
-          --sidebar-icon-color: var(--color-neutral-300);
+          --muted-foreground: var(--glass-ink);
+          --sidebar-muted-foreground: var(--glass-ink);
+          --sidebar-icon-color: var(--glass-ink);
+          --sidebar-whisper: var(--glass-ink);
+          --sidebar-row-rest: var(--glass-ink);
+          --sidebar-prose: var(--glass-ink);
           --top-row-meta-alpha: 90%;
         }
       }
@@ -230,43 +235,8 @@ describe("index.css", () => {
         background: transparent;
       }
 
-      html.desktop-mac:not(.dark, [data-theme="dark"]):has([data-terminal-translucent]) :is([data-right-panel-tabbar], [data-terminal-tabs], [data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > :not(:has([data-terminal-translucent])), [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
+      html.desktop-mac:not(.dark):has([data-terminal-translucent]) :is([data-right-panel-tabbar], [data-terminal-tabs], [data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > :not(:has([data-terminal-translucent])), [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
         background: var(--background);
-      }
-
-      /* One workspace's theme, in Spaces mode, on the sidebar's own surface. The
-         theme object is read by one formatter, which writes these custom
-         properties onto the sidebar element: the gradient, the grain and the ink.
-         The inner layer is the one both the glass recipe and the macOS vibrancy
-         leave to the app, so the gradient lies over the glass or the window's
-         material rather than replacing it; its stops carry the theme's opacity as
-         their alpha. The grain is one tile, an SVG turbulence filter the browser
-         rasterises once and repeats, laid under the rows at the slider's opacity:
-         never a filter over the whole surface, so the rows scroll over a still
-         layer. The inner isolates its stacking so the tile sits above the gradient
-         and under everything the sidebar draws. */
-      :root {
-        --space-grain-tile: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
-      }
-
-      [data-app-sidebar][data-space-theme] > [data-slot="sidebar-inner"] {
-        position: relative;
-        isolation: isolate;
-        background-image: var(--space-gradient);
-        background-repeat: no-repeat;
-        background-size: 100% 100%;
-      }
-
-      [data-app-sidebar][data-space-theme] > [data-slot="sidebar-inner"]::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        z-index: -1;
-        pointer-events: none;
-        background-image: var(--space-grain-tile);
-        background-size: 160px 160px;
-        opacity: var(--space-grain, 0);
-        mix-blend-mode: soft-light;
       }
 
       @keyframes road-in {

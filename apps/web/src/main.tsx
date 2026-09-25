@@ -4,6 +4,7 @@ import { BootGate } from "./BootGate.js";
 import { bootPayload } from "./boot.js";
 import { GlassGround } from "./components/GlassGround.js";
 import "./index.css";
+import "./themes/index.js";
 
 const cfg = bootPayload();
 if (cfg === undefined) throw new Error("the page has no window.__WSP__ boot object");

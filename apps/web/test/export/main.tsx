@@ -18,6 +18,7 @@ import { useStore } from "../../src/protocol/store";
 import { ExportProjectDialog } from "../../src/sidebar/ExportProjectDialog";
 import { fakeHostFolders } from "../host-folders-fixture";
 import "../../src/index.css";
+import "../../src/themes/index";
 import { caps } from "../caps.js";
 import { noDaemonApi } from "../fake-daemon-api.js";
 
