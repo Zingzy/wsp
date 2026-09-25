@@ -6,6 +6,7 @@ import { ComputerTerminalDrawer, WorkspaceTerminalDrawer } from "./components/Wo
 import { SettingsPage } from "./settings/SettingsPage.js";
 import { useThemeEffect } from "./settings/theme.js";
 import { AppShell } from "./shell/AppShell.js";
+import { MaterialTuner } from "./dev/MaterialTuner.js";
 import { useHostNotices } from "./notices/hostNotices.js";
 import { useShellVersionEffect } from "./shell/shellVersion.js";
 import { FirstRun } from "./shell/FirstRun.js";
@@ -135,6 +136,7 @@ export function Shell() {
       ) : (
         <div className="p-6 font-mono text-sm text-muted-foreground">connecting to runtime…</div>
       )}
+      {import.meta.env.DEV ? <MaterialTuner /> : null}
     </AppShell>
   );
 }

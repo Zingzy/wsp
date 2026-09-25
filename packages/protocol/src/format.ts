@@ -18,6 +18,20 @@ const GIB = MIB * 1024;
 
 /** Bytes as a person reads them, in binary units: whole under a gigabyte, since a tenth of a megabyte is noise at that
  * scale, and GB with one decimal unless whole. */
+const COMPACT_UNITS = ["", "K", "M", "G", "T"];
+
+/** rss as a process table column with a three-digit budget fmtBytes does not fit, so its own rule: 900, 12K, 1.5M, 123M, 2.3G. */
+export function compactBytes(n: number): string {
+  let v = Math.max(0, n);
+  let i = 0;
+  while (v >= 1000 && i < COMPACT_UNITS.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  const text = i === 0 ? String(Math.round(v)) : v < 10 ? v.toFixed(1) : String(Math.round(v));
+  return `${text}${COMPACT_UNITS[i]}`;
+}
+
 export function fmtBytes(n: number): string {
   if (n < KIB) return `${n} B`;
   if (n < MIB) return `${Math.round(n / KIB)} KB`;
@@ -1539,7 +1553,7 @@ export function memoryNearFull(mem: { used: number; total: number }): boolean {
 /** The line every pane and row shows when a machine stopped answering with its memory near full: the last figures
  * the daemon sent, and that the work took the memory, so nobody rebuilds a machine that is fine. */
 export function outOfMemoryLine(r: MemoryReading): string {
-  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the workspace last answered; the work on it took the memory, not a fault of the computer it runs on`;
+  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the task last answered; the work on it took the memory, not a fault of the computer it runs on`;
 }
 
 /** Two byte counts against each other with the unit said once when they share it: "3.6 of 3.9 GB", "900.0 MB of 3.9 GB". */
@@ -1560,8 +1574,8 @@ export function outOfMemoryRowLine(r: MemoryReading): string {
  * this machine, with its rate, for the next workspace. With none in the table, less at once is the only road. */
 export function biggerSizeLine(current: WorkspaceSize, offers: readonly MachineSizeOffer[]): string {
   const bigger = offers.filter(o => o.memMb > current.memMb).sort((a, b) => a.memMb - b.memMb)[0];
-  if (bigger === undefined) return "No size with more memory is offered; run less in the workspace at once";
-  return `A workspace on ${fmtSize(bigger)} (${fmtRate(bigger.rateUsdPerHour)}) fits more; pick it when you make the next one`;
+  if (bigger === undefined) return "No size with more memory is offered; run less in the task at once";
+  return `A task on ${fmtSize(bigger)} (${fmtRate(bigger.rateUsdPerHour)}) fits more; pick it when you make the next one`;
 }
 
 /** The machine row's line while the runtime replaces a daemon older than this wsp, and the line it shows instead
@@ -1769,13 +1783,13 @@ export const imageHomeKeptLine = (on: string | undefined, home: { id: string; na
 /** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
 export const SOLARI_CONSOLE = "console.getsolari.com";
 
-/** What a person calls a provider's key and where they get one, keyed by the word WSP_PROVIDER holds. The host's
+/** What a person calls a provider, its key and where they get one, keyed by the word WSP_PROVIDER holds. The host's
  * provider registry reads its keyName and keyConsole from here and the app's provider rows read the same, so the
  * screen that asks for a key and the terminal that asks for it say one thing. A provider that takes no key has no
  * row. */
-export const PROVIDER_KEY_WORDS: Record<string, { keyName: string; keyConsole?: string }> = {
-  box: { keyName: "Box API key", keyConsole: "ascii.dev" },
-  solari: { keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
+export const PROVIDER_KEY_WORDS: Record<string, { name: string; keyName: string; keyConsole?: string }> = {
+  box: { name: "Box by ASCII", keyName: "Box API key", keyConsole: "ascii.dev" },
+  solari: { name: "Solari", keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
 };
 
 /** Every word of the six screens that build the image, opened from Settings under the title the image section
@@ -1785,7 +1799,7 @@ export const PROVIDER_KEY_WORDS: Record<string, { keyName: string; keyConsole?: 
 export const CLOUD_SETUP_WORDS = {
   choice: {
     headline: "What goes on your image",
-    top: "What your agents need goes on one image, built once and copied for every workspace",
+    top: "What your agents need goes on one image, built once and copied for every task",
     manual: "Choose what goes on the image",
     agent: "Let an agent choose from your usage",
     agentWith: "with",
@@ -1797,7 +1811,7 @@ export const CLOUD_SETUP_WORDS = {
   },
   keys: {
     headline: "Your Solari key",
-    top: "Solari runs the computers your workspaces sit on",
+    top: "Solari runs the computers your tasks sit on",
     solari: "API key",
     /** The empty field's ghost: the start every Solari key has, and no more. */
     placeholder: "slr_live_...",
@@ -1843,11 +1857,11 @@ export const CLOUD_SETUP_WORDS = {
     choose: "Choose",
     /** Why the build keycap is held while the name field is empty: without a name nothing is forked, so a folder
      * typed beside it would have nowhere to land. */
-    needsName: "give the workspace a name",
+    needsName: "give the task a name",
   },
   build: {
     headline: "Building your image",
-    top: "The computer starts, installs what you ticked and is saved as the image every workspace starts from",
+    top: "The computer starts, installs what you ticked and is saved as the image every task starts from",
     /** The one stage row the sign-ins fold into, its sub-rows one per sign-in. */
     signingIn: "Signing in on the computer",
     /** The slide the build becomes while that stage runs: room to act on each sign-in. */
@@ -1866,11 +1880,11 @@ export const CLOUD_SETUP_WORDS = {
     cancelKeep: "Keep building",
     done: "Your image is ready",
     /** The sentence under that title: the running one would say the machine is still being saved. */
-    doneTop: "Your image is built; every workspace starts from it",
+    doneTop: "Your image is built; every task starts from it",
     failed: "The build stopped",
     /** The headline of a build the person stopped, so the screen never reads as the machine's doing. */
     stopped: "You stopped the build",
-    keycap: "Open workspace",
+    keycap: "Open task",
     again: "Start over",
   },
   agent: {
@@ -3295,7 +3309,7 @@ export type LineageMark = keyof typeof LINEAGE_MARKS;
 export const REPO_STATE_WORDS = {
   unknown: { word: "", note: "", pane: "" },
   none: { word: "", note: "", pane: "This folder is not inside a git repository, so there is nothing to diff." },
-  refused: { word: "git unread", note: "The workspace could not read this folder's git state, so no branch is shown.", pane: "" },
+  refused: { word: "git unread", note: "The task could not read this folder's git state, so no branch is shown.", pane: "" },
 } as const;
 export type RepoStateWord = keyof typeof REPO_STATE_WORDS;
 
@@ -3474,7 +3488,7 @@ export function exportFromLine(workspaceName: string): string {
 }
 
 /** What the ticks on the export dialog's agent rows do. */
-export const EXPORT_SESSIONS_NOTE = "Ticked agents' sessions come home with the folder. The rest stay in the workspace.";
+export const EXPORT_SESSIONS_NOTE = "Ticked agents' sessions come home with the folder. The rest stay in the task.";
 
 /** The export dialog's agent section when the workspace has no threads to make rows of. */
 export const NO_THREADS_NOTE = "No threads here. Every agent's sessions for the folder come home with it.";
@@ -3832,29 +3846,16 @@ export const PLACES_WORDS = {
   addComputer: "Add a computer",
   connectProvider: "Connect a provider",
   sheet: {
-    title: "Add a computer",
     description: `A computer you own runs workspaces for your wsp. It ${PLACE_CONNECTS}. You open nothing on it.`,
     /** The one line both roads say, because it is the reason a person adds a computer at all: a turn already
      * running there is that computer's own and its daemon holds it while this host sleeps, and only the start of
      * the next one needs this host awake. */
     whileAsleep: "Threads there keep running while this Mac sleeps; new ones start when it wakes.",
-    appRoad: 'On that computer, open wsp and press "This Mac joins another wsp". Type these.',
-    address: "Address",
-    code: "Code",
-    waiting: "waiting for it to connect",
-    connected: (from: string): string => `connected from ${from} · keys exchanged`,
-    reading: "reading what it has",
-    joined: (os: string, agents: readonly string[]): string => `joined · ${os}${agents.length === 0 ? "" : ` · ${agents.join(", ")} found`}`,
-    joinedTitle: (name: string): string => `${name} joined`,
-    noApp: "No app on that computer",
-    noAppLine: "In its terminal, install wsp, then join:",
     install: "npm i -g @zingzy/wsp",
     /** The line typed in a terminal on the computer being joined. The token is the code and the fingerprint of the
      * key this host will prove, as joinToken writes them, so the line names which host it is joining. */
     joinLine: (url: string, token: string): string => `wsp join ${url} --code ${token}`,
-    escStays: "esc closes, the code stays good",
-    newCode: "New code",
-    close: "Close",
+    relayNote: "when the host is linked to your relay",
     /** Said once, the first time the door binds: a Mac with its firewall on asks whether wsp may accept connections. */
     firewall: "macOS may ask once whether wsp can accept connections; allow it",
   },
@@ -3870,6 +3871,13 @@ export const PLACES_WORDS = {
     leaveTakes: `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and ${imageCopyStaysLine()}.`,
   },
 } as const;
+
+/** Every line a computer you own can join this host by: one per address it answers on, and the relay's address
+ * last, with the note that it only answers while the host is linked. The one list wsp add prints and the app draws. */
+export function joinRoads(token: string, urls: readonly string[], relayUrl: string | undefined): { url: string; line: string; note?: string }[] {
+  const road = (url: string, note?: string): { url: string; line: string; note?: string } => ({ url, line: PLACES_WORDS.sheet.joinLine(url, token), ...(note === undefined ? {} : { note }) });
+  return [...urls.map(url => road(url)), ...(relayUrl === undefined ? [] : [road(relayUrl, PLACES_WORDS.sheet.relayNote)])];
+}
 
 /** What the app calls the computer it runs on, first in every hosts list. */
 export const hereWord = (mac: boolean): string => (mac ? "This Mac" : "This computer");

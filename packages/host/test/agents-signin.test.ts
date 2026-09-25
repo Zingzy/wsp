@@ -2,15 +2,17 @@
 // Signing an agent or one of its MCP servers in from the app: the line each
 // target runs, the watched pty over a scripted link, the vault and the wsp
 // tools. Nothing here reaches a real agent, a box or a vendor.
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Machine } from "@wsp/engine";
-import { HERE_PLACE_ID, addToolsHereRefusal, controlSignInRefusal, noVaultKeyRefusal, notTokenRefusal, serverSignInCopyRefusal, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
+import { HERE_PLACE_ID, addToolsHereRefusal, controlSignInRefusal, noVaultKeyRefusal, notTokenRefusal, serverSignInCopyRefusal, shellQuote, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
 import type { AgentsOn } from "@wsp/runtime";
-import { hostActs, planSignIn, watchSignIn } from "../src/agents-signin.js";
+import { hostActs, pagesOnPty, planSignIn, watchSignIn } from "../src/agents-signin.js";
+import { openerCommand } from "../src/relay.js";
 import { CLI_VERBS, runVerb, type HostClient } from "../src/verbs.js";
 import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
 import { captured } from "./verbs-fixture.js";
@@ -23,6 +25,8 @@ const rootBox = (): AgentsOn => ({
   logins: "/var/lib/wsp/logins",
 });
 const fork = (): AgentsOn => ({ kind: "machine", machine: { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as never, project: "/root/landing" });
+/** A workspace whose callback port this host forwards from this computer. */
+const relayed = (): AgentsOn => ({ ...fork(), relayed: true }) as AgentsOn;
 
 describe("the line a sign-in runs where it stands", () => {
   it("runs a login that is not shared as the owner of the home on a root box, with no DISPLAY anywhere so the tool takes its paste road", async () => {
@@ -61,8 +65,23 @@ describe("the line a sign-in runs where it stands", () => {
     const claude = await planSignIn(rootBox(), { agent: "claude", server: "notion" });
     expect(claude.line.command).toMatch(/^runuser -u 'ada' -- bash -c '.*claude mcp login '\\''notion'\\'' --no-browser'$/);
     expect(claude.line.status).toBeUndefined();
+    expect(claude.line.env).toBeUndefined();
+    expect(claude.paste("https://mcp.notion.com/authorize")).toBe(true);
+    // Here the harness opens the page in this computer's browser and its own listener takes the redirect.
+    const here = await planSignIn({ kind: "here" }, { agent: "claude", server: "notion" });
+    expect(here.line).toEqual({ command: "claude mcp login 'notion'", env: { BROWSER: process.env["BROWSER"] || openerCommand() } });
+    expect(here.paste("https://mcp.notion.com/authorize")).toBe(false);
     expect((await planSignIn({ kind: "here" }, { agent: "codex", server: "notion" })).line.command).toBe("codex mcp login 'notion'");
     await expect(planSignIn(rootBox(), { agent: "codex", server: "notion" })).rejects.toThrow(serverSignInCopyRefusal("Codex", "codex mcp login 'notion'", "callback"));
+    await expect(planSignIn(fork(), { agent: "codex", server: "notion" })).rejects.toThrow(serverSignInCopyRefusal("Codex", "codex mcp login 'notion'", "callback"));
+    // Where the relay carries the page here and its redirect back, every harness runs its own browser sign-in with the
+    // workspace terminal's browser env: the daemon's shim as BROWSER behind the sign-in's own opener, and a DISPLAY for
+    // a tool that asks for one.
+    for (const [agent, command] of [["claude", "claude mcp login 'notion'"], ["codex", "codex mcp login 'notion'"], ["opencode", "opencode mcp auth 'notion'"]] as const) {
+      const plan = await planSignIn(relayed(), { agent, server: "notion" });
+      expect(plan.line).toEqual({ command: pagesOnPty(command), env: { DISPLAY: ":0" } });
+      expect(plan.paste("https://mcp.notion.com/authorize")).toBe(false);
+    }
     await expect(planSignIn({ kind: "here" }, { agent: "gemini", server: "notion" })).rejects.toThrow(serverSignInCopyRefusal("Gemini CLI", "/mcp auth notion", "inside"));
   });
 
@@ -170,7 +189,7 @@ describe("a watched sign-in", () => {
   });
 
   it("ends when whoever started it stops it, killing the pty, and reads a server's sign-in by its own exit", async () => {
-    const plan = await planSignIn({ kind: "here" }, { agent: "claude", server: "notion" });
+    const plan = await planSignIn(fork(), { agent: "claude", server: "notion" });
     const t = await run((l, pty, line) => {
       if (line.includes("claude mcp login")) l.data(pty, "Open https://claude.ai/oauth/authorize?code=true\r\nPaste the redirect URL: ");
     }, plan);
@@ -185,6 +204,71 @@ describe("a watched sign-in", () => {
     }, plan);
     await ok.done;
     expect(ok.steps.at(-1)).toEqual({ state: "signed-in" });
+    const bad = await run((l, pty, line) => {
+      if (!line.includes("claude mcp login")) return;
+      l.data(pty, "Authentication failed: the server refused the redirect\r\n");
+      l.exit(pty, 1);
+    }, plan);
+    await bad.done;
+    expect(bad.steps.at(-1)).toEqual({ state: "failed", said: "Authentication failed: the server refused the redirect" });
+  });
+
+  it("offers only the page the sign-in's own opener wrote on its terminal, never a browser.open from anything else on the workspace", async () => {
+    const plan = await planSignIn(relayed(), { agent: "claude", server: "notion" });
+    const page = "https://mcp.notion.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A43117%2Fcallback";
+    const t = await run((l, pty, line) => {
+      if (!line.includes("claude mcp login")) return;
+      l.emit({ type: "browser.open", url: "https://evil.example/authorize", port: 43118 });
+      setTimeout(() => l.data(pty, `${page}\r\n`), 10);
+      setTimeout(() => l.exit(pty, 0), 40);
+    }, plan);
+    await t.done;
+    expect(t.link.ptys[0]!.ran).toBe(pagesOnPty("claude mcp login 'notion'"));
+    expect(t.steps.filter(s => s.state === "waiting")).toEqual([{ state: "waiting", url: page, paste: false }]);
+    expect(t.steps.at(-1)).toEqual({ state: "signed-in" });
+  });
+
+  it("writes the page a tool hands its browser onto the sign-in's own terminal, then opens it with the browser the terminal had", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-pages-"));
+    const opened = join(dir, "opened");
+    const shim = join(dir, "shim");
+    writeFileSync(shim, `#!/bin/sh\nprintf '%s' "$1" > ${JSON.stringify(opened)}\n`);
+    chmodSync(shim, 0o755);
+    const page = "https://mcp.test/authorize?state=x&redirect_uri=http%3A%2F%2Flocalhost%3A43117%2Fcallback";
+    // The tool hands the page to its browser with no terminal of its own, as a detached opener does.
+    const line = pagesOnPty(`"$BROWSER" '${page}' < /dev/null > /dev/null 2>&1; echo done`);
+    const args = process.platform === "darwin" ? ["-q", "/dev/null", "bash", "-c", line] : ["-qec", `bash -c ${shellQuote(line)}`, "/dev/null"];
+    const out = execFileSync("script", args, { env: { PATH: "/usr/bin:/bin", BROWSER: shim }, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
+    expect(out).toContain(`${page}\r\n`);
+    expect(readFileSync(opened, "utf8")).toBe(page);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("takes the escape bytes out of a page before it reaches the sign-in's terminal", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-pages-"));
+    const shim = join(dir, "shim");
+    writeFileSync(shim, "#!/bin/sh\nexit 0\n");
+    chmodSync(shim, 0o755);
+    const line = pagesOnPty(`"$BROWSER" "$(printf 'https://mcp.test/a\\033]0;x\\007b\\033[2Jc')" < /dev/null > /dev/null 2>&1; echo done`);
+    const args = process.platform === "darwin" ? ["-q", "/dev/null", "bash", "-c", line] : ["-qec", `bash -c ${shellQuote(line)}`, "/dev/null"];
+    const out = execFileSync("script", args, { env: { PATH: "/usr/bin:/bin", BROWSER: shim }, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
+    expect(out).toContain("https://mcp.test/a]0;xb[2Jc\r\n");
+    expect(out).not.toMatch(/[\x07\x1b]/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("waits on the browser here, with the page offered and nothing to paste, and runs with this computer's own opener", async () => {
+    const plan = await planSignIn({ kind: "here" }, { agent: "claude", server: "notion" });
+    const t = await run((l, pty, line) => {
+      if (!line.includes("claude mcp login")) return;
+      l.data(pty, "Opening your browser to https://mcp.notion.com/authorize?client_id=x\r\n");
+      setTimeout(() => l.exit(pty, 0), 40);
+    }, plan);
+    await t.done;
+    expect(t.link.ptys[0]!.ran).toBe("claude mcp login 'notion'");
+    expect(t.link.ptys[0]!.created["env"]).toEqual({ BROWSER: process.env["BROWSER"] || openerCommand() });
+    expect(t.steps).toContainEqual({ state: "waiting", url: "https://mcp.notion.com/authorize?client_id=x", paste: false });
+    expect(t.steps.at(-1)).toEqual({ state: "signed-in" });
   });
 });
 

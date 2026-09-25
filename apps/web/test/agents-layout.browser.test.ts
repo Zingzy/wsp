@@ -349,6 +349,49 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     }
   }, 120_000);
 
+  it("says a server's state as an 8 px dot and a muted 11 px word with no box, and waits on the browser for a sign-in on this Mac, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(`screen=agents-states&theme=${theme}`, { width: 900, height: 2400 });
+      await page!.waitForSelector("[data-agents-row]");
+      for (const width of [360, 696]) {
+        await pickTab(width, "MCP servers");
+        const marks = await at(width)
+          .locator("[data-k=server-status]")
+          .evaluateAll(els =>
+            els.map(el => {
+              const dot = el.querySelector<HTMLElement>("[data-status-dot]")!;
+              const word = getComputedStyle(el.querySelector<HTMLElement>("[data-status-word]")!);
+              const box = getComputedStyle(el);
+              const d = dot.getBoundingClientRect();
+              return { state: el.getAttribute("data-state"), word: el.textContent, dot: [Math.round(d.width), Math.round(d.height)], round: getComputedStyle(dot).borderRadius, size: word.fontSize, border: box.borderTopWidth, bg: box.backgroundColor, svg: el.querySelector("svg") !== null };
+            }),
+          );
+        expect(marks.map(m => [m.state, m.word])).toEqual([
+          ["open", "no sign-in needed"],
+          ["connected", "connected"],
+          ["signed-in", "signed in"],
+          ["needs-sign-in", "needs sign-in"],
+          ["failed", "failed"],
+          ["open", "no sign-in needed"],
+          ["open", "no sign-in needed"],
+        ]);
+        for (const m of marks) expect(m).toMatchObject({ dot: [8, 8], size: "11px", border: "0px", bg: "rgba(0, 0, 0, 0)", svg: false });
+        await at(width).screenshot({ path: join(SHOTS_DIR, `agents-states-${width}-${theme}.png`), animations: "disabled" });
+      }
+      await at(360).locator('[data-agents-row="server-global-notion-http-mcp.notion.com"] [data-row-slot] [data-k=act-sign-in]').click();
+      const flow = at(360).locator("[data-k=sign-in-flow]");
+      await flow.locator("[data-k=sign-in-open]").waitFor();
+      expect(await flow.locator("[data-k=sign-in-browser]").textContent()).toBe("Finish in your browser");
+      expect(await flow.locator("[data-k=code-field]").count()).toBe(0);
+      expect(await at(360).locator("[data-detail-acts] button").first().textContent()).toBe("Cancel");
+      const lines = await flow.locator("[data-sign-in-line]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
+      expect(lines).toEqual([40, 40]);
+      const fits = await flow.evaluate(el => el.scrollWidth <= el.clientWidth);
+      expect(fits).toBe(true);
+      await at(360).screenshot({ path: join(SHOTS_DIR, `agents-signin-browser-360-${theme}.png`), animations: "disabled" });
+    }
+  }, 120_000);
+
   it("photographs the task's panel on Agents and the computer's page, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(`screen=panel-agents&theme=${theme}`, { width: 1280, height: 800 });

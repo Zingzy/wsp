@@ -411,7 +411,7 @@ describe("the words the clients print for the job", () => {
 
   it("the first workspace's default name and the reason its keycap is held live here, so the terminal and the app read one spelling each", () => {
     expect(FIRST_WORKSPACE).toBe("first");
-    expect(CLOUD_SETUP_WORDS.ask.needsName).toBe("give the workspace a name");
+    expect(CLOUD_SETUP_WORDS.ask.needsName).toBe("give the task a name");
   });
 
   it("the provider's console is spelled once, and the key screen's link names the company, not the host", () => {
@@ -446,7 +446,7 @@ describe("the words the clients print for the job", () => {
     // build's cap ended a wait they were not going to finish, and neither is the machine's doing.
     const deferredRow = { state: INIT_SIGN_IN_WORDS.deferred("darwin"), login: "deferred" as const };
     expect([initRowFailed(deferredRow), initRowOver(deferredRow), initRowUnrun(deferredRow.state)]).toEqual([false, true, false]);
-    expect(CLOUD_SETUP_WORDS.build.doneTop).toBe("Your image is built; every workspace starts from it");
+    expect(CLOUD_SETUP_WORDS.build.doneTop).toBe("Your image is built; every task starts from it");
     const rows: InitRow[] = [
       { id: "agent/claude", kind: "agent", label: "Claude Code", state: "MCP added" },
       { id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" },

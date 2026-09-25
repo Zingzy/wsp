@@ -5,6 +5,7 @@
 // fresh thread, which sends it the moment the copy stands, so a person types once
 // and lands in the running thread.
 import { EmptyThread } from "../components/chat/ChatView.js";
+import { HeroAtmosphere } from "../components/chat/EmptyHero.js";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore.js";
 import { useComposerOptionsStore } from "../components/chat/composerOptionsStore.js";
@@ -37,10 +38,9 @@ export function ProjectHome({ projectId }: { projectId: string }) {
   };
 
   return (
-    <div data-k="project-home" className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1">
-        <EmptyThread workspaceName={project.name} />
-      </div>
+    <div data-k="project-home" className="relative isolate flex min-h-0 flex-1 flex-col justify-center gap-10 pb-[8vh]">
+      <HeroAtmosphere projectId={project.id} />
+      <EmptyThread workspaceName={project.name} projectId={project.id} />
       <ChatComposer key={key} workspaceId={key} thread={thread} onStart={prompt => void start(prompt)} />
     </div>
   );

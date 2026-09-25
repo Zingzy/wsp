@@ -75,11 +75,11 @@ describe("workspace actions", () => {
     // A workspace name is this computer's own record, so the box opens whatever the machine is doing.
     expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "rename").refusal).toBeNull();
     // A client with no rename verb says so rather than opening a box nothing would take.
-    expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ rename: undefined })), "rename").refusal).toBe("This client cannot rename workspaces");
+    expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ rename: undefined })), "rename").refusal).toBe("This client cannot rename tasks");
     // The look actions are gone from the registry, so no surface can offer a picker for a colour or a glyph.
     expect(actions.map(action => action.id)).not.toContain("icon");
     expect(actions.map(action => action.id)).not.toContain("theme");
-    expect(actionById(actions, "fork").refusal).toBe("Running a copy of a workspace is not in the runtime yet; make a second workspace of the same project from the plus on its row");
+    expect(actionById(actions, "fork").refusal).toBe("Running a copy of a task is not in the runtime yet; make a second task of the same project from the plus on its row");
     expect(actionIfAny(actions, "rebuild")).toBeUndefined();
     expect(actionIfAny(actions, "forget")).toBeUndefined();
     expect(actionIfAny(actions, "start-daemon")).toBeUndefined();
@@ -92,7 +92,7 @@ describe("workspace actions", () => {
     const paused = actionById(resolveActions(workspaceActions, workspace("paused"), verbs), "phase");
     expect(paused.title).toBe(WORKSPACE_WORDS.wake);
     expect(paused.refusal).toBeNull();
-    expect(actionById(resolveActions(workspaceActions, workspace("pausing"), verbs), "phase").refusal).toBe("Workspace is pausing; it can be woken once it is paused");
+    expect(actionById(resolveActions(workspaceActions, workspace("pausing"), verbs), "phase").refusal).toBe("Task is pausing; it can be woken once it is paused");
     // A waking workspace is the one moving state with something to offer: the stop on the host's own asking again.
     const waking = actionById(resolveActions(workspaceActions, workspace("waking"), verbs), "phase");
     expect(waking.title).toBe(WORKSPACE_WORDS.stopWake);
@@ -148,8 +148,8 @@ describe("workspace actions", () => {
     expect(actionIfAny(zombie, "forget")).toBeUndefined();
     expect(actionById(zombie, "delete").refusal).toBeNull();
     const bare = resolveActions(workspaceActions, workspace("gone"), workspaceVerbs({ rebuild: undefined, forget: undefined }));
-    expect(actionById(bare, "rebuild").refusal).toBe("This client cannot rebuild workspaces");
-    expect(actionById(bare, "forget").refusal).toBe("This client cannot forget workspaces");
+    expect(actionById(bare, "rebuild").refusal).toBe("This client cannot rebuild tasks");
+    expect(actionById(bare, "forget").refusal).toBe("This client cannot forget tasks");
     // Bringing a folder home: the machine must answer, and the client must have the folder ops; a browser tab
     // without them says so. Nothing imports any more: a project is recorded with wsp add and a workspace is one's copy.
     expect(actionById(zombie, "export-project").refusal).toBe("Projects wait for the rebuild");
@@ -192,16 +192,16 @@ describe("workspace actions", () => {
     expect([phaseOf("running").icon, phaseOf("paused").icon, phaseOf("waking").icon]).toEqual([PauseIcon, PlayIcon, SquareIcon]);
     expect(phaseOf("running").hint).toBe("Suspend the VM and keep the disk");
     expect(phaseOf("paused").hint).toBe("Boot the VM from its disk");
-    expect(phaseOf("waking").hint).toBe("Stop asking the provider to wake this workspace");
+    expect(phaseOf("waking").hint).toBe("Stop asking the provider to wake this task");
     // A record that still says running while the provider holds the machine paused reads Wake, as its label does.
     const behind = phaseOf("running", { machineState: "paused" });
     expect([behind.buttonWord, behind.rowLabel, behind.title]).toEqual(["Wake", "Wake api", WORKSPACE_WORDS.wake]);
     const gone = resolveActions(workspaceActions, workspace("gone", { reason: "machine m_a is gone at the provider: Not found" }), verbs);
     expect(actionById(gone, "forget").buttonWord).toBe("Forget");
-    expect(actionById(gone, "forget").hint).toBe("Its computer is gone; forget the workspace to drop it from this computer");
+    expect(actionById(gone, "forget").hint).toBe("Its computer is gone; forget the task to drop it from this computer");
     expect(actionById(gone, "rebuild").buttonWord).toBe("Rebuild");
     expect(actionById(gone, "rebuild").hint).toBe("machine m_a is gone at the provider: Not found");
-    expect(actionById(resolveActions(workspaceActions, workspace("unreachable", { reach: "zombie" }), verbs), "rebuild").hint).toBe("The workspace answers nothing; rebuild it from your image");
+    expect(actionById(resolveActions(workspaceActions, workspace("unreachable", { reach: "zombie" }), verbs), "rebuild").hint).toBe("The task answers nothing; rebuild it from your image");
     expect(actionById(gone, "copy-id").buttonWord).toBeNull();
     expect(actionById(gone, "copy-id").hint).toBeNull();
   });

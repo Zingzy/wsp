@@ -202,7 +202,7 @@ describe("one MCP server's tools, on the person's ask", () => {
     const reader = agentsReader({ vault: () => ({}), here: () => here(f), now: () => now });
     const ask = { key: "here", agent: "claude", name: "airtable" };
     const first = await reader.tools({ kind: "here" }, ask);
-    expect(first).toEqual({ auth: "open", tools: [{ name: "list_records", description: "List records in a base" }, { name: `token_${SECRET.length}` }], readAt: "2026-09-24T12:00:00.000Z" });
+    expect(first).toEqual({ auth: "connected", tools: [{ name: "list_records", description: "List records in a base" }, { name: `token_${SECRET.length}` }], readAt: "2026-09-24T12:00:00.000Z" });
     expect(starts(f)).toBe(1);
     now += 59 * 60_000;
     expect(await reader.tools({ kind: "here" }, ask)).toEqual(first);
@@ -246,7 +246,7 @@ describe("one MCP server's tools, on the person's ask", () => {
     const { url, posts } = await remote();
     f.config({ notion: { type: "http", url: `${url}/mcp`, headers: { "X-Key": SECRET } }, linear: { type: "http", url: `${url}/oauth` } });
     const reader = agentsReader({ vault: () => ({}), here: () => here(f) });
-    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "notion" })).toMatchObject({ auth: "open", tools: [{ name: "search", description: "Search the workspace" }] });
+    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "notion" })).toMatchObject({ auth: "connected", tools: [{ name: "search", description: "Search the workspace" }] });
     expect(posts.slice(0, 3)).toEqual(["/mcp - initialize", "/mcp s-1 initialized", "/mcp s-1 list"]);
     expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "linear" })).toMatchObject({ auth: "needs-sign-in", holder: "claude" });
     // The harness's word is not kept: the person may sign in there between two clicks.
@@ -287,8 +287,8 @@ describe("one MCP server's tools, on the person's ask", () => {
     const { machine, lines } = box(f);
     const reader = agentsReader({ vault: () => ({}) });
     const on = { kind: "box" as const, machine, login: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin` } };
-    expect(await reader.tools(on, { key: "p_srv", agent: "claude", name: "airtable" })).toMatchObject({ auth: "open", tools: [{ name: "list_records" }, { name: `token_${SECRET.length}` }] });
-    expect(await reader.tools(on, { key: "p_srv", agent: "claude", name: "notion" })).toMatchObject({ auth: "open", tools: [{ name: "search" }] });
+    expect(await reader.tools(on, { key: "p_srv", agent: "claude", name: "airtable" })).toMatchObject({ auth: "connected", tools: [{ name: "list_records" }, { name: `token_${SECRET.length}` }] });
+    expect(await reader.tools(on, { key: "p_srv", agent: "claude", name: "notion" })).toMatchObject({ auth: "connected", tools: [{ name: "search" }] });
     for (const line of lines.filter(l => !l.startsWith("uname -s;"))) {
       expect(line).toMatch(/^runuser -u 'ada' -- /);
       expect(line).not.toContain(SECRET);
@@ -299,7 +299,7 @@ describe("one MCP server's tools, on the person's ask", () => {
     f.config({ airtable: { command: join(f.bin, "server"), args: [], env: { FAKE_TOKEN: SECRET } } });
     const { machine, lines, landed, modes } = fork(f);
     const reader = agentsReader({ vault: () => ({}) });
-    expect(await reader.tools({ kind: "machine", machine }, { key: "w_1", agent: "claude", name: "airtable" })).toMatchObject({ auth: "open", tools: [{ name: "list_records" }, { name: `token_${SECRET.length}` }] });
+    expect(await reader.tools({ kind: "machine", machine }, { key: "w_1", agent: "claude", name: "airtable" })).toMatchObject({ auth: "connected", tools: [{ name: "list_records" }, { name: `token_${SECRET.length}` }] });
     expect(landed).toHaveLength(1);
     expect(modes).toEqual(["700 600"]);
     expect(existsSync(dirname(landed[0]!)), "the variables' folder outlived the run").toBe(false);
@@ -325,7 +325,7 @@ describe("one MCP server's tools, on the person's ask", () => {
   it("stops a child that left the server's process group, when the server answered and when the time ran out", async () => {
     const f = fixture();
     f.config({ answers: { command: join(f.bin, "escape"), args: ["server"] }, silent: { command: join(f.bin, "escape"), args: ["mute"] } });
-    expect(await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "answers" })).toMatchObject({ auth: "open" });
+    expect(await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "answers" })).toMatchObject({ auth: "connected" });
     const late = agentsReader({ vault: () => ({}), here: () => here(f), toolsMs: 2_000 });
     expect(await late.tools({ kind: "here" }, { key: "here", agent: "claude", name: "silent" })).toMatchObject({ refused: serverToolsLateRefusal(2_000) });
     const pids = escaped(f);

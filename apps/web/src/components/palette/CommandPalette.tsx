@@ -85,7 +85,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const groups = useMemo<CommandPaletteGroup[]>(() => {
     const root = buildRootGroups({ actionItems: items.actionItems, recentThreadItems: items.recentThreadItems });
     if (items.workspaceItems.length > 0) {
-      root.splice(1, 0, { value: "workspaces", label: "Workspaces", items: items.workspaceItems });
+      root.splice(1, 0, { value: "workspaces", label: "Tasks", items: items.workspaceItems });
     }
     return filterCommandPaletteGroups({
       activeGroups: root,

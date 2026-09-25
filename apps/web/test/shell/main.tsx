@@ -663,7 +663,15 @@ createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
     {params.get("version") === "behind" ? <VersionRule /> : null}
     {params.get("host") === "1" ? <HostRule /> : null}
-    <AppShell>{shown === null ? <div /> : <WorkspaceThread workspaceId={shown} />}</AppShell>
+    <AppShell>
+      {shown === null ? (
+        <div />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col" data-terminal-beside>
+          <WorkspaceThread workspaceId={shown} />
+        </div>
+      )}
+    </AppShell>
   </TooltipProvider>,
 );
 // ?export=1: the dialog that brings a folder home, asked for once the sidebar is listening.

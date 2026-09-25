@@ -57,7 +57,8 @@
 //   settings-about-restart 0.3.0 installed under the running 0.2.0 host, which a restart brings back
 //   settings-search       "width" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
-//   settings-add-computer the Add a computer sheet over Computers
+//   settings-add-computer Computers scrolled to Add a computer, the ssh road open
+//   settings-add-computer-failed  the same, the add refused while the reach step ran
 //   settings-remove-computer  the Remove dialog over the box's page
 //   bring-back-paused    the row's menu on a machine that is stopped, with
 //                        Bring back held and its reason under the pointer
@@ -68,6 +69,9 @@
 //                    card's width and a phone's (760, 696, 358) and as the
 //                    panel at the widths its shape changes over (520, 480,
 //                    380 and its 360 floor)
+//   agents-states    the manager on this Mac at the panel's floor and the
+//                    page's card, its servers in every state the report
+//                    reads, a Sign in waiting on the browser
 //   panel-agents     the task on the box selected, its panel open on Agents
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
@@ -77,6 +81,7 @@ import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
 import { useServerTools } from "../../src/components/agents/useServerTools";
+import { useAgentActs } from "../../src/components/agents/useAgentActs";
 import { SettingsPage } from "../../src/settings/SettingsPage";
 import { AGENTS_REPORT, SERVER_TOOLS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
@@ -299,6 +304,7 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-search": { kind: "group", group: "appearance" },
   "settings-over-panel": { kind: "group", group: "appearance" },
   "settings-add-computer": { kind: "group", group: "computers" },
+  "settings-add-computer-failed": { kind: "group", group: "computers" },
   "settings-remove-computer": { kind: "computer", id: "p_spoo" },
 };
 const settingsAt = SETTINGS_SCREENS[screen];
@@ -393,9 +399,11 @@ const api = {
   agentsRead: async () => AGENTS_REPORT,
   serversTools: async (_target: unknown, _agent: string, name: string) => SERVER_TOOLS[name] ?? { auth: "open", tools: [], readAt: AGENTS_REPORT.readAt },
   // A sign-in whose tool prints its page at once: a device code for an agent, a page whose answer is pasted back for a server.
-  agentsSignIn: async (_target: unknown, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void) => {
-    const url = server === undefined ? "https://auth.openai.com/codex/device" : "https://claude.ai/oauth/authorize?code=true";
-    setTimeout(() => onStep({ type: "agents.signIn", signInId: `si_${agent}`, state: "waiting", url, ...(server === undefined ? { code: "ABCD-12345", paste: false } : { paste: true }) }), 30);
+  // On this Mac a server's harness opens the browser itself and nothing is pasted back.
+  agentsSignIn: async (target: { placeId?: string }, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void) => {
+    const here = target.placeId === "here";
+    const url = server === undefined ? "https://auth.openai.com/codex/device" : here ? "https://mcp.notion.com/authorize?client_id=wsp" : "https://claude.ai/oauth/authorize?code=true";
+    setTimeout(() => onStep({ type: "agents.signIn", signInId: `si_${agent}`, state: "waiting", url, ...(server === undefined ? { code: "ABCD-12345", paste: false } : { paste: !here }) }), 30);
     return { signInId: `si_${agent}`, stop: () => {} };
   },
   agentsSignInCode: async () => {},
@@ -417,6 +425,10 @@ const api = {
   addComputerOverSsh: async (_login: unknown, onStage: (stage: { step: PlaceAddStep; word: string; state: "running" | "done" }) => void) => {
     onStage({ step: "connect", word: placeAddSheetWord("connect", "done"), state: "done" });
     onStage({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done" });
+    if (screen === "settings-add-computer-failed") {
+      onStage({ step: "reach", word: placeAddSheetWord("reach", "running"), state: "running" });
+      throw new Error("spoo cannot reach this computer at any of its addresses");
+    }
     onStage({ step: "reach", word: placeAddSheetWord("reach", "done"), state: "done" });
     onStage({ step: "wsp", word: placeAddSheetWord("wsp", "running"), state: "running" });
     return new Promise<never>(() => {});
@@ -456,7 +468,7 @@ useStore.setState({
   preferences: { ...DEFAULT_PREFERENCES, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
   places: computers,
   settingsOpen: settings,
-  addComputerOpen: screen === "settings-add-computer",
+  addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed",
   release:
     screen === "settings-about-behind"
       ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, shape: "app" }
@@ -515,6 +527,36 @@ function AgentsWidths() {
   );
 }
 
+/** This Mac's report with a server in every state the report reads: no sign-in needed, connected, signed in by its
+ * harness, needs sign-in and failed. */
+const STATES_REPORT = {
+  ...AGENTS_REPORT,
+  target: { placeId: "here" },
+  servers: AGENTS_REPORT.servers.map(s => (s.name === "github" ? { ...s, auth: "connected" as const } : s.name === "linear" ? { ...s, auth: "signed-in" as const } : s.name === "sentry" ? { ...s, enabled: true, auth: "failed" as const } : s)),
+};
+function AgentsStates() {
+  const tools = useServerTools(STATES_REPORT.target);
+  const acts = useAgentActs(STATES_REPORT.target);
+  return (
+    <div className="flex flex-col gap-10 bg-background p-4">
+      {([{ shell: "panel", width: 360 }, { shell: "page", width: 696 }] as const).map(w => (
+        <div key={w.width} data-agents-width={w.width} data-shell={w.shell} style={{ width: w.width }}>
+          <AgentsManager
+            shell={w.shell}
+            head={w.shell === "panel" ? { title: "On this Mac, for wsp" } : { line: "Agents, MCP servers and skills on this Mac." }}
+            report={STATES_REPORT}
+            reading={false}
+            on="this Mac"
+            ctx={{ where: "here", project: { name: "wsp", path: "~/wsp" }, ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }) }}
+            onRefresh={() => {}}
+            now={Date.parse(AGENTS_REPORT.readAt)}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** How the runtime names the computer the host runs on in a line of prose. */
 const THIS_COMPUTER_LOWER = "this Mac";
 
@@ -560,6 +602,8 @@ createRoot(document.getElementById("root")!).render(
   <>
     {screen === "agents-widths" ? (
       <AgentsWidths />
+    ) : screen === "agents-states" ? (
+      <AgentsStates />
     ) : firstRunScreens.includes(screen) ? (
       <div className="flex h-dvh flex-col">
         <FirstRun />

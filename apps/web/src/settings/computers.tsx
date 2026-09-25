@@ -9,8 +9,10 @@
 // The list draws every row the host's places list carries: the host lists a
 // cloud only once it holds that cloud's key or a stand-in serves in its place,
 // so nothing here filters again.
+import { CloudIcon, CpuIcon, GaugeIcon, HardDriveIcon, LayersIcon, MemoryStickIcon, ReceiptIcon } from "lucide-react";
+import type { ChipItem } from "../components/ui/chips.js";
 import { useState } from "react";
-import { HERE_PLACE_ID, PLACES_WORDS, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, fmtMemGb, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { Button, DANGER_BUTTON } from "../components/ui/button.js";
 import { AgentsManager } from "../components/agents/AgentsManager.js";
 import { imageAgentsReport, recipeMissLines } from "../components/agents/agentsRows.js";
@@ -19,7 +21,9 @@ import { useServerTools } from "../components/agents/useServerTools.js";
 import { useAgentActs } from "../components/agents/useAgentActs.js";
 import { useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
-import { WHERE_WORDS } from "./format.js";
+import { ADD_COMPUTER_WORDS, WHERE_WORDS } from "./format.js";
+import { AddComputer } from "./AddComputer.js";
+import { ComputerGlyph, ComputerIconSelect } from "./ComputerGlyph.js";
 import { builtFact, builtWhen, copyOn, IMAGE_WORDS, imageFacts } from "./image.js";
 import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, threadWord, type PlaceHolding } from "./places.js";
 import { keyHeld } from "./providers.js";
@@ -45,24 +49,44 @@ export function holdingsFor(
   return held;
 }
 
-/** The facts a computer's list row says under its name, dots between, none of them where none has arrived. */
-export function computerFacts(place: PlaceView, count: number, spend: PlaceSpend | undefined): string {
+/** The facts a computer's list row says under its name, each with its glyph, none of them where none has arrived. */
+export function computerChips(place: PlaceView, count: number, spend: PlaceSpend | undefined): ChipItem[] {
+  const workspaces: ChipItem | null = count === 0 ? null : { text: plural(count, "task"), icon: LayersIcon };
   if (isProviderPlace(place)) {
-    return [WHERE_WORDS.cloud, place.rateUsdPerHour === undefined ? undefined : fmtRate(place.rateUsdPerHour), count === 0 ? undefined : plural(count, "workspace"), spend === undefined ? undefined : spentThisMonth(spend.monthUsd)].filter((word): word is string => word !== undefined).join(" · ");
+    const cloud: (ChipItem | null)[] = [
+      { text: WHERE_WORDS.cloud, icon: CloudIcon },
+      place.rateUsdPerHour === undefined ? null : { text: fmtRate(place.rateUsdPerHour), icon: GaugeIcon },
+      workspaces,
+      spend === undefined ? null : { text: spentThisMonth(spend.monthUsd), icon: ReceiptIcon },
+    ];
+    return cloud.filter((c): c is ChipItem => c !== null);
   }
-  return [place.shape === undefined ? undefined : fmtSize(place.shape, placeCpuWord(place)), place.diskFreeBytes === undefined ? undefined : fmtBytes(place.diskFreeBytes), count === 0 ? undefined : plural(count, "workspace")].filter((word): word is string => word !== undefined).join(" · ");
+  const own: (ChipItem | null)[] = [
+    place.shape === undefined ? null : { text: `${place.shape.cpu} ${placeCpuWord(place)}`, icon: CpuIcon },
+    place.shape === undefined ? null : { text: fmtMemGb(place.shape.memMb), icon: MemoryStickIcon },
+    place.diskFreeBytes === undefined ? null : { text: `${fmtBytes(place.diskFreeBytes)} free`, icon: HardDriveIcon },
+    workspaces,
+  ];
+  return own.filter((c): c is ChipItem => c !== null);
 }
 
 /** One computer's row: the name a person reads it as with the default mark, the facts it has reported, and the
  * state word while there is one, then the chevron where the row opens a page. */
 export function computerRowData(place: PlaceView, o: { here: boolean; count: number; spend?: PlaceSpend | undefined; now: number; state?: string | undefined; open?: (() => void) | undefined }): SettingsRowData {
   const state = o.state ?? placeStateWord(place, absentOf(place, o.now, o.here));
+  const chips = computerChips(place, o.count, o.spend);
   return {
     kind: "row",
     id: place.id,
     title: placeName(place, o.here),
+    lead: (
+      <span className="flex size-11 items-center justify-center rounded-xl border border-border bg-foreground/[0.04]">
+        <ComputerGlyph place={place} className="size-5 text-foreground/80" />
+      </span>
+    ),
     ...(place.default ? { mark: WHERE_WORDS.default } : {}),
-    description: computerFacts(place, o.count, o.spend),
+    description: chips.map(chip => chip.text).join(" · "),
+    chips,
     mono: true,
     ...(state === "" ? {} : { word: state, wordClass: "fact" }),
     ...(o.open === undefined ? {} : { open: o.open }),
@@ -102,15 +126,11 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
           open: () => ctx.go({ kind: "computer", id: place.id }),
         });
       }),
-      under: (
-        <>
-          {ctx.placesRefused === null ? null : <RefusalSlot k="places-refused" said={WHERE_WORDS.notRead(ctx.placesRefused.said)} {...(ctx.placesRefused.fix === undefined ? {} : { fix: ctx.placesRefused.fix })} />}
-          <Button size="xs" variant="outline" data-k="add-computer-button" onClick={ctx.openAddComputer}>
-            {PLACES_WORDS.addComputer}
-          </Button>
-        </>
-      ),
+      ...(ctx.placesRefused === null
+        ? {}
+        : { under: <RefusalSlot k="places-refused" said={WHERE_WORDS.notRead(ctx.placesRefused.said)} {...(ctx.placesRefused.fix === undefined ? {} : { fix: ctx.placesRefused.fix })} /> }),
     },
+    { id: "add-computer", head: ADD_COMPUTER_WORDS.title, items: [], body: <AddComputer setup={ctx.reads.setup} /> },
   ];
 }
 
@@ -327,6 +347,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
   const workspaces = holding.workspaces.map((w, at) => ({ kind: "line" as const, id: `workspace-${at}`, label: w.name, value: `${w.state} · ${threadWord(w.threads)}`, valueClass: "fact" as const, attrs: { "data-k": "workspace-line" } }));
   const imageBytes = ctx.reads.image === null ? undefined : copyOn(ctx.reads.image.copies, place)?.sizeBytes;
   const cards: SettingsCardData[] = [
+    { id: "look", items: [{ kind: "row", id: "icon", title: WHERE_WORDS.icon, description: WHERE_WORDS.iconDescription, control: <ComputerIconSelect place={place} onChange={icon => ctx.setPreferences({ computerLook: { [place.id]: { icon } } })} /> }] },
     ...(facts.length === 0 ? [] : [{ id: "facts", items: facts }]),
     ...(connection.length === 0 ? [] : [{ id: "connection", head: WHERE_WORDS.connection, items: connection }]),
     ...(workspaceThere.length === 0 ? [] : [{ id: "workspace-there", head: WHERE_WORDS.workspaceThere, items: workspaceThere }]),

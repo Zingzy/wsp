@@ -42,6 +42,11 @@ import {
   placeLinkTranscript,
   joinToken,
   readJoinToken,
+  JoinMint,
+  PAIR_CODE_TTL_MS,
+  MINT_JOIN_REFUSAL,
+  PLACES_WORDS,
+  SSH_HOSTS_REFUSAL,
   placeNoDaemonPortLine,
   placeNoLinkLine,
   placeNoHomeLine,
@@ -2017,6 +2022,78 @@ describe("the door a computer you own dials", () => {
     const relayed = await WsClient.connect(srv.port, { ticket });
     expect(await relayed.request("places.door")).toMatchObject({ ok: false, error: PLACE_DOOR_REFUSAL });
     relayed.close();
+  });
+});
+
+describe("the join line and the ssh hosts the app asks for", () => {
+  const view = { port: 4420, addresses: ["http://192.168.1.20:4420"], relay: "https://p_ab12cd34.singhi.me" };
+  const at = Date.parse("2026-09-24T10:00:00.000Z");
+
+  it("mints one code into every line the door and the relay answer on, and the code is the one a join spends", async () => {
+    const { hostKey } = await serving();
+    await srv!.close();
+    srv = await serveRuntime(runtime!, { port: 0, authToken: "host-token", devices: runtime!.devices, door: { open: async () => view }, now: () => at });
+    const own = await WsClient.connect(srv.port, { token: "host-token" });
+    const answer = await own.request("places.mint");
+    own.close();
+    expect(answer.ok, String(answer["error"])).toBe(true);
+    const minted = JoinMint.parse(answer);
+    const token = minted.joins[0]!.line.split(" --code ")[1]!;
+    expect(readJoinToken(token).hostKey).toBe(keyFingerprint(hostKey.publicKey));
+    expect(minted).toEqual({
+      joins: [
+        { url: view.addresses[0], line: PLACES_WORDS.sheet.joinLine(view.addresses[0]!, token) },
+        { url: view.relay, line: PLACES_WORDS.sheet.joinLine(view.relay, token), note: PLACES_WORDS.sheet.relayNote },
+      ],
+      expiresAt: new Date(at + PAIR_CODE_TTL_MS).toISOString(),
+    });
+    // The same mint wsp add spends: the code redeems once, as a pair.issue code does.
+    const spending = await WsClient.connect(srv.port);
+    expect((await spending.request("pair.redeem", { code: readJoinToken(token).code, name: "laptop" })).ok).toBe(true);
+    spending.close();
+  });
+
+  it("hands neither a code nor the ssh hosts to a paired computer or a relayed socket", async () => {
+    await serving();
+    await srv!.close();
+    const read: unknown[] = [];
+    srv = await serveRuntime(runtime!, {
+      port: 0,
+      authToken: "host-token",
+      devices: runtime!.devices,
+      door: { open: async () => view },
+      sshHosts: async rows => {
+        read.push(rows);
+        return [{ alias: "hetzner", hostName: "65.21.4.12", user: "root", from: "config" }];
+      },
+    });
+    const own = await WsClient.connect(srv.port, { token: "host-token" });
+    expect(await own.request("places.sshHosts")).toMatchObject({ ok: true, hosts: [{ alias: "hetzner", hostName: "65.21.4.12", user: "root", from: "config" }] });
+    expect(read).toHaveLength(1);
+    const code = (await own.request("pair.issue"))["code"] as string;
+    const { ticket } = (await own.request("ticket.issue", { purpose: "relay" })) as { ticket: string };
+    own.close();
+    const spending = await WsClient.connect(srv.port);
+    const { deviceToken } = (await spending.request("pair.redeem", { code, name: "phone" })) as { deviceToken: string };
+    spending.close();
+    const paired = await WsClient.connect(srv.port, { token: deviceToken });
+    expect(await paired.request("places.mint")).toMatchObject({ ok: false, error: deviceHeldRefusal("places.mint") });
+    expect(await paired.request("places.sshHosts")).toMatchObject({ ok: false, error: deviceHeldRefusal("places.sshHosts") });
+    paired.close();
+    const relayed = await WsClient.connect(srv.port, { ticket });
+    expect(await relayed.request("places.mint")).toMatchObject({ ok: false, error: MINT_JOIN_REFUSAL });
+    expect(await relayed.request("places.sshHosts")).toMatchObject({ ok: false, error: SSH_HOSTS_REFUSAL });
+    relayed.close();
+    expect(read).toHaveLength(1);
+    expect(THREAD_OPS).not.toContain("places.mint");
+    expect(THREAD_OPS).not.toContain("places.sshHosts");
+  });
+
+  it("refuses a code on a host that serves no door", async () => {
+    await serving();
+    const own = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect(await own.request("places.mint")).toMatchObject({ ok: false, error: PLACE_DOOR_UNSERVED });
+    own.close();
   });
 });
 

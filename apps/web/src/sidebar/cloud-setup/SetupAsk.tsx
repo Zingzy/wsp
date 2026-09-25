@@ -17,6 +17,8 @@ import { carriesFiles, droppedFolder } from "../folderDrag.js";
 import { FIELD_LABEL, LONE_FIELD, STATE_WORD } from "./rows.js";
 import { SetupScreen } from "./SetupScreen.js";
 
+const ASK_HEADLINE = "Your first cloud task";
+
 export function SetupAsk({ setup, counter, name, folder, onType, onKeep, onBuild, onBack, refusal }: { setup: InitSetup; counter: string; name: string; folder: string; onType: (o: { name: string; folder: string }) => void; onKeep: (o: { name: string; folder: string }) => void; onBuild: (o: { firstWorkspace: string; importFolder?: string }) => void; onBack: () => void; refusal: string | null }) {
   const words = CLOUD_SETUP_WORDS.ask;
   const bridge = desktopBridge();
@@ -41,7 +43,7 @@ export function SetupAsk({ setup, counter, name, folder, onType, onKeep, onBuild
   };
   const canChoose = bridge?.pickFolder !== undefined;
   return (
-    <SetupScreen k="ask" counter={counter} headline={words.headline} top={setup.pricing !== null ? initForkLine(setup.pricing.size) : words.top} refusal={refusal} primary={{ word: CLOUD_SETUP_WORDS.screen.build, onPress: build, disabled: !ready, focus: false, title: words.needsName }} secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}>
+    <SetupScreen k="ask" counter={counter} headline={ASK_HEADLINE} top={setup.pricing !== null ? initForkLine(setup.pricing.size) : words.top} refusal={refusal} primary={{ word: CLOUD_SETUP_WORDS.screen.build, onPress: build, disabled: !ready, focus: false, title: words.needsName }} secondary={{ word: CLOUD_SETUP_WORDS.screen.back, onPress: onBack }}>
       <div className="flex w-full flex-col gap-2">
         <label htmlFor="setup-first-name" className={FIELD_LABEL}>
           {words.name}

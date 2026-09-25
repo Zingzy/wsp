@@ -34,19 +34,12 @@ export const THEME_WORDS: Record<ThemePreference, string> = {
   dark: "Dark",
 };
 
-/** What each pick does, said under the pictures. */
-export const THEME_SAYS: Record<ThemePreference, string> = {
-  system: "Follows this Mac, light by day and dark by night if it is set that way.",
-  light: "Always light, whatever this Mac is set to.",
-  dark: "Always dark, whatever this Mac is set to.",
-};
-
 /** The sentence under each settings page's name: what the page is for, before any row. */
 export const GROUP_BLURBS = {
   general: "How wsp behaves on this Mac.",
   appearance: "How wsp looks, on every screen that opens it.",
-  computers: "The computers your workspaces run on. This Mac is the first one.",
-  projects: "The repos wsp makes workspaces from, each on one computer.",
+  computers: "The computers your tasks run on. This Mac is the first one.",
+  projects: "The repos wsp makes tasks from, each on one computer.",
   devices: "The phones and other computers paired with this wsp.",
   account: "Your sign-in, which lets your other devices find this wsp.",
   keybindings: "The keys wsp answers to.",
@@ -57,18 +50,20 @@ export const GROUP_BLURBS = {
  * computer's own page, its agents and the Remove dialog, which are this build's and are drawn nowhere else. No
  * word is in both. */
 export const WHERE_WORDS = {
+  icon: "Icon",
+  iconDescription: "How this computer shows in the sidebar and here.",
   /** A place list the host refused, said where the list would stand. */
   notRead: (said: string) => `Computers not read: ${said}`,
   /** How a workspace's copy of a project is made on that computer, and the sentence for one that makes none. */
   copies: "Copies",
-  copiesDescription: "How a workspace's copy of a project is made there.",
+  copiesDescription: "How a task's copy of a project is made there.",
   copiesNothing: "copies nothing",
   /** What a copy there has for a network, in the protocol's own words off the flags the landing carries. */
   ports: "Ports",
-  portsDescription: "What a workspace there has for a network.",
-  workspaceThere: "A workspace there",
+  portsDescription: "What a task there has for a network.",
+  workspaceThere: "A task there",
   connection: "Connection",
-  workspaces: "Workspaces",
+  workspaces: "Tasks",
   /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
    * dimmed while it runs: a label that changed to Updating moved the button's own width. */
   update: "Update",
@@ -79,7 +74,7 @@ export const WHERE_WORDS = {
   default: "default",
   remove: "Remove",
   removeTitle: (computer: string): string => `Remove ${computer}`,
-  removeDescription: (computer: string): string => `wsp comes off ${computer} and its workspaces' records leave this Mac. Your files there stay.`,
+  removeDescription: (computer: string): string => `wsp comes off ${computer} and its tasks' records leave this Mac. Your files there stay.`,
   removeCloudDescription: "Its key is forgotten on this Mac.",
   removing: "Removing…",
   cancel: "Cancel",
@@ -112,14 +107,38 @@ export const WHERE_WORDS = {
   cannotSaveKey: "This wsp cannot save a key from here.",
 } as const;
 
-/** What Add a computer says beyond PLACES_WORDS.sheet: the one field, why Add waits, and the two lines the
- * joined screen says. One road, so no word here names one. */
+/** What Add a computer says beyond PLACES_WORDS.sheet and the roads' own names. */
 export const ADD_COMPUTER_WORDS = {
-  login: "ssh login",
-  loginPlaceholder: "root@host or an ssh alias",
-  add: "Add",
+  title: "Add a computer",
+  user: "User",
+  host: "Host",
+  hostPlaceholder: "box.example.com or an ssh alias",
+  port: "Port",
+  addComputer: "Add computer",
+  whatHappens: "What happens",
+  replace: "Replace",
+  adding: "Adding",
+  another: "Add another",
+  suggested: "From your ssh config",
+  copy: "Copy",
+  copied: "Copied",
+  replaceKey: "Paste a new key to replace it",
+  keySaved: "key saved",
+  getKey: "Get a key",
+  save: "Save",
+  checking: "Checking",
+  keyRefused: "The provider did not take that key.",
+  installThere: "On that computer, install wsp",
+  joinThere: "Then run",
+  minting: "making a code",
+  codeLeft: (ms: number): string => {
+    const seconds = Math.ceil(ms / 1000);
+    return `code works for ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  },
+  expired: "code expired",
+  newCode: "New code",
+  noMint: "this wsp cannot make a join line from the app yet",
   adds: "adds",
-  loginFirst: "type the login first",
   /** Why Add is held on a wsp whose host cannot log in over ssh yet. */
   noRoad: "this wsp cannot log in over ssh yet",
   /** What to do about a login ssh would not take, short enough that what ssh said and this together stand on the
@@ -127,8 +146,6 @@ export const ADD_COMPUTER_WORDS = {
    * the ssh agent and config as they stand, so the key a box wants is named where every other ssh client reads it. */
   refusedFix: "Check the user and the address, or name a key in your ssh config.",
   running: "closing keeps it going",
-  named: "Named after its hostname.",
-  runsWorkspaces: "It runs your workspaces. Your image is built there the first time a workspace is created on it.",
 } as const;
 
 /** Each size source as its segment names it: whole at every width, since a cut segment is a defect. */
@@ -188,16 +205,16 @@ export const PROJECTS_WORDS = {
   source: "Source",
   sourceHover: "The folder or repository this project is.",
   computer: "Computer",
-  computerHover: "Where the project lives and where its workspaces run.",
+  computerHover: "Where the project lives and where its tasks run.",
   remote: "Remote",
   remoteHover: "The repository it was cloned from.",
   added: "Added",
   addedHover: "When it was recorded.",
   seeded: "Seeded",
   seededHover: "What the seed carried from this Mac, once.",
-  newWorkspaces: "New workspaces",
+  newWorkspaces: "New tasks",
   branch: "Branch",
-  branchDescription: "Where a new workspace starts.",
+  branchDescription: "Where a new task starts.",
   lastAgent: "Last agent",
   lastAgentDescription: "What a new thread on it defaults to.",
   remove: "Remove",
@@ -212,7 +229,7 @@ export const PROJECTS_WORDS = {
 /** Settings > Keybindings: the four cards' heads and the three keys that are not rules. */
 export const KEYBINDINGS_WORDS = {
   title: "Keybindings",
-  workspacesAndThreads: "Workspaces and threads",
+  workspacesAndThreads: "Tasks and threads",
   terminal: "Terminal, while it has focus",
   fixed: "Fixed",
   sendMessage: "Send the message",
