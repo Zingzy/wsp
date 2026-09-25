@@ -300,8 +300,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
 
 @utility surface-glass {
   background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  @apply glass-backdrop;
 
   @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
     background: var(--background) !important;
@@ -316,8 +315,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
       color-mix(in srgb, var(--alert-glass-tint) 4%, transparent)
     ),
     color-mix(in srgb, var(--background) var(--glass-opacity), transparent) !important;
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  @apply glass-backdrop;
 
   &[data-variant="error"] {
     --alert-glass-tint: var(--destructive);
@@ -342,8 +340,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
 
 @utility dialog-glass {
   background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  @apply glass-backdrop;
   border-color: color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
   box-shadow: 0 24px 64px -24px rgb(0 0 0 / 65%);
 
@@ -372,8 +369,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
 @utility dropdown-glass {
   /* Near solid, so the rows under a menu never read through it; the blur only softens what little shows. */
   background: color-mix(in srgb, var(--popover) 96%, transparent);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px) var(--glass-ground,);
+  backdrop-filter: blur(8px) var(--glass-ground,);
   border: 1px solid color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
   box-shadow: 0 12px 32px -12px rgb(0 0 0 / 45%), 0 2px 6px -2px rgb(0 0 0 / 25%);
 
@@ -2087,13 +2084,19 @@ code {
 
 /* wsp additions below this line. */
 
+/* A backdrop blur lays its blurred copy over the page it sampled, so on the Mac's transparent page the sharp text
+   shows through it unless the copy stands on a ground: --glass-ground, the filter GlassGround renders. */
+@utility glass-backdrop {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation)) var(--glass-ground,);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation)) var(--glass-ground,);
+}
+
 /* The shell's sidebar floats over the app background, so it takes the same
    glass recipe as the other floating surfaces, tinted with the sidebar
    palette instead of the popover, and its border joins the sidebar tokens. */
 @utility sidebar-glass {
   background: color-mix(in srgb, var(--sidebar) var(--glass-opacity), transparent);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  @apply glass-backdrop;
   border-color: var(--sidebar-border);
 
   @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
@@ -2183,6 +2186,7 @@ html.desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline
 }
 
 .desktop-mac {
+  --glass-ground: url(#glass-ground);
   --header-frame-inset: calc(69px + var(--header-gap) - var(--workspace-titlebar-control-size) / 2);
 }
 
