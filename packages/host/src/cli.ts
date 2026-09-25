@@ -339,9 +339,9 @@ export async function loadKeys(
   /** The provider's refusal of a key, in the words the app's keys step uses, or nothing. Only a refusal counts: a
    * check nothing answered says nothing about the key, so it is taken and the build says its own piece if it must. */
   const refusalOf = async (key: string, saved: boolean): Promise<string | undefined> => {
-    if (sources.checkKey === undefined) return undefined;
+    if (sources.checkKey === undefined || row === undefined) return undefined;
     const check = await sources.checkKey(key);
-    return check.state === "refused" ? keyCheckLine(check, saved) : undefined;
+    return check.state === "refused" ? keyCheckLine(check, row.id, saved) : undefined;
   };
   // The key a run is about to build with is put to the provider here, so a key it refuses is typed again on this run
   // rather than stopping the build on the far side of the confirm. Every other verb takes a saved key as it stands:
@@ -1216,6 +1216,7 @@ async function init(
         mintHere: runMintHere,
         saveKeys: set => writeEnvFile(envFileFor(opts.statePath), set),
         pricing: beside?.pricing ?? providerBackendFor(providerEnv).pricing,
+        provider: wiredProviderId(providerEnv),
         statePath: opts.statePath,
         home: homedir(),
         secrets: keychainReader(),

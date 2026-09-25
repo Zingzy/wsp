@@ -7,80 +7,17 @@
 // edits the same one; once an image stands the host builds it at its own
 // place whichever card the press came from, and the last step says so. A typed
 // key goes to the key store on Continue and never onto a draft.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CLOUD_SETUP_WORDS, initAgentStep, initJobOver, initStepCounter, type InitSetup, type PlaceView } from "@wsp/protocol";
-import { Button } from "../components/ui/button.js";
-import { cn, errorText } from "../lib/utils.js";
+import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
-import { FACT } from "./format.js";
 import { copyCost, IMAGE_WORDS } from "./image.js";
 import { AgentLine, agentStepWords } from "./recipe/AgentLine.js";
 import { ReadingRows } from "./recipe/ReadingRows.js";
 import { RecipeScreen } from "./recipe/RecipeScreen.js";
+import { RecipeStep, type StepAction } from "./recipe/RecipeStep.js";
 import { RoadChoice, roadReady, type RoadPick } from "./recipe/RoadChoice.js";
-import { MICRO_LABEL } from "../lib/microLabel.js";
 import { recipeAt, useRecipeJob } from "./recipe/useRecipeJob.js";
-import { RefusalSlot } from "./sheetParts.js";
-
-interface Action {
-  k: string;
-  word: string;
-  onPress: () => void;
-  disabled?: boolean;
-}
-
-/** One step of the recipe: its count, title and sentence over the step's card, the quiet links at the left of the
- * foot, what a build takes and the keycap at its right, and the slot a refusal lands in, standing in every state so
- * its arrival moves nothing. */
-function RecipeStep({ k, counter, headline, top, note, cost, primary, links, refusal, busy = false, children }: { k: string; counter?: string; headline: string; top?: string; note?: string; cost?: string[]; primary?: Omit<Action, "k">; links: Action[]; refusal: string | null; /** A press is with the host: every press but Close waits for it. */ busy?: boolean; children: ReactNode }) {
-  return (
-    <div data-k="recipe" data-step={k} className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1.5">
-        {counter === undefined ? null : (
-          <p data-k="recipe-counter" className={cn(MICRO_LABEL, "text-muted-foreground")}>
-            {counter}
-          </p>
-        )}
-        <h3 data-k="recipe-title" className="text-sm leading-5 font-medium text-foreground">
-          {headline}
-        </h3>
-        {top === undefined || top === "" ? null : (
-          <p data-k="recipe-sentence" className="text-xs leading-4 text-muted-foreground">
-            {top}
-          </p>
-        )}
-      </div>
-      <div className="flex min-h-0 flex-col">{children}</div>
-      {note === undefined ? null : (
-        <p data-k="recipe-note" className="text-xs leading-4 text-muted-foreground">
-          {note}
-        </p>
-      )}
-      <div className="flex items-center gap-4">
-        <div className="flex min-w-0 flex-1 items-center gap-4">
-          {links.map(link => (
-            <Button key={link.k} data-k={`recipe-${link.k}`} size="xs" variant="ghost-muted" disabled={link.disabled === true || (busy && link.k !== "close")} onClick={link.onPress}>
-              {link.word}
-            </Button>
-          ))}
-        </div>
-        {cost === undefined ? null : (
-          <span data-k="recipe-cost" className={cn(FACT, "flex shrink-0 flex-col items-end whitespace-nowrap leading-4")}>
-            {cost.map(line => (
-              <span key={line}>{line}</span>
-            ))}
-          </span>
-        )}
-        {primary === undefined ? null : (
-          <Button data-k="recipe-primary" size="xs" variant="default" held={primary.disabled === true} disabled={busy} onClick={primary.onPress}>
-            {primary.word}
-          </Button>
-        )}
-      </div>
-      <RefusalSlot k="recipe-refusal" {...(refusal === null ? {} : { said: refusal })} />
-    </div>
-  );
-}
 
 export function ImageRecipe({ place, name, version, onClose }: { place: PlaceView; name: string; /** The version the image stands at, absent before the first build. */ version: number | undefined; onClose: () => void }) {
   const select = useStore(s => s.select);
@@ -94,8 +31,31 @@ export function ImageRecipe({ place, name, version, onClose }: { place: PlaceVie
   useEffect(() => {
     void api?.initGet?.({ on: place.id }).then(setSetup, e => setRefusal(errorText(e)));
   }, [api, place.id, setRefusal]);
-  const close: Action = { k: "close", word: IMAGE_WORDS.close, onPress: onClose };
-  const choose = (): void => recipe.startRoad(pick);
+  // Build is with the host while the job may still wait on the place, where no build is drawn yet, so the stop that
+  // reaches it is here; a stop sent there leaves the recipe on the road, saying so, and nothing booted.
+  const [sending, setSending] = useState(false);
+  const stopped = useRef(false);
+  const [stoppedHere, setStoppedHere] = useState(false);
+  const stop: StepAction = {
+    k: "cancel",
+    word: CLOUD_SETUP_WORDS.build.cancel,
+    destructive: true,
+    whileBusy: true,
+    onPress: () => {
+      stopped.current = true;
+      setStoppedHere(true);
+      void api?.initCancel?.().catch((e: unknown) => {
+        stopped.current = false;
+        setStoppedHere(false);
+        setRefusal(errorText(e));
+      });
+    },
+  };
+  const close: StepAction = { k: "close", word: IMAGE_WORDS.close, onPress: onClose };
+  const choose = (): void => {
+    setStoppedHere(false);
+    recipe.startRoad(pick);
+  };
   const again = (): void => {
     setPick({ road: "manual" });
     setAgainFrom(job?.id ?? null);
@@ -112,7 +72,7 @@ export function ImageRecipe({ place, name, version, onClose }: { place: PlaceVie
   if (job === null || (initJobOver(job.phase) && (!initAgentStep(job) || job.id === againFrom))) {
     const words = CLOUD_SETUP_WORDS.choice;
     return (
-      <RecipeStep k="choice" headline={words.headline} top={words.top} primary={{ word: words.keycap, onPress: choose, disabled: !roadReady(setup.agents, pick) }} links={[close]} refusal={refusal} busy={recipe.busy}>
+      <RecipeStep k="choice" headline={words.headline} top={words.top} primary={{ word: words.keycap, onPress: choose, disabled: !roadReady(setup.agents, pick) }} links={[close]} refusal={refusal} {...(stoppedHere ? { waiting: CLOUD_SETUP_WORDS.build.stopped } : {})} busy={recipe.busy}>
         <RoadChoice agents={setup.agents} pick={pick} onPick={setPick} />
       </RecipeStep>
     );
@@ -148,14 +108,24 @@ export function ImageRecipe({ place, name, version, onClose }: { place: PlaceVie
   }
 
   const { shown, index, screen } = recipeAt(job);
-  const startOver: Action = { k: "again", word: CLOUD_SETUP_WORDS.screen.again, onPress: () => recipe.startOver(again) };
-  const back: Action = { k: "back", word: CLOUD_SETUP_WORDS.screen.back, onPress: () => recipe.stepTo(index - 1) };
+  const startOver: StepAction = { k: "again", word: CLOUD_SETUP_WORDS.screen.again, onPress: () => recipe.startOver(again) };
+  const back: StepAction = { k: "back", word: CLOUD_SETUP_WORDS.screen.back, onPress: () => recipe.stepTo(index - 1) };
   // Where the build goes is the host's word: this computer for a first build, the image's own place after that.
   const home = setup.place;
   const elsewhere = home !== undefined && home.id !== place.id;
   const buildNote = elsewhere ? IMAGE_WORDS.buildsHome(home.name, (version ?? 0) + 1) : undefined;
   const cost = copyCost(setup.pricing?.rateUsdPerHour);
-  const build = (): Promise<void> => recipe.build(setup.agents, { on: place.id });
+  const build = async (): Promise<void> => {
+    stopped.current = false;
+    setSending(true);
+    try {
+      await recipe.build(setup.agents, { on: place.id }, () => stopped.current);
+    } catch (e) {
+      if (!stopped.current) throw e;
+    } finally {
+      setSending(false);
+    }
+  };
   const last = screen !== undefined && index === shown.length - 1;
   if (screen === undefined) {
     return (
@@ -166,7 +136,7 @@ export function ImageRecipe({ place, name, version, onClose }: { place: PlaceVie
         {...(buildNote === undefined ? {} : { note: buildNote })}
         cost={cost}
         primary={{ word: IMAGE_WORDS.build, onPress: () => void attempt(build) }}
-        links={[...(shown.length > 0 ? [{ ...back, onPress: () => recipe.stepTo(shown.length - 1) }] : [startOver]), close]}
+        links={sending ? [stop, close] : [...(shown.length > 0 ? [{ ...back, onPress: () => recipe.stepTo(shown.length - 1) }] : [startOver]), close]}
         refusal={refusal} busy={recipe.busy}
       >
         {null}
@@ -183,7 +153,7 @@ export function ImageRecipe({ place, name, version, onClose }: { place: PlaceVie
       {...(last && buildNote !== undefined ? { note: buildNote } : {})}
       {...(last ? { cost } : {})}
       primary={last ? { word: IMAGE_WORDS.build, onPress: () => recipe.answer(screen, build) } : { word: CLOUD_SETUP_WORDS.screen.keycap, onPress: () => recipe.answer(screen) }}
-      links={[index > 0 ? back : startOver, close]}
+      links={sending ? [stop, close] : [index > 0 ? back : startOver, close]}
       refusal={refusal} busy={recipe.busy}
     >
       <RecipeScreen screen={screen} draft={current} onDraft={next => recipe.edit(screen, current, next)} image={recipe.imageAt(screen, current)} />

@@ -6,7 +6,7 @@
 // it, and every press that would start a build held while one runs.
 import { act, cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CLOUD_SETUP_WORDS, DEFAULT_PREFERENCES, INIT_ROW_STATES, copyStoppedLine, signInWaitLine, initDiskOverLine, type InitJob, type InitScreen, type InitSetup, type PlaceView, type SealedImage, type SealedImageView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, DEFAULT_PREFERENCES, copyStoppedLine, initDiskOverLine, type InitJob, type InitScreen, type InitSetup, type PlaceView, type SealedImage, type SealedImageView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { copyCost, IMAGE_WORDS } from "../src/settings/image.js";
@@ -238,11 +238,19 @@ describe("the recipe in the Image card", () => {
     expect(fake.ops().filter(op => op === "cancel").length).toBe(cancels);
   });
 
-  it("opens the recipe from a first build that stopped here, with the host's sentence on the state row", async () => {
+  it("opens the recipe from a first build that stopped here, with the host's sentence on the state row: Start over under the build, or Build once the build is closed", async () => {
     const failed: InitJob = { ...JOB, phase: "failed", place: { id: "p_2", name: "hetzner" }, error: copyStoppedLine("no room on hetzner") };
     useStore.setState({ initJob: failed });
     await open(host({ image: null, copies: [], projects: [] }, { job: failed }).api, "p_2");
     expect(card().querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("stopped");
+    expect(card().querySelector("[data-k='image-state'] [data-settings-description]")?.textContent).toBe(copyStoppedLine("no room on hetzner"));
+    // The build under the card is the one thing to press, and does not say the sentence a second time.
+    expect(statePress()).toBeNull();
+    expect(k("build-sentence")).toBeNull();
+    await press("build-primary");
+    expect(recipeStep()).toBe("choice");
+    await press("recipe-close");
+    await press("build-close");
     expect(statePress()?.textContent).toBe(IMAGE_WORDS.buildHere);
     fireEvent.click(statePress()!);
     await settle();
@@ -268,17 +276,5 @@ describe("the recipe in the Image card", () => {
     expect(fake.ops().filter(op => op === "build")).toHaveLength(1);
     expect(fake.ops().filter(op => op === "answer")).toHaveLength(2);
     expect(fake.ops()).not.toContain("step");
-  });
-
-  it("says the sign-in a build started here waits on, with a press that opens the setup sheet at that step", async () => {
-    const waiting: InitJob = { ...JOB, phase: "signing-in", place: { id: "p_2", name: "hetzner" }, progress: { done: 3, total: 9 }, rows: [{ id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Claude Code", state: INIT_ROW_STATES.open }], needsYou: { what: "sign in to Claude Code", since: 1 } };
-    useStore.setState({ initJob: waiting });
-    await open(host({ image: null, copies: [], projects: [] }, { job: waiting }).api, "p_2");
-    const row = card().querySelector("[data-k='image-state']")!;
-    expect(row.querySelector("[data-settings-description]")?.textContent).toBe(signInWaitLine("Claude Code"));
-    expect(statePress()?.textContent).toBe(CLOUD_SETUP_WORDS.build.open);
-    fireEvent.click(statePress()!);
-    expect(useStore.getState().setupOpen).toBe(true);
-    act(() => useStore.getState().closeSetup());
   });
 });

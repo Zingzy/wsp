@@ -64,6 +64,7 @@ beforeEach(async () => {
   await act(async () => await new Promise(resolve => setTimeout(resolve, 0)));
   useStore.setState({ workspaces: [WS], sessions: { ws_1: [ROW] }, places: [BOX], selectedId: null, selectedThreadId: null });
   useSettingsStore.getState().go({ kind: "group", group: "appearance" });
+  useSettingsStore.setState({ buildShown: null });
   act(() => useNotices.getState().clear());
   emit = e => act(() => listeners.forEach(fn => fn(e)));
   mounted = render(<Harness />);
@@ -321,6 +322,56 @@ describe("the image build", () => {
       ["done", HOST_NOTICE_WORDS.imageSealed(3)],
       ["error", HOST_NOTICE_WORDS.imageNotBuilt("the provider ran out of machines")],
     ]);
+  });
+
+  it("a need with its build's own page showing is the page's to say; leaving that page says it with an Open back onto it, and coming back ends it", () => {
+    const job: InitJob = { ...JOB, place: { id: "pl_box", name: "spoo" }, needsYou: NEED };
+    act(() => {
+      useStore.setState({ initJob: job, settingsOpen: true });
+      useSettingsStore.getState().go({ kind: "computer", id: "pl_box" });
+      useSettingsStore.getState().showBuild("pl_box");
+    });
+    emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED });
+    expect(notices()).toEqual([]);
+    // Computers is showing, but not the build: the list draws no sign-in.
+    act(() => {
+      useSettingsStore.getState().hideBuild("pl_box");
+      useSettingsStore.getState().go({ kind: "group", group: "computers" });
+    });
+    expect(notices()).toMatchObject([{ kind: "waiting", text: initNeedsYouLine(NEED.what), action: { word: "Open" } }]);
+    act(() => notices()[0]!.action!.run());
+    expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "pl_box" });
+    expect(useStore.getState().setupOpen).toBe(false);
+    act(() => useSettingsStore.getState().showBuild("pl_box"));
+    expect(notices()).toEqual([]);
+  });
+
+  it("a need arriving with another page up waits with an Open onto the build's page, not the sheet", () => {
+    act(() => useStore.setState({ initJob: { ...JOB, place: { id: "pl_box", name: "spoo" } } }));
+    emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED });
+    act(() => notices()[0]!.action!.run());
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "pl_box" });
+    expect(useStore.getState().setupOpen).toBe(false);
+  });
+
+  it("a build that ended with its page showing says nothing; one that failed away opens that page", () => {
+    const placed: InitJob = { ...JOB, place: { id: "pl_box", name: "spoo" } };
+    act(() => {
+      useStore.setState({ settingsOpen: true });
+      useSettingsStore.getState().go({ kind: "computer", id: "pl_box" });
+      useSettingsStore.getState().showBuild("pl_box");
+    });
+    emit({ type: "init.job", job: { ...placed, phase: "failed", error: "boom" } });
+    expect(notices()).toEqual([]);
+    act(() => {
+      useSettingsStore.getState().hideBuild("pl_box");
+      useStore.setState({ settingsOpen: false });
+    });
+    emit({ type: "init.job", job: { ...placed, id: "init_2", phase: "failed", error: "boom" } });
+    expect(notices().map(n => n.text)).toEqual([HOST_NOTICE_WORDS.imageNotBuilt("boom")]);
+    act(() => notices()[0]!.action!.run());
+    expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "pl_box" });
   });
 
   it("a build that ended with the setup open, or was cancelled, says nothing", () => {

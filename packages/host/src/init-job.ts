@@ -316,9 +316,10 @@ export class InitJobs implements InitDoor {
     const key = k.key?.trim();
     if (key !== undefined && key !== "") {
       const saves = this.deps.keySet(key, k.provider);
-      if (saves === undefined) throw new Error(k.provider === undefined ? "this host forks machines on a provider that reads no API key, so there is none to save" : `${k.provider} is not a provider this wsp takes a key for`);
+      const provider = k.provider ?? this.deps.keyProvider();
+      if (saves === undefined || provider === undefined) throw new Error(k.provider === undefined ? "this host forks machines on a provider that reads no API key, so there is none to save" : `${k.provider} is not a provider this wsp takes a key for`);
       const check = await this.deps.checkKey(key, k.provider);
-      const line = keyCheckLine(check);
+      const line = keyCheckLine(check, provider);
       if (line !== undefined) throw Object.assign(new Error(line), { kind: check.state === "refused" ? KEY_REFUSED : KEY_UNCHECKED });
       Object.assign(set, saves);
     }
@@ -519,6 +520,7 @@ export class InitJobs implements InitDoor {
         s.signIns = ctx;
       },
       place: built.place,
+      placeBackend: built.backend,
       pricing: built.backend.pricing,
       statePath: this.deps.statePath,
       home: this.deps.home,
@@ -965,7 +967,7 @@ export class InitJobs implements InitDoor {
         // The build's own read of the saved key, before its first stage: the provider's word is the failure, and a
         // refusal names the step that fixes it rather than offering another build.
         s.phase = "failed";
-        s.error = text("message") ?? CLOUD_SETUP_WORDS.keys.refusedSaved;
+        s.error = text("message") ?? (s.place === undefined ? CLOUD_SETUP_WORDS.build.failed : CLOUD_SETUP_WORDS.keys.refusedSaved(s.place.id));
         if (record["refused"] === true) s.keyRefused = true;
         break;
       case "seal-failed": {
