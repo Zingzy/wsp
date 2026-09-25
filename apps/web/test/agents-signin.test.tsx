@@ -142,6 +142,18 @@ describe("signing an agent in from its row", () => {
     expect(detail().querySelector("[data-k=sign-in-flow]")).toBeNull();
   });
 
+  it("stops a running sign-in from the row's Cancel and leaves the list standing", async () => {
+    const h = host();
+    render(<List />);
+    fireEvent.click(rowEl("agent-codex").querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-sign-in]")!);
+    await settle();
+    back();
+    fireEvent.click(rowEl("agent-codex").querySelector<HTMLButtonElement>("[data-row-slot] [data-k=act-cancel]")!);
+    expect(h.stopped).toEqual(["si_1"]);
+    expect(document.querySelector("[data-agents-detail]")).toBeNull();
+    expect(rowEl("agent-codex").querySelector("[data-row-slot] [data-k=act-sign-in]")).not.toBeNull();
+  });
+
   it("stops the sign-in on the host when the target changes or the panel closes, and only stops listening to one that ended", async () => {
     const h = host();
     const { rerender, unmount } = render(<List />);
@@ -189,7 +201,8 @@ describe("signing an agent in from its row", () => {
         keys.push([agent, key]);
       },
     });
-    render(<List />);
+    // Signed out, since a signed-in agent is offered no Sign in.
+    render(<List report={{ ...AGENTS_REPORT, agents: AGENTS_REPORT.agents.map(a => (a.id === "claude" ? { ...a, signIn: "none" as const } : a)) }} />);
     openRow("agent-claude");
     fireEvent.click(actIn("sign-in"));
     const flow = detail().querySelector<HTMLElement>("[data-k=sign-in-flow]")!;

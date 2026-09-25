@@ -71,15 +71,15 @@ describe("a server's tools", () => {
     expect(badge().textContent).toBe("2 tools");
     expect(document.querySelector("[data-fact=tools] [data-fact-value]")?.textContent).toBe("2 tools");
     fireEvent.click(button("view-tools"));
-    const level = document.querySelector<HTMLElement>("[data-agents-tools]")!;
-    expect([...level.querySelectorAll("[data-tool]")].map(t => t.textContent)).toEqual(["list_recordsList records in a base", "create_record"]);
-    const again = level.querySelector<HTMLButtonElement>("[data-k=tools-again]")!;
+    const level = document.querySelector<HTMLElement>("[data-agents-under]")!;
+    expect([...level.querySelectorAll("[data-under-row]")].map(t => t.textContent)).toEqual(["list_recordsList records in a base", "create_record"]);
+    const again = level.querySelector<HTMLButtonElement>("[data-k=under-again]")!;
     expect(again.getAttribute("aria-label")).toBe(W.readAgain);
     expect(again.closest("[title]")?.getAttribute("title")).toBe("read 3 min ago");
     fireEvent.click(again);
     expect(asks[1]).toMatchObject({ name: "airtable", refresh: true });
     // The last answer stands while the next one runs.
-    expect(level.querySelectorAll("[data-tool]")).toHaveLength(2);
+    expect(level.querySelectorAll("[data-under-row]")).toHaveLength(2);
   });
 
   it("says why nothing came back, turning the badge failed with that reason as its hover, and a refusal from the host the same", async () => {

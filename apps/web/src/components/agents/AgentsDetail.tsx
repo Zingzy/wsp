@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The levels under a row, each replacing the list inside its tab: the detail
 // (a head with Back, the facts as a label column and a value column, the acts
-// next step first, and a sign-in drawn under them), a server's tools, and one
-// tool. Escape goes back one level; ArrowDown from the head reaches the acts.
+// next step first, and a sign-in drawn under them), the level of rows a kind
+// may add under it, and one of those rows. Escape goes back one level;
+// ArrowDown from the head reaches the acts.
 import { ArrowLeftIcon, CheckIcon, CopyIcon, RefreshCwIcon } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { agentName } from "@wsp/catalog";
-import { offlineFor, type McpTool } from "@wsp/protocol";
+import { offlineFor } from "@wsp/protocol";
 import { copyText } from "../../actions/clipboard.js";
 import { cn } from "../../lib/utils.js";
 import { FACT, VALUE } from "../../settings/format.js";
@@ -16,7 +17,7 @@ import { Button } from "../ui/button.js";
 import { Spinner } from "../ui/spinner.js";
 import { ActButton, AgentMarks, LeadMark, ServerBadge } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W } from "./agentsRows.js";
-import type { DetailView, Fact, Lead, ToolsLevel } from "./kinds/kind.js";
+import type { DetailView, Fact, Lead, UnderLevel, UnderRow } from "./kinds/kind.js";
 import { rovingKeys } from "./roving.js";
 import { SignInFlowView } from "./SignInFlowView.js";
 
@@ -65,6 +66,8 @@ function useLevelKeys(back: () => void) {
 
 function CopyGlyph({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
   return (
     <Button
       data-k="fact-copy"
@@ -76,7 +79,8 @@ function CopyGlyph({ value, label }: { value: string; label: string }) {
         void copyText(value).then(
           () => {
             setCopied(true);
-            setTimeout(() => setCopied(false), COPIED_MS);
+            clearTimeout(timer.current);
+            timer.current = setTimeout(() => setCopied(false), COPIED_MS);
           },
           () => {},
         )
@@ -86,6 +90,23 @@ function CopyGlyph({ value, label }: { value: string; label: string }) {
     </Button>
   );
 }
+
+/** A path or a command that wraps only after a slash or at a space, so a second line starts at a folder; a hyphen
+ * is a break opportunity in Chromium, so each word between stands whole. */
+const slashBreaks = (value: string): ReactNode =>
+  value.split(/(\/|\s+)/).map((token, at) =>
+    token === "/" ? (
+      <Fragment key={at}>
+        /<wbr />
+      </Fragment>
+    ) : token === "" || token.trim() === "" ? (
+      token
+    ) : (
+      <span key={at} className="whitespace-nowrap">
+        {token}
+      </span>
+    ),
+  );
 
 /** One fact: the label in its column, the value in the mono clamped at two lines with the whole on its hover, the
  * reason or state after it in the muted mono. */
@@ -104,7 +125,7 @@ function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
           {fact.badge === undefined ? null : <ServerBadge badge={fact.badge} />}
           {fact.value === undefined ? null : (
             <span data-fact-value className={cn(fact.muted === true ? FACT : VALUE, "line-clamp-2 min-w-0 break-words")} title={fact.hover ?? fact.value}>
-              {fact.value}
+              {fact.muted === true ? fact.value : slashBreaks(fact.value)}
             </span>
           )}
           {trailing ? null : copy}
@@ -152,52 +173,52 @@ export function DetailLevel({ view, back, backLabel }: { view: DetailView; back:
   );
 }
 
-export function ToolsLevelView({ level, back, backLabel, now, onTool }: { level: ToolsLevel; back: () => void; backLabel: string; now: number; onTool: (tool: McpTool) => void }) {
+export function UnderLevelView({ level, back, backLabel, now, onRow }: { level: UnderLevel; back: () => void; backLabel: string; now: number; onRow: (row: UnderRow) => void }) {
   const { headRef, onKeyDown } = useLevelKeys(back);
   const readAgo = level.readAt === undefined ? undefined : W.readAgo(offlineFor(now - Date.parse(level.readAt)));
-  const again = level.listing ? (
+  const again = level.reading ? (
     <span className="flex size-6 items-center justify-center">
       <Spinner className="size-3.5 text-muted-foreground" />
     </span>
   ) : (
     <span className="inline-flex" {...(readAgo === undefined ? {} : { title: readAgo })}>
-      <Button data-k="tools-again" aria-label={W.readAgain} size="icon-xs" variant="ghost" held={level.refresh === undefined} {...(level.refresh === undefined ? {} : { onClick: level.refresh })}>
+      <Button data-k="under-again" aria-label={W.readAgain} size="icon-xs" variant="ghost" held={level.refresh === undefined} {...(level.refresh === undefined ? {} : { onClick: level.refresh })}>
         <RefreshCwIcon className="size-3.5" />
       </Button>
     </span>
   );
-  const tools = level.tools ?? [];
+  const rows = level.rows ?? [];
   return (
-    <div data-agents-tools onKeyDown={onKeyDown} className="flex flex-col pb-4">
+    <div data-agents-under onKeyDown={onKeyDown} className="flex flex-col pb-4">
       <LevelHead back={back} backLabel={backLabel} title={level.title} right={again} headRef={headRef} />
       <div data-level-body className="flex flex-col gap-0.5 pt-1" role="list" onKeyDown={rovingKeys}>
-        {tools.map((tool, at) => (
-          <div key={tool.name} role="listitem" data-tool={tool.name} className="relative isolate mx-2 flex h-12 items-center rounded-lg px-2">
+        {rows.map((row, at) => (
+          <div key={row.key} role="listitem" data-under-row={row.key} className="relative isolate mx-2 flex h-12 items-center rounded-lg px-2">
             <button
               type="button"
               data-row-trigger
               tabIndex={at === 0 ? 0 : -1}
-              onClick={() => onTool(tool)}
+              onClick={() => onRow(row)}
               className="flex min-w-0 flex-1 cursor-pointer flex-col justify-center text-left outline-none before:absolute before:inset-0 before:-z-10 before:rounded-lg before:transition-colors before:duration-150 hover:before:bg-accent focus-visible:before:ring-2 focus-visible:before:ring-ring focus-visible:before:ring-inset"
             >
-              <span className="truncate font-mono text-xs leading-5 text-foreground">{tool.name}</span>
-              {tool.description === undefined ? null : <span className="truncate text-xs leading-4 text-muted-foreground">{tool.description}</span>}
+              <span className="truncate font-mono text-xs leading-5 text-foreground">{row.title}</span>
+              {row.subtext === undefined ? null : <span className="truncate text-xs leading-4 text-muted-foreground">{row.subtext}</span>}
             </button>
           </div>
         ))}
       </div>
-      <div className="px-4">{level.refused === undefined ? null : <RefusalSlot k="tools-refused" said={level.refused} />}</div>
+      <div className="px-4">{level.refused === undefined ? null : <RefusalSlot k="under-refused" said={level.refused} />}</div>
     </div>
   );
 }
 
-export function ToolLevel({ tool, back, backLabel }: { tool: McpTool; back: () => void; backLabel: string }) {
+export function UnderRowLevel({ row, back, backLabel }: { row: UnderRow; back: () => void; backLabel: string }) {
   const { headRef, onKeyDown } = useLevelKeys(back);
   return (
-    <div data-agents-tool onKeyDown={onKeyDown} className="flex flex-col pb-4">
-      <LevelHead back={back} backLabel={backLabel} title={tool.name} headRef={headRef} />
+    <div data-agents-under-row onKeyDown={onKeyDown} className="flex flex-col pb-4">
+      <LevelHead back={back} backLabel={backLabel} title={row.title} headRef={headRef} />
       <div data-level-body className="px-4 pt-2">
-        {tool.description === undefined ? null : <p className="whitespace-pre-line break-words text-[13px] leading-5 text-foreground">{tool.description}</p>}
+        {row.body === undefined ? null : <p className="whitespace-pre-line break-words text-[13px] leading-5 text-foreground">{row.body}</p>}
       </div>
     </div>
   );

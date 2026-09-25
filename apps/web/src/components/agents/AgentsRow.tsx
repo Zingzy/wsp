@@ -13,7 +13,7 @@ import type { RowView } from "./kinds/kind.js";
 
 export function AgentsRow({ row, height, dim, first, onOpen }: { row: RowView; height: string; dim: boolean; first: boolean; onOpen: () => void }) {
   const quick = row.quick;
-  const step = quick?.run === undefined ? quick : { ...quick, run: () => (quick.run!(), onOpen()) };
+  const step = quick?.run === undefined || quick.inPlace === true ? quick : { ...quick, run: () => (quick.run!(), onOpen()) };
   return (
     <div role="listitem" data-agents-row={row.key} {...(row.available === true ? { "data-available": "" } : {})} className={cn("relative isolate mx-2 flex items-center gap-3 rounded-lg px-2 transition-opacity duration-150", height, dim && "opacity-50")}>
       <button

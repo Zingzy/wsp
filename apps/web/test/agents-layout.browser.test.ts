@@ -6,7 +6,9 @@
 // scrolls and takes the shape the rule gives; the toolbar stands on the 32 px
 // ladder; every row of a tab stands at the tab's one height; the head, the
 // first group label, the first row's mark and a detail's first label share
-// one left edge; Tab reaches every row with its ring drawn. Photographs of
+// one left edge, and on the computer page the page's own edges; a tab's
+// tooltip opens only while its word is hidden; Tab reaches every row with its
+// ring drawn. Photographs of
 // every tab and a detail of each kind at 360, 480 and 696 in both themes, and
 // the real right panel and computer page. Vite serves test/wireframe, so like
 // the other render tests it runs only when asked for (WSP_RENDER=1) and skips
@@ -156,9 +158,56 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       await at(width).locator('[data-agents-row="server-global-notion-http-mcp.notion.com"] [data-row-trigger]').click();
       const detail = await at(width).evaluate(el => Math.round(el.querySelector("[data-fact-label]")!.getBoundingClientRect().left - el.getBoundingClientRect().left));
       console.info(`agents left edge at ${width}: ${JSON.stringify({ ...list, detail })}`);
-      expect([list.line, list.label, list.mark, list.search, detail]).toEqual([16, 16, 16, 16, 16]);
+      // The panel's 16 px; the page's 21, the cards' hairline and px-5.
+      const edge = width === 360 ? 16 : 21;
+      expect([list.line, list.label, list.mark, list.search, detail]).toEqual([edge, edge, edge, edge, edge]);
       await at(width).locator("[data-k=agents-back]").click();
     }
+  });
+
+  it("stands on the computer page's edges: its outer edge on the section labels and card borders, its content on the cards' text", async () => {
+    await open("screen=settings-computer&theme=dark", { width: 1280, height: 1800 });
+    await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
+    const read = async () =>
+      page!.evaluate(() => {
+        const x = (el: Element | null | undefined) => Math.round(el?.getBoundingClientRect().left ?? NaN);
+        const manager = document.querySelector("[data-settings-card='agents'] [data-agents-manager]");
+        const card = document.querySelector("[data-settings-card]:not([data-settings-card='agents']) [data-settings-row]")?.parentElement;
+        return {
+          sectionLabel: x(document.querySelector("[data-settings-head]")),
+          cardBorder: x(card),
+          cardText: x(card?.querySelector("[data-settings-title]")),
+          manager: x(manager),
+          line: x(manager?.querySelector("[data-k=agents-line]")),
+          label: x(manager?.querySelector("[data-group-label] span")),
+          mark: x(manager?.querySelector("[data-agents-row] [data-row-trigger] > *")),
+          detail: x(manager?.querySelector("[data-fact-label]")),
+        };
+      });
+    const list = await read();
+    await page!.locator("[data-settings-card='agents'] [data-agents-row='agent-claude'] [data-row-trigger]").click();
+    const { detail } = await read();
+    console.info(`agents page edges: ${JSON.stringify({ ...list, detail })}`);
+    expect(list.cardBorder).toBe(list.sectionLabel);
+    expect(list.manager).toBe(list.sectionLabel);
+    expect([list.line, list.mark, detail]).toEqual([list.cardText, list.cardText, list.cardText]);
+    await page!.locator("[data-settings-card='agents'] [data-k=agents-back]").click();
+    await page!.locator("[data-settings-card='agents'] [data-segment]").filter({ has: page!.locator('[aria-label="Skills"]') }).click();
+    expect((await read()).label).toBe(list.cardText);
+  });
+
+  it("opens a tab's tooltip only while its word is hidden", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    const label = at(696).locator('[data-segment-label][aria-label="Skills"]');
+    await label.hover();
+    await page!.waitForTimeout(1200);
+    expect(await page!.locator("[data-slot=tooltip-popup]").count()).toBe(0);
+    await page!.mouse.move(0, 0);
+    await label.evaluate(el => ((el.querySelector("[data-segment-word]") as HTMLElement).style.display = "none"));
+    await label.hover();
+    await page!.locator("[data-slot=tooltip-popup]").waitFor({ timeout: 3000 });
+    expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe("Skills");
   });
 
   it("lets Tab reach the rows with the ring drawn, the arrows move over them, and Enter open one", async () => {
@@ -205,9 +254,9 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       await at(360).locator('[data-agents-row="server-global-airtable-stdio-npx -y airtable-mcp-server"] [data-row-trigger]').click();
       await at(360).locator("[data-k=act-list-tools]").click();
       await at(360).locator("[data-k=act-view-tools]").click();
-      await at(360).locator("[data-agents-tools] [data-tool]").first().waitFor();
+      await at(360).locator("[data-agents-under] [data-under-row]").first().waitFor();
       await at(360).screenshot({ path: join(SHOTS_DIR, `agents-360-tools-${theme}.png`), animations: "disabled" });
-      await at(360).locator("[data-tool=list_records] button").click();
+      await at(360).locator("[data-under-row=list_records] button").click();
       await at(360).screenshot({ path: join(SHOTS_DIR, `agents-360-tool-${theme}.png`), animations: "disabled" });
     }
   }, 180_000);

@@ -39,13 +39,13 @@ function actsOf(item: AgentItem, ctx: RowsContext) {
       : { id: "add-tools", label: W.addTools, icon: WrenchIcon, ...(adding ? { busy: true } : ctx.acts === undefined ? {} : { run: () => ctx.acts!.addTools(row.id) }) };
   const update = notYet("update", W.update, CircleArrowUpIcon, hold === undefined ? {} : { hover: hold });
   const uninstall = notYet("uninstall", W.uninstall, Trash2Icon, { destructive: true, ...(hold === undefined ? {} : { hover: hold }) });
-  const hasSignIn = row.signInRoad !== "none";
   const running = signIn.act.id === "cancel";
   const signedOut = row.signIn === "none";
+  const offersSignIn = running || (row.signInRoad !== "none" && row.signIn !== "signed-in" && row.signIn !== "vault-key");
   const acts: RowAct[] =
     signedOut || running
-      ? [...(hasSignIn ? [signIn.act] : []), ...(row.wspTools ? [] : [addTools]), ...(latest === undefined ? [] : [update]), uninstall]
-      : [...(latest === undefined ? [] : [update]), ...(row.wspTools ? [] : [addTools]), ...(hasSignIn ? [signIn.act] : []), uninstall];
+      ? [...(offersSignIn ? [signIn.act] : []), ...(row.wspTools ? [] : [addTools]), ...(latest === undefined ? [] : [update]), uninstall]
+      : [...(latest === undefined ? [] : [update]), ...(row.wspTools ? [] : [addTools]), ...(offersSignIn ? [signIn.act] : []), uninstall];
   return { acts: holdAll(acts, ctx), flow: heldReason(ctx) === undefined ? signIn.flow : undefined };
 }
 

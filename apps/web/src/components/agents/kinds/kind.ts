@@ -4,7 +4,7 @@
 // report. The manager draws every kind through this one shape, so a kind is
 // its module and one line in the registry.
 import type { LucideIcon } from "lucide-react";
-import type { AgentsReport, McpTool } from "@wsp/protocol";
+import type { AgentsReport } from "@wsp/protocol";
 import type { FlowView, RowAct, RowsContext } from "../agentsRows.js";
 
 export type GroupBy = "none" | "agent" | "source" | "scope" | "state";
@@ -38,7 +38,7 @@ export interface RowView {
   /** The state in the muted mono at the right end, where no step is needed. */
   readonly word?: string;
   readonly wordHover?: string;
-  /** The one step the row offers at its right end; pressing it opens the detail as well. */
+  /** The one step the row offers at its right end; pressing it opens the detail as well, unless it acts in place. */
   readonly quick?: RowAct;
 }
 
@@ -59,11 +59,19 @@ export interface Fact {
   readonly act?: RowAct;
 }
 
-/** A server's tools, the level under its detail. */
-export interface ToolsLevel {
+/** One row of the level under a detail, and what its own level says whole. */
+export interface UnderRow {
+  readonly key: string;
   readonly title: string;
-  readonly listing: boolean;
-  readonly tools?: readonly McpTool[];
+  readonly subtext?: string;
+  readonly body?: string;
+}
+
+/** A further level under a detail where a kind has one (a server's tools): its rows, each opening its body. */
+export interface UnderLevel {
+  readonly title: string;
+  readonly reading: boolean;
+  readonly rows?: readonly UnderRow[];
   readonly readAt?: string;
   readonly refused?: string;
   readonly refresh?: () => void;
@@ -79,7 +87,7 @@ export interface DetailView {
   readonly flow?: FlowView;
   /** Why the last ask came back with nothing, in the host's words. */
   readonly refused?: string;
-  readonly tools?: ToolsLevel;
+  readonly under?: UnderLevel;
 }
 
 export interface GroupView<T> {
@@ -92,7 +100,7 @@ export interface GroupView<T> {
 
 /** The roads a detail's acts open inside the manager. */
 export interface DetailNav {
-  readonly viewTools: () => void;
+  readonly openUnder: () => void;
 }
 
 export interface KindModule<T> {

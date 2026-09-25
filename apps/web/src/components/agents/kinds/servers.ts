@@ -87,7 +87,7 @@ export function badgeOf(s: Standing, tools: readonly unknown[] | undefined): Sta
 }
 
 /** The acts, next step first, and the sign-in flow standing for any of the entry's agents. */
-function actsOf(entry: ServerEntry, ctx: RowsContext, viewTools: () => void) {
+function actsOf(entry: ServerEntry, ctx: RowsContext, openUnder: () => void) {
   const all = standings(entry, ctx);
   const worst = worstOf(all);
   const asked = askedOf(all);
@@ -105,7 +105,7 @@ function actsOf(entry: ServerEntry, ctx: RowsContext, viewTools: () => void) {
     ...(listing ? { busy: true } : tools === undefined ? {} : { run: () => tools.list(primary) }),
   };
   const reconnect: RowAct = { id: "reconnect", label: listing ? W.listing : W.reconnect, icon: RefreshCwIcon, ...(listing ? { busy: true } : tools === undefined ? {} : { run: () => tools.list(worst.state === "failed" ? worst.row : primary, true) }) };
-  const view: RowAct = { id: "view-tools", label: W.viewTools, icon: WrenchIcon, run: viewTools };
+  const view: RowAct = { id: "view-tools", label: W.viewTools, icon: WrenchIcon, run: openUnder };
   const turnOff = notYet("turn-off", W.turnOff, PowerOffIcon);
   const turnOn = notYet("turn-on", W.turnOn, PowerIcon);
   const remove = notYet("remove", W.remove, Trash2Icon, { destructive: true });
@@ -194,7 +194,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
     };
   },
   detail: (entry, ctx, nav) => {
-    const { all, worst, asked, acts, signIns, flow } = actsOf(entry, ctx, nav.viewTools);
+    const { all, worst, asked, acts, signIns, flow } = actsOf(entry, ctx, nav.openUnder);
     const listed = asked?.answer?.tools;
     const badge = badgeOf(worst, listed);
     const first = entry.rows[0]!;
@@ -238,10 +238,10 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
       acts,
       ...(flow === undefined ? {} : { flow }),
       ...(refused === undefined ? {} : { refused }),
-      tools: {
+      under: {
         title: W.toolsOf(entry.name),
-        listing: asked?.listing === true,
-        ...(listed === undefined ? {} : { tools: listed }),
+        reading: asked?.listing === true,
+        ...(listed === undefined ? {} : { rows: listed.map(t => ({ key: t.name, title: t.name, ...(t.description === undefined ? {} : { subtext: t.description, body: t.description }) })) }),
         ...(asked?.answer === undefined ? {} : { readAt: asked.answer.readAt }),
         ...(refused === undefined ? {} : { refused }),
         ...(refresh === undefined ? {} : { refresh }),

@@ -3,13 +3,13 @@
 // by two hosts: a task's right panel and a computer's page in Settings. A
 // head says whose they are, the tabs pick a kind, one toolbar searches,
 // groups and adds, and the list stands in groups with no rules between rows.
-// A row opens its detail in place of the list, with Back; a server's detail
-// opens its tools and a tool under that. Every kind is a registered module,
-// so this file never names one. Its root is the container every width rule
-// reads.
+// A row opens its detail in place of the list, with Back; a kind may add a
+// level of rows under the detail and one row's own level under that. Every
+// kind is a registered module, so this file never names one. Its root is the
+// container every width rule reads.
 import { ListFilterIcon, PlusIcon, RefreshCwIcon, SearchIcon, SlidersHorizontalIcon } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { offlineFor, type AgentsReport, type McpTool } from "@wsp/protocol";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { offlineFor, type AgentsReport } from "@wsp/protocol";
 import { cn } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
 import { Button } from "../ui/button.js";
@@ -23,7 +23,7 @@ import { ActButton } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, notYet, onImage, pausedReport, refusedLines, type RefusedLine, type RowAct, type RowsContext } from "./agentsRows.js";
 import { HEAD, NARROW, TABS } from "./agentsWidths.js";
 import { AgentsRow } from "./AgentsRow.js";
-import { DetailLevel, ToolLevel, ToolsLevelView } from "./AgentsDetail.js";
+import { DetailLevel, UnderLevelView, UnderRowLevel } from "./AgentsDetail.js";
 import { AGENTS_KINDS } from "./kinds/index.js";
 import type { AgentsShell, AnyKind, GroupBy } from "./kinds/kind.js";
 import { focusRow, rovingKeys } from "./roving.js";
@@ -57,7 +57,7 @@ export interface AgentsManagerProps {
   readonly kinds?: readonly AnyKind[];
 }
 
-type Level = { readonly kind: "list" } | { readonly kind: "detail"; readonly key: string } | { readonly kind: "tools"; readonly key: string } | { readonly kind: "tool"; readonly key: string; readonly tool: McpTool };
+type Level = { readonly kind: "list" } | { readonly kind: "detail"; readonly key: string } | { readonly kind: "under"; readonly key: string } | { readonly kind: "under-row"; readonly key: string; readonly row: string };
 
 const GROUP_WORDS: Record<GroupBy, string> = { none: "None", agent: "Agent", source: "Source", scope: "Scope", state: "State" };
 const LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
@@ -100,6 +100,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const readAgo = report === null ? undefined : W.readAgo(offlineFor(now - Date.parse(report.readAt)));
   const current = level.kind === "list" ? undefined : items.find(item => tab.key(item) === level.key);
   const at: Level = level.kind !== "list" && current === undefined ? { kind: "list" } : level;
+  if (at !== level) setLevel(at);
 
   const open = (key: string): void => {
     const scroller = scrollerOf(root.current);
@@ -216,20 +217,17 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
           return {
             value: k.id,
             label: (
-              <Tooltip>
-                <TooltipTrigger render={<span data-segment-label aria-label={k.word} className="flex items-center gap-1.5" />}>
-                  <Icon aria-hidden className="size-4 shrink-0" />
-                  <span data-segment-word className={NARROW.hidden}>
-                    {k.word}
+              <TabLabel word={k.word}>
+                <Icon aria-hidden className="size-4 shrink-0" />
+                <span data-segment-word className={NARROW.hidden}>
+                  {k.word}
+                </span>
+                {n === null ? null : (
+                  <span data-segment-count className={cn(FACT, "text-xs", TABS.countHidden)}>
+                    {n}
                   </span>
-                  {n === null ? null : (
-                    <span data-segment-count className={cn(FACT, "text-xs", TABS.countHidden)}>
-                      {n}
-                    </span>
-                  )}
-                </TooltipTrigger>
-                <TooltipPopup side="bottom">{k.word}</TooltipPopup>
-              </Tooltip>
+                )}
+              </TabLabel>
             ),
           };
         })}
@@ -364,16 +362,18 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
     at.kind === "list" || current === undefined
       ? null
       : (() => {
-          const detail = tab.detail(current, ctx, { viewTools: () => setLevel({ kind: "tools", key: at.key }) });
-          if (at.kind === "detail") return <DetailLevel key={at.key} view={detail} back={backToList} backLabel={backLabel} />;
-          const toDetail = (): void => setLevel({ kind: "detail", key: at.key });
-          if (detail.tools === undefined) return null;
-          if (at.kind === "tools") return <ToolsLevelView key="tools" level={detail.tools} back={toDetail} backLabel={W.back(detail.title)} now={now} onTool={tool => setLevel({ kind: "tool", key: at.key, tool })} />;
-          return <ToolLevel key={at.tool.name} tool={at.tool} back={() => setLevel({ kind: "tools", key: at.key })} backLabel={W.back(detail.tools.title)} />;
+          const detail = tab.detail(current, ctx, { openUnder: () => setLevel({ kind: "under", key: at.key }) });
+          const under = detail.under;
+          const row = at.kind === "under-row" ? under?.rows?.find(r => r.key === at.row) : undefined;
+          if (at.kind === "detail" || under === undefined) return <DetailLevel key={at.key} view={detail} back={backToList} backLabel={backLabel} />;
+          const toUnder = (): void => setLevel({ kind: "under", key: at.key });
+          if (row !== undefined) return <UnderRowLevel key={`row-${row.key}`} row={row} back={toUnder} backLabel={W.back(under.title)} />;
+          return <UnderLevelView key="under" level={under} back={() => setLevel({ kind: "detail", key: at.key })} backLabel={W.back(detail.title)} now={now} onRow={r => setLevel({ kind: "under-row", key: at.key, row: r.key })} />;
         })();
 
   return (
-    <section ref={root} data-agents-manager data-shell={shell} aria-label={W.section} onKeyDown={onKeyDown} className="@container flex flex-col">
+    // On the page the content stands on the cards' text edge, their hairline and px-5, 5 px past the panel's.
+    <section ref={root} data-agents-manager data-shell={shell} aria-label={W.section} onKeyDown={onKeyDown} className={cn("@container flex flex-col", page && "px-[5px]")}>
       {headRow}
       <div className="flex flex-col gap-2">
         {tabs}
@@ -385,7 +385,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
           <div data-agents-refused className="mt-2 flex flex-col px-4">
             {lines.map(line => (
               <p key={line.id} data-refused-line={line.id} className="flex min-h-7 items-center gap-2 py-1">
-                <span data-refused-label className={cn(line.value === undefined ? FACT : "text-xs text-muted-foreground", "min-w-0 shrink-0 truncate")} title={line.label}>
+                <span data-refused-label className={cn(FACT, line.value !== undefined && "text-foreground", "min-w-0 shrink-0 truncate")} title={line.label}>
                   {line.label}
                 </span>
                 {line.value === undefined ? null : (
@@ -399,5 +399,21 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
         )}
       </div>
     </section>
+  );
+}
+
+/** A tab's face; its tooltip opens only while the word is hidden, since it says nothing more than the word. */
+function TabLabel({ word, children }: { word: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const face = useRef<HTMLSpanElement | null>(null);
+  const hidden = (): boolean => {
+    const el = face.current?.querySelector<HTMLElement>("[data-segment-word]");
+    return el === null || el === undefined || getComputedStyle(el).display === "none";
+  };
+  return (
+    <Tooltip open={open} onOpenChange={next => setOpen(next && hidden())}>
+      <TooltipTrigger render={<span ref={face} data-segment-label aria-label={word} className="flex items-center gap-1.5" />}>{children}</TooltipTrigger>
+      <TooltipPopup side="bottom">{word}</TooltipPopup>
+    </Tooltip>
   );
 }

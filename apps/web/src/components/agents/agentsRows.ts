@@ -112,6 +112,8 @@ export interface RowAct {
   readonly run?: () => void;
   /** Its road is running: the label says so beside a spinner. */
   readonly busy?: boolean;
+  /** Taken from a row it leaves the list standing, as nothing follows it to watch. */
+  readonly inPlace?: boolean;
 }
 
 /** One server's tools as its last ask stands: running, answered, or refused by the host. */
@@ -222,7 +224,7 @@ export function signInAct(id: string, start: SignInStart | undefined, ctx: RowsC
   const acts = ctx.acts;
   const flow = acts?.flowOf(id);
   const view = flow === undefined || acts === undefined ? {} : { flow: { flow, code: (code: string) => acts.code(id, code), save: (key: string) => acts.save(id, key) } };
-  if (runningFlow(flow) && acts !== undefined) return { act: { id: "cancel", label: AGENTS_LIST_WORDS.cancel, icon: XIcon, run: () => acts.cancel(id) }, ...view };
+  if (runningFlow(flow) && acts !== undefined) return { act: { id: "cancel", label: AGENTS_LIST_WORDS.cancel, icon: XIcon, run: () => acts.cancel(id), inPlace: true }, ...view };
   const terminal = start?.kind === "terminal";
   const run = start === undefined ? undefined : start.kind === "terminal" ? (ctx.typeInTerminal === undefined ? undefined : () => ctx.typeInTerminal!(start.line)) : acts === undefined ? undefined : () => acts.start(id, start);
   return { act: { id: "sign-in", label: terminal ? AGENTS_LIST_WORDS.openInTerminal : AGENTS_LIST_WORDS.signIn, icon: terminal ? SquareTerminalIcon : LogInIcon, ...(run === undefined ? {} : { run }) }, ...view };

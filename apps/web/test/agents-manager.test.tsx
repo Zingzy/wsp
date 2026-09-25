@@ -6,11 +6,13 @@
 // replaces the list with its facts and its acts next step first, a server's
 // tools and one tool, the keyboard at every level, and every state. Heights
 // and widths are measured in the render test.
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { ScrollTextIcon } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentsReport, SealedImage, ServerToolsAnswer } from "@wsp/protocol";
 import { AgentsManager, type AgentsManagerProps } from "../src/components/agents/AgentsManager.js";
 import { AGENTS_LIST_WORDS as W, imageAgentsReport, recipeMissLines, refusedLines, type ServerTools, type ToolsState } from "../src/components/agents/agentsRows.js";
+import { kind, type KindModule } from "../src/components/agents/kinds/kind.js";
 import { foldServers, rowState } from "../src/components/agents/kinds/servers.js";
 import { AGENTS_REPORT, SERVER_TOOLS } from "./fixtures/agents-report.js";
 
@@ -265,8 +267,19 @@ describe("the detail", () => {
     const detail = openRow("agent-claude");
     expect(detail.querySelector("[data-fact=version] [data-fact-note]")?.textContent).toBe("latest 2.1.282, recipe pins 2.1.280");
     expect(facts(detail)[0]).toEqual(["Status", "signed in"]);
-    expect(acts(detail)).toEqual(["Update", "Sign in", "Uninstall"]);
+    expect(acts(detail)).toEqual(["Update", "Uninstall"]);
     expect(detail.querySelector("[data-act-hover=update]")?.getAttribute("title")).toBe(W.notYet);
+  });
+
+  it("offers no Sign in to an agent signed in or on its key, and keeps it where the sign-in was not checked", () => {
+    const report = (signIn: "signed-in" | "vault-key"): AgentsReport => ({ ...AGENTS_REPORT, agents: AGENTS_REPORT.agents.map(a => (a.id === "claude" ? { ...a, latest: a.version!, signIn } : a)) });
+    for (const signIn of ["signed-in", "vault-key"] as const) {
+      draw({ report: report(signIn) });
+      expect(acts(openRow("agent-claude")), signIn).toEqual(["Uninstall"]);
+      cleanup();
+    }
+    draw();
+    expect(acts(openRow("agent-opencode"))).toEqual(["Add the wsp tools", "Sign in", "Uninstall"]);
   });
 
   it("shows a folded server's status, command, each agent's file with its own state where they disagree, and the tools line", () => {
@@ -304,21 +317,103 @@ describe("the detail", () => {
     expect(facts(detail)[0]).toEqual(["Status", "3 tools"]);
     expect(acts(detail)).toEqual(["View tools", "Reconnect", "Turn off", "Remove"]);
     fireEvent.click(detail.querySelector<HTMLButtonElement>("[data-k=act-view-tools]")!);
-    const level = document.querySelector<HTMLElement>("[data-agents-tools]")!;
+    const level = document.querySelector<HTMLElement>("[data-agents-under]")!;
     expect(level.querySelector("[data-k=detail-title]")?.textContent).toBe("Tools of airtable");
-    expect([...level.querySelectorAll("[data-tool]")].map(t => t.getAttribute("data-tool"))).toEqual(["list_records", "create_record", "list_bases"]);
-    fireEvent.click(level.querySelector<HTMLButtonElement>("[data-tool=list_records] button")!);
-    const one = document.querySelector<HTMLElement>("[data-agents-tool]")!;
+    expect([...level.querySelectorAll("[data-under-row]")].map(t => t.getAttribute("data-under-row"))).toEqual(["list_records", "create_record", "list_bases"]);
+    fireEvent.click(level.querySelector<HTMLButtonElement>("[data-under-row=list_records] button")!);
+    const one = document.querySelector<HTMLElement>("[data-agents-under-row]")!;
     expect(one.querySelector("[data-k=detail-title]")?.textContent).toBe("list_records");
     expect(one.querySelector("p")?.textContent).toContain("the offset for the next page");
     expect(one.querySelector("[data-k=agents-back]")?.getAttribute("aria-label")).toBe("Back to Tools of airtable");
     fireEvent.keyDown(one, { key: "Escape" });
-    expect(document.querySelector("[data-agents-tools]")).not.toBeNull();
-    fireEvent.keyDown(document.querySelector("[data-agents-tools]")!, { key: "Escape" });
+    expect(document.querySelector("[data-agents-under]")).not.toBeNull();
+    fireEvent.keyDown(document.querySelector("[data-agents-under]")!, { key: "Escape" });
     expect(document.querySelector("[data-agents-detail]")).not.toBeNull();
     // The list stays behind the levels: back to the tab's rows, off the server's row.
     fireEvent.keyDown(document.querySelector("[data-agents-detail]")!, { key: "Escape" });
     expect(document.activeElement?.closest("[data-agents-row]")?.getAttribute("data-agents-row")).toBe(SERVER.airtable);
+  });
+
+  it("lets any kind open a level of rows under its detail and one row's body under that, each with Back", () => {
+    const glyph = { kind: "glyph", icon: ScrollTextIcon } as const;
+    const NOTES: KindModule<{ name: string }> = {
+      id: "notes",
+      icon: ScrollTextIcon,
+      word: "Notes",
+      noun: n => `${n} notes`,
+      add: "Add a note",
+      rowHeight: "h-14",
+      groupings: [],
+      defaultGroup: () => "none",
+      items: () => [{ name: "one" }],
+      count: items => items.length,
+      key: item => item.name,
+      matches: () => true,
+      groups: items => [{ id: "all", items }],
+      row: item => ({ key: item.name, title: item.name, lead: glyph }),
+      detail: (item, _ctx, nav) => ({
+        title: item.name,
+        lead: glyph,
+        facts: [],
+        acts: [{ id: "lines", label: "Lines", run: nav.openUnder }],
+        under: { title: "Lines of one", reading: false, rows: [{ key: "first", title: "first", subtext: "the first line", body: "the first line, whole" }] },
+      }),
+      empty: () => "none",
+      none: "no notes",
+    };
+    draw({ kinds: [kind(NOTES)] });
+    fireEvent.click(openRow("one").querySelector<HTMLButtonElement>("[data-k=act-lines]")!);
+    const level = document.querySelector<HTMLElement>("[data-agents-under]")!;
+    expect(level.querySelector("[data-k=detail-title]")?.textContent).toBe("Lines of one");
+    expect(level.querySelector("[data-under-row=first]")?.textContent).toBe("firstthe first line");
+    fireEvent.click(level.querySelector<HTMLButtonElement>("[data-under-row=first] button")!);
+    const one = document.querySelector<HTMLElement>("[data-agents-under-row]")!;
+    expect(one.querySelector("p")?.textContent).toBe("the first line, whole");
+    expect(one.querySelector("[data-k=agents-back]")?.getAttribute("aria-label")).toBe("Back to Lines of one");
+    fireEvent.click(one.querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-agents-under] [data-k=agents-back]")!);
+    expect(document.querySelector("[data-agents-detail] [data-k=detail-title]")?.textContent).toBe("one");
+  });
+
+  it("goes back to the list when the open item leaves the report, and stays there when it returns", () => {
+    const { rerender } = draw();
+    openRow("agent-codex");
+    const props = { shell: "panel", head: HEAD, reading: false, on: "spoo", ctx: { where: "box" }, onRefresh: () => {}, now: NOW } as const;
+    rerender(<AgentsManager {...props} report={{ ...AGENTS_REPORT, agents: AGENTS_REPORT.agents.filter(a => a.id !== "codex") }} />);
+    expect(document.querySelector("[data-agents-detail]")).toBeNull();
+    rerender(<AgentsManager {...props} report={AGENTS_REPORT} />);
+    expect(document.querySelector("[data-agents-detail]")).toBeNull();
+    expect(rows()).toHaveLength(4);
+  });
+
+  it("breaks a path only after a slash, never at a hyphen, the text and its hover whole", () => {
+    draw();
+    tab("Skills");
+    const value = openRow("skill-user-frontend-design").querySelector<HTMLElement>("[data-fact=path-0] [data-fact-value]")!;
+    const text = value.textContent ?? "";
+    expect(text).toContain("/");
+    expect(value.getAttribute("title")).toBe(text);
+    const breaks = value.querySelectorAll("wbr");
+    expect(breaks).toHaveLength(text.split("/").length - 1);
+    for (const b of breaks) expect(b.previousSibling?.textContent?.endsWith("/")).toBe(true);
+    // A hyphen breaks a line in Chromium, so every word between the slashes stands whole.
+    for (const word of value.querySelectorAll("span")) expect([word.className, word.textContent?.includes("/")]).toEqual(["whitespace-nowrap", false]);
+  });
+
+  it("leaves no timer behind when a copied value's glyph goes before its check has turned back", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.resolve() } });
+    const set = vi.spyOn(globalThis, "setTimeout");
+    const clear = vi.spyOn(globalThis, "clearTimeout");
+    const { unmount } = draw();
+    fireEvent.click(openRow("agent-codex").querySelector<HTMLButtonElement>("[data-fact=installed-at] [data-k=fact-copy]")!);
+    await act(async () => {});
+    const at = set.mock.calls.findIndex(c => c[1] === 1_400);
+    expect(at).toBeGreaterThanOrEqual(0);
+    const id = set.mock.results[at]!.value as unknown;
+    unmount();
+    expect(clear.mock.calls.map(c => c[0])).toContain(id);
+    set.mockRestore();
+    clear.mockRestore();
   });
 
   it("says a harness holds a server's sign-in, never zero tools", () => {
@@ -452,6 +547,9 @@ describe("the states", () => {
       ["~/.hermes/config.yaml is over 1 MB and was not read", undefined],
       ["linear", "set aside: waited on GitHub CLI"],
     ]);
+    // Label and reason in the one mono, the label in the foreground.
+    for (const l of document.querySelectorAll<HTMLElement>("[data-refused-line]")) expect(l.querySelector("[data-refused-label]")!.className).toContain("font-mono");
+    expect(document.querySelector("[data-refused-line] [data-refused-label]")!.className).toContain("text-foreground");
   });
 
   it("says the host's own sentence where a read was refused and nothing stood before it, with no bars", () => {
