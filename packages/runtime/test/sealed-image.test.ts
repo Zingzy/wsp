@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { NoProviderBackend, imageHash, tarOf } from "@wsp/engine";
-import { NO_BUILD_PLACE_LINE, NO_PROVIDER_LINE, RUNTIME_OPS, THREAD_OPS, SealedImageView, buildPlaceAskLine, placeBuildsNoImageLine, placeForksNothingPickLine, sealedCopyLine, vaultUnlistedRefusal, type Recipe, type RecipeDigest, type SealedImage } from "@wsp/protocol";
+import { COPY_BUILD_FIX, NO_BUILD_PLACE_LINE, NO_PROVIDER_LINE, RUNTIME_OPS, THREAD_OPS, SealedImageView, buildPlaceAskLine, placeBuildsNoImageLine, placeForksNothingPickLine, sealedCopyLine, vaultUnlistedRefusal, type Recipe, type RecipeDigest, type SealedImage } from "@wsp/protocol";
 import { copyKey, createRuntime, wiredPlace, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -288,7 +288,7 @@ describe("building the image at a second place", () => {
     const { rt, composed } = started({ places });
     const b = await rt.golden.prepare();
     await rt.golden.seal(b.id);
-    await expect(rt.image.build({ place: "here" })).rejects.toMatchObject({ kind: "conflict", message: placeBuildsNoImageLine("here") });
+    await expect(rt.image.build({ place: "here" })).rejects.toMatchObject({ kind: "conflict", message: expect.stringContaining(placeBuildsNoImageLine("here")) });
     expect(composed.count).toBe(0);
     expect((await rt.image.get()).copies.map(c => c.place)).toEqual(["box"]);
     await rt.close();
@@ -311,6 +311,42 @@ describe("building the image at a second place", () => {
     expect(copy.place).toBe("solari");
     expect((await rt.image.get()).image!.vault).toBeUndefined();
     expect(frames.some(f => f.includes("sign-ins"))).toBe(false);
+    await rt.close();
+  });
+
+  it("every refusal a copy build meets before anything boots carries its fix apart from what happened", async () => {
+    const fixOf = async (build: Promise<unknown>): Promise<{ kind?: string; fix?: string; message: string }> => build.then(() => ({ message: "built" }), (e: Error & { kind?: string; fix?: string }) => e);
+    const none = new NoProviderBackend();
+    const withHere = (wired: StubBackend): PlaceBackends => ({ wired: "box", backend: place => (place === "box" ? wired : place === "here" ? none : undefined), list: () => ["box", "here"] });
+
+    const empty = started({ places: withHere });
+    expect(await fixOf(empty.rt.image.build({ place: "box" }))).toMatchObject({ kind: "conflict", fix: COPY_BUILD_FIX.noImage });
+    const b = await empty.rt.golden.prepare();
+    await empty.rt.golden.seal(b.id);
+    const cannot = await fixOf(empty.rt.image.build({ place: "here" }));
+    expect(cannot).toMatchObject({ kind: "conflict", fix: COPY_BUILD_FIX.noCopy });
+    expect(cannot.message).toBe(`${placeBuildsNoImageLine("here")}. ${COPY_BUILD_FIX.noCopy}`);
+    await empty.rt.close();
+
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [{ version: 1, snapshotId: "snap_old", baseTemplate: "base", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 }, imageHash: "c".repeat(64) }] });
+    const backfilled = started({ store, places: twoPlaces().places });
+    expect(await fixOf(backfilled.rt.image.build({ place: "solari" }))).toMatchObject({ kind: "conflict", fix: COPY_BUILD_FIX.noRecipe });
+    await backfilled.rt.close();
+
+    const { other, places } = twoPlaces();
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith({ vault: false }), copyRecipe: () => COPY_RECIPE, hostId: "h1", places: places(backend) });
+    const sealed = await rt.golden.prepare();
+    await rt.golden.seal(sealed.id);
+    const noVault = await fixOf(rt.image.build({ place: "solari" }));
+    expect(noVault).toMatchObject({ kind: "conflict", fix: COPY_BUILD_FIX.noVault });
+    // What happened names no flag; the fix is read on a terminal alone, since the card sends force before the host
+    // could refuse, so it names the one the terminal takes.
+    expect(noVault.message.slice(0, -COPY_BUILD_FIX.noVault.length)).not.toMatch(/force/);
+    expect(COPY_BUILD_FIX.noVault).toContain("--force");
+    expect(other.machines.length).toBe(0);
     await rt.close();
   });
 

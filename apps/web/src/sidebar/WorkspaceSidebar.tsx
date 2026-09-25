@@ -247,10 +247,10 @@ export function WorkspaceSidebar() {
 
   const openDialog = (project: string | null): void => setDialog({ key: Date.now(), project });
   // The palette's New workspace lands on the project the head names while one is picked, as the head's plus does.
-  const openDialogForPick = (): void => openDialog(picked?.project.id ?? null);
+  const openDialogForPick = (project?: string): void => openDialog(project ?? picked?.project.id ?? null);
   const openDialogRef = useRef(openDialogForPick);
   openDialogRef.current = openDialogForPick;
-  useEffect(() => onNewWorkspaceRequest(() => openDialogRef.current()), []);
+  useEffect(() => onNewWorkspaceRequest(({ project }) => openDialogRef.current(project)), []);
   useEffect(() => onAddProjectRequest(() => setAddProject(Date.now())), []);
   useEffect(() => onForgetWorkspaceRequest(({ workspaceId, act }) => setForgetting({ workspaceId, act })), []);
   useEffect(

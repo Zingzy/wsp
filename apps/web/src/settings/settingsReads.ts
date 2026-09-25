@@ -82,20 +82,17 @@ export function useSettingsReads(): void {
     if (onAbout) void api?.releaseCheck?.().then(release => useStore.setState({ release }), () => {});
   }, [api, onAbout]);
 
-  // Read again when the image sheet shuts, since a build that ran behind it changes every fact about the image.
-  useEffect(() => {
-    if (setupOpen) return;
-    let live = true;
+  const readImage = useCallback((): void => {
     void api?.image?.().then(
-      image => {
-        if (live) setReads({ image });
-      },
+      image => setReads({ image }),
       () => {},
     );
-    return () => {
-      live = false;
-    };
-  }, [api, setupOpen, setReads]);
+  }, [api, setReads]);
+  // Read again when the image sheet shuts, since a build that ran behind it changes every fact about the image, and
+  // on every sealed frame below, since a seal anywhere files a copy the page has not read.
+  useEffect(() => {
+    if (!setupOpen) readImage();
+  }, [setupOpen, readImage]);
 
   const readSpend = useCallback((): void => {
     if (api?.spend === undefined || asking.current || refused.current) return;
@@ -119,8 +116,9 @@ export function useSettingsReads(): void {
     useCallback(
       e => {
         if (e.type === "workspace.cost") readSpend();
+        if (e.type === "golden.stage" && e.stage === "sealed") readImage();
       },
-      [readSpend],
+      [readSpend, readImage],
     ),
   );
 }
