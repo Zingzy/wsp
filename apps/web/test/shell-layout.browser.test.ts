@@ -92,6 +92,25 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     if (!b) throw new Error(`${selector} has no box`);
     return b;
   };
+  /** Several boxes read in one frame once every finite animation on the page has run out, so a glide in flight
+   * between two reads cannot put them out of step. Spinners run forever and are left out. */
+  const settledBoxes = <const S extends readonly string[]>(selectors: S): Promise<{ [K in keyof S]: Box }> =>
+    page!.evaluate(async (sels: readonly string[]) => {
+      const frame = (): Promise<unknown> => new Promise(done => requestAnimationFrame(done));
+      for (;;) {
+        await frame();
+        await frame();
+        const running = document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime !== Infinity);
+        if (running.length === 0) break;
+        await Promise.all(running.map(a => a.finished.catch(() => undefined)));
+      }
+      return sels.map(sel => {
+        const el = document.querySelector(sel);
+        if (el === null) throw new Error(`${sel} has no box`);
+        const r = el.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      });
+    }, selectors) as Promise<{ [K in keyof S]: Box }>;
 
   it("the sidebar toggle starts where the search row does and the brand lockup one gap after it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
@@ -764,7 +783,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
       await page!.waitForSelector("[data-composer-image-picker]");
-      const empty = await box("[data-chat-composer]");
+      const [empty] = await settledBoxes(["[data-chat-composer]"]);
       // The picker sits with the send at the right, first, before the send.
       const order = await page!.locator("[data-chat-composer-actions]").evaluate(el =>
         [...el.querySelectorAll("button")].map(b => (b.hasAttribute("data-composer-image-picker") ? "picker" : b.getAttribute("type") === "submit" ? "send" : "?")),
@@ -791,13 +810,10 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(new Set(thumbs.map(t => t.radius)).size).toBe(1);
       expect(thumbs.map(t => t.removes)).toEqual([1, 1, 1]);
       // The row is above the text, inside the box, and the box grew by the row rather than the row escaping it.
-      const row = await box("[data-composer-images]");
-      const editor = await box("[data-chat-composer-form] [contenteditable]");
-      const shell = await box("[data-slot=composer-shell]");
+      const [row, editor, shell, grown] = await settledBoxes(["[data-composer-images]", "[data-chat-composer-form] [contenteditable]", "[data-slot=composer-shell]", "[data-chat-composer]"]);
       expect(row.y + row.height).toBeLessThanOrEqual(editor.y);
       expect(row.y).toBeGreaterThan(shell.y);
       expect(row.x + row.width).toBeLessThanOrEqual(shell.x + shell.width);
-      const grown = await box("[data-chat-composer]");
       expect(grown.height).toBeGreaterThan(empty.height);
       const path = join(SHOTS_DIR, `composer-images-${theme}.png`);
       await page!.locator("[data-chat-composer]").screenshot({ path });
