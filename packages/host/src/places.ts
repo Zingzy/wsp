@@ -63,6 +63,9 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   placeNoChipLine,
   MACHINE_PUT_PART_BYTES,
   workFolderIn,
+  BACK_OVER_SSH,
+  backUrl,
+  dialsBackWord,
   hostKeyAsk,
   hostKeyKeptNote,
   hostKeyMatches,
@@ -85,7 +88,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
 } from "@wsp/protocol";
 import { MissingKnownHostsError, PlaceMachine, SshBackend, SSH_DIAL_MS, SSH_LINE_CAP, boxWord, checkProviderKey, clientWords, keyCheckLine, keyFingerprint, knownHostKey, landBytes, offeredHostKey, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, sshWordReach, type KeyCheck, type MachineBackend, type SshReach, type SshTransport } from "@wsp/engine";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, newPlaceKeyPair, openFrame, sealKeys, sharedSecret, signPlaceBytes, verifyPlaceBytes, type Seal, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring, type PlaceBackHolder } from "@wsp/runtime";
-import { BackCutError, backUrl, heldPlaceScript, placeBackHolder } from "./place-back.js";
+import { BackCutError, heldPlaceScript, placeBackHolder } from "./place-back.js";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, hasLogin, keyEnvOf, loginSignIn } from "@wsp/catalog";
 import { ADD_TAKEN_LINE, DAEMON_GONE_LINE, PLACE_JOINED_LINE, PlaceAlreadyJoinedError, PlaceJoinedThenFailedError, WSP_READY_LINE, addFound, addFoundScript, addUndoScript, cappedLine, daemonFlags, deployDaemon, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
@@ -277,8 +280,14 @@ export const UNSAID_CHIP_REFUSAL =
 export const advertisedLoopbackRefusal = (url: string): string =>
   `wsp add: this host is advertising ${url}, which is this computer's own loopback: the computer being joined would dial itself there and reach nothing of this wsp. Start this host with --advertise naming an address that computer can reach, or drop the flag and let it dial what this computer answers on.`;
 
-/** What the install says about where the box will dial back, in the order its link will try them. */
-export const dialsBackLine = (hostUrls: readonly string[]): string => `it dials this computer at ${hostUrls.join(", ")}`;
+/** What the install says about where the box will dial back, in the order its link will try them, the forward on
+ * its own loopback said as the road it is rather than as an address of this computer's. */
+export function dialsBackLine(hostUrls: readonly string[], back?: { boxPort: number; name: string }): string {
+  if (back === undefined) return `it dials this computer at ${hostUrls.join(", ")}`;
+  const at = hostUrls.filter(url => url !== backUrl(back.boxPort));
+  const word = dialsBackWord(back.boxPort, back.name);
+  return at.length === 0 ? `it ${word}` : `it dials this computer at ${at.join(", ")}, then ${word}`;
+}
 
 /** What a remove says about the device a join bought for that computer's own window. One code bought the place and
  * the device, and a remove takes the place alone: the token is still good until somebody hands it back, from the
@@ -496,7 +505,7 @@ export function backRefusedLine(address: string, urls: readonly string[], why: s
 
 /** The reach step's note for a box that dials back over the forward: after the relay where it reached that. */
 export const dialsBackOverSshNote = (urls: readonly string[], relay: string | undefined): string =>
-  relay !== undefined ? `${relay}, and back over ssh` : fittedList(urls, list => `cannot reach this computer at ${list}, so it dials back over ssh`);
+  relay !== undefined ? `${relay}, and ${BACK_OVER_SSH}` : fittedList(urls, list => `cannot reach this computer at ${list}, so it dials ${BACK_OVER_SSH}`);
 
 /** How long taking a failed add back off a box may run, as long as the ssh road's own removal. */
 const UNDO_MS = 120_000;
@@ -675,7 +684,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
           // The addresses the box is about to dial, said as its join starts rather than after the wait it ends in:
           // a wrong one is twenty seconds of silence followed by a sentence naming it, and this is the same fact
           // read while it can still be stopped.
-          stage("service", "running", dialsBackLine(joinUrls));
+          stage("service", "running", dialsBackLine(joinUrls, back === undefined ? undefined : { boxPort: back.boxPort, name }));
         } else if (line.includes(PLACE_JOINED_LINE)) {
           stage("service", "done");
         }
