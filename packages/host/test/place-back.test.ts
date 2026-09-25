@@ -311,6 +311,26 @@ describe("a listener on the forward's port that is not sshd's", () => {
   });
 });
 
+describe("a box without ss", () => {
+  it("stops for good on a wide bind /proc/net/tcp shows, with the sshd_config sentence, since it names no owner", async () => {
+    const children = spawner();
+    const inner = box(loopback);
+    const transport: SshTransport = async (reach, script, opts) =>
+      script === backBindScript(4640) ? { exitCode: 0, stdout: "WSP_BINDHEX 0100007F:1220\nWSP_BINDHEX 00000000:1220\n", stderr: "" } : inner.transport(reach, script, opts);
+    const said: string[] = [];
+    const holder = holderAt({ hostKey: keyFingerprint(HOST_KEY), carry, log: line => said.push(line), spawn: children.spawn, transport, waitMs: () => 5, pickPort: () => 23456 });
+    const first = holder.hold(LOGIN, AT_DOOR, { home: "/root" });
+    await until(() => children.started.length === 1);
+    children.started[0]!.fake.stdout.write("WSP_BACK_UP\n");
+    await expect(first).rejects.toThrow(backBindLine("root@spoo", "0.0.0.0"));
+    await new Promise(r => setTimeout(r, 30));
+    expect(children.started).toHaveLength(1);
+    expect(children.started[0]!.fake.stdinEnded()).toBe(true);
+    expect(said).toEqual([backBindLine("root@spoo", "0.0.0.0")]);
+    holder.close();
+  });
+});
+
 describe("a release while the forward is moving", () => {
   it("writes nothing into the place file and says no move", async () => {
     const home = placeHome();

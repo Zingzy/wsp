@@ -61,10 +61,10 @@ function hexAddress(hex: string): string {
 }
 
 /** One listener the box named: where, and whether ss says sshd owns it. The comm is sshd, or sshd-session from
- * OpenSSH 9.8 on; /proc names no owner. */
+ * OpenSSH 9.8 on; undefined off /proc, which names no owner. */
 export interface BackBind {
   at: string;
-  sshd: boolean;
+  sshd: boolean | undefined;
 }
 
 /** The listeners the box says are on that port, off what backBindScript printed. */
@@ -74,7 +74,7 @@ export function backBinds(said: string, port: number): BackBind[] {
     const ss = /^WSP_BIND (\S+):(\d+)(?:\s+(.*))?$/.exec(line.trim());
     if (ss !== null && Number(ss[2]) === port) found.push({ at: ss[1]!.replace(/^\[|\]$/g, "").replace(/%\S*$/, ""), sshd: /^users:\(\("sshd(?:-session)?",/.test(ss[3] ?? "") });
     const proc = /^WSP_BINDHEX ([0-9A-Fa-f]{8}|[0-9A-Fa-f]{32}):([0-9A-Fa-f]{4})$/.exec(line.trim());
-    if (proc !== null && parseInt(proc[2]!, 16) === port) found.push({ at: hexAddress(proc[1]!.toUpperCase()), sshd: false });
+    if (proc !== null && parseInt(proc[2]!, 16) === port) found.push({ at: hexAddress(proc[1]!.toUpperCase()), sshd: undefined });
   }
   return found;
 }
@@ -227,10 +227,11 @@ export function placeBackHolder(deps: PlaceBackDeps): PlaceBackHolder {
         const binds = backBinds((await transport(reach, backBindScript(at), { timeoutMs: SSH_DIAL_MS })).stdout, at);
         stillHeld(h);
         const wide = binds.filter(b => !isLoopback(b.at));
-        const sshd = wide.find(b => b.sshd);
+        // A wide bind with no owner named may be sshd's, and each retry would stand the door wide for a moment.
+        const sshd = wide.find(b => b.sshd !== false);
         if (binds.length === 0 || sshd !== undefined) throw new BackCutError(backBindLine(h.login.ssh, sshd?.at));
-        // Under GatewayPorts yes sshd binds the wildcard and ss names it the owner; anything else there is another
-        // program's, whatever address it holds, and says nothing about sshd.
+        // Under GatewayPorts yes sshd binds the wildcard and ss names it the owner; anything else ss lists there is
+        // another program's, whatever address it holds, and says nothing about sshd.
         if (wide.length > 0) {
           child.release();
           taken = new Error(backTakenLine(h.login.ssh, at));
