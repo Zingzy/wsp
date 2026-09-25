@@ -216,7 +216,7 @@ describe("the Image card", () => {
     expect(fake.builds).toEqual([{ place: "p_2", force: undefined }]);
   });
 
-  it("opens the recipe in place from Build your image here where no image exists yet, and never the setup sheet", async () => {
+  it("opens the recipe in place from Build your image here where no image exists yet, the state row gone while it stands and back on Close", async () => {
     const fake = settingsApi({ initGet: async () => setup(), image: async () => ({ image: null, copies: [], projects: [] }), initStart: async () => ({}) as InitJob } as Partial<Api>);
     await open(fake.api, "p_2");
     expect(title()).toBe(IMAGE_WORDS.state.nothing);
@@ -227,16 +227,20 @@ describe("the Image card", () => {
     fireEvent.click(press());
     await settle();
     expect(card()!.querySelector("[data-k='recipe']")?.getAttribute("data-step")).toBe("choice");
-    expect(useStore.getState().setupOpen).toBe(false);
+    // The state row answers what now; with the recipe open that answer is on screen, so the row goes, the head stays.
+    expect(card()!.querySelector("[data-k='image-state']")).toBeNull();
+    expect(card()?.querySelector("[data-settings-head]")?.textContent).toBe(IMAGE_WORDS.head("hetzner"));
+    fireEvent.click(card()!.querySelector("[data-k='recipe-close']")!);
+    await settle();
+    expect(title()).toBe(IMAGE_WORDS.state.nothing);
   });
 
-  it("draws the image's own build running here from the job, with no press", async () => {
+  it("stands the image's own build running here in the state row's place", async () => {
     const job = { id: "j1", road: "screens", phase: "building", place: { id: "p_2", name: "hetzner" }, progress: { done: 2, total: 9 }, rows: [], screens: [], log: [], step: 0, stoppable: true, keys: {} } as unknown as InitJob;
     useStore.setState({ initJob: job });
     await open(host({ image: null, copies: [], projects: [] }).api, "p_2");
-    expect(title()).toBe(IMAGE_WORDS.state.building);
-    expect(description()).toBe(IMAGE_WORDS.steps(2, 9));
-    expect(press()).toBeNull();
+    expect(card()!.querySelector("[data-k='image-state']")).toBeNull();
+    expect(card()!.querySelector("[data-k='build']")?.getAttribute("data-step")).toBe("building");
   });
 
   it("starts a task on a ready computer with the project that lands there picked, and holds the press where none does", async () => {

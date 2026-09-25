@@ -2,8 +2,8 @@
 // Choosing what goes on your image, inside the Image card of any computer's
 // page: the init job's own steps (the road, the read of this computer, the
 // agent's thread, the host's screens with their drafts and disk tally) drawn
-// under the card rather than in a sheet, and Build sending init.build with this
-// computer as the place. The recipe is one record, so every computer's card
+// under the card, and Build sending init.build with this computer as the
+// place. The recipe is one record, so every computer's card
 // edits the same one; once an image stands the host builds it at its own
 // place whichever card the press came from, and the last step says so. A typed
 // key goes to the key store on Continue and never onto a draft.
@@ -21,7 +21,7 @@ import { recipeAt, useRecipeJob } from "./recipe/useRecipeJob.js";
 
 export function ImageRecipe({ place, name, version, onClose }: { place: PlaceView; name: string; /** The version the image stands at, absent before the first build. */ version: number | undefined; onClose: () => void }) {
   const select = useStore(s => s.select);
-  const recipe = useRecipeJob();
+  const recipe = useRecipeJob(place.id);
   const { api, job, refusal, setRefusal, attempt } = recipe;
   const [setup, setSetup] = useState<InitSetup | null>(null);
   const [pick, setPick] = useState<RoadPick>({ road: "manual" });

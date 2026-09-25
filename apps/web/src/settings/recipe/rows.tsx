@@ -3,18 +3,15 @@
 // bordered card of 48 px rows, a hairline between them, an 18 px mark where a
 // row has a real one, the name in the sans, meta and state in mono, a slot at
 // the right for the row's control or its state word, and a caps mono divider
-// row for a group. The card keeps its radius and scrolls inside its border
-// when its rows do not fit: never taller than half the window or eight rows, a
-// 24 px fade at the edge more rows lie past, the app's thin overlay bar. State
-// is a muted word or the app's small spinner, never a chip; nothing moves at
-// rest. Sizes wear the tone the protocol gives them, by weight where the step
-// weighs.
+// row for a group. The card is drawn whole, however many rows it holds, and
+// the page it stands on is what scrolls. State is a muted word or the app's
+// small spinner, never a chip; nothing moves at rest. Sizes wear the tone the
+// protocol gives them, by weight where the step weighs.
 import { ChevronDownIcon } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { INIT_ROW_STATES, diskTone, initDiskLine, type SizeTone } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../../components/ui/menu.js";
-import { ScrollArea } from "../../components/ui/scroll-area.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { TONE_FILL, TONE_TEXT } from "../../lib/tone.js";
@@ -23,33 +20,6 @@ import { cn } from "../../lib/utils.js";
 
 export const STATE_WORD = "shrink-0 font-mono text-xs tabular-nums text-muted-foreground";
 export const CARD = "w-full overflow-hidden rounded-[10px] border border-border bg-card text-left";
-/** How many 48 px rows a card shows before it scrolls. */
-export const CARD_MAX_ROWS = 8;
-export const ROW_HEIGHT = 48;
-/** The card's height cap, border and all: half the window, or eight rows and the border, whichever is less. */
-export const CARD_MAX_HEIGHT = `min(50vh, ${CARD_MAX_ROWS * ROW_HEIGHT + 2}px)`;
-/** The fewest rows a card shrinks to while the step's head, footer and margins leave room for them. */
-export const CARD_MIN_ROWS = 5;
-export const CARD_MIN_HEIGHT = CARD_MIN_ROWS * ROW_HEIGHT + 2;
-
-/** The room the step's other parts leave a card in the window: the head with its margin, the footer, the margins at
- * their least, and whatever else the content holds. Read from the DOM, since the head's lines and the footer's note
- * differ by step. */
-function roomFor(card: HTMLElement): number | undefined {
-  const middle = card.closest<HTMLElement>("[data-k=middle]");
-  const column = middle?.parentElement;
-  const content = card.parentElement;
-  if (middle === null || middle === undefined || column === null || column === undefined || content === null) return undefined;
-  const outer = (el: Element): number => {
-    const cs = getComputedStyle(el);
-    return el.getBoundingClientRect().height + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
-  };
-  let taken = 0;
-  for (const el of column.children) if (el !== middle && el.getAttribute("aria-hidden") !== "true") taken += outer(el);
-  for (const el of content.children) if (el !== card) taken += outer(el);
-  const margins = [...column.children].filter(el => el.getAttribute("aria-hidden") === "true").reduce((sum, el) => sum + parseFloat(getComputedStyle(el).minHeight), 0);
-  return column.clientHeight - taken - margins;
-}
 
 /** A size cell: tabular mono in the tone the protocol gave it. */
 export function SizeCell({ tone, children, className }: { tone: SizeTone; children: ReactNode; className?: string }) {
@@ -60,36 +30,14 @@ export function SizeCell({ tone, children, className }: { tone: SizeTone; childr
   );
 }
 
-/** The card as a list of rows that scrolls inside its own border: the radius on all four corners in every state, a
- * 24 px fade to the card's ground at the edge more rows lie past, the app's 6 px overlay bar on hover or scroll. */
-export function Card({ label, children, className, style, top, cap = true }: { label?: string; children: ReactNode; className?: string; style?: CSSProperties; /** What sits along the card's top edge inside the border, above the rows. */ top?: ReactNode; /** Whether the eight-row and half-window cap applies; a card of few large rows shows them whole and scrolls only when the window cannot hold them. */ cap?: boolean }) {
-  const card = useRef<HTMLDivElement>(null);
-  // The floor holds while five rows fit beside the rest of the step; below that the card shrinks on, so nothing ever leaves the window.
-  const [floor, setFloor] = useState(0);
-  useLayoutEffect(() => {
-    const el = card.current;
-    if (el === null) return;
-    const measure = (): void => {
-      const room = roomFor(el);
-      const list = el.querySelector("ul");
-      const viewport = el.querySelector("[data-slot=scroll-area-viewport]");
-      const chrome = el.getBoundingClientRect().height - (viewport?.getBoundingClientRect().height ?? 0);
-      const natural = list === null ? 0 : list.getBoundingClientRect().height + chrome;
-      setFloor(room !== undefined && room >= CARD_MIN_HEIGHT ? Math.min(CARD_MIN_HEIGHT, Math.ceil(natural)) : 0);
-    };
-    measure();
-    const watch = new ResizeObserver(measure);
-    watch.observe(el.closest("[data-k=middle]")?.parentElement ?? el);
-    return () => watch.disconnect();
-  }, []);
+/** The card as a list of rows, drawn whole: the page it stands on is what scrolls. */
+export function Card({ label, children, className, top }: { label?: string; children: ReactNode; className?: string; /** What sits along the card's top edge inside the border, above the rows. */ top?: ReactNode }) {
   return (
-    <div ref={card} data-k="card" data-cap={cap} className={cn(CARD, "flex min-h-0 shrink flex-col")} style={{ ...(cap ? { maxHeight: CARD_MAX_HEIGHT } : {}), minHeight: floor, ...style }}>
+    <div data-k="card" className={cn(CARD, "flex flex-col")}>
       {top}
-      <ScrollArea scrollFade className="min-h-0 flex-1">
-        <ul aria-label={label} className={className}>
-          {children}
-        </ul>
-      </ScrollArea>
+      <ul aria-label={label} className={className}>
+        {children}
+      </ul>
     </div>
   );
 }

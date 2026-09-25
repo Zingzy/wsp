@@ -97,6 +97,10 @@
 //                    page's card, its servers in every state the report
 //                    reads, a Sign in waiting on the browser
 //   panel-agents     the task on the box selected, its panel open on Agents
+//                    (&fork=solari: the same task a fork at Solari, whose one
+//                    act is Edit image)
+//   any screen with &notices=1 says the host's notices as the app does, so a
+//   build's need left behind on another page stands as its toast
 //   skill-preview    agents-widths with every SKILL.md a hostile one, for the
 //                    restricted renderer's render test
 import { createRoot } from "react-dom/client";
@@ -114,6 +118,7 @@ import { SettingsPage } from "../../src/settings/SettingsPage";
 import { AGENTS_PAGE_REPORT, AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { applyTheme, useThemeEffect } from "../../src/settings/theme";
+import { useHostNotices } from "../../src/notices/hostNotices";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
 import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
 import { requestNewWorkspace } from "../../src/shell/shellRequests";
@@ -121,7 +126,7 @@ import { RequestError, type Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
 import { useAdds } from "../../src/settings/adds";
 import { useRightPanelStore } from "../../src/rightPanelStore";
-import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "../cloud-setup/keyRefusedJob";
+import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "../fixtures/keyRefusedJob";
 import "../../src/index.css";
 
 const params = new URLSearchParams(window.location.search);
@@ -227,7 +232,7 @@ const WORKSPACES: WorkspaceView[] = [
   copyHere("ws_copy", "webhook retries", SPOO, 3100, "agent/webhook-retries"),
   // The box's workspace is stopped on the screen about a machine that is not running, so the row's own state is
   // what holds the verb rather than a flag this page invents.
-  { ...onBox("ws_box", "import from stripe", LANDING, "agent/stripe-import"), ...(screen === "bring-back-paused" ? { phase: "napping" as const } : {}) },
+  { ...onBox("ws_box", "import from stripe", LANDING, "agent/stripe-import"), ...(screen === "bring-back-paused" ? { phase: "napping" as const } : {}), ...(params.get("fork") === "solari" ? { place: undefined, provider: "solari" } : {}) },
   { ...copyHere("ws_fork", "pricing table", SPOO, 3200, "agent/pricing-table"), parentThreadId: "th_lead" },
 ];
 const SESSIONS: Record<string, SessionView[]> = {
@@ -434,7 +439,7 @@ const settings = settingsAt !== undefined;
 /** The add over ssh that joined the box a moment ago, as the window that asked it keeps it. */
 const JOINED_ADD: PlaceAddJob = { addId: "a_new", address: "root@hetzner", startedAt: AT, state: "done", steps: [], placeId: "p_new" };
 /** Every computer this host holds on a settings screen: this Mac, three boxes and the cloud whose key it holds. */
-const computers = settings ? [...COMPUTERS, ...(screen === "settings-add-joined" ? [ADDED] : [])] : places;
+const computers = settings || params.get("fork") === "solari" ? [...COMPUTERS, ...(screen === "settings-add-joined" ? [ADDED] : [])] : places;
 /** The image this host sealed and where it stands, on the cloud's page. */
 const IMAGE: SealedImage = {
   name: "default",
@@ -520,7 +525,7 @@ const api = {
   workspacesLanding: async (project: string) => landings[project] ?? landings["pr_spoo"]!,
   listHarnesses: async () => [],
   initGet: async () => ({
-    keys: { solari: settings },
+    keys: { solari: settings || params.get("fork") === "solari" },
     home: "/Users/dev",
     agents:
       screen === "first-run-no-agent"
@@ -768,8 +773,10 @@ function ThemeRule() {
 }
 
 function Centre() {
+  // Settings opened from a screen that is not one of its own, as a door into it does, draws it as the app does.
+  const settingsOpen = useStore(s => s.settingsOpen);
   if (screen === "creating") return <WorkspaceCreation creation={creation as never} />;
-  if (settings) {
+  if (settings || settingsOpen) {
     return (
       <>
         <ThemeRule />
@@ -780,6 +787,11 @@ function Centre() {
   // With no project the first run is the whole centre, as the app draws it, beside the sidebar's one row.
   if (emptyScreen) return <FirstRun />;
   return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">center content</div>;
+}
+
+function HostNotices() {
+  useHostNotices();
+  return null;
 }
 
 createRoot(document.getElementById("root")!).render(
@@ -794,6 +806,7 @@ createRoot(document.getElementById("root")!).render(
       </div>
     ) : (
       <AppShell>
+        {params.get("notices") === "1" ? <HostNotices /> : null}
         <Centre />
       </AppShell>
     )}

@@ -32,10 +32,11 @@ export function RoadChoice({ agents, pick, onPick }: { agents: readonly InitAgen
         <Radio value="manual" data-k="road-manual" />
         <span className={NAME}>{words.manual}</span>
       </label>
-      <label className={cn(ROW, ROW_LINE, canAgent ? "cursor-pointer hover:bg-accent/40" : "text-muted-foreground")}>
+      {/* Under a phone's width the name keeps its line and the picker drops under it, so neither is cut. */}
+      <label className={cn(ROW, ROW_LINE, "max-sm:h-auto max-sm:flex-wrap max-sm:gap-y-1 max-sm:py-2.5", canAgent ? "cursor-pointer hover:bg-accent/40" : "text-muted-foreground")}>
         <Radio value="agent" data-k="road-agent" disabled={!canAgent} />
-        <span className={cn(NAME, !canAgent && "text-muted-foreground")}>{words.agent}</span>
-        <Slot>
+        <span className={cn(NAME, "max-sm:whitespace-normal", !canAgent && "text-muted-foreground")}>{words.agent}</span>
+        <Slot className="max-sm:basis-full max-sm:justify-start max-sm:pl-7">
           {canAgent ? (
             <>
               {harness !== undefined ? <RowMark id={harness} /> : null}

@@ -12,7 +12,6 @@ import type { Failure } from "../protocol/failure.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
 import { shellVersions } from "../shell/shellVersion.js";
-import { CLOUD_NAMES } from "./providers.js";
 import { resolveAt, useSettingsStore, type SettingsAt, type SettingsReads } from "./settingsStore.js";
 
 export interface SettingsContext {
@@ -38,7 +37,6 @@ export interface SettingsContext {
   readonly go: (at: SettingsAt) => void;
   readonly setPreferences: (patch: PreferencesPatch) => void;
   readonly openAddComputer: () => void;
-  readonly openSetup: () => void;
   readonly openAddProject: () => void;
   readonly rereadDevices: () => void;
   /** A rejection the page's act met, as an error notice in the host's words with its fix; a lost socket says nothing. */
@@ -85,7 +83,6 @@ export function useSettingsContext(): SettingsContext {
     go: at => useSettingsStore.getState().go(at),
     setPreferences: patch => void useStore.getState().setPreferences(patch),
     openAddComputer: () => useStore.getState().openAddComputer(),
-    openSetup: () => useStore.getState().openSetup(),
     openAddProject: () => useSettingsStore.getState().openAddProject(),
     rereadDevices: () => useSettingsStore.getState().rereadDevices(),
     failed: e => noticeFailure(e),
@@ -93,19 +90,12 @@ export function useSettingsContext(): SettingsContext {
   };
 }
 
-/** The cloud whose page a toast's Open lands on with the image sheet over it: the one this host builds at. */
-const SETUP_CLOUD = CLOUD_NAMES.find(row => row.id === "solari")!;
-
-/** The page Settings is on: the image sheet overrides the memory while it stands, then a remembered page whose
- * noun is gone falls back to its group. While the image sheet is asked for the page is the cloud's, so the sheet
- * stands over the rows it is about, and the remembered page comes back when it shuts. The Add a computer door is
- * not an override but a move: it writes Computers as the page, so the computer it adds is on the list the person
- * is left on. */
+/** The page Settings is on: a remembered page whose noun is gone falls back to its group. The Add a computer door
+ * is a move, not an override: it writes Computers as the page, so the computer it adds is on the list the person is
+ * left on. */
 export function useSettingsAt(): SettingsAt {
   const stored = useSettingsStore(s => s.at);
-  const setupOpen = useStore(s => s.setupOpen);
   const places = useStore(s => s.places);
   const projects = useStore(s => s.projects);
-  if (setupOpen) return resolveAt({ kind: "computer", id: SETUP_CLOUD.id }, places, projects);
   return resolveAt(stored, places, projects);
 }

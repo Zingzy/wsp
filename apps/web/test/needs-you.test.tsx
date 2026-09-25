@@ -10,6 +10,7 @@ import { NEEDS_YOU, askingLine, initNeedsYouLine, workspaceAwakeLine, type InitN
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { useHostNotices } from "../src/notices/hostNotices.js";
 import { askToNotify, needsYouRoad, resetAskedToNotify } from "../src/shell/needsYou.js";
 import { clearNotices, lastNotice } from "./notice-text.js";
@@ -49,7 +50,7 @@ beforeEach(() => {
   Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
   vi.stubGlobal("Notification", FakeNotification);
   document.title = "wsp";
-  useStore.setState({ api: null, initJob: null, setupOpen: false });
+  useStore.setState({ api: null, initJob: null, settingsOpen: false });
   clearNotices();
 });
 afterEach(() => {
@@ -146,17 +147,18 @@ describe("a browser tab's road out of the app", () => {
     expect(FakeNotification.asked).toBe(0);
   });
 
-  it("says the need with the app's name and no sound while the tab is hidden, and a click focuses the tab and opens the setup", () => {
+  it("says the need with the app's name and no sound while the tab is hidden, and a click focuses the tab and opens Computers, where the build's card is", () => {
     const emit = bindEvents();
     render(<Harness />);
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
     emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED });
     expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: "sign in to GitHub CLI login", silent: true }]);
-    expect(useStore.getState().setupOpen).toBe(false);
+    expect(useStore.getState().settingsOpen).toBe(false);
     FakeNotification.last!.onclick!();
     expect(focus).toHaveBeenCalled();
     expect(FakeNotification.last!.closed).toBe(1);
-    expect(useStore.getState().setupOpen).toBe(true);
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useSettingsStore.getState().at).toEqual({ kind: "group", group: "computers" });
     focus.mockRestore();
   });
 
@@ -222,7 +224,7 @@ describe("a machine that came up while the person looked away", () => {
     FakeNotification.last!.onclick!();
     expect(focus).toHaveBeenCalled();
     // The click lands on the machine that came up, not on the build screen a need's click opens.
-    expect([useStore.getState().selectedId, useStore.getState().setupOpen]).toEqual(["ws_1", false]);
+    expect([useStore.getState().selectedId, useStore.getState().settingsOpen]).toEqual(["ws_1", false]);
     focus.mockRestore();
   });
 
@@ -260,10 +262,11 @@ describe("the desktop shell's road out of the app", () => {
     expect(said).toEqual([NEED]);
     // The browser's own notifications are never used where a shell owns them.
     expect(FakeNotification.built).toEqual([]);
-    // The shell's click comes back over the bridge and opens the setup here.
-    expect(useStore.getState().setupOpen).toBe(false);
+    // The shell's click comes back over the bridge and opens Computers here.
+    expect(useStore.getState().settingsOpen).toBe(false);
     handlers[0]!();
-    expect(useStore.getState().setupOpen).toBe(true);
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useSettingsStore.getState().at).toEqual({ kind: "group", group: "computers" });
   });
 
   it("a shell too old to take a need falls back to the browser's own road, so nothing is silently dropped", () => {
