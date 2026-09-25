@@ -124,7 +124,6 @@ export const AGENTS_LIST_WORDS = {
   firstOf: (shown: number, all: number): string => `shows the first ${shown} KB of ${all} KB`,
   removeTitle: (name: string): string => `Remove ${name}?`,
   removeBody: (computer: string): string => `Its folder and every link to it leave ${computer}.`,
-  preview: "SKILL.md",
 } as const;
 
 /** Compact counts the way skills.sh draws them: 3.6M, 201K, 12. */

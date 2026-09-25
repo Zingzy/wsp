@@ -97,6 +97,18 @@ describe("a skill's detail", () => {
     expect(h.previews).toHaveLength(1);
   });
 
+  it("reads the SKILL.md again off the new computer when the target under an open detail changes", async () => {
+    const h = host();
+    const { rerender } = render(<List />);
+    tab("Skills");
+    openRow("skill-user-frontend-design");
+    await settle();
+    rerender(<List report={{ ...AGENTS_REPORT, target: { placeId: "p_other" } }} />);
+    await settle();
+    expect(h.previews.map(([target]) => target)).toEqual([{ placeId: "p_spoo" }, { placeId: "p_other" }]);
+    expect(detail().querySelector("[data-k=skill-preview-body] h1")?.textContent).toBe("Frontend design");
+  });
+
   it("says how much of a long SKILL.md it shows, and the host's sentence where the read was refused", async () => {
     host({ preview: { text: "# big\n", size: 130 * 1024 } });
     render(<List />);

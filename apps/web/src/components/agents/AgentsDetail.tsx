@@ -188,8 +188,8 @@ function ChoiceLine({ choice }: { choice: Choice }) {
 export function DetailLevel({ view, back, backLabel }: { view: DetailView; back: () => void; backLabel: string }) {
   const { headRef, onKeyDown } = useLevelKeys(back);
   const load = view.doc?.load;
-  // The document is read once, when the level opens.
-  useEffect(() => load?.(), []);
+  // Asked at every draw, since the target under an open level can change; the road asks each target once.
+  useEffect(() => load?.());
   let labelFor = "";
   return (
     <div data-agents-detail onKeyDown={onKeyDown} className="flex flex-col pb-4">

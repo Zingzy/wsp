@@ -48,6 +48,23 @@ describe("skills.sh, asked by this host alone", () => {
     await expect(searchSkills(down, "x", 5)).rejects.toThrow("skills.sh did not answer: getaddrinfo ENOTFOUND skills.sh");
   });
 
+  it("stops reading an answer the moment it runs past its cap, whatever length it claims", async () => {
+    let pulled = 0;
+    const endless: SkillsFetch = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull: c => {
+            pulled += 1;
+            c.enqueue(new Uint8Array(64 * 1024).fill(32));
+          },
+        }),
+      );
+    await expect(searchSkills(endless, "x", 5)).rejects.toThrow("skills.sh answered over 1 MB, which is not read.");
+    expect(pulled).toBeLessThan(40);
+    const claims: SkillsFetch = async () => new Response("{}", { headers: { "content-length": String(64 * 1024 * 1024) } });
+    await expect(getSkill(claims, "a/b/c")).rejects.toThrow("skills.sh answered over 12 MB, which is not read.");
+  });
+
   it("reads a skill by its owner, repo and name, and refuses an id of any other shape before asking", async () => {
     const { fetch, asked } = fake({ "/api/download/anthropics/skills/pdf": { body: pdf } });
     const got = await getSkill(fetch, "anthropics/skills/pdf");

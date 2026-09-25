@@ -35,9 +35,8 @@ export function useSkillActs(target: AgentsTarget | null): SkillActs | undefined
     current.current = targetKey;
   }, [targetKey]);
   const shown = held.targetKey === targetKey ? held : fresh(targetKey);
-  // What was already asked, read synchronously so a second render asks nothing twice.
+  // What was already asked of which target, read synchronously so a second render asks nothing twice.
   const asked = useRef(new Set<string>());
-  useEffect(() => void asked.current.clear(), [targetKey]);
 
   const put = useCallback(
     <K extends Part>(part: K, key: string, value: Held[K][string] | undefined, forKey: string | null = targetKey): void =>
@@ -56,7 +55,8 @@ export function useSkillActs(target: AgentsTarget | null): SkillActs | undefined
   const acts = useMemo<SkillActs | undefined>(() => {
     if (!readable || api === null) return undefined;
     const at = JSON.parse(targetKey) as AgentsTarget;
-    const once = (key: string, run: () => void): void => {
+    const once = (what: string, run: () => void): void => {
+      const key = `${targetKey}\0${what}`;
       if (asked.current.has(key)) return;
       asked.current.add(key);
       run();
@@ -106,7 +106,7 @@ export function useSkillActs(target: AgentsTarget | null): SkillActs | undefined
             hits => put("searches", query, { reading: false, hits }),
             (e: unknown) => {
               // A refused search is asked again when the person types it again.
-              asked.current.delete(`search ${query}`);
+              asked.current.delete(`${targetKey}\0search ${query}`);
               put("searches", query, { reading: false, error: errorText(e) });
             },
           );

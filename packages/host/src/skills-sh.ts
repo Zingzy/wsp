@@ -45,6 +45,30 @@ export function skillIdOf(id: string): { owner: string; repo: string; skill: str
 
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
 
+/** An answer's body read up to `max` bytes, the read stopped and refused the moment it goes past. */
+async function capped(res: Response, max: number): Promise<Uint8Array> {
+  const over = (): Error => new Error(`skills.sh answered over ${Math.round(max / 1024 / 1024)} MB, which is not read.`);
+  if (Number(res.headers.get("content-length") ?? 0) > max) {
+    await res.body?.cancel();
+    throw over();
+  }
+  const reader = res.body?.getReader();
+  if (reader === undefined) return new Uint8Array();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel();
+      throw over();
+    }
+    parts.push(value);
+  }
+  return Buffer.concat(parts);
+}
+
 async function ask(fetch: SkillsFetch, path: string, max: number, missing: string): Promise<unknown> {
   let res: Response;
   try {
@@ -54,8 +78,7 @@ async function ask(fetch: SkillsFetch, path: string, max: number, missing: strin
   }
   if (res.status === 404) throw usage(missing);
   if (!res.ok) throw new Error(`skills.sh answered ${res.status}.`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  if (bytes.byteLength > max) throw new Error(`skills.sh answered over ${Math.round(max / 1024 / 1024)} MB, which is not read.`);
+  const bytes = await capped(res, max);
   try {
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
