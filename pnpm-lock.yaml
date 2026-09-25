@@ -33,6 +33,9 @@ importers:
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
+      '@wsp/catalog':
+        specifier: workspace:*
+        version: link:../../packages/catalog
       '@wsp/host':
         specifier: workspace:*
         version: link:../../packages/host

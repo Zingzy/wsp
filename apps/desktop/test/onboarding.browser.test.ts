@@ -10,13 +10,14 @@
 // and no focus ring sits at rest however a screen was reached. Like the web's
 // render tests it runs only when asked for (WSP_RENDER=1) and skips without
 // Playwright's Chromium.
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Browser, CDPSession, Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { launchRender, renderSkipped, stopRender } from "../../web/test/render-browser.js";
+import { writeGlyphs } from "../scripts/glyphs.mjs";
 
 const DESKTOP = fileURLToPath(new URL("..", import.meta.url));
 const WEB = join(DESKTOP, "..", "web");
@@ -38,6 +39,7 @@ const AGENTS = [
   { id: "gemini", name: "Gemini CLI", found: false, configured: false },
   { id: "hermes", name: "Hermes", found: false, configured: false },
   { id: "opencode", name: "OpenCode", found: false, configured: false },
+  { id: "crush", name: "Crush", found: false, configured: false },
 ];
 
 /** The words the agents screen says under its card and on its keycap. */
@@ -54,9 +56,7 @@ function stagePage(): string {
   const assets = join(WEB, "dist", "assets");
   const css = readdirSync(assets).find(f => /^index-.*\.css$/.test(f));
   if (css === undefined) throw new Error(`the web app is not built: no stylesheet under ${assets}`);
-  const glyphs = join(WEB, "src", "assets", "agents");
-  cpSync(glyphs, join(dir, "agents"), { recursive: true });
-  const ids = readdirSync(glyphs).filter(f => f.endsWith(".svg")).map(f => f.slice(0, -4));
+  const ids = writeGlyphs(join(dir, "agents"));
   const page = readFileSync(join(DESKTOP, "src", "onboarding.html"), "utf8").replace("__WEB_CSS__", pathToFileURL(join(assets, css)).href).replace("__AGENT_GLYPHS__", JSON.stringify(ids));
   writeFileSync(join(dir, "onboarding.html"), page);
   return dir;
@@ -216,7 +216,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
       els.map(el => {
         const check = el.querySelector("input")!;
         const glyph = el.querySelector<HTMLElement>(".glyph");
-        return { name: el.querySelector(".name")!.textContent ?? "", state: el.querySelector(".state")!.textContent ?? "", checked: check.checked, disabled: check.disabled, mark: glyph?.dataset["agent"] ?? el.querySelector(".initial")?.textContent ?? "" };
+        return { name: el.querySelector(".name")!.textContent ?? "", state: el.querySelector(".state")!.textContent ?? "", checked: check.checked, disabled: check.disabled, mark: glyph === null ? (el.querySelector(".initial")?.textContent ?? "") : getComputedStyle(glyph).backgroundColor === "rgba(0, 0, 0, 0)" ? `unpainted ${glyph.dataset["agent"]}` : (glyph.dataset["agent"] ?? "") };
       }),
     );
   const keycap = (): Promise<string> => page!.$eval("#open", el => (el.textContent ?? "").replace(/→/, "").trim());
@@ -293,9 +293,10 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
       { name: "Claude Code", state: "on this Mac", checked: true, disabled: false, mark: "claude" },
       { name: "Codex", state: "on this Mac", checked: true, disabled: false, mark: "codex" },
       { name: "Gemini CLI", state: "not installed", checked: false, disabled: true, mark: "gemini" },
-      // An agent with no glyph beside the page draws its initial.
-      { name: "Hermes", state: "not installed", checked: false, disabled: true, mark: "H" },
+      { name: "Hermes", state: "not installed", checked: false, disabled: true, mark: "hermes" },
       { name: "OpenCode", state: "not installed", checked: false, disabled: true, mark: "opencode" },
+      // An agent with no glyph beside the page draws its initial.
+      { name: "Crush", state: "not installed", checked: false, disabled: true, mark: "C" },
     ]);
     expect(await page!.textContent("#line")).toBe(LINES.some);
     expect(await keycap()).toBe("Open wsp");
@@ -310,9 +311,9 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
     const head = await box("#agents .head");
     const card = await box("#rows");
     expect(Math.round(card.y - (head.y + head.h))).toBe(64);
-    expect(await page!.$$eval("#rows .row", els => els.map(el => el.getBoundingClientRect().height))).toEqual([48, 48, 48, 48, 48]);
+    expect(await page!.$$eval("#rows .row", els => els.map(el => el.getBoundingClientRect().height))).toEqual(AGENTS.map(() => 48));
     // The hairline between rows sits inside each 48 px row; the card's own border adds one pixel over and under.
-    expect(card.h).toBe(5 * 48 + 2);
+    expect(card.h).toBe(AGENTS.length * 48 + 2);
     expect(Math.round((await box("#line")).y - (card.y + card.h))).toBe(12);
     const foot = await box("#agents .foot");
     expect(Math.round((await box("#open")).y - foot.y)).toBe(56);
