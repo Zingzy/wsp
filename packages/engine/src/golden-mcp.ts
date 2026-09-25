@@ -5,7 +5,8 @@
 // why, and the prefixes that read differently on the machine. The files are
 // read off the machine, edited here by the catalog format's own module, and the
 // bytes land back; the machine runs nothing of its own for it.
-import { BREW_PREFIX, GUEST_HOME, MAC_BIN_DIRS, MAC_BREW } from "@wsp/catalog";
+import { randomBytes } from "node:crypto";
+import { BREW_PREFIX, GUEST_HOME, MAC_BIN_DIRS, MAC_BREW, configLanding, configRefusal, configSum, configWriteLine } from "@wsp/catalog";
 import type { McpEditLib, McpEditResult, McpFormat, McpMergeResult } from "@wsp/catalog";
 import { MCP_ID_PREFIX, shellQuote } from "@wsp/protocol";
 import { TOOLS_PATH, UV_INSTALL, WITHHELD_NOTE, withheld, type RecipeEntry } from "./golden-import.js";
@@ -170,6 +171,8 @@ export function readConfigsCmd(scopes: readonly { files: readonly string[] }[]):
 export interface ScopeFile {
   path: string;
   text: string;
+  /** The file's checksum as read, which the write compares the file with before it goes over it. */
+  sum: string;
 }
 
 /** What the read printed, one entry per scope in plan order; nothing when not one line carried the mark, since the
@@ -183,7 +186,9 @@ export function parseConfigs(stdout: string, scopes: readonly { files: readonly 
     if (words[0] !== MCP_READ_MARK || words.length < 3) continue;
     answered = true;
     const path = scopes[Number(words[1])]?.files[Number(words[2])];
-    if (path !== undefined) out[Number(words[1])] = { path, text: Buffer.from(words[3] ?? "", "base64").toString("utf8") };
+    if (path === undefined) continue;
+    const bytes = Buffer.from(words[3] ?? "", "base64");
+    out[Number(words[1])] = { path, text: bytes.toString("utf8"), sum: configSum(bytes) };
   }
   return answered ? out : undefined;
 }
@@ -241,41 +246,27 @@ function editScopes(plan: McpPlan, agents: readonly McpAgentPlan[], read: readon
   return { outcomes, texts };
 }
 
-/** Where a config's edited bytes land before they go over it, and the copy of it they are poured into. The copy
- * is named here for every road that writes such a file back, this one and the leave's own on that computer. */
-const landing = (path: string): string => `${path}.wsp-mcp`;
-export const besideConfig = (path: string): string => `${path}.wsp-new`;
-
-/** The bytes land beside the file, are poured into a copy of it and that copy is renamed over it. The pour keeps
- * the file's own mode, since a signed upload writes a new file at the road's own and a config that held a login
- * would come back readable to anyone on the machine; the rename means an agent launching in that moment reads the
- * whole of one copy or the whole of the other, never a file cut in half. */
-const pourOver = (path: string): string =>
-  [
-    `if [ -f ${shellQuote(path)} ]; then cp -p ${shellQuote(path)} ${shellQuote(besideConfig(path))}; else : > ${shellQuote(besideConfig(path))}; fi`,
-    `cat ${shellQuote(landing(path))} > ${shellQuote(besideConfig(path))}`,
-    `mv ${shellQuote(besideConfig(path))} ${shellQuote(path)}`,
-    `rm -f ${shellQuote(landing(path))}`,
-  ].join("\n");
-
-/** Puts every config the edit changed back on the machine; the words when one of them did not land. A landing that
- * was never poured over is swept: it holds the whole config at the upload road's own mode, and the machine it sits
- * on is about to be sealed into an image. */
-export async function landConfigs(machine: Machine, read: readonly (ScopeFile | undefined)[], texts: ReadonlyMap<string, string>): Promise<string | undefined> {
-  const was = new Map(read.flatMap(f => (f === undefined ? [] : [[f.path, f.text] as const])));
-  const changed = [...texts].filter(([path, text]) => was.get(path) !== text);
+/** Puts every config the edit changed back on the machine, each by the one config write inside `base`, from a
+ * landing beside it; the words when one of them did not land. A landing the write never took is swept: it holds the
+ * whole config at the upload road's own mode, and the machine it sits on may be about to be sealed into an image. */
+export async function landConfigs(machine: Machine, base: string, read: readonly (ScopeFile | undefined)[], texts: ReadonlyMap<string, string>): Promise<string | undefined> {
+  const was = new Map(read.flatMap(f => (f === undefined ? [] : [[f.path, f] as const])));
+  const changed = [...texts].filter(([path, text]) => was.get(path)?.text !== text).map(([path, text]) => ({ path, bytes: new TextEncoder().encode(text), landing: configLanding(path, randomBytes(6).toString("hex")) }));
   if (changed.length === 0) return undefined;
   const swept = async (why: string): Promise<string> => {
-    await machine.exec(`rm -f ${changed.flatMap(([path]) => [shellQuote(landing(path)), shellQuote(besideConfig(path))]).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
+    await machine.exec(`rm -f ${changed.map(c => shellQuote(c.landing)).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
     return `the edited config did not land (${why})`;
   };
   try {
-    for (const [path, text] of changed) await landBytes(machine, landing(path), new TextEncoder().encode(text), { timeoutMs: READ_MS });
+    for (const c of changed) await landBytes(machine, c.landing, c.bytes, { timeoutMs: READ_MS });
   } catch (e) {
     return swept(e instanceof Error ? e.message : String(e));
   }
-  const res = await machine.exec(["set -e", ...changed.map(([path]) => pourOver(path))].join("\n"), { timeoutMs: INLINE_EXEC_MS }).catch(refused);
-  return res.exitCode === 0 ? undefined : swept(reasonOf(res, INLINE_EXEC_MS / 1000));
+  // Each write in a subshell of its own, so its exit and its trap are its own and the first refusal stops the rest.
+  const line = changed.map(c => `(\n${configWriteLine({ file: c.path, base, bytes: c.bytes.length, from: c.landing, ...(was.has(c.path) ? { sum: was.get(c.path)!.sum } : {}) })}\n) || exit $?`).join("\n");
+  const res = await machine.exec(line, { timeoutMs: INLINE_EXEC_MS }).catch(refused);
+  if (res.exitCode === 0) return undefined;
+  return swept(configRefusal(res, changed[0]!.path, p => p) ?? reasonOf(res, INLINE_EXEC_MS / 1000));
 }
 
 interface Pending extends McpResult {
@@ -379,11 +370,6 @@ export function withoutAbsent(plan: McpPlan, agents: readonly McpAgentPlan[], re
 export const mcpOpening = (agents: readonly McpAgentPlan[]): string =>
   agents.map(a => `${a.label} ${a.scopes.reduce((n, s) => n + s.keep.length + s.drop.length, 0) + a.aside.length}`).join(", ");
 
-/** What a person is told about a file whose comments a rewrite did not keep: the one sentence for it, read by the
- * install on this computer and by every server's row on a computer somebody owns, since one file and two roads
- * must not word the same loss two ways. */
-export const commentsDroppedLine = (path: string): string => `${path} held comments; the rewrite is plain JSON, so they are gone`;
-
 /** Every server of a plan as a row, and the words a person reads for them, whichever road wrote the configs: one
  * row per kept name, per dropped name and per name set aside, uv installed where a kept server runs through it and
  * is missing, each server whose command the machine does not have named on its row, and the closing line. `report`
@@ -476,7 +462,7 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
     agents = withoutAbsent(plan, agents, first.outcomes, missing, tools);
     const second = editScopes(plan, agents, files);
     report = second.outcomes;
-    failure = await landConfigs(machine, files, second.texts);
+    failure = await landConfigs(machine, plan.guestHome, files, second.texts);
   }
   return mcpRows(machine, plan, { agents, report, missing, stage, ...(failure !== undefined ? { failure } : {}) });
 }

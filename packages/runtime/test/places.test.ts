@@ -1139,7 +1139,7 @@ describe("taking a place back out", () => {
     // What came out of the agent's own file is said beside what the place's own sweep took.
     expect(answer["swept"]).toEqual([`context7 (out of ${config})`, `${home}/.wsp`]);
     // And the file was written back over the link before the leave took the folder holding the list.
-    const wrote = order.findIndex(cmd => cmd.includes(`${config}.wsp-new`));
+    const wrote = order.findIndex(cmd => cmd.includes(`f='${config}'`) && cmd.includes('mv -f "$n" "$r"'));
     expect(wrote, order.join("\n")).toBeGreaterThanOrEqual(0);
     expect(wrote).toBeLessThan(order.indexOf("place.leave"));
   });

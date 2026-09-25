@@ -5,17 +5,14 @@
 
 export interface Jsonc {
   value: unknown;
-  /** The text held a comment, which a rewrite as plain JSON loses. */
-  comments: boolean;
 }
 
-/** The value the text holds and whether it carried comments; a real syntax error throws as JSON.parse does. One pass
+/** The value the text holds; a real syntax error throws as JSON.parse does. One pass
  * over the text that copies its spans, since an agent's config runs to tens of megabytes. */
 export function readJsonc(text: string): Jsonc {
   const out: string[] = [];
   let from = 0;
   let i = 0;
-  let comments = false;
   /** Where in `out` the last comma stands while only whitespace and comments follow it, else -1. */
   let comma = -1;
   while (i < text.length) {
@@ -25,7 +22,6 @@ export function readJsonc(text: string): Jsonc {
       for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === "\\") i++;
       i++;
     } else if (c === "/" && (text[i + 1] === "/" || text[i + 1] === "*")) {
-      comments = true;
       out.push(text.slice(from, i));
       const end = text[i + 1] === "/" ? text.indexOf("\n", i) : text.indexOf("*/", i + 2);
       i = end < 0 ? text.length : text[i + 1] === "/" ? end : end + 2;
@@ -42,7 +38,7 @@ export function readJsonc(text: string): Jsonc {
     }
   }
   out.push(text.slice(from));
-  return { value: JSON.parse(out.join("")), comments };
+  return { value: JSON.parse(out.join("")) };
 }
 
 export const parseJsonc = (text: string): unknown => readJsonc(text).value;

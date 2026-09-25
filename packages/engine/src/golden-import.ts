@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, TOOLS_PATH, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, GUEST_HOME, installEnv, installHomes, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, editJson, GUEST_HOME, installEnv, installHomes, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, parseJsonc, ROAD_MODULES, roadModule, ROADS, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -308,6 +308,9 @@ export function neverCopied(e: Pick<RecipeEntry, "id" | "rung" | "consent">, rel
 
 const under = (home: string, abs: string): boolean => abs === home || abs.startsWith(`${home}/`);
 
+/** A hosts.yml line without its comment, which starts at a # after white space or at the line's start. */
+const yamlCode = (line: string): string => line.replace(/(^|\s)#.*$/, "");
+
 /** The accounts gh's hosts.yml lists under a host, in file order, and the one it marks active. */
 export function ghAccounts(hostsYml: string, host: string): { users: string[]; active?: string } {
   const users: string[] = [];
@@ -316,8 +319,9 @@ export function ghAccounts(hostsYml: string, host: string): { users: string[]; a
   let inUsers = false;
   for (const line of hostsYml.split("\n")) {
     const indent = line.length - line.trimStart().length;
-    const t = line.trim();
-    if (indent === 0 && t !== "") {
+    const t = yamlCode(line).trim();
+    if (t === "") continue;
+    if (indent === 0) {
       inHost = t === `${host}:`;
       inUsers = false;
     } else if (!inHost) {
@@ -344,8 +348,13 @@ export function dropGhAccount(host: string, existing: string, account: string): 
   let inAccount = false;
   for (const line of existing.split("\n")) {
     const indent = line.length - line.trimStart().length;
-    const t = line.trim();
-    if (indent === 0 && t !== "") {
+    const t = yamlCode(line).trim();
+    if (t === "") {
+      // A comment nested in the account goes with it; every other comment and blank line stands.
+      if (!(inAccount && indent > 8)) out.push(line);
+      continue;
+    }
+    if (indent === 0) {
       inHost = t === `${host}:`;
       inUsers = false;
       inAccount = false;
@@ -359,7 +368,7 @@ export function dropGhAccount(host: string, existing: string, account: string): 
       inAccount = false;
     }
     if (indent === 8 && inUsers) inAccount = t === `${account}:`;
-    if (inAccount && t !== "") continue;
+    if (inAccount) continue;
     if (indent === 4 && t === "users:" && left.length === 0) continue;
     if (indent === 4 && /^user:\s*(\S+)$/.exec(t)?.[1] === account) {
       if (left.length > 0) out.push(`    user: ${left[0]}`);
@@ -385,8 +394,12 @@ export function placeGhToken(host: string, token: string, existing: string | und
   let seen = false;
   for (const line of existing.split("\n")) {
     const indent = line.length - line.trimStart().length;
-    const t = line.trim();
-    if (indent === 0 && t !== "") {
+    const t = yamlCode(line).trim();
+    if (t === "") {
+      out.push(line);
+      continue;
+    }
+    if (indent === 0) {
       inHost = t === `${host}:`;
       inUsers = false;
       inAccount = false;
@@ -434,22 +447,20 @@ const KEYCHAIN: Record<string, KeychainItem> = {
   },
 };
 
-/** The settings file with its apiKeyHelper set to the line given, or taken out with none; a file that is not
- * JSON or names no helper is returned as it is. Absent, a file is made for the helper alone. */
+/** The settings file with its apiKeyHelper set to the line given, or taken out with none, in place so every comment
+ * of the person's stands; a file that is not JSON or names no helper is returned as it is. Absent, a file is made for
+ * the helper alone. */
 export function withApiKeyHelper(text: string | undefined, helper: string | undefined): string | undefined {
   if (text === undefined) return helper === undefined ? undefined : `${JSON.stringify({ apiKeyHelper: helper }, null, 2)}\n`;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = parseJsonc(text);
   } catch {
     return text;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return text;
-  const settings = parsed as Record<string, unknown>;
-  if (!("apiKeyHelper" in settings) && helper === undefined) return text;
-  if (helper === undefined) delete settings["apiKeyHelper"];
-  else settings["apiKeyHelper"] = helper;
-  return `${JSON.stringify(settings, null, 2)}\n`;
+  if (!("apiKeyHelper" in parsed) && helper === undefined) return text;
+  return editJson(text, [[["apiKeyHelper"], helper]]);
 }
 
 /** Where every login the pack copies lands on the guest, home-relative and before the pack's own rewrites: what the
