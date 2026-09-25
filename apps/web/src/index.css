@@ -2152,6 +2152,15 @@ html.desktop-mac:is(.dark, [data-theme="dark"]):has([data-terminal-translucent])
   background: rgb(6 6 6 / var(--material-centre));
 }
 
+/* The same in the right panel: holding a translucent terminal, its share moves onto the tab strip. */
+html.desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) {
+  background: transparent;
+}
+
+html.desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) [data-right-panel-tabbar] {
+  background: rgb(6 6 6 / var(--material-panel));
+}
+
 .desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"] {
   background: rgb(6 6 6 / var(--material-panel));
   border-color: var(--contrast-border);
