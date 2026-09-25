@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A saved key reaches the runtime's provider slot and the provider it names
-// gets its copy of the image kept current; a runtime made without a slot says
-// so instead of taking the key and doing nothing with it.
+// A saved key reaches the runtime's provider slot and builds nothing there, since
+// a copy bills and is built on a press; a runtime made without a slot says so
+// instead of taking the key and doing nothing with it.
 import { createRuntime, memoryStore } from "@wsp/runtime";
 import { describe, expect, it } from "vitest";
 import { makeRuntime, providerSlotOf, swapProvider } from "../src/cli.js";
@@ -13,14 +13,14 @@ describe("the provider slot behind a host's runtime", () => {
     const rt = makeRuntime({}, "/tmp/wsp-provider-swap/state.json");
     try {
       expect(providerSlotOf(rt)?.current().capabilities.previewUrls).toBe(false);
-      // The key is up: the provider is a place, and its copy is kept current behind the save.
+      // The key is up: the provider is a place, and no copy is built behind the save.
       const kept: string[] = [];
       rt.image.keepCurrent = async place => {
         kept.push(place);
       };
       swapProvider(rt, { [SOLARI_KEY_ENV]: "slr_live_fake" });
       expect(providerSlotOf(rt)?.current().capabilities.previewUrls).toBe(true);
-      expect(kept).toEqual(["solari"]);
+      expect(kept).toEqual([]);
     } finally {
       await rt.close();
     }
