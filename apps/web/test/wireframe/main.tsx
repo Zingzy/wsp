@@ -57,7 +57,7 @@
 //   settings-about-restart 0.3.0 installed under the running 0.2.0 host, which a restart brings back
 //   settings-search       "width" typed in the field
 //   settings-over-panel   a workspace's panel open, then Settings over it
-//   settings-add-computer the Add a computer sheet over Computers
+//   settings-add-computer Computers scrolled to Add a computer, the ssh road open
 //   settings-add-computer-failed  the same, the add refused while the reach step ran
 //   settings-remove-computer  the Remove dialog over the box's page
 //   bring-back-paused    the row's menu on a machine that is stopped, with

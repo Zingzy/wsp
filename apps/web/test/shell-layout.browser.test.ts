@@ -109,7 +109,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 30_000);
 
-  it("in the desktop window a translucent Ghostty config opens a hole under the terminal canvas alone: the tab strip and the column beside keep the Browser tab's backgrounds, every layer under the canvas is clear and the canvas backing carries the file's alpha, in both themes", async () => {
+  it("in the desktop window a translucent Ghostty config opens a hole under the terminal canvas alone: the tab strip keeps the Browser tab's background, in dark the centre's share moves off the column onto the thread and its header, every layer under the canvas is clear and the canvas backing carries the file's alpha, in both themes", async () => {
     // What an element sits on: the first painted background walking up from it, or "none" when the window shows through.
     const backdrops = () =>
       page!.evaluate(() => {
@@ -120,7 +120,13 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
           }
           return "none";
         };
-        return { strip: on("[data-right-panel-tabbar]"), centre: on("[data-shell-center]"), canvas: on("[data-terminal-viewport] canvas") };
+        return {
+          strip: on("[data-right-panel-tabbar]"),
+          centre: on("[data-shell-center]"),
+          header: on("[data-shell-center] > header"),
+          beside: on("[data-terminal-beside]"),
+          canvas: on("[data-terminal-viewport] canvas"),
+        };
       });
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&ws=ws_a&mac=1&panel=terminal`);
@@ -137,7 +143,15 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(browser.strip).not.toBe("none");
       // The strip wears the panel's share and the centre its own; in dark mode on the Mac those differ on purpose.
       expect(terminal.strip).toBe(browser.strip);
-      expect(terminal.centre).toBe(browser.centre);
+      if (theme === "dark") {
+        // In dark the glass shows through the canvas, so the centre column paints nothing and the thread and its header carry its share.
+        expect(terminal.centre).toBe("none");
+        expect(browser.centre).not.toBe("none");
+        expect(terminal.header).toBe(browser.centre);
+        expect(terminal.beside).toBe(browser.centre);
+      } else {
+        expect(terminal.centre).toBe(browser.centre);
+      }
       await page!.locator("[data-right-panel-tab-list] [data-active-tab='false'] button:has(> span.truncate)").click();
       await page!.waitForSelector("[data-terminal-viewport] canvas");
       const path = join(SHOTS_DIR, `terminal-pane-${theme}.png`);
