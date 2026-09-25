@@ -2881,6 +2881,11 @@ export const PlaceView = z.object({
   /** The copy of the image at this place while it is not standing: the stage sentence while a build runs there, the
    * reason after one stopped there. Absent once the copy stands, and on a place nothing was ever built at. */
   build: z.string().optional(),
+  /** Set when `build` is the reason a build there stopped rather than the stage of one running. */
+  buildStopped: z.boolean().optional(),
+  /** Whether a copy of the image can stand here at all, by buildsImages over this place's own capabilities. Absent on
+   * a joined computer that has not yet said what it forks with. */
+  buildsImages: z.boolean().optional(),
   /** The recipe on this computer: what is being put on it, then what stands and what failed. Absent on a provider,
    * on this computer itself, and on a computer nothing has provisioned yet. */
   provision: PlaceProvision.optional(),
@@ -4870,6 +4875,9 @@ export const placeNoLinkLine = (name: string): string => `${name} took the agent
 /** What a stage reads while the computer it is running on has no link: the requests behind it are held until that
  * computer opens a socket again, and a stage with no line of its own reads as one that stopped. */
 export const placeDialBackLine = (name: string): string => `waiting for ${name} to dial back`;
+
+/** Why a build on a joined computer stopped when that computer's link went and it never dialled back in time. */
+export const placeWentAwayLine = (name: string): string => `${name} went away before the build finished`;
 
 /** The refusal wsp add over ssh gets on a host that wired no installer: the road that puts the agent on a computer
  * is the host command's, so a runtime served without one holds no way onto a machine it has never met. */

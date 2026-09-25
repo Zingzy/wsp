@@ -6,7 +6,7 @@ import { CLOUD_SETUP_WORDS, DEFAULT_THEME, HOSTNAME_KEPT, type GoldenManifest, t
 import { readProjectHome } from "../src/protocol/address.js";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
-import { useStore } from "../src/protocol/store.js";
+import { GOLDEN_FRAMES_KEPT, useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
@@ -343,6 +343,33 @@ describe("store creations", () => {
       ["image", "building your image on hetzner · taking the snapshot", "about 4.2 GB"],
       ["ready", "ready", undefined],
     ]);
+  });
+
+  it("keeps each place's image build frames by the word they name it with, the newest last and capped, the image's own build out of it, and starts a place over once a build there has ended", () => {
+    useStore.setState({ goldenFrames: {} });
+    const apply = useStore.getState().applyEvent;
+    apply({ type: "golden.stage", name: "default", stage: "creating", place: "hetzner" });
+    apply({ type: "golden.stage", name: "default", stage: "installing-tools" });
+    apply({ type: "golden.stage", name: "default", stage: "installing-harness", place: "box" });
+    for (let i = 0; i < GOLDEN_FRAMES_KEPT + 5; i++) apply({ type: "golden.stage", name: "default", stage: "installing-tools", detail: `row ${i}`, place: "hetzner" });
+    const frames = useStore.getState().goldenFrames;
+    expect(Object.keys(frames).sort()).toEqual(["box", "hetzner"]);
+    expect(frames["hetzner"]).toHaveLength(GOLDEN_FRAMES_KEPT);
+    expect(frames["hetzner"]!.at(-1)!.detail).toBe(`row ${GOLDEN_FRAMES_KEPT + 4}`);
+    apply({ type: "golden.stage", name: "default", stage: "failed", detail: "no room", place: "box" });
+    apply({ type: "golden.stage", name: "default", stage: "creating", place: "box" });
+    expect(useStore.getState().goldenFrames["box"]!.map(f => f.stage)).toEqual(["creating"]);
+  });
+
+  it("drops a removed place's build frames, and every pull starts the frames over, since a host that restarted mid-build holds no build to end them", () => {
+    const apply = useStore.getState().applyEvent;
+    useStore.setState({ goldenFrames: {} });
+    apply({ type: "golden.stage", name: "default", stage: "installing-tools", place: "p_1" });
+    apply({ type: "golden.stage", name: "default", stage: "installing-tools", place: "box" });
+    apply({ type: "place.removed", placeId: "p_1" });
+    expect(Object.keys(useStore.getState().goldenFrames)).toEqual(["box"]);
+    useStore.getState().bind(fakeApi([], []).api);
+    expect(useStore.getState().goldenFrames).toEqual({});
   });
 
   it("stamps an image line's elapsed from the moment the create was asked, so the log's right column grows", () => {

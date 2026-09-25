@@ -56,6 +56,7 @@ import {
   placeProvisioningLine,
   placeStillInstalledLine,
   placeDialBackLine,
+  placeWentAwayLine,
   workFolderIn,
   copyStoppedLine,
   NO_IMAGES_HERE,
@@ -3540,6 +3541,8 @@ describe("a computer joining a host that holds a sealed image", () => {
     // The fake computer runs no builder's setup, so the build stops there: the row says so in the seal's own
     // words, and the stopped build starts no second one on its own.
     await until(async () => (await rowOf(placeId)).build?.startsWith(copyStoppedLine()) === true, 5000);
+    expect((await rowOf(placeId)).buildStopped).toBe(true);
+    expect((await rowOf(placeId)).buildsImages).toBe(true);
     expect(frames.filter(f => f.place === placeId).map(f => f.stage)).toContain("failed");
     expect(place.killed).toHaveLength(1);
     expect((await runtime!.image.get()).copies.map(c => c.place)).toEqual(["solari"]);
@@ -3616,6 +3619,30 @@ describe("a computer joining a host that holds a sealed image", () => {
     // measured on (a runner read 299 ms of this 300 ms wait). Ten milliseconds of slack, rather than one, because
     // the gap is the two clocks drifting and not a fixed cost, and a wait that never happened is off by 300.
     expect(Date.now() - at).toBeGreaterThanOrEqual(300 - 10);
+  });
+
+  it("a copy build whose computer went and never dialled back ends stopped, saying it went away, and its next link puts no building frame back", async () => {
+    const { hostKey } = await imageHost({ sealed: true, relinkWaitMs: 300 });
+    const frames = framesOf();
+    let place!: ForkingPlace;
+    const joined = await join(hostKey, { code: await code(), name: "srv", answers: answering(p => (place = p)) });
+    await until(() => place.asked["machine.backend"] === 1);
+    place.swallow.add("machine.create");
+    const building = runtime!.image.build({ place: joined.placeId });
+    await until(() => place.asked["machine.create"] === 1, 5000);
+    joined.client.close();
+    await expect(building).rejects.toThrow();
+    const ours = (): GoldenStageEvent[] => frames.filter(f => f.place === joined.placeId);
+    expect(ours().at(-1)).toMatchObject({ stage: "failed", detail: placeWentAwayLine("srv") });
+    expect((await rowOf(joined.placeId)).build).toBe(copyStoppedLine(placeWentAwayLine("srv")));
+    expect((await rowOf(joined.placeId)).buildStopped).toBe(true);
+    const said = ours().length;
+    const linked = await relink(hostKey, joined.placeId, joined.pair, report("srv"), answering(() => undefined));
+    sockets.push(linked.client.ws);
+    await until(async () => (await rowOf(joined.placeId)).present === true);
+    await settled();
+    expect(ours().slice(said)).toEqual([]);
+    expect((await rowOf(joined.placeId)).buildStopped).toBe(true);
   });
 
   it("builds nothing for a computer whose doctor said no, since its join never stood, and nothing at all on a host that holds no image", async () => {
