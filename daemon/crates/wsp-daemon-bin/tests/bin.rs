@@ -375,6 +375,23 @@ fn count(pid: u32, what: &str) -> usize {
     std::fs::read_dir(format!("/proc/{pid}/{what}")).unwrap().count()
 }
 
+/// Polls a check on /proc until it holds or five seconds pass, since a pty's threads end after its exit event.
+async fn settles(mut holds: impl FnMut() -> bool) -> bool {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !holds() {
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    true
+}
+
+/// The daemon's threads less tokio's blocking pool, whose threads come for any file read and idle out after ten seconds.
+fn own_threads(pid: u32) -> usize {
+    thread_names(pid).iter().filter(|n| *n != "tokio-rt-worker").count()
+}
+
 fn thread_names(pid: u32) -> Vec<String> {
     std::fs::read_dir(format!("/proc/{pid}/task"))
         .unwrap()
@@ -388,14 +405,14 @@ async fn an_exited_pty_holds_its_scrollback_and_no_thread_or_fd_until_it_is_kill
     let (_dir, mut child, port) = plain_daemon(None).await;
     let pid = child.id().unwrap();
     let mut c = Peer::connect(port).await;
-    let (threads, fds) = (count(pid, "task"), count(pid, "fd"));
+    let (threads, fds) = (own_threads(pid), count(pid, "fd"));
     let mut ids = Vec::new();
     for _ in 0..10 {
         let created = c.request("pty.create", json!({ "shell": "bash" })).await;
         ids.push(created["ptyId"].as_str().unwrap().to_owned());
     }
-    assert!(count(pid, "task") >= threads + 30, "each live pty has its three threads");
-    assert!(thread_names(pid).iter().any(|n| n.starts_with("pty-w-")));
+    assert!(settles(|| own_threads(pid) >= threads + 30).await, "each live pty has its three threads: {:?}", thread_names(pid));
+    assert!(settles(|| thread_names(pid).iter().any(|n| n.starts_with("pty-w-"))).await, "{:?}", thread_names(pid));
     for id in &ids {
         assert_eq!(c.request("pty.write", json!({ "ptyId": id, "data": "exit\n" })).await["ok"], true);
     }
@@ -409,11 +426,9 @@ async fn an_exited_pty_holds_its_scrollback_and_no_thread_or_fd_until_it_is_kill
         assert!(tokio::time::Instant::now() < deadline, "every shell exits: {listed}");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    // The threads end with the exit; a moment for the last of them to be gone from /proc.
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(count(pid, "task"), threads, "threads after ten exits: {:?}", thread_names(pid));
-    assert_eq!(count(pid, "fd"), fds, "fds after ten exits");
-    assert!(!thread_names(pid).iter().any(|n| n.starts_with("pty-")));
+    assert!(settles(|| own_threads(pid) == threads).await, "threads after ten exits: {:?}", thread_names(pid));
+    assert!(settles(|| count(pid, "fd") == fds).await, "fds after ten exits: {} of {fds}", count(pid, "fd"));
+    assert!(!thread_names(pid).iter().any(|n| n.starts_with("pty-")), "{:?}", thread_names(pid));
     // The scrollback is still there for a late attach; the ten entries stay listed until pty.kill.
     assert_eq!(c.request("pty.attach", json!({ "ptyId": ids[0] })).await["ok"], true);
     assert!(c.events("pty.data").iter().any(|e| e["data"].as_str().unwrap_or("").contains("exit")));
