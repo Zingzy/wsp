@@ -10,6 +10,7 @@ import type { Capabilities, PlaceView, ProjectView , WorkspaceLanding } from "@w
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
 import "../../src/index.css";
+import "../../src/themes/index";
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");

@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import type { Creation, CreationLine } from "../../src/protocol/store";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
 import "../../src/index.css";
+import "../../src/themes/index";
 
 const params = new URLSearchParams(window.location.search);
 const count = Number(params.get("lines") ?? "2");

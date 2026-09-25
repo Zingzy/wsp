@@ -5,6 +5,7 @@
 // and a probe that reads the canvas back so a test can check the paint.
 import type { TerminalConfig } from "@wsp/protocol";
 import "../../src/index.css";
+import "../../src/themes/index";
 import { terminalThemeFromApp } from "../../src/components/ThreadTerminalDrawer";
 import type { GhosttyTheme } from "../../src/terminal/ghostty/core";
 import { appTerminalFontSize, GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";

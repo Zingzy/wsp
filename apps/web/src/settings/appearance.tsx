@@ -7,11 +7,12 @@ import type { SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import { ThemePicker } from "./ThemePicker.js";
 
-/** The one patch Restore defaults writes: the theme back to the record's default. */
-export const APPEARANCE_DEFAULTS: PreferencesPatch = { theme: DEFAULT_PREFERENCES.theme };
+/** The one patch Restore defaults writes: the side and each side's theme back to the record's defaults. */
+export const APPEARANCE_DEFAULTS: PreferencesPatch = { theme: DEFAULT_PREFERENCES.theme, lightTheme: DEFAULT_PREFERENCES.lightTheme, darkTheme: DEFAULT_PREFERENCES.darkTheme };
 
-/** Whether the theme is off its default, which is when Restore defaults stands. */
-export const appearanceOffDefaults = (p: Preferences): boolean => p.theme !== DEFAULT_PREFERENCES.theme;
+/** Whether any of those is off its default, which is when Restore defaults stands. */
+export const appearanceOffDefaults = (p: Preferences): boolean =>
+  p.theme !== DEFAULT_PREFERENCES.theme || p.lightTheme !== DEFAULT_PREFERENCES.lightTheme || p.darkTheme !== DEFAULT_PREFERENCES.darkTheme;
 
 export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
   const { preferences, setPreferences } = ctx;

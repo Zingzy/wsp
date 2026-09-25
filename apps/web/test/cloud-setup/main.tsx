@@ -15,6 +15,7 @@ import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./keyRefusedJob";
 import { useStore } from "../../src/protocol/store";
 import { CloudSetupDialog } from "../../src/sidebar/CloudSetupDialog";
 import "../../src/index.css";
+import "../../src/themes/index";
 import { caps } from "../caps.js";
 import { noDaemonApi } from "../fake-daemon-api.js";
 

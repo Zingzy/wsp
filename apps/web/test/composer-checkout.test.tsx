@@ -269,7 +269,7 @@ describe("composer checkout row", () => {
     expect(slot.querySelector("svg")).toBeNull();
     expect(slot.textContent).toBe(REPO_STATE_WORDS.refused.word);
     expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
-    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(["font-mono", "text-muted-foreground/70"]));
+    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(["font-mono", "text-muted-foreground"]));
     expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
     expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
     expect(folder()).toBe("/root");

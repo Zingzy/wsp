@@ -294,7 +294,20 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.theme).toBe("system");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system" });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite" });
+  });
+
+  it("a theme picked for either side is off the defaults, and Restore defaults puts both sides back", async () => {
+    const { api, sets } = settingsApi();
+    useStore.setState({ preferences: { ...useStore.getState().preferences, darkTheme: "denim" } });
+    mountSettings({ api });
+    await settle();
+    await waitFor(() => expect(restore()).not.toBeNull());
+    fireEvent.click(restore()!);
+    await waitFor(() => expect(restore()).toBeNull());
+    expect(useStore.getState().preferences.darkTheme).toBe("graphite");
+    await settle();
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite" });
   });
 });
 

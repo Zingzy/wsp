@@ -58,14 +58,14 @@ const buttonVariants = cva(
         destructive: `${KEYCAP_BEVEL} ${NEUTRAL_RING} border-destructive bg-destructive text-white shadow-destructive/24 shadow-xs [:disabled,:active,[data-pressed]]:shadow-none [:hover,[data-pressed]]:bg-destructive/90`,
         "destructive-outline": `${OUTLINE_SURFACE} ${OUTLINE_DARK_EDGE} text-destructive-foreground [:hover,[data-pressed]]:border-destructive/32 [:hover,[data-pressed]]:bg-destructive/4`,
         ghost:
-          "[--control-icon-color:var(--contrast-muted-foreground)] border-transparent text-foreground data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent",
+          "[--control-icon-color:var(--muted-foreground)] border-transparent text-foreground data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent",
         "ghost-muted":
-          "[--control-icon-color:var(--contrast-muted-foreground)] border-transparent text-muted-foreground data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent [:hover,[data-pressed]]:text-foreground",
+          "[--control-icon-color:var(--muted-foreground)] border-transparent text-muted-foreground data-pressed:bg-accent [:hover,[data-pressed]]:bg-accent [:hover,[data-pressed]]:text-foreground",
         glass:
-          "surface-glass [--control-icon-color:var(--contrast-muted-foreground)] border-border/60 text-foreground shadow-sm [:hover,[data-pressed]]:border-border",
+          "surface-glass [--control-icon-color:var(--muted-foreground)] border-border/60 text-foreground shadow-sm [:hover,[data-pressed]]:border-border",
         link: "border-transparent underline-offset-4 [:hover,[data-pressed]]:underline",
-        keycap: `${OUTLINE_SURFACE} ${KEYCAP_BEVEL} [--control-icon-color:var(--contrast-muted-foreground)] text-foreground [:hover,[data-pressed]]:bg-accent/50 dark:[:hover,[data-pressed]]:bg-input/64`,
-        outline: `${OUTLINE_SURFACE} ${OUTLINE_DARK_EDGE} [--control-icon-color:var(--contrast-muted-foreground)] text-foreground [:hover,[data-pressed]]:bg-accent/50 dark:[:hover,[data-pressed]]:bg-input/64`,
+        keycap: `${OUTLINE_SURFACE} ${KEYCAP_BEVEL} [--control-icon-color:var(--muted-foreground)] text-foreground [:hover,[data-pressed]]:bg-accent/50 dark:[:hover,[data-pressed]]:bg-input/64`,
+        outline: `${OUTLINE_SURFACE} ${OUTLINE_DARK_EDGE} [--control-icon-color:var(--muted-foreground)] text-foreground [:hover,[data-pressed]]:bg-accent/50 dark:[:hover,[data-pressed]]:bg-input/64`,
         secondary:
           "border-transparent bg-secondary text-secondary-foreground [:active,[data-pressed]]:bg-secondary/80 [:hover,[data-pressed]]:bg-secondary/90",
       },

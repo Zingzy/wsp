@@ -451,7 +451,7 @@ export function ComposerAccessPicker({ workspaceId, thread, onPickAccess }: { wo
       picks={picks}
       note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null}
       onPickAccess={onPickAccess}
-      className="h-7 gap-1.5 px-2 text-sm text-muted-foreground/70 sm:h-6 sm:text-xs [&_svg]:size-3"
+      className="h-7 gap-1.5 px-2 text-sm text-muted-foreground sm:h-6 sm:text-xs [&_svg]:size-3"
     />
   );
 }
