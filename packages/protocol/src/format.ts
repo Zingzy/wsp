@@ -3853,11 +3853,6 @@ export const PLACE_INSTALL = {
   },
   /** What that command does, as its own sentence for a screen that lists what lands rather than what comes off. */
   openerLine: "Sign-in pages started on that computer open in your browser here.",
-  /** What a computer that runs workspaces ends up holding of the image, when it lands and what becomes of it. The
-   * size is the image's own, where this host has built one; a host with none yet says the sentence without a
-   * figure rather than a figure it is guessing. */
-  imageCopy: (size: string | undefined): string =>
-    `Your image${size === undefined ? "" : ` (${size})`} is built there the first time a workspace is created on it. When wsp comes off, ${imageCopyStaysLine()}.`,
 } as const;
 
 /** The words of the Settings section for where a person's agents run, and of the sheet that adds a computer. */

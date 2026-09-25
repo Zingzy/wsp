@@ -21,19 +21,18 @@ import { useServerTools } from "../components/agents/useServerTools.js";
 import { useAgentActs } from "../components/agents/useAgentActs.js";
 import { useServerActs } from "../components/agents/useServerActs.js";
 import { useSkillActs } from "../components/agents/useSkillActs.js";
-import { useGoldenFrames, useStore } from "../protocol/store.js";
+import { useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { ADD_COMPUTER_WORDS, WHERE_WORDS } from "./format.js";
 import { AddComputer } from "./AddComputer.js";
 import { ComputerGlyph, ComputerIconSelect } from "./ComputerGlyph.js";
 import { builtWhen, copyOn, IMAGE_WORDS } from "./image.js";
-import { ImageCard } from "./ImageCard.js";
-import { imageState } from "./imageState.js";
+import { useImageCard } from "./ImageCard.js";
 import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, projectOn, threadWord, type PlaceHolding } from "./places.js";
 import { keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 import { RefusalSlot } from "./sheetParts.js";
-import { Card, Cards, Row, type SettingsCardData, type SettingsItem, type SettingsRowData } from "./rows.js";
+import { Card, cardDrops, Cards, Row, type SettingsCardData, type SettingsItem, type SettingsRowData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import type { SettingsAt } from "./settingsStore.js";
 
@@ -140,10 +139,11 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
 
 /** The one computer row on its own, for the Add a computer sheet's joined screen. */
 export function ComputerRow({ place, now }: { place: PlaceView; now: number }) {
-  const { kind: _row, ...row } = computerRowData(place, { here: false, count: 0, now });
+  const data = computerRowData(place, { here: false, count: 0, now });
+  const { kind: _row, ...row } = data;
   return (
     <Card id="joined">
-      <Row {...row} />
+      <Row {...row} drops={cardDrops([data])} />
     </Card>
   );
 }
@@ -292,12 +292,9 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
   // After the dialog has closed: the page under it goes with the computer, and a portal torn down with its page
   // in one frame is a node React cannot find.
   const onRemoved = (): void => void setTimeout(() => ctx.go({ kind: "group", group: "computers" }), 0);
-  const job = useStore(s => s.initJob);
-  const frames = useGoldenFrames();
   const view = ctx.reads.image;
-  // Until the host has answered there is nothing to say about the image, so no card stands on a guess.
-  const state = view === null ? undefined : imageState(place, { view, job, frames });
-  const imageCard: SettingsCardData[] = view === null || state === undefined ? [] : [{ id: "image", head: IMAGE_WORDS.head(placeName(place, here)), items: [], body: <ImageCard place={place} name={placeName(place, here)} state={state} view={view} ctx={ctx} /> }];
+  const image = useImageCard(place, ctx);
+  const imageCard: SettingsCardData[] = image === undefined ? [] : [image];
   if (isProviderPlace(place)) return <Cards cards={cloudCards(ctx, place, view, imageCard, holding, onRemoved)} />;
 
   // How long this host has not heard from it, and null while it is holding its link: a computer that is answering
