@@ -81,6 +81,7 @@ import {
   twoPlacesRefusal,
   placeBehindLine,
   placeDaemonBehind,
+  buildsImages,
   type PlaceProveRequest,
 } from "@wsp/protocol";
 import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, machineServerPort, plainPath, provisionCountsOf, putFiles, serversOutLines, unmergeServers, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
@@ -341,8 +342,8 @@ export interface PlaceDoorOptions {
   onStage?: (event: PlaceStageEvent) => void;
   /** What a place's row says about its copy of the image while it is not standing: the stage of the build running
    * there, or the reason the last one stopped. The runtime holds the builds, so it answers; nothing for a copy that
-   * stands. */
-  copyBuild?: (placeId: string) => string | undefined;
+   * stands. `stopped` says which of the two the line is. */
+  copyBuild?: (placeId: string) => { line: string; stopped: boolean } | undefined;
   /** How long a computer has to dial back after its join before an install gives up on it. */
   joinWaitMs?: number;
   /** How long a computer that took an update has to dial back running it before the row is answered with what it
@@ -789,6 +790,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * A picker that took one list for every row quoted one provider's prices under another's name. Empty where this
    * host holds no backend for the row, which is a row with no pick to offer rather than a row of free sizes. */
   const providerSizes = (placeId: string): readonly MachineSizeOffer[] => providerBackend(placeId)?.capabilities.sizes ?? [];
+  /** What a row says about the image there: whether a copy can stand on it at all, and the build running or stopped
+   * there. Nothing about the first for a place whose backend this host has not heard yet. */
+  const imageFacts = (placeId: string, at: MachineBackend | undefined): Pick<PlaceView, "build" | "buildStopped" | "buildsImages"> => {
+    const build = opts.copyBuild?.(placeId);
+    return {
+      ...(at !== undefined ? { buildsImages: buildsImages(at.capabilities) } : {}),
+      ...(build !== undefined ? { build: build.line, ...(build.stopped ? { buildStopped: true } : {}) } : {}),
+    };
+  };
   const recordOf = async (placeId: string): Promise<PlaceRecord | undefined> => {
     const found = await store.get(PLACES, placeId);
     return isPlaceRecord(found) ? found : undefined;
@@ -1895,16 +1905,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           // This computer is where the person's own agents run, never something the host forks into: a copy of the
           // image on a runtime here is that place's own row, which is the one that says it forks.
           takesForks: false,
+          buildsImages: false,
         },
         ...held.map(r => {
           const forks = room.get(r.id);
-          const build = opts.copyBuild?.(r.id);
-          return { ...viewOf(r, marked), ...(forks !== undefined ? { forks } : {}), ...(build !== undefined ? { build } : {}) };
+          return { ...viewOf(r, marked), ...(forks !== undefined ? { forks } : {}), ...imageFacts(r.id, door.backendOf(r.id)) };
         }),
         ...providers.map(id => {
           const rate = providerRate(id);
           const sizes = providerSizes(id);
-          const build = opts.copyBuild?.(id);
           return {
             id,
             kind: "provider" as const,
@@ -1913,7 +1922,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
             takesForks: true,
             ...(rate !== undefined ? { rateUsdPerHour: rate } : {}),
             ...(sizes.length > 0 ? { sizes: [...sizes] } : {}),
-            ...(build !== undefined ? { build } : {}),
+            ...imageFacts(id, providerBackend(id)),
           };
         }),
       ];

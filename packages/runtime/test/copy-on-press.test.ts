@@ -7,10 +7,10 @@
 // the default when nothing is marked.
 import { describe, expect, it } from "vitest";
 import { NoProviderBackend, type MachineSpec } from "@wsp/engine";
-import { HERE_PLACE_ID, copyStoppedLine, type PlaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, copyStoppedLine, type GoldenStageEvent, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, type PlaceBackends } from "../src/runtime.js";
 import { goldenHead } from "../src/index.js";
-import { newPlaceKeyPair, type PlaceWiring } from "../src/places.js";
+import { PlaceProvisioningError, newPlaceKeyPair, type PlaceWiring } from "../src/places.js";
 import { memoryStore } from "../src/store.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { stubBackend, type StubBackend, createOn } from "./stub-backend.js";
@@ -46,8 +46,11 @@ function providers() {
     placeLinks: wiring,
   });
   const frames: { stage: string; place?: string }[] = [];
+  const sent: GoldenStageEvent[] = [];
   rt.events.on("golden.stage", e => {
-    if (e.type === "golden.stage") frames.push({ stage: e.stage, ...(e.place !== undefined ? { place: e.place } : {}) });
+    if (e.type !== "golden.stage") return;
+    frames.push({ stage: e.stage, ...(e.place !== undefined ? { place: e.place } : {}) });
+    sent.push(e);
   });
   const rows = async (): Promise<PlaceView[]> => rt.places!.list(Date.now());
   const row = async (id: string): Promise<PlaceView> => (await rows()).find(p => p.id === id)!;
@@ -61,7 +64,7 @@ function providers() {
     return rt.golden.seal(b.id);
   };
   const head = async (): Promise<string> => goldenHead(await rt.golden.get())!.snapshotId;
-  return { fake, solari, box, rt, store, composed, frames, row, marked, current, seal, head };
+  return { fake, solari, box, rt, store, composed, frames, sent, row, marked, current, seal, head };
 }
 
 /** Holds a stub's creates until released: a build blocked on its first machine, so what happens beside it is read
@@ -123,7 +126,7 @@ describe("a copy of the image is built on a press", () => {
   });
 
   it("a build kept current that stopped leaves its reason on the place's row and no copy there; the next build there takes the row over", async () => {
-    const { solari, rt, row, seal, current } = providers();
+    const { solari, rt, row, seal, current, sent } = providers();
     const create = solari.create.bind(solari);
     solari.create = async () => {
       throw Object.assign(new Error("no room at solari today"), { kind: "conflict" });
@@ -132,6 +135,7 @@ describe("a copy of the image is built on a press", () => {
     await rt.image.keepCurrent("solari");
     expect((await row("solari")).build).toContain(copyStoppedLine());
     expect((await row("solari")).build).toContain("no room at solari today");
+    expect(sent.filter(e => e.place === "solari" && e.stage === "failed")).toHaveLength(1);
     expect((await rt.image.get()).copies.map(c => c.place)).toEqual(["fake"]);
     solari.create = create;
     const { built } = await rt.image.build({ place: "solari" });
@@ -163,6 +167,43 @@ describe("a copy of the image is built on a press", () => {
     const copy = (await rt.image.get()).copies.find(c => c.place === "solari")!;
     expect(copy.hash).toBe(v2);
     expect(made.golden).toBe(copy.snapshotId);
+    await rt.close();
+  });
+
+  it("each row says whether it can hold the image, and a build that stopped there says it stopped rather than only in words", async () => {
+    const { solari, rt, row, seal, sent } = providers();
+    expect([(await row("solari")).buildsImages, (await row("box")).buildsImages, (await row("none")).buildsImages, (await row(HERE_PLACE_ID)).buildsImages]).toEqual([true, true, false, false]);
+    await seal();
+    let refuse: () => void = () => {};
+    const gate = new Promise<void>(r => (refuse = r));
+    solari.create = async () => {
+      await gate;
+      throw Object.assign(new Error("no room at solari today"), { kind: "conflict" });
+    };
+    const building = rt.image.build({ place: "solari" }).catch(() => undefined);
+    await until(async () => (await row("solari")).build !== undefined);
+    expect((await row("solari")).buildStopped).toBeUndefined();
+    refuse();
+    await building;
+    expect((await row("solari")).buildStopped).toBe(true);
+    expect((await row("solari")).build).toContain("no room at solari today");
+    // Said on the bus as the build's own stop, so the app's frames end on it too.
+    expect(sent.filter(e => e.place === "solari").at(-1)).toMatchObject({ stage: "failed", detail: "no room at solari today" });
+    await rt.close();
+  });
+
+  it("any failure after a building frame ends the frames with a stop, once, on a press and on a build kept current alike", async () => {
+    const { solari, rt, row, seal, sent } = providers();
+    await seal();
+    solari.create = async () => {
+      throw new PlaceProvisioningError("the recipe on solari is still running");
+    };
+    await rt.image.build({ place: "solari" }).catch(() => undefined);
+    expect((await row("solari")).buildStopped).toBe(true);
+    expect(sent.filter(e => e.place === "solari").at(-1)).toMatchObject({ stage: "failed", detail: "the recipe on solari is still running" });
+    await rt.image.keepCurrent("solari");
+    expect((await row("solari")).buildStopped).toBe(true);
+    expect(sent.filter(e => e.place === "solari" && e.stage === "failed")).toHaveLength(2);
     await rt.close();
   });
 

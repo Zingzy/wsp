@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
+import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -94,6 +94,10 @@ interface State {
   /** The init job on the host as its last event or the first reply left it; null while none has run. The cloud row
    * reads its progress while the modal is shut, and the modal opens where it stands. */
   initJob: InitJob | null;
+  /** The last golden.stage frames of the copy built at each place, by the place id the frames carry, the newest
+   * last: only the build running there or the one that last ended, since a frame after a sealed or failed one starts
+   * the place over. Cleared on every pull, since a host that restarted mid-build holds no build to end it. */
+  goldenFrames: Record<string, GoldenStageEvent[]>;
   /** What each harness's CLI takes at launch, from the runtime's table; empty until it answers, and the composer shows no pickers. */
   harnesses: HarnessCatalog[];
   /** The same, as the binaries on a workspace's machine reported them; set once loadHarnesses got an answer for it. */
@@ -328,6 +332,9 @@ let preferenceSetsInFlight = 0;
  * that reply was computed from or newer. The day they travel separate channels this needs a stamp instead. */
 let initJobViews = 0;
 
+/** How many of one place's build frames are kept: every stage of a build and the tail of its install steps. */
+export const GOLDEN_FRAMES_KEPT = 64;
+
 export const useStore = create<State>((set, get) => {
   const patchCreation = (key: string, patch: (c: Creation) => Creation): void => {
     set(s => ({ creations: s.creations.map(c => (c.key === key ? patch(c) : c)) }));
@@ -447,6 +454,7 @@ export const useStore = create<State>((set, get) => {
         set({ forwards: [] });
         noticeFailure(e, said => `Forwards not read: ${said}`);
       });
+    set({ goldenFrames: {} });
     const initJobsAtAsk = initJobViews;
     void api
       .initGet?.()
@@ -491,6 +499,7 @@ export const useStore = create<State>((set, get) => {
     capabilities: null,
     hasGolden: null,
     initJob: null,
+    goldenFrames: {},
     harnesses: [],
     harnessesByWorkspace: {},
     workspaces: [],
@@ -898,7 +907,10 @@ export const useStore = create<State>((set, get) => {
           }));
           return;
         case "place.removed":
-          set(s => ({ places: s.places.filter(p => p.id !== e.placeId) }));
+          set(s => {
+            const { [e.placeId]: _gone, ...goldenFrames } = s.goldenFrames;
+            return { places: s.places.filter(p => p.id !== e.placeId), goldenFrames };
+          });
           return;
         case "project.added":
           set(s => ({ projects: [...s.projects.filter(p => p.id !== e.project.id), e.project] }));
@@ -917,20 +929,23 @@ export const useStore = create<State>((set, get) => {
           useSignInStore.getState().portClosed(e.workspaceId, e.port);
           return;
         case "golden.stage": {
-          // The image being built where this create is going: one log, so the build's own stages read as the first
-          // lines of the create that is waiting on them. A frame naming no place is the image's own build, which
-          // the init screens own; one naming a place nobody here is waiting on is another road's.
+          // Kept per place for that computer's image card, and folded into the log of a create waiting on the build
+          // there, so the build's own stages read as its first lines. A frame naming no place is the image's own
+          // build, which the init job owns; one naming a place nobody here is waiting on is only the card's.
           const word = e.place;
           if (word === undefined) return;
           set(s => {
-            // Both words name the same row: the create was asked with the row's id and the build's frames carry
-            // the word the backend table keys it by, so the row itself is what matches the two.
+            const kept = s.goldenFrames[word] ?? [];
+            const last = kept.at(-1);
+            const ended = last !== undefined && copyBuildOf(last)?.stopped !== false;
+            const goldenFrames = { ...s.goldenFrames, [word]: [...(ended ? [] : kept), e].slice(-GOLDEN_FRAMES_KEPT) };
+            // The create may have been asked by the row's name while the frames carry its id, so the row matches the two.
             const at = s.places.find(p => placeNamed(p, word));
             const own = s.creations.find(c => c.failed === null && c.where !== undefined && (c.where === word || (at !== undefined && placeNamed(at, c.where))));
             const line = own === undefined ? undefined : imageBuildFrame(e, at === undefined ? word : placeName(at));
-            if (own === undefined || line === undefined) return {};
+            if (own === undefined || line === undefined) return { goldenFrames };
             const logged: CreationLine = { stage: "image", at: new Date().toISOString(), elapsedMs: Date.now() - own.askedAt, ...line };
-            return { creations: s.creations.map(c => (c === own ? { ...c, lines: [...c.lines, logged] } : c)) };
+            return { goldenFrames, creations: s.creations.map(c => (c === own ? { ...c, lines: [...c.lines, logged] } : c)) };
           });
           return;
         }
@@ -1129,6 +1144,7 @@ export function useForwarded(workspaceId: string | null, port: number | null): b
 }
 export function useCapabilities(): Capabilities | null { return useStore(s => s.capabilities); }
 export function useInitJob(): InitJob | null { return useStore(s => s.initJob); }
+export function useGoldenFrames(): Record<string, GoldenStageEvent[]> { return useStore(s => s.goldenFrames); }
 /** The catalogs a composer reads: the workspace's machine's once it answered, else the runtime's table. */
 export function useHarnessCatalogs(workspaceId: string | null): HarnessCatalog[] {
   return useStore(s => catalogsIn(s, workspaceId));
