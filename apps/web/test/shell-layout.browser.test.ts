@@ -926,6 +926,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
   it("collapsing the sidebar puts the page header's toggle where the sidebar's was, and the breadcrumb after it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
+      // A workspace opens on its composer; the crumb names a thread once one is open.
+      await page!.locator("[data-row-id='thread:s2']").click();
+      await page!.waitForSelector("header [data-breadcrumb-thread]");
       const before = await box("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
       expect(await page!.locator("header [data-slot=sidebar-trigger]").count()).toBe(0);
       await page!.locator("[data-slot=sidebar-header] [data-slot=sidebar-trigger]").click();
@@ -937,8 +940,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(Math.abs(after.y - before.y)).toBeLessThan(1);
       const crumb = await box("header [data-thread-breadcrumb]");
       expect(Math.abs(crumb.x - (after.x + after.width + (await rowGap("header [data-header-row]"))))).toBeLessThan(1);
-      // A workspace opens on its composer, so the crumb is the workspace's name alone.
-      expect(await page!.locator("header [data-thread-breadcrumb]").evaluate(el => el.textContent)).toBe("api");
+      expect(await page!.locator("header [data-thread-breadcrumb]").evaluate(el => el.textContent)).toBe("api/Reply with exactly the word hi.");
+      const ratios = await textContrast(page!, "header [data-thread-breadcrumb] .text-muted-foreground");
+      for (const ratio of ratios) expect(ratio, `the collapsed header's quiet crumb reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
       const path = join(SHOTS_DIR, `header-collapsed-${theme}.png`);
       await page!.screenshot({ path, clip: { x: 0, y: 0, width: 600, height: 120 } });
       console.info(`collapsed header screenshot: ${path}`);

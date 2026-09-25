@@ -9,6 +9,7 @@ import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNo
 import { agentName } from "@wsp/catalog";
 import { offlineFor } from "@wsp/protocol";
 import { copyText } from "../../actions/clipboard.js";
+import { MICRO_LABEL } from "../../lib/microLabel.js";
 import { cn } from "../../lib/utils.js";
 import { FACT, VALUE } from "../../settings/format.js";
 import { CopyRow, RefusalSlot } from "../../settings/sheetParts.js";
@@ -369,7 +370,7 @@ export function UnderRowLevel({ row, back, backLabel }: { row: UnderRow; back: (
         {row.body === undefined ? null : <p className="whitespace-pre-line break-words text-[13px] leading-5 text-foreground">{row.body}</p>}
         {row.list === undefined ? null : (
           <section data-k="under-list" aria-label={row.list.label} className={cn("flex flex-col gap-3", row.body !== undefined && "mt-5")}>
-            <h4 className="font-mono text-[11px] leading-4 tracking-[0.12em] text-muted-foreground uppercase">{row.list.label}</h4>
+            <h4 className={cn(MICRO_LABEL, "leading-4 text-muted-foreground")}>{row.list.label}</h4>
             <ul className="flex flex-col gap-3">
               {row.list.items.map(item => (
                 <li key={item.name} data-under-item={item.name} className="flex min-w-0 flex-col gap-0.5">

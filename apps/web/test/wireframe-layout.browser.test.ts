@@ -38,9 +38,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
-import { PlaceAddStep } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, PlaceAddStep } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { textContrast, wcagContrast } from "./contrast";
+import { MICRO_LABEL } from "../src/lib/microLabel";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 
@@ -106,7 +107,7 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
         const box = el.getBoundingClientRect();
         const slot = el.querySelector<HTMLElement>("[data-thread-state], [data-thread-time], [data-workspace-state], [data-project-slot], [data-creation-state]");
         // A row says how many lines it has: a workspace on a branch or a creation is two, everything else one.
-        return { id, kind: el.dataset["lines"] === "2" ? "two" : /^(settled|archived):/.test(id) ? "fold" : "one", height: box.height, left: box.left, right: box.right, slotRight: slot === null ? null : slot.getBoundingClientRect().right } as const;
+        return { id, kind: el.dataset["lines"] === "2" ? "two" : el.querySelector("[data-group-word]") !== null ? "fold" : "one", height: box.height, left: box.left, right: box.right, slotRight: slot === null ? null : slot.getBoundingClientRect().right } as const;
       });
     });
 
@@ -506,7 +507,7 @@ const NARROW_LINE = 56;
 /** The computers whose page is photographed to its foot, in a window tall enough to hold the whole of it. */
 const FOOT_SCREENS = ["settings-computer", "settings-computer-failed", "settings-this-mac"] as const;
 const FOOT_SIZES = [
-  { width: 1280, height: 1800 },
+  { width: 1280, height: 1900 },
   { width: 390, height: 3000 },
 ] as const;
 
@@ -559,7 +560,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
   };
 
   const read = (): Promise<SettingsRead> =>
-    page!.evaluate(() => {
+    page!.evaluate(micro => {
       const box = (el: Element) => el.getBoundingClientRect();
       const spills = (el: HTMLElement): boolean => el.scrollHeight > el.clientHeight + 1;
       const rows = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-row]")].map(el => ({
@@ -600,13 +601,16 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         opacity: Number(getComputedStyle(el).opacity),
       }));
       const cutSegments = [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-slot=segmented-control] [role=radio]")].filter(el => el.scrollWidth > el.clientWidth + 1).map(el => el.textContent ?? "");
-      // Caps and tracked-out words outside the one small label grammar, the 11 px mono caps a section's eyebrow wears;
-      // the page title's tight tracking draws it closer, which is no dress, and a picture's masked code is not words.
-      const eyebrow = (s: CSSStyleDeclaration): boolean => /mono/i.test(s.fontFamily) && s.fontSize === "11px" && s.textTransform === "uppercase" && Math.abs(parseFloat(s.letterSpacing) - 1.32) < 0.01;
+      // Caps and tracked-out words outside the one small label, which wears MICRO_LABEL itself or sits inside it; the
+      // page title's tight tracking draws it closer, which is no dress, and a picture's masked code is not words.
+      const eyebrow = (el: Element): boolean => {
+        for (let n: Element | null = el; n !== null; n = n.parentElement) if (micro.every(c => n!.classList.contains(c))) return true;
+        return false;
+      };
       const dressed = [...document.querySelectorAll<HTMLElement>("[data-settings-page] *, [data-slot=sidebar] *")]
         .filter(el => {
           const s = getComputedStyle(el);
-          return /\p{L}/u.test(el.textContent ?? "") && (s.textTransform !== "none" || parseFloat(s.letterSpacing) > 0) && !eyebrow(s);
+          return /\p{L}/u.test(el.textContent ?? "") && (s.textTransform !== "none" || parseFloat(s.letterSpacing) > 0) && !eyebrow(el);
         })
         .map(el => (el.textContent ?? "").trim().slice(0, 20));
       const pageEl = document.querySelector<HTMLElement>("[data-settings-page]")!;
@@ -621,7 +625,7 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
         scroll: { page: Math.max(pageEl.scrollWidth, viewport.scrollWidth), client: viewport.clientWidth },
         opacities: { held: opacity("[data-settings-page] [data-slot=button][data-held]"), live: opacity("[data-settings-page] [data-slot=button]:not([data-held]):not(:disabled)") },
       };
-    });
+    }, MICRO_LABEL.split(" "));
 
   const expectGrammar = (got: SettingsRead, where: string, narrow: boolean): void => {
     // One height per kind at each width: a row is 64, 72 below 640 px, or 96 there where its slot has moved under a
@@ -764,7 +768,8 @@ describe.skipIf(renderSkipped !== undefined)("the settings page laid out in Chro
   it("the Light theme picked on the dark side draws the page light, and Restore defaults stands only off the defaults and puts the page back", async () => {
     await open("settings-light-picked", "dark", "[data-settings-at=appearance]");
     await page!.waitForFunction(() => !document.documentElement.classList.contains("dark"));
-    expect(await page!.locator("[data-k=theme-picker] [role=radio][aria-checked=true]").textContent()).toBe("Light");
+    // The grid under the side segments holds the light side's pictures, with the light pick checked.
+    expect(await page!.locator("[data-k=theme-picker] [data-theme-option][aria-checked=true]").getAttribute("data-theme-option")).toBe(DEFAULT_PREFERENCES.lightTheme);
     expect(await page!.locator("[data-k=restore-defaults]").count()).toBe(1);
     await shot("light-picked-1280-dark");
     await page!.locator("[data-k=restore-defaults]").click();
