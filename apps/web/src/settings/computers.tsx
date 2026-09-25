@@ -19,6 +19,7 @@ import { imageAgentsReport, recipeMissLines } from "../components/agents/agentsR
 import { useAgentsReport } from "../components/agents/useAgentsReport.js";
 import { useServerTools } from "../components/agents/useServerTools.js";
 import { useAgentActs } from "../components/agents/useAgentActs.js";
+import { useServerActs } from "../components/agents/useServerActs.js";
 import { useSkillActs } from "../components/agents/useSkillActs.js";
 import { useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
@@ -203,6 +204,7 @@ function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean;
   const tools = useServerTools({ placeId: place.id });
   const acts = useAgentActs({ placeId: place.id });
   const skills = useSkillActs({ placeId: place.id });
+  const servers = useServerActs({ placeId: place.id });
   const away = absentOf(place, ctx.now, here)?.away ?? null;
   const name = here ? THIS_COMPUTER_WORD : placeName(place);
   return (
@@ -213,7 +215,7 @@ function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean;
       reading={reading}
       error={error}
       on={name}
-      ctx={{ where: here ? "here" : "box", ...(here ? {} : { computer: placeName(place) }), heldWhy: away, ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }), ...(skills === undefined ? {} : { skills }) }}
+      ctx={{ where: here ? "here" : "box", ...(here ? {} : { computer: placeName(place) }), heldWhy: away, ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }), ...(skills === undefined ? {} : { skills }), ...(servers === undefined ? {} : { servers }) }}
       onRefresh={refresh}
       now={ctx.now}
       misses={recipeMissLines(place.provision?.rows ?? [])}

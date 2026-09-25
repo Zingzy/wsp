@@ -4,6 +4,7 @@
 // report. The manager draws every kind through this one shape, so a kind is
 // its module and one line in the registry.
 import type { LucideIcon } from "lucide-react";
+import type { ComponentType, RefObject } from "react";
 import type { AgentsReport } from "@wsp/protocol";
 import type { DocState, FlowView, RowAct, RowsContext } from "../agentsRows.js";
 
@@ -143,6 +144,21 @@ export interface AddModule {
   detail(key: string, query: string, report: AgentsReport | null, ctx: RowsContext): DetailView | undefined;
 }
 
+/** What a kind's add form is handed: the report it adds beside, the list's context, the field focus lands on when
+ * the level opens, and the road back to the list once the host took it. */
+export interface AddFormProps {
+  readonly report: AgentsReport | null;
+  readonly ctx: RowsContext;
+  readonly first: RefObject<HTMLElement | null>;
+  readonly done: () => void;
+}
+
+/** A kind's add level as a form in place of the list, where what is added is typed rather than found. */
+export interface AddForm {
+  readonly title: string;
+  readonly Form: ComponentType<AddFormProps>;
+}
+
 export interface GroupView<T> {
   readonly id: string;
   readonly label?: string;
@@ -181,8 +197,10 @@ export interface KindModule<T> {
   empty(on: string): string;
   /** The page-level empty's ghost word. */
   none: string;
-  /** What the toolbar's Add opens where the kind has a road to add one. */
+  /** What the toolbar's Add opens where the kind has a road to add one: a search of where its things come from, or a
+   * form for what a person types. */
   adder?: (ctx: RowsContext) => AddModule | undefined;
+  form?: (ctx: RowsContext) => AddForm | undefined;
 }
 
 /** A module with its item type forgotten, so the registry holds every kind in one list. */

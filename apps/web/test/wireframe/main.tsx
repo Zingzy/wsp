@@ -86,6 +86,7 @@ import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
 import { useServerTools } from "../../src/components/agents/useServerTools";
+import { useServerActs } from "../../src/components/agents/useServerActs";
 import { useSkillActs } from "../../src/components/agents/useSkillActs";
 import { useAgentActs } from "../../src/components/agents/useAgentActs";
 import { SettingsPage } from "../../src/settings/SettingsPage";
@@ -442,6 +443,10 @@ const api = {
   skillsToggle: async () => {},
   skillsRemove: async () => {},
   skillsAdd: async () => ({ path: "~/.agents/skills/pdf", agents: [] }),
+  // An add that never answers, so a photograph of the form holds what was typed.
+  serversAdd: () => new Promise<{ file: string }>(() => {}),
+  serversRemove: async () => ({ file: "~/.claude.json" }),
+  serversToggle: async () => ({ file: "~/.codex/config.toml" }),
   account: async () => ({ signedIn: false }),
   devicesList: async () => DEVICES,
   devicesRevoke: async () => {},
@@ -537,6 +542,7 @@ const AGENTS_WIDTHS: readonly { shell: AgentsShell; width: number }[] = [
 function AgentsWidths() {
   const tools = useServerTools(AGENTS_REPORT.target);
   const skills = useSkillActs(AGENTS_REPORT.target);
+  const servers = useServerActs(AGENTS_REPORT.target);
   return (
     <div className="flex flex-col gap-10 bg-background p-4">
       {AGENTS_WIDTHS.map(w => (
@@ -547,7 +553,7 @@ function AgentsWidths() {
             report={AGENTS_REPORT}
             reading={false}
             on="spoo"
-            ctx={{ where: "box", computer: "spoo", project: { name: "wsp", path: "~/wsp" }, ...(tools === undefined ? {} : { tools }), ...(skills === undefined ? {} : { skills }) }}
+            ctx={{ where: "box", computer: "spoo", project: { name: "wsp", path: "~/wsp" }, ...(tools === undefined ? {} : { tools }), ...(skills === undefined ? {} : { skills }), ...(servers === undefined ? {} : { servers }) }}
             onRefresh={() => {}}
             now={Date.parse(AGENTS_REPORT.readAt)}
           />

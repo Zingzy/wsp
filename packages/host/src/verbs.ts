@@ -31,6 +31,8 @@ import {
   AgentsReport,
   AgentsTarget,
   McpRow,
+  McpScope,
+  commandWords,
   McpTool,
   ServerToolsAnswer,
   SkillAdded,
@@ -2737,6 +2739,52 @@ async function serverToolsOf(client: HostClient, name: string, agent: string, wo
   return ServerToolsAnswer.parse((await client.request<{ answer: unknown }>("servers.tools", { target, agent, name, ...(refresh ? { refresh } : {}) })).answer);
 }
 
+/** A server there added, removed or turned off or on; the answer names the file written. */
+async function serverChanged(client: HostClient, op: "servers.add" | "servers.remove" | "servers.toggle", body: Record<string, unknown>, workspace: string | undefined, on: string | undefined, usage: string): Promise<{ file: string }> {
+  const target = await agentsTarget(client, workspace, on, usage);
+  return z.object({ file: z.string() }).parse(await client.request(op, { target, ...body }));
+}
+
+/** The values an add names, off this process's own environment: `NAME` reads $NAME for a variable, and `Name=VAR`
+ * reads $VAR as that header's value. A variable this environment does not hold is refused rather than sent empty. */
+export function serverValues(env: Readonly<Record<string, string | undefined>>, names: readonly string[], headers: readonly string[], usage: string): { env?: Record<string, string>; headers?: Record<string, string> } {
+  const read = (variable: string): string => {
+    const value = env[variable];
+    if (value === undefined) throw usageRefusal(`${variable} is not set in this environment, so there is no value to write.`, usage);
+    return value;
+  };
+  const vars = Object.fromEntries(names.map(name => [name, read(name)]));
+  const heads = Object.fromEntries(
+    headers.map(pair => {
+      const at = pair.indexOf("=");
+      if (at <= 0 || at === pair.length - 1) throw usageRefusal(`${pair} is not <header>=<variable>.`, usage);
+      return [pair.slice(0, at), read(pair.slice(at + 1))];
+    }),
+  );
+  return { ...(names.length > 0 ? { env: vars } : {}), ...(headers.length > 0 ? { headers: heads } : {}) };
+}
+
+/** A server's command line as its program and arguments, split as a shell splits it; nothing without one. */
+function serverCommand(line: string | undefined): { command?: string; args?: string[] } {
+  if (line === undefined) return {};
+  const [command = "", ...args] = commandWords(line);
+  return { command, args };
+}
+
+/** The scope a line names, which the wire checks too; nothing without it. */
+function serverScope(word: string | undefined, usage: string): { scope?: McpScope } {
+  if (word === undefined) return {};
+  const scope = McpScope.safeParse(word);
+  if (!scope.success) throw usageRefusal(`--scope is user, home or project, not ${word}.`, usage);
+  return { scope: scope.data };
+}
+
+const ServerNameIn = z.string().describe("the server's name, as servers lists it");
+const ServerAgentIn = z.string().describe("the catalog id of the agent whose config names it, as servers lists it");
+const ServerScopeIn = McpScope.optional().describe("the scope servers lists it under: user, home or project; user without it");
+const SERVER_CHANGE_WORDS =
+  "Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.";
+
 const SERVER_TOOLS_WORDS =
   "Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer stands for an hour unless refreshed, and an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.";
 
@@ -3149,6 +3197,102 @@ export const VERBS: readonly Verb[] = [
       },
     }),
   },
+  {
+    name: "servers add",
+    usage: "wsp servers add <name> [<workspace>] [--on <computer>] --agent <id> (--command \"<line>\" [--env <NAME>]... | --url <address> [--header <name>=<VARIABLE>]...) [--project]",
+    about: "writes one MCP server into an agent's own config: a command with its arguments and variables, or an address with its headers, each value read off this terminal's environment and written into that file alone",
+    page: "agent",
+    options: { agent: { type: "string" }, on: { type: "string" }, command: { type: "string" }, env: { type: "string", multiple: true }, url: { type: "string" }, header: { type: "string", multiple: true }, project: { type: "boolean" } },
+    run: async ctx => {
+      const [name, workspace, ...rest] = ctx.args;
+      const agent = flag(ctx.flags, "agent");
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers add takes one server's name and one workspace at most.", usageIs(ctx));
+      if (agent === undefined) throw usageRefusal("wsp servers add needs --agent, the agent whose config takes the server.", usageIs(ctx));
+      const command = flag(ctx.flags, "command");
+      const url = flag(ctx.flags, "url");
+      const values = serverValues(ctx.env, flagList(ctx.flags, "env"), flagList(ctx.flags, "header"), usageIs(ctx));
+      const body = { agent, name, ...serverCommand(command), ...(url !== undefined ? { url } : {}), ...values, ...(ctx.flags["project"] === true ? { project: true } : {}) };
+      const added = await serverChanged(await ctx.client(), "servers.add", body, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+      ctx.out.emit(added, `${name} is in ${added.file}.`);
+      return 0;
+    },
+    tool: tool({
+      description: `Writes one MCP server into one agent's own config on one computer or workspace, the project's file with project from a workspace: a command with its arguments and the variables it is given, or an address with its headers. Every value is read by name off the environment the wsp tools run with and goes into that file alone, never into an answer; a name already in the file is refused rather than written over. ${SERVER_CHANGE_WORDS}`,
+      input: {
+        name: z.string().describe("what to call the server in the agent's config"),
+        agent: z.string().describe("the catalog id of the agent whose config takes it"),
+        workspace: AgentsWorkspaceIn,
+        on: AgentsOnIn,
+        command: z.string().optional().describe("the line the server runs, the program and its arguments as a shell would split them, nothing expanded; or url"),
+        env: z.array(z.string()).optional().describe("variables the server is given, each by its name, its value read off the same name in the environment the wsp tools run with"),
+        url: z.string().optional().describe("the server's https address; or command"),
+        header: z.array(z.string()).optional().describe("headers sent to the address, each <name>=<VARIABLE>, its value read off that variable in the environment the wsp tools run with"),
+        project: z.boolean().optional().describe("put it in the workspace's project file rather than the agent's own"),
+      },
+      output: { file: z.string() },
+      call: async ({ name, agent, workspace, on, command, env, url, header, project }, deps) => {
+        const usage = "servers_add takes a workspace or on, not both";
+        const values = serverValues(deps.env, env ?? [], header ?? [], usage);
+        const body = { agent, name, ...serverCommand(command), ...(url !== undefined ? { url } : {}), ...values, ...(project === true ? { project: true } : {}) };
+        const added = await serverChanged(await deps.client(), "servers.add", body, workspace, on, usage);
+        return asText(`${name} is in ${added.file}.`, added);
+      },
+    }),
+  },
+  {
+    name: "servers remove",
+    usage: "wsp servers remove <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>]",
+    about: "takes one MCP server's entry out of an agent's own config, every other line of the file as it was",
+    page: "agent",
+    options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" } },
+    run: async ctx => {
+      const [name, workspace, ...rest] = ctx.args;
+      const agent = flag(ctx.flags, "agent");
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers remove takes one server's name and one workspace at most.", usageIs(ctx));
+      if (agent === undefined) throw usageRefusal("wsp servers remove needs --agent, the agent whose config names the server, as wsp servers shows it.", usageIs(ctx));
+      const scope = serverScope(flag(ctx.flags, "scope"), usageIs(ctx));
+      const removed = await serverChanged(await ctx.client(), "servers.remove", { agent, name, ...scope }, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+      ctx.out.emit(removed, `${name} is gone from ${removed.file}.`);
+      return 0;
+    },
+    tool: tool({
+      description: `Takes one MCP server's entry out of one agent's own config on one computer or workspace, in the scope servers lists it under, every other server and line of the file as it was. ${SERVER_CHANGE_WORDS}`,
+      input: { name: ServerNameIn, agent: ServerAgentIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, scope: ServerScopeIn },
+      output: { file: z.string() },
+      call: async ({ name, agent, workspace, on, scope }, deps) => {
+        const removed = await serverChanged(await deps.client(), "servers.remove", { agent, name, ...(scope !== undefined ? { scope } : {}) }, workspace, on, "servers_remove takes a workspace or on, not both");
+        return asText(`${name} is gone from ${removed.file}.`, removed);
+      },
+    }),
+  },
+  ...(["disable", "enable"] as const).map(
+    (word): Verb => ({
+      name: `servers ${word}`,
+      usage: `wsp servers ${word} <name> [<workspace>] [--on <computer>] --agent <id> [--scope <user|home|project>]`,
+      about: word === "disable" ? "turns one MCP server off by the switch its agent reads, so the agent leaves it out until it is turned on" : "turns an MCP server that was turned off on again",
+      page: "agent",
+      options: { agent: { type: "string" }, on: { type: "string" }, scope: { type: "string" } },
+      run: async ctx => {
+        const [name, workspace, ...rest] = ctx.args;
+        const agent = flag(ctx.flags, "agent");
+        if (name === undefined || rest.length > 0) throw usageRefusal(`wsp servers ${word} takes one server's name and one workspace at most.`, usageIs(ctx));
+        if (agent === undefined) throw usageRefusal(`wsp servers ${word} needs --agent, the agent whose config names the server, as wsp servers shows it.`, usageIs(ctx));
+        const scope = serverScope(flag(ctx.flags, "scope"), usageIs(ctx));
+        const changed = await serverChanged(await ctx.client(), "servers.toggle", { agent, name, ...scope, on: word === "enable" }, workspace, flag(ctx.flags, "on"), usageIs(ctx));
+        ctx.out.emit(changed, `${name} is ${word === "enable" ? "on" : "off"} in ${changed.file}.`);
+        return 0;
+      },
+      tool: tool({
+        description: `Turns one MCP server ${word === "enable" ? "on again" : "off"} in one agent's own config on one computer or workspace, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. ${SERVER_CHANGE_WORDS}`,
+        input: { name: ServerNameIn, agent: ServerAgentIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, scope: ServerScopeIn },
+        output: { file: z.string() },
+        call: async ({ name, agent, workspace, on, scope }, deps) => {
+          const changed = await serverChanged(await deps.client(), "servers.toggle", { agent, name, ...(scope !== undefined ? { scope } : {}), on: word === "enable" }, workspace, on, `servers_${word} takes a workspace or on, not both`);
+          return asText(`${name} is ${word === "enable" ? "on" : "off"} in ${changed.file}.`, changed);
+        },
+      }),
+    }),
+  ),
   {
     name: "workspaces",
     usage: "wsp workspaces [--watch]",
@@ -4300,6 +4444,22 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "servers signin agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
   "servers tools agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
   "servers tools refresh": "start the server again even where an answer from the last hour stands",
+  "servers add on": AGENTS_ON_WORDS,
+  "servers add agent": "the agent whose config takes the server, by its catalog id",
+  "servers add command": "the line the server runs, its program and arguments in one quoted value, split as a shell splits it and nothing expanded; or --url",
+  "servers add env": "a variable the server is given, by its name, its value read off the same name in this terminal's environment; repeats",
+  "servers add url": "the server's https address; or --command",
+  "servers add header": "<name>=<VARIABLE>, a header sent to the address with its value read off that variable in this terminal's environment; repeats",
+  "servers add project": "put it in the workspace's project file rather than the agent's own",
+  "servers remove on": AGENTS_ON_WORDS,
+  "servers remove agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
+  "servers remove scope": "user, home or project, as wsp servers shows it; user without it",
+  "servers disable on": AGENTS_ON_WORDS,
+  "servers disable agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
+  "servers disable scope": "user, home or project, as wsp servers shows it; user without it",
+  "servers enable on": AGENTS_ON_WORDS,
+  "servers enable agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
+  "servers enable scope": "user, home or project, as wsp servers shows it; user without it",
   repos: "every git repo under the home folder instead of one level, most recently used first",
   image: "an image file on this computer to send with the message; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",

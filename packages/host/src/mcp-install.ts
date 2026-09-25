@@ -184,7 +184,7 @@ export function installMcp(agentId: string, server: McpServerSpec, home: string,
   const text = existsSync(file.abs) ? readFileSync(file.abs, "utf8") : undefined;
   let placed: Placed;
   try {
-    placed = agent.mcp.format.place(text, MCP_SERVER_NAME, server);
+    placed = agent.mcp.format.place(text, MCP_SERVER_NAME, { kind: "stdio", command: server.command, args: [...server.args], env: {} });
   } catch (e) {
     throw new Error(`${file.tilde}: ${e instanceof Error ? e.message : String(e)}`);
   }

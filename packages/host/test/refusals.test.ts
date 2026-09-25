@@ -119,7 +119,7 @@ describe("what wsp says when it will not run a line", () => {
     // --on is read by the lists of a computer, so on another verb it is that verb's stray flag rather than an unknown one.
     const on = await run("new", "x", "--on", "here");
     expect(on.code).toBe(EXIT_CODES.usage);
-    expect(on.io.errors[0]).toContain("--on belongs to wsp agents, wsp skills, wsp skills show, wsp skills add, wsp skills remove, wsp skills disable, wsp skills enable, wsp servers, wsp servers signin, wsp servers tools and wsp folders; wsp new does not read it");
+    expect(on.io.errors[0]).toContain("--on belongs to wsp agents, wsp skills, wsp skills show, wsp skills add, wsp skills remove, wsp skills disable, wsp skills enable, wsp servers, wsp servers signin, wsp servers tools, wsp servers add, wsp servers remove, wsp servers disable, wsp servers enable and wsp folders; wsp new does not read it");
   });
 
   it("says a thread opened on no words at all what to put in quotes", async () => {

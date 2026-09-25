@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// How an agent keeps its MCP servers: one module per config format, with the
-// three things done to such a file. The collector reads its servers and the
-// install helper places one, both on this computer; the import edits the text
-// it read off the machine, here, since a machine need carry no node of its own.
-// An agent entry registers its format and its files. Pure text in and out:
-// nothing here reads or writes a file.
-import type { McpServerSpec } from "@wsp/protocol";
+// How an agent keeps its MCP servers: one module per config format, with
+// what is done to such a file. The collector reads its servers, the install
+// helper and the app's Add an MCP server place one, a person's Remove and Turn
+// off take one out or flip its switch; the import edits the text it read off
+// the machine, here, since a machine need carry no node of its own. An agent
+// entry registers its format and its files. Pure text in and out: nothing here
+// reads or writes a file.
 import { readJsonc, type Jsonc } from "./jsonc.js";
 import type { McpCheck } from "./mcp-check.js";
 import type { McpLogin } from "./mcp-login.js";
@@ -103,7 +103,11 @@ export interface McpFormat {
   read(text: string, home: string): McpServer[];
   /** The file's text with the server called `name` placed, or replaced when it is already there; `text` is
    * undefined when the file does not exist yet. Throws when the text is not the format. */
-  place(text: string | undefined, name: string, server: McpServerSpec): Placed;
+  place(text: string | undefined, name: string, server: McpTransport): Placed;
+  /** The file's text with the server called `name` turned on or off by the switch the agent itself reads, every other
+   * server as it was; absent on a format whose agent keeps no such switch per server. Throws when the text is not the
+   * format or names no such server. */
+  enable?(text: string, name: string, on: boolean, project?: string): Placed;
   /** The edit the import runs over the text it read off the machine. */
   edit: McpEditor;
   /** The definition one server has in a file of this format, in the one shape it keeps when the agent rewrites the
@@ -144,6 +148,8 @@ export interface McpConfig {
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+/** A record written only where it holds something, so an entry with none keeps the shape it always had. */
+const some = (key: string, d: Record<string, string>): Record<string, Record<string, string>> => (Object.keys(d).length === 0 ? {} : { [key]: d });
 /** Each variable the header values name under the format's reference syntax, first seen first. */
 const refsIn = (values: readonly string[], ref: RegExp): string[] => [...new Set(values.flatMap(v => [...v.matchAll(ref)].map(m => (m[1] ?? m[2])!)))];
 
@@ -322,9 +328,13 @@ interface JsonShape {
   /** The format's own entry as one server, or nothing when it names neither a command nor a url. */
   server(name: string, raw: unknown, scope: McpServer["scope"]): McpServer | undefined;
   /** The entry the format writes for a placed server. */
-  entry(server: McpServerSpec): unknown;
+  entry(server: McpTransport): unknown;
   /** The file also holds per-folder servers under `projects.<folder>.<key>`; the home folder's are read as its own. */
   projects: boolean;
+  /** The names the file switches off outside their entries, as Gemini CLI's `mcp.excluded`. */
+  off?(root: Record<string, unknown>): string[];
+  /** Turns one entry on or off by the switch the agent reads; absent where it keeps none. */
+  flip?(root: Tree, entry: Tree, name: string, on: boolean): void;
 }
 
 function jsonFormat(shape: JsonShape): McpFormat {
@@ -337,7 +347,8 @@ function jsonFormat(shape: JsonShape): McpFormat {
         return [];
       }
       if (!isObject(root)) return [];
-      const own = jsonServers(root, shape.key, "user", shape.server);
+      const off = new Set(shape.off?.(root) ?? []);
+      const own = jsonServers(root, shape.key, "user", shape.server).map(s => (off.has(s.name) ? { ...s, disabled: true as const } : s));
       const project = shape.projects && isObject(root.projects) ? root.projects[home] : undefined;
       return isObject(project) ? [...own, ...jsonServers(project, shape.key, "home", shape.server)] : own;
     },
@@ -362,13 +373,28 @@ function jsonFormat(shape: JsonShape): McpFormat {
     },
     merge: jsonMerger(shape.key),
     remove: jsonRemover(shape.key),
+    ...(shape.flip === undefined ? {} : { enable: jsonEnabler(shape.key, shape.flip) }),
+  };
+}
+
+/** The switch for a JSON file: the named entry found under `key` (a folder's own under `projects.<folder>`), flipped,
+ * and the file written back as place writes it. */
+function jsonEnabler(key: string, flip: NonNullable<JsonShape["flip"]>): NonNullable<McpFormat["enable"]> {
+  return (text, name, on, project) => {
+    const { root, comments } = jsonObject(text);
+    const source = project === undefined ? root : tree(tree(root.projects)?.[project]);
+    const entry = tree(tree(source?.[key])?.[name]);
+    if (entry === undefined) throw new Error(`the file names no server called ${name}`);
+    flip(root, entry, name, on);
+    return { text: `${JSON.stringify(root, null, 2)}\n`, commentsDropped: comments };
   };
 }
 
 /** `mcpServers.<name> = { command, args, env, cwd }` or `{ url | httpUrl, headers }`, whose url and headers take
- * `ref`'s variables from the environment. */
-const mcpServersJson = (ref: RegExp): McpFormat =>
+ * `ref`'s variables from the environment; an address is written as `remote` writes its key. */
+const mcpServersJson = (ref: RegExp, remote: (url: string) => Record<string, string>, extra: Pick<JsonShape, "off" | "flip"> = {}): McpFormat =>
   jsonFormat({
+    ...extra,
     key: "mcpServers",
     projects: true,
     server: (name, raw, scope) => {
@@ -385,14 +411,23 @@ const mcpServersJson = (ref: RegExp): McpFormat =>
       }
       return undefined;
     },
-    entry: s => ({ command: s.command, args: [...s.args] }),
+    entry: s => (s.kind === "stdio" ? { command: s.command, args: [...s.args], ...some("env", s.env) } : { ...remote(s.url), ...some("headers", s.headers) }),
   });
 
-/** Claude Code's user file, whose `projects` hold the same shape per folder: `${X}` and `${X:-default}`. */
-export const MCP_SERVERS_JSON: McpFormat = mcpServersJson(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g);
+/** Claude Code's user file, whose `projects` hold the same shape per folder: `${X}` and `${X:-default}`. Its only
+ * switch is per folder in its own /mcp, so no server is turned off here. */
+export const MCP_SERVERS_JSON: McpFormat = mcpServersJson(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g, url => ({ type: "http", url }));
 
-/** Gemini CLI's settings, which also expand a bare `$X`. */
-export const GEMINI_SETTINGS_JSON: McpFormat = mcpServersJson(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))/g);
+/** Gemini CLI's settings, which also expand a bare `$X`, take a streamable address as `httpUrl`, and switch a server
+ * off by its name in `mcp.excluded`. */
+export const GEMINI_SETTINGS_JSON: McpFormat = mcpServersJson(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))/g, url => ({ httpUrl: url }), {
+  off: root => strs(tree(root.mcp)?.excluded),
+  flip: (root, _entry, name, on) => {
+    const mcp = (root.mcp = tree(root.mcp) ?? {});
+    const rest = strs(mcp.excluded).filter(n => n !== name);
+    mcp.excluded = on ? rest : [...rest, name];
+  },
+});
 
 /** `mcp.<name> = { type: "local", command: [command, ...args], environment }` or `{ type: "remote", url, headers }`:
  * OpenCode's config. */
@@ -411,7 +446,8 @@ export const OPENCODE_JSON: McpFormat = jsonFormat({
     if (command === undefined) return undefined;
     return { name, scope, transport: { kind: "stdio", command, args, env: dict(raw.environment) }, envRefs: [], ...off };
   },
-  entry: s => ({ type: "local", command: [s.command, ...s.args], enabled: true }),
+  entry: s => (s.kind === "stdio" ? { type: "local", command: [s.command, ...s.args], enabled: true, ...some("environment", s.env) } : { type: "remote", url: s.url, enabled: true, ...some("headers", s.headers) }),
+  flip: (_root, entry, _name, on) => void (entry.enabled = on),
 });
 
 // --- Codex's TOML ------------------------------------------------------------------------------------------------
@@ -544,11 +580,21 @@ function readCodex(text: string): McpServer[] {
 // A JSON string is a valid TOML basic string: the same escapes for quote, backslash and control characters.
 const tomlString = (s: string): string => JSON.stringify(s);
 
-/** `[mcp_servers.<name>]` with command and args. The table is replaced in place when it is there (up to the next
- * table header), appended after a blank line when it is not; every other line stays as written. */
-function placeCodex(text: string | undefined, name: string, server: McpServerSpec): string {
+/** An inline table of strings, every key and value quoted. */
+const tomlInline = (d: Record<string, string>): string => `{ ${Object.entries(d).map(([k, v]) => `${tomlString(k)} = ${tomlString(v)}`).join(", ")} }`;
+
+/** The lines of a server's own table under its header: a command with its args and variables, or an address with its
+ * headers. */
+function codexLines(server: McpTransport): string[] {
+  if (server.kind === "http") return [`url = ${tomlString(server.url)}`, ...(Object.keys(server.headers).length === 0 ? [] : [`http_headers = ${tomlInline(server.headers)}`])];
+  return [`command = ${tomlString(server.command)}`, `args = [${server.args.map(tomlString).join(", ")}]`, ...(Object.keys(server.env).length === 0 ? [] : [`env = ${tomlInline(server.env)}`])];
+}
+
+/** `[mcp_servers.<name>]` with its lines. The table is replaced in place when it is there (up to the next table
+ * header), appended after a blank line when it is not; every other line stays as written. */
+function placeCodex(text: string | undefined, name: string, server: McpTransport): string {
   const header = `[mcp_servers.${/^[A-Za-z0-9_-]+$/.test(name) ? name : tomlString(name)}]`;
-  const table = `${header}\ncommand = ${tomlString(server.command)}\nargs = [${server.args.map(tomlString).join(", ")}]\n`;
+  const table = `${[header, ...codexLines(server)].join("\n")}\n`;
   if (text === undefined || text.trim() === "") return table;
   const lines = text.split("\n");
   const start = lines.findIndex(l => l.trim() === header);
@@ -715,6 +761,26 @@ function removeCodex(text: string, names: readonly string[]): McpRemoved {
   return { text: took ? lines.join("\n") : text, commentsDropped: false };
 }
 
+/** The switch: `enabled = false` as the first line of the server's own table turns it off, and on takes the line out;
+ * its sub-tables and every other line stay byte for byte. */
+function enableCodex(text: string, name: string, on: boolean): Placed {
+  const lines = text.split("\n");
+  const headerOf = (l: string): { name: string; sub?: string } | undefined => {
+    const t = uncommentToml(l).trim();
+    return t.startsWith("[") ? tomlHeader(t) : undefined;
+  };
+  const start = lines.findIndex(l => {
+    const h = headerOf(l);
+    return h?.name === name && h.sub === undefined;
+  });
+  if (start < 0) throw new Error(`the file names no server called ${name}`);
+  let end = start + 1;
+  while (end < lines.length && !uncommentToml(lines[end]!).trim().startsWith("[")) end++;
+  const at = lines.findIndex((l, i) => i > start && i < end && /^\s*enabled\s*=/.test(uncommentToml(l)));
+  const next = on ? lines.filter((_, i) => i !== at) : at >= 0 ? lines.map((l, i) => (i === at ? "enabled = false" : l)) : [...lines.slice(0, start + 1), "enabled = false", ...lines.slice(start + 1)];
+  return { text: next.join("\n"), commentsDropped: false };
+}
+
 export const CODEX_TOML: McpFormat = {
   read: readCodex,
   place: (text, name, server) => ({ text: placeCodex(text, name, server), commentsDropped: false }),
@@ -726,4 +792,5 @@ export const CODEX_TOML: McpFormat = {
   },
   merge: codexMerge,
   remove: removeCodex,
+  enable: enableCodex,
 };

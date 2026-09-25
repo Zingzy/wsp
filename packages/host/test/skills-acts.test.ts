@@ -9,7 +9,8 @@ import { noSuchSkillRefusal, pluginSkillRefusal, projectSkillOffRefusal, systemS
 import { afterEach, describe, expect, it } from "vitest";
 import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
 import type { SkillsFetch } from "../src/skills-sh.js";
-import { runHere, skillsActs } from "../src/skills-acts.js";
+import { skillsActs } from "../src/skills-acts.js";
+import { runHere } from "../src/target-road.js";
 
 const roots: string[] = [];
 afterEach(() => {

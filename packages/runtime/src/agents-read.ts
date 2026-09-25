@@ -4,7 +4,7 @@
 // reading the agents, skills and servers off it is the host's, since the
 // catalog's readers live there. A read never wakes a machine.
 import { randomBytes } from "node:crypto";
-import { AgentsReport, HERE_PLACE_ID, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
+import { AgentsReport, HERE_PLACE_ID, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
@@ -118,6 +118,14 @@ export interface SkillsActs {
   toggle(on: AgentsOn, ask: SkillAsk & { on: boolean }): Promise<{ paths: string[] }>;
 }
 
+/** What the host writes into the agents' MCP configs on a target: one server added, removed, or turned off or on,
+ * each as that computer's login, each answering the config file it wrote. */
+export interface ServersActs {
+  add(on: AgentsOn, ask: ServerAdd): Promise<{ file: string }>;
+  remove(on: AgentsOn, ask: ServerAsk): Promise<{ file: string }>;
+  toggle(on: AgentsOn, ask: ServerAsk & { on: boolean }): Promise<{ file: string }>;
+}
+
 /** The refusal for a runtime served without the readers. */
 export const NO_AGENTS_READER = "this runtime carries no agents reader; the host that serves the app wires one";
 
@@ -136,6 +144,7 @@ export interface AgentsReadOptions<Caller> {
   workspace: (id: string, origin?: Caller) => Promise<AgentsWorkspace>;
   acts?: AgentsActs;
   skills?: SkillsActs;
+  servers?: ServersActs;
   /** One channel to the target's daemon: this computer's, a joined computer's over its link, or a workspace's. */
   channel: (target: AgentsTarget, onEvent: (event: Record<string, unknown>) => void, origin?: Caller) => Promise<DaemonChannel>;
   /** Something written changed what a report reads there; no target is every report. */
@@ -175,6 +184,9 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   skillsAdd(target: AgentsTarget, ask: { skill: string; agents?: readonly string[]; project?: boolean }, origin?: Caller): Promise<SkillAdded>;
   skillsRemove(target: AgentsTarget, ask: SkillAsk, origin?: Caller): Promise<{ removed: string[] }>;
   skillsToggle(target: AgentsTarget, ask: SkillAsk & { on: boolean }, origin?: Caller): Promise<{ paths: string[] }>;
+  serversAdd(target: AgentsTarget, ask: ServerAdd, origin?: Caller): Promise<{ file: string }>;
+  serversRemove(target: AgentsTarget, ask: ServerAsk, origin?: Caller): Promise<{ file: string }>;
+  serversToggle(target: AgentsTarget, ask: ServerAsk & { on: boolean }, origin?: Caller): Promise<{ file: string }>;
 } {
   /** The last report read off each workspace while it ran, which is what a napping one answers. */
   const last = new Map<string, AgentsReport>();
@@ -225,11 +237,21 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
       },
     };
   };
-  /** Where a skill there is read or written; a napping workspace is never woken for one. */
-  const skillOn = async (target: AgentsTarget, origin?: Caller): Promise<AgentsOn> => {
+  /** Where a skill or a server there is read or written; a napping workspace is never woken for one. */
+  const awakeOn = async (target: AgentsTarget, napping: (name: string) => string, origin?: Caller): Promise<AgentsOn> => {
     const on = await onOf(target, origin);
-    if ("napping" in on) throw usage(nappingSkillsRefusal(on.napping));
+    if ("napping" in on) throw usage(napping(on.napping));
     return on;
+  };
+  const skillOn = (target: AgentsTarget, origin?: Caller): Promise<AgentsOn> => awakeOn(target, nappingSkillsRefusal, origin);
+  const serversOf = (): ServersActs => {
+    if (o.servers === undefined) throw new Error(NO_AGENTS_READER);
+    return o.servers;
+  };
+  /** A write into a server's config there, after which the report there reads again. */
+  const serverWrite = async (target: AgentsTarget, origin: Caller | undefined, run: (acts: ServersActs, on: AgentsOn) => Promise<{ file: string }>): Promise<{ file: string }> => {
+    const [acts, on] = [serversOf(), await awakeOn(target, nappingServersRefusal, origin)];
+    return written(target, () => run(acts, on));
   };
   /** A write there, after which the report there reads again, whether the write held or stopped halfway. */
   const written = async <T,>(target: AgentsTarget, run: () => Promise<T>): Promise<T> => {
@@ -394,6 +416,9 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
       const [skills, on] = [skillsOf(), await skillOn(target, origin)];
       return written(target, () => skills.toggle(on, ask));
     },
+    serversAdd: (target, ask, origin) => serverWrite(target, origin, (acts, on) => acts.add(on, ask)),
+    serversRemove: (target, ask, origin) => serverWrite(target, origin, (acts, on) => acts.remove(on, ask)),
+    serversToggle: (target, ask, origin) => serverWrite(target, origin, (acts, on) => acts.toggle(on, ask)),
     async addTools(target, agent, origin) {
       const acts = actsOf();
       const on = await onOf(target, origin);

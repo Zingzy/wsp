@@ -4,11 +4,11 @@
 // defines, places the wsp server in a fresh file or beside what the person
 // already has, once, on every run, and carries the editor the machine runs.
 import { describe, expect, it } from "vitest";
-import type { McpServerSpec } from "@wsp/protocol";
-import { CATALOG_AGENTS, CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, type McpEditLib, type McpFormat, type McpServer } from "../src/index.js";
+import { CATALOG_AGENTS, CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, mcpSwitch, type McpEditLib, type McpFormat, type McpServer, type McpTransport } from "../src/index.js";
 
 const HOME = "/Users/dev";
-const SERVER: McpServerSpec = { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] };
+const SERVER = { kind: "stdio", command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"], env: {} } satisfies McpTransport;
+const stdio = (command: string, args: string[]): McpTransport => ({ kind: "stdio", command, args, env: {} });
 
 describe("the catalog's MCP configs", () => {
   it("are registered from the agent entries that have one, each naming its format module and files among the entry's own config paths", () => {
@@ -152,13 +152,13 @@ describe("place", () => {
     const existing = 'model = "gpt-5"\n\n[projects."/Users/me/proj"]\ntrust_level = "trusted"\n';
     const appended = CODEX_TOML.place(existing, "wsp", SERVER).text;
     expect(appended).toBe(`${existing}\n${table}`);
-    const rerun = CODEX_TOML.place(`${appended}\n[mcp_servers.other]\ncommand = "x"\n`, "wsp", { command: "/new/node", args: ["a"] }).text;
+    const rerun = CODEX_TOML.place(`${appended}\n[mcp_servers.other]\ncommand = "x"\n`, "wsp", stdio("/new/node", ["a"])).text;
     expect(rerun).toBe(`${existing}\n[mcp_servers.wsp]\ncommand = "/new/node"\nargs = ["a"]\n\n[mcp_servers.other]\ncommand = "x"\n`);
-    expect(CODEX_TOML.place(rerun, "wsp", { command: "/new/node", args: ["a"] }).text).toBe(rerun);
+    expect(CODEX_TOML.place(rerun, "wsp", stdio("/new/node", ["a"])).text).toBe(rerun);
   });
 
   it("Codex's TOML quotes a path with a quote or a backslash in it as a basic string", () => {
-    const placed = CODEX_TOML.place(undefined, "wsp", { command: 'C:\\node "x".exe', args: [] }).text;
+    const placed = CODEX_TOML.place(undefined, "wsp", stdio('C:\\node "x".exe', [])).text;
     expect(placed).toContain('command = "C:\\\\node \\"x\\".exe"');
   });
 
@@ -169,11 +169,90 @@ describe("place", () => {
     const spaced = CODEX_TOML.place("[other]\nx = 1\n", "my server", SERVER).text;
     expect(spaced).toContain('[mcp_servers."my server"]\n');
     expect(CODEX_TOML.read(spaced, "/home/u").map(s => s.name)).toEqual(["my server"]);
-    const rerun = CODEX_TOML.place(spaced, "my server", { command: "/new/node", args: [] }).text;
+    const rerun = CODEX_TOML.place(spaced, "my server", stdio("/new/node", [])).text;
     expect(rerun.match(/\[mcp_servers\./g)?.length).toBe(1);
     expect(rerun).toContain('command = "/new/node"');
   });
 });
+
+describe("place, every transport a person adds", () => {
+  const WITH_ENV: McpTransport = { kind: "stdio", command: "npx", args: ["-y", "@acme/mcp", "--flag"], env: { ACME_KEY: "sk-acme-x", ACME_ORG: "o 1" } };
+  const REMOTE: McpTransport = { kind: "http", url: "https://mcp.acme.example/mcp", headers: { Authorization: "Bearer tok-x", "X-Org": "acme" } };
+  const BARE_REMOTE: McpTransport = { kind: "http", url: "https://mcp.plain.example/mcp", headers: {} };
+  const FORMATS: [string, McpFormat][] = [["Claude Code", MCP_SERVERS_JSON], ["Gemini CLI", GEMINI_SETTINGS_JSON], ["OpenCode", OPENCODE_JSON], ["Codex", CODEX_TOML]];
+
+  it("each format reads back what it placed: a command with its arguments and variables, and an address with its headers", () => {
+    for (const [agent, format] of FORMATS) {
+      for (const t of [WITH_ENV, REMOTE, BARE_REMOTE, SERVER]) {
+        const placed = format.place(undefined, "acme", t).text;
+        expect(format.read(placed, HOME).map(s => s.transport), `${agent} ${t.kind}`).toEqual([t]);
+      }
+    }
+  });
+
+  it("Claude Code writes an address as an http entry, Gemini CLI as httpUrl, each with its headers, and a command with its env only where it has one", () => {
+    expect(JSON.parse(MCP_SERVERS_JSON.place(undefined, "acme", REMOTE).text)).toEqual({ mcpServers: { acme: { type: "http", url: REMOTE.url, headers: { Authorization: "Bearer tok-x", "X-Org": "acme" } } } });
+    expect(JSON.parse(MCP_SERVERS_JSON.place(undefined, "acme", BARE_REMOTE).text)).toEqual({ mcpServers: { acme: { type: "http", url: BARE_REMOTE.url } } });
+    expect(JSON.parse(GEMINI_SETTINGS_JSON.place(undefined, "acme", REMOTE).text)).toEqual({ mcpServers: { acme: { httpUrl: REMOTE.url, headers: { Authorization: "Bearer tok-x", "X-Org": "acme" } } } });
+    expect(JSON.parse(MCP_SERVERS_JSON.place(undefined, "acme", WITH_ENV).text)).toEqual({ mcpServers: { acme: { command: "npx", args: ["-y", "@acme/mcp", "--flag"], env: { ACME_KEY: "sk-acme-x", ACME_ORG: "o 1" } } } });
+    expect(JSON.parse(GEMINI_SETTINGS_JSON.place(undefined, "wsp", SERVER).text)).toEqual({ mcpServers: { wsp: { command: SERVER.command, args: SERVER.args } } });
+  });
+
+  it("OpenCode writes a command's variables as its environment and an address as a remote entry, both enabled", () => {
+    expect(JSON.parse(OPENCODE_JSON.place(undefined, "acme", WITH_ENV).text)).toEqual({ mcp: { acme: { type: "local", command: ["npx", "-y", "@acme/mcp", "--flag"], enabled: true, environment: { ACME_KEY: "sk-acme-x", ACME_ORG: "o 1" } } } });
+    expect(JSON.parse(OPENCODE_JSON.place(undefined, "acme", REMOTE).text)).toEqual({ mcp: { acme: { type: "remote", url: REMOTE.url, enabled: true, headers: { Authorization: "Bearer tok-x", "X-Org": "acme" } } } });
+  });
+
+  it("Codex writes a command's variables and an address's headers as inline tables, every key and value quoted", () => {
+    expect(CODEX_TOML.place(undefined, "acme", WITH_ENV).text).toBe('[mcp_servers.acme]\ncommand = "npx"\nargs = ["-y", "@acme/mcp", "--flag"]\nenv = { "ACME_KEY" = "sk-acme-x", "ACME_ORG" = "o 1" }\n');
+    expect(CODEX_TOML.place(undefined, "acme", REMOTE).text).toBe('[mcp_servers.acme]\nurl = "https://mcp.acme.example/mcp"\nhttp_headers = { "Authorization" = "Bearer tok-x", "X-Org" = "acme" }\n');
+    const tricky: McpTransport = { kind: "stdio", command: "x", args: [], env: { K: 'a "quoted" \\ value' } };
+    expect(CODEX_TOML.read(CODEX_TOML.place(undefined, "t", tricky).text, HOME)[0]!.transport).toEqual(tricky);
+  });
+
+  it("a server placed beside others leaves every other server in the file as it was", () => {
+    const claude = JSON.stringify({ numStartups: 2, mcpServers: { mine: { command: "m", args: [] } } });
+    expect(JSON.parse(MCP_SERVERS_JSON.place(claude, "acme", REMOTE).text).mcpServers.mine).toEqual({ command: "m", args: [] });
+    const codex = '[mcp_servers.mine]\ncommand = "m"\n';
+    expect(CODEX_TOML.read(CODEX_TOML.place(codex, "acme", REMOTE).text, HOME).map(s => s.name)).toEqual(["mine", "acme"]);
+  });
+});
+
+describe("enable", () => {
+  it("OpenCode turns a server off and on by its enabled field, and the read says so", () => {
+    const text = OPENCODE_JSON.place(OPENCODE_JSON.place(undefined, "a", SERVER).text, "b", REMOTE_B).text;
+    const off = OPENCODE_JSON.enable!(text, "a", false);
+    expect(OPENCODE_JSON.read(off.text, HOME).map(s => [s.name, s.disabled === true])).toEqual([["a", true], ["b", false]]);
+    const on = OPENCODE_JSON.enable!(off.text, "a", true);
+    expect(OPENCODE_JSON.read(on.text, HOME).map(s => [s.name, s.disabled === true])).toEqual([["a", false], ["b", false]]);
+  });
+
+  it("Codex turns a server off with an enabled line in its own table and on by taking that line out, every other line byte for byte", () => {
+    const text = `${CODEX_OWN}\n[mcp_servers.a]\ncommand = "x"\n\n[mcp_servers.a.env]\nK = "v"\n\n[mcp_servers.b]\ncommand = "y"\n`;
+    const off = CODEX_TOML.enable!(text, "a", false);
+    expect(off.text).toBe(`${CODEX_OWN}\n[mcp_servers.a]\nenabled = false\ncommand = "x"\n\n[mcp_servers.a.env]\nK = "v"\n\n[mcp_servers.b]\ncommand = "y"\n`);
+    expect(CODEX_TOML.read(off.text, HOME).map(s => [s.name, s.disabled === true])).toEqual([["mine", false], ["a", true], ["b", false]]);
+    expect(CODEX_TOML.enable!(off.text, "a", true).text).toBe(text);
+    const written = text.replace('[mcp_servers.a]\ncommand = "x"', '[mcp_servers.a]\ncommand = "x"\nenabled = true # mine');
+    expect(CODEX_TOML.enable!(written, "a", false).text).toBe(written.replace("enabled = true # mine", "enabled = false"));
+  });
+
+  it("Gemini CLI turns a server off by its name in mcp.excluded and on by taking it out; the read says so", () => {
+    const text = JSON.stringify({ theme: "dark", mcp: { allowed: ["b"] }, mcpServers: { a: { command: "x" }, b: { command: "y" } } });
+    const off = GEMINI_SETTINGS_JSON.enable!(text, "a", false);
+    expect(JSON.parse(off.text)).toEqual({ theme: "dark", mcp: { allowed: ["b"], excluded: ["a"] }, mcpServers: { a: { command: "x" }, b: { command: "y" } } });
+    expect(GEMINI_SETTINGS_JSON.read(off.text, HOME).map(s => [s.name, s.disabled === true])).toEqual([["a", true], ["b", false]]);
+    expect(JSON.parse(GEMINI_SETTINGS_JSON.enable!(off.text, "a", true).text)).toEqual({ theme: "dark", mcp: { allowed: ["b"], excluded: [] }, mcpServers: { a: { command: "x" }, b: { command: "y" } } });
+  });
+
+  it("Claude Code keeps no switch a person turns per server, so its format has none, and the agent reads as having none", () => {
+    expect(MCP_SERVERS_JSON.enable).toBeUndefined();
+    expect(MCP_AGENTS.map(a => [a.id, mcpSwitch(a.id)])).toEqual([["claude", false], ["codex", true], ["gemini", true], ["opencode", true]]);
+    expect(mcpSwitch("pi")).toBe(false);
+  });
+});
+
+const REMOTE_B: McpTransport = { kind: "http", url: "https://b.example/mcp", headers: {} };
 
 const CODEX_OWN = [
   'model = "gpt-5"',

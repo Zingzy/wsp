@@ -21,7 +21,7 @@ import { Spinner } from "../ui/spinner.js";
 import { ActButton, AgentMarks, LeadMark, ServerStatusView } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W } from "./agentsRows.js";
 import { NARROW } from "./agentsWidths.js";
-import type { AddLevel, AddModule, AddRow, Choice, DetailView, Fact, Lead, UnderLevel, UnderRow } from "./kinds/kind.js";
+import type { AddForm, AddFormProps, AddLevel, AddModule, AddRow, Choice, DetailView, Fact, Lead, UnderLevel, UnderRow } from "./kinds/kind.js";
 import { rovingKeys } from "./roving.js";
 import { SignInFlowView } from "./SignInFlowView.js";
 import { SkillPreview } from "./SkillPreview.js";
@@ -301,6 +301,21 @@ export function AddLevelView({ adder, level, query, typing, onQuery, onAsk, onRo
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A kind's add form in place of the list: its head with Back, then the form, whose first field takes focus. */
+export function AddFormLevel({ form, props, back, backLabel }: { form: AddForm; props: Omit<AddFormProps, "first">; back: () => void; backLabel: string }) {
+  const first = useRef<HTMLElement | null>(null);
+  const { headRef, onKeyDown } = useLevelKeys(back, first);
+  const Form = form.Form;
+  return (
+    <div data-agents-add-form onKeyDown={onKeyDown} className="flex flex-col pb-4">
+      <LevelHead back={back} backLabel={backLabel} title={form.title} headRef={headRef} />
+      <div data-level-body className="px-4 pt-2">
+        <Form {...props} first={first} />
+      </div>
     </div>
   );
 }
