@@ -49,8 +49,9 @@ export const AgentRow = z.object({
 export type AgentRow = z.infer<typeof AgentRow>;
 
 /** One folder a skill lives in: `~`-relative, the agent whose own folder it is (none for a folder several agents
- * read), and where a link points when the folder is one. */
-export const SkillPath = z.object({ path: z.string(), agent: z.string().optional(), linkTo: z.string().optional() });
+ * read), where a link points when the folder is one, and whether it is turned off: its SKILL.md renamed
+ * SKILL.md.off, which no agent loads. */
+export const SkillPath = z.object({ path: z.string(), agent: z.string().optional(), linkTo: z.string().optional(), off: z.literal(true).optional() });
 export type SkillPath = z.infer<typeof SkillPath>;
 
 export const SkillScope = z.enum(["user", "project", "plugin"]);
@@ -59,6 +60,39 @@ export type SkillScope = z.infer<typeof SkillScope>;
 /** One skill by its name, with every folder it lives in. `description` is off its SKILL.md's frontmatter. */
 export const SkillRow = z.object({ name: z.string(), description: z.string().optional(), paths: z.array(SkillPath).min(1), scope: SkillScope });
 export type SkillRow = z.infer<typeof SkillRow>;
+
+/** One skill skills.sh lists for a search: `id` is `<owner>/<repo>/<skill>`, what an install names. */
+export const SkillHit = z.object({ id: z.string(), source: z.string(), skillId: z.string(), name: z.string(), installs: z.number().int().nonnegative() });
+export type SkillHit = z.infer<typeof SkillHit>;
+
+/** How much of a SKILL.md a preview carries. */
+export const SKILL_PREVIEW_BYTES = 64 * 1024;
+
+/** A skill's SKILL.md as a preview draws it: its first part, up to SKILL_PREVIEW_BYTES, and the whole file's size. */
+export const SkillPreview = z.object({ text: z.string(), size: z.number().int().nonnegative() });
+export type SkillPreview = z.infer<typeof SkillPreview>;
+
+/** Where an install put a skill: its one folder, and each agent's folder that got a link to it or a copy of it. */
+export const SkillAdded = z.object({ path: z.string(), agents: z.array(z.object({ agent: z.string(), path: z.string() })) });
+export type SkillAdded = z.infer<typeof SkillAdded>;
+
+/** Why a search was not sent: skills.sh refuses an empty one. */
+export const skillsSearchEmptyRefusal = "Type something to search skills.sh for.";
+
+/** Why the skill wsp writes is never turned off or removed: the next start writes it again. */
+export const systemSkillRefusal = (name: string): string => `${name} is written by wsp and kept current on every start, so it is always on.`;
+
+/** Why a plugin's skill is not turned off or removed on its own. */
+export const pluginSkillRefusal = (name: string): string => `${name} comes with a plugin; turn the plugin off instead.`;
+
+/** Why a project's skill is not turned off: it lives in the repo, and the rename would be a change to it. */
+export const projectSkillOffRefusal = (name: string, path: string): string => `${name} lives in the repo at ${path}, so it is not turned off here.`;
+
+/** Why an act named a skill the computer does not have. */
+export const noSuchSkillRefusal = (name: string): string => `There is no skill named ${name} there.`;
+
+/** Why a napping workspace's skills were not read or changed: nothing here wakes a machine. */
+export const nappingSkillsRefusal = (name: string): string => `${name} is napping, and its skills are read and changed only while it runs; wake it first`;
 
 /** One tool a server lists, as its tools/list answers it. */
 export const McpTool = z.object({ name: z.string(), description: z.string().optional() });
@@ -69,12 +103,18 @@ export type McpTool = z.infer<typeof McpTool>;
 export const McpRowTransport = z.discriminatedUnion("kind", [z.object({ kind: z.literal("stdio"), line: z.string() }), z.object({ kind: z.literal("http"), host: z.string() })]);
 export type McpRowTransport = z.infer<typeof McpRowTransport>;
 
-/** A server's sign-in as its config alone says it: nothing to sign in (`open`), a saved sign-in (`signed-in`), one
- * it needs, one that failed, or no way to tell without connecting (`unknown`). */
-export const McpAuth = z.enum(["open", "signed-in", "needs-sign-in", "failed", "unknown"]);
+/** A server's state: nothing to sign in as its config says, unchecked (`open`); a token its config takes from the
+ * environment (`env-key`); its address answered with no sign-in asked (`connected`); a sign-in its harness holds
+ * (`signed-in`); one it needs; one that failed; or no way to tell without connecting (`unknown`). */
+export const McpAuth = z.enum(["open", "env-key", "connected", "signed-in", "needs-sign-in", "failed", "unknown"]);
 export type McpAuth = z.infer<typeof McpAuth>;
 
 /** `home`: Claude Code's servers kept for the home folder itself; `project`: a workspace's project files. */
+/** Where a page that returns to localhost reaches the harness: `here`, the computer the browser is on; `relay`, a
+ * computer whose callback port this host forwards from here; `none`, a computer it does not. */
+export const PageReach = z.enum(["here", "relay", "none"]);
+export type PageReach = z.infer<typeof PageReach>;
+
 export const McpScope = z.enum(["user", "home", "project"]);
 export type McpScope = z.infer<typeof McpScope>;
 
@@ -123,6 +163,8 @@ export const AgentsReport = z.object({
   servers: z.array(McpRow),
   /** One line per reader that could not answer, naming it. */
   refused: z.array(z.string()),
+  /** Where a sign-in page that returns to localhost reaches the harness there; absent reaches nowhere. */
+  reach: PageReach.optional(),
 });
 export type AgentsReport = z.infer<typeof AgentsReport>;
 
@@ -190,7 +232,10 @@ export const addToolsHereRefusal = "The wsp tools go into an agent's config on t
 
 /** A C0 control character or DEL: what an interactive terminal acts on rather than shows, so a name holding one is
  * never a name wsp runs anything by. */
-export const hasControlChar = (s: string): boolean => /[\x00-\x1f\x7f]/.test(s);
+export const hasControlChar = (s: string): boolean => /[\x00-\x1f\x7f-\x9f]/.test(s);
+
+/** The text with every control character taken out, for a name that reaches a log line. */
+export const withoutControlChars = (s: string): string => s.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
 
 /** Why a server a config names was left out of the report. */
 export const controlNameRefusal = (file: string): string => `${file} names a server with a control character in its name, which was left out.`;

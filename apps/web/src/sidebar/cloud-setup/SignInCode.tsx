@@ -10,8 +10,10 @@ import { Input } from "../../components/ui/input.js";
 import { cn } from "../../lib/utils.js";
 import { FIELD } from "./rows.js";
 
-export function SignInCode({ label, onCode, className }: { label: string; onCode: (code: string) => void; className?: string }) {
+/** `ask`: what the page hands back where it is not a code. */
+export function SignInCode({ label, onCode, ask, className }: { label: string; onCode: (code: string) => void; ask?: string; className?: string }) {
   const words = CLOUD_SETUP_WORDS.build;
+  const asked = ask ?? words.codeAsk;
   const [code, setCode] = useState("");
   const typed = code.trim();
   const send = (): void => {
@@ -27,8 +29,8 @@ export function SignInCode({ label, onCode, className }: { label: string; onCode
         autoComplete="off"
         spellCheck={false}
         value={code}
-        placeholder={words.codeAsk}
-        aria-label={`${label}: ${words.codeAsk}`}
+        placeholder={asked}
+        aria-label={`${label}: ${asked}`}
         onChange={e => setCode(e.target.value)}
         onKeyDown={e => {
           if (e.key === "Enter") send();

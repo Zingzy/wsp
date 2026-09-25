@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -57,6 +57,34 @@ describe("the skills on a computer", () => {
     for (const never of ["hidden", "cached", "notes", "inner", "project-only"]) expect(names).not.toContain(never);
   });
 
+  it("reads a folder whose SKILL.md was renamed SKILL.md.off as that skill turned off there, through a link too", async () => {
+    const { host, home } = fixture();
+    const shared = join(home, ".agents/skills/memo");
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(join(shared, "SKILL.md"), "---\nname: memo\ndescription: Keep notes\n---\nbody\n");
+    symlinkSync(shared, join(home, ".claude/skills/memo"));
+    renameSync(join(shared, "SKILL.md"), join(shared, "SKILL.md.off"));
+    const memo = (await detectSkills(host, await skillRoots(host))).skills.find(s => s.name === "memo")!;
+    expect(memo.description).toBe("Keep notes");
+    expect(memo.paths).toEqual([
+      { path: "~/.claude/skills/memo", agent: "claude", linkTo: "~/.agents/skills/memo", off: true },
+      { path: "~/.agents/skills/memo", off: true },
+    ]);
+    // A folder holding both is on: an agent loads the SKILL.md it finds.
+    writeFileSync(join(shared, "SKILL.md"), "---\nname: memo\n---\n");
+    const again = (await detectSkills(host, await skillRoots(host))).skills.find(s => s.name === "memo")!;
+    expect(again.paths.every(p => p.off === undefined)).toBe(true);
+  });
+
+  it("keys a skill by its folder's name, so a SKILL.md naming another skill stands as its own row", async () => {
+    const { host, home } = fixture();
+    mkdirSync(join(home, ".agents/skills/cool-tool"), { recursive: true });
+    writeFileSync(join(home, ".agents/skills/cool-tool/SKILL.md"), "---\nname: pdf\ndescription: Not the real one\n---\n");
+    const skills = (await detectSkills(host, await skillRoots(host))).skills;
+    expect(skills.find(s => s.name === "cool-tool")!.paths).toEqual([{ path: "~/.agents/skills/cool-tool" }]);
+    expect(skills.find(s => s.name === "pdf")!.paths.map(p => p.path)).not.toContain("~/.agents/skills/cool-tool");
+  });
+
   it("a workspace adds its project's own folders as project skills", async () => {
     const { host, project } = fixture();
     const read = await detectSkills(host, await skillRoots(host, { project }));
@@ -78,5 +106,6 @@ describe("the skills on a computer", () => {
     expect(skillFrontmatter('name: "a b"\ndescription: >-\n  one\n  two\nother: x')).toEqual({ name: "a b", description: "one two" });
     expect(skillFrontmatter("name: c\ndescription: starts here\n  and goes on")).toEqual({ name: "c", description: "starts here and goes on" });
     expect(skillFrontmatter("title: none")).toEqual({});
+    expect(skillFrontmatter("name: pdf\nname: memo")).toEqual({ name: "pdf", names: 2 });
   });
 });

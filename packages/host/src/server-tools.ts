@@ -165,7 +165,7 @@ async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>,
 /** The tools answer as the page takes it, with a server's own words sent to the log. */
 function read(body: string, log: (said: string) => void): Asked {
   const got = toolsOf(body);
-  if ("tools" in got) return { auth: "open", tools: got.tools };
+  if ("tools" in got) return { auth: "connected", tools: got.tools };
   if (got.said !== undefined) log(got.said);
   return { auth: "failed", refused: got.refused };
 }
@@ -189,10 +189,10 @@ async function askHttp(host: Host, t: Extract<McpTransport, { kind: "http" }>, d
 }
 
 /** The harness's own word on a server whose address wants a sign-in wsp does not hold. */
-async function askHarness(host: Host, agent: McpAgent, name: string, cwd: string, deadlineMs: number): Promise<Asked> {
+export async function askHarness(host: Host, agent: McpAgent, name: string, cwd: string, deadlineMs: number): Promise<Asked> {
   const check = agent.mcp.check;
   if (check === undefined) return { auth: "unknown", holder: agent.id };
-  const out = await host.exec.run("bash", ["-c", `cd ${shellQuote(cwd)} 2>/dev/null; ${check.line(name)} 2>&1; true`], { timeoutMs: deadlineMs + RUN_MARGIN_MS });
+  const out = await host.exec.run("bash", ["-c", `cd ${shellQuote(cwd)} 2>/dev/null; ${check.line(name)} 2>&1; true`], { timeoutMs: deadlineMs });
   return { auth: (out === undefined ? undefined : check.auth(out)) ?? "unknown", holder: agent.id };
 }
 

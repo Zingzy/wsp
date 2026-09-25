@@ -4,7 +4,7 @@
 // next step first, and a sign-in drawn under them), the level of rows a kind
 // may add under it, and one of those rows. Escape goes back one level;
 // ArrowDown from the head reaches the acts.
-import { ArrowLeftIcon, CheckIcon, CopyIcon, ExternalLinkIcon, RefreshCwIcon } from "lucide-react";
+import { ArrowLeftIcon, CheckIcon, CopyIcon, ExternalLinkIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { agentName } from "@wsp/catalog";
 import { offlineFor } from "@wsp/protocol";
@@ -14,12 +14,17 @@ import { FACT, VALUE } from "../../settings/format.js";
 import { CopyRow, RefusalSlot } from "../../settings/sheetParts.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
 import { Button } from "../ui/button.js";
+import { Checkbox } from "../ui/checkbox.js";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group.js";
+import { SegmentedControl } from "../ui/segmented-control.js";
 import { Spinner } from "../ui/spinner.js";
-import { ActButton, AgentMarks, LeadMark, ServerBadge } from "./agentsParts.js";
+import { ActButton, AgentMarks, LeadMark, ServerStatusView } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W } from "./agentsRows.js";
-import type { DetailView, Fact, Lead, UnderLevel, UnderRow } from "./kinds/kind.js";
+import { NARROW } from "./agentsWidths.js";
+import type { AddLevel, AddModule, AddRow, Choice, DetailView, Fact, Lead, UnderLevel, UnderRow } from "./kinds/kind.js";
 import { rovingKeys } from "./roving.js";
 import { SignInFlowView } from "./SignInFlowView.js";
+import { SkillPreview } from "./SkillPreview.js";
 
 const COPIED_MS = 1_400;
 
@@ -40,10 +45,11 @@ function LevelHead({ back, backLabel, lead, title, marks, right, headRef }: { ba
   );
 }
 
-/** Focus lands on Back when a level opens; Escape leaves it, and ArrowDown from the head steps to the first act. */
-function useLevelKeys(back: () => void) {
+/** Focus lands on Back when a level opens, or on the level's own field where it has one; Escape leaves it, and
+ * ArrowDown from the head steps to the first act. */
+function useLevelKeys(back: () => void, first?: React.RefObject<HTMLElement | null>) {
   const headRef = useRef<HTMLButtonElement | null>(null);
-  useEffect(() => headRef.current?.focus({ preventScroll: true }), []);
+  useEffect(() => (first?.current ?? headRef.current)?.focus({ preventScroll: true }), []);
   const onKeyDown = (e: KeyboardEvent<HTMLElement>): void => {
     const target = e.target as HTMLElement;
     const typing = target.tagName === "INPUT" || target.tagName === "TEXTAREA";
@@ -122,7 +128,7 @@ function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
       <span className="flex min-h-7 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 py-1">
         <span className="flex min-w-0 max-w-full items-center gap-2">
           {fact.agent === undefined ? null : <HarnessMark harness={fact.agent} label={agentName(fact.agent)} className="size-3.5" />}
-          {fact.badge === undefined ? null : <ServerBadge badge={fact.badge} />}
+          {fact.status === undefined ? null : <ServerStatusView status={fact.status} />}
           {fact.value === undefined ? null : fact.line === true ? (
             <CopyRow k={`fact-${fact.id}`} value={fact.value} whole />
           ) : fact.href !== undefined ? (
@@ -153,8 +159,37 @@ function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
   );
 }
 
+/** One pick a detail asks for, in the label column's grammar: ticks for several, a segmented control for one of a
+ * few; a held option stands ticked and says why on its hover. */
+function ChoiceLine({ choice }: { choice: Choice }) {
+  return (
+    <div data-choice={choice.id} className="flex min-h-7 items-start gap-3">
+      <span className="flex min-h-7 w-24 shrink-0 items-center text-xs text-muted-foreground @min-[480px]:w-40">{choice.label}</span>
+      {choice.many ? (
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 py-1">
+          {choice.options.map(o => {
+            const on = choice.value.includes(o.value);
+            return (
+              <label key={o.value} data-choice-option={o.value} className="inline-flex min-h-5 cursor-pointer items-center gap-2 text-xs text-foreground has-data-disabled:cursor-default" {...(o.held === undefined ? {} : { title: o.held })}>
+                <Checkbox tone="neutral" checked={on} disabled={o.held !== undefined} aria-label={o.label} onCheckedChange={next => choice.set(next ? [...choice.value, o.value] : choice.value.filter(v => v !== o.value))} />
+                {o.agent === undefined ? null : <HarnessMark harness={o.agent} label={o.label} className="size-3.5" />}
+                {o.label}
+              </label>
+            );
+          })}
+        </span>
+      ) : (
+        <SegmentedControl value={choice.value[0] ?? ""} onChange={v => choice.set([v])} className="h-7" segmentClassName="px-2.5 text-xs" segments={choice.options.map(o => ({ value: o.value, label: o.label }))} />
+      )}
+    </div>
+  );
+}
+
 export function DetailLevel({ view, back, backLabel }: { view: DetailView; back: () => void; backLabel: string }) {
   const { headRef, onKeyDown } = useLevelKeys(back);
+  const load = view.doc?.load;
+  // Asked at every draw, since the target under an open level can change; the road asks each target once.
+  useEffect(() => load?.());
   let labelFor = "";
   return (
     <div data-agents-detail onKeyDown={onKeyDown} className="flex flex-col pb-4">
@@ -171,6 +206,13 @@ export function DetailLevel({ view, back, backLabel }: { view: DetailView; back:
             return <FactLine key={fact.id} fact={fact} labelFor={labelFor} />;
           })}
         </div>
+        {view.choices === undefined ? null : (
+          <div data-choices className="flex flex-col gap-y-1">
+            {view.choices.map(choice => (
+              <ChoiceLine key={choice.id} choice={choice} />
+            ))}
+          </div>
+        )}
         {view.acts.length === 0 ? null : (
           <div data-detail-acts className="flex flex-wrap gap-2">
             {view.acts.map(act => (
@@ -180,7 +222,85 @@ export function DetailLevel({ view, back, backLabel }: { view: DetailView; back:
         )}
         {view.flow === undefined ? null : <SignInFlowView view={view.flow} label={view.title} />}
         {view.flow === undefined && view.refused !== undefined ? <RefusalSlot k="detail-refused" said={view.refused} /> : null}
+        {view.doc === undefined ? null : <SkillPreview doc={view.doc} />}
       </div>
+    </div>
+  );
+}
+
+/** A kind's add level: its head with Back and where its things come from, a search that asks as the person pauses
+ * or presses Enter, and its rows, each opening the detail of one before it is added. */
+export function AddLevelView({ adder, level, query, typing, onQuery, onAsk, onRow, back, backLabel }: { adder: AddModule; level: AddLevel; query: string; typing: boolean; onQuery: (q: string) => void; onAsk: () => void; onRow: (row: AddRow) => void; back: () => void; backLabel: string }) {
+  const field = useRef<HTMLInputElement | null>(null);
+  const { headRef, onKeyDown } = useLevelKeys(back, field);
+  const link =
+    adder.link === undefined ? undefined : (
+      <Button data-k="add-link" size="xs" variant="ghost-muted" onClick={() => void window.open(adder.link!.href, "_blank", "noopener,noreferrer")}>
+        {adder.link.label}
+        <ExternalLinkIcon aria-hidden className="size-3" />
+      </Button>
+    );
+  return (
+    <div data-agents-add onKeyDown={onKeyDown} className="flex flex-col pb-4">
+      <LevelHead back={back} backLabel={backLabel} title={adder.title} right={link} headRef={headRef} />
+      <div className="px-4 pt-1 pb-2">
+        <InputGroup className="h-8">
+          <InputGroupAddon>
+            <SearchIcon aria-hidden />
+          </InputGroupAddon>
+          <InputGroupInput
+            ref={field}
+            data-k="add-search"
+            value={query}
+            placeholder={adder.search}
+            aria-label={adder.search}
+            spellCheck={false}
+            className="font-mono text-[13px] sm:text-[13px]"
+            onChange={e => onQuery(e.target.value)}
+            onKeyDown={e => {
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              onAsk();
+            }}
+          />
+          <InputGroupAddon align="inline-end">{level.reading || typing ? <Spinner data-k="add-reading" className="size-3.5 text-muted-foreground" /> : null}</InputGroupAddon>
+        </InputGroup>
+      </div>
+      {level.rows.length === 0 ? (
+        level.empty === undefined ? null : (
+          <p data-k="add-empty" className="flex min-h-[168px] items-center justify-center px-4 text-center text-[13px] text-muted-foreground">
+            {level.empty}
+          </p>
+        )
+      ) : (
+        <div data-level-body className="flex flex-col gap-0.5" role="list" onKeyDown={rovingKeys}>
+          {level.rows.map((row, at) => (
+            <div key={row.key} role="listitem" data-add-row={row.key} className={cn("relative isolate mx-2 flex h-12 items-center gap-3 rounded-lg px-2", row.dim === true && "opacity-60")}>
+              <button
+                type="button"
+                data-row-trigger
+                tabIndex={at === 0 ? 0 : -1}
+                onClick={() => onRow(row)}
+                className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 self-stretch text-left outline-none before:absolute before:inset-0 before:-z-10 before:rounded-lg before:transition-colors before:duration-150 hover:before:bg-accent focus-visible:before:ring-2 focus-visible:before:ring-ring focus-visible:before:ring-inset"
+              >
+                <span data-add-title className="min-w-0 truncate text-[13px] leading-5 font-medium text-foreground" title={row.title}>
+                  {row.title}
+                </span>
+                {row.subtext === undefined ? null : (
+                  <span data-add-subtext className={cn(FACT, "min-w-0 truncate", NARROW.hidden)} title={row.subtext}>
+                    {row.subtext}
+                  </span>
+                )}
+                {row.fact === undefined ? null : (
+                  <span data-add-fact className={cn(FACT, "ml-auto shrink-0 pl-2")}>
+                    {row.fact}
+                  </span>
+                )}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

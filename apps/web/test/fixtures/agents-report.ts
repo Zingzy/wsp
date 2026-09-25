@@ -8,7 +8,7 @@
 // one set up for two agents that disagree about its sign-in and one in the
 // project; two readers that could not answer. Shared by the render tests and
 // the wireframe.
-import type { AgentsReport, ServerToolsAnswer } from "@wsp/protocol";
+import type { AgentsReport, ServerToolsAnswer, SkillHit, SkillPreview } from "@wsp/protocol";
 
 export const AGENTS_REPORT: AgentsReport = {
   target: { placeId: "p_spoo" },
@@ -64,7 +64,7 @@ export const AGENTS_REPORT: AgentsReport = {
  * github that did not answer in time. */
 export const SERVER_TOOLS: Readonly<Record<string, ServerToolsAnswer>> = {
   airtable: {
-    auth: "open",
+    auth: "connected",
     readAt: "2026-09-24T12:00:00.000Z",
     tools: [
       { name: "list_records", description: "List records in a table, filtered by a formula and sorted by any field, a page of up to one hundred records at a time with the offset for the next page." },
@@ -74,3 +74,68 @@ export const SERVER_TOOLS: Readonly<Record<string, ServerToolsAnswer>> = {
   },
   github: { auth: "failed", refused: "Did not answer in 20 s.", readAt: "2026-09-24T12:00:00.000Z" },
 };
+
+const FRONTEND_DESIGN_MD = `---
+name: frontend-design
+description: Create distinctive, production-grade frontend interfaces with high design quality.
+license: Apache-2.0
+---
+
+# Frontend design
+
+Pick one bold direction before writing a line, and hold it through every screen.
+
+## When to use it
+
+- A new page, component or app shell that should not look generated.
+- A redesign where the brief names a mood rather than a layout.
+
+## How
+
+1. Name the direction in one sentence.
+2. Choose two typefaces and one accent, and write them down.
+3. Build the smallest screen that shows all three.
+
+\`\`\`css
+:root { --accent: oklch(0.72 0.17 45); }
+\`\`\`
+
+See [the reference](https://skills.sh) for worked examples.
+`;
+
+/** What each installed skill's preview answers in the wireframe. */
+export const SKILL_PREVIEWS: Readonly<Record<string, SkillPreview>> = {
+  "frontend-design": { text: FRONTEND_DESIGN_MD, size: FRONTEND_DESIGN_MD.length },
+};
+
+/** What a skills.sh search answers in the wireframe: a few results, one already installed. */
+export const SKILL_HITS: readonly SkillHit[] = [
+  { id: "anthropics/skills/pdf", source: "anthropics/skills", skillId: "pdf", name: "pdf", installs: 3_612_000 },
+  { id: "vercel-labs/agent-skills/vercel-react-best-practices", source: "vercel-labs/agent-skills", skillId: "vercel-react-best-practices", name: "vercel-react-best-practices", installs: 1_204_000 },
+  { id: "anthropics/skills/docx", source: "anthropics/skills", skillId: "docx", name: "docx", installs: 192_764 },
+  { id: "acme/kit/frontend-design", source: "acme/kit", skillId: "frontend-design", name: "frontend-design", installs: 12_400 },
+];
+
+/** A SKILL.md out to do everything a file nobody here wrote must not: fetch an image, run a script, open a file on
+ * this computer. The restricted renderer draws it all as text but the one web link and the one heading link. */
+export const HOSTILE_SKILL_MD = [
+  "---",
+  "name: hostile",
+  "---",
+  "# Hostile",
+  "",
+  "![pixel](https://example.test/p.gif)",
+  "",
+  '<img src="https://example.test/p.gif">',
+  "",
+  "<script>alert(1)</script>",
+  "",
+  "[run](./scripts/run.py) [abs](/Users/zingzy/.zshrc) [hosts](file:///etc/hosts)",
+  "",
+  "`/etc/hosts`",
+  "",
+  "[site](https://skills.sh) [usage](#usage)",
+  "",
+  "## Usage",
+  "",
+].join("\n");

@@ -5,9 +5,9 @@
 // its module and one line in the registry.
 import type { LucideIcon } from "lucide-react";
 import type { AgentsReport } from "@wsp/protocol";
-import type { FlowView, RowAct, RowsContext } from "../agentsRows.js";
+import type { DocState, FlowView, RowAct, RowsContext } from "../agentsRows.js";
 
-export type GroupBy = "none" | "agent" | "source" | "scope" | "state";
+export type GroupBy = "none" | "agent" | "source" | "scope";
 
 /** Which host draws the manager: a task's panel or a computer's page, where a kind can group by default otherwise. */
 export type AgentsShell = "panel" | "page";
@@ -15,10 +15,10 @@ export type AgentsShell = "panel" | "page";
 /** What leads a row or a detail's head: an agent's own mark, a server's box, or the kind's glyph. */
 export type Lead = { readonly kind: "agent"; readonly agent: string; readonly faded?: boolean } | { readonly kind: "box"; readonly icon: LucideIcon } | { readonly kind: "glyph"; readonly icon: LucideIcon };
 
-/** A server's state as its one badge says it, the one badge in the feature. */
-export type ServerState = "connected" | "needs-sign-in" | "failed" | "off" | "unknown";
+/** A server's state as its dot and word say it: `open` needs no sign-in by its config and was never checked. */
+export type ServerState = "connected" | "signed-in" | "open" | "env-key" | "needs-sign-in" | "failed" | "off" | "unknown";
 
-export interface StatusBadge {
+export interface ServerStatus {
   readonly state: ServerState;
   readonly words: string;
   readonly hover?: string;
@@ -34,11 +34,13 @@ export interface RowView {
   readonly subtext?: string;
   /** Not on the computer: the name faded and the subtext the catalog's sentence, not a fact. */
   readonly available?: boolean;
-  readonly badge?: StatusBadge;
+  readonly status?: ServerStatus;
   /** A second line under the subtext in the muted mono: an agent's sign-in state. */
   readonly state?: string;
   /** The one step the row offers at its right end; pressing it opens the detail as well, unless it acts in place. */
   readonly quick?: RowAct;
+  /** Turned off: the name faded and `off` at the right end. */
+  readonly off?: boolean;
 }
 
 /** One line of a detail: the label, its value in the mono, and after it the reason or the state in the muted mono. */
@@ -47,7 +49,7 @@ export interface Fact {
   readonly label: string;
   readonly value?: string;
   readonly agent?: string;
-  readonly badge?: StatusBadge;
+  readonly status?: ServerStatus;
   readonly fact?: string;
   readonly hover?: string;
   /** The value is a line somebody would paste: a Copy glyph stands beside it on hover. */
@@ -80,6 +82,21 @@ export interface UnderLevel {
   readonly refresh?: () => void;
 }
 
+/** A document a detail draws whole under its facts, and the road that reads it when the detail opens. */
+export interface DocView extends DocState {
+  readonly load?: () => void;
+}
+
+/** A pick a detail asks for before its first act: several ticks, or one of a few. */
+export interface Choice {
+  readonly id: string;
+  readonly label: string;
+  readonly many: boolean;
+  readonly options: readonly { readonly value: string; readonly label: string; readonly agent?: string; readonly held?: string }[];
+  readonly value: readonly string[];
+  readonly set: (value: readonly string[]) => void;
+}
+
 export interface DetailView {
   readonly title: string;
   readonly lead: Lead;
@@ -93,6 +110,37 @@ export interface DetailView {
   /** Why the last ask came back with nothing, in the host's words. */
   readonly refused?: string;
   readonly under?: UnderLevel;
+  readonly choices?: readonly Choice[];
+  readonly doc?: DocView;
+}
+
+/** One row of a kind's add level: what to add, where it comes from, and a figure or a word at its right end. */
+export interface AddRow {
+  readonly key: string;
+  readonly title: string;
+  readonly subtext?: string;
+  readonly fact?: string;
+  /** Already on the computer: the row dims, and still opens. */
+  readonly dim?: boolean;
+}
+
+export interface AddLevel {
+  readonly reading: boolean;
+  readonly rows: readonly AddRow[];
+  /** What stands in place of rows: why nothing came back, or what to do first. */
+  readonly empty?: string;
+}
+
+/** A kind's add level, which replaces the list: a search of where the kind's things come from, its rows, and the
+ * detail of one before it is added. */
+export interface AddModule {
+  readonly title: string;
+  readonly search: string;
+  readonly link?: { readonly label: string; readonly href: string };
+  /** Asks for the rows of a query; the level reads them back as they land. */
+  ask(query: string, ctx: RowsContext): void;
+  level(query: string, report: AgentsReport | null, ctx: RowsContext): AddLevel;
+  detail(key: string, query: string, report: AgentsReport | null, ctx: RowsContext): DetailView | undefined;
 }
 
 export interface GroupView<T> {
@@ -133,6 +181,8 @@ export interface KindModule<T> {
   empty(on: string): string;
   /** The page-level empty's ghost word. */
   none: string;
+  /** What the toolbar's Add opens where the kind has a road to add one. */
+  adder?: (ctx: RowsContext) => AddModule | undefined;
 }
 
 /** A module with its item type forgotten, so the registry holds every kind in one list. */

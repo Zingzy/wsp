@@ -33,7 +33,11 @@ import {
   McpRow,
   McpTool,
   ServerToolsAnswer,
+  SkillAdded,
+  SkillHit,
+  SkillPreview,
   SkillRow,
+  SKILL_PREVIEW_BYTES,
   agentSignInWord,
   InitSetup,
   initSetupLines,
@@ -2765,6 +2769,58 @@ function signedInLine(what: string, where: string, answer: BoxSignedIn): string 
   return `${what} is not signed in on ${where}${answer.said === undefined ? "" : `: ${answer.said}`}.`;
 }
 
+/** skills.sh's search, asked by the host. */
+async function searchSkillsSh(client: HostClient, q: string, limit: number | undefined): Promise<SkillHit[]> {
+  return z.array(SkillHit).parse((await client.request<{ skills: unknown }>("skills.search", { q, ...(limit !== undefined ? { limit } : {}) })).skills);
+}
+
+/** Text off skills.sh as a terminal may print it: no control character but newline and tab, so no escape sequence. */
+const printable = (s: string): string => s.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
+
+export function skillHitLines(hits: readonly SkillHit[]): string[] {
+  return hits.length === 0 ? ["no skills on skills.sh match"] : table([["SKILL", "INSTALLS", "ADD WITH"], ...hits.map(h => [printable(h.name), String(h.installs), printable(h.id)])]);
+}
+
+/** A skill named `<owner>/<repo>/<skill>` is one on skills.sh; any other name is one already on the target. */
+const onSkillsSh = (skill: string): boolean => skill.split("/").length === 3;
+
+/** A skill's SKILL.md: off skills.sh by its id, else off the target by its name. */
+async function skillShown(client: HostClient, skill: string, workspace: string | undefined, on: string | undefined, project: boolean, usage: string): Promise<SkillPreview> {
+  if (onSkillsSh(skill)) {
+    if (workspace !== undefined || on !== undefined || project) throw usageRefusal(`${skill} is read off skills.sh, which names no computer or project.`, usage);
+    return SkillPreview.parse((await client.request<{ preview: unknown }>("skills.get", { skill })).preview);
+  }
+  const target = await agentsTarget(client, workspace, on, usage);
+  return SkillPreview.parse((await client.request<{ preview: unknown }>("skills.preview", { target, name: skill, ...(project ? { project } : {}) })).preview);
+}
+
+export const shownText = (p: SkillPreview): string => {
+  const text = printable(p.text);
+  return p.size > SKILL_PREVIEW_BYTES ? `${text}\n\n(the first ${SKILL_PREVIEW_BYTES / 1024} KB of ${Math.ceil(p.size / 1024)} KB)` : text;
+};
+
+async function skillAdded(client: HostClient, skill: string, workspace: string | undefined, on: string | undefined, agents: readonly string[] | undefined, project: boolean, usage: string): Promise<SkillAdded> {
+  const target = await agentsTarget(client, workspace, on, usage);
+  return SkillAdded.parse((await client.request<{ added: unknown }>("skills.add", { target, skill, ...(agents !== undefined && agents.length > 0 ? { agents } : {}), ...(project ? { project } : {}) })).added);
+}
+
+function addedLine(skill: string, a: SkillAdded): string {
+  const name = skill.split("/").at(-1) ?? skill;
+  return a.agents.length === 0 ? `${name} is in ${a.path}.` : `${name} is in ${a.path}, and in ${a.agents.map(x => `${agentName(x.agent)}'s ${x.path}`).join(", ")}.`;
+}
+
+/** A skill there turned off, on, or removed, by its name. */
+async function skillChanged(client: HostClient, op: "skills.remove" | "skills.toggle", name: string, workspace: string | undefined, on: string | undefined, project: boolean, turn: boolean | undefined, usage: string): Promise<string[]> {
+  const target = await agentsTarget(client, workspace, on, usage);
+  const said = await client.request<{ removed?: unknown; paths?: unknown }>(op, { target, name, ...(project ? { project } : {}), ...(turn !== undefined ? { on: turn } : {}) });
+  return z.array(z.string()).parse(op === "skills.remove" ? said.removed : said.paths);
+}
+
+const SkillNameIn = z.string().describe("the skill's name, as skills lists it");
+const SkillProjectIn = z.boolean().optional().describe("the project's skill of that name, from a workspace, rather than the one that is not a project's");
+const SKILL_CHANGE_WORDS =
+  "The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.";
+
 const AgentsWorkspaceIn = z.string().optional().describe("the workspace to read, by its name, or its id when two share a name; absent reads a computer");
 const AgentsOnIn = z.string().optional().describe("the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on");
 const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
@@ -2826,7 +2882,7 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `Every skill on one computer or workspace, one row per name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a workspace, or a plugin's. ${AGENTS_READ_WORDS}`,
+      description: `Every skill on one computer or workspace, one row per folder name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a workspace, or a plugin's. ${AGENTS_READ_WORDS}`,
       input: { workspace: AgentsWorkspaceIn, on: AgentsOnIn },
       output: { ...AGENTS_FRAME, skills: z.array(SkillRow) },
       call: async ({ workspace, on }, deps) => {
@@ -2835,6 +2891,133 @@ export const VERBS: readonly Verb[] = [
       },
     }),
   },
+  {
+    name: "skills search",
+    usage: "wsp skills search <query> [--limit <n>]",
+    about: "searches skills.sh for skills by their words, each with how often it was installed and the id wsp skills add takes",
+    page: "agent",
+    options: { limit: { type: "string" } },
+    run: async ctx => {
+      const q = ctx.args.join(" ");
+      const raw = flag(ctx.flags, "limit");
+      const limit = raw === undefined ? undefined : Number(raw);
+      if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 50)) throw usageRefusal("--limit takes a whole number from 1 to 50.", usageIs(ctx));
+      const hits = await searchSkillsSh(await ctx.client(), q, limit);
+      ctx.out.emit({ skills: hits }, skillHitLines(hits).join("\n"));
+      return 0;
+    },
+    tool: tool({
+      description: "Skills on skills.sh whose words match the query, most installed first as skills.sh ranks them: each one's name, the repo it comes from, how many times it was installed, and the id skills_add takes. The host asks skills.sh; an empty query is refused.",
+      input: { query: z.string().describe("the words to search skills.sh for"), limit: z.number().int().min(1).max(50).optional().describe("how many to answer, 20 without it") },
+      output: { skills: z.array(SkillHit) },
+      call: async ({ query, limit }, deps) => {
+        const hits = await searchSkillsSh(await deps.client(), query, limit);
+        return asText(skillHitLines(hits).join("\n"), { skills: hits });
+      },
+    }),
+  },
+  {
+    name: "skills show",
+    usage: "wsp skills show <skill> [<workspace>] [--on <computer>] [--project]",
+    about: "prints a skill's SKILL.md: one on skills.sh by its <owner>/<repo>/<skill> before it is installed, or one already on this computer, a box you added or a workspace by its name",
+    page: "agent",
+    options: { on: { type: "string" }, project: { type: "boolean" } },
+    run: async ctx => {
+      const [skill, workspace, ...rest] = ctx.args;
+      if (skill === undefined || rest.length > 0) throw usageRefusal("wsp skills show takes one skill and one workspace at most.", usageIs(ctx));
+      const shown = await skillShown(await ctx.client(), skill, workspace, flag(ctx.flags, "on"), ctx.flags["project"] === true, usageIs(ctx));
+      ctx.out.emit(shown, shownText(shown));
+      return 0;
+    },
+    tool: tool({
+      description: `A skill's SKILL.md as text, its first ${SKILL_PREVIEW_BYTES / 1024} KB and the whole file's size: a skill on skills.sh by its <owner>/<repo>/<skill>, read by the host with nothing installed, or a skill already on one computer or workspace by its name. Nothing in it runs.`,
+      input: { skill: z.string().describe("an <owner>/<repo>/<skill> off skills_search, or the name of a skill skills lists"), workspace: AgentsWorkspaceIn, on: AgentsOnIn, project: SkillProjectIn },
+      output: SkillPreview.shape,
+      call: async ({ skill, workspace, on, project }, deps) => {
+        const shown = await skillShown(await deps.client(), skill, workspace, on, project === true, "skills_show takes a workspace or on, not both");
+        return asText(shownText(shown), shown);
+      },
+    }),
+  },
+  {
+    name: "skills add",
+    usage: "wsp skills add <skill> [<workspace>] [--on <computer>] [--agent <id>]... [--project]",
+    about: "installs a skill off skills.sh by its <owner>/<repo>/<skill> into the shared skills folder, with a link or a copy for each agent named that does not read that folder; every file is checked first and lands as a plain file that runs nothing",
+    page: "agent",
+    options: { on: { type: "string" }, agent: { type: "string", multiple: true }, project: { type: "boolean" } },
+    run: async ctx => {
+      const [skill, workspace, ...rest] = ctx.args;
+      if (skill === undefined || rest.length > 0) throw usageRefusal("wsp skills add takes one skill and one workspace at most.", usageIs(ctx));
+      const agents = flagList(ctx.flags, "agent");
+      const added = await skillAdded(await ctx.client(), skill, workspace, flag(ctx.flags, "on"), agents.length > 0 ? agents : undefined, ctx.flags["project"] === true, usageIs(ctx));
+      ctx.out.emit(added, addedLine(skill, added));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Installs one skill off skills.sh on one computer or workspace, as the login it was added with: its files land once in ~/.agents/skills/<name> (the project's .agents/skills with project, from a workspace), and each agent named that does not read that folder gets a link to it or a copy in its own skills folder; with no agent named, every agent whose own folder's home is there gets it. The download is checked whole before anything lands: every path plain and inside the skill, at most 200 files, 1 MB each and 5 MB in all, a SKILL.md at its root; every file lands 0644 and nothing in the skill runs. A skill already there is refused rather than written over.",
+      input: {
+        skill: z.string().describe("the skill's <owner>/<repo>/<skill>, as skills_search answers it"),
+        workspace: AgentsWorkspaceIn,
+        on: AgentsOnIn,
+        agent: z.array(z.string()).optional().describe("the catalog ids of the agents to put it in; every agent whose folder is there without it"),
+        project: z.boolean().optional().describe("put it in the workspace's project rather than the home"),
+      },
+      output: SkillAdded.shape,
+      call: async ({ skill, workspace, on, agent, project }, deps) => {
+        const added = await skillAdded(await deps.client(), skill, workspace, on, agent, project === true, "skills_add takes a workspace or on, not both");
+        return asText(addedLine(skill, added), added);
+      },
+    }),
+  },
+  {
+    name: "skills remove",
+    usage: "wsp skills remove <name> [<workspace>] [--on <computer>] [--project]",
+    about: "removes a skill by its name: every folder it lives in and every link to it, where a link's own folder elsewhere stays",
+    page: "agent",
+    options: { on: { type: "string" }, project: { type: "boolean" } },
+    run: async ctx => {
+      const [name, workspace, ...rest] = ctx.args;
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp skills remove takes one skill's name and one workspace at most.", usageIs(ctx));
+      const removed = await skillChanged(await ctx.client(), "skills.remove", name, workspace, flag(ctx.flags, "on"), ctx.flags["project"] === true, undefined, usageIs(ctx));
+      ctx.out.emit({ removed }, `${name} is gone from ${removed.join(", ")}.`);
+      return 0;
+    },
+    tool: tool({
+      description: `Removes one skill on one computer or workspace by its name, as the login it was added with: every folder skills lists for it and every link to it; a folder a link points to outside the skills folders stays. ${SKILL_CHANGE_WORDS}`,
+      input: { name: SkillNameIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, project: SkillProjectIn },
+      output: { removed: z.array(z.string()) },
+      call: async ({ name, workspace, on, project }, deps) => {
+        const removed = await skillChanged(await deps.client(), "skills.remove", name, workspace, on, project === true, undefined, "skills_remove takes a workspace or on, not both");
+        return asText(`${name} is gone from ${removed.join(", ")}.`, { removed });
+      },
+    }),
+  },
+  ...(["disable", "enable"] as const).map(
+    (word): Verb => ({
+      name: `skills ${word}`,
+      usage: `wsp skills ${word} <name> [<workspace>] [--on <computer>]`,
+      about: word === "disable" ? "turns a skill off by its name, its SKILL.md renamed SKILL.md.off where it lives, so no agent loads it until it is turned on" : "turns a skill that was turned off on again, its SKILL.md.off renamed back",
+      page: "agent",
+      options: { on: { type: "string" } },
+      run: async ctx => {
+        const [name, workspace, ...rest] = ctx.args;
+        if (name === undefined || rest.length > 0) throw usageRefusal(`wsp skills ${word} takes one skill's name and one workspace at most.`, usageIs(ctx));
+        const paths = await skillChanged(await ctx.client(), "skills.toggle", name, workspace, flag(ctx.flags, "on"), false, word === "enable", usageIs(ctx));
+        ctx.out.emit({ paths }, `${name} is ${word === "enable" ? "on" : "off"}.`);
+        return 0;
+      },
+      tool: tool({
+        description: `Turns one skill ${word === "enable" ? "on again" : "off"} on one computer or workspace by its name, as the login it was added with: its SKILL.md is renamed ${word === "enable" ? "back from SKILL.md.off" : "SKILL.md.off"} in each folder it really lives in, which every link to it follows, and no agent config is edited. A project's skill lives in the repo and is refused. ${SKILL_CHANGE_WORDS}`,
+        input: { name: SkillNameIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn },
+        output: { paths: z.array(z.string()) },
+        call: async ({ name, workspace, on }, deps) => {
+          const paths = await skillChanged(await deps.client(), "skills.toggle", name, workspace, on, false, word === "enable", `skills_${word} takes a workspace or on, not both`);
+          return asText(`${name} is ${word === "enable" ? "on" : "off"}.`, { paths });
+        },
+      }),
+    }),
+  ),
   {
     name: "servers",
     usage: "wsp servers [<workspace>] [--on <computer>]",
@@ -4101,6 +4284,16 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "folders on": "the computer whose folders to list, by the name wsp computers shows; a box you added answers from its own disk, and this computer is listed without it",
   "agents on": AGENTS_ON_WORDS,
   "skills on": AGENTS_ON_WORDS,
+  "skills show on": AGENTS_ON_WORDS,
+  "skills add on": AGENTS_ON_WORDS,
+  "skills remove on": AGENTS_ON_WORDS,
+  "skills disable on": AGENTS_ON_WORDS,
+  "skills enable on": AGENTS_ON_WORDS,
+  "skills search limit": "how many skills to answer, from 1 to 50; 20 without it",
+  "skills show project": "the project's skill of that name, from a workspace, rather than the one that is not a project's",
+  "skills remove project": "the project's skill of that name, from a workspace, rather than the one that is not a project's",
+  "skills add agent": "an agent to put the skill in, by its catalog id; repeats, and every agent whose folder is there without it",
+  "skills add project": "put it in the workspace's project rather than the home",
   "servers on": AGENTS_ON_WORDS,
   "servers tools on": AGENTS_ON_WORDS,
   "servers signin on": AGENTS_ON_WORDS,

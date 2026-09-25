@@ -4,12 +4,12 @@
 // status check, the global config that carries over, how it keys project
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
-import { agentOfRow, packageOf, thisComputer, toolRowPrefix } from "@wsp/protocol";
+import { agentOfRow, packageOf, thisComputer, toolRowPrefix, type PageReach } from "@wsp/protocol";
 import { CODEX_CONFIG_FILE, CODEX_HOOKS } from "./codex-hooks.js";
 import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE_CONTEXT, PI_CONTEXT, type AgentContext } from "./context.js";
 import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
-import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
+import { CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { CLAUDE_MCP_CHECK } from "./mcp-check.js";
 import { CLAUDE_MCP_LOGIN, CODEX_MCP_LOGIN, GEMINI_MCP_LOGIN, OPENCODE_MCP_LOGIN, loginRoad, type ServerSignInRoad } from "./mcp-login.js";
 import { RELEASE_PINS } from "./release-pins.js";
@@ -261,7 +261,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     node: 20,
     signIn: SIGN_IN_ROWS.gemini,
     // https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (project scope is a repo's .gemini/settings.json)
-    mcp: { format: MCP_SERVERS_JSON, files: ["~/.gemini/settings.json"], projectFiles: [".gemini/settings.json"], scope: "user scope", login: GEMINI_MCP_LOGIN },
+    mcp: { format: GEMINI_SETTINGS_JSON, files: ["~/.gemini/settings.json"], projectFiles: [".gemini/settings.json"], scope: "user scope", login: GEMINI_MCP_LOGIN },
     configPaths: ["~/.gemini/settings.json", "~/.gemini/GEMINI.md", "~/.gemini/commands"],
     projectState: [
       { state: "project registry", location: "projects.json", key: "{\"projects\": {\"PATH\": \"SLUG\"}}; SLUG is the folder basename, deduplicated", pathFields: ["the key"], move: "rewrite the key, keep the slug", status: "measured" },
@@ -453,10 +453,10 @@ export const MCP_AGENTS: readonly McpAgent[] = CATALOG_AGENTS.filter((a): a is M
 export const MCP_AGENT_IDS: string = MCP_AGENTS.map(a => a.id).join(", ");
 
 /** How one server in that agent's config is signed in where it stands, off the agent's own module; nothing for an
- * agent with none. `here`: the computer the person's browser is on. */
-export function serverSignInRoad(agentId: string, name: string, here: boolean): ServerSignInRoad | undefined {
+ * agent with none. */
+export function serverSignInRoad(agentId: string, name: string, reach: PageReach): ServerSignInRoad | undefined {
   const login = MCP_AGENTS.find(a => a.id === agentId)?.mcp.login;
-  return login === undefined ? undefined : loginRoad(login, name, here);
+  return login === undefined ? undefined : loginRoad(login, name, reach);
 }
 
 const BY_ID: ReadonlyMap<string, CatalogEntry> = new Map(CATALOG.map(e => [e.id, e]));
