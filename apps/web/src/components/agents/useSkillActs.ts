@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentsTarget, SkillRow } from "@wsp/protocol";
 import { useStore } from "../../protocol/store.js";
 import { errorText } from "../../lib/utils.js";
-import { skillKey, type DocState, type SkillActs, type SkillPicks, type SkillSearch } from "./agentsRows.js";
+import { rowTarget, skillKey, type DocState, type SkillActs, type SkillPicks, type SkillSearch } from "./agentsRows.js";
 
 interface Held {
   readonly targetKey: string | null;
@@ -81,7 +81,7 @@ export function useSkillActs(target: AgentsTarget | null): SkillActs | undefined
         once(`preview ${skillKey(row)}`, () => {
           const key = skillKey(row);
           put("previews", key, { reading: true });
-          api.skillsPreview!(at, row.name, row.scope === "project").then(
+          api.skillsPreview!(rowTarget(at, row.project), row.name, row.scope === "project").then(
             preview => put("previews", key, { reading: false, preview }),
             (e: unknown) => put("previews", key, { reading: false, error: errorText(e) }),
           );
@@ -114,8 +114,8 @@ export function useSkillActs(target: AgentsTarget | null): SkillActs | undefined
       },
       picksOf: id => shown.picks[id],
       setPicks: (id, picks) => put("picks", id, picks),
-      toggle: (row, on) => write(skillKey(row), () => api.skillsToggle?.(at, row.name, row.scope === "project", on)),
-      remove: row => write(skillKey(row), () => api.skillsRemove?.(at, row.name, row.scope === "project")),
+      toggle: (row, on) => write(skillKey(row), () => api.skillsToggle?.(rowTarget(at, row.project), row.name, row.scope === "project", on)),
+      remove: row => write(skillKey(row), () => api.skillsRemove?.(rowTarget(at, row.project), row.name, row.scope === "project")),
       add: (id, picks) => write(id, () => api.skillsAdd?.(at, id, picks.agents, picks.project)),
       busyOf: key => shown.busy[key] === true,
       refusedOf: key => shown.refused[key],

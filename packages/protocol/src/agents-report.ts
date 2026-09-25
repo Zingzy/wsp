@@ -12,9 +12,22 @@ import { z } from "zod";
 export const AgentSignInState = z.enum(["signed-in", "vault-key", "none"]);
 export type AgentSignInState = z.infer<typeof AgentSignInState>;
 
-/** What a report is read off: a computer by the id places.list gives it (this one's included), or one workspace. */
-export const AgentsTarget = z.union([z.object({ placeId: z.string() }).strict(), z.object({ workspaceId: z.string() }).strict()]);
+/** What a report is read off: a computer by the id places.list gives it (this one's included), with `project` one of
+ * the projects on it by its id or its name, which is what an act on that project's skills and servers names; or one
+ * workspace. */
+export const AgentsTarget = z.union([z.object({ placeId: z.string(), project: z.string().optional() }).strict(), z.object({ workspaceId: z.string() }).strict()]);
 export type AgentsTarget = z.infer<typeof AgentsTarget>;
+
+/** A project a report read the folders of, by the id and name projects.list gives it and its folder on that
+ * computer, `~`-relative under the home: every project on a computer, or a workspace's own. */
+export const AgentsProject = z.object({ id: z.string(), name: z.string(), path: z.string() });
+export type AgentsProject = z.infer<typeof AgentsProject>;
+
+/** Why a target named a project the computer does not hold. */
+export const noSuchAgentsProjectRefusal = (id: string, computer: string): string => `There is no project ${id} on ${computer}.`;
+
+/** Why a target named a project by a name two projects on that computer share. */
+export const sharedAgentsProjectRefusal = (name: string, computer: string): string => `Two projects on ${computer} are named ${name}; name one by the id wsp projects shows.`;
 
 /** How the agent's binary got onto that computer: by wsp's own install under its tools folder, by the person or
  * another installer (`own`), as a wrapper another program puts in front of it (`shim`), or it is not there. */
@@ -57,8 +70,9 @@ export type SkillPath = z.infer<typeof SkillPath>;
 export const SkillScope = z.enum(["user", "project", "plugin"]);
 export type SkillScope = z.infer<typeof SkillScope>;
 
-/** One skill by its name, with every folder it lives in. `description` is off its SKILL.md's frontmatter. */
-export const SkillRow = z.object({ name: z.string(), description: z.string().optional(), paths: z.array(SkillPath).min(1), scope: SkillScope });
+/** One skill by its name, with every folder it lives in. `description` is off its SKILL.md's frontmatter; `project`
+ * is the project a project skill lives in. */
+export const SkillRow = z.object({ name: z.string(), description: z.string().optional(), paths: z.array(SkillPath).min(1), scope: SkillScope, project: AgentsProject.optional() });
 export type SkillRow = z.infer<typeof SkillRow>;
 
 /** One skill skills.sh lists for a search: `id` is `<owner>/<repo>/<skill>`, what an install names. */
@@ -151,8 +165,13 @@ export const noServersConfigRefusal = (agent: string): string => `${agent} keeps
 /** Why a napping workspace's servers were not changed: nothing here wakes a machine. */
 export const nappingServersRefusal = (name: string): string => `${name} is napping, and its servers are changed only while it runs; wake it first`;
 
+/** One property of a tool's input, off its input schema: its name, the type its schema gives it where it gives one,
+ * and whether a call has to carry it. */
+export const McpToolParam = z.object({ name: z.string(), type: z.string().optional(), required: z.boolean(), description: z.string().optional() });
+export type McpToolParam = z.infer<typeof McpToolParam>;
+
 /** One tool a server lists, as its tools/list answers it. */
-export const McpTool = z.object({ name: z.string(), description: z.string().optional() });
+export const McpTool = z.object({ name: z.string(), description: z.string().optional(), params: z.array(McpToolParam).optional() });
 export type McpTool = z.infer<typeof McpTool>;
 
 /** How a server is reached, shown and never run: the command with every value of the person's hidden, or the host
@@ -209,6 +228,8 @@ export const McpRow = z.object({
   /** On a computer you own: whether wsp's recipe job put it there. Absent where no recipe job keeps a record. */
   inRecipe: z.boolean().optional(),
   tools: z.array(McpTool).optional(),
+  /** The project a project server is set up in. */
+  project: AgentsProject.optional(),
 });
 export type McpRow = z.infer<typeof McpRow>;
 
@@ -240,6 +261,8 @@ export const AgentsReport = z.object({
   servers: z.array(McpRow),
   /** One line per reader that could not answer, naming it. */
   refused: z.array(z.string()),
+  /** Every project whose folders the read covered, rows or none: each one a computer holds, or a workspace's own. */
+  projects: z.array(AgentsProject).optional(),
   /** Where a sign-in page that returns to localhost reaches the harness there; absent reaches nowhere. */
   reach: PageReach.optional(),
 });

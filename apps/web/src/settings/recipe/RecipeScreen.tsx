@@ -6,8 +6,9 @@
 // where the protocol says the screen weighs, and under the card, centred, the
 // tally: the step's count and the whole image so far against the disk,
 // coloured by its share, with the disk meter inline after it on the steps that
-// change the image's size. The ticks, answers and typed keys live in the
-// dialog's one draft until Continue sends them.
+// change the image's size. The ticks, answers and typed keys live in one draft
+// until Continue sends them. The setup sheet and the Image card's recipe both
+// draw a screen with this, each in its own frame.
 import { CLOUD_SETUP_WORDS, UNKNOWN_SIZE, diskTone, fmtBytes, initSizeTone, initTallyCount, fmtBytesOfTotal, initTallyOf, initTicksOf, type InitDraft, type InitScreen, type InitScreenItem } from "@wsp/protocol";
 import { Checkbox } from "../../components/ui/checkbox.js";
 import { Input } from "../../components/ui/input.js";
@@ -16,7 +17,6 @@ import { cn } from "../../lib/utils.js";
 import { TONE_TEXT } from "../../lib/tone.js";
 import { Card, FIELD, FIELD_LABEL, GroupLabel, META, Meter, NAME, ROW, ROW_LINE, RowPicker, STATE_WORD, SizeCell, Slot } from "./rows.js";
 import { RowMark } from "./SignInMark.js";
-import { SetupScreen, type ScreenAction } from "./SetupScreen.js";
 
 /** What the person has changed on the screen and not yet sent: the rows ticked, each answering row's answer, and the
  * API keys typed under the rows that took one. The ticks and answers are kept on the host as they change; a typed
@@ -34,10 +34,13 @@ export const draftOf = (screen: InitScreen, kept?: InitDraft): Draft => ({ ticks
 /** A row's answer as it stands in the draft. */
 export const answerOf = (draft: Draft, item: InitScreenItem): string | undefined => draft.answers[item.id];
 
+/** The why beside a row's name, and under it below 640 px. */
+const WHY = "min-w-0 flex-1 cursor-default truncate text-left max-sm:w-full max-sm:flex-none max-sm:text-[11px] max-sm:leading-4";
+
 /** The API key the row's choice is: the one answer that opens a field under the row. */
 const KEY_CHOICE = "key";
 
-export function SetupAnswers({ screen, counter, draft, onDraft, primary, secondary, refusal, image }: { screen: InitScreen; counter: string; draft: Draft; onDraft: (next: Draft) => void; primary: ScreenAction; secondary: ScreenAction; refusal: string | null; /** The image so far, the protocol's one estimate, against the machine's disk where the provider reports one. */ image: { used: number; total?: number } }) {
+export function RecipeScreen({ screen, draft, onDraft, image }: { screen: InitScreen; draft: Draft; onDraft: (next: Draft) => void; /** The image so far, the protocol's one estimate, against the machine's disk where the provider reports one. */ image: { used: number; total?: number } }) {
   const groups = [...new Set(screen.items.map(i => i.group ?? ""))];
   const grouped = groups.some(g => g !== "");
   const tick = (id: string, on: boolean): void => {
@@ -60,23 +63,24 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
           <div className={ROW} title={item.detail.join("\n")}>
             {item.choices === undefined ? <Checkbox tone="neutral" aria-label={item.label} checked={item.lock === "on" || draft.ticks.has(item.id)} disabled={item.lock !== undefined} onCheckedChange={on => tick(item.id, on === true)} /> : null}
             <RowMark id={item.mark ?? item.id} />
-            <span className={cn(NAME, "flex-none max-w-[45%]")}>{item.label}</span>
-            {item.why !== undefined ? (
-              item.choices !== undefined && item.detail[0] !== undefined ? (
-                <Tooltip>
-                  <TooltipTrigger data-k="why" className={cn(META, "min-w-0 flex-1 cursor-default truncate text-left")} render={<span />}>
+            {/* Below 640 px the why stands under the name, where a phone's row has no room for both on one line. */}
+            <span className="flex min-w-0 flex-1 items-center gap-3 max-sm:flex-col max-sm:items-start max-sm:justify-center max-sm:gap-0">
+              <span className={cn(NAME, "flex-none max-w-[45%] max-sm:max-w-full")}>{item.label}</span>
+              {item.why !== undefined ? (
+                item.choices !== undefined && item.detail[0] !== undefined ? (
+                  <Tooltip>
+                    <TooltipTrigger data-k="why" className={cn(META, WHY)} render={<span />}>
+                      {item.why}
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">{item.detail[0]}</TooltipPopup>
+                  </Tooltip>
+                ) : (
+                  <span data-k="why" className={cn(META, WHY)}>
                     {item.why}
-                  </TooltipTrigger>
-                  <TooltipPopup side="top">{item.detail[0]}</TooltipPopup>
-                </Tooltip>
-              ) : (
-                <span data-k="why" className={cn(META, "min-w-0 flex-1 truncate")}>
-                  {item.why}
-                </span>
-              )
-            ) : (
-              <span className="flex-1" />
-            )}
+                  </span>
+                )
+              ) : null}
+            </span>
             {item.size !== undefined ? <SizeCell tone={initSizeTone(screen, item.size)}>{item.size === null ? UNKNOWN_SIZE : fmtBytes(item.size)}</SizeCell> : null}
             {item.choices !== undefined ? (
               <Slot>
@@ -104,7 +108,7 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
       );
     });
   return (
-    <SetupScreen k={`screen-${screen.id}`} counter={counter} headline={screen.top} refusal={refusal} primary={primary} secondary={secondary}>
+    <>
       <Card label={screen.title}>
         {grouped
           ? groups.map(group => (
@@ -118,14 +122,19 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
           : rows(screen.items)}
       </Card>
       {tally !== undefined && screen.tally !== undefined ? (
-        <p data-k="tally" className={cn(META, "mt-3 flex items-center justify-center gap-2")}>
+        <p data-k="tally" className={cn(META, "mt-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center")}>
           <span>
             {initTallyCount(tally.count, screen.tally)} ·{" "}
             <span data-k="tally-size" data-tone={imageTone} className={TONE_TEXT[imageTone]}>
               {fmtBytesOfTotal(image.used, image.total)}
             </span>
           </span>
-          {image.total !== undefined ? <Meter used={image.used} total={image.total} /> : null}
+          {image.total !== undefined ? (
+            // A phone's width holds the words or the meter on one line, not both with room around them.
+            <span className="flex max-sm:basis-full max-sm:justify-center">
+              <Meter used={image.used} total={image.total} />
+            </span>
+          ) : null}
         </p>
       ) : null}
       {screen.footer.length > 0 ? (
@@ -137,6 +146,6 @@ export function SetupAnswers({ screen, counter, draft, onDraft, primary, seconda
           ))}
         </div>
       ) : null}
-    </SetupScreen>
+    </>
   );
 }

@@ -6,7 +6,7 @@
 // press alone, with the time and the rate beside it.
 import { act, cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DEFAULT_PREFERENCES, fmtRate, placeBuildsNoImageLine, type InitSetup, type PlaceView, type SealedImage, type SealedImageBuilt, type SealedImageCopy, type SealedImageView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, fmtRate, placeBuildsNoImageLine, type InitJob, type InitSetup, type PlaceView, type SealedImage, type SealedImageBuilt, type SealedImageCopy, type SealedImageView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useAdds } from "../src/settings/adds.js";
@@ -118,14 +118,16 @@ describe("Add a computer goes on to the image", () => {
     expect(fake.builds).toEqual([]);
   });
 
-  it("says where no image exists yet that the image is built here, with the press held and its reason under it", async () => {
+  it("says where no image exists yet that the image is built here, and its press opens the recipe under the panel", async () => {
     useStore.setState({ places: [here, box] });
     joinedOverSsh(box);
-    await openRoad(host({ image: null, copies: [], projects: [] }).api, "ssh");
+    await openRoad(host({ image: null, copies: [], projects: [] }, { initStart: async () => ({}) as InitJob }).api, "ssh");
     const ssh = road("ssh");
     expect(title(ssh)).toBe(IMAGE_WORDS.state.nothing);
-    expect(press(ssh).hasAttribute("data-held")).toBe(true);
-    expect(card(ssh)?.querySelector("[data-k='image-refusal']")?.textContent).toBe(IMAGE_WORDS.buildHeld);
+    expect(press(ssh).hasAttribute("data-held")).toBe(false);
+    fireEvent.click(press(ssh));
+    await settle();
+    expect(card(ssh)?.querySelector("[data-k='recipe']")?.getAttribute("data-step")).toBe("choice");
   });
 
   it("says in one line that a joined computer takes no copy, in place of a card", async () => {

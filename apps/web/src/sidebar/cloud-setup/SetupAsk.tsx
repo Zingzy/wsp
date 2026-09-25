@@ -14,7 +14,7 @@ import { FOLDER_GHOST } from "../../files/FolderPathField.js";
 import { desktopBridge } from "../../lib/desktopShell.js";
 import { cn } from "../../lib/utils.js";
 import { carriesFiles, droppedFolder } from "../folderDrag.js";
-import { FIELD_LABEL, LONE_FIELD, STATE_WORD } from "./rows.js";
+import { FIELD_LABEL, LONE_FIELD, STATE_WORD } from "../../settings/recipe/rows.js";
 import { SetupScreen } from "./SetupScreen.js";
 
 const ASK_HEADLINE = "Your first cloud task";

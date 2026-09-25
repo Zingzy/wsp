@@ -142,4 +142,19 @@ describe("the agents report on the wire", () => {
     expect(() => SkillHit.parse({ ...hit, installs: -1 })).toThrow();
     expect(SkillPreview.parse({ text: "# pdf", size: 130_000 })).toEqual({ text: "# pdf", size: 130_000 });
   });
+
+  it("a computer's report names each project it read, its project rows carry theirs, a target may name one, and a tool carries its parameters", () => {
+    const spoo = { id: "pr_1", name: "spoo", path: "~/spoo" };
+    const withProjects = {
+      ...report,
+      projects: [spoo, { id: "pr_2", name: "www", path: "~/www" }],
+      skills: [...report.skills, { name: "deploy", scope: "project", paths: [{ path: "~/spoo/.claude/skills/deploy", agent: "claude" }], project: spoo }],
+      servers: [...report.servers, { agent: "claude", name: "db", scope: "project", file: "~/spoo/.mcp.json", transport: { kind: "stdio", line: "npx db-mcp" }, envNames: [], auth: "open", enabled: true, project: spoo }],
+    };
+    expect(AgentsReport.parse(withProjects)).toEqual(withProjects);
+    expect(RuntimeRequest.parse({ id: "1", op: "servers.tools", target: { placeId: "p_spoo", project: "pr_1" }, agent: "claude", name: "db" })).toMatchObject({ target: { placeId: "p_spoo", project: "pr_1" } });
+    expect(() => RuntimeRequest.parse({ id: "1", op: "agents.read", target: { workspaceId: "ws_1", project: "pr_1" } })).toThrow();
+    const tool = { name: "query", description: "Runs a query", params: [{ name: "sql", type: "string", required: true, description: "The query" }, { name: "limit", required: false }] };
+    expect(ServerToolsAnswer.parse({ auth: "open", tools: [tool], readAt: "2026-09-25T12:00:00.000Z" }).tools).toEqual([tool]);
+  });
 });

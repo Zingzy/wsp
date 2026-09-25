@@ -254,7 +254,7 @@ describe("a remote MCP server's state in the report", () => {
     const project = join(at.root, "repo");
     mkdirSync(project);
     writeFileSync(join(project, ".mcp.json"), JSON.stringify({ mcpServers: { theirs: { type: "http", url: `${named(s)}/ok` } } }));
-    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock: via([]), resolve: DNS }).read({ kind: "here", project }, "k");
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at), knock: via([]), resolve: DNS }).read({ kind: "here", projects: [{ id: "pr_app", name: "app", path: project }] }, "k");
     expect(authOf(read.servers, "mine")).toBe("connected");
     expect(authOf(read.servers, "theirs")).toBe("unknown");
     expect(s.hits).toHaveLength(1);

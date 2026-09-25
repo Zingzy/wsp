@@ -80,7 +80,7 @@ function skillsSh(at: AgentHome, skillMd = SKILL_MD): { fetch: SkillsFetch; aske
   return { fetch, asked };
 }
 
-const skillsOf = async (host: Host, project?: string) => (await detectSkills(host, await skillRoots(host, project === undefined ? {} : { project }))).skills;
+const skillsOf = async (host: Host, project?: string) => (await detectSkills(host, await skillRoots(host, project === undefined ? {} : { projects: [{ id: "pr_app", name: "app", path: project }] }))).skills;
 const mode = (path: string): number => statSync(path).mode & 0o777;
 
 describe("installing a skill off skills.sh", () => {
@@ -122,10 +122,10 @@ describe("installing a skill off skills.sh", () => {
 
   it("puts a project's skill in the project's folders, from a workspace", async () => {
     const at = fixture();
-    const added = await skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) }).add({ kind: "here", project: at.project }, { skill: "acme/skills/memo", agents: ["claude"], project: true });
+    const added = await skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) }).add({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { skill: "acme/skills/memo", agents: ["claude"], project: true });
     expect(added).toEqual({ path: "~/code/app/.agents/skills/memo", agents: [{ agent: "claude", path: "~/code/app/.claude/skills/memo" }] });
     expect(readlinkSync(join(at.project, ".claude/skills/memo"))).toBe("../../.agents/skills/memo");
-    await expect(skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) }).add({ kind: "here" }, { skill: "acme/skills/memo", project: true })).rejects.toThrow("A project's skill goes in from a workspace, which names the project.");
+    await expect(skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) }).add({ kind: "here" }, { skill: "acme/skills/memo", project: true })).rejects.toThrow("A project's skill goes in from a workspace of that project, or from its computer's page.");
   });
 
   it("refuses a download whose SKILL.md names another skill, or one that claims the name wsp keeps", async () => {
@@ -142,7 +142,7 @@ describe("installing a skill off skills.sh", () => {
     mkdirSync(away, { recursive: true });
     rmSync(join(at.project, ".agents/skills"), { recursive: true, force: true });
     symlinkSync(away, join(at.project, ".agents/skills"));
-    await expect(skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) }).add({ kind: "here", project: at.project }, { skill: "acme/skills/memo", agents: ["claude"], project: true })).rejects.toThrow(
+    await expect(skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) }).add({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { skill: "acme/skills/memo", agents: ["claude"], project: true })).rejects.toThrow(
       `memo was not installed: ~/code/app/.agents/skills is a link to ${away}, out of the project.`,
     );
     expect(existsSync(join(away, "memo"))).toBe(false);
@@ -214,7 +214,7 @@ describe("a skill's SKILL.md, turning it off and on, and removing it", () => {
     await expect(acts.remove({ kind: "here" }, { name: "wsp" })).rejects.toThrow(systemSkillRefusal("wsp"));
     await expect(acts.toggle({ kind: "here" }, { name: "frontend-design", on: false })).rejects.toThrow(pluginSkillRefusal("frontend-design"));
     await expect(acts.remove({ kind: "here" }, { name: "frontend-design" })).rejects.toThrow(pluginSkillRefusal("frontend-design"));
-    await expect(acts.toggle({ kind: "here", project: at.project }, { name: "deploy", project: true, on: false })).rejects.toThrow(projectSkillOffRefusal("deploy", "~/code/app/.claude/skills/deploy"));
+    await expect(acts.toggle({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { name: "deploy", project: true, on: false })).rejects.toThrow(projectSkillOffRefusal("deploy", "~/code/app/.claude/skills/deploy"));
     expect(existsSync(join(at.home, ".claude/skills/wsp/SKILL.md"))).toBe(true);
     expect(existsSync(join(at.project, ".claude/skills/deploy/SKILL.md"))).toBe(true);
   });
@@ -273,9 +273,9 @@ describe("a skill's SKILL.md, turning it off and on, and removing it", () => {
     const acts = skillsActs({ fetch: skillsSh(at).fetch, here: () => here(at) });
     const project = (await skillsOf(here(at), at.project)).filter(s => s.scope === "project");
     expect(project.map(s => s.name)).toEqual(["deploy"]);
-    await expect(acts.remove({ kind: "here", project: at.project }, { name: "review", project: true })).rejects.toThrow(noSuchSkillRefusal("review"));
-    await expect(acts.toggle({ kind: "here", project: at.project }, { name: "review", project: true, on: false })).rejects.toThrow(noSuchSkillRefusal("review"));
-    await expect(acts.preview({ kind: "here", project: at.project }, { name: "review", project: true })).rejects.toThrow(noSuchSkillRefusal("review"));
+    await expect(acts.remove({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { name: "review", project: true })).rejects.toThrow(noSuchSkillRefusal("review"));
+    await expect(acts.toggle({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { name: "review", project: true, on: false })).rejects.toThrow(noSuchSkillRefusal("review"));
+    await expect(acts.preview({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { name: "review", project: true })).rejects.toThrow(noSuchSkillRefusal("review"));
     expect(existsSync(join(at.home, ".claude/skills/review/SKILL.md"))).toBe(true);
 
     rmSync(join(at.project, ".agents/skills"));
@@ -283,15 +283,15 @@ describe("a skill's SKILL.md, turning it off and on, and removing it", () => {
     writeFileSync(join(at.home, ".fake-secret"), "sk-ant-x-not-a-key\n");
     symlinkSync("../../.fake-secret", join(at.project, "SKILL.md"));
     expect((await skillsOf(here(at), at.project)).filter(s => s.scope === "project").map(s => s.name)).toEqual(["deploy"]);
-    await expect(acts.preview({ kind: "here", project: at.project }, { name: "app", project: true })).rejects.toThrow(noSuchSkillRefusal("app"));
-    await expect(acts.remove({ kind: "here", project: at.project }, { name: "app", project: true })).rejects.toThrow(noSuchSkillRefusal("app"));
+    await expect(acts.preview({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { name: "app", project: true })).rejects.toThrow(noSuchSkillRefusal("app"));
+    await expect(acts.remove({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { name: "app", project: true })).rejects.toThrow(noSuchSkillRefusal("app"));
     expect(existsSync(at.project)).toBe(true);
 
     rmSync(join(at.project, ".agents/skills"));
     renameSync(join(at.project, ".claude"), join(at.root, "claude-dir"));
     symlinkSync(join(at.root, "claude-dir"), join(at.project, ".claude"));
     expect((await skillsOf(here(at), at.project)).filter(s => s.scope === "project")).toEqual([]);
-    await expect(acts.remove({ kind: "here", project: at.project }, { name: "deploy", project: true })).rejects.toThrow(noSuchSkillRefusal("deploy"));
+    await expect(acts.remove({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { name: "deploy", project: true })).rejects.toThrow(noSuchSkillRefusal("deploy"));
     expect(existsSync(join(at.root, "claude-dir/skills/deploy/SKILL.md"))).toBe(true);
   });
 
