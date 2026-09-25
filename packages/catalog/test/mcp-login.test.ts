@@ -4,8 +4,8 @@ import { CLAUDE_MCP_LOGIN, CODEX_MCP_LOGIN, GEMINI_MCP_LOGIN, MCP_AGENTS, OPENCO
 
 describe("how one MCP server of an agent is signed in", () => {
   it("is each harness's own command, measured off its help, or the line its own session takes", () => {
-    expect(CLAUDE_MCP_LOGIN).toMatchObject({ finish: "code" });
-    expect("command" in CLAUDE_MCP_LOGIN && CLAUDE_MCP_LOGIN.command("notion")).toBe("claude mcp login 'notion' --no-browser");
+    expect("command" in CLAUDE_MCP_LOGIN && CLAUDE_MCP_LOGIN.command("notion")).toBe("claude mcp login 'notion'");
+    expect("command" in CLAUDE_MCP_LOGIN && CLAUDE_MCP_LOGIN.pasted?.("notion")).toBe("claude mcp login 'notion' --no-browser");
     expect("command" in CODEX_MCP_LOGIN && CODEX_MCP_LOGIN.command("notion")).toBe("codex mcp login 'notion'");
     expect("command" in OPENCODE_MCP_LOGIN && OPENCODE_MCP_LOGIN.command("notion")).toBe("opencode mcp auth 'notion'");
     expect("inside" in GEMINI_MCP_LOGIN && GEMINI_MCP_LOGIN.inside("notion")).toBe("/mcp auth notion");
@@ -15,14 +15,19 @@ describe("how one MCP server of an agent is signed in", () => {
     expect(Object.fromEntries(MCP_AGENTS.map(a => [a.id, a.mcp.login]))).toEqual({ claude: CLAUDE_MCP_LOGIN, codex: CODEX_MCP_LOGIN, gemini: GEMINI_MCP_LOGIN, opencode: OPENCODE_MCP_LOGIN });
   });
 
-  it("runs in a watched pty where its page comes back to it, and is the person's line where it cannot", () => {
-    // A pasted redirect finishes Claude Code's anywhere; a page at localhost reaches only the computer the browser is on.
-    expect(serverSignInRoad("claude", "notion", false)).toEqual({ kind: "pty", command: "claude mcp login 'notion' --no-browser", finish: "code" });
-    expect(serverSignInRoad("codex", "notion", true)).toEqual({ kind: "pty", command: "codex mcp login 'notion'", finish: "callback" });
-    expect(serverSignInRoad("codex", "notion", false)).toMatchObject({ kind: "copy", line: "codex mcp login 'notion'" });
-    expect(serverSignInRoad("opencode", "notion", false)).toMatchObject({ kind: "copy", line: "opencode mcp auth 'notion'" });
-    expect(serverSignInRoad("gemini", "notion", true)).toMatchObject({ kind: "copy", line: "/mcp auth notion" });
-    expect(serverSignInRoad("hermes", "notion", true)).toBeUndefined();
+  it("runs its browser sign-in where the page comes back to it, the pasted address where only that finishes, and the person's line otherwise", () => {
+    // Here the harness opens this computer's browser; through the relay its page opens here and the redirect is carried back.
+    for (const reach of ["here", "relay"] as const) {
+      expect(serverSignInRoad("claude", "notion", reach)).toEqual({ kind: "pty", command: "claude mcp login 'notion'", finish: "callback" });
+      expect(serverSignInRoad("codex", "notion", reach)).toEqual({ kind: "pty", command: "codex mcp login 'notion'", finish: "callback" });
+      expect(serverSignInRoad("opencode", "notion", reach)).toEqual({ kind: "pty", command: "opencode mcp auth 'notion'", finish: "callback" });
+    }
+    // Where no forward reaches, Claude Code alone finishes by the address the browser landed on.
+    expect(serverSignInRoad("claude", "notion", "none")).toEqual({ kind: "pty", command: "claude mcp login 'notion' --no-browser", finish: "code" });
+    expect(serverSignInRoad("codex", "notion", "none")).toMatchObject({ kind: "copy", line: "codex mcp login 'notion'", why: "callback" });
+    expect(serverSignInRoad("opencode", "notion", "none")).toMatchObject({ kind: "copy", line: "opencode mcp auth 'notion'", why: "callback" });
+    expect(serverSignInRoad("gemini", "notion", "here")).toMatchObject({ kind: "copy", line: "/mcp auth notion" });
+    expect(serverSignInRoad("hermes", "notion", "here")).toBeUndefined();
   });
 });
 
