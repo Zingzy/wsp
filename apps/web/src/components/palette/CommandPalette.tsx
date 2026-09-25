@@ -64,7 +64,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
     () => ({
       selectWorkspace: goToWorkspace,
       selectThread: select,
-      newWorkspace: requestNewWorkspace,
+      newWorkspace: () => requestNewWorkspace(),
       toggleSidebar,
       toggleRightPanel,
       nextWorkspace: () => goToAdjacentWorkspace(1),

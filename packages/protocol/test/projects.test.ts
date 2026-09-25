@@ -4,7 +4,7 @@
 // this computer belongs to: the command line, the runtime and the app all
 // read these here.
 import { describe, expect, it } from "vitest";
-import { addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, MEMORY_KEPT_CLAUSE, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, landsOn, MEMORY_KEPT_CLAUSE, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, workspaceLands, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -254,5 +254,27 @@ describe("a project golden's manifest", () => {
     // A fork of the golden goes by the newest project it carries, the name new --from takes for it.
     expect(goldenForkName(golden)).toBe("wsp");
     expect(goldenForkName({ ...golden, projects: [] })).toBe("snap_p");
+  });
+});
+
+describe("where a workspace of a project lands", () => {
+  const here = { id: HERE_PLACE_ID, name: "zingzy-mbp" };
+  const solari = { id: "solari", name: "Solari" };
+  const box = { id: "p_2", name: "hetzner" };
+
+  it("copies a folder on this computer for a project here, forks on the host's own provider for one there, and lands anywhere else on the place it names", () => {
+    expect(workspaceLands(HERE_PLACE_ID, "solari")).toEqual({ at: "here" });
+    expect(workspaceLands("solari", "solari")).toEqual({ at: "wired" });
+    expect(workspaceLands("p_2", "solari")).toEqual({ at: "place", place: "p_2" });
+    expect(workspaceLands("solari", undefined)).toEqual({ at: "place", place: "solari" });
+  });
+
+  it("puts a project here on this computer's row and never on the provider the host forks on", () => {
+    expect(landsOn(HERE_PLACE_ID, here)).toBe(true);
+    expect(landsOn(HERE_PLACE_ID, solari)).toBe(false);
+    expect(landsOn("solari", solari)).toBe(true);
+    expect(landsOn("Solari", solari)).toBe(true);
+    expect(landsOn("hetzner", box)).toBe(true);
+    expect(landsOn("p_2", solari)).toBe(false);
   });
 });

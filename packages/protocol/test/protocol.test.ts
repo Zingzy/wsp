@@ -150,8 +150,8 @@ describe("a copy of the image beside the record", () => {
   });
 
   it("a place's row says the stage a copy build there is at in the seal's own words, or why the last one stopped, and that sentence is the row's note while it stands", () => {
-    expect(copyBuildingLine("creating")).toBe("building your image · creating the machine");
-    expect(copyBuildingLine("uploading-files")).toBe("building your image · copying your files");
+    expect(copyBuildingLine("creating")).toBe("copying your image · creating the machine");
+    expect(copyBuildingLine("uploading-files")).toBe("copying your image · copying your files");
     expect(copyStoppedLine("no room today")).toBe("the build stopped · no room today");
     expect(copyStoppedLine()).toBe("the build stopped");
     expect(copyStoppedLine("fetch failed")).toBe(`the build stopped · ${NETWORK_LOST_LINE}`);

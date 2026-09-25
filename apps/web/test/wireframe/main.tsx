@@ -64,6 +64,10 @@
 //   settings-computers-refused  Computers with the host refusing the places read
 //                         and the ssh config read
 //   settings-remove-computer  the Remove dialog over the box's page
+//   settings-image-nothing, -copy, -copying, -stopped, -stale, -ready  the box's
+//                         page with its Image card in that state, or the cloud's
+//                         with &computer=solari; settings-computer is the box's
+//                         ready card and settings-cloud the cloud's copy behind
 //   bring-back-paused    the row's menu on a machine that is stopped, with
 //                        Bring back held and its reason under the pointer
 //   bring-back-absent    the same on a workspace whose computer is not
@@ -260,6 +264,7 @@ const box = (id: string, name: string, over: Partial<PlaceView>): PlaceView =>
     lastSeenAt: AT,
     daemonVersion: 40,
     takesForks: true,
+    buildsImages: true,
     road: { ssh: `root@${name}` },
     dialled: { at: AT, answered: true, roundTripMs: 41 },
     ...over,
@@ -290,9 +295,14 @@ const COMPUTERS: PlaceView[] = [
   }),
   // A job that ended before its rows did, which the row says in the protocol's own word for it.
   box("p_attic", "attic", { provision: provision({ state: "stopped", finishedAt: undefined, said: "the link dropped" }) }),
-  { id: "solari", kind: "provider", name: "solari", default: false, takesForks: true, rateUsdPerHour: 0.11 } as PlaceView,
+  { id: "solari", kind: "provider", name: "solari", default: false, takesForks: true, buildsImages: true, rateUsdPerHour: 0.11 } as PlaceView,
 ];
 
+/** The Image card in each state it reads, on the box's page or the cloud's (?computer=solari): no image anywhere, an
+ * image with no copy there, a copy building, a build that stopped, a copy a newer version left behind, and the copy
+ * standing. The record carries a recipe here, so the ready card draws every chip a real record gives it. */
+const IMAGE_SCREENS = ["settings-image-nothing", "settings-image-copy", "settings-image-copying", "settings-image-stopped", "settings-image-stale", "settings-image-ready"];
+const imageAt = params.get("computer") === "solari" ? { id: "solari", word: "solari" } : { id: "p_spoo", word: "spoo" };
 const firstRunScreens = ["first-run", "first-run-refused", "first-run-starting", "first-run-no-agent", "first-run-agents"];
 /** The screens that are Settings in the centre rather than a workspace, each by the page it opens on. */
 const SETTINGS_SCREENS: Record<string, SettingsAt> = {
@@ -319,6 +329,7 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-add-computer-failed": { kind: "group", group: "computers" },
   "settings-computers-refused": { kind: "group", group: "computers" },
   "settings-remove-computer": { kind: "computer", id: "p_spoo" },
+  ...Object.fromEntries(IMAGE_SCREENS.map(name => [name, { kind: "computer", id: imageAt.id } as SettingsAt])),
 };
 const settingsAt = SETTINGS_SCREENS[screen];
 /** Stand-ins for the icons the host fetches, drawn here so no real site's mark ships with the tests. */
@@ -368,6 +379,10 @@ const IMAGE: SealedImage = {
   vault: { sha256: "c".repeat(64), bytes: 4_200, paths: 7, takenAt: AT },
   usedBytes: 1.2 * GB,
 };
+const RECIPE_ROW = (id: string, kind: "agent" | "tool") => ({ id, kind, on: true, source: { kind: "used" as const, sessions: 40, calls: 900 } });
+const IMAGE_RECORD: SealedImage = IMAGE_SCREENS.includes(screen)
+  ? { ...IMAGE, recipe: { version: 1, at: AT, histories: [], rows: [RECIPE_ROW("claude", "agent"), RECIPE_ROW("codex", "agent"), RECIPE_ROW("gh", "tool"), RECIPE_ROW("node", "tool"), RECIPE_ROW("ripgrep", "tool")] } }
+  : IMAGE;
 const IMAGE_COPIES = [
   { place: "spoo", version: 3, hash: IMAGE.hash, snapshotId: "snap_spoo", builtAt: new Date(Date.parse(AT) - 2 * 3_600_000).toISOString(), sizeBytes: 1.2 * GB },
   { place: "solari", version: 2, hash: "b".repeat(63) + "2", snapshotId: "snap_slr", builtAt: new Date(Date.parse(AT) - 26 * 3_600_000).toISOString(), sizeBytes: 1.1 * GB },
@@ -440,7 +455,17 @@ const api = {
   ...(screen === "bring-back-roadless" ? {} : { bringBack: async () => ({ branch: "agent/stripe-import", base: "main", ahead: 1, uncommitted: 0, stat: [] }) }),
   daemon: { open: () => () => {} },
   spend: async () => (settings ? [{ place: "solari", monthUsd: 1.2, rateUsdPerHour: 0.11 }] : []),
-  image: async () => (settings ? { image: IMAGE, copies: IMAGE_COPIES, projects: [] } : { image: null, copies: [], projects: [] }),
+  image: async () =>
+    !settings || screen === "settings-image-nothing"
+      ? { image: null, copies: [], projects: [] }
+      : screen === "settings-image-copy"
+        ? { image: IMAGE_RECORD, copies: IMAGE_COPIES.filter(copy => copy.place !== imageAt.word), projects: [] }
+        : screen === "settings-image-stale"
+          ? { image: IMAGE_RECORD, copies: IMAGE_COPIES.map(copy => (copy.place === imageAt.word ? { ...copy, version: 2, hash: "b".repeat(63) + "2" } : copy)), projects: [] }
+          : screen === "settings-image-ready"
+            ? { image: IMAGE_RECORD, copies: IMAGE_COPIES.map(copy => (copy.place === imageAt.word ? { ...copy, version: 3, hash: IMAGE.hash } : copy)), projects: [] }
+            : { image: IMAGE, copies: IMAGE_COPIES, projects: [] },
+  imageBuild: async () => new Promise<never>(() => {}),
   hostTerminalConfig: async () => ({ files: [] }),
   agentsRead: async () => AGENTS_REPORT,
   serversIcon: async (host: string) => SERVER_ICON[host]?.() ?? null,
@@ -540,6 +565,9 @@ useStore.setState({
 // This window watched the add fail: one read off the host at a reload alone leaves the form clean.
 if (screen === "settings-add-computer-failed") useAdds.setState({ jobs: { [FAILED_ADD.addId]: FAILED_ADD } });
 useStore.getState().bind(api);
+// The frames a copy build at the box sent, set after the bind, whose pull starts every place over.
+if (screen === "settings-image-copying") useStore.setState({ goldenFrames: { [imageAt.id]: [{ type: "golden.stage", name: "default", stage: "applying-setup", place: imageAt.id }] } });
+if (screen === "settings-image-stopped") useStore.setState({ goldenFrames: { [imageAt.id]: [{ type: "golden.stage", name: "default", stage: "failed", detail: `${imageAt.word} went away before the build finished`, place: imageAt.id }] } });
 // A workspace nobody has touched shows an open right panel, which at a phone's width is the whole screen: the
 // sidebar and the creation view are what these shots are of, so the panel on every workspace a screen can select
 // is shut before the first paint, except on the one screen about the panel coming back after Settings.
