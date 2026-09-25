@@ -128,7 +128,7 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
     const quick = onImage(ctx) || waitingFlow(flow) ? undefined : step;
     if (!row.installed) {
       const about = agentEntry(row.id)?.about.description;
-      return { key: rowId(row), title: row.name, lead: { kind: "agent", agent: row.id, faded: true }, available: true, ...(about === undefined ? {} : { subtext: about }), ...(quick === undefined ? {} : { quick }) };
+      return { key: rowId(row), title: row.name, lead: { kind: "agent", agent: row.id }, available: true, ...(about === undefined ? {} : { subtext: about }), ...(quick === undefined ? {} : { quick }) };
     }
     return {
       key: rowId(row),
@@ -158,7 +158,7 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
       : [{ id: "status", label: W.status, value: W.notInstalled }, ...(row.latest === undefined ? [] : [{ id: "latest", label: W.latestLabel, value: row.latest }]), threadsFact(row), ...aboutFacts(entry), ...installFact(entry)];
     return {
       title: row.name,
-      lead: { kind: "agent", agent: row.id, ...(row.installed ? {} : { faded: true }) },
+      lead: { kind: "agent", agent: row.id },
       ...(entry === undefined ? {} : { about: entry.about.description }),
       facts,
       acts,
