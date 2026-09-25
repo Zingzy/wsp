@@ -1502,8 +1502,9 @@ export interface Runtime {
     build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
     /** The manifest at the place the image's own seal stands: the versions wsp init built and updates there. */
     get(name?: string): Promise<GoldenManifest | undefined>;
-    /** Where an image build goes: the place `word` names, by the name or id wsp places lists, else the default place,
-     * else the one other place that runs workspaces. Answers the id its copies are filed under, the name a person
+    /** Where an image build goes: the image's own place once a record stands, whatever `word` says; before that,
+     * the place `word` names, by the name or id wsp places lists, else the default place, else the one other place
+     * that runs workspaces. Answers the id its copies are filed under, the name a person
      * reads and the backend a builder there is made on. Refused with the place's own reason where it runs none, with
      * NO_BUILD_PLACE_LINE where no place here does, and with buildPlaceAskLine where more than one does and none is the
      * default. */
@@ -1577,12 +1578,12 @@ export interface Runtime {
      * record has no small recipe to build from, and, without `force`, when it holds no vault. Progress rides
      * golden.stage frames carrying the place's id, and the place's row reads them. */
     build(o: { place: string; name?: string; force?: boolean; signal?: AbortSignal }): Promise<SealedImageBuilt>;
-    /** Brings a place's copy up to the record behind whatever added the place, cut the version or linked the
-     * computer: nothing where this host holds no image, where the place runs no workspaces or is not connected, or
-     * where its copy already stands on the record; else the build, joined where one is running there, and built
+    /** Brings a place's copy up to the record behind whatever added the place or linked the computer: nothing where
+     * this host holds no image, where the place runs no workspaces or is not connected, or where its copy already
+     * stands on the record; else the build, joined where one is running there, and built
      * again where the record moved while it ran. Never rejects: a build that stopped leaves its reason on the
-     * place's row until the next build there takes the row over, which wsp image build, the next cut or the
-     * computer's next link starts. Resolves once the copy stands or the build stopped. */
+     * place's row until the next build there takes the row over, which wsp image build or the computer's next
+     * link starts. Resolves once the copy stands or the build stopped. */
     keepCurrent(place: string, name?: string): Promise<void>;
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker; its list leaves out the workspaces the
@@ -7641,7 +7642,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const place = entry.record.place ?? places.wired;
     const prior = await copyOf(place, name);
     const at = backendAt(place);
-    const before = copy !== undefined ? undefined : (await recordOf(name))?.hash;
     try {
       const result = await claiming(`smoke/${entry.record.id}`, b =>
         sealGolden(entry.builder, {
@@ -7669,7 +7669,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await putCopy(place, name, stamped.manifest);
       const snapshot = entry.builder.import?.recipe;
       if (snapshot !== undefined) await putCopyRecipe(place, name, stamped.version.version, snapshot);
-      if (copy === undefined && stamped.version.imageHash !== before) void followCut(name, place);
+      if (copy === undefined) await placeDoor?.markDefaultIfNone(place);
       if (result.builderKept) {
         entry.record.sealed = { at: new Date(clock.now()).toISOString(), version: result.version.version };
         entry.life = "own";
@@ -7735,8 +7735,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (forksNoMachines(at.capabilities)) throw Object.assign(new PlaceForksNowhereError(`${name} forks no machines, so your image cannot be built there`), { kind: "conflict" });
         return { place, name, backend: at };
       };
-      if (word !== undefined) {
-        const { place, at } = await placeAt(word);
+      // A rebuild seals over the record, so building it anywhere else would move the image's home.
+      const record = await recordOf("default");
+      const target = record !== undefined ? (record.place ?? places.wired) : word;
+      if (target !== undefined) {
+        const { place, at } = await placeAt(target);
         return runs(place, at);
       }
       // The default place first, since it is where every fork that names none lands; where it runs no workspaces, the
@@ -8403,16 +8406,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const copy = (await copiesOf(name)).find(c => c.place === place);
     if (copy === undefined) throw new Error(`${where} sealed ${name} v${sealed.version.version} and no copy of it was recorded there`);
     return { copy, built: true };
-  };
-
-  /** A cut moved the record's hash: every other place that runs workspaces builds its copy behind the seal, one per
-   * place, the image's own place left out since the seal just built it. A place whose build stops says so on its row. */
-  const followCut = async (name: string, own: string): Promise<void> => {
-    try {
-      for (const row of await buildPlaces()) if (row.place !== own) void image.keepCurrent(row.place, name);
-    } catch (e) {
-      console.warn(`the places were not read for the copies of ${name}: ${e instanceof Error ? e.message : String(e)}`);
-    }
   };
 
   /** The image whose head, at the place its own seal stands, is this snapshot: the one a fork's copy is looked up by.

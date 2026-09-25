@@ -5294,7 +5294,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * install writes, with the wsp skill beside it. Refused on any other computer. */
   z.object({ id: reqId, op: z.literal("agents.addTools"), target: AgentsTarget, agent: z.string() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
-   * `on` prices the build at that place instead of the default one, by the name or id wsp places lists. */
+   * `on` prices the build at that place instead of the default one, by the name or id wsp places lists; once the
+   * image stands, every build is priced at the image's own place whatever `on` says. */
   z.object({ id: reqId, op: z.literal("init.get"), on: z.string().optional() }),
   /** Saves keys into the wsp home's .env on the computer running the host: the provider key, put to that provider
    * before anything is written and saved under the variable its own module reads, and an agent's API key by the
@@ -5322,6 +5323,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on.
    * `yes` skips the sign-ins on the machine, as wsp init --yes does: a caller that asked for no waiting gets none.
    * `on` is the place the image is built on, by the name or id wsp places lists; absent takes the default place.
+   * `on` is read for the first build alone: once the image stands, every build goes to the image's own place, so
+   * no caller can move it.
    * `rebuild` seals the next version from a fresh machine rather than from the image plus the changes, which is the
    * question a run at a terminal is asked; absent takes whichever road the changes call for. */
   z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional(), yes: z.boolean().optional(), on: z.string().optional(), rebuild: z.boolean().optional() }),
