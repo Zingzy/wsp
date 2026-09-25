@@ -98,10 +98,11 @@ describe("makeApi wrappers", () => {
     const { api, lastSent } = await connect();
     const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, projectLook: { pr_1: { icon: "rocket", hue: "teal" } }, labs: false };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record });
-    // A record from a host that kept no computer icons reads as none rather than failing the whole record.
-    expect(await api.preferences!()).toEqual({ ...record, computerLook: {} });
+    // A record from a host that kept no computer icons or theme picks reads as none and the side defaults rather than
+    // failing the whole record.
+    expect(await api.preferences!()).toEqual({ ...record, computerLook: {}, lightTheme: "paper", darkTheme: "graphite" });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.get" });
-    expect(await api.setPreferences!({ theme: "light", sidebarWidth: null })).toEqual({ ...record, computerLook: {} });
+    expect(await api.setPreferences!({ theme: "light", sidebarWidth: null })).toEqual({ ...record, computerLook: {}, lightTheme: "paper", darkTheme: "graphite" });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.set", patch: { theme: "light", sidebarWidth: null } });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: { ...record, computerLook: { pl_1: { icon: "server" } } } });
     expect((await api.preferences!()).computerLook).toEqual({ pl_1: { icon: "server" } });
