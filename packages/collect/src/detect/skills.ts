@@ -28,21 +28,58 @@ export const SKILL_HEAD_BYTES = 4096;
 
 const END = "\x1eEND";
 
+/** Reads the list the finder prints, a line naming each root and then one line per file under it (whether its folder is
+ * a link, whether it is turned off, its path), and prints the records: where each linked folder points comes off one ls,
+ * and every frontmatter off the one awk, each file cut at `cap` bytes. Only a newline in a name splits a line. */
+const FRONTMATTERS = String.raw`function q(s,  o, i) { o = ""; while ((i = index(s, "\047")) > 0) { o = o substr(s, 1, i - 1) "\047\\\047\047"; s = substr(s, i + 1) } return "\047" o s "\047" }
+/^r/ { r = substr($0, 2); next }
+{
+  n++; R[n] = r; K[n] = substr($0, 2, 1); O[n] = substr($0, 3, 1); f = substr($0, 4); F[n] = f
+  d = f; if (match(f, "/[^/]*$")) d = substr(f, 1, RSTART - 1); D[n] = d
+  if (K[n] == "1" && !(d in L)) { L[d] = ""; cmd = cmd " " q(d) }
+}
+END {
+  if (cmd != "") {
+    cmd = "QUOTING_STYLE=literal ls -ld --" cmd " 2>/dev/null"
+    while ((cmd | getline line) > 0) {
+      # Assumes an absolute name, a target with no newline, and no link named another link plus " -> " and a target start.
+      i = index(line, " /")
+      if (i == 0) continue
+      rest = substr(line, i + 1); best = ""
+      for (d in L) if (length(d) > length(best) && substr(rest, 1, length(d) + 4) == d " -> ") best = d
+      if (best != "") L[best] = substr(rest, length(best) + 5)
+    }
+    close(cmd)
+  }
+  for (j = 1; j <= n; j++) {
+    printf "\036%s\037%s\037%s\037%s\037", R[j], D[j], (K[j] == "1" ? L[D[j]] : ""), (O[j] == "1" ? "1" : "")
+    f = F[j]; k = 0; b = 0
+    while (f != "" && b < cap && (getline line < f) > 0) {
+      k++
+      if (b + length(line) > cap) line = substr(line, 1, cap - b)
+      b += length(line) + 1
+      if (k == 1) { if (line != "---") break; continue }
+      if (line == "---") break
+      print line
+    }
+    if (f != "") close(f)
+  }
+}`;
+
 /** Prints, per SKILL.md found under each root (two or three folders down: a category folder is allowed, links are
  * followed), the root, the skill's folder, where that folder links, whether it is turned off (a SKILL.md.off with no
- * SKILL.md beside it), and the frontmatter lines alone. */
+ * SKILL.md beside it), and the frontmatter lines alone. The processes it starts do not grow with the skills. */
 const SCRIPT = [
   'for r in "$@"; do',
   '  [ -d "$r" ] || continue',
+  "  printf 'r%s\\n' \"$r\"",
   '  find -L "$r" -mindepth 2 -maxdepth 3 \\( -name SKILL.md -o -name SKILL.md.off \\) -type f 2>/dev/null | while IFS= read -r f; do',
   '    d=${f%/*}',
-  '    o=; case $f in *.off) [ -f "$d/SKILL.md" ] && continue; o=1;; esac',
-  '    l=; [ -L "$d" ] && l=$(readlink "$d")',
-  "    printf '\\036%s\\037%s\\037%s\\037%s\\037' \"$r\" \"$d\" \"$l\" \"$o\"",
-  `    head -c ${SKILL_HEAD_BYTES} "$f" | awk 'NR==1 && $0 != "---" {exit} NR>1 && $0 == "---" {exit} NR>1 {print}'`,
+  '    o=0; case $f in *.off) [ -f "$d/SKILL.md" ] && continue; o=1;; esac',
+  '    l=0; [ -L "$d" ] && l=1',
+  "    printf 'f%s%s%s\\n' \"$l\" \"$o\" \"$f\"",
   "  done",
-  "done",
-  "printf '\\036END\\n'",
+  `done | LC_ALL=C awk -v cap=${SKILL_HEAD_BYTES} '${FRONTMATTERS}' && printf '\\036END\\n'`,
 ].join("\n");
 
 const unquote = (v: string): string => {
