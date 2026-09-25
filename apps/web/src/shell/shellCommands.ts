@@ -99,6 +99,16 @@ export function openPanelTerminal(workspaceId: string): Promise<void> {
   );
 }
 
+/** A fresh pty in its own right-panel surface with a line typed at its prompt and left for the person to run. */
+export function openPanelTerminalWith(workspaceId: string, line: string): Promise<void> {
+  return withTerminals(workspaceId, terminals =>
+    terminals.open(ptyStartFolder(workspaceId)).then(tab => {
+      useRightPanelStore.getState().openTerminal(workspaceId, tab.ptyId);
+      terminals.write(tab.ptyId, line);
+    }),
+  );
+}
+
 /** A fresh pty split into one right-panel terminal surface. */
 export function splitPanelTerminal(workspaceId: string, surfaceId: string, direction: SplitDirection = "horizontal"): Promise<void> {
   return withTerminals(workspaceId, terminals =>

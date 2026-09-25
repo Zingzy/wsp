@@ -10,7 +10,7 @@ import { posix } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, signInRoadOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
 import { detectSkills, expand, nodeHost, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
 import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLogin } from "@wsp/engine";
-import { MCP_SERVER_NAME, agentVersionWord, shellQuote, type AgentRow, type AgentSignInState, type McpRow } from "@wsp/protocol";
+import { MCP_SERVER_NAME, agentVersionWord, controlNameRefusal, hasControlChar, shellQuote, type AgentRow, type AgentSignInState, type McpRow } from "@wsp/protocol";
 import { vaultSignIn, type AgentsOn, type AgentsRead, type AgentsReader } from "@wsp/runtime";
 import { machineHost, type MachineHost } from "./machine-host.js";
 import { serverTools, type KeptTools } from "./server-tools.js";
@@ -72,6 +72,7 @@ const envNamesOf = (server: McpServer): string[] => [...new Set([...(server.tran
 interface Servers {
   rows: McpRow[];
   wsp: Set<string>;
+  refused: string[];
 }
 
 /** Every server each agent's own file defines, and its project's where a workspace is read; the first of an agent's
@@ -79,6 +80,7 @@ interface Servers {
 async function serversOf(host: Host, project: string | undefined): Promise<Servers> {
   const rows: McpRow[] = [];
   const wsp = new Set<string>();
+  const refused: string[] = [];
   const firstOf = async (files: readonly string[]): Promise<{ file: string; text: string } | undefined> => {
     const texts = await Promise.all(files.map(f => host.fs.readText(f)));
     const at = texts.findIndex(t => t !== undefined);
@@ -86,6 +88,11 @@ async function serversOf(host: Host, project: string | undefined): Promise<Serve
   };
   const push = (agent: McpAgent, file: string, servers: readonly McpServer[], project: boolean): void => {
     for (const s of servers) {
+      if (hasControlChar(s.name)) {
+        const line = controlNameRefusal(tilde(host.home, file));
+        if (!refused.includes(line)) refused.push(line);
+        continue;
+      }
       if (!project && s.name === MCP_SERVER_NAME) wsp.add(agent.id);
       rows.push({
         agent: agent.id,
@@ -110,7 +117,7 @@ async function serversOf(host: Host, project: string | undefined): Promise<Serve
     }),
   );
   const order = new Map(MCP_AGENTS.map((a, i) => [a.id, i]));
-  return { rows: rows.sort((a, b) => order.get(a.agent)! - order.get(b.agent)! || a.scope.localeCompare(b.scope) || a.name.localeCompare(b.name)), wsp };
+  return { rows: rows.sort((a, b) => order.get(a.agent)! - order.get(b.agent)! || a.scope.localeCompare(b.scope) || a.name.localeCompare(b.name)), wsp, refused };
 }
 
 /** What wsp's recipe job put into the agents' files on a computer you own, off the list it keeps beside the job;
@@ -174,7 +181,7 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
     };
   });
   const serverRows = recipe === undefined ? servers.rows : servers.rows.map(r => (r.scope === "project" ? r : { ...r, inRecipe: recipe.has(mcpRowId(r.agent, r.scope === "home", r.name)) }));
-  return { home: host.home, user: o.user, agents: rows, skills: skills.skills, servers: serverRows, refused: [...refused, ...skills.refused] };
+  return { home: host.home, user: o.user, agents: rows, skills: skills.skills, servers: serverRows, refused: [...refused, ...servers.refused, ...skills.refused] };
 }
 
 /** The reader the runtime is wired with: this computer's own Host for this computer and a workspace on it, and

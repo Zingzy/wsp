@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A login signed in once on a computer you own: the tool's own device-code
-// flow run on that computer's terminal, with its store pointed at the
-// directory its daemon keeps the shared logins in, outside every workspace
-// there. Every workspace on that computer mounts the one file, so a refresh
-// inside any of them is that computer's refresh, and nothing of the login is
-// ever in an image. The pty is that computer's own, reached through the host
-// over the link the computer is holding: nothing here dials it.
-import { hasLogin, loginHomeIn, loginSignIn, sharedLoginOf, type SharedLogin } from "@wsp/catalog";
-import { shellQuote } from "@wsp/protocol";
+// A sign-in run on a computer's own terminal and shown in this one: the line
+// the host planned for it there, a shared login's store pointed at the folder
+// that computer's daemon keeps the logins its workspaces share, anything else
+// as the owner of the home. The pty is that computer's own, reached through
+// the host over the link it holds: nothing here dials it.
+import { loginSignIn, sharedLoginOf, type SharedLogin } from "@wsp/catalog";
+import { lastLine, type AgentsTarget, type SignInLine } from "@wsp/protocol";
 import { relayPty, runQuiet, type PtyLink, type RelayTerminal } from "./signin-relay.js";
 import type { HostClient } from "./verbs.js";
 
@@ -27,7 +25,12 @@ export interface PlaceLink {
 /** Opens the channel and shapes it as the pty road takes it. The host refuses this to anything but its own
  * terminal and its own window, and answers with the computer's own sentence when it is not connected. */
 export async function placeLink(client: HostClient, placeId: string): Promise<PlaceLink> {
-  const { channel } = await client.request<{ channel: string }>("daemon.open", { placeId });
+  return targetLink(client, { placeId });
+}
+
+/** The same road to any target: a computer by its place id, or a workspace, whose daemon the host reads the road to. */
+export async function targetLink(client: HostClient, target: AgentsTarget): Promise<PlaceLink> {
+  const { channel } = await client.request<{ channel: string }>("daemon.open", target);
   const readers = new Set<(e: Record<string, unknown>) => void>();
   let gone: (() => void) | undefined;
   const closed = new Promise<void>(r => (gone = r));
@@ -72,10 +75,10 @@ export function sharedAgentsOn(agents: readonly string[]): string[] {
 
 export interface BoxSignIn {
   link: PtyLink;
-  /** The agent's catalog id; its row says what it shares, how it signs in with no browser there, and its status. */
-  agent: string;
-  /** Where that computer's daemon keeps the logins its workspaces share, off what its backend said. */
-  logins: string;
+  /** The agent whose own status says it landed; absent for one server's sign-in, which its exit says. */
+  agent?: string;
+  /** The line the host planned for where it runs: what runs first, the command, its environment and its status. */
+  line: SignInLine;
   terminal: RelayTerminal;
   /** Opens a URL on this computer; the person presses o for it, as they do on a builder. */
   open(url: string): Promise<boolean>;
@@ -90,43 +93,29 @@ export interface BoxSignedIn {
   said?: string;
 }
 
-/** Signs the tool in on that computer: its store's directory made first, the no-browser flow run on its own
- * terminal with the store named in the pty's environment rather than quoted into the line, then the tool's own
- * status read with that same store. Nothing is typed here but what the person types. */
-export async function signInOnBox(o: BoxSignIn): Promise<BoxSignedIn> {
-  const row = loginSignIn(o.agent);
-  const shared = row === undefined ? undefined : sharedLoginOf(row);
-  if (row === undefined || shared === undefined || !hasLogin(row)) throw new Error(`${o.agent} has no login that lives on the computer running the workspaces`);
-  const home = loginHomeIn(o.logins, shared);
-  const env = { [shared.homeEnv]: home };
-  // The tool writes its login here, so the directory is this road's to make: the daemon owns the one above it.
-  await o.link.op("exec", { cmd: `mkdir -p ${shellQuote(home)}` });
-  // The device-code variant: nobody is at that computer's browser, so the page opens here and the code is typed
-  // where the tool asked for it, which is the terminal this relay is showing.
+/** Runs the sign-in the host planned on that computer's own terminal, shown here: what runs first, the command with
+ * its environment rather than quoted into the line, then the tool's own status read the same way. Nothing is typed
+ * here but what the person types. */
+export async function relaySignIn(o: BoxSignIn): Promise<BoxSignedIn> {
+  const { line } = o;
+  if (line.prepare !== undefined) await o.link.op("exec", { cmd: line.prepare });
   const outcome = await relayPty({
     link: o.link,
-    command: row.fallback ?? row.login,
+    command: line.command,
     terminal: o.terminal,
     open: o.open,
-    env,
+    ...(line.env !== undefined ? { env: line.env } : {}),
     timeoutMs: o.timeoutMs ?? BOX_SIGN_IN_MS,
   });
-  if (row.status === undefined) return { signedIn: outcome.exitCode === 0 };
-  const status = await runQuiet(o.link, row.status.typed ?? row.status.command, STATUS_MS, env);
-  const signedIn = row.status.signedIn(status.output, status.exitCode);
-  const detail = row.status.detail?.(status.output, new Map());
+  const row = o.agent === undefined ? undefined : loginSignIn(o.agent);
+  const check = row?.status;
+  if (check === undefined || line.status === undefined) return { signedIn: outcome.exitCode === 0 };
+  const status = await runQuiet(o.link, line.status, STATUS_MS, line.env ?? {});
+  const signedIn = check.signedIn(status.output, status.exitCode);
+  const detail = check.detail?.(status.output, new Map());
   return {
     signedIn,
     ...(signedIn && detail !== undefined ? { detail } : {}),
-    ...(!signedIn ? { said: row.status.why?.(status.output) ?? lastLine(status.output) } : {}),
+    ...(!signedIn ? { said: check.why?.(status.output) ?? lastLine(status.output) } : {}),
   };
-}
-
-/** The last thing the tool said, for the line that reports a sign-in that did not land. */
-function lastLine(output: string): string | undefined {
-  const lines = output
-    .split("\n")
-    .map(line => line.trim())
-    .filter(line => line !== "");
-  return lines.at(-1);
 }

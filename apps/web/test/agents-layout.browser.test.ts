@@ -235,6 +235,34 @@ describe.skipIf(renderSkipped !== undefined)("the agents list laid out in Chromi
     }
   }, 120_000);
 
+  it("draws a device sign-in, a pasted answer and a token's paste inside their rows on the page, and photographs both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(`screen=settings-computer&theme=${theme}`, { width: 1280, height: 2400 });
+      const card = page!.locator("[data-settings-card='agents']");
+      await card.locator("[data-agents-row]").first().waitFor();
+      const codex = card.locator('[data-agents-row="agent-codex"]');
+      await codex.locator("[data-row-slot] [data-k=act-sign-in]").click();
+      await codex.locator("[data-k=sign-in-code]").waitFor();
+      expect(await codex.locator("[data-row-word]").textContent()).toBe("waiting on you");
+      // The two lines stand at 40 px each, reserved from the press.
+      const lines = await codex.locator("[data-sign-in-line]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
+      expect(lines).toEqual([40, 40]);
+      const claude = card.locator('[data-agents-row="agent-claude"]');
+      await claude.locator("[data-row-trigger]").click();
+      await claude.locator("[data-row-region] [data-k=act-sign-in]").click();
+      await claude.locator("[data-k=sign-in-key]").fill("sk-ant-api03-nope");
+      await claude.locator("[data-k=sign-in-save]").click();
+      await claude.locator("[data-k=sign-in-refused]").filter({ hasText: "That is not a Claude Code token." }).waitFor();
+      expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
+      await card.screenshot({ path: join(SHOTS_DIR, `agents-signin-page-${theme}.png`) });
+      await card.locator("[data-segment]").filter({ hasText: /^Servers/ }).click();
+      const linear = card.locator('[data-agents-row$="-linear"]');
+      await linear.locator("[data-row-slot] [data-k=act-sign-in]").click();
+      await linear.locator("[data-k=code-field]").waitFor();
+      await card.screenshot({ path: join(SHOTS_DIR, `agents-signin-server-${theme}.png`) });
+    }
+  }, 120_000);
+
   it("photographs the list at every width and the task's panel on Agents, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(`screen=agents-widths&theme=${theme}`);

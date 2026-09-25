@@ -13,6 +13,10 @@ import {
   PLACE_DOOR_REFUSAL,
   PLACE_DOOR_UNSERVED,
   PLACES_TICKET_REFUSAL,
+  deviceHeldRefusal,
+  noSignInRefusal,
+  SIGN_IN_LINE_REFUSAL,
+  AGENTS_KEY_REFUSAL,
   PLACE_LOGIN_REFUSED_KIND,
   PLACE_KEY_REFUSAL,
   PLACE_UNKNOWN_REFUSAL,
@@ -74,7 +78,7 @@ import { HANDSHAKE, MCP_READ_MARK, NoProviderBackend, SERVER_MARK, keyFingerprin
 import { freshEphemeral, makeSeal, sealKeys, sharedSecret } from "@wsp/keys";
 import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceBackHolder, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import { NO_AGENTS_READER, type AgentsOn, type AgentsReader } from "../src/agents-read.js";
+import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
@@ -119,7 +123,7 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   ...over,
 });
 
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string>; folders?: HostFolders; agentsReader?: AgentsReader; agentsActs?: AgentsActs } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   runtime = createRuntime({
@@ -128,6 +132,7 @@ async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }
     adapters: {},
     ...(opts.vault === undefined ? {} : { vault: () => opts.vault! }),
     ...(opts.agentsReader === undefined ? {} : { agentsReader: opts.agentsReader }),
+    ...(opts.agentsActs === undefined ? {} : { agentsActs: opts.agentsActs }),
     placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }) },
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
     ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
@@ -4075,6 +4080,101 @@ describe("the agents on a computer you own", () => {
     const bare = await WsClient.connect(srv!.port, { token: "host-token" });
     sockets.push(bare.ws);
     expect(await bare.request("agents.read", { target: { placeId: HERE_PLACE_ID } })).toMatchObject({ ok: false, error: NO_AGENTS_READER });
+  });
+  it("run a sign-in over that computer's link, push its steps to the asking socket alone, type its code, stop it when that socket goes, and keep keys to the host's own socket", async () => {
+    const typed: string[] = [];
+    const keys: string[] = [];
+    let ended = 0;
+    const acts: AgentsActs = {
+      signInLine: async () => ({ command: "codex login --device-auth" }),
+      signIn: async on => async run => {
+        expect(on).toMatchObject({ kind: "box" });
+        const made = await run.link.op("pty.create", { cols: 200, rows: 50 });
+        run.typing(async code => void typed.push(code));
+        run.emit({ state: "waiting", url: "https://auth.openai.com/codex/device", code: String(made["ptyId"]), paste: false });
+        await run.stop;
+        ended += 1;
+      },
+      key: async (agent, key) => void keys.push(`${agent} ${key}`),
+      addTools: async () => ({ file: "~/.codex/config.toml" }),
+    };
+    const { hostKey } = await serving({ agentsReader: reading([], []), agentsActs: acts, vault: {} });
+    const frames: string[] = [];
+    const { client, placeId } = await join(hostKey, {
+      code: await code(),
+      name: "srv",
+      report: report("srv", { daemonVersion: DAEMON_VERSION, logins: [] }),
+      answers: c =>
+        c.onFrame(raw => {
+          const frame = raw as unknown as Record<string, unknown>;
+          if (typeof frame["op"] !== "string") return;
+          frames.push(String(frame["op"]));
+          c.say({ id: frame["id"], ok: true, ptyId: "pty_7" });
+        }),
+    });
+    sockets.push(client.ws);
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const other = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(c.ws, other.ws);
+    expect((await other.request("events.subscribe")).ok).toBe(true);
+    const started = await c.request("agents.signIn", { target: { placeId }, agent: "codex" });
+    expect(started.ok, String(started["error"])).toBe(true);
+    const signInId = String(started["signInId"]);
+    await until(() => c.events.some(e => e.type === "agents.signIn"));
+    expect(c.events.find(e => e.type === "agents.signIn")).toEqual({ type: "agents.signIn", signInId, state: "waiting", url: "https://auth.openai.com/codex/device", code: "pty_7", paste: false });
+    expect(frames).toContain("pty.create");
+    expect((await c.request("agents.signInCode", { signInId, code: "ABCD-1234" })).ok).toBe(true);
+    expect(typed).toEqual(["ABCD-1234"]);
+    // Asking again from the same socket joins the one it already follows, and its steps still come once.
+    expect(await c.request("agents.signIn", { target: { placeId }, agent: "codex" })).toMatchObject({ ok: true, signInId });
+    await new Promise(r => setTimeout(r, 20));
+    expect(c.events.filter(e => e.type === "agents.signIn")).toHaveLength(1);
+    const issued = await c.request("ticket.issue", { purpose: "connect" });
+    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    sockets.push(ticketed.ws);
+    for (const [op, extra] of [
+      ["agents.signIn", { target: { placeId }, agent: "codex" }],
+      ["agents.signInCode", { signInId, code: "x" }],
+      ["agents.signInStop", { signInId }],
+      ["agents.signInLine", { target: { placeId }, agent: "codex" }],
+      ["agents.addTools", { target: { placeId: HERE_PLACE_ID }, agent: "codex" }],
+    ] as const) {
+      expect(await ticketed.request(op, extra), op).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+    }
+    expect(await ticketed.request("agents.key", { agent: "claude", key: "sk-ant-oat01-x" })).toMatchObject({ ok: false, error: AGENTS_KEY_REFUSAL });
+    expect((await c.request("agents.key", { agent: "claude", key: "sk-ant-oat01-x" })).ok).toBe(true);
+    expect(keys).toEqual(["claude sk-ant-oat01-x"]);
+    // The change goes on the one stream every socket follows; the page and the code went to the asker alone.
+    await until(() => other.events.some(e => e.type === "agents.changed"));
+    expect(other.events.some(e => e.type === "agents.signIn")).toBe(false);
+    // Only a socket following the sign-in types into it or stops it; its stop ends it at once.
+    expect(await other.request("agents.signInCode", { signInId, code: "x" })).toMatchObject({ ok: false, error: noSignInRefusal });
+    expect(await other.request("agents.signInStop", { signInId })).toMatchObject({ ok: false, error: noSignInRefusal });
+    expect(ended).toBe(0);
+    expect((await c.request("agents.signInStop", { signInId })).ok).toBe(true);
+    await until(() => ended === 1);
+    // A paired computer asks for neither a key nor a sign-in's line; the host's own socket asks for the line.
+    const redeemer = await WsClient.connect(srv!.port);
+    sockets.push(redeemer.ws);
+    const redeemed = await redeemer.request("pair.redeem", { code: await code(), name: "the phone" });
+    const device = await WsClient.connect(srv!.port, { token: String(redeemed["deviceToken"]) });
+    sockets.push(device.ws);
+    expect(await device.request("agents.key", { agent: "claude", key: "sk-ant-oat01-y" })).toMatchObject({ ok: false, error: deviceHeldRefusal("agents.key") });
+    expect(await device.request("agents.signInLine", { target: { placeId }, agent: "codex" })).toMatchObject({ ok: false, error: deviceHeldRefusal("agents.signInLine") });
+    // The owner's own browser on this computer is a device too: the line and the key are the host's alone.
+    const hereCode = String((await c.request("pair.issue", { here: true }))["code"]);
+    const browserRedeem = await WsClient.connect(srv!.port);
+    sockets.push(browserRedeem.ws);
+    const browser = await WsClient.connect(srv!.port, { token: String((await browserRedeem.request("pair.redeem", { code: hereCode, name: "this Mac's browser" }))["deviceToken"]) });
+    sockets.push(browser.ws);
+    expect(await browser.request("agents.signInLine", { target: { placeId }, agent: "codex" })).toMatchObject({ ok: false, error: SIGN_IN_LINE_REFUSAL });
+    expect(await browser.request("agents.key", { agent: "claude", key: "sk-ant-oat01-z" })).toMatchObject({ ok: false, error: AGENTS_KEY_REFUSAL });
+    expect(keys).toEqual(["claude sk-ant-oat01-x"]);
+    expect((await c.request("agents.signInLine", { target: { placeId }, agent: "codex" }))["line"]).toEqual({ command: "codex login --device-auth" });
+    // A window that goes stops what it alone followed.
+    expect((await c.request("agents.signIn", { target: { placeId }, agent: "codex" })).ok).toBe(true);
+    c.close();
+    await until(() => ended === 2);
   });
 });
 

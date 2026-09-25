@@ -10,7 +10,7 @@
 // through to the trigger except on its one button, so a button is never
 // inside a button.
 import { BotIcon, ChevronDownIcon, FolderIcon, GlobeIcon, KeyRoundIcon, ListChecksIcon, PlugIcon, RefreshCwIcon, ScrollTextIcon, TagIcon, TerminalIcon, WrenchIcon, type LucideIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { cn } from "../../lib/utils.js";
 import { offlineFor } from "@wsp/protocol";
 import { FACT, VALUE } from "../../settings/format.js";
@@ -19,6 +19,7 @@ import { HarnessMark } from "../chat/HarnessMark.js";
 import { Button, DANGER_BUTTON } from "../ui/button.js";
 import { CHIP } from "../ui/chips.js";
 import { Spinner } from "../ui/spinner.js";
+import { SignInFlowView } from "./SignInFlowView.js";
 import { AGENTS_LIST_WORDS, type AgentsRowData, type ChipGlyph, type OpenLineData, type RowAct, type RowChip, type ToolsView } from "./agentsRows.js";
 
 const CHIP_GLYPHS: Record<ChipGlyph, LucideIcon> = {
@@ -134,6 +135,11 @@ function ToolsBlock({ view, now }: { view: ToolsView; now: number }) {
 
 export function ChipRow({ row, dim = false, now }: { row: AgentsRowData; dim?: boolean; now: number }) {
   const [open, setOpen] = useState(false);
+  const flowKind = row.flow?.flow.kind;
+  // A sign-in is drawn where the row's detail is, so pressing Sign in shows it.
+  useEffect(() => {
+    if (flowKind !== undefined) setOpen(true);
+  }, [flowKind]);
   const id = useId();
   const titleId = `${id}-title`;
   const regionId = `${id}-region`;
@@ -200,6 +206,7 @@ export function ChipRow({ row, dim = false, now }: { row: AgentsRowData; dim?: b
             </div>
           )}
           {row.tools === undefined ? null : <ToolsBlock view={row.tools} now={now} />}
+          {row.flow === undefined ? null : <SignInFlowView view={row.flow} label={row.title} />}
         </div>
       ) : null}
     </div>

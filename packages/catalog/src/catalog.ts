@@ -11,6 +11,7 @@ import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { CLAUDE_MCP_CHECK } from "./mcp-check.js";
+import { CLAUDE_MCP_LOGIN, CODEX_MCP_LOGIN, GEMINI_MCP_LOGIN, OPENCODE_MCP_LOGIN, loginRoad, type ServerSignInRoad } from "./mcp-login.js";
 import { RELEASE_PINS } from "./release-pins.js";
 import { CLAUDE_PLUGIN_SKILLS, PROJECT_SHARED_SKILLS, SHARED_SKILLS, type PluginSkills, type SkillRoots } from "./skills.js";
 import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule } from "./road-modules.js";
@@ -194,7 +195,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     installRoad: { road: "script", script: CLAUDE_INSTALL, version: CLAUDE_CODE.version, bins: [LOCAL_BIN] },
     signIn: SIGN_IN_ROWS.claude,
     // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
-    mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], projectFiles: [".mcp.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login", check: CLAUDE_MCP_CHECK },
+    mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], projectFiles: [".mcp.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login", check: CLAUDE_MCP_CHECK, login: CLAUDE_MCP_LOGIN },
     hooks: CLAUDE_HOOKS,
     configPaths: [
       CLAUDE_SETTINGS_FILE, "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/commands",
@@ -222,7 +223,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     node: 16,
     signIn: SIGN_IN_ROWS.codex,
     // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
-    mcp: { format: CODEX_TOML, files: [CODEX_CONFIG_FILE], projectFiles: [".codex/config.toml"], scope: "user scope" },
+    mcp: { format: CODEX_TOML, files: [CODEX_CONFIG_FILE], projectFiles: [".codex/config.toml"], scope: "user scope", login: CODEX_MCP_LOGIN },
     hooks: CODEX_HOOKS,
     configPaths: [CODEX_CONFIG_FILE, "~/.codex/AGENTS.md", "~/.codex/prompts", "~/.codex/skills"],
     projectState: [
@@ -245,7 +246,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     node: 20,
     signIn: SIGN_IN_ROWS.gemini,
     // https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (project scope is a repo's .gemini/settings.json)
-    mcp: { format: MCP_SERVERS_JSON, files: ["~/.gemini/settings.json"], projectFiles: [".gemini/settings.json"], scope: "user scope" },
+    mcp: { format: MCP_SERVERS_JSON, files: ["~/.gemini/settings.json"], projectFiles: [".gemini/settings.json"], scope: "user scope", login: GEMINI_MCP_LOGIN },
     configPaths: ["~/.gemini/settings.json", "~/.gemini/GEMINI.md", "~/.gemini/commands"],
     projectState: [
       { state: "project registry", location: "projects.json", key: "{\"projects\": {\"PATH\": \"SLUG\"}}; SLUG is the folder basename, deduplicated", pathFields: ["the key"], move: "rewrite the key, keep the slug", status: "measured" },
@@ -269,7 +270,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     installRoad: { road: "npm", package: "opencode-ai", version: "1.18.27" },
     signIn: SIGN_IN_ROWS.opencode,
     // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
-    mcp: { format: OPENCODE_JSON, files: ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], projectFiles: ["opencode.json", "opencode.jsonc"], scope: "user scope" },
+    mcp: { format: OPENCODE_JSON, files: ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], projectFiles: ["opencode.json", "opencode.jsonc"], scope: "user scope", login: OPENCODE_MCP_LOGIN },
     configPaths: [
       "~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc", "~/.config/opencode/AGENTS.md", "~/.config/opencode/package.json",
       "~/.config/opencode/agents", "~/.config/opencode/commands", "~/.config/opencode/plugins", "~/.config/opencode/skills", "~/.config/opencode/themes",
@@ -432,6 +433,13 @@ export type McpAgent = AgentEntry & { mcp: McpConfig };
 export const MCP_AGENTS: readonly McpAgent[] = CATALOG_AGENTS.filter((a): a is McpAgent => a.mcp !== undefined);
 /** Those agents' ids as one line, for the usage, the help and the refusal that all name the same set. */
 export const MCP_AGENT_IDS: string = MCP_AGENTS.map(a => a.id).join(", ");
+
+/** How one server in that agent's config is signed in where it stands, off the agent's own module; nothing for an
+ * agent with none. `here`: the computer the person's browser is on. */
+export function serverSignInRoad(agentId: string, name: string, here: boolean): ServerSignInRoad | undefined {
+  const login = MCP_AGENTS.find(a => a.id === agentId)?.mcp.login;
+  return login === undefined ? undefined : loginRoad(login, name, here);
+}
 
 const BY_ID: ReadonlyMap<string, CatalogEntry> = new Map(CATALOG.map(e => [e.id, e]));
 

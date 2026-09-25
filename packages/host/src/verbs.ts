@@ -245,9 +245,14 @@ import {
   localRunsOneFix,
   localRunsOneLine,
   packageOf,
+  addToolsHereRefusal,
+  SignInLine,
+  THIS_COMPUTER,
   type SealedPin,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
+import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
+import type { RelayTerminal } from "./signin-relay.js";
 import { gitRootOf } from "./repo-root.js";
 import { dialAddress, hostTokenFor, hostTokenPath, servingHost } from "./host-lock.js";
 import type { HostStarter } from "./host-start.js";
@@ -693,6 +698,10 @@ export interface VerbDeps {
    * against this computer reads it, since what such a caller names is on its own machine and answering off this
    * one would hand it the person's files. */
   elsewhere?: boolean;
+  /** The terminal a sign-in run on a computer is shown in, and what opens its page here; this process's own
+   * terminal and this computer's opener by default, which a test replaces. */
+  terminal?: RelayTerminal;
+  open?(url: string): Promise<boolean>;
 }
 
 /** What a person names when they record a machine of their own: where it is, and the port, key and name they give
@@ -2727,6 +2736,35 @@ async function serverToolsOf(client: HostClient, name: string, agent: string, wo
 const SERVER_TOOLS_WORDS =
   "Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer stands for an hour unless refreshed, and an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.";
 
+/** The wsp tools into one agent's config on this computer. */
+async function addTools(client: HostClient, agent: string): Promise<{ file: string }> {
+  return z.object({ file: z.string() }).parse(await client.request("agents.addTools", { target: { placeId: HERE_PLACE_ID }, agent }));
+}
+
+/** Runs a sign-in the host plans for a target on that target's own terminal, shown in this one. */
+async function signInHere(ctx: VerbContext, target: AgentsTarget, ask: { agent: string; name?: string }): Promise<BoxSignedIn> {
+  const client = await ctx.client();
+  const { line } = await client.request<{ line: unknown }>("agents.signInLine", { target, agent: ask.agent, ...(ask.name !== undefined ? { name: ask.name } : {}) });
+  const road = await targetLink(client, target);
+  try {
+    return await relaySignIn({
+      link: road.link,
+      ...(ask.name === undefined ? { agent: ask.agent } : {}),
+      line: SignInLine.parse(line),
+      terminal: ctx.terminal ?? { input: process.stdin, output: process.stdout },
+      open: ctx.open ?? (async () => false),
+    });
+  } finally {
+    await road.close();
+  }
+}
+
+/** The line a sign-in comes to: signed in where it was named, or not, with what the tool said. */
+function signedInLine(what: string, where: string, answer: BoxSignedIn): string {
+  if (answer.signedIn) return `${what} is signed in on ${where}${answer.detail === undefined ? "" : ` (${answer.detail})`}.`;
+  return `${what} is not signed in on ${where}${answer.said === undefined ? "" : `: ${answer.said}`}.`;
+}
+
 const AgentsWorkspaceIn = z.string().optional().describe("the workspace to read, by its name, or its id when two share a name; absent reads a computer");
 const AgentsOnIn = z.string().optional().describe("the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on");
 const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
@@ -2818,6 +2856,84 @@ export const VERBS: readonly Verb[] = [
         return asText(serverRowLines(report).join("\n"), { ...reportFacts(report), servers: report.servers });
       },
     }),
+  },
+  {
+    name: "agents signin",
+    usage: "wsp agents signin <agent> [<workspace>]",
+    about: "signs an agent in on this computer or in a workspace, its own sign-in run there and shown in this terminal; a box you added takes wsp add <computer> --sign-in <agent>",
+    page: "agent",
+    options: {},
+    cliOnly: "runs the agent's own sign-in in a terminal a person types into, which is where the ones that ask them to pick a provider are answered",
+    run: async ctx => {
+      const [agent, workspace, ...rest] = ctx.args;
+      if (agent === undefined || rest.length > 0) throw usageRefusal("wsp agents signin takes one agent and one workspace at most.", usageIs(ctx));
+      const target = await agentsTarget(await ctx.client(), workspace, undefined, usageIs(ctx));
+      const answer = await signInHere(ctx, target, { agent });
+      ctx.io.log(signedInLine(agentName(agent), workspace ?? THIS_COMPUTER, answer));
+      return answer.signedIn ? 0 : 1;
+    },
+  },
+  {
+    name: "agents key",
+    usage: "wsp agents key <agent>",
+    about: "puts an agent's token or API key into this host's vault, typed where nothing echoes it; Claude Code's token is the one claude setup-token prints",
+    page: "agent",
+    options: {},
+    cliOnly: "takes a token typed at the host's own terminal into its vault, which is the person's to hand over",
+    hostSide: HOST_SIDE_VAULT,
+    run: async ctx => {
+      const [agent, ...rest] = ctx.args;
+      if (agent === undefined || rest.length > 0) throw usageRefusal("wsp agents key takes one agent.", usageIs(ctx));
+      if (ctx.io.isTTY !== true) throw usageRefusal("nobody is at this terminal to paste a token.", "Run it in a terminal on the computer the host runs on.");
+      const mint = catalogEntry(agent)?.signIn;
+      const ask = mint !== undefined && "mint" in mint ? `Run ${mint.mint} in another terminal, then paste the token it prints` : `Paste ${agentName(agent)}'s API key`;
+      const key = await ctx.io.askSecret(ask);
+      await (await ctx.client()).request("agents.key", { agent, key });
+      ctx.io.log(`${agentName(agent)}'s key is in this host's vault; every turn reads it from there.`);
+      return 0;
+    },
+  },
+  {
+    name: "agents addtools",
+    usage: "wsp agents addtools <agent>",
+    about: "writes the wsp server into an agent's own config on this computer, the entry wsp mcp install writes, with the wsp skill beside it",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [agent, ...rest] = ctx.args;
+      if (agent === undefined || rest.length > 0) throw usageRefusal("wsp agents addtools takes one agent.", usageIs(ctx));
+      const added = await addTools(await ctx.client(), agent);
+      ctx.out.emit(added, `${agentName(agent)} now has the wsp tools: ${added.file}`);
+      return 0;
+    },
+    tool: tool({
+      description: `Writes the wsp server into one agent's own MCP config on the computer the app runs on, the same entry wsp mcp install writes, with the wsp skill beside it, and answers the file. ${addToolsHereRefusal}`,
+      input: { agent: z.string().describe("the catalog id of the agent, as agents lists it") },
+      output: { file: z.string() },
+      call: async ({ agent }, deps) => {
+        const added = await addTools(await deps.client(), agent);
+        return asText(`${agentName(agent)} now has the wsp tools: ${added.file}`, added);
+      },
+    }),
+  },
+  {
+    name: "servers signin",
+    usage: "wsp servers signin <name> --agent <id> [<workspace>] [--on <computer>]",
+    about: "signs one MCP server in by its agent's own command for it, run where the server is set up and shown in this terminal",
+    page: "agent",
+    options: { agent: { type: "string" }, on: { type: "string" } },
+    cliOnly: "runs the harness's own sign-in for the server in a terminal a person types into, where the page's answer is pasted",
+    run: async ctx => {
+      const [name, workspace, ...rest] = ctx.args;
+      const agent = flag(ctx.flags, "agent");
+      if (name === undefined || rest.length > 0) throw usageRefusal("wsp servers signin takes one server's name and one workspace at most.", usageIs(ctx));
+      if (agent === undefined) throw usageRefusal("wsp servers signin needs --agent, the agent whose config names the server, as wsp servers shows it.", usageIs(ctx));
+      const on = flag(ctx.flags, "on");
+      const target = await agentsTarget(await ctx.client(), workspace, on, usageIs(ctx));
+      const answer = await signInHere(ctx, target, { agent, name });
+      ctx.io.log(signedInLine(name, workspace ?? on ?? THIS_COMPUTER, answer));
+      return answer.signedIn ? 0 : 1;
+    },
   },
   {
     name: "servers tools",
@@ -3987,6 +4103,8 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "skills on": AGENTS_ON_WORDS,
   "servers on": AGENTS_ON_WORDS,
   "servers tools on": AGENTS_ON_WORDS,
+  "servers signin on": AGENTS_ON_WORDS,
+  "servers signin agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
   "servers tools agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
   "servers tools refresh": "start the server again even where an answer from the last hour stands",
   repos: "every git repo under the home folder instead of one level, most recently used first",
@@ -4124,7 +4242,7 @@ export function jsonAsked(argv: ReadonlyArray<string>): boolean {
   return argv.slice(0, cut === -1 ? argv.length : cut).includes("--json");
 }
 
-export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "env" | "start" | "signals" | "dial" | "elsewhere">): Promise<number> {
+export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "env" | "start" | "signals" | "dial" | "elsewhere" | "terminal" | "open">): Promise<number> {
   let flags: Flags;
   let args: string[];
   try {
@@ -4175,6 +4293,8 @@ export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<s
     ...(deps.start !== undefined ? { start: deps.start } : {}),
     ...(deps.signals !== undefined ? { signals: deps.signals } : {}),
     ...(deps.elsewhere === true ? { elsewhere: true } : {}),
+    ...(deps.terminal !== undefined ? { terminal: deps.terminal } : {}),
+    ...(deps.open !== undefined ? { open: deps.open } : {}),
     client: async () => {
       if (stateNote !== undefined && !noted) {
         noted = true;

@@ -64,7 +64,7 @@ function scripted(machine: { present?: string[]; fish?: boolean; exit?: number; 
   return link;
 }
 
-const writes = (link: FakePtyLink): FakePty[] => link.ptys.filter(p => !p.writes[0]!.startsWith(readCommand()));
+const writes = (link: FakePtyLink): FakePty[] => link.ptys.filter(p => !p.ran!.startsWith(readCommand()));
 
 function stage(link: FakePtyLink, t: ReturnType<typeof terminal>, over: { asks?: { name: string; from: string }[]; skipWhy?: string } = {}) {
   const hidden: string[] = [];
@@ -133,11 +133,11 @@ describe("the secrets step", () => {
     ]);
     // One read of the machine, then one write.
     expect(link.ptys).toHaveLength(2);
-    expect(link.ptys[0]!.writes).toEqual([`${readCommand()}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+    expect(link.ptys[0]!.ran).toBe(readCommand());
     expect(link.ptys[0]!.created["env"]).toEqual({ PS1: "" });
     const pty = writes(link)[0]!;
     expect(pty.created["env"]).toEqual({ PS1: "", WSP_SECRET_LINE: `export A_KEY='pa'\\''ss word'` });
-    expect(pty.writes).toEqual([`${appendCommand(false)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+    expect(pty.ran).toBe(appendCommand(false));
     expect(link.ptys.every(p => p.killed)).toBe(true);
     expect(link.dials).toBe(2);
     expect(t.raw()).not.toContain(SECRET);
@@ -157,7 +157,7 @@ describe("the secrets step", () => {
     expect(await run).toEqual<SecretOutcome[]>([{ name: "A_KEY", from: "cut from ~/.config/fish/config.fish", state: "set" }]);
     const pty = writes(link)[0]!;
     expect(pty.created["env"]).toEqual({ PS1: "", WSP_SECRET_LINE: `export A_KEY='pa'\\''ss word'`, WSP_FISH_LINE: `set -gx A_KEY 'pa\\'ss word'` });
-    expect(pty.writes).toEqual([`${appendCommand(true)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+    expect(pty.ran).toBe(appendCommand(true));
   });
 
   it("on a machine without fish, a name already in the secrets file is not asked again and reads as set from an earlier run; nothing warns and nothing is appended twice", async () => {

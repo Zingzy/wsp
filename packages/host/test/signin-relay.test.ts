@@ -94,11 +94,8 @@ describe("URL detection", () => {
     expect(hyperlink("https://a.b/c")).toBe("\x1b]8;;https://a.b/c\x1b\\https://a.b/c\x1b]8;;\x1b\\");
   });
 
-  it("execs the command so the pty ends with it, keeps an env prefix in front, exits on a command the shell cannot find; a bare shell gets no line", () => {
-    expect(shellLine("gh auth login")).toBe("exec gh auth login || exit\r");
-    expect(shellLine("NO_BROWSER=true gemini")).toBe("NO_BROWSER=true exec gemini || exit\r");
-    expect(shellLine("codex login --device-auth")).toBe("exec codex login --device-auth || exit\r");
-    expect(shellLine(undefined)).toBeUndefined();
+  it("types a short line that reads the staged command, removes its folder, then marks the tool starting and exec's it", () => {
+    expect(shellLine({ dir: "/tmp/wsp-line.ab12", file: "'/tmp/wsp-line.ab12/line'" })).toBe(`c=$(< '/tmp/wsp-line.ab12/line'); rm -rf -- '/tmp/wsp-line.ab12'; printf '\\036'; exec bash -c "$c"\r`);
   });
 });
 
@@ -112,7 +109,7 @@ describe("relayPty", () => {
     expect(pty.created).toEqual({ cols: 120, rows: 40, shell: "bash" });
     await tick();
     expect(pty.attached).toBe(true);
-    expect(pty.writes[0]).toBe("exec gh auth login || exit\r");
+    expect(pty.ran).toBe("gh auth login");
     expect(term.raw).toEqual([true]);
 
     link.data(pty, "? Authenticate Git with your GitHub credentials? (Y/n) ");
@@ -177,6 +174,21 @@ describe("relayPty", () => {
     link.exit(pty, 0);
     const outcome = await run;
     expect(outcome).toEqual({ exitCode: 0, timedOut: false, dropped: false, urls: 1, opened: 2 });
+  });
+
+  it("offers only a page the tool printed: a link in the shell's banner is shown as text and never offered", async () => {
+    const link = fakePtyLink();
+    link.banner = "The default interactive shell is now zsh.\r\nFor more details, please visit https://support.apple.com/kb/HT208050.\r\n";
+    const term = terminal();
+    const run = relayPty({ link, command: "claude mcp login notion", terminal: term, open: async () => true, timeoutMs: 60_000 });
+    const pty = await firstPty(link);
+    await tick();
+    link.data(pty, "Open https://claude.ai/oauth/authorize?x=1\r\n");
+    expect(term.text()).toContain("https://support.apple.com/kb/HT208050");
+    expect(term.text()).not.toContain(hyperlink("https://support.apple.com/kb/HT208050"));
+    expect(term.text()).toContain(hyperlink("https://claude.ai/oauth/authorize?x=1"));
+    link.exit(pty, 0);
+    expect((await run).urls).toBe(1);
   });
 
   it("o opens the page the machine asked for when one arrived that returns through a forwarded port, and says so; without one, the printed link with the paste-code line", async () => {
@@ -345,27 +357,41 @@ describe("the questions a row declares", () => {
       const link = fakePtyLink();
       const seen: string[] = [];
       link.script = (pty: FakePty, line: string) => {
-        if (!line.startsWith("exec ")) return;
+        if (!line.includes("; exec bash -c ")) return;
         link.data(pty, `! First copy your one-time code: 72F3-072B\r\n`);
         link.data(pty, `Press Enter to open https://github.com/login/device in your browser... `);
         link.data(pty, `SSO session name (Recommended): `);
       };
       await watchPty({ link, command: "gh auth login --web", timeoutMs: 100, questions, onQuestion: a => seen.push(a.matched) });
-      return { writes: link.ptys[0]!.writes, seen };
+      return { ran: link.ptys[0]!.ran, writes: link.ptys[0]!.writes.slice(1), seen };
     };
-    expect(await run([ENTER])).toEqual({ writes: ["exec gh auth login --web || exit\r", "\r"], seen: ["Press Enter to open"] });
-    expect(await run([THEIRS])).toEqual({ writes: ["exec gh auth login --web || exit\r"], seen: ["SSO session name (Recommended)"] });
-    expect(await run([])).toEqual({ writes: ["exec gh auth login --web || exit\r"], seen: [] });
+    expect(await run([ENTER])).toEqual({ ran: "gh auth login --web", writes: ["\r"], seen: ["Press Enter to open"] });
+    expect(await run([THEIRS])).toEqual({ ran: "gh auth login --web", writes: [], seen: ["SSO session name (Recommended)"] });
+    expect(await run([])).toEqual({ ran: "gh auth login --web", writes: [], seen: [] });
   });
 });
 
 describe("watchPty", () => {
+  it("answers, reports and reads nothing the shell printed before the tool started", async () => {
+    const link = fakePtyLink();
+    link.banner = "Press Enter to open https://evil.example/login\r\n";
+    const seen: string[] = [];
+    const asked: string[] = [];
+    const chunks: string[] = [];
+    link.script = (pty, line) => {
+      if (line.includes("; exec bash -c ")) link.exit(pty, 0);
+    };
+    await watchPty({ link, command: "gh auth login --web", timeoutMs: 1_000, flushMs: 5, questions: [{ asks: /Press Enter to open/, answer: "\r" }], onQuestion: a => asked.push(a.matched), onUrl: u => seen.push(u), onData: c => chunks.push(c) });
+    expect({ seen, asked, writes: link.ptys[0]!.writes.length }).toEqual({ seen: [], asked: [], writes: 1 });
+    expect(chunks.join("")).not.toContain("evil");
+  });
+
   it("runs the command on a wide pty with nothing typed back, reports each page once, and ends with the tool's exit", async () => {
     const link = fakePtyLink();
     const seen: string[] = [];
     const chunks: string[] = [];
     link.script = (pty, line) => {
-      if (!line.startsWith("exec ")) return;
+      if (!line.includes("; exec bash -c ")) return;
       link.data(pty, `visit https://github.com/login/device to sign in\r\n`);
       link.data(pty, `still https://github.com/login/device, then https://github.com/settings\r\n`);
       link.exit(pty, 0);
@@ -375,7 +401,8 @@ describe("watchPty", () => {
     expect(seen).toEqual(["https://github.com/login/device", "https://github.com/settings"]);
     expect(chunks.join("")).toContain("visit https://github.com/login/device");
     expect(link.ptys[0]!.created).toMatchObject({ cols: 200, rows: 50, shell: "bash" });
-    expect(link.ptys[0]!.writes).toEqual(["exec gh auth login || exit\r"]);
+    expect(link.ptys[0]!.ran).toBe("gh auth login");
+    expect(link.ptys[0]!.writes).toHaveLength(1);
     expect(link.ptys[0]!.killed).toBe(true);
   });
 
@@ -383,7 +410,7 @@ describe("watchPty", () => {
     const held = () => {
       const link = fakePtyLink();
       link.script = (pty, line) => {
-        if (line.startsWith("exec ")) link.data(pty, "waiting for you...\r\n");
+        if (line.includes("; exec bash -c ")) link.data(pty, "waiting for you...\r\n");
       };
       return link;
     };
@@ -455,7 +482,9 @@ describe("runQuiet", () => {
     };
     const res = await runQuiet(link, "gh auth status", 5_000);
     expect(link.ptys[0]!.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "" } });
-    expect(link.ptys[0]!.writes).toEqual(["gh auth status; printf '\\nWSP_STATUS %s\\n' $?; exit\r"]);
+    expect(link.ptys[0]!.ran).toBe("gh auth status");
+    expect(link.ptys[0]!.writes).toHaveLength(1);
+    expect([...link.staged.values()]).toEqual([{ command: "gh auth status", cleared: true }]);
     expect(res).toEqual({ output: "github.com\n  ✓ Logged in to github.com account someone (keyring)\n  - Token: gho_****", exitCode: 1, timedOut: false, dropped: false });
     expect(link.ptys[0]!.killed).toBe(true);
   });

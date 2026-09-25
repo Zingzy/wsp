@@ -5,7 +5,7 @@ import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { nodeHost, type Host } from "@wsp/collect";
 import type { ExecResult, Machine } from "@wsp/engine";
-import { placeProvisionPaths } from "@wsp/protocol";
+import { controlNameRefusal, placeProvisionPaths } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentHome, SECRET, type AgentHome } from "../../collect/test/agent-home.js";
 import { agentsReader } from "../src/agents-reader.js";
@@ -123,6 +123,18 @@ describe("the agents report off this computer and off a workspace", () => {
     expect(agent("hermes")).toMatchObject({ version: "0.20.0", signIn: "signed-in" });
     expect(read.servers.every(s => s.inRecipe === undefined)).toBe(true);
     nothingLeaked(at, read);
+  });
+
+  it("leaves out a server whose name holds a control character and says which file named it", async () => {
+    const at = fixture();
+    const file = join(at.home, ".claude.json");
+    const config = JSON.parse(readFileSync(file, "utf8")) as { mcpServers: Record<string, unknown> };
+    config.mcpServers["notion\x15echo hi; #"] = { type: "http", url: "https://mcp.notion.com/mcp" };
+    writeFileSync(file, JSON.stringify(config));
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at) }).read({ kind: "here" });
+    expect(read.servers.filter(s => s.name.includes("\x15"))).toEqual([]);
+    expect(read.servers.some(s => s.name === "notion")).toBe(true);
+    expect(read.refused).toEqual([controlNameRefusal("~/.claude.json")]);
   });
 
   it("reads a workspace's machine with its project's own skills and servers, running as it is where the home is its own", async () => {

@@ -6,7 +6,7 @@
 // panel read one mapping. Facts are chips, state is the slot word or an
 // affordance; a fact not in the report drops its chip rather than standing
 // in for it.
-import { agentName, catalogEntry, loginIdOf } from "@wsp/catalog";
+import { agentName, catalogEntry, hasLogin, loginIdOf, mintsToken, serverSignInRoad } from "@wsp/catalog";
 import { outcomeWord } from "../../settings/places.js";
 import { MCP_SERVER_NAME, agentOfRow, compareVersions, type AgentRow, type AgentsReport, type McpRow, type McpTool, type PlaceProvisionRow, type SealedImage, type ServerToolsAnswer, type SignInRoad, type SkillRow } from "@wsp/protocol";
 
@@ -39,6 +39,14 @@ export const AGENTS_LIST_WORDS = {
   toolsCount: (n: number): string => `${n} ${n === 1 ? "tool" : "tools"}`,
   holdsSignIn: (agent: string): string => `${agent} holds the sign-in`,
   editImage: "Edit image",
+  waitingOnYou: "waiting on you",
+  openInTerminal: "Open in terminal",
+  open: "Open ↗",
+  runInTerminal: "Run in your terminal",
+  pasteToken: "Paste the token",
+  pasteKey: "Paste the key",
+  save: "Save",
+  toolsHereOnly: "a thread there is handed the wsp tools with every turn",
   under: { agents: "Install an agent", skills: "Add a skill", servers: "Add a server" } satisfies Record<AgentsSegment, string>,
   wspTools: "wsp tools",
   recipe: "recipe",
@@ -142,6 +150,39 @@ export interface AgentsRowData {
   readonly lines: readonly OpenLineData[];
   readonly acts: readonly RowAct[];
   readonly tools?: ToolsView;
+  readonly flow?: FlowView;
+}
+
+/** How a Sign in goes where it was pressed: run in a watched pty on that computer, a token or key pasted into this
+ * host's vault under the line that mints it, a line the person runs in their terminal, or typed into a task's own
+ * terminal on this computer. Worked out here off the report and the catalog, so every row reads one rule. */
+export type SignInStart =
+  | { readonly kind: "run"; readonly agent: string; readonly server?: string }
+  | { readonly kind: "vault"; readonly agent: string; readonly mint?: string; readonly word: "token" | "key" }
+  | { readonly kind: "copy"; readonly line: string }
+  | { readonly kind: "terminal"; readonly line: string };
+
+/** A sign-in as its row draws it while it stands. */
+export type SignInFlow =
+  | { readonly kind: "run"; readonly state: "running" | "waiting" | "failed"; readonly url?: string; readonly code?: string; readonly paste?: boolean; readonly said?: string }
+  | { readonly kind: "vault"; readonly agent: string; readonly mint?: string; readonly word: "token" | "key"; readonly saving?: boolean; readonly refused?: string }
+  | { readonly kind: "copy"; readonly line: string };
+
+/** What a row's sign-in draws in its open region, with the roads it takes from there. */
+export interface FlowView {
+  readonly flow: SignInFlow;
+  readonly code: (code: string) => void;
+  readonly save: (key: string) => void;
+}
+
+/** The sign-ins and writes a list on one target takes, by the row's id. */
+export interface AgentActs {
+  flowOf(rowId: string): SignInFlow | undefined;
+  start(rowId: string, start: SignInStart): void;
+  code(rowId: string, code: string): void;
+  save(rowId: string, key: string): void;
+  addTools(agent: string): void;
+  adding(agent: string): boolean;
 }
 
 /** What decides the acts: where the report was read, the computer a task on a box defers to, the away word every act
@@ -153,6 +194,9 @@ export interface RowsContext {
   readonly heldWhy?: string | null;
   readonly editImage?: () => void;
   readonly tools?: ServerTools;
+  readonly acts?: AgentActs;
+  /** Types a line into a terminal of the task on this computer, for a sign-in only the person can finish. */
+  readonly typeInTerminal?: (line: string) => void;
 }
 
 const signInWord = (row: AgentRow): string | undefined =>
@@ -174,6 +218,41 @@ const onImage = (ctx: RowsContext): boolean => ctx.where === "fork" || ctx.where
 /** The one act a copy of the image offers: editing the image every copy is made from. */
 export const editImageAct = (ctx: RowsContext): RowAct => ({ id: "edit-image", label: AGENTS_LIST_WORDS.editImage, ...(ctx.editImage === undefined ? {} : { run: ctx.editImage }) });
 
+/** How an agent's Sign in goes where the list stands; nothing for an agent with no sign-in. */
+export function agentSignInStart(row: AgentRow, ctx: RowsContext): SignInStart | undefined {
+  const signIn = catalogEntry(row.id)?.signIn;
+  if (row.signInRoad === "token") return { kind: "vault", agent: row.id, word: "token", ...(signIn !== undefined && mintsToken(signIn) ? { mint: signIn.mint } : {}) };
+  if (row.signInRoad === "key") return { kind: "vault", agent: row.id, word: "key" };
+  if (row.signInRoad === "terminal") {
+    if (ctx.typeInTerminal !== undefined && signIn !== undefined && hasLogin(signIn)) return { kind: "terminal", line: signIn.login };
+    return { kind: "copy", line: ctx.where === "box" && ctx.computer !== undefined ? `wsp add ${ctx.computer} --sign-in ${row.id}` : `wsp agents signin ${row.id}` };
+  }
+  return row.signInRoad === "none" ? undefined : { kind: "run", agent: row.id };
+}
+
+/** How one server's Sign in goes: its harness's own command in a watched pty, or the line the person runs where
+ * that command's page cannot come back. */
+export function serverSignInStart(row: McpRow, ctx: RowsContext): SignInStart | undefined {
+  const road = serverSignInRoad(row.agent, row.name, ctx.where === "here");
+  if (road === undefined) return undefined;
+  return road.kind === "pty" ? { kind: "run", agent: row.agent, server: row.name } : { kind: "copy", line: road.line };
+}
+
+/** The Sign in act and, while one stands, the flow it drew. */
+function signInAct(id: string, start: SignInStart | undefined, ctx: RowsContext): { act: RowAct; flow?: FlowView } {
+  const acts = ctx.acts;
+  const flow = acts?.flowOf(id);
+  const label = start?.kind === "terminal" ? AGENTS_LIST_WORDS.openInTerminal : AGENTS_LIST_WORDS.signIn;
+  const run = start === undefined ? undefined : start.kind === "terminal" ? (ctx.typeInTerminal === undefined ? undefined : () => ctx.typeInTerminal!(start.line)) : acts === undefined ? undefined : () => acts.start(id, start);
+  const busy = flow?.kind === "run" && flow.state !== "failed";
+  return {
+    act: { id: "sign-in", label, ...(busy ? { busy: true } : run === undefined ? {} : { run }) },
+    ...(flow === undefined || acts === undefined ? {} : { flow: { flow, code: code => acts.code(id, code), save: key => acts.save(id, key) } }),
+  };
+}
+
+const waiting = (flow: FlowView | undefined): boolean => flow?.flow.kind === "run" && flow.flow.state === "waiting";
+
 export function agentRowData(row: AgentRow, report: Pick<AgentsReport, "servers">, ctx: RowsContext): AgentsRowData {
   const word = signInWord(row);
   const latest = newerThan(row);
@@ -191,29 +270,39 @@ export function agentRowData(row: AgentRow, report: Pick<AgentsReport, "servers"
     ...(toolsFile === undefined ? [] : [{ id: "wsp-tools", label: AGENTS_LIST_WORDS.wspTools, value: toolsFile }]),
   ];
   const own = ownHover === undefined ? {} : { hover: ownHover };
+  const id = `agent-${row.id}`;
+  const signIn = signInAct(id, agentSignInStart(row, ctx), ctx);
+  const adding = ctx.acts?.adding(row.id) === true;
+  const addTools: RowAct =
+    ctx.where !== "here"
+      ? { id: "add-tools", label: AGENTS_LIST_WORDS.addTools, hover: AGENTS_LIST_WORDS.toolsHereOnly }
+      : { id: "add-tools", label: AGENTS_LIST_WORDS.addTools, ...(adding ? { busy: true } : ctx.acts === undefined ? {} : { run: () => ctx.acts!.addTools(row.id) }) };
   const acts: RowAct[] = onImage(ctx)
     ? [editImageAct(ctx)]
     : holdAll(
         [
-          { id: "sign-in", label: AGENTS_LIST_WORDS.signIn },
-          ...(row.wspTools ? [] : [{ id: "add-tools", label: AGENTS_LIST_WORDS.addTools }]),
+          ...(row.signInRoad === "none" ? [] : [signIn.act]),
+          ...(row.wspTools ? [] : [addTools]),
           ...(latest === undefined ? [] : [{ id: "update", label: AGENTS_LIST_WORDS.update, hover: ownHover ?? latest }]),
           { id: "remove", label: AGENTS_LIST_WORDS.remove, destructive: true, ...own },
         ],
         ctx,
       );
   // The slot's one button: Sign in where no sign-in stands, else Update where a newer version exists.
-  const button = onImage(ctx) ? undefined : row.signIn === "none" ? acts.find(a => a.id === "sign-in") : latest !== undefined ? acts.find(a => a.id === "update") : undefined;
+  const flow = onImage(ctx) || heldReason(ctx) !== undefined ? undefined : signIn.flow;
+  const button = onImage(ctx) || waiting(flow) ? undefined : row.signIn === "none" ? acts.find(a => a.id === "sign-in") : latest !== undefined ? acts.find(a => a.id === "update") : undefined;
+  const shown = waiting(flow) ? AGENTS_LIST_WORDS.waitingOnYou : word;
   return {
-    id: `agent-${row.id}`,
+    id,
     segment: "agents",
     title: row.name,
     agent: row.id,
     chips,
-    ...(word === undefined ? {} : { word }),
+    ...(shown === undefined ? {} : { word: shown }),
     ...(button === undefined ? {} : { button }),
     lines,
     acts,
+    ...(flow === undefined ? {} : { flow }),
   };
 }
 
@@ -273,12 +362,15 @@ export function serverRowData(listed: McpRow, ctx: RowsContext): AgentsRowData {
     hover: answer?.holder !== undefined ? AGENTS_LIST_WORDS.holdsSignIn(agentName(answer.holder)) : AGENTS_LIST_WORDS.startsOnce,
     ...(listing ? { busy: true } : tools === undefined ? {} : { run: () => tools.list(listed) }),
   };
+  const id = `server-${row.agent}-${row.scope}-${row.name}`;
+  const signIn = signInAct(id, serverSignInStart(listed, ctx), ctx);
   const acts: RowAct[] =
     ctx.where === "provider"
       ? []
-      : holdAll([listAct, ...(stdio || row.auth === "open" ? [] : [{ id: "sign-in", label: AGENTS_LIST_WORDS.signIn }]), { id: "remove", label: AGENTS_LIST_WORDS.remove, destructive: true }], ctx);
-  const word = serverWord(row);
-  const button = needsSignIn && row.enabled ? acts.find(a => a.id === "sign-in") : undefined;
+      : holdAll([listAct, ...(stdio || row.auth === "open" ? [] : [signIn.act]), { id: "remove", label: AGENTS_LIST_WORDS.remove, destructive: true }], ctx);
+  const flow = ctx.where === "provider" || heldReason(ctx) !== undefined ? undefined : signIn.flow;
+  const word = waiting(flow) ? AGENTS_LIST_WORDS.waitingOnYou : serverWord(row);
+  const button = needsSignIn && row.enabled && !waiting(flow) ? acts.find(a => a.id === "sign-in") : undefined;
   const refused = state?.error ?? answer?.refused;
   const asked = acts.find(a => a.id === "list-tools");
   // A harness that holds the sign-in lists the tools itself; its hover says so and nothing opens under the acts.
@@ -293,7 +385,7 @@ export function serverRowData(listed: McpRow, ctx: RowsContext): AgentsRowData {
           ...(asked?.run === undefined ? {} : { refresh: () => tools.list(listed, true) }),
         };
   return {
-    id: `server-${row.agent}-${row.scope}-${row.name}`,
+    id,
     segment: "servers",
     title: row.name,
     mark: agentName(row.agent),
@@ -304,6 +396,7 @@ export function serverRowData(listed: McpRow, ctx: RowsContext): AgentsRowData {
     lines,
     acts,
     ...(view === undefined ? {} : { tools: view }),
+    ...(flow === undefined ? {} : { flow }),
   };
 }
 
