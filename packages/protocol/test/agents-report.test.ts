@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { AgentsChangedEvent, AgentsReport, AgentsSignInEvent, EventUnion, RuntimeRequest, SECRET_REQUEST_FIELDS, ServerToolsAnswer, SignInLine, THREAD_OPS, DEVICE_OPS, controlNameRefusal, hasControlChar, withoutControlChars, requestSecrets, serverToolsLateRefusal } from "../src/index.js";
+import { AgentsChangedEvent, AgentsReport, AgentsSignInEvent, EventUnion, RuntimeRequest, SECRET_REQUEST_FIELDS, ServerToolsAnswer, SignInLine, SkillHit, SkillPreview, THREAD_OPS, DEVICE_OPS, controlNameRefusal, hasControlChar, withoutControlChars, requestSecrets, serverToolsLateRefusal } from "../src/index.js";
 
 const report = {
   target: { placeId: "here" },
@@ -87,5 +87,32 @@ describe("the agents report on the wire", () => {
     expect(AgentsChangedEvent.parse({ type: "agents.changed", target: { placeId: "here" } })).toMatchObject({ target: { placeId: "here" } });
     expect(EventUnion.parse({ type: "agents.changed", seq: 3 })).toMatchObject({ type: "agents.changed" });
     expect(SignInLine.parse({ command: "codex login --device-auth", env: { CODEX_HOME: "/var/lib/wsp/logins/codex" }, prepare: "mkdir -p x", status: "codex login status" })).toMatchObject({ prepare: "mkdir -p x" });
+  });
+
+  it("the skills acts name a target and a skill, the search and the skills.sh read name none, and all are shut to threads and paired devices", () => {
+    const acts = [
+      { id: "1", op: "skills.search", q: "pdf", limit: 20 },
+      { id: "2", op: "skills.get", skill: "anthropics/skills/pdf" },
+      { id: "3", op: "skills.preview", target: { placeId: "here" }, name: "pdf" },
+      { id: "4", op: "skills.add", target: { workspaceId: "ws_1" }, skill: "anthropics/skills/pdf", agents: ["claude"], project: true },
+      { id: "5", op: "skills.remove", target: { placeId: "p_spoo" }, name: "pdf" },
+      { id: "6", op: "skills.toggle", target: { placeId: "here" }, name: "pdf", project: false, on: false },
+    ];
+    for (const act of acts) {
+      expect(RuntimeRequest.parse(act)).toEqual(act);
+      expect(THREAD_OPS).not.toContain(act.op);
+      expect(DEVICE_OPS).not.toContain(act.op);
+    }
+    expect(() => RuntimeRequest.parse({ id: "1", op: "skills.search", q: "pdf", limit: 500 })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: "6", op: "skills.toggle", target: { placeId: "here" }, name: "pdf" })).toThrow();
+  });
+
+  it("a skill's folder can be off, a search hit is what skills.sh answers, and a preview carries the file's whole size beside its first part", () => {
+    const off = { ...report, skills: [{ name: "pdf", scope: "user", paths: [{ path: "~/.agents/skills/pdf", off: true }] }] };
+    expect(AgentsReport.parse(off).skills[0]!.paths[0]!.off).toBe(true);
+    const hit = { id: "anthropics/skills/pdf", source: "anthropics/skills", skillId: "pdf", name: "pdf", installs: 3_600_000 };
+    expect(SkillHit.parse(hit)).toEqual(hit);
+    expect(() => SkillHit.parse({ ...hit, installs: -1 })).toThrow();
+    expect(SkillPreview.parse({ text: "# pdf", size: 130_000 })).toEqual({ text: "# pdf", size: 130_000 });
   });
 });

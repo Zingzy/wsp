@@ -6,7 +6,7 @@
 import { LogInIcon, PencilIcon, XIcon, type LucideIcon } from "lucide-react";
 import { agentName, catalogEntry, hasLogin, loginIdOf, mintsToken, serverSignInRoad } from "@wsp/catalog";
 import { outcomeWord } from "../../settings/places.js";
-import { agentOfRow, type AgentRow, type AgentsReport, type McpRow, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerToolsAnswer, type SignInRoad } from "@wsp/protocol";
+import { agentOfRow, type AgentRow, type AgentsReport, type McpRow, type PageReach, type PlaceProvisionRow, type SealedImage, type ServerToolsAnswer, type SignInRoad, type SkillHit, type SkillPreview, type SkillRow } from "@wsp/protocol";
 
 /** Where the report was read, which decides which acts a row offers: this computer, a joined box, a fork at a cloud
  * (a copy, so every act is the image's), a cloud's own page (the image's rows), or a task standing on a box, whose
@@ -111,7 +111,29 @@ export const AGENTS_LIST_WORDS = {
   fromPlugin: "from a plugin, turn the plugin off instead",
   noReader: "This wsp reads no agents report yet.",
   copy: "Copy",
+  off: "off",
+  addSkill: "Add a skill",
+  searchSkillsSh: "Search skills.sh",
+  skillsSh: "skills.sh",
+  typeToSearch: "Type to search skills.sh.",
+  noHits: (q: string): string => `skills.sh has nothing for "${q}".`,
+  installed: "installed",
+  installName: (name: string): string => `Install ${name}`,
+  installing: "Installing",
+  source: "Source",
+  installs: "Installs",
+  agents: "Agents",
+  where: "Where",
+  global: "Global",
+  readsShared: "reads the shared skills folder, so it has the skill anyway",
+  alreadyOn: (computer: string): string => `already on ${computer}`,
+  firstOf: (shown: number, all: number): string => `shows the first ${shown} KB of ${all} KB`,
+  removeTitle: (name: string): string => `Remove ${name}?`,
+  removeBody: (computer: string): string => `Its folder and every link to it leave ${computer}.`,
 } as const;
+
+/** Compact counts the way skills.sh draws them: 3.6M, 201K, 12. */
+export const compactCount = (n: number): string => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 
 export interface RowAct {
   readonly id: string;
@@ -127,6 +149,8 @@ export interface RowAct {
   readonly busy?: boolean;
   /** Taken from a row it leaves the list standing, as nothing follows it to watch. */
   readonly inPlace?: boolean;
+  /** An act after which something does not come back asks once first, in these words. */
+  readonly confirm?: { readonly title: string; readonly body: string };
 }
 
 /** One server's tools as its last ask stands: running, answered, or refused by the host. */
@@ -151,8 +175,8 @@ export type SignInStart =
   | { readonly kind: "copy"; readonly line: string; readonly why?: string }
   | { readonly kind: "terminal"; readonly line: string };
 
-/** How a server's sign-in finishes: in the browser on this computer, where the harness takes the redirect itself, or
- * by the address the browser landed on pasted back. */
+/** How a server's sign-in finishes: in the browser, where the harness takes the redirect itself on this computer or
+ * over the host's callback relay, or by the address the browser landed on pasted back. */
 export type ServerFinish = "callback" | "address";
 
 /** A sign-in as its detail draws it while it stands. */
@@ -167,6 +191,48 @@ export interface FlowView {
   readonly code: (code: string) => void;
   readonly save: (key: string) => void;
 }
+
+/** A document a detail draws under its facts, as its read stands: reading, read, or refused by the host. */
+export interface DocState {
+  readonly reading: boolean;
+  readonly preview?: SkillPreview;
+  readonly error?: string;
+}
+
+/** A search of skills.sh as it stands for one query. */
+export interface SkillSearch {
+  readonly reading: boolean;
+  readonly hits?: readonly SkillHit[];
+  readonly error?: string;
+}
+
+/** What an install is told: the agents to put the skill in and whether it goes in the project. */
+export interface SkillPicks {
+  readonly agents: readonly string[];
+  readonly project: boolean;
+}
+
+/** The skills road of one target: a SKILL.md read for its preview, skills.sh searched and read by the host, a skill
+ * installed, turned off or on, removed; each by its key (a row's `scope:name`, a hit's id), what is running and why
+ * the last ask was refused. */
+export interface SkillActs {
+  previewOf(row: SkillRow): DocState | undefined;
+  loadPreview(row: SkillRow): void;
+  remoteOf(id: string): DocState | undefined;
+  loadRemote(id: string): void;
+  searchOf(q: string): SkillSearch | undefined;
+  search(q: string): void;
+  picksOf(id: string): SkillPicks | undefined;
+  setPicks(id: string, picks: SkillPicks): void;
+  toggle(row: SkillRow, on: boolean): void;
+  remove(row: SkillRow): void;
+  add(id: string, picks: SkillPicks): void;
+  busyOf(key: string): boolean;
+  refusedOf(key: string): string | undefined;
+}
+
+/** The key a skill's own state is kept under. */
+export const skillKey = (row: Pick<SkillRow, "scope" | "name">): string => `${row.scope}:${row.name}`;
 
 /** The sign-ins and writes a list on one target takes, by the row's id. */
 export interface AgentActs {
@@ -190,10 +256,13 @@ export interface RowsContext {
   readonly editImage?: () => void;
   readonly tools?: ServerTools;
   readonly acts?: AgentActs;
+  readonly skills?: SkillActs;
   /** Types a line into a terminal of the task on this computer, for a sign-in only the person can finish. */
   readonly typeInTerminal?: (line: string) => void;
   /** The project a task's panel reads beside the computer's own rows, which names the project group. */
   readonly project?: { readonly name: string; readonly path?: string };
+  /** The computer as the manager's lines name it; the manager fills it in. */
+  readonly on?: string;
   /** Where a sign-in page that returns to localhost reaches, as the host said on the report. */
   readonly reach?: PageReach;
 }

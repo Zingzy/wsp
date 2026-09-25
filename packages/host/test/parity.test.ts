@@ -224,6 +224,7 @@ const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
   "run notify": "--notify",
   "run images": "--image",
   "send images": "--image",
+  "skills add agent": "--agent",
 };
 
 describe("the command line, the MCP tools and the skill are one contract", () => {

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Machine } from "@wsp/engine";
-import { nappingAgentsRefusal, nappingSignInRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
+import { nappingAgentsRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk } from "../src/agents-read.js";
+import { agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type SignInForward, type SkillsActs } from "../src/agents-read.js";
+import type { PlaceDoor } from "../src/places.js";
 
 const READ = { home: "/root", user: "root", agents: [], skills: [], servers: [], refused: [] };
 
@@ -60,7 +61,7 @@ describe("the agents in a workspace", () => {
     expect((await on(false, true).read({ workspaceId: "ws_1" })).reach).toBe("relay");
     expect((await on(false, false).read({ workspaceId: "ws_1" })).reach).toBe("none");
     expect((await on(false, false).read({ placeId: "here" })).reach).toBe("here");
-    expect([pageReachOf({ kind: "here" }), pageReachOf({ kind: "machine", machine, relayed: true }), pageReachOf({ kind: "machine", machine }), pageReachOf({ kind: "box", machine, login: {} })]).toEqual(["here", "relay", "none", "none"]);
+    expect([pageReachOf({ kind: "here" }), pageReachOf({ kind: "machine", machine, relayed: true }), pageReachOf({ kind: "machine", machine }), pageReachOf({ kind: "box", machine, login: {} }), pageReachOf({ kind: "box", machine, login: {}, relayed: true })]).toEqual(["here", "relay", "none", "none", "relay"]);
   });
 
   it("forgets a workspace's last report once the workspace is removed, so nothing holds it for the host's life", async () => {
@@ -109,9 +110,19 @@ describe("the sign-ins on a computer or a workspace", () => {
     };
   }
 
-  function acting(phase: { now: WorkspacePhase }, relayed?: boolean) {
+  /** One joined computer, spoo, as the place door lists it, with nothing reported yet. */
+  const spoo = (): PlaceDoor =>
+    ({
+      list: async () => [{ id: "pl_1", name: "spoo", kind: "computer" }],
+      reportOf: async () => undefined,
+      signInsAt: () => undefined,
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+    }) as unknown as PlaceDoor;
+
+  function acting(phase: { now: WorkspacePhase }, relayed?: boolean, places?: PlaceDoor, read: AgentsRead = READ) {
     const ch = channel();
     const planned: { on: AgentsOn; ask: SignInAsk }[] = [];
+    const handed: (SignInForward | undefined)[] = [];
     const changed: (AgentsTarget | undefined)[] = [];
     const codes: string[] = [];
     let finish: () => void = () => {};
@@ -121,6 +132,7 @@ describe("the sign-ins on a computer or a workspace", () => {
         planned.push({ on, ask });
         if (ask.agent === "opencode") throw new Error("opencode asks you to pick");
         return async run => {
+          handed.push(run.forward);
           // What the host's watched pty does: a frame down the link, an event back up, the code writer handed over.
           await run.link.op("pty.create", {});
           run.link.onEvent(e => run.emit({ state: "waiting", url: String(e["url"]) }));
@@ -137,17 +149,17 @@ describe("the sign-ins on a computer or a workspace", () => {
     const forgot: string[] = [];
     const logged: string[] = [];
     const api = agentsReads<undefined>({
-      reader: { read: async () => READ, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }), forget: key => void forgot.push(key) },
+      reader: { read: async () => read, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }), forget: key => void forgot.push(key) },
       log: line => void logged.push(line),
       ...(relayed === undefined ? {} : { relayed: () => relayed }),
       acts,
-      places: () => undefined,
+      places: () => places,
       workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: "/root/landing" }),
       channel: async (_target, onEvent) => ch.open(onEvent),
       changed: target => void changed.push(target),
       now: () => Date.parse("2026-09-24T12:00:00Z"),
     });
-    return { api, ch, planned, changed, codes, forgot, logged, finish: () => finish() };
+    return { api, ch, planned, handed, changed, codes, forgot, logged, finish: () => finish() };
   }
 
   it("tell the host a workspace's callback port is forwarded from here where the relay does, and nothing where it does not", async () => {
@@ -157,6 +169,63 @@ describe("the sign-ins on a computer or a workspace", () => {
       expect(t.planned[0]!.on).toEqual({ kind: "machine", machine: expect.anything(), project: "/root/landing", ...(relayed ? { relayed: true } : {}) });
       leave();
     }
+  });
+
+  it("tell the host a joined computer is relayed once the host's relay holds a link to it, and hand each server sign-in a forward of its own that closes when it ends", async () => {
+    const t = acting({ now: "running" }, undefined, spoo());
+    const target = { placeId: "pl_1" };
+    const first = await t.api.signIn(target, { agent: "codex", server: "notion" }, () => {});
+    await tick();
+    expect(t.planned[0]!.on).not.toHaveProperty("relayed");
+    expect(t.handed).toEqual([undefined]);
+    expect((await t.api.read(target)).reach).toBe("none");
+    t.api.signInStop(first.signInId);
+    await tick();
+    const opened: SignInForward[] = [];
+    const closed: SignInForward[] = [];
+    const asked: unknown[] = [];
+    const ours = (at: AgentsTarget): boolean => (asked.push(at), "placeId" in at && at.placeId === "pl_1");
+    const unregister = t.api.forwards({
+      reaches: ours,
+      open: at => {
+        if (!ours(at)) return undefined;
+        const forward: SignInForward = { arm: async () => true, deliver: async () => undefined, close: () => void closed.push(forward) };
+        opened.push(forward);
+        return forward;
+      },
+    });
+    expect((await t.api.read(target)).reach).toBe("relay");
+    expect(opened).toEqual([]);
+    const second = await t.api.signIn(target, { agent: "codex", server: "notion" }, () => {});
+    await tick();
+    expect(t.planned[1]!.on).toMatchObject({ kind: "box", relayed: true });
+    expect(opened).toHaveLength(1);
+    expect(t.handed[1]).toBe(opened[0]);
+    expect(asked).toContainEqual(target);
+    expect(closed).toEqual([]);
+    t.api.signInStop(second.signInId);
+    await tick();
+    expect(closed).toEqual([opened[0]]);
+    // A tool's own login types its code on the terminal, so it is handed no forward to arm or to carry a pasted address.
+    const login = await t.api.signIn(target, { agent: "codex" }, () => {});
+    await tick();
+    expect(t.handed[2]).toBeUndefined();
+    expect(opened).toHaveLength(1);
+    t.api.signInStop(login.signInId);
+    await tick();
+    unregister();
+    await t.api.signIn(target, { agent: "codex", server: "notion" }, () => {});
+    await tick();
+    expect(t.planned[3]!.on).not.toHaveProperty("relayed");
+  });
+
+  it("report none for a joined computer whose lines go to another login, as the sign-in plans it, relay or not", async () => {
+    const t = acting({ now: "running" }, undefined, spoo(), { ...READ, home: "/home/ada", user: "ada", runAs: "ada" });
+    t.api.forwards({ reaches: () => true, open: () => undefined });
+    const report = await t.api.read({ placeId: "pl_1" });
+    expect(report.reach).toBe("none");
+    expect(report).not.toHaveProperty("runAs");
+    expect(pageReachOf({ kind: "box", machine: {} as never, login: {}, relayed: true }, "ada")).toBe("none");
   });
 
   it("drop what the reader kept for the target before saying it changed, and log each sign-in's start and end without its page or code", async () => {
@@ -281,3 +350,63 @@ describe("the sign-ins on a computer or a workspace", () => {
 });
 
 const tick = (): Promise<void> => new Promise(r => setTimeout(r, 5));
+
+describe("the skills on a computer or a workspace", () => {
+  function skills(phase: { now: WorkspacePhase }): { asked: [string, unknown, unknown][]; changed: (AgentsTarget | undefined)[]; api: ReturnType<typeof agentsReads<undefined>> } {
+    const asked: [string, unknown, unknown][] = [];
+    const changed: (AgentsTarget | undefined)[] = [];
+    const machine = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as Machine;
+    const acts: SkillsActs = {
+      search: async (q, limit) => (asked.push(["search", q, limit]), [{ id: "a/b/pdf", source: "a/b", skillId: "pdf", name: "pdf", installs: 3 }]),
+      get: async skill => (asked.push(["get", skill, undefined]), { text: "# pdf", size: 5 }),
+      preview: async (on, ask) => (asked.push(["preview", on, ask]), { text: "# pdf", size: 5 }),
+      add: async (on, ask) => (asked.push(["add", on, ask]), { path: "~/.agents/skills/pdf", agents: [] }),
+      remove: async (on, ask) => {
+        asked.push(["remove", on, ask]);
+        throw new Error("rm failed");
+      },
+      toggle: async (on, ask) => (asked.push(["toggle", on, ask]), { paths: ["~/.agents/skills/pdf"] }),
+    };
+    const api = agentsReads<undefined>({
+      reader: undefined,
+      places: () => undefined,
+      workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: "/root/landing" }),
+      skills: acts,
+      channel: async () => {
+        throw new Error("no channel on this road");
+      },
+      changed: target => void changed.push(target),
+      now: () => Date.parse("2026-09-24T12:00:00Z"),
+    });
+    return { asked, changed, api };
+  }
+
+  it("searches with twenty hits unless told otherwise, and reads a skills.sh skill with no target", async () => {
+    const { asked, api } = skills({ now: "running" });
+    expect(await api.skillsSearch("pdf")).toHaveLength(1);
+    await api.skillsSearch("pdf", 5);
+    expect(await api.skillsGet("a/b/pdf")).toEqual({ text: "# pdf", size: 5 });
+    expect(asked).toEqual([["search", "pdf", 20], ["search", "pdf", 5], ["get", "a/b/pdf", undefined]]);
+  });
+
+  it("changes a skill on the workspace's own machine and says the report there changed, whether the write held or not", async () => {
+    const { asked, changed, api } = skills({ now: "running" });
+    const target = { workspaceId: "ws_1" };
+    await api.skillsAdd(target, { skill: "a/b/pdf", project: true });
+    await api.skillsToggle(target, { name: "pdf", on: false });
+    await expect(api.skillsRemove(target, { name: "pdf" })).rejects.toThrow("rm failed");
+    expect(await api.skillsPreview(target, { name: "pdf" })).toEqual({ text: "# pdf", size: 5 });
+    expect(asked.map(([what, on]) => [what, (on as AgentsOn).kind])).toEqual([["add", "machine"], ["toggle", "machine"], ["remove", "machine"], ["preview", "machine"]]);
+    expect(changed).toEqual([target, target, target]);
+  });
+
+  it("never touches a napping workspace's skills", async () => {
+    const { asked, changed, api } = skills({ now: "napping" });
+    const target = { workspaceId: "ws_1" };
+    for (const act of [() => api.skillsAdd(target, { skill: "a/b/pdf" }), () => api.skillsToggle(target, { name: "pdf", on: false }), () => api.skillsRemove(target, { name: "pdf" }), () => api.skillsPreview(target, { name: "pdf" })]) {
+      await expect(act()).rejects.toThrow(nappingSkillsRefusal("landing"));
+    }
+    expect(asked).toEqual([]);
+    expect(changed).toEqual([]);
+  });
+});
