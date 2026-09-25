@@ -98,6 +98,17 @@ describe("the preferences record in the store", () => {
     expect(lastNotice()).toBeNull();
   });
 
+  it("a theme pick paints at once and the host's answer settles it", async () => {
+    const { api, sets } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
+    useStore.getState().bind(api);
+    await flush();
+    const done = useStore.getState().setPreferences({ darkTheme: "denim" });
+    expect(useStore.getState().preferences.darkTheme).toBe("denim");
+    await done;
+    expect(sets).toEqual([{ darkTheme: "denim" }]);
+    expect(useStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, labs: true, darkTheme: "denim" });
+  });
+
   it("while a set is on its way, an earlier record from the host does not paint over the person's pick", async () => {
     const { api, emit } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
     useStore.getState().bind(api);

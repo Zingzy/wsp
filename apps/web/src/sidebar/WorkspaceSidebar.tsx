@@ -482,7 +482,7 @@ export function WorkspaceSidebar() {
         {made.map(creation => creationItem(creation, depth, rail))}
         {group.workspaces.length === 0 && made.length === 0 ? (
           <li data-thread-selection-safe className={cn(rail && RAIL_ITEM_CLASS)}>
-            <p data-k="no-workspaces" data-depth={depth} className="flex h-9 items-center px-2 text-[13px] text-sidebar-foreground/45">
+            <p data-k="no-workspaces" data-depth={depth} className="flex h-9 items-center px-2 text-[13px] text-muted-foreground">
               {PROJECT_WORDS.noWorkspaces}
             </p>
           </li>
@@ -520,7 +520,7 @@ export function WorkspaceSidebar() {
                 right over its name, which is the row's subject in the full ink. */}
             <ProjectGlyph projectId={id} />
             <span className="flex min-w-0 flex-1 flex-col justify-center">
-              <span data-project-computer className="truncate text-[11px] leading-[14px] text-sidebar-foreground/45">
+              <span data-project-computer className="truncate text-[11px] leading-[14px] text-muted-foreground">
                 {device}
               </span>
               <span className="flex min-w-0 items-center gap-2.5 leading-5">
