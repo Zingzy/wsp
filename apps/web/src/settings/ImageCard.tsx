@@ -3,15 +3,17 @@
 // computer is added: what stands there of your image, as imageState reads it,
 // and the one press that state invites; under it what the image holds, on
 // every computer's card alike, with Edit; and the recipe itself, opened in
-// place by Build your image here or Edit; and the image's own build, drawn
-// under the card of the computer it runs on until it seals or the person
-// starts over. A copy is built only on Copy, never on opening the page, and
-// the time and the rate stand beside the press, since a build bills where it
-// runs. While the image builds anywhere, every press that would start another
-// build is held with where it is building.
+// place by Build your image here or Edit, or on arrival by an Edit image
+// pressed anywhere else in the app; and the image's own build, drawn under the
+// card of the computer it runs on until it seals or the person starts over.
+// While the recipe or the build is open the state row gives way to it, the
+// card's head standing over the step. A copy is built only on Copy, never on
+// opening the page, and the time and the rate stand beside the press, since a
+// build bills where it runs. While the image builds anywhere, every press that
+// would start another build is held with where it is building.
 import { PencilIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { HERE_PLACE_ID, copyAsksSignIns, initJobBuilding, initJobOver, initSignInWaitedOn, signInWaitLine, type PlaceView, type SealedImageView } from "@wsp/protocol";
+import { HERE_PLACE_ID, copyAsksSignIns, initAgentStep, initJobBuilding, initJobOver, initSignInWaitedOn, signInWaitLine, type PlaceView, type SealedImageView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import type { ChipItem } from "../components/ui/chips.js";
 import { Spinner } from "../components/ui/spinner.js";
@@ -27,6 +29,7 @@ import { placeName, projectOn } from "./places.js";
 import { RefusalSlot } from "./sheetParts.js";
 import { CARD_SURFACE, Row, type SettingsCardData, type SettingsRowData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
+import { useSettingsStore } from "./settingsStore.js";
 import { cn } from "../lib/utils.js";
 
 /** The Image card under its head for one computer, drawn by the computer's page and by Add a computer once that
@@ -73,18 +76,26 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
   const [refused, setRefused] = useState<Failure | null>(null);
   const job = useStore(s => s.initJob);
   const building = job !== null && initJobBuilding(job.phase);
-  // A recipe still being chosen stands open on every card that opens, since it is one job whichever card began it.
-  const [recipeOpen, setRecipeOpen] = useState(() => job !== null && !initJobOver(job.phase) && !building);
+  // A recipe still being chosen stands open on every card that opens, since it is one job whichever card began it;
+  // an agent road that ended short stands open on the card it was started from, where its Retry is.
+  const [recipeOpen, setRecipeOpen] = useState(() => job !== null && !building && (!initJobOver(job.phase) || (initAgentStep(job) && job.place?.id === place.id)));
   useEffect(() => {
     if (building) setRecipeOpen(false);
   }, [building]);
   const open = recipeOpen && !building;
   // The image's own build at this computer, running or ended short, until Close puts that job away.
   const [putAway, setPutAway] = useState<string | null>(null);
-  const buildHere = !open && job !== null && job.place?.id === place.id && (building || job.phase === "failed" || job.phase === "cancelled") && putAway !== job.id;
+  const buildHere = !open && job !== null && job.place?.id === place.id && !initAgentStep(job) && (building || job.phase === "failed" || job.phase === "cancelled") && putAway !== job.id;
   const buildingAt = building ? ctx.places.find(p => p.id === job.place?.id) : undefined;
   const buildHeld = building ? IMAGE_WORDS.buildingOn(buildingAt === undefined ? (job.place?.name ?? name) : placeName(buildingAt, buildingAt.id === HERE_PLACE_ID)) : ctx.api?.initStart === undefined ? WHERE_WORDS.notYet : undefined;
   const openRecipe = (): void => setRecipeOpen(true);
+  const asked = useSettingsStore(s => s.recipeAsked === place.id);
+  const heldNow = buildHeld !== undefined;
+  useEffect(() => {
+    if (!asked) return;
+    useSettingsStore.getState().askRecipe(null);
+    if (!heldNow) setRecipeOpen(true);
+  }, [asked, heldNow]);
   const build = ctx.api?.imageBuild;
   const image = view.image;
   const force = image !== null && copyAsksSignIns(image);
@@ -137,9 +148,10 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
     }
   })();
 
-  // While the recipe or the build stands under the card it is the one thing to press, so the state row keeps its
-  // words and drops its press.
-  const press = open || buildHere ? undefined : row.press;
+  // The state row answers what to do now; while the recipe or the build stands under the card that answer is on
+  // screen already, so the row goes until Close or the build's end brings it back with the new state.
+  const stepOpen = open || buildHere;
+  const press = stepOpen ? undefined : row.press;
   const control = row.busy ? (
     <Spinner className="size-4 text-muted-foreground" />
   ) : press === undefined ? undefined : (
@@ -156,7 +168,7 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
       </Button>
     </>
   );
-  const waiting = press?.heldWhy ?? row.note ?? (image !== null && !open && !buildHere ? buildHeld : undefined);
+  const waiting = press?.heldWhy ?? row.note ?? (image !== null && !stepOpen ? buildHeld : undefined);
   const stateRow: Omit<SettingsRowData, "kind"> = {
     id: "image-state",
     title: row.title,
@@ -187,10 +199,12 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
         };
   return (
     <div className="flex flex-col gap-3">
-      <div className={cn(CARD_SURFACE, "flex flex-col divide-y divide-border")}>
-        <Row {...stateRow} drops={row.cost !== undefined && press !== undefined} />
-        {holds === undefined ? null : <Row {...holds} />}
-      </div>
+      {stepOpen && holds === undefined ? null : (
+        <div className={cn(CARD_SURFACE, "flex flex-col divide-y divide-border")}>
+          {stepOpen ? null : <Row {...stateRow} drops={row.cost !== undefined && press !== undefined} />}
+          {holds === undefined ? null : <Row {...holds} />}
+        </div>
+      )}
       {open ? (
         <ImageRecipe place={place} name={name} version={image?.version} onClose={() => setRecipeOpen(false)} />
       ) : buildHere && refused === null && waiting === undefined ? null : (
@@ -198,7 +212,7 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
         // the card; under a build with nothing to say it gives way to the build.
         <RefusalSlot k="image-refusal" {...(refused === null ? {} : { said: refused.said, ...(refused.fix === undefined ? {} : { fix: refused.fix }) })} {...(waiting === undefined ? {} : { waiting })} />
       )}
-      {buildHere ? <ImageBuild key={job.id} job={job} place={place} said={state.kind === "stopped" && state.said === job.error} onAgain={openRecipe} onClose={() => setPutAway(job.id)} /> : null}
+      {buildHere ? <ImageBuild key={job.id} job={job} place={place} onAgain={openRecipe} onClose={() => setPutAway(job.id)} /> : null}
     </div>
   );
 }

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The image's build as rows, for every client that draws it: the setup sheet
-// and the Image card frame the same list. The stages in the order the job runs
-// them, under a 2 px line along the card's top edge filled by the stages done;
-// each with the machine's latest lines under the one running in a block as
+// The image's build as rows, drawn whole under the Image card of the computer
+// it runs on, since the page is what scrolls. The stages in the order the job
+// runs them, under a 2 px line along the card's top edge filled by the stages
+// done; each with the machine's latest lines under the one running in a block as
 // tall as its lines up to eight (a done stage folds and opens on a click); the
 // stages the provider says nothing during counting their own seconds in the
 // slot; the sign-ins one stage whose sub-rows carry the keycap that opens each
@@ -43,16 +43,14 @@ const NARROW_BLOCK = "max-sm:h-auto";
  * the same block, saying so. */
 const onIt = (state: string): boolean => state === INIT_ROW_STATES.running || state === INIT_ROW_STATES.slot;
 
-/** The build read once for whoever frames it: the stages with the sign-ins folded, the count, whether the sign-ins
- * have the screen to themselves, and the one row kept in view as it appears and whenever it changes. */
+/** The build read once: the stages with the sign-ins folded, the count, and whether the sign-ins have the step to
+ * themselves. */
 export interface BuildView {
   rows: InitRow[];
   signIns: InitRow[];
   count: { done: number; total: number };
   /** The sign-in stage is running or waits on the person, so the sign-ins stand alone with room to act. */
   slide: boolean;
-  focusId: string | undefined;
-  slideFocusId: string | undefined;
   /** The build's title for the phase it is in. */
   headline: string;
 }
@@ -63,13 +61,8 @@ export function buildView(job: InitJob): BuildView {
   const { rows, signIns } = initBuildRows(job.rows);
   const signInStage = rows.find(r => r.id === SIGN_IN_STAGE_ID);
   const slide = building && signInStage !== undefined && (signInStage.state === INIT_ROW_STATES.open || signInStage.state === INIT_ROW_STATES.running);
-  // A sign-in to retry first, else the stage that runs or failed, else a machine still being removed, which is the one
-  // row left on a stopped build that is still costing money; on the slide, the first sign-in waiting on the person.
-  const attention = building && signIns.some(s => initRowFailed(s));
-  const focusId = attention && signInStage !== undefined ? signInStage.id : (rows.find(r => onIt(r.state) || r.state === INIT_ROW_STATES.failed) ?? rows.find(r => r.state === INIT_ROW_STATES.retrying))?.id;
-  const slideFocusId = (signIns.find(s => s.state === INIT_ROW_STATES.open) ?? signIns.find(s => initRowFailed(s)))?.id;
   const headline = slide ? words.slideHeadline : job.phase === "done" ? words.done : job.phase === "cancelled" ? words.stopped : initJobOver(job.phase) ? words.failed : words.headline;
-  return { rows, signIns, count: initStageCount(rows), slide, focusId, slideFocusId, headline };
+  return { rows, signIns, count: initStageCount(rows), slide, headline };
 }
 
 /** What a press on a row sends: a sign-in run again, or a code a page handed back, both for that row's tool. */
@@ -78,16 +71,13 @@ export interface BuildActs {
   onCode: (o: { tool: string; code: string }) => void;
 }
 
-/** The stages as one card under the progress line; a sign-in that ran out carries Retry only while the build runs.
- * `contained`: the frame bounds the list, as the sheet's window does, so it scrolls inside its own border under
- * the cap and keeps the row to watch in view; on a page the list is drawn whole and the page is what scrolls. */
-export function StageList({ job, view, acts, contained = false }: { job: InitJob; view: BuildView; acts: BuildActs; contained?: boolean }) {
+/** The stages as one card under the progress line; a sign-in that ran out carries Retry only while the build runs. */
+export function StageList({ job, view, acts }: { job: InitJob; view: BuildView; acts: BuildActs }) {
   const fraction = view.count.total > 0 ? view.count.done / view.count.total : 0;
   const building = initJobBuilding(job.phase);
   return (
     <Card
       label={CLOUD_SETUP_WORDS.build.headline}
-      cap={contained}
       top={
         <span role="progressbar" aria-label={view.headline} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fraction * 100)} data-k="progress" className="block h-0.5 w-full shrink-0 bg-muted-foreground/20">
           <span className="block h-full bg-foreground/70 transition-[width] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none" style={{ width: `${Math.round(fraction * 100)}%` }} />
@@ -98,7 +88,6 @@ export function StageList({ job, view, acts, contained = false }: { job: InitJob
         <BuildRow
           key={row.id}
           row={row}
-          focus={contained && row.id === view.focusId}
           signIns={row.id === SIGN_IN_STAGE_ID ? view.signIns : undefined}
           onRetry={building ? acts.onRetry : undefined}
           onCode={(tool, code) => acts.onCode({ tool, code })}
@@ -108,12 +97,12 @@ export function StageList({ job, view, acts, contained = false }: { job: InitJob
   );
 }
 
-/** The sign-ins with room to act, while their stage runs; `contained` as for the stages. */
-export function SignInSlide({ view, acts, contained = false }: { view: BuildView; acts: BuildActs; contained?: boolean }) {
+/** The sign-ins with room to act, while their stage runs. */
+export function SignInSlide({ view, acts }: { view: BuildView; acts: BuildActs }) {
   return (
-    <Card label={CLOUD_SETUP_WORDS.build.slideHeadline} cap={false}>
+    <Card label={CLOUD_SETUP_WORDS.build.slideHeadline}>
       {view.signIns.map(s => (
-        <SignInSlideRow key={s.id} row={s} marked={marked(view.signIns)} focus={contained && s.id === view.slideFocusId} onRetry={initRowFailed(s) ? () => acts.onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => acts.onCode({ tool: s.tool ?? s.id, code }) : undefined} />
+        <SignInSlideRow key={s.id} row={s} marked={marked(view.signIns)} onRetry={initRowFailed(s) ? () => acts.onRetry(s.tool ?? s.id) : undefined} onCode={s.finish === "code" ? code => acts.onCode({ tool: s.tool ?? s.id, code }) : undefined} />
       ))}
     </Card>
   );
@@ -137,16 +126,12 @@ function MarkColumn({ tool }: { tool: string | undefined }) {
  * 20 px mono, the keycap that opens the page or retries, the field for a page that hands a code back, and the
  * protocol's sentence for what the machine waits on. Nothing else changes a row's height, and nothing the machine
  * ran reaches the row. */
-function SignInSlideRow({ row, marked, focus, onRetry, onCode }: { row: InitRow; marked: boolean; focus: boolean; onRetry?: () => void; onCode?: (code: string) => void }) {
-  const item = useRef<HTMLLIElement>(null);
-  useEffect(() => {
-    if (focus) item.current?.scrollIntoView({ block: "start" });
-  }, [focus]);
+function SignInSlideRow({ row, marked, onRetry, onCode }: { row: InitRow; marked: boolean; onRetry?: () => void; onCode?: (code: string) => void }) {
   const waiting = row.state === INIT_ROW_STATES.open;
   const acts = (waiting && (row.code !== undefined || row.page !== undefined || onCode !== undefined)) || onRetry !== undefined;
   const line = initSignInLine(row);
   return (
-    <li ref={item} data-k="signin" data-row={row.id} data-state={row.state} data-acts={acts} className={ROW_LINE}>
+    <li data-k="signin" data-row={row.id} data-state={row.state} data-acts={acts} className={ROW_LINE}>
       <div className={cn(ROW, NARROW_ROW)}>
         {marked ? <MarkColumn tool={row.tool} /> : null}
         <span className={cn(NAME, NARROW_NAME)}>{row.label}</span>
@@ -201,9 +186,8 @@ function Elapsed({ since }: { since: number }) {
 
 /** A stage's lines open under the running row on their own; a done row's open on a click and fold on the next. The
  * sign-in stage opens on its sub-rows the same way, on its own while the person is waited on. */
-function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focus: boolean; signIns?: InitRow[]; onRetry?: (tool: string) => void; onCode: (tool: string, code: string) => void }) {
+function BuildRow({ row, signIns, onRetry, onCode }: { row: InitRow; signIns?: InitRow[]; onRetry?: (tool: string) => void; onCode: (tool: string, code: string) => void }) {
   const [opened, setOpened] = useState<boolean | undefined>(undefined);
-  const item = useRef<HTMLLIElement>(null);
   const running = onIt(row.state);
   const waitedOn = row.state === INIT_ROW_STATES.open;
   const failed = row.state === INIT_ROW_STATES.failed;
@@ -215,12 +199,8 @@ function BuildRow({ row, focus, signIns, onRetry, onCode }: { row: InitRow; focu
   // A running stage and the sign-ins being waited on are open and stay so; a failed one, or one with a sign-in to retry, opens on its own and folds on a click; a done one opens on a click.
   const canOpen = row.kind === "stage" && has && !live;
   const open = has && (live || (opened ?? (failed || attention)));
-  // The row to act on or watch heads the card's view as the screen appears.
-  useEffect(() => {
-    if (focus) item.current?.scrollIntoView({ block: "start" });
-  }, [focus]);
   return (
-    <li ref={item} data-k="row" data-row={row.id} data-state={row.state} data-open={open} className={ROW_LINE}>
+    <li data-k="row" data-row={row.id} data-state={row.state} data-open={open} className={ROW_LINE}>
       <div className={cn(ROW, NARROW_ROW, canOpen && "cursor-pointer hover:bg-accent/30")} title={row.detail} onClick={canOpen ? () => setOpened(!open) : undefined} role={canOpen ? "button" : undefined} aria-expanded={canOpen ? open : undefined}>
         <span data-k="glyph" aria-hidden className="flex size-[18px] shrink-0 items-center justify-center text-foreground">
           <StageGlyph row={row} />

@@ -384,7 +384,7 @@ describe("Appearance", () => {
 });
 
 describe("the doors and the memory", () => {
-  it("Add a computer opens Settings on Computers with the sheet over it whatever was remembered, and the image's Open lands on the cloud's page with its sheet", async () => {
+  it("Add a computer opens Settings on Computers with the sheet over it whatever was remembered", async () => {
     useStore.setState({ places: [here, solari] });
     const api = settingsApi({ initGet: async () => ({ keys: { solari: true }, home: "/Users/dev", agents: [], pricing: null, job: null }), image: async () => ({ image: null, copies: [], projects: [] }) } as Partial<Api>).api;
     useSettingsStore.getState().go({ kind: "group", group: "about" });
@@ -401,14 +401,6 @@ describe("the doors and the memory", () => {
     await settle();
     expect(pageAt()).toBe("computers");
     expect(window.localStorage.getItem("wsp:settings-at")).toBe("computers");
-    act(() => useStore.getState().openSetup());
-    await settle();
-    expect(pageAt()).toBe("computer:solari");
-    expect(crumb()).toBe("Settings/Computers/Solari");
-    expect(document.querySelector("[data-cloud-setup-dialog]")).not.toBeNull();
-    act(() => useStore.getState().closeSetup());
-    await settle();
-    expect(pageAt()).toBe("computers");
   });
 
   it("reopens where it was closed in this window, and a remembered computer or project that is gone falls back to its group", async () => {

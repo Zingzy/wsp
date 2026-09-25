@@ -169,6 +169,8 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   };
 
   const add: RowAct = onImage(ctx) ? editImageAct(ctx) : adder !== undefined || former !== undefined ? { id: "add", label: W.add, icon: PlusIcon, run: () => setLevel({ kind: "add" }) } : { ...notYet("add", W.add, PlusIcon), hover: heldReason(ctx) ?? W.notYet };
+  // The toolbar's word is the act's own: a copy of the image edits it, anything else adds to the tab it stands on.
+  const addWord = add.id === "edit-image" ? W.editImage : tab.add;
 
   const staleMark =
     staleWord === undefined ? null : (
@@ -196,7 +198,8 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const headRow =
     head.title === undefined ? (
       <div data-agents-head className="flex min-h-6 items-center gap-3 px-4 pb-3">
-        <p data-k="agents-line" className="min-w-0 flex-1 truncate text-xs leading-4 text-muted-foreground" title={head.line}>
+        {/* Under a phone's width the line wraps rather than cut, since its hover is not there to read. */}
+        <p data-k="agents-line" className="min-w-0 flex-1 truncate text-xs leading-4 text-muted-foreground max-sm:whitespace-normal" title={head.line}>
           {head.line}
         </p>
         {staleMark}
@@ -336,8 +339,8 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
             </MenuPopup>
           </Menu>
         )}
-        <span className="inline-flex shrink-0" title={add.hover ?? tab.add}>
-          <Button data-k="agents-add" size="default" variant="outline" aria-label={add.id === "edit-image" ? W.editImage : tab.add} held={add.run === undefined} {...(add.run === undefined ? {} : { onClick: add.run })}>
+        <span className="inline-flex shrink-0" title={add.hover ?? addWord}>
+          <Button data-k="agents-add" size="default" variant="outline" aria-label={addWord} held={add.run === undefined} {...(add.run === undefined ? {} : { onClick: add.run })}>
             {add.icon === undefined ? null : <add.icon aria-hidden className="size-4" />}
             <span className={TABS.addWordHidden}>{add.label}</span>
           </Button>
@@ -364,7 +367,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
       ) : page ? (
         <div data-k="agents-empty" className="mx-4 flex min-h-[168px] flex-col items-center justify-center gap-3 rounded-lg bg-[radial-gradient(var(--border)_1px,transparent_1px)] bg-size-[12px_12px]">
           <span className="rounded-md border border-dashed border-border bg-background px-2 py-1 font-mono text-xs text-muted-foreground">{tab.none}</span>
-          <ActButton act={{ ...add, label: add.id === "edit-image" ? W.editImage : tab.add }} />
+          <ActButton act={{ ...add, label: addWord }} />
         </div>
       ) : (
         <p data-k="agents-empty" className={emptyBox}>

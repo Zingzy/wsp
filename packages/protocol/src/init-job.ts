@@ -204,7 +204,8 @@ export const InitJob = z.object({
   keyRefused: z.boolean().optional(),
   golden: z.object({ version: z.number().int() }).optional(),
   workspace: z.object({ id: z.string(), name: z.string() }).optional(),
-  /** The place the build was sent to, by id and the name wsp places lists; absent before a build starts. */
+  /** The computer the job is for, by id and the name wsp places lists: the one a card started it from, from its start,
+   * then the place the build was sent to once it starts. Absent on a job no card started, until its build starts. */
   place: z.object({ id: z.string(), name: z.string() }).optional(),
 });
 export type InitJob = z.infer<typeof InitJob>;

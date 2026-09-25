@@ -16,6 +16,7 @@ import { stripVTControlCharacters } from "node:util";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
 import { HERE_PLACE_ID, CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, Recipe, savedKeyStoppedLine, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, markedDefault, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
+import { placeWiring } from "../src/places.js";
 import { createRuntime, goldenHead, memoryStore, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring } from "../src/cli.js";
@@ -39,7 +40,7 @@ const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb 
 const AGENT_RECIPE: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "codex" ? { ...r, on: true } : r)) };
 /** The wsp server as this host's install would write it: one spec, read by the install road and by the launch. */
 /** The rows the host leaves when the saved key is refused, in the order a client draws them. The app's fixture and
- * its dialog test stand in for this job (apps/web/test/cloud-setup/keyRefusedJob.ts), so a change here is a change
+ * its Image card tests stand in for this job (apps/web/test/fixtures/keyRefusedJob.ts), so a change here is a change
  * there; the words themselves are the protocol's, which both sides read. */
 /** The place the fake runtime builds at when nothing names one. */
 const FAKE_PLACE = "default";
@@ -152,7 +153,7 @@ async function forkable(f: Fake): Promise<void> {
   await f.rt.projects.add({ source: "https://github.com/dev/first.git", on: "default" });
 }
 
-function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string; /** The provider this host forks on, which a terminal run beside it reads off the setup. */ forksOn?: string; /** The places this host can build at, over the runtime's own stub as the wired one. */ places?: (wired: StubBackend) => PlaceBackends; /** How long the vault step waits for this client's token. */ vaultWaitMs?: number; /** The wsp home holds the Claude token unless a case says it does not. */ tokenHeld?: boolean; /** Saves keys the way the command line wires it, through the one writer of the .env beside the state. */ writesEnv?: boolean } = {}): Fake {
+function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string; /** The provider this host forks on, which a terminal run beside it reads off the setup. */ forksOn?: string; /** The places this host can build at, over the runtime's own stub as the wired one. */ places?: (wired: StubBackend) => PlaceBackends; /** How long the vault step waits for this client's token. */ vaultWaitMs?: number; /** The wsp home holds the Claude token unless a case says it does not. */ tokenHeld?: boolean; /** Saves keys the way the command line wires it, through the one writer of the .env beside the state. */ writesEnv?: boolean; /** The place door the serving host wires, so the places it lists are read. */ placeLinks?: boolean } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -175,7 +176,7 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
     });
   // The provider the runtime forks on: the stub, or one a case hands over to stand for a host set up for none.
   const places = over.places?.(backend);
-  const rt = createRuntime({ backend: over.provider ?? backend, store, adapters: { claude: claude.adapter, ...over.adapters }, local: localWiring(dir, undefined, fakeDaemonStart, undefined, copyingFake()), hostId: "box:h1", ...(places !== undefined ? { places } : {}) });
+  const rt = createRuntime({ backend: over.provider ?? backend, store, adapters: { claude: claude.adapter, ...over.adapters }, local: localWiring(dir, undefined, fakeDaemonStart, undefined, copyingFake()), hostId: "box:h1", ...(places !== undefined ? { places } : {}), ...(over.placeLinks === true ? { placeLinks: placeWiring(statePath) } : {}) });
   runtimes.push(rt);
   let link = scriptedLink({ signedIn: true, hold: false, missing: false });
   const relay: Fake["relay"] = { hooks: [], closed: 0 };
@@ -1777,6 +1778,16 @@ describe("the init job, terminal road", () => {
     expect(f.backend.machines).toEqual([]);
     expect((await f.rt.image.get()).image).toMatchObject({ version: 1, place: "box" });
     expect(goldenHead(await f.rt.golden.get())?.version).toBe(1);
+  });
+
+  it("a job started from a computer's card names that computer from its start, before any build, and a word naming no place is refused", async () => {
+    const box = stubBackend();
+    const f = fake({ placeLinks: true, places: wired => { box.execImpl = wired.execImpl; return { wired: "solari", backend: p => (p === "solari" ? wired : p === "box" ? box : undefined), list: () => ["solari", "box"] }; } });
+    saveSmallRecipe(smallRecipePath(f.statePath), RECIPE);
+    await expect(f.jobs.start({ road: "terminal", on: "nowhere" })).rejects.toThrow(/no place named nowhere/);
+    expect((await f.jobs.start({ road: "terminal", on: "box" })).place).toEqual({ id: "box", name: "box" });
+    await f.settled();
+    expect(f.jobs.view()).toMatchObject({ phase: "answering", place: { id: "box", name: "box" } });
   });
 
   it("the job names the place its build was sent to, and once the image stands a build named at another place goes to the image's own", async () => {

@@ -4,14 +4,13 @@
 // While the settings sidebar's field holds text at a width with room for
 // both, the centre is a results page: under each group with a match, its name
 // as a link and a card of the matching rows, live, so a pick made there is
-// made. The sheets that mount at page level stand over whichever page is
-// open: Add a computer over Computers, the image screens over the cloud's page.
+// made. The Add a project sheet mounts at page level and stands over whichever
+// page is open.
 import { Fragment } from "react";
 import { ScrollArea } from "../components/ui/scroll-area.js";
 import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useStore } from "../protocol/store.js";
 import { AddProjectDialog } from "../sidebar/AddProjectDialog.js";
-import { CloudSetupDialog } from "../sidebar/CloudSetupDialog.js";
 import { ComputerPage } from "./computers.js";
 import { GROUP_BLURBS, SETTINGS_WORDS } from "./format.js";
 import { drawnGroups, groupById, searchGroup } from "./groups.js";
@@ -91,8 +90,6 @@ export function SettingsPage() {
   const addProjectAt = useSettingsStore(s => s.addProjectAt);
   const closeAddProject = useSettingsStore(s => s.closeAddProject);
   const isMobile = useIsMobile();
-  const editing = useStore(s => s.setupOpen);
-  const closeSetup = useStore(s => s.closeSetup);
   // At a phone's width the results are in the sheet the field is in, so the centre keeps its page.
   const searching = search !== "" && !isMobile;
   return (
@@ -100,7 +97,6 @@ export function SettingsPage() {
       <div data-settings-page data-settings-at={searching ? "search" : atId(at)} className="mx-auto flex w-full max-w-[760px] flex-col gap-10 px-8 pt-14 pb-12 max-sm:px-4 max-sm:pt-6">
         {searching ? <SearchPage ctx={ctx} query={search} /> : <Page key={atId(at)} at={at} ctx={ctx} />}
       </div>
-      {editing ? <CloudSetupDialog onClose={closeSetup} /> : null}
       {addProjectAt === null ? null : (
         <Fragment key={addProjectAt}>
           <AddProjectDialog onClose={closeAddProject} />
