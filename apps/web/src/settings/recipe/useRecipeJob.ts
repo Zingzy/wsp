@@ -3,9 +3,9 @@
 // screen the host's step stands on, the draft of what that screen has ticked
 // and typed, kept on the host as it changes, the image estimate against the
 // disk, Continue with its disk check and the typed keys saved first, Back,
-// Start over, and the build with the first launch's answer handed over. The
-// setup sheet and the Image card's recipe both read this, so a step walked in
-// one reads the same in the other.
+// Start over, and the build with the first launch's answer handed over. Every
+// Image card's recipe reads this, so a step walked on one computer's card
+// reads the same on another's.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { initDiskOverLine, initImageBytes, wspToolsRowId, type InitAgent, type InitDraft, type InitJob, type InitRoad, type InitScreen } from "@wsp/protocol";
 import { errorText } from "../../lib/utils.js";
@@ -27,7 +27,8 @@ export function recipeAt(job: InitJob): { shown: InitScreen[]; index: number; sc
   return { shown, index, screen: shown[index] };
 }
 
-export function useRecipeJob() {
+/** `on` is the computer whose card walks the job, which a job it starts carries from its first view. */
+export function useRecipeJob(on?: string) {
   const api = useStore(s => s.api);
   const saveKeys = useStore(s => s.saveKeys);
   const job = useStore(s => s.initJob);
@@ -108,7 +109,7 @@ export function useRecipeJob() {
   const startRoad = (pick: { road: InitRoad; harness?: string }, then?: () => void): void => {
     if (api?.initStart === undefined) return;
     void attempt(async () => {
-      await api.initStart!({ road: pick.road, ...(pick.harness !== undefined ? { harness: pick.harness } : {}) });
+      await api.initStart!({ road: pick.road, ...(pick.harness !== undefined ? { harness: pick.harness } : {}), ...(on !== undefined ? { on } : {}) });
       then?.();
     });
   };
@@ -119,7 +120,7 @@ export function useRecipeJob() {
   };
   /** Starts the build. The first launch's answer for the MCP rows rides with it: the agents here it configured. A
    * stop pressed on the way sends no build after it. */
-  const build = async (agents: readonly InitAgent[], o: { firstWorkspace?: string; importFolder?: string; on?: string }, stopped: () => boolean = () => false): Promise<void> => {
+  const build = async (agents: readonly InitAgent[], o: { on?: string }, stopped: () => boolean = () => false): Promise<void> => {
     const firstLaunch = job?.screens.find(s => s.id === FIRST_LAUNCH_SCREEN);
     if (firstLaunch !== undefined && !stopped()) await api!.initAnswer!({ screen: firstLaunch.id, ticks: agents.filter(a => a.configured).map(a => wspToolsRowId(a.id)).filter(id => firstLaunch.items.some(i => i.id === id)) });
     if (!stopped()) await api!.initBuild!(o);

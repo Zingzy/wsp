@@ -611,7 +611,7 @@ describe("what the driver reads and aims at", () => {
 
   it("aims a word at a data attribute only when it says so", () => {
     expect(attrWord("attr=row-id=ws:ws_api")).toBe('[data-row-id="ws:ws_api"]');
-    expect(attrWord("attr=cloud-setup-row")).toBe("[data-cloud-setup-row]");
+    expect(attrWord("attr=agents-row")).toBe("[data-agents-row]");
     expect(attrWord("Set up cloud machines")).toBeUndefined();
     // The same rule the surfaces list is read by, so a word that is not an attribute name is refused rather than
     // turned into a class selector the next restyle moves.

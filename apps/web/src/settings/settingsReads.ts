@@ -16,7 +16,6 @@ import { groupOf, useSettingsStore } from "./settingsStore.js";
 
 export function useSettingsReads(): void {
   const api = useStore(s => s.api);
-  const setupOpen = useStore(s => s.setupOpen);
   const addComputerOpen = useStore(s => s.addComputerOpen);
   const devicesAsked = useSettingsStore(s => s.devicesAsked);
   const setReads = useSettingsStore(s => s.setReads);
@@ -88,11 +87,11 @@ export function useSettingsReads(): void {
       () => {},
     );
   }, [api, setReads]);
-  // Read again when the image sheet shuts, since a build that ran behind it changes every fact about the image, and
-  // on every sealed frame below, since a seal anywhere files a copy the page has not read.
+  // Read when the page opens, and again on every sealed frame below, since a seal anywhere files a copy the page has
+  // not read.
   useEffect(() => {
-    if (!setupOpen) readImage();
-  }, [setupOpen, readImage]);
+    readImage();
+  }, [readImage]);
 
   const readSpend = useCallback((): void => {
     if (api?.spend === undefined || asking.current || refused.current) return;

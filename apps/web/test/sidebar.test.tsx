@@ -135,7 +135,7 @@ const HERE_PROJECT: ProjectView = { id: "pr_2", name: "wsp", computer: "here", s
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ places: [], projects: [], placesRefused: null, projectsRefused: null, api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, setupOpen: false, selectedId: null, selectedThreadId: null, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ places: [], projects: [], placesRefused: null, projectsRefused: null, api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, selectedThreadId: null, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
   clearNotices();
 });
 

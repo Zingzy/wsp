@@ -5466,7 +5466,7 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * every change after rides init.job events. One job runs at a time; a second start while one runs is refused. The
    * terminal road takes its answers from the recipe beside the state, which wsp init wrote from its own screens, and
    * is refused when there is none there. */
-  z.object({ id: reqId, op: z.literal("init.start"), road: InitRoad, harness: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("init.start"), road: InitRoad, harness: z.string().optional(), on: z.string().optional() }),
   /** Answers one screen: the rows ticked, the answers chosen; replies with { job: InitJob }, its screens recomputed
    * and its step moved to the next. */
   z.object({ id: reqId, op: z.literal("init.answer"), screen: InitScreenId, ticks: z.array(z.string()).optional(), answers: z.record(z.string()).optional() }),

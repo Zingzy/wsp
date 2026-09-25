@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The code a sign-in's page hands back, on the build screen's row: the field
-// and its keycap belong to the row whose road takes a code, no other row shows
-// them, and what is typed goes out once and is left nowhere.
+// The code a sign-in's page hands back, on the build's row: the field and its
+// keycap belong to the row whose road takes a code, no other row shows them,
+// and what is typed goes out once and is left nowhere.
 import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CLOUD_SETUP_WORDS, initSignInOutcome, SIGN_IN_OPEN_STATE, type InitJob, type InitRow } from "@wsp/protocol";
-import { SetupBuild } from "../src/sidebar/cloud-setup/SetupBuild.js";
+import { SignInSlide, StageList, buildView } from "../src/settings/recipe/BuildRows.js";
 
 const PAGE = "https://accounts.google.com/o/oauth2/auth";
 const PASTED = "4/0AfakeCodeFromThePage";
@@ -14,11 +14,13 @@ const LABEL = "Google Cloud login";
 
 const row = (over: Partial<InitRow> = {}): InitRow => ({ id: "sign-in/gcloud", kind: "sign-in", tool: "gcloud", label: LABEL, state: SIGN_IN_OPEN_STATE, page: PAGE, ...over });
 
-/** The build screen over these rows, with the code submit spied on. */
+/** The build's rows as the Image card draws them, with the code submit spied on. */
 function screenWith(...rows: InitRow[]) {
   const onCode = vi.fn();
   const job: InitJob = { id: "init_1", road: "manual", phase: "signing-in", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows, progress: { done: 0, total: rows.length }, log: [] };
-  render(<SetupBuild job={job} onCancel={vi.fn()} onRetry={vi.fn()} onCode={onCode} onOpenWorkspace={vi.fn()} onAgain={vi.fn()} onChangeKey={vi.fn()} refusal={null} />);
+  const view = buildView(job);
+  const acts = { onRetry: vi.fn(), onCode };
+  render(<div data-k="build">{view.slide ? <SignInSlide view={view} acts={acts} /> : <StageList job={job} view={view} acts={acts} />}</div>);
   const build = document.querySelector<HTMLElement>("[data-k=build]");
   if (build === null) throw new Error("the build screen did not render");
   return { onCode, build };

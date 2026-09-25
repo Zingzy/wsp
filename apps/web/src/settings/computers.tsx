@@ -28,6 +28,7 @@ import { AddComputer } from "./AddComputer.js";
 import { ComputerGlyph, ComputerIconSelect } from "./ComputerGlyph.js";
 import { builtWhen, copyOn, IMAGE_WORDS } from "./image.js";
 import { useImageCard } from "./ImageCard.js";
+import { openImageRecipe } from "./openAt.js";
 import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, projectOn, threadWord, type PlaceHolding } from "./places.js";
 import { keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
@@ -261,7 +262,7 @@ function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageVie
         }));
   // A cloud keeps no computer to read: its agents are the image's, and the image is what every act there edits.
   const agents =
-    image === null ? undefined : <AgentsManager shell="page" head={{ line: AGENTS_IMAGE_LINE(placeName(place)) }} report={imageAgentsReport(image, place.id)} reading={false} on={placeName(place)} ctx={{ where: "provider", editImage: ctx.openSetup }} now={ctx.now} />;
+    image === null ? undefined : <AgentsManager shell="page" head={{ line: AGENTS_IMAGE_LINE(placeName(place)) }} report={imageAgentsReport(image, place.id)} reading={false} on={placeName(place)} ctx={{ where: "provider", editImage: () => openImageRecipe(place.id) }} now={ctx.now} />;
   return [
     // No card is drawn with nothing in it: before the host has answered, a cloud's page is its one act.
     ...(facts.length === 0 ? [] : [{ id: "cloud", items: facts }]),

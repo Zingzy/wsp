@@ -109,9 +109,6 @@ interface State {
   spending: Record<string, number>;
   /** Guest ports the host forwards to localhost here, from the host's list and its forward events. */
   forwards: PortForward[];
-  /** Whether the cloud setup sheet stands open. Here rather than in the row that opens it, since a notice's Open and
-   * a system notification's click open the same sheet. */
-  setupOpen: boolean;
   /** Whether the connect sheet stands open: the shell's menu, the sidebar's foot and a first launch all open one sheet. */
   connectOpen: boolean;
   /** Every computer this wsp runs on, as the Settings table shows them; the four place events keep it current. */
@@ -221,10 +218,6 @@ interface State {
    * anything about what is in it. */
   /** The row leaves on the host's forward.close; a refusal is a toast. */
   stopForward(workspaceId: string, port: number): Promise<void>;
-  /** Opens the cloud setup sheet on wherever the job stands, which while a build waits on the person is its build
-   * screen: what the sidebar's row, the toast's Open and a system notification's click all call. */
-  openSetup(): void;
-  closeSetup(): void;
   openConnect(): void;
   closeConnect(): void;
   /** Opens Settings with the Add a computer sheet over it: the palette row and the table's button take one road. */
@@ -507,7 +500,6 @@ export const useStore = create<State>((set, get) => {
     costs: {},
     spending: {},
     forwards: [],
-    setupOpen: false,
     connectOpen: false,
     places: [],
     projects: [],
@@ -814,10 +806,6 @@ export const useStore = create<State>((set, get) => {
         noticeFailure(e, said => `localhost:${port}: ${said}`);
       }
     },
-    /** The screens live on the Settings page's image section now, so the road that opens them opens the page under
-     * them: a notice asking for a sign-in is pressed from anywhere in the window. */
-    openSetup() { set({ settingsOpen: true, setupOpen: true }); },
-    closeSetup() { set({ setupOpen: false }); },
     openConnect() { set({ connectOpen: true }); },
     closeConnect() { set({ connectOpen: false }); },
     openAddComputer() { set({ settingsOpen: true, addComputerOpen: true }); },

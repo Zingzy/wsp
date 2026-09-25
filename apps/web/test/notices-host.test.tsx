@@ -58,7 +58,7 @@ beforeEach(async () => {
       return () => listeners.delete(fn);
     },
   } as unknown as Api;
-  useStore.setState({ api: null, initJob: null, setupOpen: false, settingsOpen: false, addComputerOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, workspaces: [], sessions: {}, places: [], release: null });
+  useStore.setState({ api: null, initJob: null, settingsOpen: false, addComputerOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, workspaces: [], sessions: {}, places: [], release: null });
   useStore.getState().bind(api);
   // The bind's own reads land first, then the page is put where each case starts: nothing selected.
   await act(async () => await new Promise(resolve => setTimeout(resolve, 0)));
@@ -284,15 +284,16 @@ describe("a thread's end, its prompts and its line to me", () => {
 });
 
 describe("the image build", () => {
-  it("a need waits under its key with an Open onto the setup, and ends when a view carries no need or another one", () => {
+  it("a need waits under its key with an Open onto Computers when its job names no place, and ends when a view carries no need or another one", () => {
     emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED });
     expect(notices()).toMatchObject([{ kind: "waiting", text: initNeedsYouLine(NEED.what), action: { word: "Open" } }]);
     // A view of the same standing need leaves it.
     emit({ type: "init.job", job: { ...JOB, needsYou: NEED } });
     expect(notices()).toHaveLength(1);
     act(() => notices()[0]!.action!.run());
-    expect(useStore.getState().setupOpen).toBe(true);
-    act(() => useStore.setState({ setupOpen: false, settingsOpen: false }));
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useSettingsStore.getState().at).toEqual({ kind: "group", group: "computers" });
+    act(() => useStore.setState({ settingsOpen: false }));
     emit({ type: "init.job", job: JOB });
     expect(notices()).toEqual([]);
 
@@ -307,13 +308,7 @@ describe("the image build", () => {
     expect(notices()).toEqual([]);
   });
 
-  it("a need with the setup open is the sheet's to say", () => {
-    act(() => useStore.getState().openSetup());
-    emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED });
-    expect(notices()).toEqual([]);
-  });
-
-  it("a build that failed or sealed while the setup was shut is said once per job", () => {
+  it("a build that failed or sealed while its page was not showing is said once per job", () => {
     emit({ type: "init.job", job: { ...JOB, phase: "failed", error: "the provider ran out of machines" } });
     emit({ type: "init.job", job: { ...JOB, phase: "failed", error: "the provider ran out of machines" } });
     emit({ type: "init.job", job: { ...JOB, id: "init_2", phase: "done", golden: { version: 3 } } });
@@ -341,18 +336,16 @@ describe("the image build", () => {
     expect(notices()).toMatchObject([{ kind: "waiting", text: initNeedsYouLine(NEED.what), action: { word: "Open" } }]);
     act(() => notices()[0]!.action!.run());
     expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "pl_box" });
-    expect(useStore.getState().setupOpen).toBe(false);
     act(() => useSettingsStore.getState().showBuild("pl_box"));
     expect(notices()).toEqual([]);
   });
 
-  it("a need arriving with another page up waits with an Open onto the build's page, not the sheet", () => {
+  it("a need arriving with another page up waits with an Open onto the build's page", () => {
     act(() => useStore.setState({ initJob: { ...JOB, place: { id: "pl_box", name: "spoo" } } }));
     emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED });
     act(() => notices()[0]!.action!.run());
     expect(useStore.getState().settingsOpen).toBe(true);
     expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "pl_box" });
-    expect(useStore.getState().setupOpen).toBe(false);
   });
 
   it("a build that ended with its page showing says nothing; one that failed away opens that page", () => {
@@ -374,10 +367,8 @@ describe("the image build", () => {
     expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "pl_box" });
   });
 
-  it("a build that ended with the setup open, or was cancelled, says nothing", () => {
+  it("a build that was cancelled says nothing", () => {
     emit({ type: "init.job", job: { ...JOB, phase: "cancelled" } });
-    act(() => useStore.getState().openSetup());
-    emit({ type: "init.job", job: { ...JOB, id: "init_2", phase: "failed", error: "boom" } });
     expect(notices()).toEqual([]);
   });
 });
