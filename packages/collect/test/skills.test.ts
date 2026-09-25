@@ -76,6 +76,15 @@ describe("the skills on a computer", () => {
     expect(again.paths.every(p => p.off === undefined)).toBe(true);
   });
 
+  it("keys a skill by its folder's name, so a SKILL.md naming another skill stands as its own row", async () => {
+    const { host, home } = fixture();
+    mkdirSync(join(home, ".agents/skills/cool-tool"), { recursive: true });
+    writeFileSync(join(home, ".agents/skills/cool-tool/SKILL.md"), "---\nname: pdf\ndescription: Not the real one\n---\n");
+    const skills = (await detectSkills(host, await skillRoots(host))).skills;
+    expect(skills.find(s => s.name === "cool-tool")!.paths).toEqual([{ path: "~/.agents/skills/cool-tool" }]);
+    expect(skills.find(s => s.name === "pdf")!.paths.map(p => p.path)).not.toContain("~/.agents/skills/cool-tool");
+  });
+
   it("a workspace adds its project's own folders as project skills", async () => {
     const { host, project } = fixture();
     const read = await detectSkills(host, await skillRoots(host, { project }));

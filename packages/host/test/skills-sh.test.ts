@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { skillsSearchEmptyRefusal } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
+import { shownText, skillHitLines } from "../src/verbs.js";
 import { checkSkillFiles, getSkill, searchSkills, skillArchive, skillPreview, type SkillsFetch } from "../src/skills-sh.js";
 
 const roots: string[] = [];
@@ -76,6 +79,34 @@ describe("skills.sh, asked by this host alone", () => {
     expect(asked).toEqual(["https://skills.sh/api/download/anthropics/skills/pdf"]);
   });
 
+  it("follows a redirect that stays on skills.sh and refuses one to another host without asking it", async () => {
+    const hits: string[] = [];
+    const listen = (handle: (url: string) => { status: number; location?: string; body?: string }): Promise<{ server: Server; origin: string }> =>
+      new Promise(resolve => {
+        const server = createServer((req, res) => {
+          hits.push(`${req.headers.host}${req.url}`);
+          const a = handle(req.url ?? "");
+          res.writeHead(a.status, a.location === undefined ? {} : { location: a.location });
+          res.end(a.body ?? "");
+        });
+        server.listen(0, "127.0.0.1", () => resolve({ server, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}` }));
+      });
+    const other = await listen(() => ({ status: 200, body: JSON.stringify({ skills: [] }) }));
+    const stand = await listen(url =>
+      url.startsWith("/api/search?q=same") ? { status: 302, location: "/api/answer" } : url.startsWith("/api/answer") ? { status: 200, body: JSON.stringify({ skills: [] }) } : { status: 302, location: `${other.origin}/api/search?q=x` },
+    );
+    try {
+      // skills.sh's own address points at the stand-in, the options the host passes kept as they are.
+      const fetch: SkillsFetch = (url, init) => globalThis.fetch(url.replace("https://skills.sh", stand.origin), init);
+      expect(await searchSkills(fetch, "same", 5)).toEqual([]);
+      await expect(searchSkills(fetch, "away", 5)).rejects.toThrow(`skills.sh sent the ask on to ${other.origin}/api/search?q=x, which is not skills.sh, so it was not followed.`);
+      expect(hits.some(h => h.startsWith(new URL(other.origin).host))).toBe(false);
+    } finally {
+      stand.server.close();
+      other.server.close();
+    }
+  });
+
   it("previews the first 64 KB of the SKILL.md and says the whole size", () => {
     expect(skillPreview(new TextEncoder().encode(SKILL_MD))).toEqual({ text: SKILL_MD, size: SKILL_MD.length });
     const long = "é".repeat(40_000);
@@ -107,6 +138,19 @@ describe("the install path rule", () => {
     expect(refused([...good, { path: `${"a".repeat(256)}/b`, contents: "x" }])).toMatch(/not a plain path inside the skill/);
   });
 
+  it("refuses a folder or file a version control tool reads its config from, in any case", () => {
+    for (const path of [".git/config", ".GIT/config", "docs/.Git/HEAD", ".hg/hgrc", "a/.HG/hgrc", ".svn/entries", ".bzr/branch.conf", ".jj/repo", ".gitmodules", "sub/.GitModules", ".g\u200cit/config"]) {
+      expect(refused([...good, { path, contents: "[core]\n\tfsmonitor = touch x\n" }]), JSON.stringify(path)).toBe(`pdf was not installed: the download names ${JSON.stringify(path)}, which a version control tool reads its config from.`);
+    }
+    expect(refused([...good, { path: ".github/workflows/ci.yml", contents: "x" }, { path: ".gitignore", contents: "x" }])).toBe("accepted");
+  });
+
+  it("refuses a SKILL.md whose name is not the folder's, and the name wsp keeps for its own skill", () => {
+    expect(refused([{ path: "SKILL.md", contents: "---\nname: memo\n---\n" }])).toBe("pdf was not installed: its SKILL.md names it memo, not pdf.");
+    expect(refused([{ path: "SKILL.md", contents: "# no frontmatter\n" }])).toBe("pdf was not installed: its SKILL.md names no name, where it must say pdf.");
+    for (const name of ["wsp", "wsp-machine"]) expect(refused([{ path: "SKILL.md", contents: `---\nname: ${name}\n---\n` }], name), name).toBe(`${name} is the name of the skill wsp writes, so nothing was installed.`);
+  });
+
   it("refuses a skill name that is not a plain name", () => {
     for (const name of ["..", ".", "Pdf", "a b", "-x", "a/b", "a".repeat(65)]) expect(refused(good, name), name).toBe(`${name} is not a plain skill name, so nothing was installed.`);
   });
@@ -134,5 +178,17 @@ describe("the install path rule", () => {
     expect(statSync(join(root, "out", "scripts")).mode & 0o777).toBe(0o755);
     const listed = execFileSync("tar", ["-tvzf", tgz]).toString();
     expect(listed).not.toMatch(/^l/m);
+  });
+});
+
+describe("what a skills verb prints of skills.sh's text", () => {
+  it("drops control characters and escape sequences, keeping newlines and tabs", () => {
+    const hostile = "# pdf\n\tUse it.\x1b]52;c;cm0gLXJmIH4=\x07\x1b]0;title\x07\x1b]8;;https://evil.test\x1b\\click\x1b]8;;\x1b\\\r\x9b2J\x00end";
+    const text = shownText({ text: hostile, size: hostile.length });
+    expect(text).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
+    expect(text.startsWith("# pdf\n\tUse it.")).toBe(true);
+    expect(text.endsWith("end")).toBe(true);
+    const lines = skillHitLines([{ id: "a/b/c\x1b[2J", source: "a/b", skillId: "c", name: "c\x1b]0;x\x07", installs: 1 }]).join("\n");
+    expect(lines).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
   });
 });

@@ -2774,8 +2774,11 @@ async function searchSkillsSh(client: HostClient, q: string, limit: number | und
   return z.array(SkillHit).parse((await client.request<{ skills: unknown }>("skills.search", { q, ...(limit !== undefined ? { limit } : {}) })).skills);
 }
 
-function skillHitLines(hits: readonly SkillHit[]): string[] {
-  return hits.length === 0 ? ["no skills on skills.sh match"] : table([["SKILL", "INSTALLS", "ADD WITH"], ...hits.map(h => [h.name, String(h.installs), h.id])]);
+/** Text off skills.sh as a terminal may print it: no control character but newline and tab, so no escape sequence. */
+const printable = (s: string): string => s.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
+
+export function skillHitLines(hits: readonly SkillHit[]): string[] {
+  return hits.length === 0 ? ["no skills on skills.sh match"] : table([["SKILL", "INSTALLS", "ADD WITH"], ...hits.map(h => [printable(h.name), String(h.installs), printable(h.id)])]);
 }
 
 /** A skill named `<owner>/<repo>/<skill>` is one on skills.sh; any other name is one already on the target. */
@@ -2791,7 +2794,10 @@ async function skillShown(client: HostClient, skill: string, workspace: string |
   return SkillPreview.parse((await client.request<{ preview: unknown }>("skills.preview", { target, name: skill, ...(project ? { project } : {}) })).preview);
 }
 
-const shownText = (p: SkillPreview): string => (p.size > SKILL_PREVIEW_BYTES ? `${p.text}\n\n(the first ${SKILL_PREVIEW_BYTES / 1024} KB of ${Math.ceil(p.size / 1024)} KB)` : p.text);
+export const shownText = (p: SkillPreview): string => {
+  const text = printable(p.text);
+  return p.size > SKILL_PREVIEW_BYTES ? `${text}\n\n(the first ${SKILL_PREVIEW_BYTES / 1024} KB of ${Math.ceil(p.size / 1024)} KB)` : text;
+};
 
 async function skillAdded(client: HostClient, skill: string, workspace: string | undefined, on: string | undefined, agents: readonly string[] | undefined, project: boolean, usage: string): Promise<SkillAdded> {
   const target = await agentsTarget(client, workspace, on, usage);
@@ -2876,7 +2882,7 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `Every skill on one computer or workspace, one row per name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a workspace, or a plugin's. ${AGENTS_READ_WORDS}`,
+      description: `Every skill on one computer or workspace, one row per folder name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a workspace, or a plugin's. ${AGENTS_READ_WORDS}`,
       input: { workspace: AgentsWorkspaceIn, on: AgentsOnIn },
       output: { ...AGENTS_FRAME, skills: z.array(SkillRow) },
       call: async ({ workspace, on }, deps) => {

@@ -72,6 +72,9 @@ describe.skipIf(renderSkipped !== undefined)("a skill's SKILL.md rendered restri
     expect(read.text).toContain("pixel https://example.test/p.gif");
     expect(await body.locator("code", { hasText: "/etc/hosts" }).count()).toBe(1);
     expect(asked).toEqual([]);
+    // A link keeps the hover that says where it goes, favicon or none, so a label cannot hide its address.
+    await body.locator("a", { hasText: "site" }).hover();
+    await page!.locator("[data-slot=tooltip-popup]", { hasText: "https://skills.sh" }).waitFor({ timeout: 5_000 });
   };
 
   it("draws an installed skill's hostile SKILL.md as text but for one web link and one heading link, and fetches nothing", async () => {

@@ -6,6 +6,8 @@
 // its root; the archive the host lands is built here, regular files at 0644
 // in folders at 0755, so nothing in a skill carries a link or a mode of its
 // own and nothing in it runs.
+import { isSystemSkill } from "@wsp/catalog";
+import { skillMdFrontmatter } from "@wsp/collect";
 import { tarOf, type TarEntry } from "@wsp/engine";
 import { SKILL_PREVIEW_BYTES, SkillHit, hasControlChar, skillsSearchEmptyRefusal, type SkillPreview } from "@wsp/protocol";
 import { z } from "zod";
@@ -13,9 +15,10 @@ import { z } from "zod";
 export const SKILLS_SH = "https://skills.sh";
 
 /** The one road to skills.sh: the global fetch, or a fake in a test. */
-export type SkillsFetch = (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
+export type SkillsFetch = (url: string, init?: { signal?: AbortSignal; redirect?: RequestRedirect }) => Promise<Response>;
 
 const ASK_MS = 20_000;
+const MAX_HOPS = 3;
 /** What is read of an answer: a search is small, a download holds up to MAX_TOTAL of text with its escapes. */
 const SEARCH_ANSWER_MAX = 1024 * 1024;
 const DOWNLOAD_ANSWER_MAX = 12 * 1024 * 1024;
@@ -69,13 +72,27 @@ async function capped(res: Response, max: number): Promise<Uint8Array> {
   return Buffer.concat(parts);
 }
 
-async function ask(fetch: SkillsFetch, path: string, max: number, missing: string): Promise<unknown> {
-  let res: Response;
-  try {
-    res = await fetch(`${SKILLS_SH}${path}`, { signal: AbortSignal.timeout(ASK_MS) });
-  } catch (e) {
-    throw new Error(`skills.sh did not answer: ${e instanceof Error ? e.message : String(e)}`);
+/** skills.sh's answer at the address, following a redirect only while it stays on skills.sh. */
+async function answerAt(fetch: SkillsFetch, url: string, signal: AbortSignal): Promise<Response> {
+  for (let hop = 0; ; hop++) {
+    let res: Response;
+    try {
+      res = await fetch(url, { signal, redirect: "manual" });
+    } catch (e) {
+      throw new Error(`skills.sh did not answer: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (location === null) return res;
+    await res.body?.cancel();
+    const next = new URL(location, url);
+    if (next.origin !== new URL(SKILLS_SH).origin) throw new Error(`skills.sh sent the ask on to ${next.href}, which is not skills.sh, so it was not followed.`);
+    if (hop + 1 >= MAX_HOPS) throw new Error(`skills.sh sent the ask on more than ${MAX_HOPS} times, so it was not followed.`);
+    url = next.href;
   }
+}
+
+async function ask(fetch: SkillsFetch, path: string, max: number, missing: string): Promise<unknown> {
+  const res = await answerAt(fetch, `${SKILLS_SH}${path}`, AbortSignal.timeout(ASK_MS));
   if (res.status === 404) throw usage(missing);
   if (!res.ok) throw new Error(`skills.sh answered ${res.status}.`);
   const bytes = await capped(res, max);
@@ -104,6 +121,12 @@ export interface SkillFile {
   bytes: Uint8Array;
 }
 
+/** Folder and file names a version control tool reads config from, which can name a command it runs. */
+const VCS_NAMES = new Set([".git", ".hg", ".svn", ".bzr", ".jj", ".gitmodules"]);
+// Code points a Mac's file system has ignored in a name, so ".g\u200cit" once opened as .git.
+const IGNORABLE = /[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
+const vcsPath = (path: string): boolean => path.split("/").some(seg => VCS_NAMES.has(seg.replace(IGNORABLE, "").toLowerCase()));
+
 const plainPath = (path: string): boolean => {
   if (path === "" || Buffer.byteLength(path) > MAX_PATH_BYTES || path.startsWith("/") || path.includes("\\") || /^[A-Za-z]:/.test(path) || hasControlChar(path)) return false;
   return path.split("/").every(seg => seg !== "" && seg !== "." && seg !== ".." && Buffer.byteLength(seg) <= MAX_SEGMENT_BYTES);
@@ -113,6 +136,7 @@ const plainPath = (path: string): boolean => {
  * a count or a size past its cap, or no SKILL.md at the root refuses the whole skill in one sentence. */
 export function checkSkillFiles(name: string, files: readonly { path?: unknown; contents?: unknown }[]): SkillFile[] {
   if (!SKILL_NAME_SHAPE.test(name)) throw usage(`${name} is not a plain skill name, so nothing was installed.`);
+  if (isSystemSkill(name)) throw usage(`${name} is the name of the skill wsp writes, so nothing was installed.`);
   const refuse = (why: string): Error => usage(`${name} was not installed: ${why}`);
   if (files.length > MAX_FILES) throw refuse(`it has ${files.length} files, over the ${MAX_FILES} a skill may have.`);
   const out: SkillFile[] = [];
@@ -121,6 +145,7 @@ export function checkSkillFiles(name: string, files: readonly { path?: unknown; 
   for (const f of files) {
     if (typeof f.path !== "string" || typeof f.contents !== "string") throw new Error(UNREAD);
     if (!plainPath(f.path)) throw refuse(`the download names ${JSON.stringify(f.path)}, which is not a plain path inside the skill.`);
+    if (vcsPath(f.path)) throw refuse(`the download names ${JSON.stringify(f.path)}, which a version control tool reads its config from.`);
     if (seen.has(f.path)) throw refuse(`the download names ${f.path} twice.`);
     seen.add(f.path);
     const bytes = new TextEncoder().encode(f.contents);
@@ -133,7 +158,12 @@ export function checkSkillFiles(name: string, files: readonly { path?: unknown; 
     const parts = path.split("/");
     for (let i = 1; i < parts.length; i++) if (seen.has(parts.slice(0, i).join("/"))) throw refuse(`the download names ${parts.slice(0, i).join("/")} as a file and as a folder.`);
   }
-  if (!seen.has("SKILL.md")) throw refuse("it has no SKILL.md at its root.");
+  const skillMd = out.find(f => f.path === "SKILL.md");
+  if (skillMd === undefined) throw refuse("it has no SKILL.md at its root.");
+  // Every agent finds a skill by its folder, so a SKILL.md naming another skill would pass for that one.
+  const said = skillMdFrontmatter(new TextDecoder().decode(skillMd.bytes)).name;
+  if (said === undefined) throw refuse(`its SKILL.md names no name, where it must say ${name}.`);
+  if (said !== name) throw refuse(`its SKILL.md names it ${said}, not ${name}.`);
   return out;
 }
 

@@ -20,6 +20,29 @@ import { getSkill, searchSkills, skillArchive, skillPreview, type SkillsFetch } 
 const WRITE_MS = 60_000;
 /** The exit a line takes when the skill's folder is already there, so nothing is written over it. */
 const THERE_EXIT = 3;
+/** The exit a line takes, with the link and where it points on stdout, when a folder it would touch sits under a link. */
+const HELD_EXIT = 4;
+/** The exit a preview takes when its SKILL.md is a link out of the skills folders. */
+const OUT_EXIT = 5;
+/** What a preview reads of a SKILL.md at most; the preview itself carries the first SKILL_PREVIEW_BYTES. */
+const PREVIEW_READ_CAP = 2 * 1024 * 1024;
+
+/** A shell function: the first folder above $1, below $2, that is a link, printed with where it points, else false.
+ * With $3, a real path, a link that resolves inside it is passed over. */
+const LINK_ABOVE = [
+  "linked() {",
+  "  p=${1%/*}",
+  '  while [ -n "$p" ] && [ "$p" != "$2" ] && [ "$p" != / ]; do',
+  '    if [ -L "$p" ]; then',
+  '      if [ -n "$3" ] && r=$(realpath "$p" 2>/dev/null); then case $r/ in "$3"/*) p=${p%/*}; continue;; esac; fi',
+  "      printf '%s\\t%s\\n' \"$p\" \"$(readlink \"$p\")\"",
+  "      return 0",
+  "    fi",
+  "    p=${p%/*}",
+  "  done",
+  "  return 1",
+  "}",
+].join("\n");
 
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
 
@@ -29,13 +52,19 @@ interface Road {
   run(line: string, stdin?: Uint8Array): Promise<ExecResult>;
 }
 
-/** A line in this computer's own bash, with the home the Host reads. */
-function runHere(home: string, line: string, stdin?: Uint8Array): Promise<ExecResult> {
+/** A line in this computer's own bash, with the home the Host reads; past its time the line and all it started die. */
+export function runHere(home: string, line: string, stdin?: Uint8Array, ms = WRITE_MS): Promise<ExecResult> {
   return new Promise(resolve => {
-    const child = spawn("/bin/bash", ["-c", line], { env: { ...process.env, HOME: home }, cwd: home, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn("/bin/bash", ["-c", line], { env: { ...process.env, HOME: home }, cwd: home, stdio: ["pipe", "pipe", "pipe"], detached: true });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
-    const timer = setTimeout(() => child.kill("SIGKILL"), WRITE_MS);
+    const timer = setTimeout(() => {
+      try {
+        process.kill(-child.pid!, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+    }, ms);
     child.stdout.on("data", (b: Buffer) => out.push(b));
     child.stderr.on("data", (b: Buffer) => err.push(b));
     child.stdin.on("error", () => undefined);
@@ -80,14 +109,38 @@ function projectOf(on: AgentsOn): string {
 
 /** The one skill the act names, off the same reader the report uses: the project's with `project`, else the one that
  * is not a project's, a person's own before a plugin's of the same name. */
-async function findSkill(road: Road, on: AgentsOn, ask: SkillAsk): Promise<SkillRow> {
+async function findSkill(road: Road, on: AgentsOn, ask: SkillAsk): Promise<{ row: SkillRow; roots: string[] }> {
   const project = on.kind === "box" ? undefined : on.project;
-  const read = await detectSkills(road.host, await skillRoots(road.host, project !== undefined ? { project } : {}));
+  const roots = await skillRoots(road.host, project !== undefined ? { project } : {});
+  const read = await detectSkills(road.host, roots);
   const rows = read.skills.filter(s => s.name === ask.name && (ask.project === true ? s.scope === "project" : s.scope !== "project"));
   const row = rows.find(s => s.scope !== "plugin") ?? rows[0];
   if (row === undefined) throw usage(read.refused[0] ?? noSuchSkillRefusal(ask.name));
-  return row;
+  return { row, roots: roots.map(r => r.dir) };
 }
+
+/** Where a skill's folders stop being checked for a link above them: the project for a project's, else the home. */
+const baseOf = (road: Road, on: AgentsOn, row: SkillRow): string => (row.scope === "project" ? projectOf(on) : road.host.home);
+
+/** A line that exits HELD_EXIT naming the link when any of the folders sits under one below `base`. */
+const heldLine = (dirs: readonly string[], base: string): string =>
+  [LINK_ABOVE, ...dirs.map(d => `linked ${shellQuote(d)} ${shellQuote(base)} && exit ${HELD_EXIT}`)].join("\n");
+
+/** The link and where it points, off a line that exited HELD_EXIT. */
+function linkSaid(res: ExecResult, home: string): { link: string; to: string } {
+  const [link = "", to = ""] = res.stdout.trim().split("\n")[0]!.split("\t");
+  return { link: tilde(home, link), to: tilde(home, to) };
+}
+
+/** The held skill's refusal, off a line that exited HELD_EXIT. */
+function heldRefusal(res: ExecResult, road: Road, row: SkillRow): void {
+  if (res.exitCode !== HELD_EXIT) return;
+  const { link, to } = linkSaid(res, road.host.home);
+  throw usage(skillUnderLinkRefusal(row.name, link, to));
+}
+
+export const skillUnderLinkRefusal = (name: string, link: string, to: string): string => `${name} sits under ${link}, a link to ${to}, so its files belong to that checkout and wsp leaves them as they are.`;
+export const skillLinkOnlyRefusal = (name: string, path: string, to: string, word: "on" | "off"): string => `${name} is a link to ${to} at ${path}, whose files wsp does not change, so nothing was turned ${word}.`;
 
 /** The folder a skill really lives in: the first that is no link, else the first. */
 const realPath = (row: SkillRow): string => (row.paths.find(p => p.linkTo === undefined) ?? row.paths[0]!).path;
@@ -116,11 +169,26 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
     },
     preview: async (on, ask): Promise<SkillPreview> => {
       const road = await roadOf(on, here);
-      const row = await findSkill(road, on, ask);
-      const dir = expand(road.host, realPath(row));
-      const text = (await road.host.fs.readText(`${dir}/SKILL.md`)) ?? (await road.host.fs.readText(`${dir}/SKILL.md.off`));
-      if (text === undefined) throw new Error(`The SKILL.md of ${row.name} at ${realPath(row)} could not be read.`);
-      return skillPreview(new TextEncoder().encode(text));
+      const { row, roots } = await findSkill(road, on, ask);
+      const q = shellQuote;
+      const line = [
+        `d=${q(expand(road.host, realPath(row)))}`,
+        'f="$d/SKILL.md"; [ -e "$f" ] || f="$d/SKILL.md.off"',
+        '[ -f "$f" ] || exit 1',
+        'if [ -L "$f" ]; then',
+        '  r=$(realpath "$f") || exit 1',
+        `  ok=; for a in "$d" ${roots.map(q).join(" ")}; do a=$(realpath "$a" 2>/dev/null) || continue; case $r in "$a"/*) ok=1;; esac; done`,
+        `  [ -n "$ok" ] || exit ${OUT_EXIT}`,
+        "fi",
+        'wc -c < "$f" | tr -d " "',
+        `head -c ${PREVIEW_READ_CAP} "$f"`,
+      ].join("\n");
+      const res = await road.run(line);
+      if (res.exitCode === OUT_EXIT) throw usage(`The SKILL.md of ${row.name} at ${realPath(row)} is a link out of the skills folders, so it is not read.`);
+      const cut = res.stdout.indexOf("\n");
+      const size = Number(res.stdout.slice(0, cut));
+      if (res.exitCode !== 0 || cut === -1 || !Number.isInteger(size)) throw new Error(`The SKILL.md of ${row.name} at ${realPath(row)} could not be read.`);
+      return { ...skillPreview(new TextEncoder().encode(res.stdout.slice(cut + 1))), size };
     },
     add: async (on, ask): Promise<SkillAdded> => {
       const project = ask.project === true ? projectOf(on) : undefined;
@@ -138,7 +206,10 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
         return root === undefined ? [] : [{ id: a.id, root, dir: inside(root.dir) }];
       });
       const q = shellQuote;
+      // A project's folder that links out of it would put the skill somewhere the project does not hold.
+      const held = project === undefined ? [] : [LINK_ABOVE, `b=$(realpath ${q(project)}) || exit 1`, ...[dest, ...agents.map(a => posix.join(a.dir, got.name))].map(d => `linked ${q(d)} ${q(project)} "$b" && exit ${HELD_EXIT}`)];
       const lines = [
+        ...held,
         "umask 022",
         't=$(mktemp) || exit 1',
         'trap \'rm -f -- "$t"\' EXIT',
@@ -154,6 +225,10 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
       ];
       const res = await road.run(lines.join("\n"), skillArchive(got.files));
       if (res.exitCode === THERE_EXIT) throw usage(`${got.name} is already at ${tilde(home, dest)}, so nothing was installed.`);
+      if (res.exitCode === HELD_EXIT) {
+        const { link, to } = linkSaid(res, home);
+        throw usage(`${got.name} was not installed: ${link} is a link to ${to}, out of the project.`);
+      }
       if (res.exitCode !== 0) throw new Error(`${got.name} was not installed: ${firstLine(res)}`);
       const placed = res.stdout
         .split("\n")
@@ -166,31 +241,40 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
     },
     remove: async (on, ask) => {
       const road = await roadOf(on, here);
-      const row = await findSkill(road, on, ask);
+      const { row } = await findSkill(road, on, ask);
       mayChange(row, "remove");
       // rm -rf never follows a link it is handed, so a link goes and the folder it points to stays unless it is itself
-      // one of the skill's folders.
+      // one of the skill's folders; a link above a folder it does follow, so such a skill is held.
       const paths = row.paths.map(p => p.path);
-      const res = await road.run(`rm -rf -- ${paths.map(p => shellQuote(expand(road.host, p))).join(" ")}`);
+      const dirs = paths.map(p => expand(road.host, p));
+      const res = await road.run(`${heldLine(dirs, baseOf(road, on, row))}\nrm -rf -- ${dirs.map(shellQuote).join(" ")}`);
+      heldRefusal(res, road, row);
       if (res.exitCode !== 0) throw new Error(`${row.name} was not removed: ${firstLine(res)}`);
       return { removed: paths };
     },
     toggle: async (on, ask) => {
       const road = await roadOf(on, here);
-      const row = await findSkill(road, on, ask);
+      const { row } = await findSkill(road, on, ask);
       mayChange(row, "toggle");
+      const word = ask.on ? "on" : "off";
       // Renamed where the skill really lives; every link to it follows.
       const real = row.paths.filter(p => p.linkTo === undefined).map(p => p.path);
+      const only = row.paths[0]!;
+      if (real.length === 0) throw usage(skillLinkOnlyRefusal(row.name, only.path, only.linkTo ?? only.path, word));
       const [from, to] = ask.on ? ["SKILL.md.off", "SKILL.md"] : ["SKILL.md", "SKILL.md.off"];
-      const line = real
-        .map(p => {
-          const dir = expand(road.host, p);
-          return `if [ -f ${shellQuote(`${dir}/${from}`)} ] && [ ! -e ${shellQuote(`${dir}/${to}`)} ]; then mv -- ${shellQuote(`${dir}/${from}`)} ${shellQuote(`${dir}/${to}`)} || exit 1; fi`;
-        })
-        .join("\n");
-      const res = await road.run(line === "" ? "true" : line);
-      if (res.exitCode !== 0) throw new Error(`${row.name} was not turned ${ask.on ? "on" : "off"}: ${firstLine(res)}`);
-      return { paths: real };
+      const dirs = real.map(p => expand(road.host, p));
+      const q = shellQuote;
+      const renames = dirs.map(
+        (dir, i) => `if [ -f ${q(`${dir}/${from}`)} ] && [ ! -e ${q(`${dir}/${to}`)} ]; then mv -- ${q(`${dir}/${from}`)} ${q(`${dir}/${to}`)} || exit 1; echo "moved ${i}"; elif [ -f ${q(`${dir}/${from}`)} ]; then echo "both ${i}"; fi`,
+      );
+      const res = await road.run([heldLine(dirs, baseOf(road, on, row)), ...renames].join("\n"));
+      heldRefusal(res, road, row);
+      if (res.exitCode !== 0) throw new Error(`${row.name} was not turned ${word}: ${firstLine(res)}`);
+      const said = res.stdout.split("\n").map(l => l.split(" "));
+      const moved = said.filter(([k]) => k === "moved").map(([, i]) => real[Number(i)]!);
+      if (moved.length > 0) return { paths: moved };
+      const both = said.find(([k]) => k === "both");
+      throw usage(both !== undefined ? `${row.name} was not turned ${word}: ${real[Number(both[1])]} already holds a ${to}, so nothing was renamed.` : `${row.name} is already ${word}, so nothing was renamed.`);
     },
   };
 }

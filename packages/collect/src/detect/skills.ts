@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Every skill on a computer, off the folders each catalog agent loads skills
-// from: one row per name with every folder it lives in, whether that folder
-// is a link, and the name and description off its SKILL.md's frontmatter.
+// from: one row per folder name with every folder it lives in, whether that
+// folder is a link, and the description off its SKILL.md's frontmatter.
 // One command reads every folder, so a computer reached over a link answers
 // in one round trip however many skills it keeps.
 import { posix } from "node:path";
@@ -67,6 +67,15 @@ export function skillFrontmatter(text: string): { name?: string; description?: s
   return out;
 }
 
+/** `name` and `description` off a whole SKILL.md: the lines between its opening `---` and the next, as the reader's
+ * script takes them. */
+export function skillMdFrontmatter(text: string): { name?: string; description?: string } {
+  const lines = text.slice(0, SKILL_HEAD_BYTES).split(/\r?\n/);
+  if (lines[0] !== "---") return {};
+  const end = lines.indexOf("---", 1);
+  return skillFrontmatter(lines.slice(1, end === -1 ? undefined : end).join("\n"));
+}
+
 /** The folders every catalog agent loads skills from on that computer, absolute, each once: an agent's own folder
  * carries that agent, a folder several read carries none. A project adds the folders the agents read inside it,
  * and the plugin indexes name the folders their plugins' skills sit in. */
@@ -91,7 +100,7 @@ export async function skillRoots(host: Host, o: { agents?: readonly AgentEntry[]
   return [...out.values()];
 }
 
-/** Every skill under the roots, one row per name and kind with every folder it lives in. A folder whose name starts
+/** Every skill under the roots, one row per folder name and kind with every folder it lives in. A folder whose name starts
  * with a dot, one without a SKILL.md, and a skill inside another skill's folder are not skills. An answer cut short
  * is a refusal naming it, never a list that silently stops. */
 export async function detectSkills(host: Host, roots: readonly SkillRootAt[]): Promise<SkillsRead> {
@@ -116,7 +125,8 @@ export async function detectSkills(host: Host, roots: readonly SkillRootAt[]): P
     const parts = f.dir.slice(f.root.dir.length + 1).split("/");
     if (parts.slice(1).some((_, i) => dirs.has(`${f.root.dir}\0${f.root.dir}/${parts.slice(0, i + 1).join("/")}`))) continue;
     const meta = skillFrontmatter(f.head);
-    const name = meta.name ?? posix.basename(f.dir);
+    // Keyed by folder, which is what an agent loads a skill by; the frontmatter's name is the file's own claim.
+    const name = posix.basename(f.dir);
     const key = `${f.root.scope}\0${name}`;
     const path: SkillPath = {
       path: tilde(host.home, f.dir),
