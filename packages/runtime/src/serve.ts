@@ -193,8 +193,9 @@ export interface AdmittedDevices {
 export interface PlaceDoorControl {
   /** Opens the door if it is shut and answers where it is; a host already bound beyond loopback answers its own
    * port and opens nothing. The key proved there is not the host's to say: the place door holds the pair, and the
-   * runtime puts its fingerprint on the view it serves. */
-  open(): Promise<Omit<PlaceDoorView, "hostKey">>;
+   * runtime puts its fingerprint on the view it serves. `backPort` is the door's port on this computer's loopback
+   * where the door is a listener of its own, which is what a forward over ssh may land on; it stays on this side. */
+  open(): Promise<Omit<PlaceDoorView, "hostKey"> & { backPort?: number }>;
 }
 
 /** How the runtime asks the host to prove one computer it holds the link to. `run` walks the road and answers what
@@ -910,7 +911,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               }
               // Where to dial is the host's, the key answered there is the place door's own: one view, so a line
               // built from it cannot name an address without the key that will answer at it.
-              send({ id: msg.id, ok: true, door: { ...(await opts.door.open()), hostKey: places().hostKey() } });
+              const { backPort: _loopback, ...view } = await opts.door.open();
+              send({ id: msg.id, ok: true, door: { ...view, hostKey: places().hostKey() } });
               return;
             }
             case "places.add": {
@@ -934,6 +936,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                   ...(msg.keyPath !== undefined ? { keyPath: msg.keyPath } : {}),
                   ...(msg.hostKey !== undefined ? { hostKey: msg.hostKey } : {}),
                   hostUrls: [...at.addresses, ...(at.relay === undefined ? [] : [at.relay])],
+                  ...(at.backPort !== undefined ? { doorPort: at.backPort } : {}),
+                  ...(at.relay !== undefined ? { relay: at.relay } : {}),
                 },
                 now(),
               );

@@ -2641,12 +2641,22 @@ export function computerKindWord(place: Pick<PlaceView, "id" | "kind">, platform
   return place.kind === "provider" ? "cloud" : "box";
 }
 
+/** A forward over the ssh login from a port on that computer's own loopback to this host's door, held by this host
+ * for a computer that cannot reach it any other way: its link dials `http://127.0.0.1:<boxPort>`. The door's end is
+ * read off the running host at each standing, never saved: a restarted host's door can sit on another port. */
+export const PlaceBack = z.object({
+  boxPort: z.number().int().min(1).max(65535),
+});
+export type PlaceBack = z.infer<typeof PlaceBack>;
+
 /** How a computer this host holds is reached, off the road it was added on. `ssh` is the login the host logs in
- * as, which is also what a person types in their own terminal; `from` is where its last link dialled in from. A
- * row with neither is a computer that joined with a code and has never linked. */
+ * as, which is also what a person types in their own terminal; `from` is where its last link dialled in from; `back`
+ * is the forward it dials back through where it reaches this host no other way. A row with neither `ssh` nor `from`
+ * is a computer that joined with a code and has never linked. */
 export const PlaceRoad = z.object({
   ssh: z.string().max(300).optional(),
   from: z.string().max(300).optional(),
+  back: PlaceBack.optional(),
 });
 export type PlaceRoad = z.infer<typeof PlaceRoad>;
 

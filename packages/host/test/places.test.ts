@@ -16,10 +16,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
-import { PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
-import { OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
+import { PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
+import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
 import { daemonFlags, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
@@ -38,7 +38,8 @@ import {
   joinCommand,
   placeDaemonFlags,
   placeInstaller,
-  heldPlaceScript,
+  backRefusedLine,
+  dialsBackOverSshNote,
   placeHeldRefusal,
   reachScript,
   reachedUrls,
@@ -79,6 +80,7 @@ import {
   boxSignedInLine,
   joinUnansweredLine,
 } from "../src/places.js";
+import { BackCutError, backBindLine, backUrl, heldPlaceScript } from "../src/place-back.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceAddress, type ServiceManager, type ServiceRunner, type ServiceUnit } from "../src/service.js";
@@ -1534,6 +1536,127 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(box.stages.some(line => line.startsWith("wsp "))).toBe(false);
   });
 
+  /** A holder that records what the installer asked of it into the box's own list of what ran, so the order of the
+   * hold and the deploy reads off one list; `refuse` is the sentence its first standing fails with. */
+  function backHolder(ran: string[], refuse?: string | Error): { holder: PlaceBackHolder; asked: { login: PlaceLogin; back: PlaceBack; home: string }[]; released: string[] } {
+    const asked: { login: PlaceLogin; back: PlaceBack; home: string }[] = [];
+    const released: string[] = [];
+    return {
+      asked,
+      released,
+      holder: {
+        hold: async (login, back, on) => {
+          asked.push({ login, back, home: on.home });
+          ran.push(`HOLD ${login.ssh} ${back.boxPort}`);
+          if (refuse !== undefined) throw typeof refuse === "string" ? new Error(refuse) : refuse;
+          return back;
+        },
+        release: login => void released.push(login.ssh),
+        door: () => {},
+        close: () => {},
+      },
+    };
+  }
+
+  it("dials back over ssh where the box reaches none of the door's addresses, with the forward standing before anything lands", async () => {
+    const box = fakeBox("x86_64", "bash", { reaches: () => false });
+    const back = backHolder(box.ran);
+    const urls = ["http://100.129.166.28:4720", "http://192.168.1.20:4720"];
+    const installed = await placeInstaller({ backend: box.backend as never, back: back.holder, ...assets(tmp("back-ssh"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls, doorPort: 4720 }, box.stage);
+    expect(back.asked).toEqual([{ login: { ssh: "root@spoo" }, back: { boxPort: 4720 }, home: "/home/maya" }]);
+    const hold = box.ran.indexOf("HOLD root@spoo 4720");
+    const deploy = box.ran.findIndex(script => script.includes(`case "$(uname -m)" in`));
+    expect(hold).toBeGreaterThan(box.ran.indexOf(reachScript(urls)));
+    expect(deploy).toBeGreaterThan(hold);
+    expect(box.ran[deploy]).toContain(`join '${backUrl(4720)}' --code-file`);
+    expect(box.ran[deploy]).not.toContain("192.168.1.20");
+    expect(box.stages).toContain(`reach done (${dialsBackOverSshNote(urls, undefined)})`);
+    expect(dialsBackOverSshNote(urls, undefined)).toBe("cannot reach this computer at http://100.129.166.28:4720, http://192.168.1.20:4720, so it dials back over ssh");
+    expect(box.stages).toContain("service running (it dials this computer at http://127.0.0.1:4720)");
+    expect(installed.back).toEqual({ boxPort: 4720 });
+    expect(back.released).toEqual([]);
+  });
+
+  it("dials the relay first where the box reaches only that, and back over ssh after it", async () => {
+    const relay = "https://h645d7f8a8d48cbd6.example";
+    const box = fakeBox("x86_64", "bash", { reaches: url => url === relay });
+    const back = backHolder(box.ran);
+    const urls = ["http://100.129.166.28:4720", relay];
+    await placeInstaller({ backend: box.backend as never, back: back.holder, ...assets(tmp("back-relay"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls, doorPort: 4720, relay }, box.stage);
+    const deploy = box.ran.find(script => script.includes(`case "$(uname -m)" in`))!;
+    expect(deploy).toContain(`join '${relay}' '${backUrl(4720)}' --code-file`);
+    expect(box.stages).toContain(`reach done (${relay}, and back over ssh)`);
+  });
+
+  it("holds no forward where the box reaches an address of the door, or on a host that names no door port of its own", async () => {
+    const lan = fakeBox("x86_64", "bash", { reaches: url => url.includes("192.168.1.20") });
+    const heldLan = backHolder(lan.ran);
+    await placeInstaller({ backend: lan.backend as never, back: heldLan.holder, ...assets(tmp("back-none"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: ["http://100.129.166.28:4720", "http://192.168.1.20:4720"], doorPort: 4720 }, lan.stage);
+    expect(heldLan.asked).toEqual([]);
+    // A host started with --listen answers on its main port, where a peer on its loopback is the owner's own road:
+    // a forward there would hand the box that road, so the add is refused as it was before any forward existed.
+    const listening = fakeBox("x86_64", "bash", { reaches: () => false });
+    const heldListening = backHolder(listening.ran);
+    const urls = ["http://100.129.166.28:4700"];
+    await expect(placeInstaller({ backend: listening.backend as never, back: heldListening.holder, ...assets(tmp("back-listen"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls }, listening.stage)).rejects.toThrow(unreachedLine("root@spoo", urls));
+    expect(heldListening.asked).toEqual([]);
+    expect(listening.landed).toEqual([]);
+  });
+
+  it("refuses in one sentence where the forward will not stand either, lets it go, and sends nothing", async () => {
+    const box = fakeBox("x86_64", "bash", { reaches: () => false });
+    const why = "Error: remote port forwarding failed for listen port 23456";
+    const back = backHolder(box.ran, why);
+    const urls = ["http://100.129.166.28:4720", "http://192.168.1.20:4720"];
+    await expect(placeInstaller({ backend: box.backend as never, back: back.holder, ...assets(tmp("back-refused"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls, doorPort: 4720 }, box.stage)).rejects.toThrow(
+      backRefusedLine("root@spoo", urls, why),
+    );
+    expect(backRefusedLine("root@spoo", urls, why)).toBe(
+      "root@spoo cannot reach this computer at http://100.129.166.28:4720, http://192.168.1.20:4720 and the forward back over ssh did not stand (Error: remote port forwarding failed for listen port 23456); link this host to your relay, or start it with --advertise naming an address it can reach",
+    );
+    const long = backRefusedLine("root@spoo", urls, "x".repeat(2000));
+    expect(long.length).toBeLessThanOrEqual(300);
+    expect(long).toMatch(/naming an address it can reach$/);
+    // ssh copies the box's stderr raw, and the box's startup files write before the forward's up line.
+    const boxWritten = backRefusedLine(`${"u".repeat(255)}@spoo`, urls, "\x1b]0;pwned\x07Connection closed");
+    expect(boxWritten).not.toMatch(/[\x00-\x1f\x7f]/);
+    expect(boxWritten.length).toBeLessThanOrEqual(300);
+    expect(boxWritten).toMatch(/naming an address it can reach$/);
+    expect(back.released).toEqual(["root@spoo"]);
+    expect(box.landed).toEqual([]);
+    expect(box.ran.some(script => script.includes(`case "$(uname -m)" in`))).toBe(false);
+  });
+
+  it("says a refusal that names its own fix whole: sshd binding beyond loopback, a known hosts file that is not here", async () => {
+    const urls = ["http://100.129.166.28:4720"];
+    for (const refusal of [new BackCutError(backBindLine("root@spoo", "0.0.0.0")), new MissingKnownHostsError(missingKnownHostsLine("root@spoo", "/Users/lena/my"))]) {
+      const box = fakeBox("x86_64", "bash", { reaches: () => false });
+      const back = backHolder(box.ran, refusal);
+      const refused = await placeInstaller({ backend: box.backend as never, back: back.holder, ...assets(tmp("back-whole"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: urls, doorPort: 4720 }, box.stage).catch((e: unknown) => e);
+      expect((refused as Error).message).toBe(refusal.message);
+      expect(box.landed).toEqual([]);
+    }
+  });
+
+  it("lets the forward go when the deploy it was held for fails", async () => {
+    const box = fakeBox("x86_64", "bash", { reaches: () => false });
+    const back = backHolder(box.ran);
+    const failing = {
+      ...(box.backend as { adopt: () => Promise<{ machine: { run: (script: string, opts?: unknown) => Promise<unknown> } }> }),
+    };
+    const adopt = failing.adopt;
+    failing.adopt = async () => {
+      const adopted = await adopt();
+      const run = adopted.machine.run;
+      adopted.machine.run = async (script, opts) => (script.includes(`case "$(uname -m)" in`) ? { exitCode: 1, stdout: "", stderr: "tar: ./daemon: Cannot open: No such file or directory\n" } : run(script, opts));
+      return adopted;
+    };
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(placeInstaller({ backend: failing as never, back: back.holder, ...assets(tmp("back-deploy"), [X86]) })({ address: "root@spoo", code: "7QK3M2VD", hostUrls: ["http://100.129.166.28:4720"], doorPort: 4720 }, box.stage)).rejects.toThrow();
+    warned.mockRestore();
+    expect(back.released).toEqual(["root@spoo"]);
+  });
+
   it("refuses a box that already belongs to a wsp at the connect, naming that wsp, with nothing sent", async () => {
     const studio = placeFileText({ placeId: "p_studio", name: "spoo", hostName: "studio", hostUrls: ["http://192.168.1.5:4640"], hostPublicKey: "c3R1ZGlv", keyPath: "/root/.wsp/place.key", joinedAt: "2026-09-20T10:00:00Z" });
     const elsewhere = fakeBox("x86_64", "bash", { holds: studio });
@@ -1554,6 +1677,12 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const junk = fakeBox("x86_64", "bash", { holds: "{}\n" });
     expect(await placeInstaller({ backend: junk.backend as never, ...assets(tmp("held-junk"), [X86]) })({ address: "maya@box", code: own, hostUrls: ["http://192.168.1.20:4720"] }, junk.stage)).toMatchObject({ name: "box" });
     expect(placeHeldRefusal("root@spoo", { ...JSON.parse(studio), hostUrls: [] }, undefined)).toBe("root@spoo already belongs to the wsp on studio; wsp leave on it frees it, or wsp add spoo --update from that wsp updates it there");
+    // A long address that is still a valid one is cut like the names, so the way out survives the cap.
+    const long = `http://${"a".repeat(240)}.example:4640`;
+    const said = placeHeldRefusal("root@spoo", { ...JSON.parse(studio), name: "s".repeat(200), hostName: "h".repeat(200), hostUrls: [long] }, undefined);
+    expect(said.length).toBeLessThanOrEqual(300);
+    expect(said).toMatch(/updates it there$/);
+    expect(said).toContain(` at ${long.slice(0, 48)};`);
   });
 
   it("reads whether an alias is this computer off the address ssh dials, not off the alias", async () => {

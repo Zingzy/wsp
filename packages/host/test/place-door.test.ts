@@ -11,7 +11,7 @@ import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { freshEphemeral } from "@wsp/keys";
 import { AGENTS_ON, API_UNAUTHORIZED, DEFAULT_PLACE_PORT, DEFAULT_PORT, LOOPBACK, PLACE_LINK_NONCE_BYTES, PLACE_PORT_OFFSET, SCOPED_TOKEN_ROAD_REFUSAL, WILDCARD, WS_PATH, doorPortHeldLine, type BootPayload } from "@wsp/protocol";
-import { copyKey, createRuntime, memoryStore, newPlaceKeyPair, type Runtime } from "@wsp/runtime";
+import { copyKey, createRuntime, memoryStore, newPlaceKeyPair, type PlaceBackHolder, type Runtime } from "@wsp/runtime";
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { placeWiring } from "../src/places.js";
 import { startHost, type HostHandle } from "../src/server.js";
@@ -52,11 +52,11 @@ function testRuntime(): Runtime {
 
 /** Holds a port the way the door holds one: the wildcard, since a loopback bind and a wildcard bind on the same
  * port are a clash on Linux and are not one on macOS, and this test must read the same on both. */
-const hold = (port: number): Promise<Server | undefined> =>
+const hold = (port: number, address: string = WILDCARD): Promise<Server | undefined> =>
   new Promise(done => {
     const server = createServer((_req, res) => res.end("mine"));
     server.once("error", () => done(undefined));
-    server.listen(port, WILDCARD, () => done(server));
+    server.listen(port, address, () => done(server));
   });
 
 const letGo = (server: Server | undefined): Promise<void> => (server === undefined ? Promise.resolve() : new Promise(done => server.close(() => done())));
@@ -72,12 +72,14 @@ async function freePair(): Promise<number> {
     if (port + PLACE_PORT_OFFSET >= 65_535) continue;
     const beside = await hold(port + PLACE_PORT_OFFSET);
     await letGo(beside);
-    if (beside !== undefined) return port;
+    const besideLoopback = await hold(port + PLACE_PORT_OFFSET, LOOPBACK);
+    await letGo(besideLoopback);
+    if (beside !== undefined && besideLoopback !== undefined) return port;
   }
   throw new Error("no free app port whose door port is free beside it");
 }
 
-async function up(opts: { port: number; door?: "closed" | "open"; listen?: string; runtime?: Runtime } = { port: 0 }): Promise<HostHandle> {
+async function up(opts: { port: number; door?: "closed" | "open"; listen?: string; runtime?: Runtime; back?: PlaceBackHolder } = { port: 0 }): Promise<HostHandle> {
   handle = await startHost({
     runtime: opts.runtime ?? testRuntime(),
     webDir: fakeWebDir(),
@@ -85,6 +87,7 @@ async function up(opts: { port: number; door?: "closed" | "open"; listen?: strin
     wsPort: 0,
     ...(opts.door !== undefined ? { door: opts.door } : {}),
     ...(opts.listen !== undefined ? { listen: opts.listen } : {}),
+    ...(opts.back !== undefined ? { back: opts.back } : {}),
   });
   return handle;
 }
@@ -137,6 +140,8 @@ describe("the door a host opens for computers you own", () => {
     expect(first).toEqual(second);
     expect(first.port).toBe(port + PLACE_PORT_OFFSET);
     expect(first.addresses.every(at => at.endsWith(`:${port + PLACE_PORT_OFFSET}`))).toBe(true);
+    // The door's own listener is what a forward over ssh from a box may land on.
+    expect(first.backPort).toBe(port + PLACE_PORT_OFFSET);
   });
 
   it("says who holds the port rather than stepping to a free one", async () => {
@@ -154,6 +159,58 @@ describe("the door a host opens for computers you own", () => {
     expect(h.door.port()).toBeUndefined();
     expect(view.port).toBe(h.port);
     expect(view.addresses.every(at => at.endsWith(`:${h.port}`))).toBe(true);
+    // A forward into this host's main port would arrive from its loopback, which is the owner's own road: none.
+    expect(view.backPort).toBeUndefined();
+  });
+});
+
+describe("the door a forward back from a box lands on", () => {
+  /** A holder that keeps the door it was handed and nothing else. */
+  const doorKept = (): { back: PlaceBackHolder; door: () => Promise<number | undefined>; closed: () => boolean } => {
+    let door: (() => Promise<number | undefined>) | undefined;
+    let closed = false;
+    return {
+      back: { hold: async (_login, back) => back, release: () => {}, door: at => void (door = at), close: () => void (closed = true) },
+      door: () => door!(),
+      closed: () => closed,
+    };
+  };
+
+  it("is the door's own listener as it stands, read at each ask", async () => {
+    const port = await freePair();
+    const kept = doorKept();
+    await up({ port, back: kept.back });
+    expect(await kept.door()).toBe(port + PLACE_PORT_OFFSET);
+    await handle!.door.close();
+    expect(await kept.door()).toBe(port + PLACE_PORT_OFFSET);
+  });
+
+  it("refuses a door port another program holds on this computer's loopback, so no forward lands on that program", async () => {
+    const port = await freePair();
+    held = await hold(port + PLACE_PORT_OFFSET, LOOPBACK);
+    expect(held).toBeDefined();
+    const kept = doorKept();
+    const h = await up({ port, back: kept.back });
+    await expect(h.door.open()).rejects.toThrow(doorPortHeldLine(port + PLACE_PORT_OFFSET));
+    await expect(kept.door()).rejects.toThrow(doorPortHeldLine(port + PLACE_PORT_OFFSET));
+    expect(h.door.port()).toBeUndefined();
+    expect(await (await fetch(`http://${LOOPBACK}:${port + PLACE_PORT_OFFSET}/`)).text()).toBe("mine");
+  });
+
+  it("is nothing on a host with no door of its own, whose main port a forward would land on", async () => {
+    const port = await freePair();
+    const kept = doorKept();
+    await up({ port, listen: "0.0.0.0", back: kept.back });
+    expect(await kept.door()).toBeUndefined();
+  });
+
+  it("lets every forward go before the door closes with the host", async () => {
+    const port = await freePair();
+    const kept = doorKept();
+    const h = await up({ port, back: kept.back });
+    await h.close();
+    handle = undefined;
+    expect(kept.closed()).toBe(true);
   });
 });
 
