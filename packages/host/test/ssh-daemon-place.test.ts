@@ -10,7 +10,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SYSTEMD_LINE, sshDaemonPaths, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SYSTEMD_LINE, shellQuote, sshDaemonPaths, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
 import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonBinaryOn, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, profileSourceStep, DAEMON_UNIT, daemonUnit, deployScript, loginFilesStep, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
@@ -576,9 +576,9 @@ describe("the place a computer joined over ssh keeps its agent", () => {
     const off = removeDaemonScript(place);
     // Unloaded before the file goes: the kernel holds a profile by name, so a bare rm would leave it loaded for a
     // binary that is gone. Guarded the way the step that wrote it is, and only where this scope could write it.
-    expect(off).toContain(`apparmor_parser -R ${WSP_WORKSPACE_APPARMOR_PATH}`);
-    expect(off).toContain(`rm -f ${WSP_WORKSPACE_APPARMOR_PATH}`);
-    expect(off.indexOf("apparmor_parser -R")).toBeLessThan(off.indexOf(`rm -f ${WSP_WORKSPACE_APPARMOR_PATH}`));
+    expect(off).toContain(`apparmor_parser -R ${shellQuote(WSP_WORKSPACE_APPARMOR_PATH)}`);
+    expect(off).toContain(`rm -f ${shellQuote(WSP_WORKSPACE_APPARMOR_PATH)}`);
+    expect(off.indexOf("apparmor_parser -R")).toBeLessThan(off.indexOf(`rm -f ${shellQuote(WSP_WORKSPACE_APPARMOR_PATH)}`));
     expect(off).toContain("command -v apparmor_parser >/dev/null 2>&1");
     // The two scopes that write no such profile take none off: a login's own daemon owns no /etc.
     expect(removeDaemonScript(sshDaemonPlace(LOGIN))).not.toContain("apparmor_parser");

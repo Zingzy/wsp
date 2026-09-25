@@ -503,6 +503,10 @@ export const dialsBackOverSshNote = (urls: readonly string[], relay: string | un
 /** How long taking a failed add back off a box may run, as long as the ssh road's own removal. */
 const UNDO_MS = 120_000;
 
+/** What an add says of a box whose login has / for its home: every file wsp keeps there sits under that home, and
+ * the undo of a failed add takes back folders up to it. */
+export const placeRootHomeRefusal = (address: string): string => `${address.slice(0, 64)} answered with / for its login's home folder; wsp keeps its files in a home folder of their own, so give that login one and add the box again`;
+
 /** A failed add's sentence with what taking it back off the box came to, the box's line cut first so the end stands. */
 export function addUndoneLine(said: string, undone: boolean): string {
   const tail = undone ? "nothing this add put on it is left there" : "what this add put on it may still be there";
@@ -598,6 +602,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       // The read that has just run already went through it once; what this stops is the deploy and every dial after.
       // A box that named no shell at all is one this rule says nothing about, and is taken as it always was.
       if (shell !== undefined && !PLACE_ROOT_SHELLS.includes(shell)) throw new Error(placeRootShellRefusal(req.address, shell));
+      if (login.HOME === "/") throw new Error(placeRootHomeRefusal(req.address));
       // The binary that lands is picked off the word the box just said about its own chip, never off this computer's:
       // the two are different computers as often as they are alike, and a binary for the wrong one starts and dies.
       // Read before anything is sent, so a chip wsp builds no daemon for leaves the box exactly as it was found.
@@ -651,7 +656,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
     // it wrote, and a box that would not say keeps everything.
     const unit = placeUnit(login.HOME);
     const writes = joinedAddWrites(place, unit.path);
-    const found = addFound((await machine.run(addFoundScript(place, writes), { deadlineMs: SSH_DIAL_MS }).catch(() => undefined))?.stdout ?? "", writes.length);
+    const found = addFound((await machine.run(addFoundScript(place, writes, unit.systemctl.join(" ")), { deadlineMs: SSH_DIAL_MS }).catch(() => undefined))?.stdout ?? "", writes.length);
     await deployDaemon(machine, {
       place,
       target,
@@ -673,8 +678,9 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       ...(deps.cliDir !== undefined ? { cliDir: deps.cliDir } : {}),
     }).catch(async (e: unknown) => {
       if (back !== undefined) deps.back?.release(road);
-      // A box that refused at the preflight, or never answered it, was sent nothing.
-      if (machineLacksLine(e) !== undefined || machineNeverAnswered(e)) throw e;
+      // A box that refused at the preflight, or never answered it, was sent nothing. A join refused as already joined
+      // stands beside another add that won the box between the read and the deploy, and what is there is that add's.
+      if (machineLacksLine(e) !== undefined || machineNeverAnswered(e) || (e instanceof Error && e.message.includes(ALREADY_JOINED_LINE))) throw e;
       const undone =
         found !== undefined &&
         (await machine.run(addUndoScript(place, writes, found, unit.systemctl.join(" ")), { deadlineMs: UNDO_MS }).then(
