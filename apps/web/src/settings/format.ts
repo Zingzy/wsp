@@ -92,6 +92,9 @@ export const WHERE_WORDS = {
    * dialled in from, with the road it is. */
   address: "Address",
   addressDescription: "The ssh login it was installed over, or where it dialled in from.",
+  /** The same row for a box that reaches this host only through a forward on its own loopback: the address it links
+   * from is this computer's own, so the road back is said instead, in two lines at a phone's width. */
+  addressBackDescription: (dialsBack: string): string => `It ${dialsBack}.`,
   cloud: "cloud",
   ago: (span: string): string => `${span} ago`,
   /** The button beside that reading, which asks the host to dial the computer once, worded by the road that dial

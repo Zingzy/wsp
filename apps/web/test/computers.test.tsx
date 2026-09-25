@@ -293,6 +293,18 @@ describe("a computer's own page", () => {
     expect(lineOf("system")?.className).toContain("h-11");
   });
 
+  it("says a box on the ssh dial-back dials back over ssh under its login, and never that it dials in from this computer's loopback", async () => {
+    const spoo: PlaceView = { ...laptop, id: "p_4", name: "spoo", present: true, road: { ssh: "root@spoo", from: "127.0.0.1", back: { boxPort: 4640 } } };
+    useStore.setState({ places: [here, spoo] });
+    await mountComputers(computersApi(dialling()).api, { kind: "computer", id: "p_4" });
+    expect(wordOf("address")).toBe("root@spoo · ssh");
+    expect(descriptionOf("address")).toBe(WHERE_WORDS.addressBackDescription("dials back over ssh (127.0.0.1:4640 on spoo)"));
+    expect(descriptionOf("address")).toBe("It dials back over ssh (127.0.0.1:4640 on spoo).");
+    const page = document.querySelector("[data-settings-page]")?.textContent ?? "";
+    expect(page).not.toContain("dials in");
+    expect(page).not.toContain("127.0.0.1 ·");
+  });
+
   it("this Mac's page has no Connection card and no acts, and reads its agents, skills and servers off this computer", async () => {
     const asked: AgentsTarget[] = [];
     useStore.setState({ places: [here] });
