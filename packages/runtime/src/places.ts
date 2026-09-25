@@ -57,6 +57,7 @@ import {
   type PlaceAddJob,
   withPlaceStage,
   keptSaid,
+  markedCut,
   refusalParts,
   usageRefusal,
   type PlaceAuthRefusal,
@@ -1781,7 +1782,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         const message = e instanceof Error ? e.message : String(e);
         const { said, fix, kind } = refusalParts(e);
         putAdd(addId, job => ({ ...job, said: keptSaid(said), ...(fix === undefined ? {} : { fix }), ...(kind === undefined ? {} : { kind }) }));
-        stage(step, "failed", message.split("\n")[0]!);
+        stage(step, "failed", markedCut(message.split("\n")[0]!));
         // The code went to the box as a file, so an add that failed spends it rather than leave it good for ten minutes.
         await devices.spend(code, at).catch(() => false);
         // The install took its join back off the box, so the record that join made names a computer that no longer

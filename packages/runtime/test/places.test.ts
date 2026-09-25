@@ -1999,6 +1999,32 @@ describe("the adds this host keeps", () => {
     expect(job!.said.split("\n")).toEqual([placeNoLinkLine("box"), `${long.slice(0, 400)} (cut ${long.length - 400} characters)`, "agent: dial refused"]);
   });
 
+  it("cuts the failed step's note to the length a log line keeps, and says the cut", async () => {
+    const long = `root@10.0.0.9: ${"y".repeat(5_000)}`;
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(newPlaceKeyPair()),
+        install: async (_req, stage) => {
+          stage("connect", "running");
+          throw new Error(`${long}\nsecond line`);
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices, door });
+    const stages: PlaceStageEvent[] = [];
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    const c = await WsClient.connect(srv.port, { token: "host-token" });
+    sockets.push(c.ws);
+    await c.request("places.add", { addId: "a_long", address: "root@10.0.0.9" });
+    const cut = `${long.slice(0, 400)} (cut ${long.length - 400} characters)`;
+    const [job] = (await addsOf(c)) as { steps: { note?: string }[] }[];
+    expect(job!.steps.at(-1)).toMatchObject({ step: "connect", state: "failed", note: cut });
+    expect(stages.at(-1)).toMatchObject({ step: "connect", state: "failed", note: cut });
+  });
+
   it("refuses an add under the id of one still running, and leaves that one's job as it was", async () => {
     let go: () => void = () => {};
     runtime = createRuntime({
