@@ -2155,6 +2155,8 @@ html.desktop-mac:is(.dark, [data-theme="dark"]):has([data-terminal-translucent])
 /* The same in the right panel: holding a translucent terminal, its share moves onto the tab strip. */
 html.desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) {
   background: transparent;
+  /* The hairline read against the share; over the bare glass it takes the grey it shows there, as a solid line. */
+  border-color: rgb(31 31 33);
 }
 
 html.desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) [data-right-panel-tabbar] {
