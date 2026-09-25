@@ -423,7 +423,7 @@ describe.skipIf(renderSkipped !== undefined)("the cloud setup sheet laid out in 
     const tip = page!.locator("[data-slot=tooltip-popup]");
     await tip.waitFor();
     expect(await tip.textContent()).toMatch(/^about [\d.]+ GB of 20 GB on the image$/);
-    expect(await style("[data-slot=tooltip-popup]", "font-size")).toEqual(["12px"]);
+    expect(await style("[data-slot=tooltip-popup]", "font-size")).toEqual(["13px"]);
     await goTo("signing", theme);
     // While the sign-in stage runs the build is a slide: its own title, the stages folded to one line, one large row per sign-in with its mark, the code in 20 px mono, the hand-off's line, the keycap.
     expect(await page!.locator("[role=dialog] [data-k=title]").textContent()).toBe(CLOUD_SETUP_WORDS.build.slideHeadline);

@@ -24,10 +24,11 @@ export const SETTINGS_WORDS = {
   restore: "Restore defaults",
   appearance: "Appearance",
   theme: "Theme",
-  themeDescription: "The side this Mac is set to, or one side whatever it is set to.",
+  /** The grid of one side's themes, named by the side's word. */
+  themesOf: (side: string) => `${side} themes`,
 } as const;
 
-/** Each side as its picture names it. */
+/** Each side as its segment names it. */
 export const THEME_WORDS: Record<ThemePreference, string> = {
   system: "System",
   light: "Light",

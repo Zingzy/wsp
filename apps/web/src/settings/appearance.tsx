@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Settings > Appearance: the theme as three pictures of the app, and what the
-// chosen one does under them.
+// Settings > Appearance: the theme picker, the side and each side's theme.
 import { DEFAULT_PREFERENCES, type Preferences, type PreferencesPatch } from "@wsp/protocol";
 import { SETTINGS_WORDS } from "./format.js";
 import type { SettingsCardData } from "./rows.js";
@@ -21,7 +20,7 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
       id: "theme",
       head: SETTINGS_WORDS.theme,
       items: [],
-      body: <ThemePicker value={preferences.theme} onChange={theme => setPreferences({ theme })} />,
+      body: <ThemePicker picks={preferences} onChange={setPreferences} />,
     },
   ];
 }

@@ -318,7 +318,7 @@ export function ComposerCheckoutRow({
                 {branch.kind === "repo" ? <FolderGitIcon className="size-3 shrink-0" /> : <FolderIcon className="size-3 shrink-0" />}
                 <FolderPath path={folder ?? ""} />
               </TooltipTrigger>
-              <TooltipPopup side="top" align="start" className="max-w-72">
+              <TooltipPopup side="top" align="start" className="max-w-80">
                 {LOCKED_FOLDER_NOTE}
               </TooltipPopup>
             </Tooltip>
@@ -332,7 +332,7 @@ export function ComposerCheckoutRow({
             <GitBranchIcon className="size-3 shrink-0" />
             <span className="truncate">{branch.head}</span>
           </TooltipTrigger>
-          <TooltipPopup side="top" align="end" className="max-w-72">
+          <TooltipPopup side="top" align="end" className="max-w-80">
             {BRANCH_NOTE}
           </TooltipPopup>
         </Tooltip>
@@ -343,7 +343,7 @@ export function ComposerCheckoutRow({
           <TooltipTrigger render={<span className={branchSlotClass} tabIndex={0} data-composer-branch={branch.kind} />}>
             {REPO_STATE_WORDS[branch.kind].word}
           </TooltipTrigger>
-          <TooltipPopup side="top" align="end" className="max-w-72">
+          <TooltipPopup side="top" align="end" className="max-w-80">
             {REPO_STATE_WORDS[branch.kind].note}
           </TooltipPopup>
         </Tooltip>
