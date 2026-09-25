@@ -30,10 +30,11 @@ import { focusRow, rovingKeys } from "./roving.js";
 
 export type { AgentsShell } from "./kinds/kind.js";
 
-/** What the head says: the panel's two lines (whose these are, and what that covers), or the page's one. */
+/** What the head says: the panel's one line (whose these are, the project's folder on its name's hover), or the
+ * page's one sentence. */
 export interface AgentsHead {
-  readonly title?: string;
-  readonly line: string;
+  readonly title?: ReactNode;
+  readonly line?: string;
   /** The link to the computer's own page, from a task's panel. */
   readonly manage?: { readonly computer: string; readonly open: () => void };
 }
@@ -158,7 +159,6 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
         </span>
       </>
     );
-  // Two lines held at two: one truncated line never reached the project's folder at a panel's width.
   const headRow =
     head.title === undefined ? (
       <div data-agents-head className="flex min-h-6 items-center gap-3 px-4 pb-3">
@@ -169,20 +169,15 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
         {readAgain()}
       </div>
     ) : (
-      <div data-agents-head className="flex flex-col gap-0.5 px-4 pt-4 pb-3">
-        <div className="flex h-6 items-center gap-2">
-          <h2 data-k="agents-title" className="min-w-0 truncate text-[13px] leading-5 font-medium text-foreground" title={head.title}>
-            {head.title}
-          </h2>
-          {staleMark}
-          <span className="-mr-1 ml-auto flex shrink-0 items-center gap-1">
-            {manage}
-            {readAgain()}
-          </span>
-        </div>
-        <p data-k="agents-line" className="line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground" title={head.line}>
-          {head.line}
-        </p>
+      <div data-agents-head className="flex items-center gap-2 px-4 pt-4 pb-3">
+        <h2 data-k="agents-title" className="min-w-0 truncate text-[13px] leading-6 font-medium text-foreground" {...(typeof head.title === "string" ? { title: head.title } : {})}>
+          {head.title}
+        </h2>
+        {staleMark}
+        <span className="-mr-1 ml-auto flex shrink-0 items-center gap-1">
+          {manage}
+          {readAgain()}
+        </span>
       </div>
     );
 
@@ -235,13 +230,10 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
     </div>
   );
 
-  const toolbar = (
-    <div data-agents-toolbar className="flex h-8 items-center gap-1.5 px-4">
-      {tab.search === undefined ? (
-        <span className="flex-1" />
-      ) : (
-        // Pulled left by its own inset, so the glyph stands on the manager's one left edge.
-        <InputGroup variant="ghost" className="-ml-2.5 h-8 min-w-0 flex-1">
+  const toolbar =
+    tab.search === undefined ? null : (
+      <div data-agents-toolbar className="flex h-8 items-center gap-1.5 px-4">
+        <InputGroup variant="ghost" className="h-8 min-w-0 flex-1">
           <InputGroupAddon>
             <SearchIcon aria-hidden />
           </InputGroupAddon>
@@ -266,49 +258,48 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
             }}
           />
         </InputGroup>
-      )}
-      {count === null ? null : (
-        <span data-k="agents-count" className={cn(FACT, "hidden shrink-0", TABS.countShown)}>
-          {query.trim() === "" ? tab.noun(count) : W.of(shown.length, count)}
+        {count === null ? null : (
+          <span data-k="agents-count" className={cn(FACT, "hidden shrink-0", TABS.countShown)}>
+            {query.trim() === "" ? tab.noun(count) : W.of(shown.length, count)}
+          </span>
+        )}
+        {tab.groupings.length === 0 ? null : (
+          <Menu>
+            <Tooltip>
+              <TooltipTrigger render={<MenuTrigger render={<Button data-k="agents-view" size="icon" variant="ghost" aria-label={W.groupAndSort} />} />}>
+                <ListFilterIcon className="size-4" />
+              </TooltipTrigger>
+              <TooltipPopup side="bottom">{W.groupAndSort}</TooltipPopup>
+            </Tooltip>
+            <MenuPopup align="end">
+              <MenuGroup>
+                <MenuGroupLabel>{W.groupBy}</MenuGroupLabel>
+                <MenuRadioGroup value={by} onValueChange={value => setGrouping(g => ({ ...g, [tab.id]: value as GroupBy }))}>
+                  {tab.groupings.map(g => (
+                    <MenuRadioItem key={g} value={g} data-k={`group-${g}`}>
+                      {GROUP_WORDS[g]}
+                    </MenuRadioItem>
+                  ))}
+                </MenuRadioGroup>
+              </MenuGroup>
+              <MenuSeparator />
+              <MenuGroup>
+                <MenuGroupLabel>{W.sortBy}</MenuGroupLabel>
+                <MenuRadioGroup value="name">
+                  <MenuRadioItem value="name">{W.name}</MenuRadioItem>
+                </MenuRadioGroup>
+              </MenuGroup>
+            </MenuPopup>
+          </Menu>
+        )}
+        <span className="inline-flex shrink-0" title={add.hover ?? tab.add}>
+          <Button data-k="agents-add" size="default" variant="outline" aria-label={add.id === "edit-image" ? W.editImage : tab.add} held={add.run === undefined} {...(add.run === undefined ? {} : { onClick: add.run })}>
+            {add.icon === undefined ? null : <add.icon aria-hidden className="size-4" />}
+            <span className={TABS.addWordHidden}>{add.label}</span>
+          </Button>
         </span>
-      )}
-      {tab.groupings.length === 0 ? null : (
-        <Menu>
-          <Tooltip>
-            <TooltipTrigger render={<MenuTrigger render={<Button data-k="agents-view" size="icon" variant="ghost" aria-label={W.groupAndSort} />} />}>
-              <ListFilterIcon className="size-4" />
-            </TooltipTrigger>
-            <TooltipPopup side="bottom">{W.groupAndSort}</TooltipPopup>
-          </Tooltip>
-          <MenuPopup align="end">
-            <MenuGroup>
-              <MenuGroupLabel>{W.groupBy}</MenuGroupLabel>
-              <MenuRadioGroup value={by} onValueChange={value => setGrouping(g => ({ ...g, [tab.id]: value as GroupBy }))}>
-                {tab.groupings.map(g => (
-                  <MenuRadioItem key={g} value={g} data-k={`group-${g}`}>
-                    {GROUP_WORDS[g]}
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-            <MenuSeparator />
-            <MenuGroup>
-              <MenuGroupLabel>{W.sortBy}</MenuGroupLabel>
-              <MenuRadioGroup value="name">
-                <MenuRadioItem value="name">{W.name}</MenuRadioItem>
-              </MenuRadioGroup>
-            </MenuGroup>
-          </MenuPopup>
-        </Menu>
-      )}
-      <span className="inline-flex shrink-0" title={add.hover ?? tab.add}>
-        <Button data-k="agents-add" size="default" variant="outline" aria-label={add.id === "edit-image" ? W.editImage : tab.add} held={add.run === undefined} {...(add.run === undefined ? {} : { onClick: add.run })}>
-          {add.icon === undefined ? null : <add.icon aria-hidden className="size-4" />}
-          <span className={TABS.addWordHidden}>{add.label}</span>
-        </Button>
-      </span>
-    </div>
-  );
+      </div>
+    );
 
   const rowHeight = tab.rowHeight;
   const emptyBox = "flex min-h-[168px] items-center justify-center px-4 text-center text-[13px] text-muted-foreground";
@@ -337,11 +328,12 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
         </p>
       )
     ) : (
-      <div data-agents-rows aria-busy={reading} onKeyDown={rovingKeys} className="flex flex-col">
+      // Labels and rows stand 2 px apart alike, a label's words centred in its slot: one rhythm down the list.
+      <div data-agents-rows aria-busy={reading} onKeyDown={rovingKeys} className="flex flex-col gap-0.5">
         {groups.map((group, g) => (
-          <div key={group.id} role="group" data-agents-group={group.id} {...(group.label === undefined ? {} : { "aria-label": group.label })} className={cn(g > 0 && "mt-2")}>
+          <div key={group.id} role="group" data-agents-group={group.id} {...(group.label === undefined ? {} : { "aria-label": group.label })} className="flex flex-col gap-0.5">
             {group.label === undefined ? null : (
-              <div data-group-label className={cn(LABEL, "flex h-8 items-end gap-2 px-4 pb-1.5")}>
+              <div data-group-label className={cn(LABEL, "flex h-8 items-center gap-2 px-4")}>
                 <span>{group.label}</span>
                 {group.path === undefined ? null : <span className="truncate normal-case tracking-normal">{group.path}</span>}
               </div>
@@ -374,10 +366,13 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   return (
     // On the page the content stands on the cards' text edge, their hairline and px-5, 5 px past the panel's.
     <section ref={root} data-agents-manager data-shell={shell} aria-label={W.section} onKeyDown={onKeyDown} className={cn("@container flex flex-col", page && "px-[5px]")}>
-      {headRow}
-      <div className="flex flex-col gap-2">
-        {tabs}
-        {toolbar}
+      {/* Pinned over the list on the surface it stands on: the page's grained main surface, the panel's flat one. */}
+      <div data-agents-top className={cn("sticky top-0 z-10 flex flex-col bg-background pb-1", page && "surface-grain")}>
+        {headRow}
+        <div className="flex flex-col gap-3">
+          {tabs}
+          {toolbar}
+        </div>
       </div>
       <div data-agents-body className={cn("flex flex-col pt-2", dim && at.kind !== "list" && "opacity-50")}>
         {at.kind === "list" ? list : levelView}

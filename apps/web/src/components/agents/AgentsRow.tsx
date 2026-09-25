@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One row of any kind at its kind's one height, split from the next by 2 px
 // and no rule: the lead, the name with the agents' marks after it, one fact
-// under it, a server's badge under that, and at the right end the state word
-// or the one step it needs. The row is one button whose ::before carries the
+// under it, an agent's state or a server's badge under that, and at the right
+// end the one step it needs. The row is one button whose ::before carries the
 // hover over the whole block; the step is a sibling that lets the pointer
 // through except on its own button, so no button stands inside a button and
 // Tab reaches the row, then its step.
 import { cn } from "../../lib/utils.js";
-import { FACT } from "../../settings/format.js";
 import { ActButton, AgentMarks, LeadMark, ServerBadge } from "./agentsParts.js";
 import type { RowView } from "./kinds/kind.js";
 
@@ -36,6 +35,11 @@ export function AgentsRow({ row, height, dim, first, onOpen }: { row: RowView; h
               {row.subtext}
             </span>
           )}
+          {row.state === undefined ? null : (
+            <span data-row-state className="truncate font-mono text-xs leading-4 tabular-nums text-muted-foreground">
+              {row.state}
+            </span>
+          )}
           {row.badge === undefined ? null : (
             <span className="mt-1.5 flex">
               <ServerBadge badge={row.badge} />
@@ -43,14 +47,9 @@ export function AgentsRow({ row, height, dim, first, onOpen }: { row: RowView; h
           )}
         </span>
       </button>
-      {row.word === undefined && step === undefined ? null : (
+      {step === undefined ? null : (
         <div data-row-slot className="pointer-events-none flex shrink-0 items-center">
-          {row.word === undefined ? null : (
-            <span data-row-word className={cn(FACT, "whitespace-nowrap")} {...(row.wordHover === undefined ? {} : { title: row.wordHover })}>
-              {row.word}
-            </span>
-          )}
-          {step === undefined ? null : <ActButton act={step} className="pointer-events-auto relative z-10" />}
+          <ActButton act={step} className="pointer-events-auto relative z-10" />
         </div>
       )}
     </div>

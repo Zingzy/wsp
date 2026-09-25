@@ -33,14 +33,22 @@ export function ActButton({ act, className }: { act: RowAct; className?: string 
   );
 }
 
-/** A row's or a head's lead: the agent's own mark in its hue, faded where it is not installed; a server's glyph in its
- * bordered box; the kind's glyph. */
+const TILE = "flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-foreground/[0.04]";
+
+/** A row's or a head's lead: the agent's own mark in its hue in a tile, faded where it is not installed; a server's
+ * glyph in its bordered box; the kind's glyph. */
 export function LeadMark({ lead, label, big = false }: { lead: Lead; label: string; big?: boolean }) {
-  if (lead.kind === "agent") return <HarnessMark harness={lead.agent} label={label} className={cn(big ? "size-5" : "size-4", lead.faded === true && "text-foreground/40 grayscale")} />;
+  if (lead.kind === "agent") {
+    return (
+      <span data-k="lead-tile" className={TILE}>
+        <HarnessMark harness={lead.agent} label={label} className={cn("size-5", lead.faded === true && "text-foreground/40 grayscale")} />
+      </span>
+    );
+  }
   const Icon = lead.icon;
   if (lead.kind === "box") {
     return (
-      <span data-k="lead-box" className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-foreground/[0.04]">
+      <span data-k="lead-box" className={TILE}>
         <Icon aria-hidden className="size-4 text-foreground/80" />
       </span>
     );

@@ -16,10 +16,10 @@ export const AGENTS_REPORT: AgentsReport = {
   user: "ada",
   readAt: "2026-09-24T12:00:00.000Z",
   agents: [
-    { id: "claude", name: "Claude Code", installed: true, version: "2.1.281", latest: "2.1.282", pinned: "2.1.280", road: "wsp", path: "/opt/wsp/bin/claude", signIn: "signed-in", signInRoad: "token", wspTools: true },
+    { id: "claude", name: "Claude Code", installed: true, version: "2.1.281", latest: "2.1.282", pinned: "2.1.280", road: "wsp", path: "/opt/wsp/bin/claude", via: "cmux", signIn: "signed-in", signInRoad: "token", wspTools: true },
     { id: "codex", name: "Codex", installed: true, version: "0.62.0", road: "own", path: "~/.local/bin/codex", signIn: "none", signInRoad: "device", wspTools: true },
-    { id: "opencode", name: "OpenCode", installed: true, version: "1.14.2", road: "shim", path: "~/.local/share/mise/shims/opencode", signIn: "unknown", signInRoad: "terminal", wspTools: false },
-    { id: "pi", name: "Pi", installed: false, road: "none", signIn: "unknown", signInRoad: "terminal", wspTools: false },
+    { id: "opencode", name: "OpenCode", installed: true, version: "1.14.2", road: "shim", via: "mise", signIn: "unknown", signInRoad: "terminal", wspTools: false },
+    { id: "pi", name: "Pi", installed: false, latest: "0.84.4", road: "none", signIn: "unknown", signInRoad: "terminal", wspTools: false },
   ],
   skills: [
     {

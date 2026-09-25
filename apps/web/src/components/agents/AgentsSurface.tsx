@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The right panel's host of the agents manager: what a task can use, read on
 // its own machine, the computer's own rows and its project's, drawn at the
-// panel's width. The head says which computer and which project, and links
-// to that computer's page, where everything on it is managed. A task on a box
-// offers no act of its own, since what is installed is that box's; a fork at
-// a cloud is a copy of the image, so its one act is Edit image.
+// panel's width. The head says which computer and which project, the
+// project's folder on its name's hover, and links to that computer's page,
+// where everything on it is managed. A task on a box offers no act of its
+// own, since what is installed is that box's; a fork at a cloud is a copy of
+// the image, so its one act is Edit image.
 import { HERE_PLACE_ID, isLocalWorkspace, type WorkspaceView } from "@wsp/protocol";
 import { useAbsentComputer, useStore, useWorkspace } from "../../protocol/store.js";
 import { placeName, placeOf, THIS_COMPUTER_WORD } from "../../settings/places.js";
@@ -26,10 +27,8 @@ const projectPath = (workspace: WorkspaceView): string | undefined => {
 };
 
 export const PANEL_WORDS = {
-  title: (computer: string, project: string): string => `On ${computer}, for ${project}`,
+  on: (computer: string): string => `On ${computer}, for `,
   fork: (workspace: string, cloud: string): string => `${workspace} (${cloud})`,
-  line: (computer: string, project: string, path: string | undefined): string => `Agents, MCP servers and skills this thread can use: global on ${computer}, plus ${project}'s own${path === undefined ? "" : ` at ${path}`}.`,
-  image: "Acts edit the image.",
 } as const;
 
 export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
@@ -46,11 +45,16 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
   const computer = where === "here" ? THIS_COMPUTER_WORD : where === "fork" && workspace !== null ? PANEL_WORDS.fork(workspace.name, cloud ?? "") : (cloud ?? "");
   const project = workspace?.project.name ?? "";
   const path = workspace === null ? undefined : projectPath(workspace);
-  const line = PANEL_WORDS.line(computer, project, path);
   const placeId = place?.id ?? (where === "here" ? HERE_PLACE_ID : undefined);
   const head: AgentsHead = {
-    title: PANEL_WORDS.title(computer, project),
-    line: where === "fork" ? `${line} ${PANEL_WORDS.image}` : line,
+    title: (
+      <>
+        {PANEL_WORDS.on(computer)}
+        <span data-k="agents-project" {...(path === undefined ? {} : { title: path })}>
+          {project}
+        </span>
+      </>
+    ),
     ...(placeId === undefined
       ? {}
       : {

@@ -52,7 +52,7 @@ export function CopyRow({
         <span className={cn(LABEL_WIDTH, "shrink-0 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground")}>{label}</span>
       )}
       {/* The name is on the value, not the row: a reader after the fact alone must not also get the label. */}
-      <span data-k={k} className={cn("min-w-0 flex-1 font-mono text-xs tabular-nums text-foreground", whole ? "break-all" : "truncate")} title={value}>
+      <span data-k={k} className={cn("min-w-0 flex-1 font-mono text-xs tabular-nums text-foreground", whole ? "break-words" : "truncate")} title={value}>
         {value}
       </span>
       {children}

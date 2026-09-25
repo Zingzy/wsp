@@ -324,6 +324,8 @@ describe("a computer's own page", () => {
     const again = screen.getByRole("button", { name: "Read again" });
     expect(again.hasAttribute("disabled")).toBe(true);
     expect(again.parentElement?.getAttribute("title")).toBe(stateOfPage());
+    // Agents has no search, so no toolbar; Add stands on the other tabs.
+    fireEvent.click(screen.getByRole("radio", { name: /^Skills/ }));
     expect(document.querySelector("[data-k=agents-add]")?.parentElement?.getAttribute("title")).toBe(stateOfPage());
   });
 
@@ -357,6 +359,7 @@ describe("a computer's own page", () => {
     await mountComputers(computersApi({ image: async () => ({ image, copies: [], projects: [] }) }, setupOf({ keys: { solari: true } })).api, { kind: "computer", id: "solari" });
     expect(agentTitles()).toEqual(["Claude Code"]);
     expect(screen.queryByRole("button", { name: "Read again" })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: /^Skills/ }));
     fireEvent.click(document.querySelector<HTMLElement>("[data-k=agents-add]")!);
     expect(useStore.getState().setupOpen).toBe(true);
   });

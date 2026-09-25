@@ -47,9 +47,9 @@ function road(at: AgentHome, o: { root?: boolean } = {}): { machine: Pick<Machin
 }
 
 /** This computer's own Host over the fixture: the node readers, with the fixture's home and PATH. */
-function here(at: AgentHome): Host {
+function here(at: AgentHome, path = `${at.bin}:/usr/bin:/bin`): Host {
   const live = nodeHost();
-  return { ...live, home: at.home, exec: { ...live.exec, run: (cmd, args, o) => live.exec.run(cmd, args, { ...o, env: { PATH: `${at.bin}:/usr/bin:/bin`, HOME: at.home, ...o?.env } }) } };
+  return { ...live, home: at.home, exec: { ...live.exec, run: (cmd, args, o) => live.exec.run(cmd, args, { ...o, env: { PATH: path, HOME: at.home, ...o?.env } }) } };
 }
 
 const nothingLeaked = (at: AgentHome, report: unknown, lines: readonly string[] = []): void => {
@@ -123,6 +123,23 @@ describe("the agents report off this computer and off a workspace", () => {
     expect(agent("hermes")).toMatchObject({ version: "0.20.0", signIn: "signed-in" });
     expect(read.servers.every(s => s.inRecipe === undefined)).toBe(true);
     nothingLeaked(at, read);
+  });
+
+  it("reads past a wrapper another app put first on the PATH to the binary behind it, and names the app", async () => {
+    const at = fixture();
+    const shims = join(at.root, "T", "cmux-cli-shims");
+    mkdirSync(shims, { recursive: true });
+    for (const [name, body] of [["claude", `exec ${join(at.bin, "claude")} "$@"`], ["gemini", 'echo "0.58.0"']] as const) {
+      writeFileSync(join(shims, name), `#!/bin/sh\n${body}\n`);
+      chmodSync(join(shims, name), 0o755);
+    }
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at, `${shims}:${at.bin}:/usr/bin:/bin`) }).read({ kind: "here" });
+    const agent = (id: string) => read.agents.find(a => a.id === id)!;
+    expect(agent("claude")).toMatchObject({ installed: true, path: join(at.bin, "claude"), road: "own", via: "cmux", version: "2.1.281" });
+    // Nothing behind the wrapper: no temporary path stands as where it is installed.
+    expect(agent("gemini")).toMatchObject({ installed: true, road: "shim", via: "cmux" });
+    expect(agent("gemini").path).toBeUndefined();
+    expect(agent("codex").via).toBeUndefined();
   });
 
   it("leaves out a server whose name holds a control character and says which file named it", async () => {

@@ -113,7 +113,7 @@ describe("signing an agent in from its row", () => {
     fireEvent.click(openButton);
     expect(opened).toHaveBeenCalledWith("https://auth.openai.com/codex/device", "_blank", "noopener,noreferrer");
     back();
-    expect(rowEl("agent-codex").querySelector("[data-row-word]")?.textContent).toBe(AGENTS_LIST_WORDS.waitingOnYou);
+    expect(rowEl("agent-codex").querySelector("[data-row-state]")?.textContent).toBe(AGENTS_LIST_WORDS.waitingOnYou);
     openRow("agent-codex");
     act(() => h.started[0]!.step({ state: "signed-in" }));
     expect(detail().querySelector("[data-k=sign-in-flow]")).toBeNull();
@@ -239,7 +239,8 @@ describe("signing an agent in from its row", () => {
     render(<List where="here" typeInTerminal={line => void typed.push(line)} />);
     openRow("agent-opencode");
     const button = actIn("sign-in");
-    expect(button.textContent).toBe(AGENTS_LIST_WORDS.openInTerminal);
+    // The word is Sign in whatever road it takes; this one types the agent's own sign-in into the task's terminal.
+    expect(button.textContent).toBe(AGENTS_LIST_WORDS.signIn);
     fireEvent.click(button);
     expect(typed).toEqual(["opencode auth login"]);
     expect(h.started).toEqual([]);

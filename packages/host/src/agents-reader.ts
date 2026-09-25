@@ -19,8 +19,27 @@ const READ_MS = 20_000;
 /** How long one agent's own version or status command is given where the computer has a timeout command. */
 const COMMAND_S = 15;
 
-/** Where each agent's command answers on the login PATH, one line per agent; empty where it is not there. */
-const WHERE = 'for b; do command -v "$b" 2>/dev/null || echo; done';
+/** Every place each agent's command answers from on the login PATH, in PATH order and tab-separated, one line per
+ * agent; empty where it is not there. */
+const WHERE = 'for b; do (IFS=:; for d in $PATH; do [ -f "$d/$b" ] && [ -x "$d/$b" ] && printf "%s\\t" "$d/$b"; done); echo; done';
+
+/** The app a wrapper folder on PATH belongs to, off the folder's name (`cmux-cli-shims`, `mise/shims`); nothing
+ * for a folder that is no wrapper's. */
+function wrapperApp(path: string): string | undefined {
+  const dirs = posix.dirname(path).split("/");
+  const dir = dirs.at(-1) ?? "";
+  if (!/shims$/.test(dir)) return undefined;
+  const app = dir.replace(/-?(cli-)?shims$/, "");
+  return app !== "" ? app : dirs.at(-2);
+}
+
+/** Where an agent is installed off every match on PATH: the first that is no wrapper's, and the app whose wrapper
+ * answers before it. A wrapper alone leaves no path, since its folder is often a temporary one. */
+function installedAt(matches: readonly string[]): { found: boolean; path?: string; via?: string } {
+  const real = matches.find(m => wrapperApp(m) === undefined);
+  const via = matches[0] === undefined ? undefined : wrapperApp(matches[0]);
+  return { found: matches.length > 0, ...(real !== undefined ? { path: real } : {}), ...(via !== undefined ? { via } : {}) };
+}
 /** Each command run side by side under its own bound, then each one's exit code and output in the order asked. */
 const EACH = [
   'd=$(mktemp -d) || exit 1',
@@ -146,16 +165,16 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
   ]);
   if (where === undefined) refused.push("agents: the login PATH could not be read");
   if (o.box !== undefined && recipe === undefined) refused.push("servers: the list of what wsp's recipe put there could not be read");
-  const paths = (where ?? "").split("\n");
-  const at = new Map(agents.map((a, i) => [a.id, paths[i]?.trim() ?? ""]));
-  const installed = agents.filter(a => at.get(a.id) !== "");
+  const lines = (where ?? "").split("\n");
+  const at = new Map(agents.map((a, i) => [a.id, installedAt((lines[i] ?? "").split("\t").filter(m => m !== ""))]));
+  const installed = agents.filter(a => at.get(a.id)!.found);
   const box = o.box;
   const [versions, statuses] = await Promise.all([
     box?.versions !== undefined ? Promise.resolve(installed.map(a => box.versions?.[a.id])) : each(host, installed.map(a => `${shellQuote(a.bin)} --version`)).then(r => r.map(s => s?.output.split("\n")[0])),
     box !== undefined ? Promise.resolve([]) : each(host, installed.map(a => a.signIn.status?.typed ?? a.signIn.status?.command ?? "false")),
   ]);
   const rows: AgentRow[] = agents.map(a => {
-    const path = at.get(a.id) ?? "";
+    const { found, path, via } = at.get(a.id)!;
     const i = installed.indexOf(a);
     const said = i < 0 ? undefined : versions[i];
     const version = said === undefined || said.trim() === "" ? undefined : agentVersionWord(said);
@@ -171,11 +190,12 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
     return {
       id: a.id,
       name: a.name,
-      installed: path !== "",
+      installed: found,
       ...(version !== undefined ? { version } : {}),
-      road: path === "" ? "none" : path.startsWith(`${TOOL_PREFIX}/`) ? "wsp" : "own",
-      ...(path !== "" ? { path: tilde(host.home, path) } : {}),
-      signIn: path === "" ? "none" : signIn,
+      road: !found ? "none" : path === undefined ? "shim" : path.startsWith(`${TOOL_PREFIX}/`) ? "wsp" : "own",
+      ...(path !== undefined ? { path: tilde(host.home, path) } : {}),
+      ...(via !== undefined ? { via } : {}),
+      signIn: !found ? "none" : signIn,
       signInRoad: signInRoadOf(a.signIn),
       wspTools: servers.wsp.has(a.id),
     };

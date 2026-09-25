@@ -37,8 +37,10 @@ export const AgentRow = z.object({
   /** The version the catalog installs. */
   pinned: z.string().optional(),
   road: AgentRoad,
-  /** Where the command answers from, `~`-relative under the home. */
+  /** Where the command answers from, `~`-relative under the home: past any wrapper another app put first on PATH. */
   path: z.string().optional(),
+  /** The app whose wrapper answers first on the login PATH, in front of the binary at path. */
+  via: z.string().optional(),
   signIn: z.union([AgentSignInState, z.literal("unknown")]),
   signInRoad: SignInRoad,
   /** One of its MCP config files names the wsp server. */

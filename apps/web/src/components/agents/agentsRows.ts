@@ -3,7 +3,7 @@
 // offers, what decides whether an act can be taken where the list stands, the
 // sign-in roads, and the lines under the list. Each kind's own rows, detail
 // and acts are its module under kinds/.
-import { LogInIcon, PencilIcon, SquareTerminalIcon, XIcon, type LucideIcon } from "lucide-react";
+import { LogInIcon, PencilIcon, XIcon, type LucideIcon } from "lucide-react";
 import { agentName, catalogEntry, hasLogin, loginIdOf, mintsToken, serverSignInRoad } from "@wsp/catalog";
 import { outcomeWord } from "../../settings/places.js";
 import { agentOfRow, type AgentRow, type AgentsReport, type McpRow, type PlaceProvisionRow, type SealedImage, type ServerToolsAnswer, type SignInRoad } from "@wsp/protocol";
@@ -29,7 +29,7 @@ export const AGENTS_LIST_WORDS = {
   nothingMatches: (q: string): string => `Nothing matches "${q}".`,
   manageAll: (computer: string): string => `Manage all on ${computer}`,
   signedIn: "signed in",
-  notSignedIn: "not signed in",
+  needsSignIn: "needs sign-in",
   yourKey: "your key",
   notChecked: "not checked",
   notInstalled: "not installed",
@@ -69,6 +69,13 @@ export const AGENTS_LIST_WORDS = {
   latest: (v: string): string => `latest ${v}`,
   pins: (v: string): string => `recipe pins ${v}`,
   installedAt: "Installed at",
+  latestLabel: "Latest",
+  madeBy: "Made by",
+  license: "License",
+  homepage: "Homepage",
+  repo: "Repository",
+  viaShim: (app: string): string => `via a shim from ${app}`,
+  fromPanel: "from a task's own panel",
   wspTools: "wsp tools",
   notAdded: "not added",
   description: "Description",
@@ -225,9 +232,8 @@ export function signInAct(id: string, start: SignInStart | undefined, ctx: RowsC
   const flow = acts?.flowOf(id);
   const view = flow === undefined || acts === undefined ? {} : { flow: { flow, code: (code: string) => acts.code(id, code), save: (key: string) => acts.save(id, key) } };
   if (runningFlow(flow) && acts !== undefined) return { act: { id: "cancel", label: AGENTS_LIST_WORDS.cancel, icon: XIcon, run: () => acts.cancel(id), inPlace: true }, ...view };
-  const terminal = start?.kind === "terminal";
   const run = start === undefined ? undefined : start.kind === "terminal" ? (ctx.typeInTerminal === undefined ? undefined : () => ctx.typeInTerminal!(start.line)) : acts === undefined ? undefined : () => acts.start(id, start);
-  return { act: { id: "sign-in", label: terminal ? AGENTS_LIST_WORDS.openInTerminal : AGENTS_LIST_WORDS.signIn, icon: terminal ? SquareTerminalIcon : LogInIcon, ...(run === undefined ? {} : { run }) }, ...view };
+  return { act: { id: "sign-in", label: AGENTS_LIST_WORDS.signIn, icon: LogInIcon, ...(run === undefined ? {} : { run }) }, ...view };
 }
 
 /** Whether a sign-in waits on the person: its row says so in place of its state. */

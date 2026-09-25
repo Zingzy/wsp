@@ -35,9 +35,8 @@ export interface RowView {
   /** Not on the computer: the name faded and the subtext the catalog's sentence, not a fact. */
   readonly available?: boolean;
   readonly badge?: StatusBadge;
-  /** The state in the muted mono at the right end, where no step is needed. */
-  readonly word?: string;
-  readonly wordHover?: string;
+  /** A second line under the subtext in the muted mono: an agent's sign-in state. */
+  readonly state?: string;
   /** The one step the row offers at its right end; pressing it opens the detail as well, unless it acts in place. */
   readonly quick?: RowAct;
 }
@@ -57,6 +56,10 @@ export interface Fact {
   readonly muted?: boolean;
   /** A step for this line alone: a folded server's agent that needs its own sign-in. */
   readonly act?: RowAct;
+  /** The value is a page's address, shown without its scheme and opened in the browser on a press. */
+  readonly href?: string;
+  /** The value is a whole line a person pastes, drawn in a copy row. */
+  readonly line?: boolean;
 }
 
 /** One row of the level under a detail, and what its own level says whole. */
@@ -81,6 +84,8 @@ export interface DetailView {
   readonly title: string;
   readonly lead: Lead;
   readonly marks?: readonly string[];
+  /** What it is in a sentence or two, the first block under the head. */
+  readonly about?: string;
   readonly facts: readonly Fact[];
   /** Next step first, Remove last. */
   readonly acts: readonly RowAct[];

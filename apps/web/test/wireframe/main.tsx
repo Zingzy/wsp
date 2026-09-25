@@ -498,10 +498,10 @@ function AgentsWidths() {
   return (
     <div className="flex flex-col gap-10 bg-background p-4">
       {AGENTS_WIDTHS.map(w => (
-        <div key={w.width} data-agents-width={w.width} data-shell={w.shell} className={w.shell === "panel" ? "bg-card" : undefined} style={{ width: w.width }}>
+        <div key={w.width} data-agents-width={w.width} data-shell={w.shell} style={{ width: w.width }}>
           <AgentsManager
             shell={w.shell}
-            head={w.shell === "panel" ? { title: "On spoo, for wsp", line: "Agents, MCP servers and skills this thread can use: global on spoo, plus wsp's own at ~/wsp.", manage: { computer: "spoo", open: () => {} } } : { line: "Agents, MCP servers and skills on spoo." }}
+            head={w.shell === "panel" ? { title: "On spoo, for wsp", manage: { computer: "spoo", open: () => {} } } : { line: "Agents, MCP servers and skills on spoo." }}
             report={AGENTS_REPORT}
             reading={false}
             on="spoo"

@@ -4,14 +4,14 @@
 // next step first, and a sign-in drawn under them), the level of rows a kind
 // may add under it, and one of those rows. Escape goes back one level;
 // ArrowDown from the head reaches the acts.
-import { ArrowLeftIcon, CheckIcon, CopyIcon, RefreshCwIcon } from "lucide-react";
+import { ArrowLeftIcon, CheckIcon, CopyIcon, ExternalLinkIcon, RefreshCwIcon } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { agentName } from "@wsp/catalog";
 import { offlineFor } from "@wsp/protocol";
 import { copyText } from "../../actions/clipboard.js";
 import { cn } from "../../lib/utils.js";
 import { FACT, VALUE } from "../../settings/format.js";
-import { RefusalSlot } from "../../settings/sheetParts.js";
+import { CopyRow, RefusalSlot } from "../../settings/sheetParts.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
 import { Button } from "../ui/button.js";
 import { Spinner } from "../ui/spinner.js";
@@ -123,7 +123,14 @@ function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
         <span className="flex min-w-0 max-w-full items-center gap-2">
           {fact.agent === undefined ? null : <HarnessMark harness={fact.agent} label={agentName(fact.agent)} className="size-3.5" />}
           {fact.badge === undefined ? null : <ServerBadge badge={fact.badge} />}
-          {fact.value === undefined ? null : (
+          {fact.value === undefined ? null : fact.line === true ? (
+            <CopyRow k={`fact-${fact.id}`} value={fact.value} whole />
+          ) : fact.href !== undefined ? (
+            <button type="button" data-fact-value title={fact.href} onClick={() => void window.open(fact.href, "_blank", "noopener,noreferrer")} className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 truncate font-mono text-xs text-foreground underline-offset-4 transition-colors duration-150 hover:underline">
+              <span className="truncate">{fact.value}</span>
+              <ExternalLinkIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+            </button>
+          ) : (
             <span data-fact-value className={cn(fact.muted === true ? FACT : VALUE, "line-clamp-2 min-w-0 break-words")} title={fact.hover ?? fact.value}>
               {fact.muted === true ? fact.value : slashBreaks(fact.value)}
             </span>
@@ -153,6 +160,11 @@ export function DetailLevel({ view, back, backLabel }: { view: DetailView; back:
     <div data-agents-detail onKeyDown={onKeyDown} className="flex flex-col pb-4">
       <LevelHead back={back} backLabel={backLabel} lead={view.lead} title={view.title} {...(view.marks === undefined ? {} : { marks: view.marks })} headRef={headRef} />
       <div data-level-body className="flex flex-col gap-3 px-4 pt-2">
+        {view.about === undefined ? null : (
+          <p data-detail-about className="text-[13px] leading-5 text-foreground">
+            {view.about}
+          </p>
+        )}
         <div data-facts className="flex flex-col gap-y-1">
           {view.facts.map(fact => {
             if (fact.label !== "") labelFor = fact.label;
