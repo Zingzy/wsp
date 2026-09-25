@@ -8,7 +8,7 @@
 // the only home a second copy cannot grow beside.
 
 import { z } from "zod";
-import { AgentSignInState, AgentsTarget } from "./agents-report.js";
+import { AgentSignInState, AgentsChangedEvent, AgentsTarget } from "./agents-report.js";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
@@ -2981,6 +2981,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   PlacePresentEvent.extend(sequenced),
   PlaceAbsentEvent.extend(sequenced),
   PlaceRemovedEvent.extend(sequenced),
+  AgentsChangedEvent.extend(sequenced),
 ]);
 export type EventUnion = z.infer<typeof EventUnion>;
 
@@ -5328,6 +5329,27 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * the person's ask, under a deadline, the answer kept for an hour unless `refresh`. A server whose sign-in the
    * harness holds brings no list, only the harness's word where its words were measured; no login file is read. */
   z.object({ id: reqId, op: z.literal("servers.tools"), target: AgentsTarget, agent: z.string(), name: z.string(), refresh: z.boolean().optional() }),
+  /** Replies with { signInId } once the agent's own sign-in runs in a pty there, as that computer's login, or joins
+   * the one already running for that agent there, one per agent per target; its progress is pushed as agents.signIn
+   * events to the sockets following it alone, which is what a page and its code are for, and the sign-in stops when
+   * the last of them goes. Refused for a row that asks the person to pick, which runs in their terminal, for a row
+   * whose login is a token or key this host keeps, and for a name holding a control character. */
+  z.object({ id: reqId, op: z.literal("agents.signIn"), target: AgentsTarget, agent: z.string() }),
+  /** The same for one MCP server of that agent's config, by the harness's own command for it. */
+  z.object({ id: reqId, op: z.literal("servers.signIn"), target: AgentsTarget, agent: z.string(), name: z.string() }),
+  /** Types what a sign-in's page handed back into that sign-in's own pty, with the Enter the person would press. */
+  z.object({ id: reqId, op: z.literal("agents.signInCode"), signInId: z.string(), code: z.string().min(1) }),
+  /** Stops a sign-in this socket started or joined, killing its pty for everyone following it. */
+  z.object({ id: reqId, op: z.literal("agents.signInStop"), signInId: z.string() }),
+  /** Replies with { line: SignInLine }: the sign-in, or one server's with `name`, as the line the person's own
+   * terminal runs there over its daemon channel. */
+  z.object({ id: reqId, op: z.literal("agents.signInLine"), target: AgentsTarget, agent: z.string(), name: z.string().optional() }),
+  /** Writes the agent's token or key into this host's vault, the variable its row names, checked against the shape
+   * the row says the tool prints; only on the host's own socket. Replies with nothing of it. */
+  z.object({ id: reqId, op: z.literal("agents.key"), agent: z.string(), key: z.string().min(1) }),
+  /** Replies with { file }: the wsp server written into that agent's own config on this computer, the entry an
+   * install writes, with the wsp skill beside it. Refused on any other computer. */
+  z.object({ id: reqId, op: z.literal("agents.addTools"), target: AgentsTarget, agent: z.string() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
    * `on` prices the build at that place instead of the default one, by the name or id wsp places lists. */
   z.object({ id: reqId, op: z.literal("init.get"), on: z.string().optional() }),

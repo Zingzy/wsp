@@ -90,6 +90,9 @@ export type SignIn =
       sources: readonly LoginSource[];
       /** The device-code, paste-code or no-browser variant, offered on a retry. */
       fallback?: string;
+      /** How the flow finishes with no browser on the machine: a device page taking a code the tool printed, or a
+       * page whose code comes back to be pasted. Absent: the paste. */
+      headless?: "device" | "code";
       /** Every question this tool is known to put to a terminal, each with what settles it. Absent: running the
        * login command in a pty with nothing typed into it printed a page and waited on the browser. */
       questions?: readonly Question[];
@@ -176,11 +179,11 @@ export function asksThePerson(s: SignIn | { kind: "shell" }): boolean {
 /** How a person signs this in where it stands, in the agents report's one word: the agent's own terminal where it
  * asks them to pick, the token or key it takes, a device page where its login or the no-browser variant prints
  * one, and otherwise the code its page hands back, which is the road a login with a callback takes where no
- * browser is. */
+ * browser is. The row says which of the two it is. */
 export function signInRoadOf(s: SignIn): SignInRoad {
   if (asksThePerson(s)) return "terminal";
   if (s.kind === "token" || s.kind === "key" || s.kind === "none" || s.kind === "device") return s.kind;
-  return /device/.test(s.fallback ?? "") ? "device" : "code";
+  return s.headless ?? "code";
 }
 
 /** The login as a row names it: the command up to the flags that answer its questions, which a row has no room for
@@ -332,6 +335,7 @@ export const SIGN_IN_ROWS = {
     finish: "callback",
     login: "aws configure sso",
     fallback: "aws configure sso --use-device-code",
+    headless: "device",
     questions: [
       { asks: /SSO session name \(Recommended\)/, person: true },
       { asks: /SSO start URL/, person: true },
@@ -402,6 +406,9 @@ export const SIGN_IN_ROWS = {
     keyEnv: "OPENAI_API_KEY",
     login: "codex login",
     fallback: "codex login --device-auth",
+    headless: "device",
+    // The one-time code 0.155.1 prints for its device page; read outside the URLs, so no query string is taken for it.
+    code: /\b[A-Z0-9]{4,}-[A-Z0-9]{4,}\b/,
     shared: { dir: "codex", file: "auth.json", target: `${GUEST_HOME}/.codex/auth.json`, homeEnv: "CODEX_HOME" },
     status: { command: "codex login status", signedIn: ok(/Logged in using/) },
     stateOnMachine: [],

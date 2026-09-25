@@ -8,6 +8,7 @@
 import type { McpServerSpec } from "@wsp/protocol";
 import { readJsonc, type Jsonc } from "./jsonc.js";
 import type { McpCheck } from "./mcp-check.js";
+import type { McpLogin } from "./mcp-login.js";
 
 export type McpTransport =
   | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string }
@@ -135,6 +136,8 @@ export interface McpConfig {
   httpAuth?: string;
   /** How the harness answers for one server's sign-in; absent where no harness's words were measured. */
   check?: McpCheck;
+  /** How the harness signs one server in. */
+  login?: McpLogin;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

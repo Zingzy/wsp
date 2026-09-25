@@ -848,7 +848,7 @@ describe("wsp verbs over the host", () => {
     expect(existsSync(dest)).toBe(false);
     delete env["WSP_HOME"];
     // Only the export is held here: wsp image is a reading and answers against whichever host the line names.
-    expect(CLI_VERBS.filter(v => "hostSide" in v && v.hostSide !== undefined).map(v => v.name)).toEqual(["image export"]);
+    expect(CLI_VERBS.filter(v => "hostSide" in v && v.hostSide !== undefined).map(v => v.name)).toEqual(["agents key", "image export"]);
   });
 
   it("wsp image export with nobody at the terminal and no passphrase in the environment refuses before anything is read", async () => {
@@ -3611,7 +3611,7 @@ describe("wsp verbs over the host", () => {
     // A flag another verb reads is refused naming that verb, so the caller is told where it lives: run's --agent on send, threads' --tree on stop.
     const foreign = await run("send", "row_1", "--agent", "claude", "hello");
     expect(foreign.code).toBe(3);
-    expect(foreign.io.errors).toEqual(['--agent belongs to wsp servers tools, wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--image <path>] [--detach] "<message>"']);
+    expect(foreign.io.errors).toEqual(['--agent belongs to wsp servers signin, wsp servers tools, wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--image <path>] [--detach] "<message>"']);
     const within = await run("stop", "row_1", "--tree");
     expect(within.io.errors[0]).toContain("--tree belongs to wsp threads; wsp stop does not read it");
     // A flag wsp used to read is nobody's now: the parser's own line, with the verb's usage under it.

@@ -31,6 +31,7 @@ import { ASKS, EXPORT_SOURCE, PAGE, SCRIPTED_ASK, bornDeadAgent, captured, execG
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
 import { agentsReader } from "../src/agents-reader.js";
+import { hostActs } from "../src/agents-signin.js";
 import { nodeHost, type Host } from "@wsp/collect";
 
 /** This computer's own Host over a fixture home, with the fixture's agents on its PATH. */
@@ -156,6 +157,8 @@ describe("the agent contract on the command line and the tool door", () => {
       placeLinks: placeWiring(statePath),
       // What stands on this computer, read off a home six harnesses left and the agents on its own PATH.
       agentsReader: agentsReader({ vault: () => ({}), here: () => fixtureHost(agents) }),
+      // The wsp tools land in a config under this test's own home, never the person's.
+      agentsActs: hostActs({ vaultFile: join(dir, ".env"), home: () => join(dir, "user"), wspServer: () => ({ command: "wsp", args: ["mcp"] }) }),
       // Two places over one backend: this host's own, and one more for the image build road, which never boots a
       // machine here because the place already stands on the record.
       places: { wired: "default", backend: place => (place === "default" || place === "elsewhere" ? backend : undefined), list: () => ["default", "elsewhere"] },
@@ -241,6 +244,7 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("agents", "agents");
     await last("skills", "skills", "--on", HERE_PLACE_ID);
     await last("servers", "servers");
+    expect(await last("agents addtools", "agents", "addtools", "codex")).toEqual({ file: "~/.codex/config.toml" });
     // The one verb that starts a server: the fixture's runner exits at once, so the answer is why no tools came back.
     expect(await last("servers tools", "servers", "tools", "local", "--agent", "claude")).toMatchObject({ auth: "failed", refused: expect.any(String) });
     expect(await last("projects", "projects")).toEqual({ projects: [expect.objectContaining({ name: "alpha", computer: "default" })] });

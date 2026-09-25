@@ -293,6 +293,8 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     }
     expect(COMMAND_LINES.filter(c => "cliOnly" in c).map(c => c.words).sort()).toEqual([
       "add",
+      "agents key",
+      "agents signin",
       "doctor",
       "down",
       "host connect",
@@ -313,6 +315,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "mcp",
       "mcp install",
       "remove",
+      "servers signin",
       "status",
       "up",
     ]);

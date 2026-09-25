@@ -97,6 +97,7 @@ import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { agentsReader } from "./agents-reader.js";
+import { hostActs } from "./agents-signin.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
 import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
 import { serveMcp } from "./mcp.js";
@@ -780,6 +781,9 @@ export function makeRuntime(
     vault: () => vaultNow(statePath),
     // The same vault stands behind the sign-in word of an agent whose own login is not on the computer read.
     agentsReader: agentsReader({ vault: () => vaultNow(statePath) }),
+    // A key pasted in the app lands in the same vault, and the wsp tools an agent's config gets are the entry an
+    // install writes: this same wsp against this state file.
+    agentsActs: hostActs({ vaultFile: envFileFor(statePath), home: homedir, wspServer: () => mcpServerSpec(statePath, agents?.run ?? runningWsp()) }),
     // How a folder on this computer is read and packed to seed a project elsewhere: the collector's own menu over
     // this computer, and the host's pack of whichever rows the person ticked.
     seed: hostSeed(),
@@ -2601,7 +2605,7 @@ export async function cli(
   const verb = findVerb(rest);
   if (verb !== undefined) {
     const words = verb.name.split(" ");
-    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: caller.cwd ?? process.cwd(), env, ...starts, ...(caller.elsewhere === true ? { elsewhere: true } : {}) });
+    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: caller.cwd ?? process.cwd(), env, open: systemOpener(), ...starts, ...(caller.elsewhere === true ? { elsewhere: true } : {}) });
   }
   if (rest[0] === MCP_COMMAND) return mcp(io, [...common, ...rest.slice(1)], chooseState, run, env, starts);
   let values: SharedFlags;

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Machine } from "@wsp/engine";
-import { nappingAgentsRefusal, nappingToolsRefusal, type WorkspacePhase } from "@wsp/protocol";
+import { nappingAgentsRefusal, nappingSignInRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { agentsReads, type AgentsOn, type AgentsWorkspace, type ServerToolsAsk } from "../src/agents-read.js";
+import { agentsReads, type AgentsActs, type AgentsOn, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk } from "../src/agents-read.js";
 
 const READ = { home: "/root", user: "root", agents: [], skills: [], servers: [], refused: [] };
 
@@ -14,6 +14,10 @@ function reads(phase: { now: WorkspacePhase }, local = false): { asked: AgentsOn
     reader: { read: async on => (asked.push(on), READ), tools: async (on, ask) => (asked.push(on), tools.push(ask), { auth: "open", tools: [], readAt: "2026-09-24T12:00:00.000Z" }) },
     places: () => undefined,
     workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local, machine, project: "/root/landing" }),
+    channel: async () => {
+      throw new Error("no channel on this road");
+    },
+    changed: () => undefined,
     now: () => Date.parse("2026-09-24T12:00:00Z"),
   });
   return { asked, tools, api };
@@ -58,3 +62,161 @@ describe("the agents in a workspace", () => {
     expect(asked).toHaveLength(1);
   });
 });
+
+describe("the sign-ins on a computer or a workspace", () => {
+  /** A channel whose frames are kept and whose events this test pushes. */
+  function channel() {
+    const frames: Record<string, unknown>[] = [];
+    let push: (e: Record<string, unknown>) => void = () => {};
+    let end: () => void = () => {};
+    const closed = new Promise<{ code: number; reason: string }>(r => (end = () => r({ code: 1000, reason: "" })));
+    let shut = 0;
+    return {
+      frames,
+      push: (e: Record<string, unknown>) => push(e),
+      get shut() {
+        return shut;
+      },
+      open: async (onEvent: (e: Record<string, unknown>) => void) => {
+        push = onEvent;
+        return {
+          send: async (frame: Record<string, unknown>) => (frames.push(frame), { ok: true, ptyId: "pty_1" }),
+          close: () => void (shut++, end()),
+          closed,
+        } as never;
+      },
+    };
+  }
+
+  function acting(phase: { now: WorkspacePhase }) {
+    const ch = channel();
+    const planned: { on: AgentsOn; ask: SignInAsk }[] = [];
+    const changed: (AgentsTarget | undefined)[] = [];
+    const codes: string[] = [];
+    let finish: () => void = () => {};
+    const acts: AgentsActs = {
+      signInLine: async () => ({ command: "codex login --device-auth" }),
+      signIn: async (on, ask) => {
+        planned.push({ on, ask });
+        if (ask.agent === "opencode") throw new Error("opencode asks you to pick");
+        return async run => {
+          // What the host's watched pty does: a frame down the link, an event back up, the code writer handed over.
+          await run.link.op("pty.create", {});
+          run.link.onEvent(e => run.emit({ state: "waiting", url: String(e["url"]) }));
+          run.typing(async code => void codes.push(code));
+          await Promise.race([new Promise<void>(r => (finish = r)), run.stop]);
+          run.typing(undefined);
+          run.emit({ state: "signed-in" });
+        };
+      },
+      key: async () => undefined,
+      addTools: async () => ({ file: "~/.codex/config.toml" }),
+    };
+    const machine = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as Machine;
+    const api = agentsReads<undefined>({
+      reader: { read: async () => READ, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }) },
+      acts,
+      places: () => undefined,
+      workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: "/root/landing" }),
+      channel: async (_target, onEvent) => ch.open(onEvent),
+      changed: target => void changed.push(target),
+      now: () => Date.parse("2026-09-24T12:00:00Z"),
+    });
+    return { api, ch, planned, changed, codes, finish: () => finish() };
+  }
+
+  it("run what the host planned over the target's own channel, push each step under the sign-in's id, take a code by that id and say the agents changed at the end", async () => {
+    const t = acting({ now: "running" });
+    const seen: Record<string, unknown>[] = [];
+    const { signInId } = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void seen.push(e));
+    expect(signInId).toMatch(/^si_[0-9a-f]{12}$/);
+    expect(t.planned).toEqual([{ on: { kind: "machine", machine: expect.anything(), project: "/root/landing" }, ask: { agent: "codex" } }]);
+    await tick();
+    expect(t.ch.frames).toEqual([{ op: "pty.create" }]);
+    t.ch.push({ url: "https://auth.openai.com/codex/device" });
+    await t.api.signInCode(signInId, "ABCD-1234");
+    expect(t.codes).toEqual(["ABCD-1234"]);
+    t.finish();
+    await tick();
+    expect(seen).toEqual([
+      { type: "agents.signIn", signInId, state: "waiting", url: "https://auth.openai.com/codex/device" },
+      { type: "agents.signIn", signInId, state: "signed-in" },
+    ]);
+    expect(t.ch.shut).toBe(1);
+    expect(t.changed).toEqual([{ workspaceId: "ws_1" }]);
+    // Once it is over its code writer is gone with it.
+    await expect(t.api.signInCode(signInId, "ABCD-1234")).rejects.toThrow(noSignInRefusal);
+  });
+
+  it("refuse a sign-in the host will not plan before any channel opens, never wake a napping workspace, and stop one whose asker went", async () => {
+    const t = acting({ now: "running" });
+    await expect(t.api.signIn({ workspaceId: "ws_1" }, { agent: "opencode" }, () => {})).rejects.toThrow(/asks you to pick/);
+    expect(t.ch.frames).toEqual([]);
+    const napping = acting({ now: "napping" });
+    await expect(napping.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, () => {})).rejects.toThrow(nappingSignInRefusal("landing"));
+    expect(napping.planned).toEqual([]);
+    const seen: Record<string, unknown>[] = [];
+    const { leave } = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void seen.push(e));
+    leave();
+    await tick();
+    expect(t.ch.shut).toBe(1);
+  });
+
+  it("run one sign-in per agent or server on a target: a second start joins the running one, which ends once nobody follows it", async () => {
+    const t = acting({ now: "running" });
+    const a: Record<string, unknown>[] = [];
+    const b: Record<string, unknown>[] = [];
+    const [first, second] = await Promise.all([
+      t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void a.push(e)),
+      t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void b.push(e)),
+    ]);
+    expect(second.signInId).toBe(first.signInId);
+    expect(t.planned).toHaveLength(1);
+    await tick();
+    t.ch.push({ url: "https://auth.openai.com/codex/device" });
+    // One who joins late is shown where it stands.
+    const c: Record<string, unknown>[] = [];
+    const third = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void c.push(e));
+    expect(third.signInId).toBe(first.signInId);
+    expect(c).toEqual([{ type: "agents.signIn", signInId: first.signInId, state: "waiting", url: "https://auth.openai.com/codex/device" }]);
+    expect([a, b].map(x => x.length)).toEqual([1, 1]);
+    // Another server, or another target, is a sign-in of its own.
+    const other = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "claude", server: "notion" }, () => {});
+    expect(other.signInId).not.toBe(first.signInId);
+    other.leave();
+    first.leave();
+    second.leave();
+    await tick();
+    expect(t.ch.shut).toBe(1);
+    third.leave();
+    await tick();
+    expect(t.ch.shut).toBe(2);
+  });
+
+  it("stop a sign-in by its id for everyone following it, so the next start runs fresh, and refuse an id that is not running", async () => {
+    const t = acting({ now: "running" });
+    const seen: Record<string, unknown>[] = [];
+    const first = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void seen.push(e));
+    const joined = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, () => {});
+    t.api.signInStop(first.signInId);
+    const fresh = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, () => {});
+    expect(fresh.signInId).not.toBe(first.signInId);
+    expect(t.planned).toHaveLength(2);
+    await tick();
+    expect(t.ch.shut).toBe(1);
+    expect(seen.at(-1)).toMatchObject({ signInId: first.signInId, state: "signed-in" });
+    expect(() => t.api.signInStop(first.signInId)).toThrow(noSignInRefusal);
+    joined.leave();
+    fresh.leave();
+  });
+
+  it("hand a key and the wsp tools to the host, and say what changed: every report for a key, the one target for the tools", async () => {
+    const t = acting({ now: "running" });
+    await t.api.key("claude", "sk-ant-oat01-x");
+    expect(await t.api.addTools({ placeId: "here" }, "codex")).toEqual({ file: "~/.codex/config.toml" });
+    expect(t.changed).toEqual([undefined, { placeId: "here" }]);
+    expect(await t.api.signInLine({ placeId: "here" }, { agent: "codex" })).toEqual({ command: "codex login --device-auth" });
+  });
+});
+
+const tick = (): Promise<void> => new Promise(r => setTimeout(r, 5));

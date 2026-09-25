@@ -18,6 +18,7 @@ import { AgentsList } from "../components/agents/AgentsList.js";
 import { imageAgentsReport, recipeMissLines } from "../components/agents/agentsRows.js";
 import { useAgentsReport } from "../components/agents/useAgentsReport.js";
 import { useServerTools } from "../components/agents/useServerTools.js";
+import { useAgentActs } from "../components/agents/useAgentActs.js";
 import { useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { ADD_COMPUTER_WORDS, WHERE_WORDS } from "./format.js";
@@ -202,6 +203,7 @@ function RemoveControl({ place, holding, imageBytes, onRemoved }: { place: Place
 function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean; ctx: SettingsContext }) {
   const { report, reading, error, refresh } = useAgentsReport({ placeId: place.id });
   const tools = useServerTools({ placeId: place.id });
+  const acts = useAgentActs({ placeId: place.id });
   const away = absentOf(place, ctx.now, here)?.away ?? null;
   return (
     <AgentsList
@@ -210,7 +212,7 @@ function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean;
       reading={reading}
       error={error}
       on={here ? THIS_COMPUTER_WORD : placeName(place)}
-      ctx={{ where: here ? "here" : "box", heldWhy: away, ...(tools === undefined ? {} : { tools }) }}
+      ctx={{ where: here ? "here" : "box", ...(here ? {} : { computer: placeName(place) }), heldWhy: away, ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }) }}
       onRefresh={refresh}
       now={ctx.now}
       misses={recipeMissLines(place.provision?.rows ?? [])}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { AgentsReport, RuntimeRequest, ServerToolsAnswer, THREAD_OPS, DEVICE_OPS, serverToolsLateRefusal } from "../src/index.js";
+import { AgentsChangedEvent, AgentsReport, AgentsSignInEvent, EventUnion, RuntimeRequest, SECRET_REQUEST_FIELDS, ServerToolsAnswer, SignInLine, THREAD_OPS, DEVICE_OPS, controlNameRefusal, hasControlChar, requestSecrets, serverToolsLateRefusal } from "../src/index.js";
 
 const report = {
   target: { placeId: "here" },
@@ -47,5 +47,44 @@ describe("the agents report on the wire", () => {
     expect(ServerToolsAnswer.parse({ auth: "signed-in", holder: "claude", readAt: listed.readAt })).toMatchObject({ holder: "claude" });
     expect(ServerToolsAnswer.parse({ auth: "failed", refused: serverToolsLateRefusal(20_000), readAt: listed.readAt }).refused).toBe("Did not answer in 20 s.");
     expect(() => ServerToolsAnswer.parse({ auth: "maybe", readAt: listed.readAt })).toThrow();
+  });
+
+  it("the sign-in acts name their target and agent, carry the code and the key in the fields a log hides, and are shut to threads and paired devices", () => {
+    const acts = [
+      { id: "1", op: "agents.signIn", target: { placeId: "p_spoo" }, agent: "codex" },
+      { id: "2", op: "servers.signIn", target: { workspaceId: "ws_1" }, agent: "claude", name: "notion" },
+      { id: "3", op: "agents.signInCode", signInId: "si_1", code: "ABCD-1234" },
+      { id: "4", op: "agents.signInLine", target: { placeId: "here" }, agent: "opencode" },
+      { id: "5", op: "agents.signInLine", target: { placeId: "here" }, agent: "claude", name: "notion" },
+      { id: "6", op: "agents.key", agent: "claude", key: "sk-ant-oat01-x" },
+      { id: "7", op: "agents.addTools", target: { placeId: "here" }, agent: "codex" },
+      { id: "8", op: "agents.signInStop", signInId: "si_1" },
+    ];
+    for (const act of acts) {
+      expect(RuntimeRequest.parse(act)).toEqual(act);
+      expect(THREAD_OPS).not.toContain(act.op);
+      expect(DEVICE_OPS).not.toContain(act.op);
+    }
+    expect(SECRET_REQUEST_FIELDS).toEqual(expect.arrayContaining(["code", "key"]));
+    expect(requestSecrets(acts[2])).toEqual(["ABCD-1234"]);
+    expect(requestSecrets(acts[5])).toEqual(["sk-ant-oat01-x"]);
+    expect(() => RuntimeRequest.parse({ id: "8", op: "agents.signIn", target: { placeId: "p" } })).toThrow();
+  });
+
+  it("a name holding a control character is caught by one predicate, whichever one it holds, and refused in one sentence naming its file", () => {
+    for (const c of ["\x00", "\x03", "\x15", "\r", "\n", "\x1b", "\x7f"]) expect(hasControlChar(`notion${c}echo hi`)).toBe(true);
+    expect(hasControlChar("notion-2 (work)")).toBe(false);
+    expect(hasControlChar("ünïcode")).toBe(false);
+    expect(controlNameRefusal("~/.claude.json")).toBe("~/.claude.json names a server with a control character in its name, which was left out.");
+  });
+
+  it("a sign-in's progress carries the page, the code it printed and whether a code goes back, and the change event rides the stream", () => {
+    const waiting = { type: "agents.signIn", signInId: "si_1", state: "waiting", url: "https://auth.openai.com/device", code: "ABCD-1234", paste: false };
+    expect(AgentsSignInEvent.parse(waiting)).toEqual(waiting);
+    expect(AgentsSignInEvent.parse({ type: "agents.signIn", signInId: "si_1", state: "failed", said: "Not logged in" }).said).toBe("Not logged in");
+    expect(() => AgentsSignInEvent.parse({ ...waiting, state: "maybe" })).toThrow();
+    expect(AgentsChangedEvent.parse({ type: "agents.changed", target: { placeId: "here" } })).toMatchObject({ target: { placeId: "here" } });
+    expect(EventUnion.parse({ type: "agents.changed", seq: 3 })).toMatchObject({ type: "agents.changed" });
+    expect(SignInLine.parse({ command: "codex login --device-auth", env: { CODEX_HOME: "/var/lib/wsp/logins/codex" }, prepare: "mkdir -p x", status: "codex login status" })).toMatchObject({ prepare: "mkdir -p x" });
   });
 });

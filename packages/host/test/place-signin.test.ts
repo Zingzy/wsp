@@ -5,10 +5,11 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { SIGN_IN_ROWS, sharedLoginOf } from "@wsp/catalog";
-import { BOX_SIGN_IN_MS, placeLink, sharedAgentsOn, sharedOn, signInOnBox } from "../src/place-signin.js";
-import type { RelayTerminal } from "../src/signin-relay.js";
-import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
+import { BOX_SIGN_IN_MS, placeLink, relaySignIn, sharedAgentsOn, sharedOn, targetLink } from "../src/place-signin.js";
+import { type RelayTerminal } from "../src/signin-relay.js";
+import { execsBeside, fakePtyLink, type FakePty } from "./fake-pty-link.js";
 import type { HostClient } from "../src/verbs.js";
+import type { SignInLine } from "@wsp/protocol";
 
 const tick = (): Promise<void> => new Promise(r => setTimeout(r, 5));
 
@@ -33,23 +34,17 @@ describe("which logins live on the computer that runs the workspaces", () => {
   });
 });
 
-describe("the sign-in on a computer you own", () => {
-  const signIn = async (script: (link: ReturnType<typeof fakePtyLink>, pty: FakePty, line: string) => void) => {
+describe("the sign-in the host planned, run on that computer's terminal and shown here", () => {
+  const CODEX = { command: "codex login --device-auth", env: { CODEX_HOME: "/var/lib/wsp/logins/codex" }, prepare: "mkdir -p '/var/lib/wsp/logins/codex'", status: "codex login status" };
+  const signIn = async (script: (link: ReturnType<typeof fakePtyLink>, pty: FakePty, line: string) => void, line: SignInLine = CODEX, agent: string | undefined = "codex") => {
     const link = fakePtyLink();
-    link.script = (pty, line) => script(link, pty, line);
+    link.script = (pty, typed) => script(link, pty, typed);
     const term = terminal();
-    const answer = await signInOnBox({
-      link,
-      agent: "codex",
-      logins: "/var/lib/wsp/logins",
-      terminal: term,
-      open: async () => true,
-      timeoutMs: 2_000,
-    });
+    const answer = await relaySignIn({ link, ...(agent !== undefined ? { agent } : {}), line, terminal: term, open: async () => true, timeoutMs: 2_000 });
     return { answer, link, term };
   };
 
-  it("makes the tool's own store on that computer, runs the flow that needs no browser there, and names the store in the pty's environment", async () => {
+  it("runs what comes first, then the command with its environment rather than quoted into the line, then the tool's own status the same way", async () => {
     const { answer, link } = await signIn((l, pty, line) => {
       if (line.includes("WSP_STATUS")) {
         l.data(pty, "Logged in using ChatGPT\r\nWSP_STATUS 0\r\n");
@@ -59,15 +54,13 @@ describe("the sign-in on a computer you own", () => {
       l.data(pty, "Open https://auth.openai.com/device and enter CODE-1234\r\n");
       l.exit(pty, 0);
     });
-    // The directory above it is the daemon's; this one is the tool's own store, made before it runs.
-    expect(link.ops.filter(o => o.op === "exec").map(o => o.extra["cmd"])).toEqual(["mkdir -p '/var/lib/wsp/logins/codex'"]);
-    // The no-browser variant off the row, and the store named in the environment rather than quoted into the line.
+    expect(execsBeside(link).map(o => o.extra["cmd"])).toEqual(["mkdir -p '/var/lib/wsp/logins/codex'"]);
+    expect([...link.staged.values()].every(s => s.cleared)).toBe(true);
     const [flow, status] = link.ptys;
     expect(flow!.created["env"]).toEqual({ CODEX_HOME: "/var/lib/wsp/logins/codex" });
-    expect(flow!.writes[0]).toBe("exec codex login --device-auth || exit\r");
-    // Then the tool's own status, with the same store, which is what says it landed.
+    expect(flow!.ran).toBe("codex login --device-auth");
     expect(status!.created["env"]).toMatchObject({ CODEX_HOME: "/var/lib/wsp/logins/codex" });
-    expect(status!.writes[0]).toContain("codex login status");
+    expect(status!.ran).toBe("codex login status");
     expect(answer).toEqual({ signedIn: true });
   });
 
@@ -84,10 +77,12 @@ describe("the sign-in on a computer you own", () => {
     expect(answer.said).toBe("Not logged in");
   });
 
-  it("refuses an agent whose login sits in the image instead", async () => {
-    await expect(
-      signInOnBox({ link: fakePtyLink(), agent: "claude", logins: "/var/lib/wsp/logins", terminal: terminal(), open: async () => true }),
-    ).rejects.toThrow(/no login that lives on the computer/);
+  it("runs a line with nothing first and no status, as one server's sign-in is, and reads it by its own exit", async () => {
+    const server = { command: "runuser -u 'ada' -- bash -c 'claude mcp login notion --no-browser'" };
+    const { answer, link } = await signIn((l, pty) => l.exit(pty, 0), server, undefined);
+    expect(execsBeside(link)).toEqual([]);
+    expect(link.ptys[0]!.created["env"]).toBeUndefined();
+    expect(answer).toEqual({ signedIn: true });
     expect(BOX_SIGN_IN_MS).toBeGreaterThan(60_000);
   });
 });
@@ -140,5 +135,8 @@ describe("the pty road to a computer you own", () => {
     expect(ended).toBe(true);
     await road.close();
     expect(c.sent.at(-1)).toEqual({ op: "daemon.close", params: { channel: "ch1" } });
+    // A workspace's own daemon is opened by the same road, named by the workspace.
+    await targetLink(c, { workspaceId: "ws_1" });
+    expect(c.sent.at(-1)).toEqual({ op: "daemon.open", params: { workspaceId: "ws_1" } });
   });
 });

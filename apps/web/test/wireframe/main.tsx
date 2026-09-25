@@ -72,7 +72,7 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, placeAddSheetWord, startingLine, type Capabilities, type DeviceView, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, placeAddSheetWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsList, type AgentsShell } from "../../src/components/agents/AgentsList";
@@ -393,6 +393,17 @@ const api = {
   hostTerminalConfig: async () => ({ files: [] }),
   agentsRead: async () => AGENTS_REPORT,
   serversTools: async (_target: unknown, _agent: string, name: string) => SERVER_TOOLS[name] ?? { auth: "open", tools: [], readAt: AGENTS_REPORT.readAt },
+  // A sign-in whose tool prints its page at once: a device code for an agent, a page whose answer is pasted back for a server.
+  agentsSignIn: async (_target: unknown, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void) => {
+    const url = server === undefined ? "https://auth.openai.com/codex/device" : "https://claude.ai/oauth/authorize?code=true";
+    setTimeout(() => onStep({ type: "agents.signIn", signInId: `si_${agent}`, state: "waiting", url, ...(server === undefined ? { code: "ABCD-12345", paste: false } : { paste: true }) }), 30);
+    return { signInId: `si_${agent}`, stop: () => {} };
+  },
+  agentsSignInCode: async () => {},
+  agentsKey: async () => {
+    throw new Error("That is not a Claude Code token.");
+  },
+  agentsAddTools: async () => ({ file: "~/.config/opencode/opencode.json" }),
   account: async () => ({ signedIn: false }),
   devicesList: async () => DEVICES,
   devicesRevoke: async () => {},

@@ -57,7 +57,7 @@ function signInOnTheMachine(order: "before" | "after" | "never") {
   };
   let pty: FakePty | undefined;
   link.script = (p, line) => {
-    if (!line.startsWith(`exec ${loginOf("codex")}`)) return;
+    if (line !== `printf '\\036'; exec bash -c ${loginOf("codex")}`) return;
     pty = p;
     if (order === "before") shim(PAGE, 42485);
     link.data(p, `Opening browser to sign in...\r\nIf the browser didn't open, visit: ${PRINTED}\r\nPaste code here if prompted > `);
@@ -92,11 +92,11 @@ describe("the sign-in stage", () => {
   it("a sign-in on the machine that exits 0 is signed in by that exit: no status check follows, the next row comes at once, and nothing is offered", async () => {
     const link = fakePtyLink();
     link.script = (pty, line) => {
-      if (line.startsWith("exec ")) link.exit(pty, 0);
+      if (line.includes("; exec bash -c ")) link.exit(pty, 0);
     };
     const st = stage(link, { logins: [{ ...CODEX, choice: "machine" }, { ...GH, choice: "machine" }] });
     const rows = await st.run;
-    expect(link.ptys.map(p => p.writes[0])).toEqual([`exec ${loginOf("codex")} || exit\r`, `exec ${loginOf("gh")} || exit\r`]);
+    expect(link.ptys.map(p => p.ran)).toEqual([loginOf("codex"), loginOf("gh")]);
     expect(rows).toEqual([
       { id: "logins/codex", label: "Codex login", state: "signed-in", command: loginOf("codex"), exit: 0, note: `${loginOf("codex")} exited 0` },
       { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: loginOf("gh"), exit: 0, note: `${loginOf("gh")} exited 0` },
@@ -111,7 +111,7 @@ describe("the sign-in stage", () => {
   it("a sign-in on the machine that exits with a failure is not signed in by that exit, and a retry or a skip is offered", async () => {
     const link = fakePtyLink();
     link.script = (pty, line) => {
-      if (line.startsWith("exec ")) link.exit(pty, 1);
+      if (line.includes("; exec bash -c ")) link.exit(pty, 1);
     };
     const st = stage(link, { logins: [{ ...CODEX, choice: "machine" }] });
     for (let i = 0; i < 100 && !st.text().includes("r retry"); i++) await tick();
@@ -211,11 +211,11 @@ describe("what an answer means at build time", () => {
     // And through the stage itself: the answerless row's own command runs on the machine.
     const link = fakePtyLink();
     link.script = (pty, line) => {
-      if (line.startsWith("exec ")) link.exit(pty, 0);
+      if (line.includes("; exec bash -c ")) link.exit(pty, 0);
     };
     const st = stage(link, { logins: [BARE] });
     const [r] = await st.run;
     expect(r).toMatchObject({ state: "signed-in", exit: 0, command: loginOf("codex") });
-    expect(link.ptys.map(p => p.writes[0])).toEqual([`exec ${loginOf("codex")} || exit\r`]);
+    expect(link.ptys.map(p => p.ran)).toEqual([loginOf("codex")]);
   });
 });
