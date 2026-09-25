@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The laptop half of the sign-in callback relay and of the localhost forwards.
-// One daemon link per running workspace (and the init builder): a browser.open
-// from the guest is shown by the app (opened here only when autoOpen says so),
-// and the flow's callback port is listened on locally and tunnelled back over
-// that link for a bounded window. A local URL the guest printed forwards its
-// port the same way, one per port, until it sees no traffic for a while. The
-// URL is never logged.
+// One daemon link per running workspace (and the init builder), and one per
+// computer this host holds as a place, for sign-in callbacks only and only
+// while a sign-in there runs: a browser.open from the guest is shown by the app
+// (opened here only when autoOpen says so), and the flow's callback port is
+// listened on locally and tunnelled back over that link for a bounded window.
+// A local URL the guest printed forwards its port the same way, one per port,
+// until it sees no traffic for a while. The URL is never logged.
 
 import { spawn } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
 import { platform } from "node:os";
-import { DaemonEvent, LOOPBACK, hostOf, isHttpUrl, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
-import { plumbTunnel, realClock, tunnelFrame, type Clock, type DaemonChannel, type EventUnion, type Runtime } from "@wsp/runtime";
+import { PassThrough } from "node:stream";
+import { DaemonEvent, LOOPBACK, callbackPortOf, hostOf, isHttpUrl, isJoinedComputer, isLoopback, type AgentsTarget, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
+import { plumbTunnel, realClock, tunnelFrame, type Clock, type DaemonChannel, type EventUnion, type Runtime, type SignInForward } from "@wsp/runtime";
 import { DAEMON_CONNECT_TIMEOUT_MS, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
 import type { GuestDoor } from "./guest.js";
 
@@ -67,9 +69,12 @@ export interface RelayOptions {
   listenHosts?: string[];
   /** A fraction in [0, 1) added to each redial wait (up to half again), so links through one edge do not redial in lockstep. */
   jitter?: () => number;
+  /** Also holds a link to each computer this host holds as a place, over the socket that computer opened, and hands
+   * the runtime's sign-ins the forward for theirs. The host's own relay; init's builder relay leaves it off. */
+  places?: boolean;
 }
 
-/** callback: a sign-in flow's redirect port, one per workspace, keyed on the guest listener's life.
+/** callback: a sign-in flow's redirect port, one per workspace and one more per sign-in running there, keyed on the guest listener's life.
  * url: a port a printed local URL named, one per port per workspace, kept while traffic flows. */
 export type ForwardKind = "callback" | "url";
 
@@ -107,14 +112,28 @@ export const REDIAL_CEILING_MS = 30_000;
 /** A callback that lands while the link is down waits this long for it: the longest jittered redial pause plus the dial's
  * budget, so the redial that starts inside every hold also lands inside it. */
 export const CALLBACK_HOLD_MS = REDIAL_CEILING_MS * 1.5 + DAEMON_CONNECT_TIMEOUT_MS;
+/** How long the harness has to answer a landed address carried to it. */
+export const DELIVER_MS = 10_000;
 /** A callback is a GET whose head is a few hundred bytes; a held socket that sends more is not one. */
 export const CALLBACK_HOLD_MAX_BYTES = 64 * 1024;
+/** The most of a harness's status line a refusal quotes back to the panel. */
+const QUOTE_MAX = 120;
 /** Held callback connections per forward; a browser opens a handful per host, a page probing loopback opens many. */
 export const CALLBACK_HOLD_MAX_CONNS = 8;
 
 interface Target {
   id: string;
   name: string;
+  /** What the lines call the far end: a workspace, or a computer this host holds as a place. */
+  noun: "workspace" | "computer";
+  /** The forwards this link opens. A place's daemon watches the whole computer, and every workspace on it too, so a
+   * printed local URL there is no one sign-in's and is never carried here. */
+  kinds: readonly ForwardKind[];
+  /** Whether the guest sessions on the far end are this link's. A place's are its workspaces', each on its own link. */
+  guests: boolean;
+  /** Whether a callback forward opens only while a sign-in on the far end runs, and closes when the last one ends. Anything
+   * on a computer that can post to its daemon's socket could otherwise hold a port on this computer's loopback. */
+  armedBySignIn: boolean;
   /** How this link reaches the daemon answering for the target: a dial of the machine's own daemon, or the
    * channel the runtime holds over the link of the computer that answers for a workspace. */
   open(o: { onEvent: (event: Record<string, unknown>) => void; onEventError: (error: unknown) => void }): Promise<DaemonSocket>;
@@ -139,6 +158,16 @@ interface Link {
    * about thirty seconds and the link redials under it; a guest session streaming rows across that gap would
    * otherwise lose them, and its exit frame with them, and the process on the machine would wait for good. */
   waiting: ((sock: DaemonSocket | undefined) => void)[];
+  /** The sign-ins on this target that hold a forward from the relay, each with the port its page returns to. */
+  signIns: Set<SignIn>;
+  /** Tunnels carrying one landed address each, by id, while their answer comes back. */
+  replays: Map<string, Socket>;
+}
+
+interface SignIn {
+  /** The callback port of the page this sign-in armed, which a landed address must name. */
+  page?: number;
+  ended: boolean;
 }
 
 interface Held {
@@ -183,13 +212,13 @@ function refusedResponse(f: Forward): string {
   return badGateway(
     f.kind === "url"
       ? `localhost:${f.port} on this computer is forwarded to workspace ${f.target.name}, but nothing there answered on port ${f.port}.`
-      : `The sign-in callback reached this computer, but nothing on workspace ${f.target.name} answered on port ${f.port}.`,
+      : `The sign-in callback reached this computer, but nothing on ${f.target.noun} ${f.target.name} answered on port ${f.port}.`,
   );
 }
 
 /** What a held callback hears when its wait ends without a link, its forward closes first, or the hold is full. */
 function heldResponse(f: Forward, what: string): string {
-  return badGateway(`The sign-in callback reached this computer while workspace ${f.target.name} was reconnecting, ${what}. Start the sign-in again.`);
+  return badGateway(`The sign-in callback reached this computer while ${f.target.noun} ${f.target.name} was reconnecting, ${what}. Start the sign-in again.`);
 }
 
 function seconds(ms: number): string {
@@ -237,10 +266,10 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   const autoOpen = o.autoOpen ?? (() => false);
   const openLine = o.openLine ?? ((workspace: string, hostname: string) => `${workspace}: a sign-in page for ${hostname} is ready; open it from the app`);
   const jitter = o.jitter ?? Math.random;
-  /** Forwards whose binds are in flight, by target and port, so a second event for the same port joins the first. */
-  const binding = new Set<string>();
+  /** Forwards whose binds are in flight, by target, kind and port, so a second ask for the same port joins the first. */
+  const binding = new Map<string, Promise<void>>();
   const links = new Map<string, Link>();
-  /** The one callback forward per target. */
+  /** callback forwards by target and port: one per target, and one more for each sign-in running there. */
   const forwards = new Map<string, Forward>();
   /** url forwards by target and port. */
   const urlForwards = new Map<string, Forward>();
@@ -257,14 +286,14 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   // question: they are the one socket this host holds into each running workspace, and the guest road rides them,
   // so a host whose backend forwards nothing still holds them where a guest door was given.
   const forwarding = rt.backend.capabilities.callbackRelay;
-  if (!forwarding && o.guest === undefined) return { forwards: () => [], list: () => [], stop: () => false, on, close: async () => {} };
+  const holdsWorkspaces = forwarding || o.guest !== undefined;
+  if (!holdsWorkspaces && o.places !== true) return { forwards: () => [], list: () => [], stop: () => false, on, close: async () => {} };
+  const workspaceKinds: readonly ForwardKind[] = forwarding ? ["callback", "url"] : [];
 
   const urlKey = (targetId: string, port: number): string => `${targetId}:${port}`;
   const allForwards = (targetId: string): Forward[] => {
     const out: Forward[] = [];
-    const callback = forwards.get(targetId);
-    if (callback) out.push(callback);
-    for (const f of urlForwards.values()) if (f.target.id === targetId) out.push(f);
+    for (const f of [...forwards.values(), ...urlForwards.values()]) if (f.target.id === targetId) out.push(f);
     return out;
   };
   const forwardOn = (targetId: string, port: number): Forward | undefined => allForwards(targetId).find(f => f.port === port);
@@ -285,14 +314,10 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   // --- forwards -------------------------------------------------------------
 
   const closeForward = (f: Forward, why: string): void => {
-    if (f.kind === "callback") {
-      if (forwards.get(f.target.id) !== f) return;
-      forwards.delete(f.target.id);
-    } else {
-      const key = urlKey(f.target.id, f.port);
-      if (urlForwards.get(key) !== f) return;
-      urlForwards.delete(key);
-    }
+    const open = f.kind === "callback" ? forwards : urlForwards;
+    const key = urlKey(f.target.id, f.port);
+    if (open.get(key) !== f) return;
+    open.delete(key);
     f.cancel();
     for (const c of f.conns.values()) c.destroy();
     f.conns.clear();
@@ -324,7 +349,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       () => {
         if (clock.now() < f.expiresAt) arm(f);
         else if (f.kind === "url") closeForward(f, `no traffic for ${minutes(idleMs)}`);
-        else closeForward(f, f.listener ? `open for ${minutes(capMs)}, the cap` : `no listener on the workspace within ${minutes(windowMs)}`);
+        else closeForward(f, f.listener ? `open for ${minutes(capMs)}, the cap` : `no listener on the ${f.target.noun} within ${minutes(windowMs)}`);
       },
       wait,
       { unref: true },
@@ -364,7 +389,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         o.log(
           f.kind === "url"
             ? `${f.target.name}: a connection to localhost:${f.port} here reached the workspace but nothing there answered on port ${f.port}`
-            : `${f.target.name}: the sign-in callback on port ${f.port} reached this computer but nothing on the workspace answered`,
+            : `${f.target.name}: the sign-in callback on port ${f.port} reached this computer but nothing on the ${f.target.noun} answered`,
         );
       },
     });
@@ -426,17 +451,30 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     // callback port a printed URL already forwarded rides that url forward, which lives by its idle clock
     // rather than the guest listener's, and gets no sign-in line of its own.
     if (forwardOn(target.id, port)) return;
-    // The in-flight set, not the forwards map: a second event for the same port joins the bind,
+    // The in-flight map, not the forwards map: a second ask for the same port joins the bind,
     // and the forward that works stays in place until the newcomer's servers are listening.
     const key = `${target.id}:${kind}:${port}`;
-    if (binding.has(key) || binding.has(`${target.id}:${kind === "url" ? "callback" : "url"}:${port}`)) return;
+    const joined = binding.get(key) ?? binding.get(`${target.id}:${kind === "url" ? "callback" : "url"}:${port}`);
+    if (joined !== undefined) return joined;
     // url binds in flight count too: a burst of events in one tick must not all pass the cap before any lands.
-    const inFlight = [...binding].filter(k => k.startsWith(`${target.id}:url:`)).length;
+    const inFlight = [...binding.keys()].filter(k => k.startsWith(`${target.id}:url:`)).length;
     if (kind === "url" && allForwards(target.id).filter(f => f.kind === "url").length + inFlight >= FORWARD_MAX_PER_TARGET) {
       o.log(`${target.name}: not forwarding localhost:${port}; ${FORWARD_MAX_PER_TARGET} ports are already forwarded for this workspace, stop one first`);
       return;
     }
-    binding.add(key);
+    let bound: () => void = () => {};
+    binding.set(key, new Promise<void>(r => (bound = r)));
+    try {
+      await bind(link, sock, port, kind);
+    } finally {
+      binding.delete(key);
+      bound();
+    }
+  };
+
+  /** The bind behind forward, once it is this port's one ask in flight. */
+  const bind = async (link: Link, sock: DaemonSocket, port: number, kind: ForwardKind): Promise<void> => {
+    const { target } = link;
     const startedAt = clock.now();
     const f: Forward = { target, port, kind, listener: false, servers: [], conns: new Map(), held: new Map(), startedAt, expiresAt: startedAt + (kind === "url" ? idleMs : windowMs), cancel: () => {} };
     // The link at connection time, not at bind time: a forward outlives a redial, and a url forward a nap too.
@@ -458,14 +496,9 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       }
       plumb(f, live, c);
     };
-    let results: (Server | NodeJS.ErrnoException)[];
-    try {
-      // Both families: a browser resolves localhost to either, and the guest listener may be on one only.
-      // A refusal on either is a port this computer already uses; a missing family (no IPv6) is not.
-      results = await Promise.all(listenHosts.map(h => listen(h, port, onConn)));
-    } finally {
-      binding.delete(key);
-    }
+    // Both families: a browser resolves localhost to either, and the guest listener may be on one only.
+    // A refusal on either is a port this computer already uses; a missing family (no IPv6) is not.
+    const results = await Promise.all(listenHosts.map(h => listen(h, port, onConn)));
     for (const r of results) if (!(r instanceof Error)) f.servers.push(r);
     const inUse = results.some(r => r instanceof Error && r.code === "EADDRINUSE");
     if (inUse || f.servers.length === 0) {
@@ -484,12 +517,12 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       arm(f);
       o.log(`${target.name}: forwarding localhost:${port} on this computer to the workspace (closes after ${minutes(idleMs)} without traffic)`);
     } else {
-      const previous = forwards.get(target.id);
-      if (previous) closeForward(previous, `port ${port} replaces it`);
-      forwards.set(target.id, f);
+      const held = heldPorts(link);
+      for (const previous of callbacksOf(target.id)) if (!held.has(previous.port)) closeForward(previous, `port ${port} replaces it`);
+      forwards.set(urlKey(target.id, port), f);
       if (link.ports.has(port)) sawListener(f);
       arm(f);
-      o.log(`${target.name}: forwarding localhost:${port} on this computer to the workspace for the sign-in callback (while the workspace listens, ${minutes(capMs)} at most)`);
+      o.log(`${target.name}: forwarding localhost:${port} on this computer to the ${target.noun} for the sign-in callback (while the ${target.noun} listens, ${minutes(capMs)} at most)`);
     }
     emit({ type: "forward.open", forward: viewOf(f) });
   };
@@ -510,8 +543,22 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     return sock.op(op, params);
   };
 
+  const heldPorts = (link: Link): Set<number> => new Set([...link.signIns].flatMap(s => (s.page !== undefined ? [s.page] : [])));
+  const callbacksOf = (targetId: string): Forward[] => allForwards(targetId).filter(f => f.kind === "callback");
+
+  /** A sign-in's end closes the forward on its page's port, unless another sign-in there holds that port; on a target
+   * armed only by sign-ins, the last one's end closes them all. */
+  const release = (link: Link, s: SignIn): void => {
+    s.ended = true;
+    link.signIns.delete(s);
+    if (links.get(link.target.id) !== link) return;
+    const held = heldPorts(link);
+    const all = link.target.armedBySignIn && link.signIns.size === 0;
+    for (const f of callbacksOf(link.target.id)) if (!held.has(f.port) && (all || f.port === s.page)) closeForward(f, "the sign-in ended");
+  };
+
   const tryForward = (link: Link, port: number, kind: ForwardKind): void => {
-    if (!forwarding) return;
+    if (!link.target.kinds.includes(kind)) return;
     forward(link, port, kind).catch((e: unknown) => o.log(`${link.target.name}: not forwarding port ${port} (${e instanceof Error ? e.message : String(e)})`));
   };
 
@@ -527,20 +574,27 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     if (!parsed.success) {
       // A relay event that fails the wire shape (a port outside 1024..65535, say) is dropped with a line, never acted on.
       // A guest's open is here because the process inside the machine is waiting on it and hears nothing when it goes.
-      if (raw["type"] === "browser.open" || raw["type"] === "callback.port" || raw["type"] === "localhost.url" || raw["type"] === "guest.opened") o.log(`${link.target.name}: ignored a malformed ${String(raw["type"])} event from the workspace`);
+      if (raw["type"] === "browser.open" || raw["type"] === "callback.port" || raw["type"] === "localhost.url" || raw["type"] === "guest.opened") o.log(`${link.target.name}: ignored a malformed ${String(raw["type"])} event from the ${link.target.noun}`);
       return;
     }
     const e = parsed.data;
-    const f = forwards.get(link.target.id);
+    if ((e.type === "browser.open" || e.type === "callback.port") && link.target.armedBySignIn && link.signIns.size === 0) {
+      o.log(`${link.target.name}: ignored ${e.type === "browser.open" ? "a sign-in page" : "a callback port"} from the ${link.target.noun}; no sign-in runs there`);
+      return;
+    }
     switch (e.type) {
-      case "port.open":
+      case "port.open": {
         link.ports.add(e.port);
-        if (f?.port === e.port) sawListener(f);
+        const f = forwards.get(urlKey(link.target.id, e.port));
+        if (f !== undefined) sawListener(f);
         return;
-      case "port.close":
+      }
+      case "port.close": {
         link.ports.delete(e.port);
-        if (f?.port === e.port && f.listener) closeForward(f, "the workspace stopped listening");
+        const f = forwards.get(urlKey(link.target.id, e.port));
+        if (f?.listener === true) closeForward(f, `the ${link.target.noun} stopped listening`);
         return;
+      }
       case "browser.open":
         if (autoOpen(link.target.id, e.url, e.port)) {
           const returns = e.port !== undefined ? "; it returns to the machine on its own" : "";
@@ -570,7 +624,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       case "guest.closed":
         // A computer that answers for many workspaces names the one each session was opened inside; a session of
         // another workspace is that workspace's link to hand over, and this one never opens or ends it.
-        if (link.target.machineId !== undefined && e.machineId !== link.target.machineId) return;
+        if (!link.target.guests || (link.target.machineId !== undefined && e.machineId !== link.target.machineId)) return;
         o.guest?.event({ workspaceId: link.target.id, request: (op, params) => downward(link, op, params) }, e);
         return;
       case "tunnel.data":
@@ -578,6 +632,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         // One counter mints every tunnel id here, so a frame belongs to at most one forward and the first that
         // holds it is the one it is for.
         for (const fw of allForwards(link.target.id)) if (tunnelFrame(fw.conns, e, () => touch(fw))) return;
+        tunnelFrame(link.replays, e);
         return;
       default:
         return;
@@ -596,7 +651,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         const early: Record<string, unknown>[] = [];
         let recorded = false;
         const cannotHandle = (e: unknown): void =>
-          o.log(`${link.target.name}: an event from the workspace could not be handled (${e instanceof Error ? e.message : String(e)})`);
+          o.log(`${link.target.name}: an event from the ${link.target.noun} could not be handled (${e instanceof Error ? e.message : String(e)})`);
         /** The one road every event from this machine takes, live or out of the queue, so a throw from a hook this
          * relay's caller owns says so and the link lives rather than tearing down the socket the event arrived on.
          * The catch is here and not in the connect the dial happened to use, since that road is the caller's too. */
@@ -626,7 +681,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         // And takes the guest sessions on this machine, which go to the last socket that asked for them. A daemon
         // deployed before the road existed answers that it has no such op, and the guests there keep the command
         // that rides in its bundle.
-        if (o.guest !== undefined) await sock.op("guest.watch").catch(() => undefined);
+        if (o.guest !== undefined && link.target.guests) await sock.op("guest.watch").catch(() => undefined);
         if (link.stopped) {
           sock.close();
           return;
@@ -674,7 +729,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       f.unreachableLogged = false;
       if (f.kind === "callback") {
         if (f.listener && !link.ports.has(f.port)) {
-          closeForward(f, "the workspace stopped listening while the daemon link was down");
+          closeForward(f, `the ${link.target.noun} stopped listening while the daemon link was down`);
           continue;
         }
         if (link.ports.has(f.port)) sawListener(f);
@@ -705,7 +760,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
 
   const add = (target: Target): void => {
     if (closed || links.has(target.id)) return;
-    const link: Link = { target, ports: new Set(), stopped: false, done: Promise.resolve(), waiting: [] };
+    const link: Link = { target, ports: new Set(), stopped: false, done: Promise.resolve(), waiting: [], replays: new Map(), signIns: new Set() };
     link.done = run(link);
     links.set(target.id, link);
   };
@@ -747,6 +802,10 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   const dialled = (id: string, name: string, reach: () => Promise<DaemonReachView>): Target => ({
     id,
     name,
+    noun: "workspace",
+    kinds: workspaceKinds,
+    guests: true,
+    armedBySignIn: false,
     ownPorts: true,
     open: async at => {
       const road = await reach();
@@ -761,6 +820,10 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   const servedTarget = (id: string, name: string, machineId: string): Target => ({
     id,
     name,
+    noun: "workspace",
+    kinds: workspaceKinds,
+    guests: true,
+    armedBySignIn: false,
     machineId,
     ownPorts: false,
     open: async at => daemonSocketOver(await rt.workspaces.daemonChannel(id, at.onEvent)),
@@ -768,11 +831,126 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
 
   /** The target for one running workspace, on whichever of the two roads its own runtime says it is on. */
   const addWorkspace = (w: { id: string; name: string; machineId: string }): void => {
-    if (closed || links.has(w.id)) return;
+    if (closed || !holdsWorkspaces || links.has(w.id)) return;
     void rt.workspaces.servedByItsComputer(w.id).then(
       served => add(served ? servedTarget(w.id, w.name, w.machineId) : dialled(w.id, w.name, () => rt.workspaces.daemonReach(w.id))),
       () => {},
     );
+  };
+
+  /** A computer this host holds as a place: the link is a channel over the socket that computer opened, so nothing is
+   * dialled, and what it carries here is a sign-in's callback and nothing else. */
+  const placeTarget = (id: string, name: string): Target => ({
+    id,
+    name,
+    noun: "computer",
+    kinds: ["callback"],
+    guests: false,
+    armedBySignIn: true,
+    ownPorts: true,
+    open: async at => {
+      const channel = rt.places?.channel(id, at.onEvent);
+      if (channel === undefined) throw new Error(`${name} is not connected`);
+      return daemonSocketOver(channel);
+    },
+  });
+
+  const addPlace = (id: string, name: string): void => {
+    if (o.places === true) add(placeTarget(id, name));
+  };
+
+  /** One landed address carried to the port the target's sign-in page returns to, as the one request a browser there
+   * would have made, for a sign-in whose port this computer could not listen on. Only the outcome is logged. */
+  const deliver = async (link: Link, signIn: SignIn, landed: string): Promise<void> => {
+    const { target } = link;
+    if (signIn.ended) throw new Error(`the sign-in on ${target.name} has ended; start it again`);
+    let url: URL | undefined;
+    try {
+      url = new URL(landed.trim());
+    } catch {
+      url = undefined;
+    }
+    if (url === undefined || url.protocol !== "http:" || !isLoopback(url.hostname)) throw new Error("that is not an address on localhost: paste the address your browser landed on");
+    const port = Number(url.port);
+    if (signIn.page === undefined || port !== signIn.page) throw new Error(`that address is on port ${url.port || "80"}, not the port the sign-in's page returns to`);
+    const sock = link.sock;
+    if (sock === undefined) throw new Error(linkDownLine(target.name));
+    const tunnelId = `t${++seq}`;
+    const answer = new PassThrough();
+    link.replays.set(tunnelId, answer as unknown as Socket);
+    const status = new Promise<string>((resolve, reject) => {
+      let head = "";
+      let settled = false;
+      const cancel = clock.schedule(() => reject(new Error(`the sign-in on ${target.name} did not answer within ${seconds(DELIVER_MS)}`)), DELIVER_MS, { unref: true });
+      const done = (line: string): void => {
+        settled = true;
+        cancel();
+        resolve(line);
+      };
+      answer.on("data", (d: Buffer) => {
+        if (settled) return;
+        head += d.toString("latin1");
+        const at = head.indexOf("\r\n");
+        if (at >= 0 && at <= CALLBACK_HOLD_MAX_BYTES) return done(head.slice(0, at));
+        if (head.length <= CALLBACK_HOLD_MAX_BYTES) return;
+        settled = true;
+        head = "";
+        cancel();
+        reject(new Error(`the sign-in on ${target.name} answered the address with more than ${CALLBACK_HOLD_MAX_BYTES / 1024} KB before its status line`));
+      });
+      answer.on("end", () => {
+        if (!settled) done(head.split("\r\n")[0] ?? "");
+      });
+    });
+    // A deadline that passes while the open is still in flight is read below, not left unhandled.
+    status.catch(() => undefined);
+    try {
+      await sock.op("tunnel.open", { tunnelId, port });
+      const request = `GET ${url.pathname}${url.search} HTTP/1.1\r\nHost: localhost:${port}\r\nConnection: close\r\n\r\n`;
+      await sock.op("tunnel.write", { tunnelId, data: Buffer.from(request).toString("base64") });
+      const line = await status;
+      const code = Number(line.split(" ")[1]);
+      if (!(code >= 200 && code < 400)) throw new Error(`the sign-in on ${target.name} answered the address with ${line === "" ? "nothing" : line.length > QUOTE_MAX ? `${line.slice(0, QUOTE_MAX)}...` : line}`);
+      o.log(`${target.name}: carried the address your browser landed on to port ${port} for the sign-in`);
+    } catch (e) {
+      o.log(`${target.name}: the address your browser landed on did not reach port ${port}`);
+      throw e;
+    } finally {
+      link.replays.delete(tunnelId);
+      void sock.op("tunnel.close", { tunnelId }).catch(() => undefined);
+    }
+  };
+
+  const callbackLink = (target: AgentsTarget): Link | undefined => {
+    const link = links.get("workspaceId" in target ? target.workspaceId : target.placeId);
+    return link !== undefined && link.target.kinds.includes("callback") ? link : undefined;
+  };
+
+  /** What one sign-in on a target is handed: the forward for the page it saw, the road for a landed address, and its
+   * end, which closes that forward. */
+  const openSignIn = (target: AgentsTarget): SignInForward | undefined => {
+    const link = callbackLink(target);
+    if (link === undefined) return undefined;
+    const id = link.target.id;
+    const signIn: SignIn = { ended: false };
+    link.signIns.add(signIn);
+    return {
+      arm: async url => {
+        const port = callbackPortOf(url);
+        if (port === undefined || signIn.ended || links.get(id) !== link) return false;
+        signIn.page = port;
+        await forward(link, port, "callback");
+        if (signIn.ended) {
+          release(link, signIn);
+          return false;
+        }
+        return forwardOn(id, port) !== undefined;
+      },
+      deliver: landed => deliver(link, signIn, landed),
+      close: () => {
+        if (!signIn.ended) release(link, signIn);
+      },
+    };
   };
 
   /** The workspace was named: every row and every log line for it reads the name it carries now. The link's target
@@ -812,6 +990,19 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       case "workspace.deleted":
         void drop(e.workspaceId, "the workspace was deleted", "close");
         return;
+      case "place.joined":
+        if (isJoinedComputer(e.place)) addPlace(e.place.id, e.place.name);
+        return;
+      case "place.present": {
+        // The link redials on its own clock; a computer that is back is dialled now.
+        const link = links.get(e.placeId);
+        if (link !== undefined) link.wake?.();
+        else if (rt.places !== undefined) addPlace(e.placeId, rt.places.nameOf(e.placeId));
+        return;
+      }
+      case "place.removed":
+        void drop(e.placeId, "the computer was removed", "close");
+        return;
       default:
         return;
     }
@@ -824,9 +1015,18 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     },
     () => {},
   );
-  if (o.builder !== undefined) {
+  if (o.builder !== undefined && holdsWorkspaces) {
     const b = o.builder;
     add(dialled(b.id, `${b.name} (builder)`, () => rt.golden.builderReach(b.id)));
+  }
+  if (o.places === true) {
+    void rt.places?.list(clock.now()).then(
+      rows => {
+        for (const p of rows) if (isJoinedComputer(p)) addPlace(p.id, p.name);
+      },
+      () => {},
+    );
+    detaches.push(rt.agents.forwards({ reaches: target => callbackLink(target) !== undefined, open: openSignIn }));
   }
 
   const every = (): Forward[] => [...forwards.values(), ...urlForwards.values()];

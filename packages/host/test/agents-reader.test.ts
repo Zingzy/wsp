@@ -74,6 +74,7 @@ describe("the agents report off a computer you own whose daemon runs as root", (
     });
     expect(read.refused).toEqual([]);
     expect(read.user).toBe("ada");
+    expect(read.runAs).toBe("ada");
     for (const line of lines.slice(1)) expect(line.startsWith("runuser -u 'ada' -- bash -c "), line.slice(0, 80)).toBe(true);
     expect(lines.join("\n")).not.toMatch(/-u 'root'|-u root\b/);
     const agent = (id: string) => read.agents.find(a => a.id === id)!;

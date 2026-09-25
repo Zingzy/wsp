@@ -104,7 +104,7 @@ export function SignInFlowView({ view, label }: { view: FlowView; label: string 
         )}
       </div>
       <div data-sign-in-line className="flex h-10 items-center">
-        {flow.paste === true && flow.state === "waiting" ? <SignInCode label={label} onCode={view.code} {...(flow.finish === "address" ? { ask: AGENTS_LIST_WORDS.landedAddress } : {})} /> : null}
+        {flow.paste === true && flow.state === "waiting" ? <SignInCode label={label} onCode={view.code} {...(flow.finish !== undefined ? { ask: AGENTS_LIST_WORDS.landedAddress } : {})} /> : null}
       </div>
       <RefusalSlot k="sign-in-refused" {...(flow.state === "failed" && flow.said !== undefined ? { said: flow.said } : {})} />
     </div>

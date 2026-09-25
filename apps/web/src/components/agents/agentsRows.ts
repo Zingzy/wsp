@@ -175,8 +175,8 @@ export type SignInStart =
   | { readonly kind: "copy"; readonly line: string; readonly why?: string }
   | { readonly kind: "terminal"; readonly line: string };
 
-/** How a server's sign-in finishes: in the browser on this computer, where the harness takes the redirect itself, or
- * by the address the browser landed on pasted back. */
+/** How a server's sign-in finishes: in the browser, where the harness takes the redirect itself on this computer or
+ * over the host's callback relay, or by the address the browser landed on pasted back. */
 export type ServerFinish = "callback" | "address";
 
 /** A sign-in as its detail draws it while it stands. */

@@ -1215,12 +1215,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   };
 
   /** A frame the forward owns rather than the panes: the bytes of one connection riding a tunnel, or its end.
-   * Answers whether it was taken. */
+   * Answers whether it was taken; a tunnel another road on this link opened is that road's to read. */
   const tunnelled = (placeId: string, e: DaemonEvent): boolean => {
     if (e.type !== "tunnel.data" && e.type !== "tunnel.end") return false;
     const conn = connOf(placeId, e.tunnelId);
-    if (e.type === "tunnel.data") conn?.write(Buffer.from(e.data, "base64"));
-    else conn?.end();
+    if (conn === undefined) return false;
+    if (e.type === "tunnel.data") conn.write(Buffer.from(e.data, "base64"));
+    else conn.end();
     return true;
   };
   const connOf = (placeId: string, tunnelId: string): Socket | undefined => {
