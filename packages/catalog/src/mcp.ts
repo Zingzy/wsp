@@ -6,7 +6,7 @@
 // the machine, here, since a machine need carry no node of its own. An agent
 // entry registers its format and its files. Pure text in and out: nothing here
 // reads or writes a file.
-import { applyEdits, modify, type JSONPath } from "jsonc-parser";
+import { findNodeAtLocation, parseTree, visit, type JSONPath, type Node } from "jsonc-parser";
 import { readJsonc, type Jsonc } from "./jsonc.js";
 import type { McpCheck } from "./mcp-check.js";
 import type { McpLogin } from "./mcp-login.js";
@@ -172,38 +172,197 @@ function jsonObject(text: string | undefined): Record<string, unknown> {
 /** One change to a JSON file: the value at the path set, or taken out where it is undefined. */
 type JsonEdit = [JSONPath, unknown];
 
-/** The same change made to the parsed value, a missing object on the way made as the in-place edit makes one. */
+/** The same change made to the parsed value, a missing object on the way made as the in-place edit makes one; a
+ * number at the end is an element of the array there, -1 one put after its last. */
 function setAt(root: Tree, [path, value]: JsonEdit): void {
   // Own keys only, so a name such as __proto__ is a key as JSON.parse reads it and never the object's prototype.
   const put = (o: Tree, key: string, v: unknown): void => void Object.defineProperty(o, key, { value: v, enumerable: true, writable: true, configurable: true });
+  const last = path[path.length - 1]!;
+  const via = path.slice(0, -1).map(String);
   let at = root;
-  for (const key of path.slice(0, -1).map(String)) {
-    const next = Object.hasOwn(at, key) ? tree(at[key]) : undefined;
-    if (next === undefined) put(at, key, {});
+  for (const [i, key] of via.entries()) {
+    const held = Object.hasOwn(at, key) ? at[key] : undefined;
+    if (i === via.length - 1 && typeof last === "number" && Array.isArray(held)) {
+      if (value === undefined) held.splice(last, 1);
+      else if (last === -1) held.push(value);
+      else held[last] = value;
+      return;
+    }
+    if (tree(held) === undefined) put(at, key, {});
     at = at[key] as Tree;
   }
-  const last = String(path[path.length - 1]);
-  if (value === undefined) delete at[last];
-  else put(at, last, value);
+  if (value === undefined) delete at[String(last)];
+  else put(at, String(last), value);
+}
+
+interface Comment {
+  at: number;
+  end: number;
+}
+
+function commentsOf(text: string): Comment[] {
+  const out: Comment[] = [];
+  visit(text, { onComment: (at, length) => void out.push({ at, end: at + length }) }, { allowTrailingComma: true });
+  return out;
+}
+
+/** How the text is laid out around its members, reading comments as the parser found them. */
+function layout(text: string, comments: readonly Comment[]) {
+  const lineStart = (p: number): number => text.lastIndexOf("\n", p - 1) + 1;
+  const starts = new Map(comments.map(c => [c.at, c]));
+  const commentAt = (p: number): Comment | undefined => starts.get(p);
+  /** The first place at or after `p` that is neither white space nor a comment. */
+  const past = (p: number): number => {
+    for (;;) {
+      while (p < text.length && /\s/.test(text[p]!)) p++;
+      const c = commentAt(p);
+      if (c === undefined) return p;
+      p = c.end;
+    }
+  };
+  /** Past the spaces, tabs and one-line comments that end the line from `p`, or -1 where anything else stands on it. */
+  const lineRest = (p: number): number => {
+    for (;;) {
+      while (text[p] === " " || text[p] === "\t" || text[p] === "\r") p++;
+      if (p >= text.length) return p;
+      if (text[p] === "\n") return p + 1;
+      const c = commentAt(p);
+      if (c === undefined || text.slice(c.at, c.end).includes("\n")) return -1;
+      p = c.end;
+    }
+  };
+  const indent = (p: number): string => {
+    const from = lineStart(p);
+    let to = from;
+    while (text[to] === " " || text[to] === "\t") to++;
+    return text.slice(from, to);
+  };
+  return { lineStart, commentAt, past, lineRest, indent };
+}
+
+/** What taking out one member of an object or one element of an array cuts: its own text, from the comment lines
+ * right above it (a blank line ends them) through the comma after it and the comment at the end of its line, with
+ * the comma before it where it was the last; a member sharing its line with another is cut alone. `own` is the span
+ * whose comments go with it. */
+function memberCuts(text: string, kids: readonly Node[], i: number, comments: readonly Comment[]): { cuts: [number, number][]; own: [number, number] } {
+  const { lineStart, commentAt, past, lineRest } = layout(text, comments);
+  const unit = kids[i]!;
+  const after = past(unit.offset + unit.length);
+  const comma = text[after] === "," ? after : -1;
+  const end = comma >= 0 ? comma + 1 : unit.offset + unit.length;
+  const cuts: [number, number][] = [];
+  if (comma < 0 && i > 0) {
+    const before = past(kids[i - 1]!.offset + kids[i - 1]!.length);
+    if (text[before] === ",") cuts.push([before, before + 1]);
+  }
+  const rest = lineRest(end);
+  if (text.slice(lineStart(unit.offset), unit.offset).trim() !== "" || rest < 0) {
+    let to = end;
+    while (comma >= 0 && (text[to] === " " || text[to] === "\t")) to++;
+    cuts.push([unit.offset, to]);
+    return { cuts, own: [unit.offset, to] };
+  }
+  let from = lineStart(unit.offset);
+  while (from > 0) {
+    const above = lineStart(from - 1);
+    let first = above;
+    while (text[first] === " " || text[first] === "\t") first++;
+    if (commentAt(first) === undefined || lineRest(above) !== from) break;
+    from = above;
+  }
+  cuts.push([from, rest]);
+  return { cuts, own: [from, rest] };
+}
+
+/** A value as it is put into the text: on lines of its own under `indent` in a file laid out on lines, else on one. */
+const rendered = (value: unknown, indent: string | undefined, eol: string): string =>
+  indent === undefined ? JSON.stringify(value) : JSON.stringify(value, null, 2).replace(/\n/g, `${eol}${indent}`);
+
+/** The text with `entry` put into `container` after its last member: on a line of its own under that member where it
+ * ends its line, so the comment at the end of that line stays that member's; beside it where the container sits on
+ * one line; on the line after the opening bracket of an empty one laid out on lines. */
+function inserted(text: string, container: Node, entry: (indent: string | undefined) => string, comments: readonly Comment[]): string {
+  const { past, lineRest, indent } = layout(text, comments);
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const kids = container.children ?? [];
+  const at = (p: number, put: string): string => text.slice(0, p) + put + text.slice(p);
+  if (kids.length === 0) {
+    const open = container.offset + 1;
+    const rest = lineRest(open);
+    if (rest < 0 || text[rest - 1] !== "\n") return at(open, entry(undefined));
+    const inner = `${indent(container.offset)}  `;
+    return at(rest, `${inner}${entry(inner)}${eol}`);
+  }
+  const last = kids[kids.length - 1]!;
+  const end = last.offset + last.length;
+  const after = past(end);
+  const trailing = text[after] === ",";
+  const rest = lineRest(trailing ? after + 1 : end);
+  if (rest < 0 || text[rest - 1] !== "\n") return trailing ? at(after + 1, ` ${entry(undefined)},`) : at(end, `, ${entry(undefined)}`);
+  const inner = indent(last.offset);
+  const line = `${inner}${entry(inner)}${trailing ? "," : ""}${eol}`;
+  return trailing ? at(rest, line) : `${text.slice(0, end)},${text.slice(end, rest)}${line}${text.slice(rest)}`;
+}
+
+const LOST_COMMENT = "the change would lose a comment that is not the server's, so it was not made; change the file by hand";
+
+/** One edit made to the text: a member or element taken out by its own span, a value put in where it stood, or put
+ * into the deepest object or array on its path that is there. Every comment outside what the edit takes out must stand
+ * after it, or the edit is refused. */
+function editOnce(text: string, [path, value]: JsonEdit): string {
+  const comments = commentsOf(text);
+  const doc = parseTree(text, [], { allowTrailingComma: true });
+  if (doc === undefined) throw new Error("the file is not JSON");
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  let depth = path.length;
+  while (depth > 0 && findNodeAtLocation(doc, path.slice(0, depth)) === undefined) depth--;
+  const node = findNodeAtLocation(doc, path.slice(0, depth)) ?? doc;
+  let out: string;
+  let own: [number, number] = [0, 0];
+  if (value === undefined) {
+    if (depth < path.length) return text;
+    const unit = node.parent?.type === "property" ? node.parent : node;
+    const kids = unit.parent?.children ?? [];
+    const cut = memberCuts(text, kids, kids.indexOf(unit), comments);
+    own = cut.own;
+    out = text;
+    for (const [from, to] of [...cut.cuts].sort((x, y) => y[0] - x[0])) out = out.slice(0, from) + out.slice(to);
+  } else {
+    const wrap = (from: number): unknown => path.slice(from).reduceRight<unknown>((v, k) => (typeof k === "number" ? [v] : { [k]: v }), value);
+    const wrapped = wrap(depth + 1);
+    const key = path[depth];
+    if (node.type === "object" && typeof key === "string") {
+      out = inserted(text, node, indent => `${JSON.stringify(key)}: ${rendered(wrapped, indent, eol)}`, comments);
+    } else if (node.type === "array" && key === -1) {
+      out = inserted(text, node, indent => rendered(wrapped, indent, eol), comments);
+    } else {
+      own = [node.offset, node.offset + node.length];
+      const lined = text.slice(node.offset, node.offset + node.length).includes("\n");
+      out = text.slice(0, node.offset) + rendered(wrap(depth), lined ? layout(text, comments).indent(node.offset) : undefined, eol) + text.slice(node.offset + node.length);
+    }
+  }
+  const kept = comments.filter(c => c.at < own[0] || c.end > own[1]).map(c => text.slice(c.at, c.end));
+  const left = commentsOf(out).map(c => out.slice(c.at, c.end));
+  if (kept.length !== left.length || kept.some((c, i) => c !== left[i])) throw new Error(LOST_COMMENT);
+  return out;
 }
 
 /** The file's text with the edits made in place, so every comment and every byte they do not touch stays where it
  * was; `root` is the text parsed. An edit whose result would read as anything but the edits made to that value is
  * refused, since a file with a key twice or a shape the in-place edit cannot follow is not written as a guess. */
 function editJsonc(text: string, root: Tree, edits: readonly JsonEdit[]): string {
-  const edited = (): string | undefined => {
-    try {
-      let out = text;
-      // A value put in is laid out on lines of its own; a key taken out leaves every line beside it as written.
-      for (const [path, value] of edits) out = applyEdits(out, modify(out, path, value, value === undefined ? {} : { formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" } }));
-      for (const edit of edits) setAt(root, edit);
-      return jsonCanonical(readJsonc(out).value) === jsonCanonical(root) ? out : undefined;
-    } catch {
-      return undefined;
+  let out = text;
+  let same = false;
+  try {
+    for (const edit of edits) {
+      out = editOnce(out, edit);
+      setAt(root, edit);
     }
-  };
-  const out = edited();
-  if (out === undefined) throw new Error("the file could not be changed in place, which keeps its comments; change it by hand");
+    same = jsonCanonical(readJsonc(out).value) === jsonCanonical(root);
+  } catch (e) {
+    if (e instanceof Error && e.message === LOST_COMMENT) throw e;
+  }
+  if (!same) throw new Error("the file could not be changed in place, which keeps its comments; change it by hand");
   return out;
 }
 
@@ -311,15 +470,10 @@ function jsonRemover(shape: JsonShape): McpFormat["remove"] {
     if (table === undefined) return { text };
     const took = names.filter(name => Object.hasOwn(table, name));
     if (took.length === 0) return { text };
-    const edits = took.map((name): JsonEdit => [[...at, name], undefined]);
+    let out = editJsonc(text, root, took.map((name): JsonEdit => [[...at, name], undefined]));
     // A name the file switches off outside its entry is switched back on as the entry goes, so it goes whole.
-    for (const name of took) {
-      if (shape.flip === undefined || !(shape.off?.(root) ?? []).includes(name)) continue;
-      const on = shape.flip(root, [...at, name], name, true);
-      setAt(root, on);
-      edits.push(on);
-    }
-    return { text: editJsonc(text, root, edits) };
+    for (const name of took) if (shape.flip !== undefined && (shape.off?.(root) ?? []).includes(name)) out = editJsonc(out, root, shape.flip(root, [...at, name], name, true));
+    return { text: out };
   };
 }
 
@@ -372,8 +526,9 @@ interface JsonShape {
   projects: boolean;
   /** The names the file switches off outside their entries, as Gemini CLI's `mcp.excluded`. */
   off?(root: Record<string, unknown>): string[];
-  /** The edit that turns the entry at `entry` on or off by the switch the agent reads; absent where it keeps none. */
-  flip?(root: Tree, entry: JSONPath, name: string, on: boolean): JsonEdit;
+  /** The edits that turn the entry at `entry` on or off by the switch the agent reads, in the order they are made;
+   * absent where it keeps none. */
+  flip?(root: Tree, entry: JSONPath, name: string, on: boolean): JsonEdit[];
 }
 
 function jsonFormat(shape: JsonShape): McpFormat {
@@ -424,7 +579,7 @@ function jsonEnabler(key: string, flip: NonNullable<JsonShape["flip"]>): NonNull
     const source = project === undefined ? root : tree(tree(root.projects)?.[project]);
     if (tree(tree(source?.[key])?.[name]) === undefined) throw new Error(`the file names no server called ${name}`);
     const at: JSONPath = project === undefined ? [key, name] : ["projects", project, key, name];
-    return { text: editJsonc(text, root, [flip(root, at, name, on)]) };
+    return { text: editJsonc(text, root, flip(root, at, name, on)) };
   };
 }
 
@@ -461,8 +616,10 @@ export const MCP_SERVERS_JSON: McpFormat = mcpServersJson(/\$\{([A-Za-z_][A-Za-z
 export const GEMINI_SETTINGS_JSON: McpFormat = mcpServersJson(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))/g, url => ({ httpUrl: url }), {
   off: root => strs(tree(root.mcp)?.excluded),
   flip: (root, _entry, name, on) => {
-    const rest = strs(tree(root.mcp)?.excluded).filter(n => n !== name);
-    return [["mcp", "excluded"], on ? rest : [...rest, name]];
+    const held = tree(root.mcp)?.excluded;
+    if (!Array.isArray(held)) return on ? [] : [[["mcp", "excluded"], [name]]];
+    if (!on) return [[["mcp", "excluded", -1], name]];
+    return held.flatMap((n, i): JsonEdit[] => (n === name ? [[["mcp", "excluded", i], undefined]] : [])).reverse();
   },
 });
 
@@ -484,7 +641,7 @@ export const OPENCODE_JSON: McpFormat = jsonFormat({
     return { name, scope, transport: { kind: "stdio", command, args, env: dict(raw.environment) }, envRefs: [], ...off };
   },
   entry: s => (s.kind === "stdio" ? { type: "local", command: [s.command, ...s.args], enabled: true, ...some("environment", s.env) } : { type: "remote", url: s.url, enabled: true, ...some("headers", s.headers) }),
-  flip: (_root, entry, _name, on) => [[...entry, "enabled"], on],
+  flip: (_root, entry, _name, on) => [[[...entry, "enabled"], on]],
 });
 
 // --- Codex's TOML ------------------------------------------------------------------------------------------------

@@ -145,6 +145,15 @@ describe("place", () => {
     expect((parseJsonc(url) as { mcp: { ctx: { url: string } } }).mcp.ctx.url).toBe("https://ctx.example/*/mcp");
   });
 
+  it("an add goes on a line of its own after the last server, so the comment at the end of that server's line stays its own", () => {
+    const text = '{\n  "mcpServers": { // header\n    "a": { "command": "x" } // note on a\n  }\n}\n';
+    const placed = MCP_SERVERS_JSON.place(text, "w", stdio("n", [])).text;
+    expect(placed).toBe('{\n  "mcpServers": { // header\n    "a": { "command": "x" }, // note on a\n    "w": {\n      "command": "n",\n      "args": []\n    }\n  }\n}\n');
+    const empty = MCP_SERVERS_JSON.remove(placed, ["a", "w"]).text;
+    expect(empty).toBe('{\n  "mcpServers": { // header\n  }\n}\n');
+    expect(MCP_SERVERS_JSON.place(empty, "w", stdio("n", [])).text).toBe('{\n  "mcpServers": { // header\n    "w": {\n      "command": "n",\n      "args": []\n    }\n  }\n}\n');
+  });
+
   it("a file that holds the servers' key twice is refused rather than edited into something it was not meant to read as", () => {
     const twice = '{ "mcpServers": { "a": { "command": "x" } }, // mine\n "mcpServers": { "b": { "command": "y" } } }';
     expect(() => MCP_SERVERS_JSON.place(twice, "wsp", SERVER)).toThrow("the file could not be changed in place, which keeps its comments; change it by hand");
@@ -478,7 +487,7 @@ describe("remove", () => {
     const own = '{\n  "theme": "x",\n  "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"] }, "mine": { "type": "local", "command": ["mine"] } }\n}\n';
     const gone = OPENCODE_JSON.remove(own, ["wsp"]);
     expect(JSON.parse(gone.text)).toEqual({ theme: "x", mcp: { mine: { type: "local", command: ["mine"] } } });
-    expect(gone.text).toBe('{\n  "theme": "x",\n  "mcp": {"mine": { "type": "local", "command": ["mine"] } }\n}\n');
+    expect(gone.text).toBe('{\n  "theme": "x",\n  "mcp": { "mine": { "type": "local", "command": ["mine"] } }\n}\n');
     expect(OPENCODE_JSON.remove(own, ["nobody"]).text).toBe(own);
   });
 
@@ -489,6 +498,52 @@ describe("remove", () => {
     expect(gone).toContain("// the rest\n");
     expect(parseJsonc(gone)).toEqual({ theme: "x", mcp: {} });
     expect(OPENCODE_JSON.remove(own, ["nobody"]).text).toBe(own);
+  });
+
+  it("a remove takes out the server's own lines, its comment lines above it and the comment at the end of its line, and no neighbour's comment", () => {
+    const claude = [
+      "{ // my settings",
+      '  "mcpServers": { // header for all my servers',
+      "    // about a",
+      '    "a": { "command": "x" }, // note on a',
+      "    // about b",
+      '    "b": { "command": "y" } // note on b',
+      "  } // end of servers",
+      "}",
+      "",
+    ].join("\n");
+    expect(MCP_SERVERS_JSON.remove(claude, ["b"]).text).toBe(
+      ["{ // my settings", '  "mcpServers": { // header for all my servers', "    // about a", '    "a": { "command": "x" } // note on a', "  } // end of servers", "}", ""].join("\n"),
+    );
+    expect(MCP_SERVERS_JSON.remove(claude, ["a"]).text).toBe(
+      ["{ // my settings", '  "mcpServers": { // header for all my servers', "    // about b", '    "b": { "command": "y" } // note on b', "  } // end of servers", "}", ""].join("\n"),
+    );
+    const middle = '{\n  "mcpServers": {\n    "a": { "command": "x" }, // note on a\n\n    // section two\n    "b": { "command": "y" }, /* note on b */\n    "c": { "command": "z" } // note on c\n  }\n}\n';
+    expect(MCP_SERVERS_JSON.remove(middle, ["b"]).text).toBe('{\n  "mcpServers": {\n    "a": { "command": "x" }, // note on a\n\n    "c": { "command": "z" } // note on c\n  }\n}\n');
+    const blank = '{\n  "mcpServers": {\n    // my servers\n\n    "a": { "command": "x" }\n  }\n}\n';
+    expect(MCP_SERVERS_JSON.remove(blank, ["a"]).text).toBe('{\n  "mcpServers": {\n    // my servers\n\n  }\n}\n');
+  });
+
+  it("Gemini CLI turns a server on, and takes a removed one out of mcp.excluded, by that one name, every other name's comment kept", () => {
+    const text = [
+      "{",
+      '  "mcp": {',
+      '    "excluded": [ // switched off',
+      '      "s", // trying it',
+      '      "other" // keep off',
+      "    ]",
+      "  },",
+      '  "mcpServers": { "s": { "command": "x" }, "other": { "command": "y" }, "t": { "command": "z" } }',
+      "}",
+      "",
+    ].join("\n");
+    const kept = ['    "excluded": [ // switched off', '      "other" // keep off', "    ]"].join("\n");
+    expect(GEMINI_SETTINGS_JSON.enable!(text, "s", true).text).toContain(kept);
+    expect(GEMINI_SETTINGS_JSON.remove(text, ["s"]).text).toContain(kept);
+    const off = GEMINI_SETTINGS_JSON.enable!(text, "t", false).text;
+    expect(off).toContain(['      "s", // trying it', '      "other", // keep off', '      "t"', "    ]"].join("\n"));
+    expect(GEMINI_SETTINGS_JSON.enable!('{ "mcp": { "excluded": ["s"] }, "mcpServers": { "t": {} } }', "t", false).text).toBe('{ "mcp": { "excluded": ["s", "t"] }, "mcpServers": { "t": {} } }');
+    expect(GEMINI_SETTINGS_JSON.read(off, HOME).map(s => [s.name, s.disabled === true])).toEqual([["s", true], ["other", true], ["t", true]]);
   });
 
   it("Gemini CLI takes a removed server's name out of mcp.excluded too, so a later server of that name is not born off", () => {
