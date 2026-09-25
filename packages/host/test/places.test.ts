@@ -1719,7 +1719,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     // The person's own ~/.local/bin and login file were there before the add; nothing else of the list was.
     const box = failingBox(w => w.path === at.binDir || w.as === "login");
     const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const thrown = await placeInstaller({ backend: box.backend as never, ...assets(tmp("undo-add"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, box.stage).catch((e: unknown) => e as Error);
+    const thrown = await placeInstaller({ backend: box.backend as never, ...assets(tmp("undo-add"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, box.stage).then(() => new Error("the add stood"), (e: unknown) => e as Error);
     warned.mockRestore();
     // Marked as taken back, which is what lets the runtime drop the record the join made.
     expect(thrown).toBeInstanceOf(PlaceAddTakenBackError);
@@ -1777,7 +1777,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(unsaid.ran.some(script => script.endsWith(`echo ${DAEMON_GONE_LINE}`))).toBe(false);
     // The undo ran and did not finish.
     const dropped = failingBox(() => false, { undo: { exitCode: 255, stdout: "", stderr: "Connection closed\n" } });
-    const kept = await placeInstaller({ backend: dropped.backend as never, ...assets(tmp("undo-dropped"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, dropped.stage).catch((e: unknown) => e as Error);
+    const kept = await placeInstaller({ backend: dropped.backend as never, ...assets(tmp("undo-dropped"), [X86]) })({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4720"] }, dropped.stage).then(() => new Error("the add stood"), (e: unknown) => e as Error);
     expect(kept.message).toBe(addUndoneLine(SERVICE_SAID, false));
     expect(kept).not.toBeInstanceOf(PlaceAddTakenBackError);
     warned.mockRestore();
