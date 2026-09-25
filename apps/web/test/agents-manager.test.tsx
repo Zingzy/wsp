@@ -397,7 +397,9 @@ describe("the detail", () => {
     expect(breaks).toHaveLength(text.split("/").length - 1);
     for (const b of breaks) expect(b.previousSibling?.textContent?.endsWith("/")).toBe(true);
     // A hyphen breaks a line in Chromium, so every word between the slashes stands whole.
-    for (const word of value.querySelectorAll("span")) expect([word.className, word.textContent?.includes("/")]).toEqual(["whitespace-nowrap", false]);
+    const words = [...value.querySelectorAll("span")];
+    expect(words.map(w => w.textContent)).toEqual(text.split("/").filter(Boolean));
+    for (const w of words) expect(w.className).toBe("whitespace-nowrap");
   });
 
   it("leaves no timer behind when a copied value's glyph goes before its check has turned back", async () => {
