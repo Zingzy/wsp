@@ -30,7 +30,7 @@ function wrapperApp(path: string): string | undefined {
   const dir = dirs.at(-1) ?? "";
   if (!/shims$/.test(dir)) return undefined;
   const app = dir.replace(/-?(cli-)?shims$/, "");
-  return app !== "" ? app : dirs.at(-2);
+  return (app !== "" ? app : dirs.at(-2))?.replace(/^\./, "");
 }
 
 /** Where an agent is installed off every match on PATH: the first that is no wrapper's, and the app whose wrapper

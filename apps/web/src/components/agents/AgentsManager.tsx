@@ -233,7 +233,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const toolbar =
     tab.search === undefined ? null : (
       <div data-agents-toolbar className="flex h-8 items-center gap-1.5 px-4">
-        <InputGroup variant="ghost" className="h-8 min-w-0 flex-1">
+        <InputGroup variant="ghost" className="-ms-3 h-8 min-w-0 flex-1">
           <InputGroupAddon>
             <SearchIcon aria-hidden />
           </InputGroupAddon>

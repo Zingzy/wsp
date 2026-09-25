@@ -142,6 +142,16 @@ describe("the agents report off this computer and off a workspace", () => {
     expect(agent("codex").via).toBeUndefined();
   });
 
+  it("names a dot-folder's wrapper without its dot", async () => {
+    const at = fixture();
+    const shims = join(at.root, ".asdf", "shims");
+    mkdirSync(shims, { recursive: true });
+    writeFileSync(join(shims, "claude"), `#!/bin/sh\nexec ${join(at.bin, "claude")} "$@"\n`);
+    chmodSync(join(shims, "claude"), 0o755);
+    const read = await agentsReader({ vault: () => ({}), here: () => here(at, `${shims}:${at.bin}:/usr/bin:/bin`) }).read({ kind: "here" });
+    expect(read.agents.find(a => a.id === "claude")).toMatchObject({ via: "asdf" });
+  });
+
   it("leaves out a server whose name holds a control character and says which file named it", async () => {
     const at = fixture();
     const file = join(at.home, ".claude.json");
