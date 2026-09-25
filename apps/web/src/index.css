@@ -2113,20 +2113,19 @@ code {
   }
 }
 
-/* Dark mode on the Mac: the whole window stands on the glass. The left sidebar is the bare glass; the right panel
-   lays #060606 at 60 percent over it and the centre #060606 at 72 percent, so the column read in is the darkest and
-   steadiest (tuned live with the owner on 2026-09-25). Inside the panel every edge is an 8 percent hairline and cards
-   a 2 percent tint; the line tokens are the contrast ones, which every border utility reads. Light mode keeps its
-   solid ground. */
+/* Dark mode on the Mac: the whole window stands on the glass, each region #060606 at its own share over it, tuned
+   live with the owner on 2026-09-25 (the dev build's Material panel, Cmd+Shift+M, moves the same variables). Inside
+   the panel every edge is a hairline and cards a faint tint; the line tokens are the contrast ones, which every
+   border utility reads. Light mode keeps its solid ground. */
 .desktop-mac:is(.dark, [data-theme="dark"]) [data-slot="sidebar-inset"] {
   background: transparent;
 }
 
 .desktop-mac:is(.dark, [data-theme="dark"]) {
-  --material-centre: 72%;
-  --material-panel: 60%;
-  --material-sidebar: 0%;
-  --material-line: 8%;
+  --material-centre: 67%;
+  --material-panel: 74%;
+  --material-sidebar: 40%;
+  --material-line: 10%;
   --material-card: 2%;
 }
 

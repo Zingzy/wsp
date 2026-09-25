@@ -7,10 +7,10 @@ import { CheckIcon, CopyIcon, RotateCcwIcon, SlidersHorizontalIcon, XIcon } from
 type Knob = { key: string; label: string; hint: string; min: number; max: number; locked: number };
 
 const KNOBS: readonly Knob[] = [
-  { key: "--material-centre", label: "Chat column", hint: "#060606 over the glass", min: 0, max: 100, locked: 72 },
-  { key: "--material-panel", label: "Right panel", hint: "#060606 over the glass", min: 0, max: 100, locked: 60 },
-  { key: "--material-sidebar", label: "Left sidebar", hint: "#060606 over the glass", min: 0, max: 100, locked: 0 },
-  { key: "--material-line", label: "Panel lines", hint: "white hairline", min: 0, max: 30, locked: 8 },
+  { key: "--material-centre", label: "Chat column", hint: "#060606 over the glass", min: 0, max: 100, locked: 67 },
+  { key: "--material-panel", label: "Right panel", hint: "#060606 over the glass", min: 0, max: 100, locked: 74 },
+  { key: "--material-sidebar", label: "Left sidebar", hint: "#060606 over the glass", min: 0, max: 100, locked: 40 },
+  { key: "--material-line", label: "Panel lines", hint: "white hairline", min: 0, max: 30, locked: 10 },
   { key: "--material-card", label: "Panel cards", hint: "white tint", min: 0, max: 15, locked: 2 },
 ];
 
