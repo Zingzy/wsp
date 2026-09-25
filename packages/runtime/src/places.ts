@@ -436,6 +436,8 @@ export interface PlaceDoor {
   defaultPlace(): Promise<{ placeId?: string }>;
   /** Writes the default mark: the last place a fork landed on. */
   markUsed(placeId: string | undefined): Promise<void>;
+  /** Marks the place default where no mark names a place this host holds: where the first image is sealed. */
+  markDefaultIfNone(placeId: string): Promise<void>;
   /** Puts the agent on a computer over ssh and waits for it to dial back as a place. Refused in one sentence on a
    * host that wired no installer. */
   add(req: { addId?: string; address: string; name?: string; sshPort?: number; keyPath?: string; hostKey?: string; hostUrls: readonly string[]; doorPort?: number; relay?: string }, now: number): Promise<PlaceAdded>;
@@ -866,7 +868,20 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const held = (await store.get(DEFAULT_COLLECTION, DEFAULT_ID)) as { placeId?: unknown } | undefined;
     return typeof held?.placeId === "string" ? held.placeId : undefined;
   };
-  const markDefault = (placeId: string): Promise<void> => store.put(DEFAULT_COLLECTION, DEFAULT_ID, { placeId });
+  // Every write of the mark takes its turn here, so a check-then-write at a seal never lands over a mark set meanwhile.
+  let marking: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(write: () => Promise<T>): Promise<T> => {
+    const run = marking.then(write);
+    marking = run.catch(() => {});
+    return run;
+  };
+  const markDefault = (placeId: string): Promise<void> => inTurn(() => store.put(DEFAULT_COLLECTION, DEFAULT_ID, { placeId }));
+  /** The mark while it names this computer or a place this host still holds; a mark on a row since gone is none. */
+  const markHeld = async (): Promise<string | undefined> => {
+    const marked = await defaultId();
+    if (marked === undefined) return undefined;
+    return marked === HERE_PLACE_ID || providerIds().includes(marked) || (await records()).some(r => r.id === marked) ? marked : undefined;
+  };
 
   /** The host's half of the handshake, the one place it is built and the one place its private key is read: a
    * fresh nonce and a fresh key agreement, the signature over the transcript the other end challenged with, the
@@ -1328,7 +1343,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     kept.delete(placeId);
     backends.delete(placeId);
     await store.delete(PLACES, placeId);
-    if ((await defaultId()) === placeId) await store.delete(DEFAULT_COLLECTION, DEFAULT_ID);
+    await inTurn(async () => {
+      if ((await defaultId()) === placeId) await store.delete(DEFAULT_COLLECTION, DEFAULT_ID);
+    });
     woken(placeId, false);
     closedAt.delete(placeId);
     emit({ type: "place.removed", placeId });
@@ -1658,6 +1675,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       await markDefault(placeId ?? wiredProvider() ?? HERE_PLACE_ID);
     },
 
+    async markDefaultIfNone(placeId) {
+      await inTurn(async () => {
+        if ((await markHeld()) === undefined) await store.put(DEFAULT_COLLECTION, DEFAULT_ID, { placeId });
+      });
+    },
+
     async add(req, at) {
       const install = wiring.install;
       if (install === undefined) throw new Error(NO_PLACE_INSTALLER);
@@ -1813,13 +1836,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     homeOf: async placeId => (await recordOf(placeId))?.report.login["HOME"],
 
     async list() {
-      const defaulted = await defaultId();
       const here = wiring.here();
       const providers = providerIds();
       const held = await records();
       // This computer first, the computers joined to it after, the providers last; exactly one default, which falls
       // to this computer when the mark names a row that is no longer here.
-      const marked = held.some(r => r.id === defaulted) || (defaulted !== undefined && providers.includes(defaulted)) ? defaulted : HERE_PLACE_ID;
+      const marked = (await markHeld()) ?? HERE_PLACE_ID;
       const room = new Map(await Promise.all(held.map(async r => [r.id, await forksOf(r)] as const)));
       return [
         {

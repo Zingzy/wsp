@@ -143,6 +143,7 @@ interface State {
   watching: (() => void)[];
   golden?: { version: number };
   workspace?: { id: string; name: string };
+  place?: { id: string; name: string };
   /** Where a terminal's Ctrl-C would arrive for the run; cancel emits it. */
   signals: EventEmitter;
   handle?: SessionHandle;
@@ -264,6 +265,7 @@ export class InitJobs implements InitDoor {
       ...(s.keyRefused === true ? { keyRefused: true } : {}),
       ...(s.golden !== undefined ? { golden: s.golden } : {}),
       ...(s.workspace !== undefined ? { workspace: s.workspace } : {}),
+      ...(s.place !== undefined ? { place: s.place } : {}),
     };
   }
 
@@ -473,6 +475,7 @@ export class InitJobs implements InitDoor {
     if (agents.size > 0) this.tools(s, this.deps.installTools(agents));
     s.building = true;
     s.phase = "building";
+    s.place = { id: built.place, name: built.name };
     // Every sign-in the screens chose is a row from the first frame, waiting for its turn: the handoff's own events
     // fill in the page and the outcome when they reach it, and a row the run never reaches ends as skipped, said so.
     for (const row of this.chosenSignIns(s)) s.rows.push(row);

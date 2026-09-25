@@ -2504,8 +2504,8 @@ export const SealedImageCopy = z.object({
 export type SealedImageCopy = z.infer<typeof SealedImageCopy>;
 
 /** What a build at a place came to: the copy that place holds now, and whether this call built it. A place already
- * standing on the record is answered with its copy and `built: false` rather than refused, so the road that builds
- * a copy on first use and a person typing the line twice both get the copy they asked for. */
+ * standing on the record is answered with its copy and `built: false` rather than refused, so a fork there and a
+ * person typing the line twice both get the copy they asked for. */
 export const SealedImageBuilt = z.object({ copy: SealedImageCopy, built: z.boolean() });
 export type SealedImageBuilt = z.infer<typeof SealedImageBuilt>;
 
@@ -3619,10 +3619,11 @@ export const NOT_ON_THIS_ROAD = "not on this road";
  * computer's own directories and a copy of a checkout on it, so there is nothing to pull and nothing to build. */
 export const NO_IMAGES_HERE = "this computer keeps no images: a workspace here is a copy of the computer itself";
 
-/** What a place that holds no copy of the image a fork names is refused with. A place builds its copy on first use;
- * until it does, the forks land where the image already is. */
+/** What a fork is refused with when the place it lands on answers that it holds no copy of the snapshot named. A
+ * fork builds the copy it needs only of the image's current version, so this is an older version or a project's
+ * image named at a place it was never built at. */
 export const placeHoldsNoImageLine = (place: string, image: string): string =>
-  `${place} holds no copy of ${image}; a place builds its copy of your image on first use, and until it does forks land on your default place`;
+  `${place} holds no copy of ${image}; a fork there builds a copy first only of your image's current version`;
 
 /** What a remove of a place that still holds forks is refused with: the machines are the person's to delete, and a
  * place taken out from under them would leave containers nothing here can name. */
@@ -5294,7 +5295,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * install writes, with the wsp skill beside it. Refused on any other computer. */
   z.object({ id: reqId, op: z.literal("agents.addTools"), target: AgentsTarget, agent: z.string() }),
   /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
-   * `on` prices the build at that place instead of the default one, by the name or id wsp places lists. */
+   * `on` prices the build at that place instead of the default one, by the name or id wsp places lists; once the
+   * image stands, every build is priced at the image's own place whatever `on` says. */
   z.object({ id: reqId, op: z.literal("init.get"), on: z.string().optional() }),
   /** Saves keys into the wsp home's .env on the computer running the host: the provider key, put to that provider
    * before anything is written and saved under the variable its own module reads, and an agent's API key by the
@@ -5322,6 +5324,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on.
    * `yes` skips the sign-ins on the machine, as wsp init --yes does: a caller that asked for no waiting gets none.
    * `on` is the place the image is built on, by the name or id wsp places lists; absent takes the default place.
+   * `on` is read for the first build alone: once the image stands, every build goes to the image's own place, so
+   * no caller can move it.
    * `rebuild` seals the next version from a fresh machine rather than from the image plus the changes, which is the
    * question a run at a terminal is asked; absent takes whichever road the changes call for. */
   z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional(), yes: z.boolean().optional(), on: z.string().optional(), rebuild: z.boolean().optional() }),
