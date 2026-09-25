@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
 import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, REQUEST_BODY_MAX_BYTES, REQUEST_BODY_NOT_JSON, REQUEST_BODY_TOO_LARGE, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, isObjectFrame, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, reachAddresses } from "./pairing.js";
 import { NO_PROJECT_YET } from "./verbs.js";
@@ -73,6 +73,8 @@ export interface HostOptions {
   door?: "closed" | "open";
   /** The line said the first time the door binds, so a person reads about the firewall prompt where they asked. */
   doorLine?: (line: string) => void;
+  /** The forwards over ssh that land on the door: handed the door as this host holds it, and let go before it closes. */
+  back?: Pick<PlaceBackHolder, "door" | "close">;
   /** What the doctor's computer road reads on this host beside the runtime, for the places.doctor op; absent, the
    * op is refused and no computer this host holds is proved from here. */
   doctor?: HostDoctorReaders;
@@ -135,7 +137,7 @@ export interface HostHandle extends WorkspaceRoads {
 
 /** What this host answers about the door a computer you own dials: where it is, and nothing about the key proved
  * there, which the runtime reads off the pair its place door signs with. */
-type DoorAt = Omit<PlaceDoorView, "hostKey">;
+type DoorAt = Omit<PlaceDoorView, "hostKey"> & { backPort?: number };
 
 /** Orphan sweep period after the one at start. Matches the age a stray
  * workspace machine must reach before reap treats it as abandoned. */
@@ -223,6 +225,20 @@ function originAllows(req: IncomingMessage): boolean {
 function bearerOf(header: string | undefined): string | undefined {
   const match = /^Bearer\s+(\S+)$/i.exec(header ?? "");
   return match?.[1];
+}
+
+function listenOn(server: Server, port: number, host: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -561,9 +577,13 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const asked = opts.port ?? DEFAULT_PORT;
   const doorPort = asked === 0 ? 0 : asked + PLACE_PORT_OFFSET;
   const doorServer = createServer(handler(() => false));
+  // macOS lets a wildcard bind share a port another process holds on the loopback address, and a dial there reaches
+  // that process, so the door holds the loopback itself; Linux refuses both binds together and the wildcard alone.
+  const doorLoopback = platform() === "linux" ? undefined : createServer(handler(() => false));
+  const doorListeners = doorLoopback === undefined ? [doorServer] : [doorServer, doorLoopback];
   // Held per socket rather than read off the port, so a socket the door let in stays the door's after it closes.
   const doorSockets = new WeakSet<Socket>();
-  doorServer.on("connection", socket => doorSockets.add(socket));
+  for (const listener of doorListeners) listener.on("connection", socket => doorSockets.add(socket));
   let doorAt: number | undefined;
   let doorOpening: Promise<DoorAt> | undefined;
   /** Where a person is told to dial, with the relay's own name beside it when a connector is carrying this host.
@@ -574,27 +594,34 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       port: at,
       addresses: doorAddresses(bound, at, opts.advertise),
       ...(relay === undefined ? {} : { relay: relayUrlOf(relay) }),
+      // Only the door's own listener: on a host bound beyond loopback a forward would land on the main port, where a
+      // loopback peer is the owner's road.
+      ...(boundHere ? { backPort: at } : {}),
     };
   };
   const openDoor = async (): Promise<DoorAt> => {
     // A host that already answers beyond this computer needs no second listener: it names its own port instead.
     if (!boundHere) return viewOf(port, address);
     if (doorAt !== undefined) return viewOf(doorAt, WILDCARD);
-    doorOpening ??= new Promise<DoorAt>((resolve, reject) => {
-      const failed = (e: NodeJS.ErrnoException): void => {
-        doorOpening = undefined;
-        reject(e.code === "EADDRINUSE" ? new Error(doorPortHeldLine(doorPort)) : e);
-      };
-      doorServer.once("error", failed);
-      doorServer.listen(doorPort, WILDCARD, () => {
-        doorServer.off("error", failed);
+    doorOpening ??= (async () => {
+      let at = doorPort;
+      try {
+        await listenOn(doorServer, doorPort, WILDCARD);
         const bound = doorServer.address();
-        doorAt = typeof bound === "object" && bound !== null ? bound.port : doorPort;
-        // Said on a Mac alone: it is the application firewall's prompt, and no other computer here shows one.
-        if (platform() === "darwin") opts.doorLine?.(PLACES_WORDS.sheet.firewall);
-        resolve(viewOf(doorAt, WILDCARD));
-      });
-    });
+        at = typeof bound === "object" && bound !== null ? bound.port : doorPort;
+        if (doorLoopback !== undefined) await listenOn(doorLoopback, at, LOOPBACK).catch(async (e: unknown) => {
+          await closeServer(doorServer);
+          throw e;
+        });
+      } catch (e) {
+        doorOpening = undefined;
+        throw (e as NodeJS.ErrnoException).code === "EADDRINUSE" ? new Error(doorPortHeldLine(at)) : e;
+      }
+      doorAt = at;
+      // Said on a Mac alone: it is the application firewall's prompt, and no other computer here shows one.
+      if (platform() === "darwin") opts.doorLine?.(PLACES_WORDS.sheet.firewall);
+      return viewOf(at, WILDCARD);
+    })();
     return doorOpening;
   };
 
@@ -639,7 +666,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     rtServer = await serveRuntime(rt, {
       port: opts.wsPort ?? DEFAULT_WS_PORT,
       host: address,
-      attach: [server, doorServer],
+      attach: [server, ...doorListeners],
       originAllowed: originAllows,
       ownRoad: req => ownRoad(req, doorSockets),
       door: { open: openDoor },
@@ -715,6 +742,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   // A door that cannot bind is a computer that cannot dial in, not a host that will not serve: the person reads
   // who holds the port and everything else on this computer goes on working.
   if (opts.door === "open") await openDoor().catch((e: unknown) => log(e instanceof Error ? e.message : String(e)));
+  opts.back?.door(async () => (await openDoor()).backPort);
 
   return {
     port,
@@ -729,8 +757,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         if (doorAt === undefined) return;
         doorAt = undefined;
         doorOpening = undefined;
-        doorServer.closeAllConnections();
-        await new Promise<void>((resolve, reject) => doorServer.close(err => (err ? reject(err) : resolve())));
+        for (const listener of doorListeners) {
+          listener.closeAllConnections();
+          if (listener.listening) await closeServer(listener);
+        }
       },
     },
     addProject,
@@ -738,15 +768,17 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     planProject,
     importProject,
     close: async () => {
+      // First: a forward remade while the door closes would open it again.
+      opts.back?.close();
       clearInterval(reapTimer);
       opts.release?.close();
       await relay.close();
       // The runtime first: the sockets it holds on WS_PATH are this server's connections, and closing them here is
       // what sends a waiting client the stopping code instead of cutting the socket under it.
       await rtServer.close();
-      for (const held of [doorServer, server]) {
+      for (const held of [...doorListeners, server]) {
         held.closeAllConnections();
-        if (held.listening) await new Promise<void>((resolve, reject) => held.close(err => (err ? reject(err) : resolve())));
+        if (held.listening) await closeServer(held);
       }
       // Last: with the servers gone nothing can record another event, so the
       // flush this waits on is the final word in the store.
