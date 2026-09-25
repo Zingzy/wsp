@@ -3,11 +3,14 @@
 // agents in one scope name the same server with the same command or address.
 // The row says where it is reached and its state as a dot and a word; the
 // detail is the /mcp view: status, command, names, each agent's file, the
-// tools, and the next step first. Tools are asked only on a click.
+// tools, and the next step first. Tools are asked only on a click. Turn off
+// and on and Remove act on every agent the entry is set up for, and Add an MCP
+// server is a form in place of the list.
 import { PlugIcon, PowerIcon, PowerOffIcon, RefreshCwIcon, ServerIcon, Trash2Icon, WrenchIcon } from "lucide-react";
-import { agentName } from "@wsp/catalog";
+import { agentName, mcpSwitch } from "@wsp/catalog";
 import type { AgentsReport, McpRow, ServerToolsAnswer } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, holdAll, notYet, onImage, serverSignInStart, signInAct, waitingFlow, type FlowView, type RowAct, type RowsContext } from "../agentsRows.js";
+import { AddServerForm } from "../AddServerForm.js";
 import { byName, kind, matchesAny, type Fact, type GroupBy, type GroupView, type KindModule, type ServerState, type ServerStatus } from "./kind.js";
 
 /** Where a server is set up: the person's own files, or the project's. */
@@ -114,9 +117,23 @@ function actsOf(entry: ServerEntry, ctx: RowsContext, openUnder: () => void) {
   };
   const reconnect: RowAct = { id: "reconnect", label: listing ? W.listing : W.reconnect, icon: RefreshCwIcon, ...(listing ? { busy: true } : tools === undefined ? {} : { run: () => tools.list(worst.state === "failed" ? worst.row : primary, true) }) };
   const view: RowAct = { id: "view-tools", label: W.viewTools, icon: WrenchIcon, run: openUnder };
-  const turnOff = notYet("turn-off", W.turnOff, PowerOffIcon);
-  const turnOn = notYet("turn-on", W.turnOn, PowerIcon);
-  const remove = notYet("remove", W.remove, Trash2Icon, { destructive: true });
+  const servers = ctx.servers;
+  const busy = servers?.busyOf(entry.key) === true;
+  // A server turns off only where every agent it is set up for keeps a switch per server.
+  const unswitched = entry.rows.find(r => !mcpSwitch(r.agent));
+  const turn = (on: boolean): RowAct => {
+    const [id, label, icon] = on ? (["turn-on", W.turnOn, PowerIcon] as const) : (["turn-off", W.turnOff, PowerOffIcon] as const);
+    if (servers === undefined) return notYet(id, label, icon);
+    if (unswitched !== undefined) return notYet(id, label, icon, { hover: W.noSwitch(agentName(unswitched.agent)) });
+    return { id, label, icon, ...(busy ? { busy: true } : { run: () => servers.toggle(entry.key, entry.rows.filter(r => r.enabled !== on), on) }) };
+  };
+  const turnOff = turn(false);
+  const turnOn = turn(true);
+  const files = [...new Set(entry.rows.map(r => r.file))];
+  const remove: RowAct =
+    servers === undefined
+      ? notYet("remove", W.remove, Trash2Icon, { destructive: true })
+      : { id: "remove", label: W.remove, icon: Trash2Icon, destructive: true, confirm: { title: W.removeTitle(entry.name), body: W.leavesFiles(files, ctx.on ?? ctx.computer ?? "") }, ...(busy ? { busy: true } : { run: () => servers.remove(entry.key, entry.rows) }) };
   // Each agent that needs its own sign-in, and the flow any one of them drew.
   const signIns = new Map<string, RowAct>();
   let flow: FlowView | undefined;
@@ -196,6 +213,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
     const disagree = new Set(all.map(s => s.state)).size > 1;
     const holder = asked?.answer?.holder;
     const refused = asked?.error ?? asked?.answer?.refused;
+    const wrote = ctx.servers?.refusedOf(entry.key);
     const toolsFact: Fact =
       listed !== undefined
         ? { id: "tools", label: W.tools, value: W.toolsCount(listed.length) }
@@ -231,7 +249,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
       facts,
       acts,
       ...(flow === undefined ? {} : { flow }),
-      ...(refused === undefined ? {} : { refused }),
+      ...(wrote !== undefined ? { refused: wrote } : refused === undefined ? {} : { refused }),
       under: {
         title: W.toolsOf(entry.name),
         reading: asked?.listing === true,
@@ -244,6 +262,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
   },
   empty: on => `No MCP servers on ${on} yet.`,
   none: "no MCP servers",
+  form: ctx => (ctx.servers === undefined || onImage(ctx) ? undefined : { title: W.addServer, Form: AddServerForm }),
 };
 
 export const SERVERS = kind(SERVERS_KIND);

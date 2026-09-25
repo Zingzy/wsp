@@ -1526,6 +1526,25 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               else send({ id: msg.id, ok: true, ...(await rt.agents.skillsToggle(msg.target, { ...skill(msg), on: msg.on }, origin)) });
               return;
             }
+            case "servers.add":
+            case "servers.remove":
+            case "servers.toggle": {
+              // A server in an agent's config on one of the person's computers is theirs to change, and the values an
+              // add carries go into that file alone.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              if (msg.op === "servers.add") {
+                const { id: _id, op: _op, target, ...ask } = msg;
+                send({ id: msg.id, ok: true, ...(await rt.agents.serversAdd(target, ask, origin)) });
+                return;
+              }
+              const ask = { agent: msg.agent, name: msg.name, ...(msg.scope !== undefined ? { scope: msg.scope } : {}) };
+              if (msg.op === "servers.remove") send({ id: msg.id, ok: true, ...(await rt.agents.serversRemove(msg.target, ask, origin)) });
+              else send({ id: msg.id, ok: true, ...(await rt.agents.serversToggle(msg.target, { ...ask, on: msg.on }, origin)) });
+              return;
+            }
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
               return;

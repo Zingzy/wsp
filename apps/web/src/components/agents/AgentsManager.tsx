@@ -5,10 +5,10 @@
 // groups and adds, and the list stands in groups with no rules between rows.
 // A row opens its detail in place of the list, with Back; a kind may add a
 // level of rows under the detail and one row's own level under that, and an
-// add level in place of the list, whose search asks as the person pauses and
-// whose rows open the detail of one before it is added. Every kind is a
-// registered module, so this file never names one. Its root is the container
-// every width rule reads.
+// add level in place of the list: a search that asks as the person pauses,
+// whose rows open the detail of one before it is added, or a form for what a
+// person types. Every kind is a registered module, so this file never names
+// one. Its root is the container every width rule reads.
 import { ListFilterIcon, PlusIcon, RefreshCwIcon, SearchIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { offlineFor, type AgentsReport } from "@wsp/protocol";
@@ -25,7 +25,7 @@ import { ActButton } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, notYet, onImage, pausedReport, refusedLines, type RefusedLine, type RowAct, type RowsContext } from "./agentsRows.js";
 import { HEAD, NARROW, TABS } from "./agentsWidths.js";
 import { AgentsRow } from "./AgentsRow.js";
-import { AddLevelView, DetailLevel, UnderLevelView, UnderRowLevel } from "./AgentsDetail.js";
+import { AddFormLevel, AddLevelView, DetailLevel, UnderLevelView, UnderRowLevel } from "./AgentsDetail.js";
 import { AGENTS_KINDS } from "./kinds/index.js";
 import type { AgentsShell, AnyKind, GroupBy } from "./kinds/kind.js";
 import { focusRow, rovingKeys } from "./roving.js";
@@ -113,12 +113,13 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const lines: RefusedLine[] = [...(report === null ? [] : refusedLines(report.refused)), ...misses, ...(report === null && error !== null ? [{ id: "read-refused", label: error }] : [])];
   const readAgo = report === null ? undefined : W.readAgo(offlineFor(now - Date.parse(report.readAt)));
   const adder = heldReason(ctx) === undefined ? tab.adder?.(ctx) : undefined;
+  const former = heldReason(ctx) === undefined && adder === undefined ? tab.form?.(ctx) : undefined;
   const adding = level.kind === "add" || level.kind === "add-detail";
   const current = level.kind === "list" || adding ? undefined : items.find(item => tab.key(item) === level.key);
   const addView = level.kind === "add-detail" ? adder?.detail(level.key, asked, report, ctx) : undefined;
   // A level whose item left goes back one: to the list, or to the add level where the search no longer holds it.
   const at: Level =
-    adding && adder === undefined ? { kind: "list" } : level.kind === "add-detail" && addView === undefined ? { kind: "add" } : !adding && level.kind !== "list" && current === undefined ? { kind: "list" } : level;
+    adding && adder === undefined && former === undefined ? { kind: "list" } : level.kind === "add-detail" && addView === undefined ? { kind: "add" } : !adding && level.kind !== "list" && current === undefined ? { kind: "list" } : level;
   if (at !== level) setLevel(at);
   const askRef = useRef(adder);
   askRef.current = adder;
@@ -165,7 +166,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
     }
   };
 
-  const add: RowAct = onImage(ctx) ? editImageAct(ctx) : adder !== undefined ? { id: "add", label: W.add, icon: PlusIcon, run: () => setLevel({ kind: "add" }) } : { ...notYet("add", W.add, PlusIcon), hover: heldReason(ctx) ?? W.notYet };
+  const add: RowAct = onImage(ctx) ? editImageAct(ctx) : adder !== undefined || former !== undefined ? { id: "add", label: W.add, icon: PlusIcon, run: () => setLevel({ kind: "add" }) } : { ...notYet("add", W.add, PlusIcon), hover: heldReason(ctx) ?? W.notYet };
 
   const staleMark =
     staleWord === undefined ? null : (
@@ -397,8 +398,12 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
         backLabel={backLabel}
       />
     );
+  const formLevel =
+    former === undefined || at.kind !== "add" ? null : <AddFormLevel key={`form-${tab.id}`} form={former} props={{ report, ctx, done: backToList }} back={backToList} backLabel={backLabel} />;
   const levelView =
-    addLevel !== null
+    formLevel !== null
+      ? formLevel
+      : addLevel !== null
       ? addLevel
       : at.kind === "list" || current === undefined
       ? null

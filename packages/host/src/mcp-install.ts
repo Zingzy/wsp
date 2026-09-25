@@ -7,7 +7,6 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, sep } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, skillsDirOf, type AgentEntry, type McpAgent, type Placed } from "@wsp/catalog";
-import { commentsDroppedLine } from "@wsp/engine";
 import { MCP_SERVER_NAME, mcpServerCommandLine, nextInsideAgentLine, type McpServerSpec } from "@wsp/protocol";
 import { placeSections, removeSections } from "./agents-md.js";
 import { SKILL_NAME, WSP_SKILL } from "./skill.js";
@@ -111,8 +110,6 @@ export interface Installed {
   agent: string;
   /** `~/`-relative; absent when the catalog knows no MCP config for the agent yet, and then nothing was written. */
   path?: string;
-  /** The file held comments the rewrite did not keep. */
-  commentsDropped?: boolean;
   /** The skill's file, `~/`-relative. */
   skill: string;
   /** The project's own instruction files the wsp section now sits in, absolute; absent when no project was named. */
@@ -171,7 +168,7 @@ function agentEntry(agentId: string): AgentEntry {
 
 /** Writes the server into the agent's config under `home`, created with its folder when it is not there, the skill
  * into its skills folder, and with a project named, the wsp section into that project's own instruction files. Says
- * which agent and which files, and whether the config's comments were lost. */
+ * which agent and which files. */
 export function installMcp(agentId: string, server: McpServerSpec, home: string, project?: string): Installed {
   const entry = agentEntry(agentId);
   const landed = (): Pick<Installed, "skill" | "docs"> => {
@@ -184,13 +181,13 @@ export function installMcp(agentId: string, server: McpServerSpec, home: string,
   const text = existsSync(file.abs) ? readFileSync(file.abs, "utf8") : undefined;
   let placed: Placed;
   try {
-    placed = agent.mcp.format.place(text, MCP_SERVER_NAME, server);
+    placed = agent.mcp.format.place(text, MCP_SERVER_NAME, { kind: "stdio", command: server.command, args: [...server.args], env: {} });
   } catch (e) {
     throw new Error(`${file.tilde}: ${e instanceof Error ? e.message : String(e)}`);
   }
   mkdirSync(dirname(file.abs), { recursive: true });
   writeFileSync(file.abs, placed.text);
-  return { agent: entry.name, path: file.tilde, commentsDropped: placed.commentsDropped, ...landed() };
+  return { agent: entry.name, path: file.tilde, ...landed() };
 }
 
 /** One agent as `--remove` leaves it: the project's instruction files the wsp section came out of, absolute, empty
@@ -250,12 +247,10 @@ export function removeEach(agentIds: Iterable<string>, project: string): RemoveR
   return { removed: done, failures };
 }
 
-/** What an install says, for the command and the wizard alike: the agent and its file, then the comments line
- * when the rewrite lost them, or the by-hand line when the catalog knows no config and the server was not written;
- * last, where the skill went. */
+/** What an install says, for the command and the wizard alike: the agent and its file, or the by-hand line when the
+ * catalog knows no config and the server was not written; last, where the skill went. */
 export function installLines(placed: Installed): string[] {
   const lines = placed.path === undefined ? [`${placed.agent}: the catalog has no MCP config for it yet, so the server was not written; add it by hand.`] : [`${placed.agent} now has the wsp tools: ${placed.path}`];
-  if (placed.commentsDropped === true && placed.path !== undefined) lines.push(commentsDroppedLine(placed.path));
   lines.push(`The wsp skill went to ${placed.skill}`);
   if (placed.docs !== undefined && placed.docs.length > 0) lines.push(`The wsp section is in ${placed.docs.join(" and ")}`);
   return lines;

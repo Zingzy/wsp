@@ -26,7 +26,7 @@ import { CATALOG_AGENTS, MCP_AGENTS, skillsDirOf } from "@wsp/catalog";
 import { INLINE_EXEC_MS, OLD_APPEND_MARKS } from "./exec-detached.js";
 import type { SkippedPath } from "./golden-import.js";
 import type { PackFiles } from "./golden.js";
-import { READ_MS, commentsDroppedLine, landConfigs, parseConfigs, parseMcpId, readConfigsCmd, type ScopeFile } from "./golden-mcp.js";
+import { READ_MS, landConfigs, parseConfigs, parseMcpId, readConfigsCmd, type ScopeFile } from "./golden-mcp.js";
 import type { Machine } from "./machine.js";
 import { importInto } from "./vault.js";
 
@@ -507,13 +507,10 @@ export function machineServerPort(machine: Machine): ServerPort {
 export interface ServersOut {
   path: string;
   names: string[];
-  /** Writing that file back could not keep the comments it held, the same loss a merge into it answers. */
-  commentsDropped: boolean;
 }
 
-/** What a leave says it took out of one agent's own file: the names and the file they came out of, and where the
- * rewrite could not keep that file's comments, the one sentence for that loss after it. */
-export const serversOutLines = (out: ServersOut): string[] => [`${out.names.join(", ")} (out of ${out.path})`, ...(out.commentsDropped ? [commentsDroppedLine(out.path)] : [])];
+/** What a leave says it took out of one agent's own file: the names and the file they came out of. */
+export const serversOutLines = (out: ServersOut): string[] => [`${out.names.join(", ")} (out of ${out.path})`];
 
 /** Takes the servers wsp merged into the agents' own files on a computer back out of them, which is what a leave
  * cannot do by taking a path: those files are the agents' own and only the keys in them are wsp's. The list
@@ -534,7 +531,6 @@ export async function unmergeServers(port: ServerPort, home: string): Promise<Se
       const file = await port.read(agent.mcp.files.map(f => `${home}/${f.slice(2)}`));
       if (file === undefined) continue;
       let text = file.text;
-      let commentsDropped = false;
       const took: string[] = [];
       // The user scope and, for a format that keeps servers per folder, the machine's own home folder: the same
       // two scopes the merge wrote them under.
@@ -542,14 +538,12 @@ export async function unmergeServers(port: ServerPort, home: string): Promise<Se
         const project = scoped ? home : undefined;
         const names = mine.filter(k => k.home === scoped && serverDigest(agent.mcp.format.entryOf(text, k.name, project)) === k.digest).map(k => k.name);
         if (names.length === 0) continue;
-        const removed = agent.mcp.format.remove(text, names, project);
-        text = removed.text;
-        commentsDropped ||= removed.commentsDropped;
+        text = agent.mcp.format.remove(text, names, project).text;
         took.push(...names);
       }
       if (took.length === 0 || text === file.text) continue;
       await port.write(file.path, text);
-      out.push({ path: file.path, names: took, commentsDropped });
+      out.push({ path: file.path, names: took });
     } catch {
       continue;
     }

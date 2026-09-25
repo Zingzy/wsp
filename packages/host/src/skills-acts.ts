@@ -7,17 +7,15 @@
 // the report uses, so an act names only folders the report shows. The skill
 // wsp writes and a plugin's are always on; a project's lives in the repo and
 // is not turned off here.
-import { spawn } from "node:child_process";
 import { posix } from "node:path";
 import { CATALOG_AGENTS, PROJECT_SHARED_SKILLS, SHARED_SKILLS, isSystemSkill, ownSkillFolder } from "@wsp/catalog";
 import { detectSkills, expand, nodeHost, skillRoots, tilde, type Host } from "@wsp/collect";
-import { asLogin, stageAsLogin, targetLogin, type ExecResult } from "@wsp/engine";
+import type { ExecResult } from "@wsp/engine";
 import { noSuchSkillRefusal, pluginSkillRefusal, projectSkillOffRefusal, shellQuote, systemSkillRefusal, type SkillAdded, type SkillPreview, type SkillRow } from "@wsp/protocol";
 import type { AgentsOn, SkillAsk, SkillsActs } from "@wsp/runtime";
-import { machineHost } from "./machine-host.js";
 import { getSkill, searchSkills, skillArchive, skillPreview, type SkillsFetch } from "./skills-sh.js";
+import { firstLine, roadOf, type Road } from "./target-road.js";
 
-const WRITE_MS = 60_000;
 /** The exit a line takes when the skill's folder is already there, so nothing is written over it. */
 const THERE_EXIT = 3;
 /** The exit a line takes, with the link and where it points on stdout, when a folder it would touch sits under a link. */
@@ -45,60 +43,6 @@ const LINK_ABOVE = [
 ].join("\n");
 
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
-
-/** Where a target's lines run: the reader's Host over it, and one line as its login with bytes on its stdin. */
-interface Road {
-  host: Host;
-  run(line: string, stdin?: Uint8Array): Promise<ExecResult>;
-}
-
-/** A line in this computer's own bash, with the home the Host reads; past its time the line and all it started die. */
-export function runHere(home: string, line: string, stdin?: Uint8Array, ms = WRITE_MS): Promise<ExecResult> {
-  return new Promise(resolve => {
-    const child = spawn("/bin/bash", ["-c", line], { env: { ...process.env, HOME: home }, cwd: home, stdio: ["pipe", "pipe", "pipe"], detached: true });
-    const out: Buffer[] = [];
-    const err: Buffer[] = [];
-    const timer = setTimeout(() => {
-      try {
-        process.kill(-child.pid!, "SIGKILL");
-      } catch {
-        child.kill("SIGKILL");
-      }
-    }, ms);
-    child.stdout.on("data", (b: Buffer) => out.push(b));
-    child.stderr.on("data", (b: Buffer) => err.push(b));
-    child.stdin.on("error", () => undefined);
-    child.on("error", e => {
-      clearTimeout(timer);
-      resolve({ exitCode: 127, stdout: "", stderr: e.message });
-    });
-    child.on("close", code => {
-      clearTimeout(timer);
-      resolve({ exitCode: code ?? 1, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") });
-    });
-    child.stdin.end(stdin === undefined ? undefined : Buffer.from(stdin));
-  });
-}
-
-async function roadOf(on: AgentsOn, here: () => Host): Promise<Road> {
-  if (on.kind === "here") {
-    const host = here();
-    return { host, run: (line, stdin) => runHere(host.home, line, stdin) };
-  }
-  const login = await targetLogin(on.machine, on.kind === "box" ? on.login : {});
-  const bound = { timeoutMs: WRITE_MS };
-  if (on.kind === "box") {
-    const machine = on.machine;
-    return { host: machineHost(machine, login, { stdin: true }), run: (line, stdin) => machine.exec(asLogin(login, line), { ...bound, ...(stdin !== undefined ? { stdin } : {}) }) };
-  }
-  const machine = on.machine;
-  return {
-    host: machineHost(machine, login, { land: machine }),
-    run: (line, stdin) => (stdin === undefined ? machine.exec(asLogin(login, line), bound) : stageAsLogin(machine, machine, login, "the skill", stdin, file => machine.exec(asLogin(login, `{\n${line}\n} < ${shellQuote(file)}`), bound), bound)),
-  };
-}
-
-const firstLine = (r: ExecResult): string => (r.stderr || r.stdout).trim().split("\n")[0] || `exit ${r.exitCode}`;
 
 /** The project a target holds, which a project's skill needs. */
 function projectOf(on: AgentsOn): string {
@@ -169,7 +113,7 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
       return skillPreview(got.files.find(f => f.path === "SKILL.md")!.bytes);
     },
     preview: async (on, ask): Promise<SkillPreview> => {
-      const road = await roadOf(on, here);
+      const road = await roadOf(on, here, "the skill");
       const { row, roots } = await findSkill(road, on, ask);
       const q = shellQuote;
       const line = [
@@ -196,7 +140,7 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
       const unknown = (ask.agents ?? []).filter(id => !CATALOG_AGENTS.some(a => a.id === id));
       if (unknown.length > 0) throw usage(`The catalog has no agent ${unknown.join(", ")}.`);
       const got = await getSkill(fetch, ask.skill);
-      const road = await roadOf(on, here);
+      const road = await roadOf(on, here, "the skill");
       const home = road.host.home;
       const inside = (dir: string): string => (project !== undefined ? posix.join(project, dir) : expand(road.host, dir));
       const dest = posix.join(inside(project !== undefined ? PROJECT_SHARED_SKILLS : SHARED_SKILLS), got.name);
@@ -241,7 +185,7 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
       return { path: tilde(home, dest), agents: placed };
     },
     remove: async (on, ask) => {
-      const road = await roadOf(on, here);
+      const road = await roadOf(on, here, "the skill");
       const { row, roots } = await findSkill(road, on, ask);
       mayChange(row, "remove");
       // rm -rf never follows a link it is handed, so a link goes and the folder it points to stays unless it is itself
@@ -254,7 +198,7 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
       return { removed: paths };
     },
     toggle: async (on, ask) => {
-      const road = await roadOf(on, here);
+      const road = await roadOf(on, here, "the skill");
       const { row, roots } = await findSkill(road, on, ask);
       mayChange(row, "toggle");
       const word = ask.on ? "on" : "off";

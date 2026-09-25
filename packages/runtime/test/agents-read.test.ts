@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Machine } from "@wsp/engine";
-import { nappingAgentsRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
+import { nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type SignInForward, type SkillsActs } from "../src/agents-read.js";
+import { NO_AGENTS_READER, agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type ServersActs, type SignInForward, type SkillsActs } from "../src/agents-read.js";
 import type { PlaceDoor } from "../src/places.js";
 
 const READ = { home: "/root", user: "root", agents: [], skills: [], servers: [], refused: [] };
@@ -408,5 +408,59 @@ describe("the skills on a computer or a workspace", () => {
     }
     expect(asked).toEqual([]);
     expect(changed).toEqual([]);
+  });
+});
+
+describe("the MCP servers written on a computer or a workspace", () => {
+  function servers(phase: { now: WorkspacePhase }): { asked: [string, unknown, unknown][]; changed: (AgentsTarget | undefined)[]; api: ReturnType<typeof agentsReads<undefined>> } {
+    const asked: [string, unknown, unknown][] = [];
+    const changed: (AgentsTarget | undefined)[] = [];
+    const machine = { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as unknown as Machine;
+    const acts: ServersActs = {
+      add: async (on, ask) => (asked.push(["add", on, ask]), { file: "~/.claude.json" }),
+      remove: async (on, ask) => {
+        asked.push(["remove", on, ask]);
+        throw new Error("the file changed");
+      },
+      toggle: async (on, ask) => (asked.push(["toggle", on, ask]), { file: "~/.codex/config.toml" }),
+    };
+    const api = agentsReads<undefined>({
+      reader: undefined,
+      places: () => undefined,
+      workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: "/root/landing" }),
+      servers: acts,
+      channel: async () => {
+        throw new Error("no channel on this road");
+      },
+      changed: target => void changed.push(target),
+      now: () => Date.parse("2026-09-24T12:00:00Z"),
+    });
+    return { asked, changed, api };
+  }
+
+  it("changes a server on the workspace's own machine and says the report there changed, whether the write held or not", async () => {
+    const { asked, changed, api } = servers({ now: "running" });
+    const target = { workspaceId: "ws_1" };
+    expect(await api.serversAdd(target, { agent: "claude", name: "acme", command: "npx", env: { A: "sk-x" } })).toEqual({ file: "~/.claude.json" });
+    expect(await api.serversToggle(target, { agent: "codex", name: "acme", on: false })).toEqual({ file: "~/.codex/config.toml" });
+    await expect(api.serversRemove(target, { agent: "claude", name: "acme", scope: "project" })).rejects.toThrow("the file changed");
+    expect(asked.map(([what, on, ask]) => [what, (on as AgentsOn).kind, ask])).toEqual([
+      ["add", "machine", { agent: "claude", name: "acme", command: "npx", env: { A: "sk-x" } }],
+      ["toggle", "machine", { agent: "codex", name: "acme", on: false }],
+      ["remove", "machine", { agent: "claude", name: "acme", scope: "project" }],
+    ]);
+    expect(changed).toEqual([target, target, target]);
+  });
+
+  it("never touches a napping workspace's servers, and refuses on a runtime wired without the acts", async () => {
+    const { asked, changed, api } = servers({ now: "napping" });
+    const target = { workspaceId: "ws_1" };
+    for (const act of [() => api.serversAdd(target, { agent: "claude", name: "acme", command: "npx" }), () => api.serversToggle(target, { agent: "codex", name: "acme", on: true }), () => api.serversRemove(target, { agent: "claude", name: "acme" })]) {
+      await expect(act()).rejects.toThrow(nappingServersRefusal("landing"));
+    }
+    expect(asked).toEqual([]);
+    expect(changed).toEqual([]);
+    const bare = agentsReads<undefined>({ reader: undefined, places: () => undefined, workspace: async () => { throw new Error("no workspace"); }, channel: async () => { throw new Error("no channel"); }, changed: () => {}, now: () => 0 });
+    await expect(bare.serversAdd({ placeId: "here" }, { agent: "claude", name: "acme", command: "npx" })).rejects.toThrow(NO_AGENTS_READER);
   });
 });

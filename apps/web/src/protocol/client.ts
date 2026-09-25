@@ -14,6 +14,8 @@ import {
   SkillHit,
   SkillPreview,
   type AgentsTarget,
+  type ServerAdd,
+  type ServerAsk,
   BringBackResult,
   CLOUD_SETUP_WORDS,
   DeviceView,
@@ -435,6 +437,13 @@ export interface Api {
   skillsRemove?(target: AgentsTarget, name: string, project: boolean): Promise<void>;
   /** One skill there turned off or on. */
   skillsToggle?(target: AgentsTarget, name: string, project: boolean, on: boolean): Promise<void>;
+  /** One MCP server written into an agent's config there; its values ride this once and go into that file alone. A
+   * client without it holds Add an MCP server. */
+  serversAdd?(target: AgentsTarget, ask: ServerAdd): Promise<{ file: string }>;
+  /** One server's entry taken out of an agent's config there. */
+  serversRemove?(target: AgentsTarget, ask: ServerAsk): Promise<{ file: string }>;
+  /** One server turned off or on there by the switch its agent reads. */
+  serversToggle?(target: AgentsTarget, ask: ServerAsk, on: boolean): Promise<{ file: string }>;
   /** Asks the host to dial one computer once, now: a frame over the link it holds, or one login over the road it
    * was added on when it holds none. Answers what came back, the sentence to say it in and the row as it now
    * stands. A client without it draws no Try now rather than one that would ask nobody. */
@@ -786,6 +795,9 @@ export function makeApi(c: ProtocolClient): Api {
     skillsAdd: async (target, skill, agents, project) => SkillAdded.parse((await c.request<{ added?: unknown }>("skills.add", { target, skill, agents: [...agents], ...(project ? { project } : {}) })).added),
     skillsRemove: async (target, name, project) => void (await c.request("skills.remove", { target, name, ...(project ? { project } : {}) })),
     skillsToggle: async (target, name, project, on) => void (await c.request("skills.toggle", { target, name, on, ...(project ? { project } : {}) })),
+    serversAdd: async (target, ask) => ({ file: String((await c.request<{ file?: unknown }>("servers.add", { target, ...ask })).file) }),
+    serversRemove: async (target, ask) => ({ file: String((await c.request<{ file?: unknown }>("servers.remove", { target, ...ask })).file) }),
+    serversToggle: async (target, ask, on) => ({ file: String((await c.request<{ file?: unknown }>("servers.toggle", { target, ...ask, on })).file) }),
     serversTools: async (target, agent, name, refresh) =>
       ServerToolsAnswer.parse((await c.request<{ answer?: unknown }>("servers.tools", { target, agent, name, ...(refresh === true ? { refresh } : {}) })).answer),
     agentsSignIn: async (target, agent, server, onStep) => {

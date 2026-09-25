@@ -131,7 +131,7 @@ const FIRST_RUN = { hasCompletedOnboarding: true, installMethod: "native", numSt
  * person's in its own environment. A real Mac gets these from the first-run row, and without them a tester's agent
  * does not know it is inside wsp: one spent twelve minutes and $0.68 writing JSON-RPC by hand to find its own
  * threads, and an orchestrator fanned its work out through its harness's background agents rather than threads. */
-export const labMcpServer = home => ({ command: join(binDir(home), "wsp"), args: ["mcp"] });
+export const labMcpServer = home => ({ kind: "stdio", command: join(binDir(home), "wsp"), args: ["mcp"], env: {} });
 
 /** The file an agent reads its first-run answers and its own MCP servers out of when it has been pointed at a
  * store rather than left on a home: the catalog's own path for that file with the home taken off, and the agent's

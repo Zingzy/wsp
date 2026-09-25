@@ -16,6 +16,7 @@ import { AgentsManager, type AgentsHead } from "./AgentsManager.js";
 import { useAgentActs } from "./useAgentActs.js";
 import { useAgentsReport } from "./useAgentsReport.js";
 import { useServerTools } from "./useServerTools.js";
+import { useServerActs } from "./useServerActs.js";
 import { useSkillActs } from "./useSkillActs.js";
 
 /** A path under the machine's home, the way its shell shows it. */
@@ -41,6 +42,7 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
   const tools = useServerTools(target);
   const acts = useAgentActs(target);
   const skills = useSkillActs(target);
+  const servers = useServerActs(target);
   const place = workspace === null ? undefined : placeOf(places, workspace);
   const where: AgentsWhere = workspace === null || isLocalWorkspace(workspace) ? "here" : place?.kind === "computer" ? "box-task" : "fork";
   const cloud = place === undefined ? undefined : placeName(place);
@@ -86,6 +88,7 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
           ...(tools === undefined ? {} : { tools }),
           ...(acts === undefined ? {} : { acts }),
           ...(skills === undefined ? {} : { skills }),
+          ...(servers === undefined ? {} : { servers }),
           ...(where === "here" ? { typeInTerminal: (typed: string) => void openPanelTerminalWith(workspaceId, typed) } : {}),
           ...(workspace === null ? {} : { project: { name: project, ...(path === undefined ? {} : { path }) } }),
         }}

@@ -371,8 +371,8 @@ describe("applyMcp", () => {
     });
     return { text: `${lines.join("\n")}\n`, results: [...results, ...dropped], commentsDropped: false };
   };
-  const linesRemove = (text: string, names: readonly string[]): McpRemoved => ({ text: text.split("\n").filter(l => !names.includes(l.split(" ")[0] ?? "")).join("\n"), commentsDropped: false });
-  const LINES: McpFormat = { read: () => [], place: () => ({ text: "", commentsDropped: false }), edit: linesEditor, entryOf: (text, name) => lineOf(text, name), merge: linesMerge, remove: linesRemove };
+  const linesRemove = (text: string, names: readonly string[]): McpRemoved => ({ text: text.split("\n").filter(l => !names.includes(l.split(" ")[0] ?? "")).join("\n") });
+  const LINES: McpFormat = { read: () => [], place: () => ({ text: "" }), edit: linesEditor, entryOf: (text, name) => lineOf(text, name), merge: linesMerge, remove: linesRemove };
 
   it("a format the catalog gains is one module: the stage runs the module's editor over the text it read and reports through it, with no format of its own", async () => {
     const { root, cmds, machine } = guest(["alpha"]);

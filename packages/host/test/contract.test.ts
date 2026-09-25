@@ -4,7 +4,7 @@
 // object the verb's MCP tool answers with; every refusal is one line on stderr
 // and the exit code is its class's, the same class the tool error carries.
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -33,6 +33,7 @@ import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
 import { agentsReader } from "../src/agents-reader.js";
 import { hostActs } from "../src/agents-signin.js";
 import { skillsActs } from "../src/skills-acts.js";
+import { serversActs } from "../src/servers-acts.js";
 import type { SkillsFetch } from "../src/skills-sh.js";
 
 /** skills.sh as far as this test asks it: one search and one skill's folder. */
@@ -171,6 +172,8 @@ describe("the agent contract on the command line and the tool door", () => {
       agentsActs: hostActs({ vaultFile: join(dir, ".env"), home: () => join(dir, "user"), wspServer: () => ({ command: "wsp", args: ["mcp"] }) }),
       // A skill lands in the fixture's home, never the person's, off a skills.sh that answers from this file.
       skillsActs: skillsActs({ fetch: skillsSh, here: () => fixtureHost(agents) }),
+      // A server lands in the fixture's agents' configs, never the person's.
+      serversActs: serversActs({ here: () => fixtureHost(agents) }),
       // Two places over one backend: this host's own, and one more for the image build road, which never boots a
       // machine here because the place already stands on the record.
       places: { wired: "default", backend: place => (place === "default" || place === "elsewhere" ? backend : undefined), list: () => ["default", "elsewhere"] },
@@ -264,6 +267,15 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(await last("skills enable", "skills", "enable", "memo")).toEqual({ paths: ["~/.agents/skills/memo"] });
     expect(await last("skills remove", "skills", "remove", "memo")).toEqual({ removed: expect.arrayContaining(["~/.agents/skills/memo", "~/.claude/skills/memo"]) });
     expect(await last("agents addtools", "agents", "addtools", "codex")).toEqual({ file: "~/.codex/config.toml" });
+    // A value an add names is read off the environment by its name, lands in the file and is never printed.
+    vi.stubEnv("ACME_KEY", "sk-acme-contract-x");
+    expect(await last("servers add", "servers", "add", "acme", "--agent", "codex", "--command", "npx -y @acme/mcp", "--env", "ACME_KEY")).toEqual({ file: "~/.codex/config.toml" });
+    expect(readFileSync(join(dir, "agents", "home", ".codex", "config.toml"), "utf8")).toContain('env = { "ACME_KEY" = "sk-acme-contract-x" }');
+    expect(JSON.stringify([...covered.values()])).not.toContain("sk-acme-contract-x");
+    expect(await last("servers disable", "servers", "disable", "acme", "--agent", "codex")).toEqual({ file: "~/.codex/config.toml" });
+    expect(await last("servers enable", "servers", "enable", "acme", "--agent", "codex")).toEqual({ file: "~/.codex/config.toml" });
+    expect(await last("servers remove", "servers", "remove", "acme", "--agent", "codex")).toEqual({ file: "~/.codex/config.toml" });
+    expect(readFileSync(join(dir, "agents", "home", ".codex", "config.toml"), "utf8")).not.toContain("acme");
     // The one verb that starts a server: the fixture's runner exits at once, so the answer is why no tools came back.
     expect(await last("servers tools", "servers", "tools", "local", "--agent", "claude")).toMatchObject({ auth: "failed", refused: expect.any(String) });
     expect(await last("projects", "projects")).toEqual({ projects: [expect.objectContaining({ name: "alpha", computer: "default" })] });

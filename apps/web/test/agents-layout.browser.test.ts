@@ -363,6 +363,48 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     }
   }, 180_000);
 
+  it("photographs Add an MCP server with a command and a variable, and with an address and a header, at 360, 480 and 696 in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await open(`screen=agents-widths&theme=${theme}`);
+      await page!.waitForSelector("[data-agents-row]");
+      expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
+      for (const width of [360, 480, 696]) {
+        await pickTab(width, "MCP servers");
+        await at(width).locator("[data-k=agents-add]").click();
+        const form = at(width).locator("[data-add-server]");
+        await form.waitFor();
+        await at(width).locator("[data-k=add-server-name]").fill("notion");
+        await at(width).locator("[data-k=add-server-command]").fill("npx -y @notionhq/notion-mcp-server");
+        await at(width).locator("[data-k=add-server-pair-add]").click();
+        await at(width).locator("[data-k=add-server-pair-name]").fill("NOTION_TOKEN");
+        await at(width).locator("[data-k=add-server-pair-value]").fill("ntn_secret_value");
+        // Every field on the 32 px ladder, the value masked, nothing wider than the level, one left edge with the head.
+        const laid = await form.evaluate(el => ({
+          over: el.scrollWidth > el.clientWidth,
+          heights: [...el.querySelectorAll("[data-slot=input-group]")].map(f => Math.round(f.getBoundingClientRect().height)),
+          masked: (el.querySelector("[data-k=add-server-pair-value]") as HTMLInputElement).type,
+          labelX: Math.round(el.querySelector("span")!.getBoundingClientRect().left),
+          backX: Math.round(el.closest("[data-agents-add-form]")!.querySelector("[data-level-head]")!.getBoundingClientRect().left),
+          text: el.textContent ?? "",
+        }));
+        expect(laid.over).toBe(false);
+        expect(new Set(laid.heights)).toEqual(new Set([32]));
+        expect(laid.masked).toBe("password");
+        expect(laid.labelX - laid.backX).toBe(16);
+        expect(laid.text).not.toContain("ntn_secret_value");
+        await at(width).screenshot({ path: join(SHOTS_DIR, `agents-${width}-add-server-${theme}.png`), animations: "disabled" });
+        await at(width).locator('[role="radio"]', { hasText: "Address" }).click();
+        await at(width).locator("[data-k=add-server-url]").fill("https://mcp.notion.com/mcp");
+        await at(width).locator("[data-k=add-server-pair-add]").click();
+        await at(width).locator("[data-k=add-server-pair-name]").fill("Authorization");
+        await at(width).locator("[data-k=add-server-pair-value]").fill("Bearer secret");
+        expect(await form.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(false);
+        await at(width).screenshot({ path: join(SHOTS_DIR, `agents-${width}-add-server-address-${theme}.png`), animations: "disabled" });
+        await at(width).locator("[data-k=agents-back]").click();
+      }
+    }
+  }, 180_000);
+
   it("draws a device sign-in under the detail's acts with Cancel first, and photographs both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(`screen=settings-computer&theme=${theme}`, { width: 1280, height: 1800 });
