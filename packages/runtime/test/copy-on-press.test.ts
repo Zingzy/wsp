@@ -201,12 +201,50 @@ describe("where a rebuild goes", () => {
   });
 });
 
+describe("the image's home on every road", () => {
+  it("a prepare that names no place, or another place, builds at the image's own place once a record stands", async () => {
+    const { solari, rt, seal } = providers();
+    await seal({ place: "solari" });
+    await seal();
+    expect((await rt.image.get()).image!.place).toBe("solari");
+    await seal({ place: "box" });
+    expect((await rt.image.get()).image!.place).toBe("solari");
+    expect(solari.snapshots).toHaveLength(3);
+    await rt.close();
+  });
+});
+
 describe("the default place at the image's seal", () => {
   it("with nothing marked, the place the image is sealed on becomes the default", async () => {
     const { rt, marked, seal } = providers();
     expect(await marked()).toBe(HERE_PLACE_ID);
     await seal({ place: "solari" });
     expect(await marked()).toBe("solari");
+    await rt.close();
+  });
+
+  it("a mark that lands while the seal reads the default wins", async () => {
+    const { rt, marked } = providers();
+    const sealing = rt.places!.markDefaultIfNone("solari");
+    await rt.places!.markUsed("box");
+    await sealing;
+    expect(await marked()).toBe("box");
+    await rt.close();
+  });
+
+  it("an image of another name never takes the default, and a default that cannot be written fails no seal", async () => {
+    const { rt, store, marked } = providers();
+    const b = await rt.golden.prepare({ name: "other", place: "solari" });
+    await rt.golden.seal(b.id);
+    expect(await marked()).toBe(HERE_PLACE_ID);
+    const put = store.put.bind(store);
+    store.put = async (collection, key, value) => {
+      if (collection === "place-default") throw new Error("disk full");
+      return put(collection, key, value);
+    };
+    const c = await rt.golden.prepare({ place: "solari" });
+    await expect(rt.golden.seal(c.id)).resolves.toBeDefined();
+    expect((await rt.image.get()).image!.place).toBe("solari");
     await rt.close();
   });
 
@@ -269,6 +307,36 @@ describe("a fork at a place that holds no copy of the image", () => {
     expect([box.snapshots.length, composed.count]).toEqual([2, 2]);
     expect(c.golden).toBe((await rt.image.get()).copies.find(x => x.place === "box")!.snapshotId);
     expect(lines.filter(l => l.name === "c")[0]!.message).toMatch(/^building your image on box first/);
+    await rt.close();
+  });
+
+  it("a record holding no sign-ins is refused at the fork as the build refuses it, never forced, and nothing is said about a build", async () => {
+    const { box, rt, store, seal, head } = providers();
+    await seal();
+    const record = (await store.get("images", "default")) as Record<string, unknown>;
+    delete record["vault"];
+    await store.put("images", "default", record);
+    const lines = said(rt);
+    await expect(createOn(rt, { golden: await head(), name: "x", on: "box" })).rejects.toThrow(/holds no sign-ins.*force/);
+    expect(box.snapshots).toHaveLength(0);
+    expect(lines.filter(l => l.name === "x").some(l => l.message.includes("building your image"))).toBe(false);
+    await rt.close();
+  });
+
+  it("a fork that meets a copy already building there says it waits on that build, and forks its copy", async () => {
+    const { box, rt, seal, head, frames } = providers();
+    await seal();
+    const release = held(box);
+    const building = rt.image.build({ place: "box" });
+    await until(() => frames.some(f => f.place === "box"));
+    const lines = said(rt);
+    const creating = createOn(rt, { golden: await head(), name: "x", on: "box" });
+    await until(() => lines.some(l => l.name === "x"));
+    expect(lines.filter(l => l.name === "x")[0]!.message).toMatch(/^building your image on box first/);
+    release();
+    const made = await creating;
+    expect(made.golden).toBe((await building).copy.snapshotId);
+    expect(box.snapshots).toHaveLength(1);
     await rt.close();
   });
 

@@ -1577,13 +1577,13 @@ export interface Runtime {
      * takes it, a joined computer by name or id included. Refused when the place builds no copy at all, when the
      * record has no small recipe to build from, and, without `force`, when it holds no vault. Progress rides
      * golden.stage frames carrying the place's id, and the place's row reads them. */
-    build(o: { place: string; name?: string; force?: boolean; signal?: AbortSignal }): Promise<SealedImageBuilt>;
-    /** Brings a place's copy up to the record behind whatever added the place or linked the computer: nothing where
-     * this host holds no image, where the place runs no workspaces or is not connected, or where its copy already
-     * stands on the record; else the build, joined where one is running there, and built
-     * again where the record moved while it ran. Never rejects: a build that stopped leaves its reason on the
-     * place's row until the next build there takes the row over, which wsp image build or the computer's next
-     * link starts. Resolves once the copy stands or the build stopped. */
+    build(o: { place: string; name?: string; force?: boolean; signal?: AbortSignal; starting?: () => void }): Promise<SealedImageBuilt>;
+    /** Brings a joined computer's copy up to the record at the end of its setup: nothing where this host holds no
+     * image, where the place runs no workspaces or is not connected, or where its copy already stands on the
+     * record; else the build, joined where one is running there, and built again where the record moved while it
+     * ran. Never rejects: a build that stopped leaves its reason on the place's row until the next build there
+     * takes the row over, which wsp image build or a fork there starts. Resolves once the copy stands or the build
+     * stopped. */
     keepCurrent(place: string, name?: string): Promise<void>;
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker; its list leaves out the workspaces the
@@ -2820,17 +2820,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // The door's four events ride the one stream every other event rides, so the app follows a computer joining
     // over the socket it already holds and no road subscribes to the door itself.
     placeDoor.on(e => bus.emit(e));
-    // Every link of a computer is the moment its copy is brought up to the record: the agent's link behind a join
-    // (the join command's own socket comes present first and closes behind its prove, so the ask over it fails and
-    // says nothing), a laptop dialling back in after a cut it was away for, a computer whose last build stopped. A
-    // copy that stands costs the ask nothing.
     placeDoor.on(e => {
-      if (e.type === "place.present") void image.keepCurrent(e.placeId);
-      else if (e.type === "place.removed") copyRows.delete(e.placeId);
+      if (e.type === "place.removed") copyRows.delete(e.placeId);
     });
-    // The recipe job on a computer holds the road a copy is built over, so the ask at its link answered nothing
-    // about its image: the job's own end is when the image there can be read at all, which is the moment the
-    // tally beside it is written.
+    // A copy is built only when somebody asks for one, and a computer's setup was asked for: its end is when the
+    // image there can be read at all, which is the moment the tally beside it is written. A link builds nothing.
     bus.on("place.stage", e => {
       if (e.type !== "place.stage" || e.step !== "provision" || e.placeId === undefined) return;
       if (e.state === "done" || e.state === "failed") void image.keepCurrent(e.placeId);
@@ -7669,7 +7663,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await putCopy(place, name, stamped.manifest);
       const snapshot = entry.builder.import?.recipe;
       if (snapshot !== undefined) await putCopyRecipe(place, name, stamped.version.version, snapshot);
-      if (copy === undefined) await placeDoor?.markDefaultIfNone(place);
+      // The seal stands whatever the mark does: a default that could not be written is a later fork's to ask about.
+      if (copy === undefined && name === "default") await placeDoor?.markDefaultIfNone(place).catch((e: unknown) => console.warn(`the default place was not marked at the seal: ${e instanceof Error ? e.message : String(e)}`));
       if (result.builderKept) {
         entry.record.sealed = { at: new Date(clock.now()).toISOString(), version: result.version.version };
         entry.life = "own";
@@ -7736,8 +7731,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return { place, name, backend: at };
       };
       // A rebuild seals over the record, so building it anywhere else would move the image's home.
-      const record = await recordOf("default");
-      const target = record !== undefined ? (record.place ?? places.wired) : word;
+      const target = (await recordOf("default")) !== undefined ? await imagePlace("default") : word;
       if (target !== undefined) {
         const { place, at } = await placeAt(target);
         return runs(place, at);
@@ -7765,7 +7759,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const signal = o?.signal;
       const { deployDaemon, smoke, import: imp, ...size } = recipe;
       void smoke;
-      const { place, at } = o?.place === undefined ? { place: places.wired, at: backendAt(places.wired) } : await placeAt(o.place);
+      // A seal over a standing record files it where the builder was made, so the image's own build goes to the
+      // record's place whatever was asked, and only a copy is built anywhere else.
+      const asked = o?.copy !== true && (await recordOf(name)) !== undefined ? await imagePlace(name) : o?.place;
+      const { place, at } = asked === undefined ? { place: places.wired, at: backendAt(places.wired) } : await placeAt(asked);
       // Per place as well as per name: a copy building at one place and the image building at another are two
       // prepares of one golden, and neither is the other's to join.
       const preparingKey = copyKey(place, name);
@@ -8332,6 +8329,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // rather than inheriting a build it would have refused; what is joined is the build itself.
       const key = copyKey(place, name);
       const running = copyBuilds.get(key);
+      o.starting?.();
       if (running !== undefined) return running;
       const run = buildCopy({ place, where, at, name, record, ...(o.signal !== undefined ? { signal: o.signal } : {}) }).finally(() => copyBuilds.delete(key));
       copyBuilds.set(key, run);
@@ -8340,9 +8338,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async keepCurrent(place, name) {
       const key = name ?? "default";
-      // A computer that is not connected owes nothing now: its next link runs this again. Read before anything is
+      // A computer that is not connected owes nothing now: a fork there builds its copy. Read before anything is
       // composed or framed, so no row says a build stopped that never started, and read again on a failure, since
-      // the link going mid-ask is the join command's socket closing behind its prove or a laptop sleeping.
+      // the link going mid-ask is a laptop sleeping.
       const away = (): boolean => placeDoor !== undefined && places.backend(place) === undefined && placeDoor.link(place) === undefined;
       try {
         await ready();
@@ -8426,20 +8424,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const place = placeId ?? places.wired;
     const name = await imageHeadNamed(golden);
     if (name === undefined || place === (await imagePlace(name))) return golden;
-    const building = copyBuilds.get(copyKey(place, name));
-    if (building !== undefined) {
-      const built = await building.catch(() => undefined);
+    if (announce === undefined) {
+      const built = await copyBuilds.get(copyKey(place, name))?.catch(() => undefined);
       if (built !== undefined) return built.copy.snapshotId;
     }
     const record = await recordOf(name);
-    const held = goldenHead(await copyOf(place, name));
     if (record === undefined) return golden;
+    const held = goldenHead(await copyOf(place, name));
     if (held !== undefined && copyIsCurrent(record, { hash: held.imageHash })) return held.snapshotId;
     if (announce === undefined) return golden;
     const { at } = await placeAt(place);
     if (!buildsImages(at.capabilities)) return golden;
-    announce(placeName(place), at.pricing.rateUsdPerHour(at.pricing.defaultSize));
-    return (await image.build({ place, name })).copy.snapshotId;
+    const starting = (): void => announce(placeName(place), at.pricing.rateUsdPerHour(at.pricing.defaultSize));
+    return (await image.build({ place, name, starting })).copy.snapshotId;
   };
 
   /** The import road onto a fork: the plan, what was consented, the pack, the upload in parts, the landing at the

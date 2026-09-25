@@ -1761,6 +1761,10 @@ export const placeForksNothingPickLine = (place: string, names: readonly string[
 /** The line under wsp init's opening that names where the image is built, so the first screen says it. */
 export const imageBuiltOnLine = (place: string): string => `your image is built on ${place}`;
 
+/** The line beside it when --on named a place other than the image's own: a rebuild never moves the image's home. */
+export const imageHomeKeptLine = (on: string | undefined, home: { id: string; name: string }): string | undefined =>
+  on === undefined || on === home.id || on === home.name ? undefined : `your image lives on ${home.name}, so it is built there and not on ${on}`;
+
 /** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
 export const SOLARI_CONSOLE = "console.getsolari.com";
 

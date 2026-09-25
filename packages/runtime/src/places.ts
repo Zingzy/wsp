@@ -864,7 +864,14 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const held = (await store.get(DEFAULT_COLLECTION, DEFAULT_ID)) as { placeId?: unknown } | undefined;
     return typeof held?.placeId === "string" ? held.placeId : undefined;
   };
-  const markDefault = (placeId: string): Promise<void> => store.put(DEFAULT_COLLECTION, DEFAULT_ID, { placeId });
+  // Every write of the mark takes its turn here, so a check-then-write at a seal never lands over a mark set meanwhile.
+  let marking: Promise<unknown> = Promise.resolve();
+  const inTurn = <T>(write: () => Promise<T>): Promise<T> => {
+    const run = marking.then(write);
+    marking = run.catch(() => {});
+    return run;
+  };
+  const markDefault = (placeId: string): Promise<void> => inTurn(() => store.put(DEFAULT_COLLECTION, DEFAULT_ID, { placeId }));
   /** The mark while it names this computer or a place this host still holds; a mark on a row since gone is none. */
   const markHeld = async (): Promise<string | undefined> => {
     const marked = await defaultId();
@@ -1651,7 +1658,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     async markDefaultIfNone(placeId) {
-      if ((await markHeld()) === undefined) await markDefault(placeId);
+      await inTurn(async () => {
+        if ((await markHeld()) === undefined) await store.put(DEFAULT_COLLECTION, DEFAULT_ID, { placeId });
+      });
     },
 
     async add(req, at) {
@@ -1962,7 +1971,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       kept.delete(placeId);
       backends.delete(placeId);
       await store.delete(PLACES, placeId);
-      if ((await defaultId()) === placeId) await store.delete(DEFAULT_COLLECTION, DEFAULT_ID);
+      await inTurn(async () => {
+        if ((await defaultId()) === placeId) await store.delete(DEFAULT_COLLECTION, DEFAULT_ID);
+      });
       woken(placeId, false);
       closedAt.delete(placeId);
       emit({ type: "place.removed", placeId });

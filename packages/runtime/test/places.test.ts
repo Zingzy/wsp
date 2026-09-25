@@ -3200,7 +3200,7 @@ describe("a computer joining a host that holds a sealed image", () => {
     return frames;
   };
 
-  it("builds that computer's copy on the agent's link, not on the join's own socket: the join socket closes behind its prove and the row says nothing, the link that dials in next starts the build, and where the build stops the row says so, the builder is killed by its id and no copy is filed", async () => {
+  it("builds that computer's copy only when asked, never on a link: the join socket and the agent's link start nothing, a press starts the build, and where the build stops the row says so, the builder is killed by its id and no copy is filed", async () => {
     const { hostKey } = await imageHost({ sealed: true });
     const frames = framesOf();
     // The join command's road: join and prove on one socket that answers no machine frame and closes once the
@@ -3217,6 +3217,9 @@ describe("a computer joining a host that holds a sealed image", () => {
     const linked = await relink(hostKey, placeId, pair, report("srv"), answering(p => (place = p)));
     sockets.push(linked.client.ws);
     expect(linked.proved.ok, String(linked.proved["error"])).toBe(true);
+    await settled();
+    expect(place.asked["machine.create"]).toBeUndefined();
+    void runtime!.image.build({ place: placeId }).catch(() => undefined);
     await until(() => place.asked["machine.create"] === 1, 5000);
     expect(frames.some(f => f.place === placeId && f.stage === "creating")).toBe(true);
     // The fake computer runs no builder's setup, so the build stops there: the row says so in the seal's own
@@ -3302,7 +3305,7 @@ describe("a computer joining a host that holds a sealed image", () => {
     expect((await rowOf(placeId)).build).toBeUndefined();
   });
 
-  it("a computer not connected at the cut builds nothing then and its row says nothing; its next link builds the copy", async () => {
+  it("a computer not connected at the cut builds nothing then and its row says nothing, and its next link builds nothing either", async () => {
     const { hostKey } = await imageHost({ sealed: false });
     let place!: ForkingPlace;
     const joined = await join(hostKey, { code: await code(), name: "srv", answers: answering(p => (place = p)) });
@@ -3319,8 +3322,10 @@ describe("a computer joining a host that holds a sealed image", () => {
     let back!: ForkingPlace;
     const linked = await relink(hostKey, joined.placeId, joined.pair, report("srv"), answering(p => (back = p)));
     sockets.push(linked.client.ws);
-    await until(() => back.asked["machine.create"] === 1, 5000);
-    expect(frames.some(f => f.place === joined.placeId && f.stage === "creating")).toBe(true);
+    await until(async () => (await rowOf(joined.placeId)).present === true);
+    await settled();
+    expect(back.asked["machine.create"]).toBeUndefined();
+    expect(frames.filter(f => f.place === joined.placeId)).toEqual([]);
   });
 
   it("a host restarted while a copy was building on a computer you joined reads the builder back through that computer once it dials in and the sweep stops it there; the wired provider is never asked about it and no copy is half filed", async () => {

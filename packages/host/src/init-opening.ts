@@ -44,9 +44,10 @@ export function opening(io: Pick<InitIO, "output" | "isTTY" | "env">, o: { comma
   log.message(muted(stateFileLine(o.statePath), depth), out);
 }
 
-/** The line under the opening that names the place the image is built on, in the state line's own weight. */
-export function builtOn(io: Pick<InitIO, "output" | "isTTY" | "env">, place: string): void {
+/** The line under the opening that names the place the image is built on, in the state line's own weight, or the
+ * one saying why that is not the place --on named. */
+export function builtOn(io: Pick<InitIO, "output" | "isTTY" | "env">, place: string, kept?: string): void {
   const out = { output: io.output };
-  const line = imageBuiltOnLine(place);
+  const line = kept ?? imageBuiltOnLine(place);
   log.message(io.isTTY ? muted(line, colourDepth(io.isTTY, io.env)) : line, out);
 }
