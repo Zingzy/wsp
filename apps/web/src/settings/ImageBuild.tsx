@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The image's own build under the Image card of the computer it runs on: the
-// rows the setup sheet draws, framed as one of the card's steps. While the
-// sign-in stage runs the sign-ins have the step to themselves, each page
+// The image's own build under the Image card of the computer it runs on, its
+// rows framed as one of the card's steps. While the sign-in stage runs the
+// sign-ins have the step to themselves, each page
 // opening in the person's browser and a code going to the host for that
 // tool's terminal. Cancel asks once and is held with its reason while the seal
 // runs. A build that ended short stays here with the stage it stopped at, the
@@ -16,7 +16,7 @@ import { RecipeStep, type StepAction } from "./recipe/RecipeStep.js";
 import { useRecipeJob } from "./recipe/useRecipeJob.js";
 import { useSettingsStore } from "./settingsStore.js";
 
-export function ImageBuild({ job, place, said, onAgain, onClose }: { job: InitJob; place: PlaceView; /** The job's error already stands on the card's state row. */ said: boolean; onAgain: () => void; onClose: () => void }) {
+export function ImageBuild({ job, place, onAgain, onClose }: { job: InitJob; place: PlaceView; onAgain: () => void; onClose: () => void }) {
   const words = CLOUD_SETUP_WORDS.build;
   const { api, refusal, attempt, busy } = useRecipeJob();
   const [asking, setAsking] = useState(false);
@@ -45,7 +45,7 @@ export function ImageBuild({ job, place, said, onAgain, onClose }: { job: InitJo
         ]
       : [{ k: "cancel", word: words.cancel, destructive: true, disabled: !job.stoppable, onPress: () => setAsking(true) }];
   const primary = building || changing ? undefined : keyWords !== undefined ? { word: CLOUD_SETUP_WORDS.keys.changeKey, onPress: () => setChanging(true) } : { word: words.again, onPress: onAgain };
-  const top = building ? (view.slide ? words.slideTop : words.top) : said ? undefined : job.error;
+  const top = building ? (view.slide ? words.slideTop : words.top) : job.error;
   return (
     <RecipeStep
       root="build"

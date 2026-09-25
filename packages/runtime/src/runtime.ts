@@ -573,7 +573,7 @@ export interface InitDoor {
   /** The setup as the modal opens on it, priced at the place `on` names, else the default build place. */
   get(o?: { on?: string }): Promise<InitSetup>;
   keys(keys: { provider?: string; key?: string; rows?: Record<string, string> }): Promise<InitSetup>;
-  start(o: { road: InitRoad; harness?: string }): Promise<InitJob>;
+  start(o: { road: InitRoad; harness?: string; on?: string }): Promise<InitJob>;
   answer(o: { screen: InitScreenId; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   step(o: { at: number }): Promise<InitJob>;
   /** Keeps a step's unsent ticks, picks and typed text on the job, so a sheet shut mid-step reopens on them. */

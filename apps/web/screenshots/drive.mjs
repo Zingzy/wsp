@@ -220,7 +220,7 @@ const stepLine = step => `> ${[step.verb, ...step.words].join(" ")}`;
  * the data attributes those controls carry, which is what `click attr=` aims at. Read in the page, since what is
  * visible is what the browser laid out, never what the markup says. */
 export const READ_PAGE = () => {
-  const CLICKABLE = 'button, a[href], summary, input, textarea, select, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [data-row-id], [data-surface-launch], [data-cloud-setup-row]';
+  const CLICKABLE = 'button, a[href], summary, input, textarea, select, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [data-row-id], [data-surface-launch]';
   // What a control says about itself that its words do not: a radio picked, a checkbox ticked, the tab a page is
   // on, a panel open. A tester who clicked a radio was told the page read the same, because a page's text is all
   // this reads and a dot is not text. The words are the ones a screen reader says, off the same attributes.
@@ -333,7 +333,7 @@ export function diffLines(before, after) {
 const marked = page => page.evaluate(READ_PAGE);
 
 /** A word that names a data attribute rather than something on the page: `attr=row-id=ws:ws_api` is that attribute
- * at that value, `attr=cloud-setup-row` is the attribute being there at all. */
+ * at that value, `attr=agents-row` is the attribute being there at all. */
 export const attrWord = word => (typeof word === "string" && word.startsWith("attr=") ? selectorFor(word.slice(5)) : undefined);
 
 /** The first of several guesses that is on the page at all; nothing when none is. */

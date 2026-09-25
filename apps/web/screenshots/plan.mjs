@@ -37,7 +37,7 @@ const fail = message => {
 };
 
 /** The CSS selector a data attribute word means. `row-id=ws:ws_api` is that attribute at that value,
- * `cloud-setup-row` is the attribute being there at all; nothing here reaches past a data attribute, so a
+ * `agents-row` is the attribute being there at all; nothing here reaches past a data attribute, so a
  * list cannot point the harness at a class name the next restyle moves. */
 export function selectorFor(word) {
   if (typeof word !== "string" || word === "") fail("a click or wait word is a non-empty string");

@@ -81,17 +81,6 @@
       "wait": "right-panel-tabbar"
     },
     {
-      "name": "cloud-setup",
-      "at": "/",
-      "steps": [
-        "390:key:Escape",
-        "390:sidebar=trigger",
-        "cloud-setup-row"
-      ],
-      "wait": "k=choice",
-      "settleMs": 700
-    },
-    {
       "name": "spawned-thread",
       "at": "/",
       "steps": [
@@ -245,7 +234,7 @@
       "settleMs": 700
     },
     {
-      "name": "settings-image-sheet",
+      "name": "settings-image-recipe",
       "at": "/",
       "steps": [
         "390:key:Escape",
@@ -254,10 +243,10 @@
         "k=settings-computers",
         "390:key:Escape",
         "place-row=solari",
-        "k=edit-image"
+        "k=edit-recipe"
       ],
       "fixture": "image-built",
-      "wait": "k=choice",
+      "wait": "k=recipe",
       "settleMs": 700
     },
     {

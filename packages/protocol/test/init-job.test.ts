@@ -24,11 +24,9 @@ import {
   SIGN_IN_CODE_MAX,
   SOLARI_CONSOLE,
   SignInFinish,
-  cloudCreateRefusal,
   initAgentNoRecipeLine,
   initAgentPrompt,
   initAgentStep,
-  initButtonLine,
   initCostLine,
   initJobBuilding,
   initJobOver,
@@ -36,7 +34,6 @@ import {
   initNeedsYouLine,
   initPhaseWord,
   initProgressLine,
-  initProgressState,
   initRowOver,
   initRowFailed,
   initRowUnrun,
@@ -212,21 +209,6 @@ describe("the words the clients print for the job", () => {
     expect(initProgressLine(waiting)).toBe("sign in to GitHub CLI login");
     expect(initProgressLine({ ...JOB, phase: "answering", rows: [] })).toBe("waiting for you");
     expect(initProgressLine({ ...JOB, phase: "failed", rows: [] })).toBe("failed");
-  });
-
-  it("the sidebar button's facts: the rows over as a fraction of the total, the host's own needsYou for whether the person is waited on, and its words", () => {
-    expect(initProgressState(JOB)).toEqual({ fraction: 1 / 3, waitingOnYou: false });
-    expect(initButtonLine(JOB)).toBe("building · 1/3");
-    const waiting = { ...WAITING, progress: { done: 2, total: 4 } };
-    expect(initProgressState(waiting)).toEqual({ fraction: 0.5, waitingOnYou: true });
-    expect(initButtonLine(waiting)).toBe("waiting for you");
-    expect(initButtonLine({ ...JOB, phase: "sealing", progress: { done: 3, total: 3 } })).toBe("sealing · 3/3");
-    // The rows alone no longer say it: a job whose host wrote no need waits on the machine, whatever its rows hold.
-    expect(initProgressState({ ...waiting, needsYou: undefined })).toEqual({ fraction: 0.5, waitingOnYou: false });
-    // The screens are not a need, so nothing is waited on there; the phase word still carries them on the button.
-    const answering = { ...JOB, phase: "answering" as const, rows: [], progress: { done: 0, total: 0 } };
-    expect(initProgressState(answering)).toEqual({ fraction: 0, waitingOnYou: false });
-    expect(initButtonLine(answering)).toBe(initPhaseWord("answering"));
   });
 
   it("only a wait the person is not looking at is a need: a sign-in's open page, never the screens they just opened", () => {
@@ -409,20 +391,18 @@ describe("the words the clients print for the job", () => {
     expect(InitJob.safeParse({ ...JOB, rows: [row({ finish: "paste" as InitRow["finish"] })] }).success).toBe(false);
   });
 
-  it("the first workspace's default name and the reason its keycap is held live here, so the terminal and the app read one spelling each", () => {
+  it("the first workspace's default name lives here, so the terminal and the host read one spelling", () => {
     expect(FIRST_WORKSPACE).toBe("first");
-    expect(CLOUD_SETUP_WORDS.ask.needsName).toBe("give the task a name");
   });
 
-  it("the provider's console is spelled once, and the key screen's link names the company, not the host", () => {
+  it("the provider's console is spelled once, and no step's words name the host", () => {
     expect(SOLARI_CONSOLE).toBe("console.getsolari.com");
-    expect(CLOUD_SETUP_WORDS.keys.where).toBe("Get one at Solari");
     expect(JSON.stringify(CLOUD_SETUP_WORDS)).not.toContain(SOLARI_CONSOLE);
   });
 
   it("every step has a sentence under its title, and no title or sentence ends in a period", () => {
     expect(CLOUD_SETUP_WORDS.build.slideTop).not.toMatch(/[.;]$/);
-    for (const step of [CLOUD_SETUP_WORDS.choice, CLOUD_SETUP_WORDS.keys, CLOUD_SETUP_WORDS.reading, CLOUD_SETUP_WORDS.agent, CLOUD_SETUP_WORDS.build, CLOUD_SETUP_WORDS.ask]) {
+    for (const step of [CLOUD_SETUP_WORDS.choice, CLOUD_SETUP_WORDS.reading, CLOUD_SETUP_WORDS.agent, CLOUD_SETUP_WORDS.build]) {
       expect(step.top.length, step.top).toBeGreaterThan(20);
       expect(step.top, step.top).not.toMatch(/\.$/);
       expect(step.headline, step.headline).not.toMatch(/\.$/);
@@ -446,7 +426,6 @@ describe("the words the clients print for the job", () => {
     // build's cap ended a wait they were not going to finish, and neither is the machine's doing.
     const deferredRow = { state: INIT_SIGN_IN_WORDS.deferred("darwin"), login: "deferred" as const };
     expect([initRowFailed(deferredRow), initRowOver(deferredRow), initRowUnrun(deferredRow.state)]).toEqual([false, true, false]);
-    expect(CLOUD_SETUP_WORDS.build.doneTop).toBe("Your image is built; every task starts from it");
     const rows: InitRow[] = [
       { id: "agent/claude", kind: "agent", label: "Claude Code", state: "MCP added" },
       { id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" },
@@ -548,29 +527,4 @@ describe("the words the clients print for the job", () => {
     expect(CLOUD_SETUP_WORDS.choice.headline).toBe("What goes on your image");
   });
 
-  it("holds a new cloud workspace back while there is no image to fork, in the app's own words", () => {
-    const stages: InitRow[] = [
-      row({ id: "stage/creating", state: "done" }),
-      row({ id: "stage/tools", state: "done" }),
-      row({ id: "stage/snapshotting", state: "running" }),
-    ];
-    const building = { ...JOB, phase: "building" as const, rows: stages };
-    expect(cloudCreateRefusal({ hasGolden: false, job: building })).toEqual({ line: "the image is still building · 2 of 3", word: "Open the build" });
-    // The count is the build's own, so the sign-ins fold into one stage here as they do on the build screen.
-    const withSignIns = { ...building, rows: [...stages, row({ id: "sign-in/gh", kind: "sign-in" as const, label: "GitHub CLI login", state: "waiting" }), row({ id: "sign-in/claude", kind: "sign-in" as const, label: "Claude Code", state: "waiting" })] };
-    expect(cloudCreateRefusal({ hasGolden: false, job: withSignIns })?.line).toBe("the image is still building · 2 of 4");
-    // Every stretch of the build says it, since the image is sealed at the end of all of them.
-    for (const phase of ["signing-in", "sealing", "finishing"] as const) {
-      expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase } })?.line).toMatch(/^the image is still building/);
-    }
-    // No build to point at: the answers, a job that stopped, and no job at all all send the person to the image.
-    const setup = { line: "build your image first", word: CLOUD_SETUP_WORDS.create.build };
-    expect(cloudCreateRefusal({ hasGolden: false, job: null })).toEqual(setup);
-    expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase: "answering" } })).toEqual(setup);
-    expect(cloudCreateRefusal({ hasGolden: false, job: { ...building, phase: "failed" } })).toEqual(setup);
-    // A sealed image has a head to fork, so a later build over it holds nothing back; nor does a state not read yet.
-    expect(cloudCreateRefusal({ hasGolden: true, job: building })).toBeNull();
-    expect(cloudCreateRefusal({ hasGolden: null, job: building })).toBeNull();
-    expect(JSON.stringify(CLOUD_SETUP_WORDS.create)).not.toMatch(/wspx|golden build|terminal/i);
-  });
 });

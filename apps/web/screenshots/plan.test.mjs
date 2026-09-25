@@ -11,7 +11,7 @@ const list = (surfaces, rest = {}) => readSurfaces({ surfaces, ...rest });
 
 describe("a click or wait word", () => {
   it("is the attribute alone where it names no value", () => {
-    expect(selectorFor("cloud-setup-row")).toBe("[data-cloud-setup-row]");
+    expect(selectorFor("agents-row")).toBe("[data-agents-row]");
   });
 
   it("keeps a value with a colon in it whole", () => {
@@ -94,7 +94,7 @@ describe("a surfaces list", () => {
 
 describe("the folder a run leaves", () => {
   it("names a file after its surface, theme and width", () => {
-    expect(shotName("cloud-setup", "dark", 390)).toBe("cloud-setup-dark-390.png");
+    expect(shotName("settings-computers", "dark", 390)).toBe("settings-computers-dark-390.png");
   });
 
   it("lists only the files that were written, so a missed shot is not reviewed from a stale one", () => {
@@ -169,7 +169,6 @@ describe("the surfaces list this repo ships", () => {
       "composer-slash-menu",
       "composer-slash-filtered",
       "machine",
-      "cloud-setup",
       "spawned-thread",
       "threads-across-workspaces",
       "opener-transcript",
@@ -182,7 +181,7 @@ describe("the surfaces list this repo ships", () => {
       "add-computer",
       "settings-image-fresh",
       "settings-image-built",
-      "settings-image-sheet",
+      "settings-image-recipe",
       "settings-computer-open",
       "remove-computer",
       "settings-appearance",

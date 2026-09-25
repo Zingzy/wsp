@@ -283,7 +283,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch laid out in Chrom
     expect(Math.abs(across.body - column.body)).toBeLessThan(EDGE_STEP);
   });
 
-  it.each(["dark", "light"] as const)("in the %s appearance the agents screen is one row per catalog agent, the found ones first and ticked, the missing ones held, at the SetupScreen numbers", async theme => {
+  it.each(["dark", "light"] as const)("in the %s appearance the agents screen is one row per catalog agent, the found ones first and ticked, the missing ones held, at the sheet screen's numbers", async theme => {
     await agents(theme);
     expect(await visible("#welcome")).toBe(false);
     expect(await visible("#agents")).toBe(true);
