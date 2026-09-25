@@ -122,10 +122,28 @@ export interface SkillFile {
 }
 
 /** Folder and file names a version control tool reads config from, which can name a command it runs. */
-const VCS_NAMES = new Set([".git", ".hg", ".svn", ".bzr", ".jj", ".gitmodules"]);
+const VCS_NAMES = new Set([".git", ".hg", ".svn", ".bzr", ".jj", ".gitmodules", "_darcs", ".pijul", ".sl"]);
 // Code points a Mac's file system has ignored in a name, so ".g\u200cit" once opened as .git.
 const IGNORABLE = /[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
-const vcsPath = (path: string): boolean => path.split("/").some(seg => VCS_NAMES.has(seg.replace(IGNORABLE, "").toLowerCase()));
+const bare = (seg: string): string => seg.replace(IGNORABLE, "").toLowerCase();
+const vcsPath = (path: string): boolean => path.split("/").some(seg => VCS_NAMES.has(bare(seg)));
+
+/** The first folder, "" for the root, that git takes for a repository when someone stands in it, whatever it is
+ * called: a HEAD beside objects and refs, or beside a commondir naming where those are. */
+function gitFolder(paths: Iterable<string>): string | undefined {
+  const under = new Map<string, Set<string>>();
+  for (const path of paths) {
+    const parts = path.split("/");
+    for (let i = 0; i < parts.length; i++) {
+      const dir = parts.slice(0, i).join("/");
+      const names = under.get(dir) ?? new Set<string>();
+      names.add(bare(parts[i]!));
+      under.set(dir, names);
+    }
+  }
+  for (const [dir, names] of under) if (names.has("head") && ((names.has("objects") && names.has("refs")) || names.has("commondir"))) return dir;
+  return undefined;
+}
 
 const plainPath = (path: string): boolean => {
   if (path === "" || Buffer.byteLength(path) > MAX_PATH_BYTES || path.startsWith("/") || path.includes("\\") || /^[A-Za-z]:/.test(path) || hasControlChar(path)) return false;
@@ -158,10 +176,14 @@ export function checkSkillFiles(name: string, files: readonly { path?: unknown; 
     const parts = path.split("/");
     for (let i = 1; i < parts.length; i++) if (seen.has(parts.slice(0, i).join("/"))) throw refuse(`the download names ${parts.slice(0, i).join("/")} as a file and as a folder.`);
   }
+  const git = gitFolder(seen);
+  if (git !== undefined) throw refuse(`${git === "" ? "the skill's own folder" : git} is laid out as a git folder, whose config git runs commands from.`);
   const skillMd = out.find(f => f.path === "SKILL.md");
   if (skillMd === undefined) throw refuse("it has no SKILL.md at its root.");
   // Every agent finds a skill by its folder, so a SKILL.md naming another skill would pass for that one.
-  const said = skillMdFrontmatter(new TextDecoder().decode(skillMd.bytes)).name;
+  const front = skillMdFrontmatter(new TextDecoder().decode(skillMd.bytes));
+  if (front.names !== undefined) throw refuse("its SKILL.md has more than one name line, which agents read apart.");
+  const said = front.name;
   if (said === undefined) throw refuse(`its SKILL.md names no name, where it must say ${name}.`);
   if (said !== name) throw refuse(`its SKILL.md names it ${said}, not ${name}.`);
   return out;

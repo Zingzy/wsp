@@ -106,5 +106,6 @@ describe("the skills on a computer", () => {
     expect(skillFrontmatter('name: "a b"\ndescription: >-\n  one\n  two\nother: x')).toEqual({ name: "a b", description: "one two" });
     expect(skillFrontmatter("name: c\ndescription: starts here\n  and goes on")).toEqual({ name: "c", description: "starts here and goes on" });
     expect(skillFrontmatter("title: none")).toEqual({});
+    expect(skillFrontmatter("name: pdf\nname: memo")).toEqual({ name: "pdf", names: 2 });
   });
 });

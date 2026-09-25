@@ -143,11 +143,36 @@ describe("the install path rule", () => {
       expect(refused([...good, { path, contents: "[core]\n\tfsmonitor = touch x\n" }]), JSON.stringify(path)).toBe(`pdf was not installed: the download names ${JSON.stringify(path)}, which a version control tool reads its config from.`);
     }
     expect(refused([...good, { path: ".github/workflows/ci.yml", contents: "x" }, { path: ".gitignore", contents: "x" }])).toBe("accepted");
+    for (const path of ["_darcs/prefs/defaults", ".pijul/config", ".SL/config", "a/.Pijul/x"]) {
+      expect(refused([...good, { path, contents: "x" }]), path).toBe(`pdf was not installed: the download names ${JSON.stringify(path)}, which a version control tool reads its config from.`);
+    }
+  });
+
+  it("refuses a folder laid out as a git folder under any name, in any case: HEAD with objects and refs, or with commondir", () => {
+    const repo = (at: string, head: string, rest: string[]) => [
+      { path: `${at}${head}`, contents: "ref: refs/heads/main\n" },
+      { path: `${at}config`, contents: "[core]\n\tbare = false\n\tworktree = .\n\tfsmonitor = touch x\n" },
+      ...rest.map(r => ({ path: `${at}${r}`, contents: "x" })),
+    ];
+    for (const [at, head, rest] of [
+      ["", "HEAD", ["objects/info/x", "refs/heads/x"]],
+      ["sub/", "HEAD", ["objects/info/x", "refs/heads/x"]],
+      ["sub/", "head", ["Objects/info/x", "REFS/heads/x"]],
+      ["", "HEAD", ["commondir"]],
+      ["a/b/", "Head", ["CommonDir"]],
+    ] as const) {
+      const where = at === "" ? "the skill's own folder" : at.slice(0, -1);
+      expect(refused([...good, ...repo(at, head, [...rest])]), `${at}${head}`).toBe(`pdf was not installed: ${where} is laid out as a git folder, whose config git runs commands from.`);
+    }
+    expect(refused([...good, { path: "HEAD", contents: "x" }, { path: "refs/x", contents: "x" }])).toBe("accepted");
+    expect(refused([...good, { path: "a/HEAD", contents: "x" }, { path: "objects/x", contents: "x" }, { path: "refs/x", contents: "x" }])).toBe("accepted");
   });
 
   it("refuses a SKILL.md whose name is not the folder's, and the name wsp keeps for its own skill", () => {
     expect(refused([{ path: "SKILL.md", contents: "---\nname: memo\n---\n" }])).toBe("pdf was not installed: its SKILL.md names it memo, not pdf.");
     expect(refused([{ path: "SKILL.md", contents: "# no frontmatter\n" }])).toBe("pdf was not installed: its SKILL.md names no name, where it must say pdf.");
+    expect(refused([{ path: "SKILL.md", contents: "---\nname: pdf\nname: memo\n---\n" }])).toBe("pdf was not installed: its SKILL.md has more than one name line, which agents read apart.");
+    expect(refused([{ path: "SKILL.md", contents: "---\nname: memo\nname: pdf\n---\n" }])).toBe("pdf was not installed: its SKILL.md has more than one name line, which agents read apart.");
     for (const name of ["wsp", "wsp-machine"]) expect(refused([{ path: "SKILL.md", contents: `---\nname: ${name}\n---\n` }], name), name).toBe(`${name} is the name of the skill wsp writes, so nothing was installed.`);
   });
 

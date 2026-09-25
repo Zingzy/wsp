@@ -48,32 +48,63 @@ const unquote = (v: string): string => {
   return (t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")) ? t.slice(1, -1) : t;
 };
 
-/** `name` and `description` off a SKILL.md's frontmatter lines: a plain value, a quoted one, or a folded or literal
- * block, read as one line. */
-export function skillFrontmatter(text: string): { name?: string; description?: string } {
-  const out: { name?: string; description?: string } = {};
+/** What a SKILL.md's frontmatter says; `names` counts the name lines when there is more than one. */
+export interface SkillFront {
+  name?: string;
+  description?: string;
+  names?: number;
+}
+
+/** `name` and `description` off a SKILL.md's frontmatter lines, the first of each: a plain value, a quoted one, or a
+ * folded or literal block, read as one line. */
+export function skillFrontmatter(text: string): SkillFront {
+  const out: SkillFront = {};
+  let names = 0;
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const m = /^(name|description):\s*(.*)$/.exec(lines[i]!);
     if (m === null) continue;
     const key = m[1] as "name" | "description";
+    if (key === "name") names++;
     let value = m[2]!.trim();
     const block = /^[>|][-+]?$/.test(value);
     const more: string[] = [];
     while (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1]!)) more.push(lines[++i]!.trim());
     value = block ? more.join(" ") : [unquote(value), ...more].filter(w => w !== "").join(" ");
-    if (value !== "") out[key] = value;
+    if (value !== "" && out[key] === undefined) out[key] = value;
   }
+  if (names > 1) out.names = names;
   return out;
 }
 
 /** `name` and `description` off a whole SKILL.md: the lines between its opening `---` and the next, as the reader's
  * script takes them. */
-export function skillMdFrontmatter(text: string): { name?: string; description?: string } {
+export function skillMdFrontmatter(text: string): SkillFront {
   const lines = text.slice(0, SKILL_HEAD_BYTES).split(/\r?\n/);
   if (lines[0] !== "---") return {};
   const end = lines.indexOf("---", 1);
   return skillFrontmatter(lines.slice(1, end === -1 ? undefined : end).join("\n"));
+}
+
+/** Prints each folder given after the project that is a link or sits under one inside the project. */
+const LINKED_SCRIPT = [
+  'p=$1; shift',
+  'for r in "$@"; do',
+  '  s=$r',
+  '  while [ "${#s}" -gt "${#p}" ]; do',
+  "    if [ -L \"$s\" ]; then printf '%s\\n' \"$r\"; break; fi",
+  '    s=${s%/*}',
+  '  done',
+  'done',
+  "printf '\\036END\\n'",
+].join("\n");
+
+/** The project's skills folders that are the repo's links: a repo that links one out would hand its skills acts the
+ * person's own folders. Every one of them, when the answer does not come back whole. */
+async function linkedInside(host: Host, project: string, dirs: readonly string[]): Promise<Set<string>> {
+  const said = await host.exec.run("sh", ["-c", LINKED_SCRIPT, "sh", project, ...dirs], { timeoutMs: 20_000 });
+  if (said === undefined || !said.trimEnd().endsWith(END)) return new Set(dirs);
+  return new Set(said.split("\n").filter(l => dirs.includes(l)));
 }
 
 /** The folders every catalog agent loads skills from on that computer, absolute, each once: an agent's own folder
@@ -90,7 +121,12 @@ export async function skillRoots(host: Host, o: { agents?: readonly AgentEntry[]
     }
   };
   for (const a of agents) add(a.skillRoots.user.map((r, i) => ({ dir: expand(host, r.dir), own: i === 0 })), "user", a.id);
-  if (o.project !== undefined) for (const a of agents) add(a.skillRoots.project.map((r, i) => ({ dir: posix.join(o.project!, r.dir), own: i === 0 })), "project", a.id);
+  if (o.project !== undefined) {
+    const project = o.project;
+    const at = (r: { dir: string }): string => posix.join(project, r.dir);
+    const linked = await linkedInside(host, project, [...new Set(agents.flatMap(a => a.skillRoots.project.map(at)))]);
+    for (const a of agents) add(a.skillRoots.project.map((r, i) => ({ dir: at(r), own: i === 0 })).filter(r => !linked.has(r.dir)), "project", a.id);
+  }
   const plugins = agents.filter(a => a.pluginSkills !== undefined);
   const indexes = await Promise.all(plugins.map(a => host.fs.readText(expand(host, a.pluginSkills!.index))));
   plugins.forEach((a, i) => {
