@@ -2,7 +2,7 @@
 // The preferences record every client reads off the host: what a stored record
 // parses to, how a patch lands on it, and the wire shapes that carry both.
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PREFERENCES, EventUnion, LABS_ENV, PreferencesPatch, RuntimeRequest, applyPreferencesPatch, fmtPx, labsFromEnv, preferencesFrom } from "../src/index.js";
+import { DEFAULT_PREFERENCES, EventUnion, LABS_ENV, Preferences, PreferencesPatch, RuntimeRequest, applyPreferencesPatch, fmtPx, labsFromEnv, preferencesFrom } from "../src/index.js";
 
 describe("the preferences record", () => {
   it("nothing stored, a record from an older host and a corrupt one all read as the defaults", () => {
@@ -10,7 +10,7 @@ describe("the preferences record", () => {
     expect(preferencesFrom({})).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom({ theme: "sepia" })).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom("nonsense")).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, labs: false });
+    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, labs: false });
   });
 
   it("a stored record keeps what it has and takes the defaults for the rest", () => {
@@ -19,13 +19,34 @@ describe("the preferences record", () => {
 
   it("a patch lands field by field, a null width clears the width, and the zoom lands per workspace, a null entry dropping that workspace's", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark", sidebarWidth: 300, terminalZoom: { ws_a: 2 } });
-    expect(one).toEqual({ theme: "dark", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, labs: false });
+    expect(one).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, labs: false });
     const two = applyPreferencesPatch(one, { terminalZoom: { ws_b: -1 } });
     expect(two.terminalZoom).toEqual({ ws_a: 2, ws_b: -1 });
     const three = applyPreferencesPatch(two, { sidebarWidth: null, terminalZoom: { ws_a: null } });
-    expect(three).toEqual({ theme: "dark", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, labs: false });
+    expect(three).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, labs: false });
     expect(applyPreferencesPatch(one, {})).toEqual(one);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
+  });
+
+  it("each side keeps its own theme pick: a patch lands either, an old record reads with the side defaults, and an empty id is refused", () => {
+    const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { darkTheme: "denim" });
+    expect(one).toEqual({ ...DEFAULT_PREFERENCES, darkTheme: "denim" });
+    const two = applyPreferencesPatch(one, { lightTheme: "linen", theme: "light" });
+    expect(two).toEqual({ ...DEFAULT_PREFERENCES, theme: "light", lightTheme: "linen", darkTheme: "denim" });
+    expect(applyPreferencesPatch(two, { sidebarWidth: 280 })).toEqual({ ...two, sidebarWidth: 280 });
+    // A record from a host older than the picks reads with each side on its default.
+    expect(preferencesFrom({ theme: "dark", sidebarWidth: 300 })).toEqual({ ...DEFAULT_PREFERENCES, theme: "dark", sidebarWidth: 300 });
+    expect(preferencesFrom({ darkTheme: "denim" }).darkTheme).toBe("denim");
+    // On the wire too: a record an older host sends parses with the side defaults rather than failing whole.
+    const { lightTheme: _l, darkTheme: _d, ...older } = DEFAULT_PREFERENCES;
+    expect(Preferences.parse({ ...older, theme: "dark" })).toEqual({ ...DEFAULT_PREFERENCES, theme: "dark" });
+    // The shape is the protocol's; which ids exist is the app's, so an id this build does not know still parses.
+    expect(PreferencesPatch.safeParse({ lightTheme: "linen", darkTheme: "some-later-theme" }).success).toBe(true);
+    expect(PreferencesPatch.safeParse({ lightTheme: "" }).success).toBe(false);
+    // The record's defaults never ride in on a patch that names neither pick: they would put a side back unasked.
+    expect(PreferencesPatch.parse({ theme: "dark" })).toEqual({ theme: "dark" });
+    expect(PreferencesPatch.safeParse({ darkTheme: 3 }).success).toBe(false);
+    expect(PreferencesPatch.safeParse({ lightTheme: "linen", accentTheme: "x" }).success).toBe(false);
   });
 
   it("the access pick lands per workspace and stands beside the rest, a null entry dropping that workspace's", () => {

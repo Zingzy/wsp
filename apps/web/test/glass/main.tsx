@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { ComposerSurface } from "../../src/components/chat/ComposerSurface";
 import { GlassGround } from "../../src/components/GlassGround";
 import "../../src/index.css";
+import "../../src/themes/index";
 
 const theme = new URLSearchParams(window.location.search).get("theme") === "light" ? "light" : "dark";
 document.documentElement.classList.toggle("dark", theme === "dark");

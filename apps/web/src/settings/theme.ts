@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The theme as the page draws it. The stylesheet has two sides, told apart by
-// the dark class on the html element; the preference picks a side, or leaves
-// it to the computer. One rule per value says which side it draws, and the
-// desktop shell is told the value so its frame and glass draw the same side.
-import type { ThemePreference } from "@wsp/protocol";
+// the dark class on the html element, and one sheet per theme, keyed on its
+// data-theme; the preference picks a side, or leaves it to the computer, and
+// each side draws the theme picked for it. One rule per value says which side
+// it draws, and the desktop shell is told the value so its frame and glass
+// draw the same side.
+import type { Preferences, ThemePreference } from "@wsp/protocol";
 import { useLayoutEffect, useSyncExternalStore } from "react";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { useStore } from "../protocol/store.js";
+import { themeFor } from "../themes/index.js";
 
 /** Whether each value draws the dark side, given whether the computer does. */
 const DRAWS_DARK: Record<ThemePreference, (systemDark: boolean) => boolean> = {
@@ -18,12 +21,18 @@ const DRAWS_DARK: Record<ThemePreference, (systemDark: boolean) => boolean> = {
 
 export const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
 
-/** Flips the side with transitions held off for one frame: the stylesheet transitions colours on cards and buttons,
- * and a paint mid-way between the sides is what a switch would show otherwise. */
-export function applyTheme(theme: ThemePreference, systemDark: boolean): void {
+/** What the page draws its theme from: the side's pick, and each side's theme. */
+export type ThemePicks = Pick<Preferences, "theme" | "lightTheme" | "darkTheme">;
+
+/** Sets the side and that side's theme together, with transitions held off for one frame: the stylesheet
+ * transitions colours on cards and buttons, and a paint mid-way between two themes is what a switch would show
+ * otherwise. */
+export function applyTheme({ theme, lightTheme, darkTheme }: ThemePicks, systemDark: boolean): void {
+  const dark = DRAWS_DARK[theme](systemDark);
   const html = document.documentElement;
   html.classList.add("no-transitions");
-  html.classList.toggle("dark", DRAWS_DARK[theme](systemDark));
+  html.classList.toggle("dark", dark);
+  html.dataset["theme"] = dark ? themeFor("dark", darkTheme).id : themeFor("light", lightTheme).id;
   window.requestAnimationFrame(() => html.classList.remove("no-transitions"));
 }
 
@@ -33,11 +42,13 @@ export function applyTheme(theme: ThemePreference, systemDark: boolean): void {
  * strand a person where the app cannot read the computer's. */
 export function useThemeEffect(): void {
   const theme = useStore(s => s.preferences.theme);
+  const lightTheme = useStore(s => s.preferences.lightTheme);
+  const darkTheme = useStore(s => s.preferences.darkTheme);
   const systemDark = useMediaQuery(SYSTEM_DARK_QUERY);
   useLayoutEffect(() => {
-    applyTheme(theme, systemDark);
+    applyTheme({ theme, lightTheme, darkTheme }, systemDark);
     desktopBridge()?.setTheme?.(theme);
-  }, [theme, systemDark]);
+  }, [theme, lightTheme, darkTheme, systemDark]);
 }
 
 const subscribeToHtmlClass = (onChange: () => void): (() => void) => {

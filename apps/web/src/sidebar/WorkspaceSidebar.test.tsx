@@ -149,7 +149,7 @@ describe("the sidebar under the four nouns", () => {
     expect(leaf.className).toContain("px-2");
     // A sentence with a period is read, not glanced at: the sans in a quiet ink, never the mono.
     expect(leaf.className).toContain("text-[13px]");
-    expect(leaf.className).toContain("text-sidebar-foreground/45");
+    expect(leaf.className).toContain("text-muted-foreground");
     expect(leaf.className).not.toContain("font-mono");
     const plus = [...document.querySelectorAll<HTMLElement>(`[data-k=new-workspace]`)].find(el => el.dataset["project"] === "pr_2")!;
     // The plus sits in the row's frame and reads at rest as nothing at every width: the hover and the keyboard focus lift it.

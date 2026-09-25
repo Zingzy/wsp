@@ -8,6 +8,7 @@ import { DaemonDown } from "../../src/components/DaemonDown";
 import { RequestError, type Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
 import "../../src/index.css";
+import "../../src/themes/index";
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");

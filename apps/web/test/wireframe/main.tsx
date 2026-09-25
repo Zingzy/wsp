@@ -7,7 +7,8 @@
 // machine, so the real sidebar, the real dialog and the real first run are fed
 // records here instead of pixels being drawn by hand.
 //
-// ?screen=<name> picks one, ?theme=light the light side, ?sidebar=<px> opens
+// ?screen=<name> picks one, ?theme=light the light side, ?lightTheme= and ?darkTheme= each side's theme by id,
+// ?sidebar=<px> opens
 // the sidebar at that remembered width, ?pick=<project id> is the project
 // the switcher is filtered to, written to this window's storage before the
 // store binds:
@@ -91,7 +92,7 @@ import { useAgentActs } from "../../src/components/agents/useAgentActs";
 import { SettingsPage } from "../../src/settings/SettingsPage";
 import { AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
-import { useThemeEffect } from "../../src/settings/theme";
+import { applyTheme, useThemeEffect } from "../../src/settings/theme";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
 import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
 import { requestNewWorkspace } from "../../src/shell/shellRequests";
@@ -103,7 +104,9 @@ import "../../src/index.css";
 
 const params = new URLSearchParams(window.location.search);
 const screen = params.get("screen") ?? "sidebar";
-document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
+/** Each side's theme, by id (?lightTheme=, ?darkTheme=), the record's defaults where the query names none. */
+const picks = { lightTheme: params.get("lightTheme") ?? DEFAULT_PREFERENCES.lightTheme, darkTheme: params.get("darkTheme") ?? DEFAULT_PREFERENCES.darkTheme };
+applyTheme({ theme: params.get("theme") === "light" ? "light" : "dark", ...picks }, false);
 
 const AT = "2026-09-17T09:00:00.000Z";
 const project = (id: string, name: string, computer: string): ProjectView => ({
@@ -492,7 +495,7 @@ useStore.setState({
   conn: "live",
   ready: true,
   projectsRead: true,
-  preferences: { ...DEFAULT_PREFERENCES, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
+  preferences: { ...DEFAULT_PREFERENCES, ...picks, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
   places: computers,
   settingsOpen: settings,
   addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed" || screen === "settings-computers-refused",

@@ -13,6 +13,7 @@ import { diffPanelOptions } from "../../src/diffs/DiffSurface";
 import { toDiffModel } from "../../src/diffs/model";
 import { PANEL_WIDTH } from "./width";
 import "../../src/index.css";
+import "../../src/themes/index";
 
 const params = new URLSearchParams(window.location.search);
 const theme = params.get("theme") === "light" ? "light" : "dark";
