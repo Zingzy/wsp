@@ -287,7 +287,7 @@ describe("a machine that stopped answering with its memory near full", () => {
 
   it("the line carries the last figures and says the work took the memory, never that the machine failed", () => {
     expect(outOfMemoryLine({ used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.42 })).toBe(
-      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the workspace last answered; the work on it took the memory, not a fault of the computer it runs on",
+      "Out of memory (3.6 GB of 3.9 GB used, load 6.4) when the task last answered; the work on it took the memory, not a fault of the computer it runs on",
     );
   });
 
@@ -297,9 +297,9 @@ describe("a machine that stopped answering with its memory near full", () => {
   });
 
   it("the size line names the smallest offer with more memory and its rate, or that there is none", () => {
-    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, offers)).toBe("A workspace on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one");
-    expect(biggerSizeLine({ cpu: 2, memMb: 8192 }, offers)).toBe("A workspace on 4 vCPU · 16 GB ($0.30/hr) fits more; pick it when you make the next one");
-    expect(biggerSizeLine({ cpu: 4, memMb: 16384 }, offers)).toBe("No size with more memory is offered; run less in the workspace at once");
+    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, offers)).toBe("A task on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one");
+    expect(biggerSizeLine({ cpu: 2, memMb: 8192 }, offers)).toBe("A task on 4 vCPU · 16 GB ($0.30/hr) fits more; pick it when you make the next one");
+    expect(biggerSizeLine({ cpu: 4, memMb: 16384 }, offers)).toBe("No size with more memory is offered; run less in the task at once");
     // Order in the table does not pick the offer; memory does.
     expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, [...offers].reverse())).toContain("2 vCPU · 8 GB");
   });
@@ -1403,7 +1403,7 @@ describe("REPO_STATE_WORDS", () => {
   });
 
   it("explains the word beside it in one dry sentence about the machine and this folder's git state", () => {
-    expect(REPO_STATE_WORDS.refused.note).toBe("The workspace could not read this folder's git state, so no branch is shown.");
+    expect(REPO_STATE_WORDS.refused.note).toBe("The task could not read this folder's git state, so no branch is shown.");
     expect(REPO_STATE_WORDS.refused.note).toMatch(/^[^.]+\.$/);
   });
 
@@ -1633,7 +1633,7 @@ describe("the export dialog's words", () => {
   });
 
   it("tells a stranger what the ticks on the agent rows do, what happens when the workspace has no threads, and why a row is empty before the export", () => {
-    expect(EXPORT_SESSIONS_NOTE).toBe("Ticked agents' sessions come home with the folder. The rest stay in the workspace.");
+    expect(EXPORT_SESSIONS_NOTE).toBe("Ticked agents' sessions come home with the folder. The rest stay in the task.");
     expect(NO_THREADS_NOTE).toBe("No threads here. Every agent's sessions for the folder come home with it.");
     expect(NOT_LANDED_WORD).toBe("when it lands");
   });

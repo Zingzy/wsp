@@ -197,7 +197,7 @@ describe("command palette", () => {
     await waitFor(() => expect(palette()).not.toBeNull());
     // The provider its own record names, and, on a record that names none, what the machine is: a person picks a
     // workspace by its state and where it runs, and the id the provider minted for the machine names neither.
-    expect(metaOn("api")).toBe("Running · solari · Current workspace");
+    expect(metaOn("api")).toBe("Running · solari · Current task");
     expect(metaOn("worker")).toBe("Stopped · a provider");
     for (const title of ["api", "worker"]) expect(metaOn(title)).not.toMatch(/m_ws_/);
   });
@@ -303,7 +303,7 @@ describe("command palette", () => {
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
     fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: ">pause" } });
-    fireEvent.click(await screen.findByText("Pause workspace"));
+    fireEvent.click(await screen.findByText("Pause task"));
     await waitFor(() => expect(api.nap).toHaveBeenCalledWith("ws_a"));
     expect(palette()).toBeNull();
   });
@@ -338,8 +338,8 @@ describe("command palette", () => {
     await mountShell();
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
-    fireEvent.click(screen.getByText("New workspace", { selector: "[data-slot=command-item] span" }));
-    await waitFor(() => expect(screen.getByRole("dialog", { name: "New workspace" })).toBeTruthy());
+    fireEvent.click(screen.getByText("New task", { selector: "[data-slot=command-item] span" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "New task" })).toBeTruthy());
   });
 
   it("while a creation row is selected, the shortcuts act on no workspace: no thread request, no drawer, no panel", async () => {
@@ -455,8 +455,8 @@ describe("command palette", () => {
     try {
       mod("k");
       await waitFor(() => expect(palette()).not.toBeNull());
-      expect(chordOn("Next workspace")).toBe("⌃Tab");
-      expect(chordOn("Previous workspace")).toBe("⌃⇧Tab");
+      expect(chordOn("Next task")).toBe("⌃Tab");
+      expect(chordOn("Previous task")).toBe("⌃⇧Tab");
       expect(chordOn("api")).toBe("⌘1");
       expect(chordOn("worker")).toBe("⌘2");
     } finally {
@@ -468,8 +468,8 @@ describe("command palette", () => {
     await waitFor(() => expect(palette()).not.toBeNull());
     // A browser tab on macOS keeps Tab, the digits and the mod arrows for its own tabs, so the switch has no
     // chord to show there at all and the row is a click alone.
-    expect(chordOn("Next workspace")).toBeNull();
-    expect(chordOn("Previous workspace")).toBeNull();
+    expect(chordOn("Next task")).toBeNull();
+    expect(chordOn("Previous task")).toBeNull();
     expect(chordOn("api")).toBeNull();
   });
 
@@ -478,7 +478,7 @@ describe("command palette", () => {
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
     const { asks, off } = watchComposerFocus("ws_b");
-    fireEvent.click(inPalette().getByText("Next workspace"));
+    fireEvent.click(inPalette().getByText("Next task"));
     await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
     expect(asks).toEqual(["ws_b"]);
     off();
@@ -716,7 +716,7 @@ describe("default shortcuts", () => {
       // Both directions, since neither can step. "No threads to walk" over four listed threads is what stopped a
       // tester believing the app about its own state.
       expect(inPalette().queryByText("No threads to walk")).toBeNull();
-      expect(inPalette().getAllByText("Nothing to step to on api; a walk stays inside one workspace")).toHaveLength(2);
+      expect(inPalette().getAllByText("Nothing to step to on api; a walk stays inside one task")).toHaveLength(2);
       // And the walk does hold them once the workspace they run on is the one on screen.
       mod("k");
       await waitFor(() => expect(palette()).toBeNull());
@@ -742,8 +742,8 @@ describe("default shortcuts", () => {
       await waitFor(() => expect(palette()).not.toBeNull());
       expect(chordOn("Next thread")).toBe("⌥⌘Down");
       expect(chordOn("Previous thread")).toBe("⌥⌘Up");
-      expect(chordOn("Next workspace")).toBe("⌃Tab");
-      expect(chordOn("Previous workspace")).toBe("⌃⇧Tab");
+      expect(chordOn("Next task")).toBe("⌃Tab");
+      expect(chordOn("Previous task")).toBe("⌃⇧Tab");
     } finally {
       restore();
     }

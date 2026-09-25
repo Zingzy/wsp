@@ -2,7 +2,7 @@
 // Settings > Appearance: the theme as three pictures of the app, and what the
 // chosen one does under them.
 import { DEFAULT_PREFERENCES, type Preferences, type PreferencesPatch } from "@wsp/protocol";
-import { SETTINGS_WORDS, THEME_SAYS } from "./format.js";
+import { SETTINGS_WORDS } from "./format.js";
 import type { SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import { ThemePicker } from "./ThemePicker.js";
@@ -20,14 +20,7 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
       id: "theme",
       head: SETTINGS_WORDS.theme,
       items: [],
-      body: (
-        <div className="flex flex-col gap-4">
-          <ThemePicker value={preferences.theme} onChange={theme => setPreferences({ theme })} />
-          <p data-k="theme-says" className="text-[13px] text-muted-foreground">
-            {THEME_SAYS[preferences.theme]}
-          </p>
-        </div>
-      ),
+      body: <ThemePicker value={preferences.theme} onChange={theme => setPreferences({ theme })} />,
     },
   ];
 }

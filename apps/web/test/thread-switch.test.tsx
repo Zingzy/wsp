@@ -180,7 +180,7 @@ describe("switching threads while a turn runs", () => {
     await center().findByText("Added GET /health.");
     expect(center().queryByText("Checking the keychain.")).toBeNull();
     expect(center().queryByText(/Working for/)).toBeNull();
-    expect(center().getByTestId("settled-footer").textContent).toContain("completed");
+    expect(center().getByTestId("settled-footer").textContent).toContain("Worked for");
     expect(center().getByTestId("composer-editor")).toBeDefined();
     expect(threadRow("make me a simple server").getAttribute("data-active")).toBe("true");
     expect(threadRow("do you have access").getAttribute("data-active")).toBe("false");
@@ -281,7 +281,7 @@ describe("switching threads while a turn runs", () => {
     ];
     const { emit, started, center, editor } = await mount(fixtureApi(transcript, rows, { ...workspace, claudeSessionId: "sess_a" }));
     expect(center().queryByText("Adding GET /ready.")).toBeNull();
-    expect(center().getByTestId("settled-footer").textContent).toContain("completed");
+    expect(center().getByTestId("settled-footer").textContent).toContain("Worked for");
     await typeInto(editor(), "check the login keychain too");
     await press(editor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));

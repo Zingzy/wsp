@@ -10,7 +10,7 @@ describe("the preferences record", () => {
     expect(preferencesFrom({})).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom({ theme: "sepia" })).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom("nonsense")).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, labs: false });
+    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, labs: false });
   });
 
   it("a stored record keeps what it has and takes the defaults for the rest", () => {
@@ -19,11 +19,11 @@ describe("the preferences record", () => {
 
   it("a patch lands field by field, a null width clears the width, and the zoom lands per workspace, a null entry dropping that workspace's", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark", sidebarWidth: 300, terminalZoom: { ws_a: 2 } });
-    expect(one).toEqual({ theme: "dark", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, labs: false });
+    expect(one).toEqual({ theme: "dark", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, labs: false });
     const two = applyPreferencesPatch(one, { terminalZoom: { ws_b: -1 } });
     expect(two.terminalZoom).toEqual({ ws_a: 2, ws_b: -1 });
     const three = applyPreferencesPatch(two, { sidebarWidth: null, terminalZoom: { ws_a: null } });
-    expect(three).toEqual({ theme: "dark", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, labs: false });
+    expect(three).toEqual({ theme: "dark", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, labs: false });
     expect(applyPreferencesPatch(one, {})).toEqual(one);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
   });
@@ -50,6 +50,21 @@ describe("the preferences record", () => {
     expect(PreferencesPatch.safeParse({ projectLook: { pr_1: { icon: "rocket" } } }).success).toBe(true);
     expect(PreferencesPatch.safeParse({ projectLook: { pr_1: { icon: "unicorn" } } }).success).toBe(false);
     expect(PreferencesPatch.safeParse({ projectLook: { pr_1: { hue: "blue", size: 3 } } }).success).toBe(false);
+  });
+
+  it("a computer's icon lands per computer, a null entry dropping that computer's, and a stored record without icons reads as none", () => {
+    const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { computerLook: { pl_1: { icon: "server" } } });
+    expect(one.computerLook).toEqual({ pl_1: { icon: "server" } });
+    const two = applyPreferencesPatch(one, { computerLook: { pl_2: { icon: "laptop" } }, theme: "dark" });
+    expect(two.computerLook).toEqual({ pl_1: { icon: "server" }, pl_2: { icon: "laptop" } });
+    expect(applyPreferencesPatch(two, { projectLook: { pr_1: { hue: "blue" } } }).computerLook).toEqual(two.computerLook);
+    expect(applyPreferencesPatch(two, { computerLook: { pl_1: null } }).computerLook).toEqual({ pl_2: { icon: "laptop" } });
+    expect(preferencesFrom({ theme: "light", projectLook: { pr_1: { icon: "rocket" } } })).toEqual({ ...DEFAULT_PREFERENCES, theme: "light", projectLook: { pr_1: { icon: "rocket" } }, computerLook: {} });
+    expect(preferencesFrom({ computerLook: { pl_1: { icon: "home" } } }).computerLook).toEqual({ pl_1: { icon: "home" } });
+    expect(PreferencesPatch.safeParse({ computerLook: { pl_1: null } }).success).toBe(true);
+    expect(PreferencesPatch.safeParse({ computerLook: { pl_1: { icon: "toaster" } } }).success).toBe(false);
+    expect(PreferencesPatch.safeParse({ computerLook: { pl_1: {} } }).success).toBe(false);
+    expect(PreferencesPatch.safeParse({ computerLook: { pl_1: { icon: "cloud", hue: "blue" } } }).success).toBe(false);
   });
 
   it("labs comes from the host's environment alone, and no patch carries it", () => {

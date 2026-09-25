@@ -66,6 +66,10 @@ import {
   threadOpRefusal,
   deviceHeldRefusal,
   isObjectFrame,
+  joinRoads,
+  joinToken,
+  MINT_JOIN_REFUSAL,
+  SSH_HOSTS_REFUSAL,
   issuesLine,
   redacted,
   requestSecrets,
@@ -80,7 +84,9 @@ import {
   type ForwardEvent,
   type PlaceAuthRefusal,
   type PlaceDoorView,
+  type PlaceView,
   type PortForward,
+  type SshHostSuggestion,
   type ReleaseChangedEvent,
   type ReleaseView,
   type Caller,
@@ -159,6 +165,9 @@ export interface ServeOptions {
   /** The doctor's computer road as this host runs it, for places.doctor and the doctor.line events; without it the
    * op is refused, since the road is the host's own and the runtime holds none of what it reads. */
   doctor?: PlaceDoctor;
+  /** The hosts the person's ssh already knows on this computer, less the computers the rows given were added as,
+   * for places.sshHosts; without it the op answers none. */
+  sshHosts?: (places: readonly PlaceView[]) => Promise<SshHostSuggestion[]>;
   /** The host's reading of the newest release, for release.get, release.check and the release.changed events;
    * without it both ops are refused. */
   release?: ReleaseDoor;
@@ -357,6 +366,8 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     if (opts.devices === undefined) throw new Error(NO_DEVICE_DOOR);
     return opts.devices;
   };
+  /** The one mint a join code comes from, whichever op asks: one store and one expiry for wsp add and the app. */
+  const issueCode = (here: boolean): Promise<{ code: string; expiresAt: number }> => devices().issue({ now: now(), ttlMs: pairTtlMs, ...(here ? { here: true } : {}) });
   const places = (): PlaceDoor => {
     if (rt.places === undefined) throw new Error(NO_PLACE_DOOR);
     return rt.places;
@@ -815,7 +826,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // holds this host to that key before it spends it. A runtime wired with no place door proves none
               // and answers the code alone, which the line that asked refuses to print in its own words.
               const hostKey = rt.places?.hostKey();
-              const { code, expiresAt } = await devices().issue({ now: now(), ttlMs: pairTtlMs, ...(msg.here === true ? { here: true } : {}) });
+              const { code, expiresAt } = await issueCode(msg.here === true);
               send({ id: msg.id, ok: true, code, expiresAt, ...(hostKey === undefined ? {} : { hostKey }) });
               return;
             }
@@ -918,6 +929,31 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // built from it cannot name an address without the key that will answer at it.
               const { backPort: _loopback, ...view } = await opts.door.open();
               send({ id: msg.id, ok: true, door: { ...view, hostKey: places().hostKey() } });
+              return;
+            }
+            case "places.mint": {
+              if (!ownRoad() || me?.kind !== "host") {
+                send({ id: msg.id, ok: false, error: MINT_JOIN_REFUSAL });
+                return;
+              }
+              if (opts.door === undefined) {
+                send({ id: msg.id, ok: false, error: PLACE_DOOR_UNSERVED });
+                return;
+              }
+              // The key and the door before the code, so a host that cannot answer a join leaves no code minted.
+              const hostKey = places().hostKey();
+              const door = await opts.door.open();
+              const { code, expiresAt } = await issueCode(false);
+              send({ id: msg.id, ok: true, joins: joinRoads(joinToken(code, hostKey), door.addresses, door.relay), expiresAt: new Date(expiresAt).toISOString() });
+              return;
+            }
+            case "places.sshHosts": {
+              if (!ownRoad() || me?.kind !== "host") {
+                send({ id: msg.id, ok: false, error: SSH_HOSTS_REFUSAL });
+                return;
+              }
+              const rows = rt.places === undefined ? [] : await rt.places.list(now());
+              send({ id: msg.id, ok: true, hosts: opts.sshHosts === undefined ? [] : await opts.sshHosts(rows) });
               return;
             }
             case "places.add": {

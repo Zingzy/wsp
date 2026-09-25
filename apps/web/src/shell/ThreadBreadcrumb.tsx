@@ -43,7 +43,7 @@ export function ThreadBreadcrumb() {
             <span className="truncate font-medium text-foreground">{home.name}</span>
           </span>
         ) : firstRun ? null : (
-          <span className="truncate text-muted-foreground">No workspace selected</span>
+          <span className="truncate text-muted-foreground">No task selected</span>
         )
       ) : (
         <>

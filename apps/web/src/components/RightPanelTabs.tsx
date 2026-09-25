@@ -1,5 +1,5 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/RightPanelTabs.tsx at 57a66608 (MIT).
-import { Bot, FileDiff, Globe2, Plus, TerminalSquare } from "lucide-react";
+import { Activity, Bot, Cpu, FileDiff, Globe2, Plus, TerminalSquare } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -47,25 +47,30 @@ interface RightPanelTabsProps {
   onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
+  onAddMachine: () => void;
+  onAddProcesses: () => void;
   onAddAgents: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
+  machineAvailable: boolean;
+  processesAvailable: boolean;
   agentsAvailable: boolean;
   /** Why each unavailable surface is greyed out; shown on its card and menu item. */
   unavailableReasons?: Partial<Record<SurfaceKey, string>>;
   /** Set when every panel waits on one thing: the launcher says it once, in this line, and its cards carry no reason. */
-  heldLine?: string;
   children: ReactNode;
 }
 
-type SurfaceKey = "browser" | "terminal" | "diff" | "agents";
+type SurfaceKey = "browser" | "terminal" | "diff" | "machine" | "processes" | "agents";
 
 /** One-line unavailability hints for the empty-state cards and the add menu. */
 const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
-  browser: "Available while the workspace is running.",
-  terminal: "Available while the workspace is running.",
-  diff: "Review changes once the workspace is running.",
+  browser: "Available while the task is running.",
+  terminal: "Available while the task is running.",
+  diff: "Review changes once the task is running.",
+  machine: "Available when a task is selected.",
+  processes: "Available while the task is running.",
   agents: "Available when a task is selected.",
 };
 
@@ -163,10 +168,14 @@ function surfaceActions(
     | "onAddBrowser"
     | "onAddTerminal"
     | "onAddDiff"
+    | "onAddMachine"
+    | "onAddProcesses"
     | "onAddAgents"
     | "browserAvailable"
     | "terminalAvailable"
     | "diffAvailable"
+    | "machineAvailable"
+    | "processesAvailable"
     | "agentsAvailable"
     | "unavailableReasons"
   >,
@@ -186,7 +195,7 @@ function surfaceActions(
     {
       key: "terminal",
       label: "Terminal",
-      description: "Start a shell in this workspace.",
+      description: "Start a shell in this task.",
       icon: TerminalSquare,
       shortcut: "T",
       available: props.terminalAvailable,
@@ -196,12 +205,32 @@ function surfaceActions(
     {
       key: "diff",
       label: "Diff",
-      description: "Review changes in this workspace.",
+      description: "Review changes in this task.",
       icon: FileDiff,
       shortcut: "D",
       available: props.diffAvailable,
       disabledReason: reason("diff"),
       onClick: props.onAddDiff,
+    },
+    {
+      key: "machine",
+      label: "Computer",
+      description: "Load, memory and disk.",
+      icon: Cpu,
+      shortcut: "M",
+      available: props.machineAvailable,
+      disabledReason: reason("machine"),
+      onClick: props.onAddMachine,
+    },
+    {
+      key: "processes",
+      label: "Processes",
+      description: "Inspect and kill what runs.",
+      icon: Activity,
+      shortcut: "P",
+      available: props.processesAvailable,
+      disabledReason: reason("processes"),
+      onClick: props.onAddProcesses,
     },
     {
       key: "agents",
@@ -224,8 +253,8 @@ function surfaceActions(
  * cannot open stays visible with a one-line reason. The person's word for one
  * of these is panel; surface is ours and stays in the code.
  */
-function RightPanelEmptyState(props: { actions: readonly SurfaceAction[]; heldLine?: string }) {
-  const { actions, heldLine } = props;
+function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
+  const { actions } = props;
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
 
@@ -323,13 +352,9 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[]; heldLi
       <div className="relative w-full max-w-lg">
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
           <h3 className="font-medium text-foreground text-sm">Open a panel</h3>
-          {heldLine !== undefined ? (
-            <p className="mt-1 font-mono text-muted-foreground text-xs">{heldLine}</p>
-          ) : (
-            <p className="mt-1 text-muted-foreground text-xs">
-              A browser, a terminal or the diff in this workspace.
-            </p>
-          )}
+          <p className="mt-1 text-muted-foreground text-xs">
+            A browser, a terminal, the diff, the task or what runs on it.
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           {actions.map((action) =>
@@ -375,11 +400,9 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[]; heldLi
                   {actionIcon(action)}
                   <span className="font-medium text-sm">{action.label}</span>
                 </span>
-                {heldLine === undefined ? (
-                  <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
-                    {action.disabledReason}
-                  </span>
-                ) : null}
+                <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
+                  {action.disabledReason}
+                </span>
               </div>
             ),
           )}
@@ -397,6 +420,10 @@ function surfaceTitle(
   switch (surface.kind) {
     case "diff":
       return "Diff";
+    case "machine":
+      return "Computer";
+    case "processes":
+      return "Processes";
     case "agents":
       return "Agents";
     case "terminal":
@@ -420,6 +447,10 @@ function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
       return <Globe2 className="size-3 shrink-0" />;
     case "diff":
       return <FileDiff className="size-3 shrink-0" />;
+    case "machine":
+      return <Cpu className="size-3 shrink-0" />;
+    case "processes":
+      return <Activity className="size-3 shrink-0" />;
     case "agents":
       return <Bot className="size-3 shrink-0" />;
     case "terminal":
@@ -577,7 +608,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       </div>
       <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
         {props.activeSurfaceId === null ? (
-          <RightPanelEmptyState actions={addSurfaceActions} {...(props.heldLine !== undefined ? { heldLine: props.heldLine } : {})} />
+          <RightPanelEmptyState actions={addSurfaceActions} />
         ) : (
           props.children
         )}
