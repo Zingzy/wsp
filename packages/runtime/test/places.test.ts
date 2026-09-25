@@ -3231,6 +3231,25 @@ describe("a computer joining a host that holds a sealed image", () => {
     expect(place.asked["machine.create"]).toBe(1);
   });
 
+  it("a fork there builds that computer's copy first, saying so with no rate since the computer charges nothing, and never forks the image it holds no copy of", async () => {
+    const { hostKey } = await imageHost({ sealed: true });
+    let place!: ForkingPlace;
+    const { placeId } = await join(hostKey, { code: await code(), name: "srv", answers: answering(p => (place = p)) });
+    await until(async () => (await rowOf(placeId)).present === true);
+    const lines: string[] = [];
+    runtime!.events.on("workspace.creating", e => {
+      if (e.type === "workspace.creating" && e.name === "x") lines.push(e.message);
+    });
+    const head = (await runtime!.image.get()).copies.find(c => c.place === "solari")!.snapshotId;
+    // The fake computer runs no builder's tool install, so the copy's build stops there and the fork with it; a
+    // fork that forked the image anyway would have asked this computer for a second machine.
+    await expect(createOn(runtime!, { golden: head, name: "x", on: "srv" })).rejects.toThrow(/launch failed/);
+    expect(lines[0]).toBe("building your image on srv first, about ten minutes, then x forks from it");
+    expect(place.created).toHaveLength(1);
+    expect((place.created[0]!["labels"] as Record<string, string>)["wsp-builder"]).toBe("1");
+    expect(place.killed).toHaveLength(1);
+  });
+
   it("a link that drops under a stage and dials back finishes the stage: the create is asked again on the socket that computer opens next, the build goes on to the stage after it, and the stage reads the wait while the gap lasts", async () => {
     const { hostKey } = await imageHost({ sealed: false });
     const frames = framesOf();
@@ -3631,8 +3650,7 @@ describe("the recipe this host holds, put on a computer you own", () => {
     await store.put("images", "default", IMAGE_RECORD);
     const { placeId } = await joined({ provision: p.wired, store });
     await until(async () => (await provisionOf(placeId))?.at !== undefined);
-    // The link's own read of the image ran inside the join, while the job was already going on. Asked again here
-    // by hand for the same reason: the refusal the road meets is the job's, and no row is written for it.
+    // Asked by hand before the job ends: the refusal the road meets is the job's, and no row is written for it.
     await runtime!.image.keepCurrent(placeId);
     expect((await placesOf()).find(r => r.id === placeId)?.build).toBeUndefined();
     const asks: string[] = [];

@@ -1830,7 +1830,8 @@ interface BuilderRecord {
   base?: GoldenBaseTool[];
   /** Saved as this version and kept running since; an update of that version lands on it, the sweep stops it at GRACE_MS. */
   sealed?: { at: string; version: number };
-  /** The place this builder was made at, when it is not the wired one: a copy's build. Absent reads as the wired place. */
+  /** The place this builder was made at, so a provider swapped in mid-build never becomes where it seals. Absent,
+   * on a record from before places, reads as the wired place. */
   place?: string;
 }
 
@@ -7474,9 +7475,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     throw conflict(running.length === 0 ? NO_PROVIDER_LINE : placeForksNothingPickLine(placeName(placeId ?? places.wired), running));
   };
   const placeName = (place: string): string => placeDoor?.nameOf(place) ?? place;
-  /** What a builder record says about where it was made: its place, except the provider this host forks on, which
-   * records before places never named and which every reader takes an absent place to mean. */
-  const filedAt = (place: string): string | undefined => (place === places.wired ? undefined : place);
   /** Where the image's own seal stands: the place the record names, or the provider this host forks on for a record
    * sealed before places. The manifest there is the one wsp init built and updates. */
   const imagePlace = async (name: string): Promise<string> => (await recordOf(name))?.place ?? places.wired;
@@ -7522,8 +7520,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     name: string,
     imp: Pick<GoldenImport, "recipeHash" | "recipe"> | undefined,
     made: (placeholder: LiveBuilder) => void,
-    stop?: { signal: AbortSignal | undefined; began: (creating: Promise<Machine>) => void },
-    place?: string,
+    stop: { signal: AbortSignal | undefined; began: (creating: Promise<Machine>) => void } | undefined,
+    place: string,
   ): MachineBackend => ({
     ...b,
     create: spec => {
@@ -7545,7 +7543,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           building: true,
           ...(machine.streamUrl !== undefined ? { streamUrl: machine.streamUrl } : {}),
           ...(imp !== undefined ? { import: { recipeHash: imp.recipeHash, ...(imp.recipe !== undefined ? { recipe: imp.recipe } : {}), applied: [], smoke: "true" } } : {}),
-          ...(place !== undefined ? { place } : {}),
+          place,
         };
         const placeholder: LiveBuilder = { record, builder: { machine, kind: spec.kind, baseTemplate: record.baseTemplate, setupSha: "", createdAt: record.createdAt, firstLife: true, size: asked }, sealable: true, life: "own" };
         builders.set(machine.id, placeholder);
@@ -7559,7 +7557,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   });
 
   /** The finished builder replaces its placeholder on the record and stays this process's own. */
-  const settleBuilder = async (name: string, builder: Builder, placeholder: LiveBuilder | undefined, place?: string): Promise<LiveBuilder> => {
+  const settleBuilder = async (name: string, builder: Builder, placeholder: LiveBuilder | undefined, place: string): Promise<LiveBuilder> => {
     const record: BuilderRecord = {
       id: builder.machine.id,
       name,
@@ -7572,7 +7570,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(builder.machine.streamUrl !== undefined ? { streamUrl: builder.machine.streamUrl } : {}),
       ...(builder.import !== undefined ? { import: builder.import } : {}),
       ...(builder.base !== undefined ? { base: builder.base } : {}),
-      ...(place !== undefined ? { place } : {}),
+      place,
     };
     const entry: LiveBuilder = placeholder ?? { record, builder, sealable: true, life: "own" };
     entry.record = record;
@@ -7772,7 +7770,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw new Error(`a builder named ${name} is still being prepared for a different recipe; wait for it to finish, then run again`);
       }
       const stage = stageOf(name, place, o?.copy === true);
-      const filed = filedAt(place);
       const run = claiming(`builder/${preparingKey}`, async b => {
         await refreshBuilders();
         // A builder with a seal still in it carrying the same ticks is attached to instead of
@@ -7857,7 +7854,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           let builder: Builder;
           try {
             builder = await prepareBuilder({
-              backend: recordingCreates(b, name, imp, p => (mine = p), { signal, began: c => (creating = c) }, filed),
+              backend: recordingCreates(b, name, imp, p => (mine = p), { signal, began: c => (creating = c) }, place),
               ...size,
               ...(o?.kind !== undefined ? { kind: o.kind } : {}),
               ...(deployDaemon !== undefined ? { deployDaemon } : {}),
@@ -7872,7 +7869,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           // A last exec that outran the kill must not leave a finished record for a machine the stop is killing.
           if (stopping !== undefined) throw await stopping;
-          const entry = await settleBuilder(name, builder, mine, filed);
+          const entry = await settleBuilder(name, builder, mine, place);
           entry.recipe = recipe;
           return builderView(entry.record, entry);
         };
@@ -7976,7 +7973,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           let builder: Builder;
           try {
             builder = await upgradeBuilder({
-              backend: recordingCreates(b, name, o.delta.import, p => (placeholder = p), undefined, filedAt(place)),
+              backend: recordingCreates(b, name, o.delta.import, p => (placeholder = p), undefined, place),
             head,
             delta: o.delta,
               setup: recipe.setup,
@@ -7992,7 +7989,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             if (placeholder !== undefined) await forgetIfGone(placeholder, at);
             throw e;
           }
-          return settleBuilder(name, builder, placeholder, filedAt(place));
+          return settleBuilder(name, builder, placeholder, place);
         },
         at,
       );

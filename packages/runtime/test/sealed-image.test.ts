@@ -73,6 +73,29 @@ describe("the image record a seal writes", () => {
     await rt.close();
   });
 
+  it("a seal at the wired provider files that provider as the image's home, so a rebuild after the provider is swapped is refused rather than sent to the new one", async () => {
+    let id = "solari";
+    const { store, rt, backend } = started({ places: wired => wiredPlace(() => id, wired) });
+    const b = await rt.golden.prepare();
+    await rt.golden.seal(b.id);
+    expect(((await store.get("images", "default")) as SealedImage).place).toBe("solari");
+    const machines = backend.machines.length;
+    id = "ascii";
+    await expect(rt.golden.prepare()).rejects.toThrow(/solari/);
+    expect(backend.machines.length).toBe(machines);
+    await rt.close();
+  });
+
+  it("a builder made at the wired provider is sealed only there, so a provider swapped in mid-build is never filed as the image's home", async () => {
+    let id = "solari";
+    const { store, rt } = started({ places: wired => wiredPlace(() => id, wired) });
+    const b = await rt.golden.prepare();
+    id = "ascii";
+    await expect(rt.golden.seal(b.id)).rejects.toThrow(/solari/);
+    expect(await store.get("images", "default")).toBeUndefined();
+    await rt.close();
+  });
+
   it("a seal that names no vault paths records the image with none, and its hash differs from one that held a vault", async () => {
     const backend = stubBackend();
     backend.execImpl = dfOk;
