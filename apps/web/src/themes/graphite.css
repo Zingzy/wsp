@@ -14,6 +14,8 @@
   /* Mixed into the ground rather than laid over it, so an edge over the window's material reads as a line. */
   --border: color-mix(in srgb, #fff 10%, var(--background));
   --input: color-mix(in oklab, #fff 8%, transparent);
+  --success: var(--color-emerald-500);
+  --warning: var(--color-amber-500);
   --error-foreground: oklch(70.4% 0.191 22.216);
   --warning-foreground: oklch(75% 0.183 55.934);
   --success-foreground: oklch(76.5% 0.177 163.223);
@@ -38,8 +40,8 @@
   --sidebar-hover-ink: #f7f9ff;
   --sidebar-quiet: var(--sidebar-muted-foreground);
   --sidebar-input: rgb(255 255 255 / 18%);
-  /* Over the glass the sidebar's quiet text has no solid card behind it; this step keeps it AA over a white desktop. */
-  --sidebar-glass-ink: oklch(87% 0 none);
+  /* Over the Mac's glass quiet text has no solid card behind it; this step keeps it AA over a white desktop. */
+  --glass-ink: oklch(87% 0 none);
   --material-ground: #060606;
   --material-raised: #18181a;
   --material-edge: #1f1f21;

@@ -3,9 +3,10 @@
 // agents panel and Settings, each on its theme's side and, for a dark theme, again inside the Mac's window where
 // the material stands on the theme's own ground. On each, every line of body and muted text is measured against
 // what it is drawn on, and the screen is photographed under wsp-render/themes. The Mac's glass is the window's and
-// no page shot carries it, so in the Mac's window the ratios are logged over the glass as it reads over a white
-// desktop, an estimate for a person to judge live, and what is held is that each region's share is the theme's
-// ground. Runs only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium.
+// no page shot carries it, so in the Mac's window every line of words in the chat column, the right panel and the
+// sidebar is measured over the glass as it reads over a white desktop, mid grey, the lightest it shows, and each
+// region's share is held to the theme's ground. Runs only when asked for (WSP_RENDER=1) and skips without
+// Playwright's Chromium.
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -28,8 +29,8 @@ const SCREENS = [
 ] as const;
 
 /** Body and muted text: the two inks every screen sets its words in, wherever a line carries words of its own. */
-const measureText = (page: Page) =>
-  page.evaluate(() => {
+const measureText = (page: Page, selector: string) =>
+  page.evaluate(selector => {
     const ctx = document.createElement("canvas").getContext("2d")!;
     const parse = (c: string): number[] => {
       ctx.clearRect(0, 0, 1, 1);
@@ -61,20 +62,20 @@ const measureText = (page: Page) =>
       const page = document.documentElement.classList.contains("dark") ? [128, 128, 128] : [255, 255, 255];
       return layers.reverse().reduce((under, top) => over(top, under), page);
     };
-    const accent = parse(getComputedStyle(document.documentElement).getPropertyValue("--accent"));
-    const out: { ink: "body" | "muted"; text: string; ratio: number; onHover: boolean }[] = [];
-    for (const el of document.querySelectorAll(".text-foreground, .text-muted-foreground, .chat-markdown p, [data-settings-page] h1")) {
+    const out: { ink: "body" | "muted"; text: string; ratio: number }[] = [];
+    for (const el of document.querySelectorAll(selector)) {
       if (!ownText(el) || !shown(el)) continue;
       const bg = ground(el);
-      let filled: Element | null = el;
-      while (filled !== null && parse(getComputedStyle(filled).backgroundColor)[3] === 0) filled = filled.parentElement;
-      const onHover = filled !== null && parse(getComputedStyle(filled).backgroundColor).join() === accent.join();
       const fg = over(parse(getComputedStyle(el).color), bg);
       const [hi, lo] = [lum(fg), lum(bg)].sort((a, b) => b - a) as [number, number];
-      out.push({ ink: el.classList.contains("text-muted-foreground") ? "muted" : "body", text: (el.textContent ?? "").trim().slice(0, 40), ratio: Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100, onHover });
+      out.push({ ink: el.classList.contains("text-muted-foreground") ? "muted" : "body", text: (el.textContent ?? "").trim().slice(0, 40), ratio: Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100 });
     }
     return out;
-  });
+  }, selector);
+
+const TEXT = ".text-foreground, .text-muted-foreground, .chat-markdown p, [data-settings-page] h1";
+/** In the Mac's window: every line of words in the three regions that stand on the glass, bar the code's own syntax inks. */
+const MAC_TEXT = ["[data-shell-center]", "[data-slot=sidebar-inner]", "[data-preview-panel-mode=inline]"].map(r => `${r} :not(.shiki, .shiki *)`).join(", ");
 
 if (renderSkipped !== undefined) console.info(`themes render test skipped: ${renderSkipped}`);
 
@@ -103,9 +104,8 @@ describe.skipIf(renderSkipped !== undefined)("every theme on the main screens", 
       await page.waitForSelector(ready);
       await page.evaluate(() => document.fonts.ready);
       expect(await page.evaluate(() => document.documentElement.dataset["theme"])).toBe(id);
-      const lines = await measureText(page);
-      // Muted ink on the hover fill is the one pair held lower: Paper's reads 4.39 there, kept as it stands.
-      const low = lines.filter(l => l.ratio < (l.ink === "muted" && l.onHover ? 4.35 : 4.5));
+      const lines = await measureText(page, mac ? MAC_TEXT : TEXT);
+      const low = lines.filter(l => l.ratio < 4.5);
       const floor = (ink: "body" | "muted") => Math.min(...lines.filter(l => l.ink === ink).map(l => l.ratio));
       console.info(`${id} ${name}${mac ? " in the Mac's window, over mid grey" : ""}: ${lines.length} lines, body from ${floor("body")}, muted from ${floor("muted")}${low.length > 0 ? `, under AA: ${low.map(l => `${l.text} ${l.ratio}`).join("; ")}` : ""}`);
       expect(lines.filter(l => l.ink === "body").length).toBeGreaterThan(0);
@@ -126,9 +126,10 @@ describe.skipIf(renderSkipped !== undefined)("every theme on the main screens", 
         });
         expect(shares.regions.length).toBeGreaterThan(0);
         for (const region of shares.regions) expect(region).toBe(shares.ground);
-      } else {
-        expect(low, JSON.stringify(low)).toEqual([]);
+        // The shot stands on the glass the lines were measured over.
+        await page.evaluate(() => (document.documentElement.style.background = "rgb(128 128 128)"));
       }
+      expect(low, JSON.stringify(low)).toEqual([]);
       await page.screenshot({ path: join(SHOTS, `${id}-${name}${mac ? "-mac" : ""}.png`) });
     } finally {
       await page.close();

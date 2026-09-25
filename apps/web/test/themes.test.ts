@@ -29,6 +29,8 @@ const TOKENS = [
   "--primary-foreground",
   "--border",
   "--input",
+  "--success",
+  "--warning",
   "--error-foreground",
   "--warning-foreground",
   "--success-foreground",
@@ -54,9 +56,9 @@ const TOKENS = [
   "--sidebar-input",
 ] as const;
 /** What a dark theme names besides: the Mac's dark window stands on the glass, and these are its grounds there. */
-const DARK_TOKENS = ["--sidebar-glass-ink", "--material-ground", "--material-raised", "--material-edge"] as const;
+const DARK_TOKENS = ["--glass-ink", "--material-ground", "--material-raised", "--material-edge"] as const;
 /** The tokens allowed a hue: the primary and the status inks. Everything else is a neutral. */
-const HUED = new Set(["--primary", "--error-foreground", "--warning-foreground", "--success-foreground", "--info-foreground", "--update-foreground"]);
+const HUED = new Set(["--primary", "--success", "--warning", "--error-foreground", "--warning-foreground", "--success-foreground", "--info-foreground", "--update-foreground"]);
 
 const sheet = (id: string): string => readFileSync(join(DIR, `${id}.css`), "utf8");
 const tokensOf = (id: string): Map<string, string> => new Map(declarations(blockBody(sheet(id), new RegExp(`\\[data-theme="${id}"\\][^{]*\\{`))!));
@@ -73,8 +75,14 @@ function colours(id: string): (token: string) => Rgba {
   const own = tokensOf(id);
   const side = sideTokens(theme.side);
   const lookup = (name: string): string | undefined => own.get(name) ?? side.get(name) ?? palette.get(name);
-  return token => resolveColor(lookup(token) ?? `var(${token})`, lookup);
+  return token => resolveColor(token.startsWith("--") ? (lookup(token) ?? `var(${token})`) : token, lookup);
 }
+
+/** The Mac's dark window: its own declarations and the sidebar's inside it. */
+const macWindow = new Map(declarations(blockBody(indexCss, /\.desktop-mac\.dark \{/)!));
+const macSidebar = new Map(declarations(blockBody(blockBody(indexCss, /\.desktop-mac \[data-app-sidebar\] \{/)!, /@variant dark \{/)!));
+/** The glass as it reads over a white desktop, the lightest it shows. */
+const GLASS: Rgba = [128 / 255, 128 / 255, 128 / 255, 1];
 
 describe("the theme registry", () => {
   it("ids are unique, each side's default is the record's default pick, and an id that is missing or on the other side reads as that side's default", () => {
@@ -129,11 +137,26 @@ describe.each(THEMES.map(t => [t.id, t] as const))("the %s theme", (id, theme) =
     for (const ink of ["--sidebar-foreground", "--sidebar-muted-foreground", "--sidebar-whisper", "--sidebar-quiet"]) expect(ratio(ink, "--sidebar"), ink).toBeGreaterThanOrEqual(4.5);
     expect(ratio("--accent-foreground", "--accent", "--background")).toBeGreaterThanOrEqual(4.5);
     expect(ratio("--sidebar-hover-ink", "--sidebar-hover", "--sidebar")).toBeGreaterThanOrEqual(4.5);
+    expect(ratio("--muted-foreground", "--accent", "--background")).toBeGreaterThanOrEqual(4.5);
+    expect(ratio("--sidebar-quiet", "--sidebar-hover", "--sidebar")).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.skipIf(theme.side !== "dark")("in the Mac's window, muted text in the chat column, the right panel and the sidebar reads at AA over its share of the glass under a hover fill", () => {
+    const share = (region: string): Rgba => over(c(`color-mix(in srgb, var(--material-ground) ${macWindow.get(region)!}, transparent)`), GLASS);
+    const regions = [
+      { region: "--material-centre", inks: [macWindow.get("--muted-foreground")!], fills: ["--accent"] },
+      { region: "--material-panel", inks: [macWindow.get("--muted-foreground")!], fills: ["--accent"] },
+      { region: "--material-sidebar", inks: ["--sidebar-muted-foreground", "--muted-foreground", "--sidebar-row-rest", "--sidebar-prose"].map(t => macSidebar.get(t)!), fills: ["--sidebar-row-hover", "--sidebar-row-selected"] },
+    ];
+    for (const { region, inks, fills } of regions) {
+      for (const ink of inks) for (const fill of fills) expect(contrast(c(ink), over(c(fill), share(region))), `${ink} on ${fill} in ${region}`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it("the primary's label reads on it, the primary reads as a graphic on the ground, and every status ink reads on the card", () => {
     expect(ratio("--primary-foreground", "--primary")).toBeGreaterThanOrEqual(4.5);
     expect(ratio("--primary", "--background")).toBeGreaterThanOrEqual(3);
+    for (const fill of ["--error", "--warning", "--success", "--info"]) expect(ratio(fill, "--card", "--background"), fill).toBeGreaterThanOrEqual(3);
     for (const ink of ["--error-foreground", "--warning-foreground", "--success-foreground", "--info-foreground", "--update-foreground", "--caution-foreground", "--yellow-foreground"]) {
       expect(ratio(ink, "--card", "--background"), ink).toBeGreaterThanOrEqual(4.5);
     }

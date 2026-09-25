@@ -6,13 +6,17 @@
   --foreground: oklch(27.4% 0.006 286.033);
   --card: #fff;
   --muted: oklch(98.5% 0 none);
-  --muted-foreground: oklch(55.2% 0.016 285.938);
+  /* A step under zinc-500, which read 4.39:1 on the hover fill. */
+  --muted-foreground: oklch(53.5% 0.016 285.938);
   --accent: oklch(96.7% 0.001 286.375);
   --accent-foreground: oklch(21% 0.006 285.885);
   --primary: oklch(0.488 0.217 264);
   --primary-foreground: #fff;
   --border: oklch(92% 0.004 286.32);
   --input: oklch(87.1% 0.006 286.286);
+  /* Emerald and amber at 500 read 2.46:1 and 2.15:1 on white as fills; 600 clears the 3:1 graphics floor. */
+  --success: var(--color-emerald-600);
+  --warning: var(--color-amber-600);
   --error-foreground: oklch(50.5% 0.213 27.518);
   --warning-foreground: oklch(0.56 0.14 56);
   --success-foreground: oklch(50.8% 0.118 165.612);
@@ -38,6 +42,6 @@
   --sidebar-fill: oklch(98.5% 0 none);
   --sidebar-hover: oklch(96.7% 0.001 286.375);
   --sidebar-hover-ink: oklch(21% 0.006 285.885);
-  --sidebar-quiet: oklch(55.2% 0.016 285.938);
+  --sidebar-quiet: oklch(53.5% 0.016 285.938);
   --sidebar-input: oklch(87.1% 0.006 286.286);
 }

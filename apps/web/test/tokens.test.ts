@@ -94,6 +94,9 @@ describe("index.css", () => {
       }
 
       .desktop-mac.dark {
+        /* Over a white desktop the glass reads as mid grey and the page's muted ink falls under AA on every share of it;
+           this step clears it under a hover fill and stays a step behind the body. */
+        --muted-foreground: color-mix(in oklab, var(--glass-ink) 85%, var(--material-ground));
         --material-centre: 67%;
         --material-panel: 74%;
         --material-sidebar: 40%;
@@ -196,14 +199,17 @@ describe("index.css", () => {
       }
 
       /* Over the glass the sidebar's quiet text and glyphs have no solid card
-         behind them: one step up, and the counts nearly opaque, keep
-         them at AA over a white desktop, where the glass reads as mid grey. */
+         behind them: one step up, the rows' words and the prose whole, and the
+         counts nearly opaque, keep them at AA over a white desktop, where the
+         glass reads as mid grey. */
       .desktop-mac [data-app-sidebar] {
         @variant dark {
-          --muted-foreground: var(--sidebar-glass-ink);
-          --sidebar-muted-foreground: var(--sidebar-glass-ink);
-          --sidebar-icon-color: var(--sidebar-glass-ink);
-          --sidebar-whisper: var(--sidebar-glass-ink);
+          --muted-foreground: var(--glass-ink);
+          --sidebar-muted-foreground: var(--glass-ink);
+          --sidebar-icon-color: var(--glass-ink);
+          --sidebar-whisper: var(--glass-ink);
+          --sidebar-row-rest: var(--glass-ink);
+          --sidebar-prose: var(--glass-ink);
           --top-row-meta-alpha: 90%;
         }
       }
