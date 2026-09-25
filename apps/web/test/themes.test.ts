@@ -103,14 +103,22 @@ describe("the theme registry", () => {
     for (const t of THEMES) expect(readFileSync(join(DIR, `${t.id}.ts`), "utf8")).toContain(`import "./${t.id}.css";`);
   });
 
-  it("a page carrying no theme mark draws each side's default, and the pages that boot before the app name the dark default", () => {
+  it("every page that loads the stylesheet loads the theme registry, since no colour token lives outside a theme's sheet", () => {
+    const harnesses = readdirSync(__dirname, { withFileTypes: true }).filter(d => d.isDirectory()).flatMap(d => readdirSync(join(__dirname, d.name)).filter(f => /^main\.tsx?$/.test(f)).map(f => join(__dirname, d.name, f)));
+    const entries = [join(__dirname, "../src/main.tsx"), ...harnesses];
+    const styled = entries.filter(f => /^import ["'][./]*(src\/)?index\.css["'];/m.test(readFileSync(f, "utf8")));
+    expect(styled.length).toBeGreaterThan(2);
+    expect(styled.filter(f => !/^import [^;]*["'][./]*(src\/)?(themes\/index|settings\/theme)(\.js)?["'];/m.test(readFileSync(f, "utf8")))).toEqual([]);
+  });
+
+  it("a page carrying no theme mark draws each side's default, and the page that boots before the app names no theme of its own", () => {
     for (const t of THEMES) {
       const header = /^([^{]+)\{/m.exec(sheet(t.id).replace(/\/\*[\s\S]*?\*\//g, ""))![1]!.trim();
       const fallback = t.side === "light" ? ":root:not([data-theme])" : ":root.dark:not([data-theme])";
       expect(header.includes(fallback)).toBe(SIDE_DEFAULT[t.side] === t);
     }
     const index = readFileSync(join(__dirname, "../index.html"), "utf8");
-    expect(index).toMatch(new RegExp(`<html[^>]* class="dark" data-theme="${SIDE_DEFAULT.dark.id}"`));
+    expect(index).toMatch(/<html lang="en" class="dark">/);
   });
 });
 
