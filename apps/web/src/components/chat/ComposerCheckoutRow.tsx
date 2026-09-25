@@ -72,7 +72,7 @@ export function canPickFolder(thread: ChatThreadHandle): boolean {
 
 /** The size both the folder and the branch wear, the picker button's (size xs), so the row does not move when the
  * label replaces the button. */
-const slotClass = "inline-flex h-7 items-center gap-1 px-2 text-sm text-muted-foreground/70 sm:h-6 sm:text-xs";
+const slotClass = "inline-flex h-7 items-center gap-1 px-2 text-sm text-muted-foreground sm:h-6 sm:text-xs";
 /** The folder in either form: the one item in the row that gives its width up, and that keeps what it cannot hold
  * inside its own box, so a long path is cut at its edge rather than drawn over the branch. */
 const folderItemClass = "min-w-0 shrink overflow-hidden";
@@ -192,7 +192,7 @@ function FolderMenu({
       <MenuTrigger
         ref={trigger}
         render={<Button type="button" variant="ghost" size="xs" />}
-        className={cn(folderItemClass, "justify-start font-medium text-muted-foreground/70 hover:text-foreground/80")}
+        className={cn(folderItemClass, "justify-start font-medium text-muted-foreground hover:text-foreground/80")}
         aria-label={`Working folder: ${folder}`}
         data-composer-folder={folder}
       >

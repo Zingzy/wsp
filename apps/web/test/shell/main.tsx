@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the app shell over a fake api with three
 // workspaces (running, paused, gone) and four threads, in either theme
-// (?theme=light), with a toast over the centre pane (?toast=...) and with the
+// (?theme=light, each side's theme by id with ?lightTheme= and ?darkTheme=), with a toast over the centre pane (?toast=...) and with the
 // runtime replacing the first machine's helper (?helper=1) or the first
 // machine's link dropped after a near-full memory sample (?oom=1) or the
 // napping machine's last vault refused for its size (?vault=1) or every
@@ -76,13 +76,16 @@ import { useComposerImagesStore } from "../../src/components/chat/composerImages
 import { requestProjectTrip } from "../../src/shell/shellRequests";
 import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
+import { applyTheme } from "../../src/settings/theme";
 import "../../src/index.css";
 import { caps } from "../caps.js";
 import { noDaemonApi } from "../fake-daemon-api.js";
 
 const params = new URLSearchParams(window.location.search);
 const theme = params.get("theme") === "light" ? "light" : "dark";
-document.documentElement.classList.toggle("dark", theme === "dark");
+/** Each side's theme, by id (?lightTheme=, ?darkTheme=), the record's defaults where the query names none. */
+const picks = { lightTheme: params.get("lightTheme") ?? DEFAULT_PREFERENCES.lightTheme, darkTheme: params.get("darkTheme") ?? DEFAULT_PREFERENCES.darkTheme };
+applyTheme({ theme, ...picks }, theme === "dark");
 document.documentElement.classList.toggle(DESKTOP_MAC_CLASS, params.get("mac") === "1");
 // The bridge alone tells the page which shell holds it; with ?shell=desktop the chords a browser tab keeps for its
 // own tabs reach the page, which is what the switcher's chord needs. It carries the two picture calls, which is what
@@ -518,7 +521,7 @@ if (toast !== null) addNotice({ kind: "error", text: toast, where: params.get("w
 // preferences op, so the record is put in place here as the host's answer would put it. The shell is where the
 // surfaces behind labs are shot, so labs is on unless ?labs=0 asks for the record a host without it serves.
 const sidebarWidth = params.get("sidebar");
-useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}), ...(projects ? { project: { ws_a: "spoo", ws_m: "spoo" } } : {}) } });
+useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme, ...picks, labs: params.get("labs") !== "0", ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(params.get("spaces") === "1" ? { sidebarMode: "spaces" as const } : {}), ...(params.get("size") === "file" ? { terminalSize: "file" as const } : {}), ...(projects ? { project: { ws_a: "spoo", ws_m: "spoo" } } : {}) } });
 // ?places=1 fills the places list with the worst row the spec draws, a computer away with a long name beside
 // this Mac and a provider, so the pane's rows can be measured against a full list at every window.
 if (params.get("places") === "1") {

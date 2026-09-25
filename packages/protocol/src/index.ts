@@ -1865,8 +1865,18 @@ export type ComputerIcon = z.infer<typeof ComputerIcon>;
 export const ComputerLook = z.object({ icon: ComputerIcon }).strict();
 export type ComputerLook = z.infer<typeof ComputerLook>;
 
+/** A theme's id, one per side. The shape is checked here; which ids exist is the app's registry, which reads an id it
+ * does not know as that side's default, so a theme added later needs nothing from the host. */
+export const ThemeId = z.string().min(1);
+/** Each side's theme before a person picks one. */
+const THEME_PICK_DEFAULTS = { lightTheme: "paper", darkTheme: "graphite" } as const;
+
 export const Preferences = z.object({
   theme: ThemePreference,
+  /** Each side's pick. Defaulted rather than required, so a record from a host older than the picks still parses on the
+   * wire and does not blank every other preference. */
+  lightTheme: ThemeId.default(THEME_PICK_DEFAULTS.lightTheme),
+  darkTheme: ThemeId.default(THEME_PICK_DEFAULTS.darkTheme),
   sidebarMode: SidebarMode,
   sidebarWidth: z.number().int().positive().optional(),
   terminalSize: TerminalSizeSource,
@@ -1912,7 +1922,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1935,6 +1945,8 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
   const target = patch.target === undefined ? current.target : patch.target;
   return {
     theme: patch.theme ?? current.theme,
+    lightTheme: patch.lightTheme ?? current.lightTheme,
+    darkTheme: patch.darkTheme ?? current.darkTheme,
     sidebarMode: patch.sidebarMode ?? current.sidebarMode,
     terminalSize: patch.terminalSize ?? current.terminalSize,
     terminalZoom: perWorkspace(current.terminalZoom, patch.terminalZoom),
