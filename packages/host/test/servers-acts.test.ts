@@ -102,9 +102,18 @@ describe("adding an MCP server", () => {
   it("puts a project's server in the project's own file from a workspace, and asks a workspace for one", async () => {
     const at = fixture();
     const acts = serversActs({ here: () => here(at) });
-    expect(await acts.add({ kind: "here", project: at.project }, { agent: "claude", name: "acme", project: true, command: "npx", args: [] })).toEqual({ file: "~/code/app/.mcp.json" });
+    expect(await acts.add({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { agent: "claude", name: "acme", project: true, command: "npx", args: [] })).toEqual({ file: "~/code/app/.mcp.json" });
     expect(Object.keys(json(join(at.project, ".mcp.json")).mcpServers!)).toEqual(["project-db", "acme"]);
-    await expect(acts.add(HERE, { agent: "claude", name: "acme2", project: true, command: "npx" })).rejects.toThrow("A project's server is changed from a workspace, which names the project.");
+    await expect(acts.add(HERE, { agent: "claude", name: "acme2", project: true, command: "npx" })).rejects.toThrow("A project's server is changed from a workspace of that project, or from its computer's page.");
+  });
+
+  it("puts a project's server in that project's file on a computer you own, as its login, where the page names the project", async () => {
+    const at = fixture();
+    const { machine } = road(at, { root: true });
+    const on: AgentsOn = { ...box(at, machine), projects: [{ id: "pr_app", name: "app", path: at.project }] };
+    expect(await serversActs({}).add(on, { agent: "claude", name: "acme", project: true, command: "npx", args: [] })).toEqual({ file: "~/code/app/.mcp.json" });
+    expect(Object.keys(json(join(at.project, ".mcp.json")).mcpServers!)).toEqual(["project-db", "acme"]);
+    await expect(serversActs({}).add(box(at, machine), { agent: "claude", name: "acme2", project: true, command: "npx" })).rejects.toThrow("A project's server is changed from a workspace of that project, or from its computer's page.");
   });
 
   it("never writes over a server of that name, and leaves the file as it was", async () => {
@@ -288,7 +297,7 @@ describe("removing an MCP server", () => {
     const acts = serversActs({ here: () => here(at) });
     await acts.remove(HERE, { agent: "codex", name: "linear" });
     expect(readFileSync(join(at.home, ".codex/config.toml"), "utf8")).toBe(`model = "gpt-5"\n\n[mcp_servers.old]\ncommand = "uvx"\nargs = ["old-server"]\nenabled = false\n`);
-    await acts.remove({ kind: "here", project: at.project }, { agent: "claude", name: "project-db", scope: "project" });
+    await acts.remove({ kind: "here", projects: [{ id: "pr_app", name: "app", path: at.project }] }, { agent: "claude", name: "project-db", scope: "project" });
     expect(json(join(at.project, ".mcp.json"))).toEqual({ mcpServers: {} });
   });
 

@@ -75,6 +75,7 @@
 //                         page with its Image card in that state, or the cloud's
 //                         with &computer=solari; settings-computer is the box's
 //                         ready card and settings-cloud the cloud's copy behind
+//                         (&projects=1: the box's agents over the two projects it holds)
 //   settings-image-recipe, -recipe-last, -recipe-choice  the box's card with the
 //                         recipe open on its first screen, on the screen that
 //                         builds, and on the road before any job (&image=none);
@@ -106,7 +107,7 @@ import { useServerActs } from "../../src/components/agents/useServerActs";
 import { useSkillActs } from "../../src/components/agents/useSkillActs";
 import { useAgentActs } from "../../src/components/agents/useAgentActs";
 import { SettingsPage } from "../../src/settings/SettingsPage";
-import { AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
+import { AGENTS_PAGE_REPORT, AGENTS_REPORT, HOSTILE_SKILL_MD, SERVER_TOOLS, SKILL_HITS, SKILL_PREVIEWS } from "../fixtures/agents-report";
 import { useSettingsStore, type SettingsAt } from "../../src/settings/settingsStore";
 import { applyTheme, useThemeEffect } from "../../src/settings/theme";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
@@ -523,7 +524,7 @@ const api = {
   initStart: async () => new Promise<never>(() => {}),
   initDraft: async () => new Promise<never>(() => {}),
   hostTerminalConfig: async () => ({ files: [] }),
-  agentsRead: async () => AGENTS_REPORT,
+  agentsRead: async () => (params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
   serversIcon: async (host: string) => SERVER_ICON[host]?.() ?? null,
   serversTools: async (_target: unknown, _agent: string, name: string) => SERVER_TOOLS[name] ?? { auth: "open", tools: [], readAt: AGENTS_REPORT.readAt },
   // A sign-in whose tool prints its page at once: a device code for an agent, a page whose answer is pasted back for a server.

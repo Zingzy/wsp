@@ -318,6 +318,13 @@ describe("a computer's own page", () => {
     expect(document.querySelector("[data-settings-card='agents'] [data-settings-head]")).toBeNull();
   });
 
+  it("says the page covers each project once the computer holds any, and only then", async () => {
+    useStore.setState({ places: [here] });
+    const projects = [{ id: "pr_app", name: "app", path: "~/code/app" }];
+    await mountComputers(computersApi({ agentsRead: async () => ({ ...AGENTS_REPORT, projects }) }).api, { kind: "computer", id: "here" });
+    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on this Mac and in its projects.");
+  });
+
   it("says so when a computer reported no agent at all, the head naming that computer", async () => {
     useStore.setState({ places: [here, { ...laptop, present: true, agents: [] }] });
     await mountComputers(computersApi({ agentsRead: async () => EMPTY_REPORT }).api, { kind: "computer", id: "here" });

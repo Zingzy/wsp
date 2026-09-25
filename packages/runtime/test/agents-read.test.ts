@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { Machine } from "@wsp/engine";
-import { nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
+import { noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, type AgentsTarget, type WorkspacePhase } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { NO_AGENTS_READER, agentsReads, pageReachOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type ServersActs, type SignInForward, type SkillsActs } from "../src/agents-read.js";
+import { NO_AGENTS_READER, agentsReads, pageReachOf, projectOf, type AgentsActs, type AgentsOn, type AgentsRead, type AgentsWorkspace, type ServerToolsAsk, type SignInAsk, type ServersActs, type SignInForward, type SkillsActs } from "../src/agents-read.js";
 import type { PlaceDoor } from "../src/places.js";
+
+const LANDING = { id: "pr_landing", name: "landing", path: "/root/landing" };
 
 const READ = { home: "/root", user: "root", agents: [], skills: [], servers: [], refused: [] };
 
@@ -14,7 +16,7 @@ function reads(phase: { now: WorkspacePhase }, local = false): { asked: AgentsOn
   const api = agentsReads<undefined>({
     reader: { read: async on => (asked.push(on), READ), tools: async (on, ask) => (asked.push(on), tools.push(ask), { auth: "open", tools: [], readAt: "2026-09-24T12:00:00.000Z" }) },
     places: () => undefined,
-    workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local, machine, project: "/root/landing" }),
+    workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local, machine, project: LANDING }),
     channel: async () => {
       throw new Error("no channel on this road");
     },
@@ -30,7 +32,7 @@ describe("the agents in a workspace", () => {
     const { asked, api } = reads(phase);
     const first = await api.read({ workspaceId: "ws_1" });
     expect(first).toMatchObject({ target: { workspaceId: "ws_1" }, readAt: "2026-09-24T12:00:00.000Z", ...READ });
-    expect(asked).toEqual([{ kind: "machine", machine: expect.anything(), project: "/root/landing" }]);
+    expect(asked).toEqual([{ kind: "machine", machine: expect.anything(), projects: [LANDING] }]);
     phase.now = "napping";
     expect(await api.read({ workspaceId: "ws_1" })).toEqual({ ...first, stale: "napping" });
     expect(asked).toHaveLength(1);
@@ -40,7 +42,7 @@ describe("the agents in a workspace", () => {
     await expect(reads({ now: "napping" }).api.read({ workspaceId: "ws_2" })).rejects.toThrow(nappingAgentsRefusal("landing"));
     const here = reads({ now: "running" }, true);
     await here.api.read({ workspaceId: "ws_3" });
-    expect(here.asked).toEqual([{ kind: "here", project: "/root/landing" }]);
+    expect(here.asked).toEqual([{ kind: "here", projects: [LANDING] }]);
   });
 
   it("say on the report where a page that returns to localhost reaches, off the one rule the sign-in plans by", async () => {
@@ -49,7 +51,7 @@ describe("the agents in a workspace", () => {
       agentsReads<undefined>({
         reader: { read: async () => READ, tools: async () => ({ auth: "open", readAt: "2026-09-24T12:00:00.000Z" }) },
         places: () => undefined,
-        workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: "running", local, machine, project: "/root/landing" }),
+        workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: "running", local, machine, project: LANDING }),
         channel: async () => {
           throw new Error("no channel on this road");
         },
@@ -77,7 +79,7 @@ describe("the agents in a workspace", () => {
     const phase = { now: "running" as WorkspacePhase };
     const { asked, tools, api } = reads(phase);
     expect(await api.tools({ workspaceId: "ws_5" }, { agent: "claude", name: "airtable" })).toEqual({ auth: "open", tools: [], readAt: "2026-09-24T12:00:00.000Z" });
-    expect(asked).toEqual([{ kind: "machine", machine: expect.anything(), project: "/root/landing" }]);
+    expect(asked).toEqual([{ kind: "machine", machine: expect.anything(), projects: [LANDING] }]);
     expect(tools).toEqual([{ key: JSON.stringify({ workspaceId: "ws_5" }), agent: "claude", name: "airtable" }]);
     phase.now = "napping";
     await expect(api.tools({ workspaceId: "ws_5" }, { agent: "claude", name: "airtable" })).rejects.toThrow(nappingToolsRefusal("landing"));
@@ -154,7 +156,7 @@ describe("the sign-ins on a computer or a workspace", () => {
       ...(relayed === undefined ? {} : { relayed: () => relayed }),
       acts,
       places: () => places,
-      workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: "/root/landing" }),
+      workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: LANDING }),
       channel: async (_target, onEvent) => ch.open(onEvent),
       changed: target => void changed.push(target),
       now: () => Date.parse("2026-09-24T12:00:00Z"),
@@ -166,7 +168,7 @@ describe("the sign-ins on a computer or a workspace", () => {
     for (const relayed of [true, false]) {
       const t = acting({ now: "running" }, relayed);
       const { leave } = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "claude", server: "notion" }, () => {});
-      expect(t.planned[0]!.on).toEqual({ kind: "machine", machine: expect.anything(), project: "/root/landing", ...(relayed ? { relayed: true } : {}) });
+      expect(t.planned[0]!.on).toEqual({ kind: "machine", machine: expect.anything(), projects: [LANDING], ...(relayed ? { relayed: true } : {}) });
       leave();
     }
   });
@@ -260,7 +262,7 @@ describe("the sign-ins on a computer or a workspace", () => {
     const seen: Record<string, unknown>[] = [];
     const { signInId } = await t.api.signIn({ workspaceId: "ws_1" }, { agent: "codex" }, e => void seen.push(e));
     expect(signInId).toMatch(/^si_[0-9a-f]{12}$/);
-    expect(t.planned).toEqual([{ on: { kind: "machine", machine: expect.anything(), project: "/root/landing" }, ask: { agent: "codex" } }]);
+    expect(t.planned).toEqual([{ on: { kind: "machine", machine: expect.anything(), projects: [LANDING] }, ask: { agent: "codex" } }]);
     await tick();
     expect(t.ch.frames).toEqual([{ op: "pty.create" }]);
     t.ch.push({ url: "https://auth.openai.com/codex/device" });
@@ -370,7 +372,7 @@ describe("the skills on a computer or a workspace", () => {
     const api = agentsReads<undefined>({
       reader: undefined,
       places: () => undefined,
-      workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: "/root/landing" }),
+      workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: LANDING }),
       skills: acts,
       channel: async () => {
         throw new Error("no channel on this road");
@@ -427,7 +429,7 @@ describe("the MCP servers written on a computer or a workspace", () => {
     const api = agentsReads<undefined>({
       reader: undefined,
       places: () => undefined,
-      workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: "/root/landing" }),
+      workspace: async (): Promise<AgentsWorkspace> => ({ name: "landing", phase: phase.now, local: false, machine, project: LANDING }),
       servers: acts,
       channel: async () => {
         throw new Error("no channel on this road");
@@ -462,5 +464,67 @@ describe("the MCP servers written on a computer or a workspace", () => {
     expect(changed).toEqual([]);
     const bare = agentsReads<undefined>({ reader: undefined, places: () => undefined, workspace: async () => { throw new Error("no workspace"); }, channel: async () => { throw new Error("no channel"); }, changed: () => {}, now: () => 0 });
     await expect(bare.serversAdd({ placeId: "here" }, { agent: "claude", name: "acme", command: "npx" })).rejects.toThrow(NO_AGENTS_READER);
+  });
+});
+
+describe("the projects a computer's report covers", () => {
+  const SPOO = { id: "pr_spoo", name: "spoo", path: "/home/ada/spoo" };
+  const WWW = { id: "pr_www", name: "www", path: "/home/ada/www" };
+  const door = {
+    list: async () => [{ id: "pl_1", name: "box", kind: "computer" }],
+    reportOf: async () => undefined,
+    signInsAt: () => undefined,
+    exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+  } as unknown as PlaceDoor;
+  function computer(held: Record<string, readonly (typeof SPOO)[]> = { pl_1: [SPOO, WWW], here: [WWW] }) {
+    const read: AgentsOn[] = [];
+    const acted: AgentsOn[] = [];
+    const changed: (AgentsTarget | undefined)[] = [];
+    const skills = { remove: async (on: AgentsOn) => (acted.push(on), { removed: [] }) } as unknown as SkillsActs;
+    const api = agentsReads<undefined>({
+      reader: { read: async on => (read.push(on), READ), tools: async on => (acted.push(on), { auth: "open", readAt: "2026-09-25T12:00:00.000Z" }) },
+      skills,
+      places: () => door,
+      projects: async placeId => held[placeId] ?? [],
+      workspace: async () => {
+        throw new Error("no workspace");
+      },
+      channel: async () => {
+        throw new Error("no channel");
+      },
+      changed: target => void changed.push(target),
+      now: () => Date.parse("2026-09-25T12:00:00Z"),
+    });
+    return { api, read, acted, changed };
+  }
+
+  it("a read of a computer covers every project this host holds on it, and of this one its own", async () => {
+    const c = computer();
+    await c.api.read({ placeId: "pl_1" });
+    await c.api.read({ placeId: "here" });
+    expect(c.read.map(on => [on.kind, on.projects])).toEqual([
+      ["box", [SPOO, WWW]],
+      ["here", [WWW]],
+    ]);
+  });
+
+  it("an act names one project by id and works in that one alone; one the computer does not hold is refused; the change is the computer's", async () => {
+    const c = computer();
+    await c.api.skillsRemove({ placeId: "pl_1", project: "pr_www" }, { name: "deploy", project: true });
+    await c.api.tools({ placeId: "pl_1", project: "pr_spoo" }, { agent: "claude", name: "db" });
+    await c.api.tools({ placeId: "pl_1" }, { agent: "claude", name: "notion" });
+    expect(c.acted.map(on => on.projects)).toEqual([[WWW], [SPOO], undefined]);
+    expect(c.acted.map(on => projectOf(on))).toEqual(["/home/ada/www", "/home/ada/spoo", undefined]);
+    expect(c.changed).toEqual([{ placeId: "pl_1" }]);
+    await expect(c.api.read({ placeId: "pl_1", project: "pr_gone" })).rejects.toThrow(noSuchAgentsProjectRefusal("pr_gone", "box"));
+    await expect(c.api.skillsRemove({ placeId: "here", project: "pr_spoo" }, { name: "deploy", project: true })).rejects.toThrow(noSuchAgentsProjectRefusal("pr_spoo", "this computer"));
+  });
+
+  it("names a project by its id or by its name, and a name two projects there share is refused naming the way out", async () => {
+    const c = computer({ pl_1: [SPOO, WWW, { id: "pr_www2", name: "www", path: "/home/ada/www2" }], here: [SPOO] });
+    await c.api.skillsRemove({ placeId: "here", project: "spoo" }, { name: "deploy", project: true });
+    await c.api.skillsRemove({ placeId: "pl_1", project: "pr_www2" }, { name: "deploy", project: true });
+    expect(c.acted.map(on => projectOf(on))).toEqual(["/home/ada/spoo", "/home/ada/www2"]);
+    await expect(c.api.skillsRemove({ placeId: "pl_1", project: "www" }, { name: "deploy", project: true })).rejects.toThrow(sharedAgentsProjectRefusal("www", "box"));
   });
 });

@@ -8,10 +8,10 @@
 // server is a form in place of the list.
 import { PlugIcon, PowerIcon, PowerOffIcon, RefreshCwIcon, ServerIcon, Trash2Icon, WrenchIcon } from "lucide-react";
 import { agentName, mcpSwitch } from "@wsp/catalog";
-import type { AgentsReport, McpRow, ServerToolsAnswer } from "@wsp/protocol";
+import type { AgentsProject, AgentsReport, McpRow, McpTool, McpToolParam, ServerToolsAnswer } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, holdAll, notYet, onImage, serverSignInStart, signInAct, waitingFlow, type FlowView, type RowAct, type RowsContext } from "../agentsRows.js";
 import { AddServerForm } from "../AddServerForm.js";
-import { byName, kind, matchesAny, type Fact, type GroupBy, type GroupView, type KindModule, type Lead, type ServerState, type ServerStatus } from "./kind.js";
+import { byName, kind, matchesAny, projectGroups, rowKey, type Fact, type GroupBy, type GroupView, type KindModule, type Lead, type ServerState, type ServerStatus, type UnderRow } from "./kind.js";
 
 /** Where a server is set up: the person's own files, or the project's. */
 type Scope = "global" | "project";
@@ -20,6 +20,8 @@ export interface ServerEntry {
   readonly key: string;
   readonly name: string;
   readonly scope: Scope;
+  /** The project a project server is set up in. */
+  readonly project?: AgentsProject;
   /** The command with its values hidden, or the address. */
   readonly reach: string;
   readonly stdio: boolean;
@@ -33,15 +35,16 @@ const scopeOf = (row: McpRow): Scope => (row.scope === "project" ? "project" : "
 const reachOf = (row: McpRow): string => (row.transport.kind === "stdio" ? row.transport.line : row.transport.host);
 /** The box a server's row and detail lead with: its own icon where it is reached over an address. */
 const leadOf = (entry: ServerEntry): Lead => ({ kind: "box", icon: ServerIcon, ...(entry.stdio || entry.reach === "" ? {} : { host: entry.reach }) });
-const rowId = (row: McpRow): string => `server-${row.agent}-${row.scope}-${row.name}`;
+const rowId = (row: McpRow): string => rowKey(["server", row.agent, row.scope], row.project, row.name);
 
-/** One entry per server: the same name reached the same way in the same scope is one server set up for each agent. */
+/** One entry per server: the same name reached the same way in the same scope, and the same project, is one server
+ * set up for each agent. */
 export function foldServers(rows: readonly McpRow[], readAt?: string): ServerEntry[] {
-  const out = new Map<string, { name: string; scope: Scope; reach: string; stdio: boolean; rows: McpRow[] }>();
+  const out = new Map<string, { name: string; scope: Scope; project?: AgentsProject; reach: string; stdio: boolean; rows: McpRow[] }>();
   for (const row of rows) {
-    const key = `${scopeOf(row)}\0${row.name}\0${row.transport.kind}\0${reachOf(row)}`;
+    const key = [scopeOf(row), ...(row.project === undefined ? [] : [row.project.id]), row.name, row.transport.kind, reachOf(row)].join("\0");
     const was = out.get(key);
-    if (was === undefined) out.set(key, { name: row.name, scope: scopeOf(row), reach: reachOf(row), stdio: row.transport.kind === "stdio", rows: [row] });
+    if (was === undefined) out.set(key, { name: row.name, scope: scopeOf(row), ...(row.project !== undefined ? { project: row.project } : {}), reach: reachOf(row), stdio: row.transport.kind === "stdio", rows: [row] });
     else was.rows.push(row);
   }
   return [...out].map(([key, e]) => ({ key: `server-${key.replaceAll("\0", "-")}`, ...e, ...(readAt === undefined ? {} : { readAt }) }));
@@ -160,13 +163,32 @@ function actsOf(entry: ServerEntry, ctx: RowsContext, openUnder: () => void) {
 
 const NO_NAV = (): void => {};
 
+/** A tool as a row of its server's tools, and its own level: the description whole, then each parameter by name with
+ * its type and whether a call needs it. */
+function toolRow(tool: McpTool): UnderRow {
+  const facts = (p: McpToolParam): string | undefined => [p.type, p.required ? W.required : undefined].filter(w => w !== undefined).join(" · ") || undefined;
+  return {
+    key: tool.name,
+    title: tool.name,
+    ...(tool.description === undefined ? {} : { subtext: tool.description, body: tool.description }),
+    ...(tool.params === undefined
+      ? {}
+      : {
+          list: {
+            label: W.parameters,
+            items: tool.params.map(p => {
+              const fact = facts(p);
+              return { name: p.name, ...(fact === undefined ? {} : { fact }), ...(p.description === undefined ? {} : { about: p.description }) };
+            }),
+          },
+        }),
+  };
+}
+
+/** Global first, then one group per project, each by its name with its folder. */
 function scopeGroups(items: readonly ServerEntry[], ctx: RowsContext): GroupView<ServerEntry>[] {
   const global = items.filter(e => e.scope === "global");
-  const project = items.filter(e => e.scope === "project");
-  return [
-    ...(global.length === 0 ? [] : [{ id: "global", label: "Global", items: global }]),
-    ...(project.length === 0 ? [] : [{ id: "project", label: ctx.project?.name ?? "Project", ...(ctx.project?.path === undefined ? {} : { path: ctx.project.path }), items: project }]),
-  ];
+  return [...(global.length === 0 ? [] : [{ id: "global", label: "Global", items: global }]), ...projectGroups(items.filter(e => e.scope === "project"))];
 }
 
 export const SERVERS_KIND: KindModule<ServerEntry> = {
@@ -182,7 +204,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
   items: (report: AgentsReport) => foldServers(report.servers, report.readAt).sort(byName),
   count: items => items.length,
   key: entry => entry.key,
-  matches: (entry, q) => matchesAny(q, entry.name, entry.reach, ...entry.rows.flatMap(r => [agentName(r.agent), r.file])),
+  matches: (entry, q) => matchesAny(q, entry.name, entry.reach, entry.project?.name, ...entry.rows.flatMap(r => [agentName(r.agent), r.file])),
   groups: (items, by: GroupBy, ctx) => {
     if (by === "none") return [{ id: "all", items }];
     if (by === "agent") {
@@ -255,7 +277,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
       under: {
         title: W.toolsOf(entry.name),
         reading: asked?.listing === true,
-        ...(listed === undefined ? {} : { rows: listed.map(t => ({ key: t.name, title: t.name, ...(t.description === undefined ? {} : { subtext: t.description, body: t.description }) })) }),
+        ...(listed === undefined ? {} : { rows: listed.map(toolRow) }),
         ...(asked?.answer === undefined ? {} : { readAt: asked.answer.readAt }),
         ...(refused === undefined ? {} : { refused }),
         ...(refresh === undefined ? {} : { refresh }),
