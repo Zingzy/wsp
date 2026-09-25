@@ -98,6 +98,7 @@ import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { agentsReader } from "./agents-reader.js";
 import { skillsActs } from "./skills-acts.js";
+import { serverIcons } from "./server-icons.js";
 import { serversActs } from "./servers-acts.js";
 import { knock } from "./server-check.js";
 import { hostActs } from "./agents-signin.js";
@@ -789,6 +790,9 @@ export function makeRuntime(
     skillsActs: skillsActs(),
     // A server lands in the agent's own config as the login of the computer it is for, its values in that file alone.
     serversActs: serversActs(),
+    // A remote server's icon is asked of Google from this host, never from the page or a machine, and kept beside the
+    // state file.
+    serverIcons: serverIcons({ dir: join(dirname(statePath), "icons") }),
     // How a folder on this computer is read and packed to seed a project elsewhere: the collector's own menu over
     // this computer, and the host's pack of whichever rows the person ticked.
     seed: hostSeed(),

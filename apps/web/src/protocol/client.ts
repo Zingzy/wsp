@@ -102,6 +102,9 @@ export type ConnStatus = "connecting" | "live" | "reconnecting" | "closed";
 /** What a refusal that came with no sentence reads as. */
 export const NO_REASON = "The host answered with no reason. Try again.";
 
+/** The only icon a page draws for a server: an image of a kind the host keeps, carried inline. */
+const ICON_DATA_URL = /^data:image\/(?:png|x-icon|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
+
 export type DisconnectReason = "lost" | "closed" | "unauthorized";
 const DISCONNECT_MESSAGE: Record<DisconnectReason, string> = {
   lost: "runtime connection lost",
@@ -415,6 +418,9 @@ export interface Api {
   /** Starts one MCP server there once, or asks its address once, for its tools and its sign-in; the host keeps the
    * answer an hour unless `refresh`. A client without it holds List tools. */
   serversTools?(target: AgentsTarget, agent: string, name: string, refresh?: boolean): Promise<ServerToolsAnswer>;
+  /** A remote server's icon by its host as a data url, asked of Google by the host and never by this page; null where
+   * there is none or the person turned server icons off. */
+  serversIcon?(host: string, refresh?: boolean): Promise<string | null>;
   /** Runs an agent's sign-in there, or one server's with `server`, in a watched pty, or joins the one running; each
    * step reaches `onStep`. `stop` ends it on the host and stops listening; `off` only stops listening, once the last
    * step has come. A client without it holds Sign in. */
@@ -548,8 +554,9 @@ export interface Api {
   /** The person's view preferences as the host keeps them, one record every client on this host shares. Optional so
    * fixtures without a settings page need not fake it; without it the defaults stand and nothing is kept. */
   preferences?(): Promise<Preferences>;
-  /** The patch over the host's record; resolves with the record as it now stands, and every client hears preferences.changed. */
-  setPreferences?(patch: PreferencesPatch): Promise<Preferences>;
+  /** The patch over the host's record; resolves with the record as it now stands, and the host's notice when the set
+   * was kept but not finished; every client hears preferences.changed. */
+  setPreferences?(patch: PreferencesPatch): Promise<Preferences & { notice?: string }>;
   /** The newest release as the host last read it, asking nobody. Optional so fixtures without About need not fake it. */
   releaseGet?(): Promise<ReleaseView>;
   /** Asks the host to read the newest release again; the host keeps asks ten minutes apart and answers its reading. */
@@ -762,7 +769,11 @@ export function makeApi(c: ProtocolClient): Api {
     },
     // Parsed, not trusted: the page paints its theme and sizes only from values the wire type vouches for.
     preferences: async () => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.get")).preferences),
-    setPreferences: async patch => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.set", { patch })).preferences),
+    setPreferences: async patch => {
+      const { preferences, notice } = await c.request<{ preferences?: unknown; notice?: unknown }>("preferences.set", { patch });
+      const record = Preferences.parse(preferences);
+      return typeof notice === "string" ? { ...record, notice } : record;
+    },
     releaseGet: async () => ReleaseView.parse((await c.request<{ release?: unknown }>("release.get")).release),
     releaseCheck: async () => ReleaseView.parse((await c.request<{ release?: unknown }>("release.check")).release),
     hostRestart: async () => void (await c.request("host.restart")),
@@ -800,6 +811,10 @@ export function makeApi(c: ProtocolClient): Api {
     serversToggle: async (target, ask, on) => ({ file: String((await c.request<{ file?: unknown }>("servers.toggle", { target, ...ask, on })).file) }),
     serversTools: async (target, agent, name, refresh) =>
       ServerToolsAnswer.parse((await c.request<{ answer?: unknown }>("servers.tools", { target, agent, name, ...(refresh === true ? { refresh } : {}) })).answer),
+    serversIcon: async (host, refresh) => {
+      const icon = (await c.request<{ icon?: unknown }>("servers.icon", { host, ...(refresh === true ? { refresh } : {}) })).icon;
+      return typeof icon === "string" && ICON_DATA_URL.test(icon) ? icon : null;
+    },
     agentsSignIn: async (target, agent, server, onStep) => {
       // The host answers before it pushes a step, but a step that lands first is kept for the id it names.
       let signInId: string | undefined;
