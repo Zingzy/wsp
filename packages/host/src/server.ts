@@ -577,7 +577,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const asked = opts.port ?? DEFAULT_PORT;
   const doorPort = asked === 0 ? 0 : asked + PLACE_PORT_OFFSET;
   const doorServer = createServer(handler(() => false));
-  // macOS lets a wildcard bind share a port another process holds on 127.0.0.1, and a dial to the loopback reaches
+  // macOS lets a wildcard bind share a port another process holds on the loopback address, and a dial there reaches
   // that process, so the door holds the loopback itself; Linux refuses both binds together and the wildcard alone.
   const doorLoopback = platform() === "linux" ? undefined : createServer(handler(() => false));
   const doorListeners = doorLoopback === undefined ? [doorServer] : [doorServer, doorLoopback];
