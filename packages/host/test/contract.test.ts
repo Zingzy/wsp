@@ -32,6 +32,16 @@ import { runsFromItsOwnFolder } from "./own-folder.js";
 import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
 import { agentsReader } from "../src/agents-reader.js";
 import { hostActs } from "../src/agents-signin.js";
+import { skillsActs } from "../src/skills-acts.js";
+import type { SkillsFetch } from "../src/skills-sh.js";
+
+/** skills.sh as far as this test asks it: one search and one skill's folder. */
+const skillsSh: SkillsFetch = async url => {
+  const at = new URL(url);
+  if (at.pathname === "/api/search") return new Response(JSON.stringify({ skills: [{ id: "acme/skills/memo", source: "acme/skills", skillId: "memo", name: "memo", installs: 12 }] }));
+  if (at.pathname === "/api/download/acme/skills/memo") return new Response(JSON.stringify({ files: [{ path: "SKILL.md", contents: "---\nname: memo\ndescription: Keep notes\n---\n# memo\n" }] }));
+  return new Response("{}", { status: 404 });
+};
 import { nodeHost, type Host } from "@wsp/collect";
 
 /** This computer's own Host over a fixture home, with the fixture's agents on its PATH. */
@@ -159,6 +169,8 @@ describe("the agent contract on the command line and the tool door", () => {
       agentsReader: agentsReader({ vault: () => ({}), here: () => fixtureHost(agents) }),
       // The wsp tools land in a config under this test's own home, never the person's.
       agentsActs: hostActs({ vaultFile: join(dir, ".env"), home: () => join(dir, "user"), wspServer: () => ({ command: "wsp", args: ["mcp"] }) }),
+      // A skill lands in the fixture's home, never the person's, off a skills.sh that answers from this file.
+      skillsActs: skillsActs({ fetch: skillsSh, here: () => fixtureHost(agents) }),
       // Two places over one backend: this host's own, and one more for the image build road, which never boots a
       // machine here because the place already stands on the record.
       places: { wired: "default", backend: place => (place === "default" || place === "elsewhere" ? backend : undefined), list: () => ["default", "elsewhere"] },
@@ -244,6 +256,13 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("agents", "agents");
     await last("skills", "skills", "--on", HERE_PLACE_ID);
     await last("servers", "servers");
+    expect(await last("skills search", "skills", "search", "memo")).toEqual({ skills: [expect.objectContaining({ id: "acme/skills/memo" })] });
+    expect(await last("skills show", "skills", "show", "acme/skills/memo")).toMatchObject({ size: expect.any(Number) });
+    expect(await last("skills add", "skills", "add", "acme/skills/memo", "--agent", "claude")).toEqual({ path: "~/.agents/skills/memo", agents: [{ agent: "claude", path: "~/.claude/skills/memo" }] });
+    await last("skills show", "skills", "show", "memo");
+    expect(await last("skills disable", "skills", "disable", "memo")).toEqual({ paths: ["~/.agents/skills/memo"] });
+    expect(await last("skills enable", "skills", "enable", "memo")).toEqual({ paths: ["~/.agents/skills/memo"] });
+    expect(await last("skills remove", "skills", "remove", "memo")).toEqual({ removed: expect.arrayContaining(["~/.agents/skills/memo", "~/.claude/skills/memo"]) });
     expect(await last("agents addtools", "agents", "addtools", "codex")).toEqual({ file: "~/.codex/config.toml" });
     // The one verb that starts a server: the fixture's runner exits at once, so the answer is why no tools came back.
     expect(await last("servers tools", "servers", "tools", "local", "--agent", "claude")).toMatchObject({ auth: "failed", refused: expect.any(String) });
