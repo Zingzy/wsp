@@ -5,7 +5,7 @@
 // command line, the runtime and the app all read them here, so no road can
 // record a project one way and read it back another.
 import { THIS_COMPUTER, thisComputer } from "./format.js";
-import { HERE_PLACE_ID } from "./index.js";
+import { HERE_PLACE_ID, namesPlace } from "./index.js";
 import type { ProjectSource, ProjectView, WorkspaceKind, WorkspaceProject, WorkspaceView } from "./index.js";
 import { folderName, underProject } from "./project-path.js";
 import { shellLine, shellQuote } from "./shell-quote.js";
@@ -250,6 +250,22 @@ export function copiesFolder(kind: WorkspaceKind): boolean {
  * road anywhere compares that id itself. */
 export function kindForComputer(computer: string): WorkspaceKind {
   return computer === HERE_PLACE_ID ? "local" : "cloud";
+}
+
+/** Where a workspace of a project on this computer lands: a copy of a folder beside the app for a project here, a
+ * fork on the host's own backend for a project on the provider it forks on (`wired`), and a fork on the place it
+ * names for every other one. The one rule the host forks by and a computer's page reads its projects by. */
+export type WorkspaceLands = { at: "here" } | { at: "wired" } | { at: "place"; place: string };
+
+export function workspaceLands(computer: string, wired: string | undefined): WorkspaceLands {
+  if (copiesFolder(kindForComputer(computer))) return { at: "here" };
+  return computer === wired ? { at: "wired" } : { at: "place", place: computer };
+}
+
+/** Whether a workspace of a project on `computer` stands on this place's row. The provider the host forks on is a
+ * row under its own word, so which provider that is changes nothing here. */
+export function landsOn(computer: string, place: { id: string; name: string }): boolean {
+  return workspaceLands(computer, undefined).at === "here" ? place.id === HERE_PLACE_ID : namesPlace(place, computer);
 }
 
 /** Why a workspace on this computer takes none of the words a fork takes: it is a copy of the project's folder

@@ -893,6 +893,18 @@ export function plural(n: number, noun: string): string {
 
 /** What a record with no vault says: its copies ask for every sign-in again until the next version holds them. */
 export const IMAGE_NO_VAULT = "no sign-ins held; cut the next version to hold them";
+/** Whether a copy of this record asks for every sign-in again: it was sealed holding none. The refusal that wants
+ * force and the card that offers to copy it anyway read this one rule. */
+export const copyAsksSignIns = (image: Pick<SealedImage, "vault">): boolean => image.vault === undefined;
+/** What to do about each refusal a copy build meets before anything boots: said after it on a terminal, and in the
+ * fix ink beside the Image card's press in the app. Only the no-sign-ins one names a flag: the card sends force on
+ * such a record before the host could refuse it, so that fix is read on a terminal alone. */
+export const COPY_BUILD_FIX = {
+  noCopy: "Start its tasks on a cloud or a computer that holds your image.",
+  noImage: "Build your image first; a copy is made from it.",
+  noRecipe: "Build the next version, then copy that one.",
+  noVault: "Build the next version to hold them, or run it again with --force to copy this one anyway.",
+} as const;
 /** Where a run with nobody at its terminal reads the passphrase an export is sealed to; never a flag, since every
  * process on a computer can read another's command line. */
 export const IMAGE_PASSPHRASE_ENV = "WSP_IMAGE_PASSPHRASE";
@@ -932,7 +944,7 @@ export const lowerFirst = (words: string): string => `${words.charAt(0).toLowerC
 
 /** What a place's row says while a copy of the image is built there: the stage in the seal's own words, so the row
  * and the init sheet name one stage one way. */
-export const copyBuildingLine = (stage: Exclude<GoldenStage, "failed">): string => `building your image · ${lowerFirst(GOLDEN_STAGE_WORDS[stage])}`;
+export const copyBuildingLine = (stage: Exclude<GoldenStage, "failed">): string => `copying your image · ${lowerFirst(GOLDEN_STAGE_WORDS[stage])}`;
 
 /** What the row says after a build there stopped: the seal's own headline, and the reason the way the sheet reads it.
  * It stands until the next build there starts: wsp image build, the next version cut, or the computer connecting

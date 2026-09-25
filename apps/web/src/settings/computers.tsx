@@ -20,13 +20,15 @@ import { useAgentsReport } from "../components/agents/useAgentsReport.js";
 import { useServerTools } from "../components/agents/useServerTools.js";
 import { useAgentActs } from "../components/agents/useAgentActs.js";
 import { useSkillActs } from "../components/agents/useSkillActs.js";
-import { useStore } from "../protocol/store.js";
+import { useGoldenFrames, useStore } from "../protocol/store.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { ADD_COMPUTER_WORDS, WHERE_WORDS } from "./format.js";
 import { AddComputer } from "./AddComputer.js";
 import { ComputerGlyph, ComputerIconSelect } from "./ComputerGlyph.js";
-import { builtFact, builtWhen, copyOn, IMAGE_WORDS, imageFacts } from "./image.js";
-import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, threadWord, type PlaceHolding } from "./places.js";
+import { builtWhen, copyOn, IMAGE_WORDS } from "./image.js";
+import { ImageCard } from "./ImageCard.js";
+import { imageState } from "./imageState.js";
+import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, projectOn, threadWord, type PlaceHolding } from "./places.js";
 import { keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 import { RefusalSlot } from "./sheetParts.js";
@@ -229,7 +231,7 @@ const spendLine = (spend: PlaceSpend): string => `${spentThisMonth(spend.monthUs
 /** Where a workspace of a project on this computer would land, for the Ports row: the first project the host holds
  * on it, since every workspace there reads the same two flags. */
 function landingOn(ctx: SettingsContext, place: PlaceView): WorkspaceLanding | null {
-  const project = ctx.projects.find(p => p.computer === place.id);
+  const project = projectOn(place, ctx.projects);
   return project === undefined ? null : (ctx.landings[project.id] ?? null);
 }
 
@@ -239,20 +241,11 @@ function landingOn(ctx: SettingsContext, place: PlaceView): WorkspaceLanding | n
  * The image is what this host builds with the cloud's key, so every word about it stands under the same rule the
  * list row's own cloud stands under: the key is held here. A cloud row drawn for a workspace alone is a machine
  * somebody else's key made, and this host has nothing to say about its image and nothing to edit. */
-function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageView | null, holding: PlaceHolding, onRemoved: () => void): SettingsCardData[] {
+function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageView | null, imageCard: SettingsCardData[], holding: PlaceHolding, onRemoved: () => void): SettingsCardData[] {
   const held = keyHeld(place.name, ctx.reads.setup);
   const image = held ? (view?.image ?? null) : null;
   const spend = ctx.reads.spend.find(row => row.place === place.id);
-  const facts: SettingsItem[] = [
-    ...(spend === undefined ? [] : [{ kind: "line" as const, id: "spend", label: WHERE_WORDS.spend, value: spendLine(spend), attrs: { "data-k": "spend" } }]),
-    // Until the host has answered there is no fact to say; not built yet is drawn only once the read came back empty.
-    ...(!held || view === null
-      ? []
-      : image === null
-        ? [{ kind: "line" as const, id: "image", label: IMAGE_WORDS.image, value: IMAGE_WORDS.notBuilt, valueClass: "fact" as const, hover: IMAGE_WORDS.firstBuild, attrs: { "data-k": "image-facts" } }]
-        : [{ kind: "line" as const, id: "image", label: IMAGE_WORDS.image, value: imageFacts(image), attrs: { "data-k": "image-facts" } }]),
-    ...(image === null ? [] : [{ kind: "line" as const, id: "built", label: IMAGE_WORDS.built, value: builtFact(image, ctx.now), attrs: { "data-k": "image-built" } }]),
-  ];
+  const facts: SettingsItem[] = spend === undefined ? [] : [{ kind: "line" as const, id: "spend", label: WHERE_WORDS.spend, value: spendLine(spend), attrs: { "data-k": "spend" } }];
   const copies: SettingsItem[] =
     image === null || view === null
       ? []
@@ -263,17 +256,13 @@ function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageVie
           value: [`v${copy.version}`, copyStanding(image, copy), copy.sizeBytes === undefined ? undefined : fmtBytes(copy.sizeBytes), builtWhen(copy.builtAt, ctx.now)].filter((word): word is string => word !== undefined).join(" · "),
           attrs: { "data-k": "image-copy", "data-place": copy.place },
         }));
-  const edit = !held ? undefined : (
-    <Button data-k="edit-image" variant="outline" size="xs" onClick={ctx.openSetup}>
-      {IMAGE_WORDS.edit}
-    </Button>
-  );
   // A cloud keeps no computer to read: its agents are the image's, and the image is what every act there edits.
   const agents =
     image === null ? undefined : <AgentsManager shell="page" head={{ line: AGENTS_IMAGE_LINE(placeName(place)) }} report={imageAgentsReport(image, place.id)} reading={false} on={placeName(place)} ctx={{ where: "provider", editImage: ctx.openSetup }} now={ctx.now} />;
   return [
     // No card is drawn with nothing in it: before the host has answered, a cloud's page is its one act.
-    ...(facts.length === 0 ? [] : [{ id: "cloud", items: facts, ...(edit === undefined ? {} : { under: edit }) }]),
+    ...(facts.length === 0 ? [] : [{ id: "cloud", items: facts }]),
+    ...(held ? imageCard : []),
     ...(agents === undefined ? [] : [{ id: "agents", items: [], body: agents }]),
     ...(copies.length === 0 ? [] : [{ id: "copies", head: IMAGE_WORDS.copies, items: copies }]),
     {
@@ -301,7 +290,13 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
   // After the dialog has closed: the page under it goes with the computer, and a portal torn down with its page
   // in one frame is a node React cannot find.
   const onRemoved = (): void => void setTimeout(() => ctx.go({ kind: "group", group: "computers" }), 0);
-  if (isProviderPlace(place)) return <Cards cards={cloudCards(ctx, place, ctx.reads.image, holding, onRemoved)} />;
+  const job = useStore(s => s.initJob);
+  const frames = useGoldenFrames();
+  const view = ctx.reads.image;
+  // Until the host has answered there is nothing to say about the image, so no card stands on a guess.
+  const state = view === null ? undefined : imageState(place, { view, job, frames });
+  const imageCard: SettingsCardData[] = view === null || state === undefined ? [] : [{ id: "image", head: IMAGE_WORDS.head(placeName(place, here)), items: [], body: <ImageCard place={place} name={placeName(place, here)} state={state} view={view} ctx={ctx} /> }];
+  if (isProviderPlace(place)) return <Cards cards={cloudCards(ctx, place, view, imageCard, holding, onRemoved)} />;
 
   // How long this host has not heard from it, and null while it is holding its link: a computer that is answering
   // reads its facts plain, since nothing about them is stale.
@@ -351,6 +346,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
   const cards: SettingsCardData[] = [
     { id: "look", items: [{ kind: "row", id: "icon", title: WHERE_WORDS.icon, description: WHERE_WORDS.iconDescription, control: <ComputerIconSelect place={place} onChange={icon => ctx.setPreferences({ computerLook: { [place.id]: { icon } } })} /> }] },
     ...(facts.length === 0 ? [] : [{ id: "facts", items: facts }]),
+    ...imageCard,
     ...(connection.length === 0
       ? []
       : [{ id: "connection", head: WHERE_WORDS.connection, items: connection, ...(refused === null ? {} : { under: <RefusalSlot k="dial-refusal" said={refused.said} {...(refused.fix === undefined ? {} : { fix: refused.fix })} /> }) }]),

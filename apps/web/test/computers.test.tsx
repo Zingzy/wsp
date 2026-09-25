@@ -585,18 +585,18 @@ describe("the cloud's page", () => {
   };
   const copy = { place: "hetzner", version: 1, hash: HASH, snapshotId: "snap_h", builtAt: "2026-09-12T10:00:00.000Z", sizeBytes: 4.2 * 1024 ** 3 };
 
-  it("carries the spend, the image and Built as lines, Edit image under them, the copies as lines and Remove saying the key is forgotten, while the key is held", async () => {
+  it("carries the spend as a line, the Image card with Edit image in it, the copies as lines and Remove saying the key is forgotten, while the key is held", async () => {
     const api = computersApi(
       { image: async () => ({ image: IMAGE, copies: [copy], projects: [] }), spend: async () => [{ place: "solari", monthUsd: 4.12, rateUsdPerHour: 0.16 }] } as Partial<Api>,
       setupOf({ keys: { solari: true } }),
     ).api;
-    useStore.setState({ places: [here, solari], workspaces: [atSolari("ws_y"), atSolari("ws_z")] });
+    useStore.setState({ places: [here, { ...solari, buildsImages: true }], workspaces: [atSolari("ws_y"), atSolari("ws_z")] });
     await mountComputers(api, { kind: "computer", id: "solari" });
     // The rate is what is running there, so the count of workspaces it is spread over is not said again: the
     // clause wrapped the value onto a second line at a phone's width to add nothing.
     expect(lineValue("spend")).toBe("$4.12 this month · $0.16/hr");
-    expect(lineValue("image-facts")).toBe("v2 · 4.2 GB · 2 sign-ins");
-    expect(lineValue("image-built")).toMatch(/^Sep 12 \d\d:\d\d · from this Mac$/);
+    expect([...document.querySelectorAll("[data-settings-page] [data-settings-card]")].map(card => card.getAttribute("data-settings-card"))).toEqual(["cloud", "image", "agents", "copies", "acts"]);
+    expect(document.querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("none");
     expect(document.querySelector("[data-k='edit-image']")?.textContent).toBe(IMAGE_WORDS.edit);
     expect([...document.querySelectorAll("[data-k='image-copy']")].map(row => [row.getAttribute("data-place"), row.querySelector("[data-settings-word]")?.textContent])).toEqual([["hetzner", expect.stringMatching(new RegExp(`^v1 · ${COPY_CURRENT} · 4.2 GB · `))]]);
     expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeCloudDescription);
@@ -612,10 +612,9 @@ describe("the cloud's page", () => {
     // A cloud row stands on a workspace alone; the image is what this host's own key builds, so a page with no key
     // has no image line, no Edit image and no copies, and the card those would have stood in is not drawn.
     const api = computersApi({ image: async () => ({ image: IMAGE, copies: [copy], projects: [] }) } as Partial<Api>, setupOf({ keys: { solari: false } })).api;
-    useStore.setState({ places: [here, solari], workspaces: [atSolari("ws_y")] });
+    useStore.setState({ places: [here, { ...solari, buildsImages: true }], workspaces: [atSolari("ws_y")] });
     await mountComputers(api, { kind: "computer", id: "solari" });
-    expect(document.querySelector("[data-k='image-facts']")).toBeNull();
-    expect(document.querySelector("[data-k='image-built']")).toBeNull();
+    expect(document.querySelector("[data-settings-card='image']")).toBeNull();
     expect(document.querySelector("[data-k='edit-image']")).toBeNull();
     expect(document.querySelector("[data-settings-card='copies']")).toBeNull();
     expect(document.querySelector("[data-settings-card='cloud']")).toBeNull();
@@ -629,13 +628,11 @@ describe("the cloud's page", () => {
     expect(document.querySelector<HTMLElement>("[data-k='remove-confirm']")!.className).toContain("bg-destructive");
   });
 
-  it("says the image is not built with what will build it on hover, and draws no Built line and no copies before a build", async () => {
+  it("draws the Image card before a build, and no copies card", async () => {
     const api = computersApi({ image: async () => ({ image: null, copies: [], projects: [] }) } as Partial<Api>, setupOf({ keys: { solari: true } })).api;
-    useStore.setState({ places: [here, solari] });
+    useStore.setState({ places: [here, { ...solari, buildsImages: true }] });
     await mountComputers(api, { kind: "computer", id: "solari" });
-    expect(lineValue("image-facts")).toBe(IMAGE_WORDS.notBuilt);
-    expect(lineOf("image")?.getAttribute("title")).toBe(IMAGE_WORDS.firstBuild);
-    expect(document.querySelector("[data-k='image-built']")).toBeNull();
+    expect(document.querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("none");
     expect(document.querySelector("[data-settings-card='copies']")).toBeNull();
   });
 });

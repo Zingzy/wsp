@@ -18,13 +18,33 @@ export interface NewThreadRequest {
   readonly workspaceId: string;
 }
 
-export function requestNewWorkspace(): void {
-  window.dispatchEvent(new CustomEvent(NEW_WORKSPACE_EVENT));
+/** Which project the new workspace goes on, where the raiser names one. */
+export interface NewWorkspaceRequest {
+  readonly project?: string;
 }
 
-export function onNewWorkspaceRequest(listener: () => void): () => void {
-  window.addEventListener(NEW_WORKSPACE_EVENT, listener);
-  return () => window.removeEventListener(NEW_WORKSPACE_EVENT, listener);
+let newWorkspaceListeners = 0;
+/** A request raised while no sidebar stands to answer it, as from a Settings page, which the sidebar's place is
+ * given to: answered by the next sidebar to listen. */
+let heldNewWorkspace: NewWorkspaceRequest | null = null;
+
+export function requestNewWorkspace(project?: string): void {
+  const detail: NewWorkspaceRequest = project === undefined ? {} : { project };
+  if (newWorkspaceListeners === 0) heldNewWorkspace = detail;
+  else window.dispatchEvent(new CustomEvent(NEW_WORKSPACE_EVENT, { detail }));
+}
+
+export function onNewWorkspaceRequest(listener: (detail: NewWorkspaceRequest) => void): () => void {
+  const handler = (event: Event) => listener((event as CustomEvent<NewWorkspaceRequest | null>).detail ?? {});
+  window.addEventListener(NEW_WORKSPACE_EVENT, handler);
+  newWorkspaceListeners += 1;
+  const held = heldNewWorkspace;
+  heldNewWorkspace = null;
+  if (held !== null) listener(held);
+  return () => {
+    window.removeEventListener(NEW_WORKSPACE_EVENT, handler);
+    newWorkspaceListeners -= 1;
+  };
 }
 
 /** Asks for the sheet that records a project; the sidebar answers, since the row it appears in is its own. */
