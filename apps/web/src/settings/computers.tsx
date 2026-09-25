@@ -295,7 +295,7 @@ function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageVie
 export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsContext }) {
   const here = place.id === HERE_PLACE_ID;
   const noUpdate = ctx.api?.placesUpdate === undefined;
-  const { dial, busy, line, held, heldWhy, road: dialRoad } = useDialPlace(place);
+  const { dial, busy, line, refused, held, heldWhy, road: dialRoad } = useDialPlace(place);
   const threadsOf = (workspaceId: string): number => ctx.sessions[workspaceId]?.length ?? 0;
   const holding = holdingsFor(ctx.places, ctx.workspaces, threadsOf, id => ctx.statuses[id] ?? null)[place.id] ?? NOTHING_HELD;
   // After the dialog has closed: the page under it goes with the computer, and a portal torn down with its page
@@ -325,7 +325,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
     ...(spend === undefined ? [] : [{ kind: "line" as const, id: "spend", label: WHERE_WORDS.spend, value: spendLine(spend), attrs: { "data-k": "spend" } }]),
   ];
   // The dial's answer replaces the description while it stands, one line with the whole on hover; a wsp that
-  // cannot dial says so there and draws no button.
+  // cannot dial says so there and draws no button. A refused dial goes under the card, whole and with its fix.
   const answered = line ?? road?.refused ?? heldWhy ?? WHERE_WORDS.answeredDescription;
   const connection: SettingsItem[] =
     road === null
@@ -351,7 +351,9 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
   const cards: SettingsCardData[] = [
     { id: "look", items: [{ kind: "row", id: "icon", title: WHERE_WORDS.icon, description: WHERE_WORDS.iconDescription, control: <ComputerIconSelect place={place} onChange={icon => ctx.setPreferences({ computerLook: { [place.id]: { icon } } })} /> }] },
     ...(facts.length === 0 ? [] : [{ id: "facts", items: facts }]),
-    ...(connection.length === 0 ? [] : [{ id: "connection", head: WHERE_WORDS.connection, items: connection }]),
+    ...(connection.length === 0
+      ? []
+      : [{ id: "connection", head: WHERE_WORDS.connection, items: connection, ...(refused === null ? {} : { under: <RefusalSlot k="dial-refusal" said={refused.said} {...(refused.fix === undefined ? {} : { fix: refused.fix })} /> }) }]),
     ...(workspaceThere.length === 0 ? [] : [{ id: "workspace-there", head: WHERE_WORDS.workspaceThere, items: workspaceThere }]),
     { id: "agents", items: [], body: <ComputerAgents place={place} here={here} ctx={ctx} /> },
     ...(workspaces.length === 0 ? [] : [{ id: "workspaces", head: WHERE_WORDS.workspaces, items: workspaces }]),

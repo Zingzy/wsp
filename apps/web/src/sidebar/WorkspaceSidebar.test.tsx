@@ -70,7 +70,7 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
     watchStatuses: async () => [],
     capabilities: async () => SHARES,
     getGolden: async () => ({ head: null, versions: [] }),
-    placesList: async () => [],
+    placesList: async () => ({ places: [], adds: [] }),
     projectsList: async () => projects,
     projectsAdd: async () => project("pr_new", "new"),
     projectsRemove: async () => {},
