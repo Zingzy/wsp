@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The host's events that become notices, one rule per event type. A notice is
 // for what happened away from where the person is looking: an event whose home
-// is on screen (that thread open, that computer's row showing, that sheet
-// open) is the panel's to show and says nothing here. A wait (a build's need,
-// a thread's prompt) is keyed and stands until the event that closes it. The
-// need, the prompt and a machine that came up also go out on the shell's own
-// road, which speaks only while the app is not in front of the person.
+// is on screen (that thread open, that computer's row showing, that build's
+// rows drawn) is the panel's to show and says nothing here. A wait (a build's
+// need, a thread's prompt) is keyed and stands until the event that closes it,
+// and a build's need is said when its rows leave the screen with it standing.
+// The need, the prompt and a machine that came up also go out on the shell's
+// own road, which speaks only while the app is not in front of the person.
 import { CLOUD_SETUP_WORDS, GET_THE_APP_WORD, NOTIFY_ME, askingLine, foldThreads, initJobBuilding, initNeedsYouLine, threadKeyOf, titleWithNeed, workspaceAwakeLine, type InitNeedsYou, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
@@ -63,6 +64,13 @@ const workspaceOnScreen = (workspaceId: string): boolean => !useStore.getState()
 
 const setupOnScreen = (): boolean => useStore.getState().settingsOpen && useStore.getState().setupOpen;
 
+/** Whether a build's own rows are in front of the person: the sheet, or the Image card of the computer it runs on
+ * drawing it. The Computers list shows no sign-in, so it is not the build's home. */
+function buildOnScreen(placeId: string | undefined): boolean {
+  if (setupOnScreen()) return true;
+  return placeId !== undefined && useStore.getState().settingsOpen && useSettingsStore.getState().buildShown === placeId;
+}
+
 function computerOnScreen(placeId: string | undefined): boolean {
   const s = useStore.getState();
   if (!s.settingsOpen) return false;
@@ -84,6 +92,9 @@ const openComputer = (placeId: string | undefined): NoticeAction => ({
     useStore.getState().openSettings();
   },
 });
+/** Where a build's notice opens: the page of the computer it runs on, whose card draws it; the sheet for a job the
+ * host has named no place for. */
+const openBuild = (placeId: string | undefined): NoticeAction => (placeId === undefined ? openSetup : openComputer(placeId));
 
 interface Absence {
   said?: string;
@@ -97,6 +108,9 @@ interface Held {
   opens: () => void;
   /** The need the keyed notice stands for. */
   need: string | undefined;
+  /** Whether the build's rows were in front of the person at the last change, so leaving them with a need standing
+   * says it and coming back to them ends it. */
+  shown: boolean;
   /** Computers gone quiet, by place id, until they come back: a said one stays with no timer so the same absence is said once. */
   absences: Map<string, Absence>;
   /** The jobs whose end has been said. */
@@ -110,6 +124,25 @@ interface Held {
 function sayOutside(held: Held, opens: () => void, need: InitNeedsYou): void {
   held.opens = opens;
   held.road?.say(need);
+}
+
+function sayNeed(held: Held, what: string, placeId: string | undefined): void {
+  held.need = what;
+  addNotice({ kind: "waiting", key: NEED_KEY, text: initNeedsYouLine(what), action: openBuild(placeId) });
+}
+
+/** The build's rows came into view or left it: a need they carried is said once they are gone, and ended once they
+ * are back. */
+function settleShown(held: Held): void {
+  const job = useStore.getState().initJob;
+  const shown = buildOnScreen(job?.place?.id);
+  if (shown === held.shown) return;
+  held.shown = shown;
+  if (shown) {
+    if (held.need === undefined) return;
+    held.need = undefined;
+    useNotices.getState().end(NEED_KEY);
+  } else if (job?.needsYou !== undefined && held.need === undefined) sayNeed(held, job.needsYou.what, job.place?.id);
 }
 
 function sayAbsence(placeId: string, said: string | undefined): void {
@@ -220,10 +253,10 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     addNotice({ kind: "note", text: e.text, ...(where === undefined ? {} : { where }), action: openThread(e.workspaceId, e.threadId) });
   },
   "job.needs-you": (e, held) => {
-    sayOutside(held, () => useStore.getState().openSetup(), e.needsYou);
-    if (setupOnScreen()) return;
-    held.need = e.needsYou.what;
-    addNotice({ kind: "waiting", key: NEED_KEY, text: initNeedsYouLine(e.needsYou.what), action: openSetup });
+    const at = useStore.getState().initJob?.place?.id;
+    sayOutside(held, () => openBuild(at).run(), e.needsYou);
+    if (buildOnScreen(at)) return;
+    sayNeed(held, e.needsYou.what, at);
   },
   "init.job": (e, held) => {
     // A build already running when this page loaded never saw the press that asks for the browser's leave.
@@ -231,8 +264,9 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
     const { id, phase } = e.job;
     if ((phase !== "done" && phase !== "failed") || held.jobsEnded.has(id)) return;
     held.jobsEnded.add(id);
-    if (setupOnScreen()) return;
-    if (phase === "failed") addNotice({ kind: "error", text: HOST_NOTICE_WORDS.imageNotBuilt(e.job.error), action: openSetup });
+    const at = e.job.place?.id;
+    if (buildOnScreen(at)) return;
+    if (phase === "failed") addNotice({ kind: "error", text: HOST_NOTICE_WORDS.imageNotBuilt(e.job.error), action: openBuild(at) });
     else addNotice({ kind: "done", text: HOST_NOTICE_WORDS.imageSealed(e.job.golden?.version) });
   },
   "workspace.gone": e => {
@@ -252,7 +286,7 @@ export function useHostNotices(): void {
   // A build waiting on a sign-in and a thread stopped on a permission prompt are the same fact to a person looking
   // somewhere else, so the window's own title carries the mark for either.
   const needed = useStore(s => s.initJob?.needsYou !== undefined || Object.values(s.sessions).some(rows => rows.some(row => row.asking !== undefined)));
-  const held = useRef<Held>({ road: null, opens: () => useStore.getState().openSetup(), need: undefined, absences: new Map(), jobsEnded: new Set(), released: undefined, results: new Map() });
+  const held = useRef<Held>({ road: null, opens: () => useStore.getState().openSetup(), need: undefined, shown: false, absences: new Map(), jobsEnded: new Set(), released: undefined, results: new Map() });
   useEffect(() => {
     const h = held.current;
     const built = needsYouRoad(() => h.opens());
@@ -271,13 +305,20 @@ export function useHostNotices(): void {
     const h = held.current;
     h.released = releaseSaid();
     sayRelease(h, useStore.getState().release);
-    return useStore.subscribe((s, prev) => {
+    h.shown = buildOnScreen(useStore.getState().initJob?.place?.id);
+    const offStore = useStore.subscribe((s, prev) => {
       if (s.release !== prev.release) sayRelease(h, s.release);
       if (s.initJob !== prev.initJob && h.need !== undefined && s.initJob?.needsYou?.what !== h.need) {
         h.need = undefined;
         useNotices.getState().end(NEED_KEY);
       }
+      settleShown(h);
     });
+    const offSettings = useSettingsStore.subscribe(() => settleShown(h));
+    return () => {
+      offStore();
+      offSettings();
+    };
   }, []);
   const onEvent = useCallback((e: ProtocolEvent) => {
     (RULES[e.type] as ((e: ProtocolEvent, held: Held) => void) | undefined)?.(e, held.current);

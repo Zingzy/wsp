@@ -4,7 +4,7 @@
 // state under its name, and offers Sign in where none stands, else Open in
 // terminal; the detail says who the agent is and the rest, next step first.
 import { BotIcon, CircleArrowUpIcon, DownloadIcon, SquareTerminalIcon, Trash2Icon, WrenchIcon } from "lucide-react";
-import { catalogEntry, installShown, roadModule, type AgentEntry } from "@wsp/catalog";
+import { catalogEntry, installShown, runsThreads, type AgentEntry } from "@wsp/catalog";
 import { compareVersions, MCP_SERVER_NAME, type AgentRow, type AgentsReport } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, agentSignInStart, editImageAct, heldReason, holdAll, notYet, onImage, signInAct, waitingFlow, type RowAct, type RowsContext } from "../agentsRows.js";
 import { kind, matchesAny, type Fact, type KindModule } from "./kind.js";
@@ -81,15 +81,18 @@ function aboutFacts(entry: AgentEntry | undefined): Fact[] {
     { id: "made-by", label: W.madeBy, value: about.creator },
     { id: "license", label: W.license, value: about.license },
     ...(about.homepage === undefined ? [] : [page("homepage", W.homepage, about.homepage)]),
-    page("repo", W.repo, about.repo),
+    ...(about.repo === undefined ? [] : [page("repo", W.repo, about.repo)]),
   ];
 }
 
-/** The line that installs it, to copy; a road whose install is a vendor's script says how it installs instead. */
+/** Whether wsp opens threads on it, or installs and manages it only. */
+const threadsFact = (row: AgentRow): Fact => ({ id: "threads", label: W.threads, value: runsThreads(row.id) ? W.threadsInWsp : W.threadsNotYet });
+
+/** The line that installs it, to copy; a road no one line installs by says where it installs from instead. */
 function installFact(entry: AgentEntry | undefined): Fact[] {
   if (entry === undefined) return [];
-  const line = installShown(entry);
-  return [line === undefined ? { id: "install", label: W.install, value: roadModule(entry.installRoad).words, muted: true } : { id: "install", label: W.install, value: line, line: true }];
+  const said = installShown(entry);
+  return [{ id: "install", label: W.install, ...("line" in said ? { value: said.line, line: true } : { value: said.words, muted: true }) }];
 }
 
 export const AGENTS_KIND: KindModule<AgentItem> = {
@@ -118,7 +121,10 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
     const { row } = item;
     const { step, flow } = actsOf(item, ctx);
     const quick = onImage(ctx) || waitingFlow(flow) ? undefined : step;
-    if (!row.installed) return { key: rowId(row), title: row.name, lead: { kind: "agent", agent: row.id, faded: true }, available: true, ...(quick === undefined ? {} : { quick }) };
+    if (!row.installed) {
+      const about = agentEntry(row.id)?.about.description;
+      return { key: rowId(row), title: row.name, lead: { kind: "agent", agent: row.id, faded: true }, available: true, ...(about === undefined ? {} : { subtext: about }), ...(quick === undefined ? {} : { quick }) };
+    }
     return {
       key: rowId(row),
       title: row.name,
@@ -141,9 +147,10 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
           ...(row.version === undefined ? [] : [{ id: "version", label: W.version, value: row.version, ...(versionFact === "" ? {} : { fact: versionFact }) }]),
           { id: "installed-at", label: W.installedAt, ...(row.path === undefined ? {} : { value: row.path, copy: true }), ...(installedNote === "" ? {} : { fact: installedNote }) },
           { id: "wsp-tools", label: W.wspTools, ...(item.toolsFile === undefined ? { value: W.notAdded, muted: true } : { value: item.toolsFile, copy: true }) },
+          threadsFact(row),
           ...aboutFacts(entry),
         ]
-      : [{ id: "status", label: W.status, value: W.notInstalled }, ...(row.latest === undefined ? [] : [{ id: "latest", label: W.latestLabel, value: row.latest }]), ...aboutFacts(entry), ...installFact(entry)];
+      : [{ id: "status", label: W.status, value: W.notInstalled }, ...(row.latest === undefined ? [] : [{ id: "latest", label: W.latestLabel, value: row.latest }]), threadsFact(row), ...aboutFacts(entry), ...installFact(entry)];
     return {
       title: row.name,
       lead: { kind: "agent", agent: row.id, ...(row.installed ? {} : { faded: true }) },

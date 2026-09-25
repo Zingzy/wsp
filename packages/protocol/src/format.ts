@@ -1813,6 +1813,9 @@ export const PROVIDER_KEY_WORDS: Record<string, { name: string; keyName: string;
   solari: { name: "Solari", keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
 };
 
+/** A provider's name as its key rows say it, by its id; an id with no row reads as itself. */
+export const providerKeyName = (provider: string): string => PROVIDER_KEY_WORDS[provider]?.name ?? provider;
+
 /** Every word of the six screens that build the image, opened from Settings under the title the image section
  * gives them. Micro-labels are the caps mono words over a screen, headlines the one sentence under them, keycaps
  * the one primary button each screen has. Nothing here asks the person to run a command, and nothing here is a
@@ -1843,11 +1846,12 @@ export const CLOUD_SETUP_WORDS = {
     unset: "not set",
     keycap: "Save",
     /** Under the field when the provider answered and refused what was typed; its own status and word follow. */
-    refused: "Solari refused this key",
-    /** The build's line for a key already saved that the provider refuses, read before the first stage. */
-    refusedSaved: "Solari refused the saved key",
+    refused: (provider: string): string => `${providerKeyName(provider)} refused this key`,
+    /** The build's line for a key already saved that the provider refuses, read before the first stage, naming that
+     * provider by PROVIDER_KEY_WORDS. */
+    refusedSaved: (provider: string): string => `${providerKeyName(provider)} refused the saved key`,
     /** Under the field when nothing came back about the key at all; what this computer saw follows. */
-    unchecked: "Solari could not be reached to check the key",
+    unchecked: (provider: string): string => `${providerKeyName(provider)} could not be reached to check the key`,
     /** What the Save keycap says after a check nothing answered, since pressing it again is worth something. */
     retry: "Try again",
     /** What the build offers when the saved key was refused: back to this step, not another build. */
@@ -2395,24 +2399,26 @@ export function providerSaidLine(status: number, said: string): string {
   return said === "" ? String(status) : `${status} ${said}`;
 }
 
-/** Under the keys field when the provider answered and refused the key typed there. */
-export function keyRefusedLine(said: string): string {
-  return `${CLOUD_SETUP_WORDS.keys.refused}: ${said}`;
+/** Under the keys field when the provider answered and refused the key typed there; `provider` is its id. */
+export function keyRefusedLine(said: string, provider: string): string {
+  return `${CLOUD_SETUP_WORDS.keys.refused(provider)}: ${said}`;
 }
 
-/** The same for a key already saved, which is what the build reads before its first stage. */
-export function savedKeyRefusedLine(said: string): string {
-  return `${CLOUD_SETUP_WORDS.keys.refusedSaved}: ${said}`;
+/** The same for a key already saved, which is what the build reads before its first stage; `provider` is the id of
+ * the provider that refused it. */
+export function savedKeyRefusedLine(said: string, provider: string): string {
+  return `${CLOUD_SETUP_WORDS.keys.refusedSaved(provider)}: ${said}`;
 }
 
 /** Either place when nothing came back about the key at all: what this computer saw instead, with Try again beside it. */
-export function keyUncheckedLine(said: string): string {
-  return `${CLOUD_SETUP_WORDS.keys.unchecked}: ${said}`;
+export function keyUncheckedLine(said: string, provider: string): string {
+  return `${CLOUD_SETUP_WORDS.keys.unchecked(provider)}: ${said}`;
 }
 
 /** How a terminal run closes when the check stopped it before the first stage. The refusal itself is said above this
- * line, so this one carries the way on alone; wsp init asks for a key it can use, so running it again is that road. */
-export const SAVED_KEY_STOPPED_LINE = "Save a key Solari takes and run wsp init again; nothing booted, and the recipe is kept.";
+ * line, so this one carries the way on alone; wsp init asks for a key it can use, so running it again is that road.
+ * `provider` is the id of the provider that refused it. */
+export const savedKeyStoppedLine = (provider: string): string => `Save a key ${providerKeyName(provider)} takes and run wsp init again; nothing booted, and the recipe is kept.`;
 
 /** What the machine the build boots costs, said once under the key screen's title from the backend's own rate. */
 export function initCostLine(size: WorkspaceSize, rateUsdPerHour: number): string {

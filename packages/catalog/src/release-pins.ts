@@ -6,7 +6,7 @@
 // fails when the catalog loads. A bump is one entry, printed to paste by
 // `node packages/catalog/scripts/pin-release.mjs <repo> <tag>`; each comment
 // names the release the entry was read from and the sums it publishes.
-import type { ReleaseAssets } from "./roads.js";
+import type { InstallRoad, ReleaseAssets } from "./roads.js";
 
 export interface ReleasePin {
   tag: string;
@@ -35,4 +35,17 @@ export const RELEASE_PINS: Readonly<Record<string, ReleasePin>> = {
   "dandavison/delta": { tag: "0.19.2", assets: { x86_64: { name: "delta-0.19.2-x86_64-unknown-linux-gnu.tar.gz", sha256: "8e695c5f586a8c53d6c3b01be0b4a422ed218bfed2a56191caebe373a1c18ab2" }, aarch64: { name: "delta-0.19.2-aarch64-unknown-linux-gnu.tar.gz", sha256: "0bfce159a5cddd5feb3d6db4a616d883ff51253ce08ac7ec11cb1d208cfaab9e" } } },
   // https://github.com/bazelbuild/bazelisk/releases/tag/v1.29.0, which publishes no sums beside the binaries
   "bazelbuild/bazelisk": { tag: "v1.29.0", assets: { x86_64: { name: "bazelisk-linux-amd64", sha256: "5a408715e932c0250d28bd84555f12edbf70117de42f9181691c736eacc4a992" }, aarch64: { name: "bazelisk-linux-arm64", sha256: "e20e8b0f4f240091b7a55bf17b9398bd4f40ee70ae0208dff95dd4c445fb4010" } } },
+  // https://github.com/charmbracelet/crush/releases/tag/v0.96.1, sums published at https://github.com/charmbracelet/crush/releases/download/v0.96.1/checksums.txt
+  "charmbracelet/crush": { tag: "v0.96.1", assets: { x86_64: { name: "crush_0.96.1_Linux_x86_64.tar.gz", sha256: "5411b0906a82162dcab4a99071d70accf1caad0eee69789416dd607943c6680d" }, aarch64: { name: "crush_0.96.1_Linux_arm64.tar.gz", sha256: "4bfe4a37aedeb4219d51eb7a25b837304084070378e77fd578999764b487f01f" } } },
+  // https://github.com/aaif-goose/goose/releases/tag/v1.52.0, which publishes no sums beside the tarballs; the glibc build without vulkan
+  "aaif-goose/goose": { tag: "v1.52.0", assets: { x86_64: { name: "goose-x86_64-unknown-linux-gnu.tar.gz", sha256: "4aee1f770b405c44194c0e9407df1fb06bda4c50eee935f0d8fd10731821cc5e" }, aarch64: { name: "goose-aarch64-unknown-linux-gnu.tar.gz", sha256: "ae602c4f6e9a785bf087da52c89908d4dc6aa605dcc17bf83293873f626d9c85" } } },
 };
+
+/** The release road at the tag and the per-arch assets this table recorded for the repository, so no row of the
+ * catalog installs a release nobody read; `go` is the repository's main package for an arch the release has no asset
+ * for, left off when it has none. */
+export function pinnedRelease(repo: string, go?: string): InstallRoad {
+  const pin = RELEASE_PINS[repo];
+  if (pin === undefined) throw new Error(`the release pins table names no ${repo}`);
+  return { road: "release", repo, version: pin.tag, assets: pin.assets, ...(go !== undefined ? { go } : {}) };
+}

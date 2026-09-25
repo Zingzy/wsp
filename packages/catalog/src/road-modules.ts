@@ -48,6 +48,8 @@ export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
   /** The one line a person reads while the install runs, for a road whose install line is not that: the brew line
    * without its su, where a release comes from. Absent, the install line is its own. */
   shown?(road: R, bin: string): string;
+  /** False where `shown` says where the bytes come from rather than being a line a person could paste. */
+  pastes?: false;
   /** What the install runs on top of: a floor row by id, the one apt index read, or Homebrew. */
   after?: string;
   /** The road a recipe's tools row under this manager takes; absent for a road no manager row names. */
@@ -537,6 +539,7 @@ const release: RoadModule<Road<"release">> = {
   roots: ["/usr/local/bin"],
   bins: () => [LOCAL_BIN],
   shown: r => (r.repo === undefined ? NO_RELEASE : versionOf(r) === undefined ? NO_TAG : `the ${versionOf(r)} release of github.com/${r.repo}`),
+  pastes: false,
   install: (r, bin) => {
     if (r.repo === undefined) return { note: NO_RELEASE };
     const tag = versionOf(r);
@@ -553,6 +556,7 @@ const vendor: RoadModule<Road<"vendor">> = {
   roots: ["/opt", "/usr/local/bin"],
   bins: () => [LOCAL_BIN],
   shown: r => r.cask.from,
+  pastes: false,
   install: r => r.cask.install,
   uninstall: r => ({ cmd: r.cask.uninstall }),
   names: () => [],

@@ -5,18 +5,17 @@
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
 import { agentOfRow, packageOf, thisComputer, toolRowPrefix, type PageReach } from "@wsp/protocol";
-import { CODEX_CONFIG_FILE, CODEX_HOOKS } from "./codex-hooks.js";
-import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE_CONTEXT, PI_CONTEXT, type AgentContext } from "./context.js";
-import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
+import { AGENT_MODULES } from "./agents/index.js";
+import type { AgentContext } from "./context.js";
+import type { HookCarry } from "./hooks.js";
 import { GCLOUD, KUBECTL } from "./linux-casks.js";
-import { CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
-import { CLAUDE_MCP_CHECK } from "./mcp-check.js";
-import { CLAUDE_MCP_LOGIN, CODEX_MCP_LOGIN, GEMINI_MCP_LOGIN, OPENCODE_MCP_LOGIN, loginRoad, type ServerSignInRoad } from "./mcp-login.js";
-import { RELEASE_PINS } from "./release-pins.js";
-import { CLAUDE_PLUGIN_SKILLS, PROJECT_SHARED_SKILLS, SHARED_SKILLS, type PluginSkills, type SkillRoots } from "./skills.js";
+import type { McpConfig } from "./mcp.js";
+import { loginRoad, type ServerSignInRoad } from "./mcp-login.js";
+import { pinnedRelease } from "./release-pins.js";
+import type { PluginSkills, SkillRoots } from "./skills.js";
 import { APT_BIN, APT_INDEX, CARGO_BIN, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
-import { CLAUDE_CODE, CLAUDE_CONFIG_DIR, CLAUDE_INSTALL, DOCKER_INSTALL, FD_INSTALL, HERMES, HERMES_INSTALL, LOCAL_BIN, MIB, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
+import { DOCKER_INSTALL, FD_INSTALL, LOCAL_BIN, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, mintsToken, type KeyFiles, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
@@ -80,7 +79,8 @@ export interface AgentAbout {
   /** One or two sentences. */
   description: string;
   homepage?: string;
-  repo: string;
+  /** Absent where the source is not public. */
+  repo?: string;
   /** An SPDX id, or "proprietary". */
   license: string;
 }
@@ -170,174 +170,12 @@ const brew = (formula: string, bytes: number): { installRoad: InstallRoad; size:
 const apt = (bytes: number, ...packages: string[]): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "apt", packages }, size: measured("apt", bytes) });
 const npm = (bytes: number, pkg: string, version?: string): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "npm", package: pkg, ...(version !== undefined ? { version } : {}) }, size: measured("du", bytes) });
 const uvTool = (bytes: number, pkg: string): { installRoad: InstallRoad; size: Size } => ({ installRoad: { road: "uv", package: pkg }, size: measured("du", bytes) });
-/** A release road at the tag and the per-arch assets the pins table recorded for the repository, so no row of the
- * catalog installs a release nobody read; `go` is the repository's main package for an arch the release has no asset
- * for, left off when it has none; the bytes are the binary's. */
-const github = (bytes: number, repo: string, go?: string): { installRoad: InstallRoad; size: Size } => {
-  const pin = RELEASE_PINS[repo];
-  if (pin === undefined) throw new Error(`the release pins table names no ${repo}`);
-  return { installRoad: { road: "release", repo, version: pin.tag, assets: pin.assets, ...(go !== undefined ? { go } : {}) }, size: measured("unpacked", bytes) };
-};
+/** A release road at its pinned tag and assets; the bytes are the binary's. */
+const github = (bytes: number, repo: string, go?: string): { installRoad: InstallRoad; size: Size } => ({ installRoad: pinnedRelease(repo, go), size: measured("unpacked", bytes) });
 const tool = { kind: "tool", configPaths: [], floor: false } as const;
-/** The file a project keeps its standing instructions for agents in; an agent that reads another one names that too. */
-const AGENTS_MD = "AGENTS.md";
-/** What to type inside an agent that has no slash form for a skill: the sentence the wsp skill's description answers.
- * Claude Code reaches a skill by its folder name with a slash, so its own line opens with that and carries this after. */
-const SET_UP_WSP = "set up wsp for me";
-/** An agent's bytes are what df moved across its install on the builder: the global, its caches and whatever the
- * installer put under /root; the cache sweep after the stage gives some of it back. */
-const agent = (id: string, mib: number) => ({ id, kind: "agent", bin: id, projectDocs: [AGENTS_MD], firstMove: SET_UP_WSP, size: measured("df", mib * MIB, "2026-09-05") }) as const;
 
 export const CATALOG: readonly CatalogEntry[] = [
-  // --- agents: the six whose project state a move can follow -------------------------------------------------------
-  {
-    ...agent("claude", 208),
-    stateHome: ".claude",
-    guestStateHome: CLAUDE_CONFIG_DIR,
-    stateHomeEnv: "CLAUDE_CONFIG_DIR",
-    projectKeyEnv: "CLAUDE_CODE_PROJECT_DIR_NAME",
-    name: "Claude Code",
-    about: { creator: "Anthropic", description: "Anthropic's coding agent for the terminal. It reads the codebase, edits files, runs commands and handles git.", homepage: "https://code.claude.com/docs/en/overview", repo: "https://github.com/anthropics/claude-code", license: "proprietary" },
-    context: CLAUDE_CONTEXT,
-    // 2.1.281: ~/.claude/skills alone, links into the shared folder among them; plugins under their own folders.
-    skillRoots: { user: [{ dir: "~/.claude/skills", lands: "link" }], project: [{ dir: ".claude/skills", lands: "link" }] },
-    pluginSkills: CLAUDE_PLUGIN_SKILLS,
-    projectDocs: [AGENTS_MD, "CLAUDE.md"],
-    // The slash is the skill's folder name, host's SKILL_NAME, which the catalog cannot import; mcp-install.test.ts pins this to it.
-    firstMove: `/wsp ${SET_UP_WSP}`,
-    installRoad: { road: "script", script: CLAUDE_INSTALL, version: CLAUDE_CODE.version, bins: [LOCAL_BIN] },
-    signIn: SIGN_IN_ROWS.claude,
-    // https://docs.claude.com/en/docs/claude-code/mcp (user scope; project scope lives in each repo's .mcp.json)
-    mcp: { format: MCP_SERVERS_JSON, files: ["~/.claude.json"], projectFiles: [".mcp.json"], scope: "user scope and your home folder", httpAuth: "its sign-in is kept with the Claude Code login", check: CLAUDE_MCP_CHECK, login: CLAUDE_MCP_LOGIN },
-    hooks: CLAUDE_HOOKS,
-    configPaths: [
-      CLAUDE_SETTINGS_FILE, "~/.claude/CLAUDE.md", "~/.claude/skills", "~/.claude/agents", "~/.claude/commands",
-      "~/.claude/plugins/installed_plugins.json", "~/.claude/plugins/known_marketplaces.json", "~/.claude.json",
-    ],
-    // ~/.claude.json holds per-project state and caches rewritten on every run; the plugin indexes carry lastUpdated stamps.
-    volatile: ["~/.claude/plugins/installed_plugins.json", "~/.claude/plugins/known_marketplaces.json", "~/.claude.json"],
-    projectState: [
-      { state: "session transcripts", location: "projects/KEY/SESSIONID.jsonl and projects/KEY/SESSIONID/", key: "the resolved path with every character outside A-Z a-z 0-9 replaced by a dash", pathFields: ["cwd on every message line"], move: "rename the KEY directory; rewriting cwd is optional", status: "measured" },
-      { state: "auto memory", location: "projects/KEY/memory/", key: "the same KEY", pathFields: [], move: "comes along with the directory rename", status: "measured" },
-      { state: "per-project settings", location: "~/.claude.json, the projects object", key: "the plain resolved path as the JSON key", pathFields: ["the key"], move: "rename the key", status: "inferred" },
-      { state: "prompt history", location: "history.jsonl", key: "one line per prompt", pathFields: ["project"], move: "rewrite the field", status: "inferred" },
-    ],
-    history: { format: "claude-jsonl", root: "~/.claude/projects" },
-    source: { sessions: 149, images: 1, road: "measured" },
-  },
-  {
-    ...agent("codex", 455),
-    stateHome: ".codex",
-    name: "Codex",
-    about: { creator: "OpenAI", description: "OpenAI's coding agent that runs locally in the terminal.", homepage: "https://developers.openai.com/codex", repo: "https://github.com/openai/codex", license: "Apache-2.0" },
-    context: CODEX_CONTEXT,
-    // 0.155.1: CODEX_HOME's skills, where it writes copies, and the shared folder.
-    skillRoots: { user: [{ dir: "~/.codex/skills", lands: "copy" }, { dir: SHARED_SKILLS, lands: "copy" }], project: [{ dir: PROJECT_SHARED_SKILLS, lands: "copy" }] },
-    installRoad: { road: "npm", package: "@openai/codex", version: "0.153.0" },
-    node: 16,
-    signIn: SIGN_IN_ROWS.codex,
-    // https://developers.openai.com/codex/config-basic (project scope is a trusted repo's .codex/config.toml)
-    mcp: { format: CODEX_TOML, files: [CODEX_CONFIG_FILE], projectFiles: [".codex/config.toml"], scope: "user scope", login: CODEX_MCP_LOGIN },
-    hooks: CODEX_HOOKS,
-    configPaths: [CODEX_CONFIG_FILE, "~/.codex/AGENTS.md", "~/.codex/prompts", "~/.codex/skills"],
-    projectState: [
-      { state: "rollout transcript", location: "sessions/YYYY/MM/DD/rollout-TIMESTAMP-THREADID.jsonl", key: "by date and thread id, not by path", pathFields: ["cwd in the session_meta payload and on per-turn lines"], move: "rewrite cwd", status: "measured" },
-      { state: "thread index", location: "state_5.sqlite, table threads", key: "one row per thread id", pathFields: ["cwd", "rollout_path"], move: "update threads set cwd; rollout_path changes only if CODEX_HOME itself moves", status: "measured" },
-      { state: "trust", location: "config.toml, table [projects.\"PATH\"]", key: "the quoted resolved path as the TOML table name", pathFields: ["the table name"], move: "rename the table", status: "inferred" },
-      { state: "memories", location: "memories/rollout_summaries/*.md and memories/MEMORY.md", key: "global files", pathFields: ["cwd: and path: lines in each summary", "applies_to: cwd=PATH lines in MEMORY.md"], move: "rewrite if memories should follow the project", status: "inferred" },
-    ],
-    history: { format: "codex-rollout", root: "~/.codex/sessions" },
-    source: { sessions: 5, images: 1, road: "measured" },
-  },
-  {
-    ...agent("gemini", 189),
-    stateHome: ".gemini",
-    name: "Gemini CLI",
-    about: { creator: "Google", description: "An open source agent that brings Gemini into the terminal.", homepage: "https://geminicli.com", repo: "https://github.com/google-gemini/gemini-cli", license: "Apache-2.0" },
-    context: GEMINI_CONTEXT,
-    // Its docs as of 0.58.0 (no Gemini on the Mac measured); copies found there.
-    skillRoots: { user: [{ dir: "~/.gemini/skills", lands: "copy" }], project: [{ dir: ".gemini/skills", lands: "copy" }] },
-    installRoad: { road: "npm", package: "@google/gemini-cli", version: "0.58.0" },
-    node: 20,
-    signIn: SIGN_IN_ROWS.gemini,
-    // https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (project scope is a repo's .gemini/settings.json)
-    mcp: { format: GEMINI_SETTINGS_JSON, files: ["~/.gemini/settings.json"], projectFiles: [".gemini/settings.json"], scope: "user scope", login: GEMINI_MCP_LOGIN },
-    configPaths: ["~/.gemini/settings.json", "~/.gemini/GEMINI.md", "~/.gemini/commands"],
-    projectState: [
-      { state: "project registry", location: "projects.json", key: "{\"projects\": {\"PATH\": \"SLUG\"}}; SLUG is the folder basename, deduplicated", pathFields: ["the key"], move: "rewrite the key, keep the slug", status: "measured" },
-      { state: "project temp dir", location: "tmp/SLUG/ with chats/, logs/ and .project_root", key: "the slug from the registry", pathFields: [".project_root"], move: "rewrite .project_root", status: "measured" },
-      { state: "shell history", location: "history/SLUG/ with .project_root", key: "the same slug", pathFields: [".project_root"], move: "rewrite .project_root", status: "measured" },
-      { state: "chat files", location: "tmp/SLUG/chats/session-TIMESTAMP-ID8.jsonl", key: "by slug directory", pathFields: ["projectHash in the header line, the sha256 hex of the resolved path", "the workspace path as text in the first user message"], move: "optional; neither listing nor resume checks it", status: "measured" },
-      { state: "trust", location: "trustedFolders.json", key: "the resolved path to a trust level", pathFields: ["the key"], move: "rewrite the key", status: "inferred" },
-    ],
-    source: { sessions: 0, images: 0, road: "measured" },
-  },
-  {
-    ...agent("opencode", 673),
-    stateHome: ".local/share/opencode",
-    name: "OpenCode",
-    about: { creator: "Anomaly", description: "The open source coding agent for the terminal.", homepage: "https://opencode.ai", repo: "https://github.com/anomalyco/opencode", license: "MIT" },
-    context: OPENCODE_CONTEXT,
-    // 1.18.18: its own folder, where it holds copies, then Claude Code's and the shared folder, which it loads too.
-    skillRoots: {
-      user: [{ dir: "~/.config/opencode/skills", lands: "copy" }, { dir: "~/.claude/skills", lands: "link" }, { dir: SHARED_SKILLS, lands: "copy" }],
-      project: [{ dir: ".opencode/skills", lands: "copy" }, { dir: ".claude/skills", lands: "link" }, { dir: PROJECT_SHARED_SKILLS, lands: "copy" }],
-    },
-    installRoad: { road: "npm", package: "opencode-ai", version: "1.18.27" },
-    signIn: SIGN_IN_ROWS.opencode,
-    // https://opencode.ai/docs/mcp-servers/ (project scope is a repo's opencode.json)
-    mcp: { format: OPENCODE_JSON, files: ["~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc"], projectFiles: ["opencode.json", "opencode.jsonc"], scope: "user scope", login: OPENCODE_MCP_LOGIN },
-    configPaths: [
-      "~/.config/opencode/opencode.json", "~/.config/opencode/opencode.jsonc", "~/.config/opencode/AGENTS.md", "~/.config/opencode/package.json",
-      "~/.config/opencode/agents", "~/.config/opencode/commands", "~/.config/opencode/plugins", "~/.config/opencode/skills", "~/.config/opencode/themes",
-    ],
-    projectState: [
-      { state: "project", location: "opencode.db, table project", key: "id is the git root commit hash; \"global\" for folders outside git", pathFields: ["worktree", "sandboxes"], move: "update project set worktree, clear sandboxes", status: "measured" },
-      { state: "project directories", location: "table project_directory", key: "(project_id, directory)", pathFields: ["directory"], move: "update the row", status: "measured" },
-      { state: "sessions", location: "table session", key: "id ses_..., project_id", pathFields: ["directory"], move: "update session set directory", status: "measured" },
-    ],
-    source: { sessions: 0, images: 0, road: "measured" },
-  },
-  {
-    ...agent("pi", 165),
-    stateHome: ".pi/agent",
-    name: "Pi",
-    about: { creator: "Earendil Works", description: "A small coding agent for the terminal with read, bash, edit and write tools and saved sessions.", repo: "https://github.com/earendil-works/pi", license: "MIT" },
-    context: PI_CONTEXT,
-    // 0.84.1: its own folder, links into the shared folder there, and the shared folder.
-    skillRoots: { user: [{ dir: "~/.pi/agent/skills", lands: "link" }, { dir: SHARED_SKILLS, lands: "copy" }], project: [{ dir: ".pi/skills", lands: "copy" }, { dir: PROJECT_SHARED_SKILLS, lands: "copy" }] },
-    installRoad: { road: "npm", package: "@earendil-works/pi-coding-agent", version: "0.84.4", ignoreScripts: true },
-    node: 22,
-    signIn: SIGN_IN_ROWS.pi,
-    // models.json stays: a provider entry may carry a literal apiKey. trust.json stays: it keys on this laptop's absolute project paths.
-    configPaths: [
-      "~/.pi/agent/settings.json", "~/.pi/agent/keybindings.json", "~/.pi/agent/AGENTS.md", "~/.pi/agent/SYSTEM.md", "~/.pi/agent/APPEND_SYSTEM.md",
-      "~/.pi/agent/prompts", "~/.pi/agent/skills", "~/.pi/agent/extensions", "~/.pi/agent/themes",
-    ],
-    projectState: [
-      { state: "sessions", location: "sessions/KEY/TIMESTAMP_SESSIONID.jsonl", key: "two dashes, the resolved path without its leading slash with every slash, backslash and colon replaced by a dash, two dashes; dots and underscores kept", pathFields: ["cwd in the header line"], move: "rename the KEY directory; rewriting cwd is optional", status: "measured" },
-      { state: "trust", location: "trust.json", key: "the resolved path to true; a parent folder covers its children", pathFields: ["the key"], move: "rewrite the key", status: "inferred" },
-    ],
-    source: { sessions: 0, images: 0, road: "measured" },
-  },
-  {
-    ...agent("hermes", 484),
-    stateHome: ".hermes",
-    name: "Hermes Agent",
-    about: { creator: "Nous Research", description: "Nous Research's agent that keeps memories and skills and grows with use.", homepage: "https://hermes-agent.nousresearch.com", repo: "https://github.com/NousResearch/hermes-agent", license: "MIT" },
-    context: HERMES_CONTEXT,
-    // 0.20.0: one folder, skills under a category folder or straight in it, links into the shared folder among them.
-    skillRoots: { user: [{ dir: "~/.hermes/skills", lands: "link" }], project: [] },
-    installRoad: { road: "script", script: HERMES_INSTALL, version: HERMES.tag },
-    signIn: SIGN_IN_ROWS.hermes,
-    configPaths: ["~/.hermes/config.yaml", "~/.hermes/SOUL.md", "~/.hermes/memories", "~/.hermes/skills", "~/.hermes/cron", "~/.hermes/hooks"],
-    projectState: [
-      { state: "sessions", location: "state.db, table sessions", key: "id like 20260906_033144_55e3e2", pathFields: ["cwd", "git_repo_root"], move: "update sessions set cwd and git_repo_root", status: "measured" },
-      { state: "projects registry", location: "projects.db: projects.primary_path, project_folders.path, discovered_repos.root", key: "resolved path columns", pathFields: ["primary_path", "path", "root"], move: "update the rows", status: "inferred" },
-    ],
-    history: { format: "hermes-sqlite", root: "~/.hermes/state.db" },
-    source: { sessions: 1, images: 0, road: "measured" },
-  },
+  ...AGENT_MODULES,
 
   // --- tools on by default: both sources agree or one is overwhelming --------------------------------------------
   // The floor rows first, in the order the base stage installs them: a row waits only on rows above it.
@@ -569,11 +407,14 @@ export function smokeOf(e: CatalogEntry): string {
   return `${e.bin} --version`;
 }
 
-/** The one line a person pastes to install an entry, for its detail; nothing where the road runs a vendor's script
- * of many lines. */
-export function installShown(e: CatalogEntry): string | undefined {
-  const line = roadModule(e.installRoad).shown?.(e.installRoad, e.bin) ?? installLine(e);
-  return line.includes("\n") ? undefined : line;
+/** How an entry installs, for its detail: the one line a person pastes, or the road's words where no one line does
+ * it (a vendor's script of many lines, a release checked against its sum). */
+export function installShown(e: CatalogEntry): { line: string } | { words: string } {
+  const mod = roadModule(e.installRoad);
+  const shown = mod.shown?.(e.installRoad, e.bin);
+  if (shown !== undefined && mod.pastes === false) return { words: shown };
+  const line = shown ?? installLine(e);
+  return line.includes("\n") ? { words: mod.words } : { line };
 }
 
 /** The bash line an entry's road runs on the guest, from the road's module; an entry whose road has nothing to run is a

@@ -182,14 +182,14 @@ export function defaultAnswers(manifest: Manifest, brew: BrewTable, coming: Read
 }
 
 /** Every catalog agent as a row, the collector's where it found one here and a bare one otherwise, with a bare login
- * row beside it so the agent can be ticked for the machine and signed in there. A bare row has nothing to copy and
- * starts off; the recipe decides its tick. */
+ * row beside it where the catalog has a sign-in for it, so the agent can be ticked for the machine and signed in
+ * there. A bare row has nothing to copy and starts off; the recipe decides its tick. */
 export function withCatalogAgents(manifest: Manifest): Manifest {
   const has = (rung: Rung, name: string): boolean => manifest.entries.some(e => e.rung === rung && agentName(e) === name);
   const bare = (rung: Rung, id: string, label: string): ManifestEntry => ({ rung, id, label, paths: [], bytes: 0, default: "skip" });
   const added = CATALOG_AGENTS.flatMap(a => [
     ...(has("agents", a.id) ? [] : [bare("agents", `agents/${a.id}`, a.name)]),
-    ...(has("logins", loginIdOf(a.id)) ? [] : [{ ...bare("logins", `logins/${loginIdOf(a.id)}`, `${a.name} login`), group: "Agent logins" }]),
+    ...(has("logins", loginIdOf(a.id)) || loginRow(loginIdOf(a.id)) === undefined ? [] : [{ ...bare("logins", `logins/${loginIdOf(a.id)}`, `${a.name} login`), group: "Agent logins" }]),
   ]);
   return added.length === 0 ? manifest : { ...manifest, entries: [...manifest.entries, ...added] };
 }

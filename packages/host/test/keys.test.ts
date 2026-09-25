@@ -351,7 +351,7 @@ describe("loadKeys", () => {
     expect(asked).toEqual(["slr_live_wrong", "slr_live_right"]);
     expect(keys).toEqual({ SOLARI_API_KEY: "slr_live_right" });
     // The second question carries the provider's own words, which is what the app's field says too.
-    expect(stripVTControlCharacters(io.output[1]!)).toContain(keyRefusedLine("401 Unauthorized"));
+    expect(stripVTControlCharacters(io.output[1]!)).toContain(keyRefusedLine("401 Unauthorized", "solari"));
     // Only the key the provider took reached the file, and no question ever carried either key.
     expect(readFileSync(join(home, ".env"), "utf8")).toContain("SOLARI_API_KEY=slr_live_right");
     expect(readFileSync(join(home, ".env"), "utf8")).not.toContain("slr_live_wrong");
@@ -362,7 +362,7 @@ describe("loadKeys", () => {
     setup();
     const io = fakeIO(["slr_live_a", "slr_live_b", "slr_live_c", "yes"], true);
     const sources = { env: {}, cwd, statePath: state, checkKey: async () => ({ state: "refused" as const, said: "401 Unauthorized" }) };
-    await expect(loadKeys(io, sources, { anthropic: false })).rejects.toThrow(keyRefusedLine("401 Unauthorized"));
+    await expect(loadKeys(io, sources, { anthropic: false })).rejects.toThrow(keyRefusedLine("401 Unauthorized", "solari"));
     expect(io.output).toHaveLength(3);
     expect(existsSync(join(home, ".env"))).toBe(false);
   });
@@ -385,7 +385,15 @@ describe("loadKeys", () => {
     const io = fakeIO(["slr_live_new", "yes"], true);
     expect(await loadHeld(io, { env: {}, cwd, statePath: state, checkKey }, { anthropic: false, noSolari: "offer", checkSaved: true })).toEqual({ SOLARI_API_KEY: "slr_live_new" });
     expect(checked).toEqual([SOLARI, "slr_live_new"]);
-    expect(stripVTControlCharacters(io.output[0]!)).toContain(savedKeyRefusedLine("401 Unauthorized"));
+    expect(stripVTControlCharacters(io.output[0]!)).toContain(savedKeyRefusedLine("401 Unauthorized", "solari"));
+  });
+
+  it("a saved Box key the provider refused is said as Box's refusal, not Solari's", async () => {
+    setup();
+    mkdirSync(home);
+    writeFileSync(join(home, ".env"), `WSP_PROVIDER=box\nBOX_API_KEY=box_live_x\n`);
+    const sources = { env: {}, cwd, statePath: state, checkKey: async () => ({ state: "refused" as const, said: "401 Unauthorized" }) };
+    await expect(loadKeys(fakeIO([]), sources, { anthropic: false, noSolari: "offer", checkSaved: true })).rejects.toThrow("Box by ASCII refused the saved key: 401 Unauthorized");
   });
 
   it("every other verb takes the saved key as it stands: nothing is asked of the provider and nothing of the person", async () => {
@@ -407,7 +415,7 @@ describe("loadKeys", () => {
     mkdirSync(home);
     writeFileSync(join(home, ".env"), `SOLARI_API_KEY=${SOLARI}\n`);
     const sources = { env: {}, cwd, statePath: state, checkKey: async () => ({ state: "refused" as const, said: "401 Unauthorized" }) };
-    await expect(loadKeys(fakeIO([]), sources, { anthropic: false, noSolari: "offer", checkSaved: true })).rejects.toThrow(savedKeyRefusedLine("401 Unauthorized"));
+    await expect(loadKeys(fakeIO([]), sources, { anthropic: false, noSolari: "offer", checkSaved: true })).rejects.toThrow(savedKeyRefusedLine("401 Unauthorized", "solari"));
   });
 
   it("refuses to start on an empty provider key without leaking anything", async () => {

@@ -60,8 +60,12 @@ describe("the agents screen", () => {
       ["Hermes Agent", "catalog    not installed here", "484 MB"],
       ["Gemini CLI", "catalog    not installed here", "189 MB"],
       ["Pi", "catalog    not installed here", "165 MB"],
+      ["Crush", "catalog    not installed here", "83 MB"],
+      ["Qwen Code", "catalog    not installed here", "size unknown"],
+      ["Goose", "catalog    not installed here", "287 MB"],
+      ["Amp", "catalog    not installed here", "size unknown"],
     ]);
-    // No groups on this screen, and nothing locked: the six are one list.
+    // No groups on this screen, and nothing locked: the agents are one list.
     expect(items.every(i => i.group === undefined && i.lock === undefined)).toBe(true);
     expect(items.find(i => i.label === "Codex")!.detail[0]).not.toBe("installs, but wsp cannot run its threads yet");
     expect(items.find(i => i.label === "OpenCode")!.detail[0]).toBe("installs, but wsp cannot run its threads yet");
@@ -76,9 +80,9 @@ describe("the agents screen", () => {
       histories: [{ agent: "claude", state: "read", sessions: 3, calls: 40 }, { agent: "codex", state: "read", sessions: 5, calls: 90 }],
       rows: [...RECIPE.rows.filter(r => r.kind !== "agent"), { id: "claude", kind: "agent", on: true, source: here }, { id: "codex", kind: "agent", on: false, source: here }, { id: "opencode", kind: "agent", on: false, source: here }],
     };
-    expect(agentRows(recipe).map(r => [r.name, r.on])).toEqual([["Claude Code", true], ["Codex", false], ["OpenCode", false], ["Hermes Agent", false], ["Gemini CLI", false], ["Pi", false]]);
+    expect(agentRows(recipe).map(r => [r.name, r.on])).toEqual([["Claude Code", true], ["Codex", false], ["OpenCode", false], ["Hermes Agent", false], ["Gemini CLI", false], ["Pi", false], ["Crush", false], ["Qwen Code", false], ["Goose", false], ["Amp", false]]);
     // The tools table keeps heavy rows first inside a group: this order is the agents screen's alone.
-    expect(recipeTable(recipe, CATALOG_AGENTS).map(r => r.name)).toEqual(["Codex", "Claude Code", "OpenCode", "Hermes Agent", "Gemini CLI", "Pi"]);
+    expect(recipeTable(recipe, CATALOG_AGENTS).map(r => r.name)).toEqual(["Codex", "Claude Code", "OpenCode", "Hermes Agent", "Gemini CLI", "Pi", "Crush", "Qwen Code", "Goose", "Amp"]);
   });
 });
 
@@ -133,7 +137,7 @@ describe("the tools screen", () => {
     expect(tools.rows.find(r => r.id === "go")).toEqual({ id: "go", kind: "tool", on: true, source: { kind: "popular", sessions: 9, images: 4 }, size: 250752891 });
     expect(tools.rows.filter(r => r.kind === "agent")).toEqual(RECIPE.rows.filter(r => r.kind === "agent"));
     const agents = withAgents(RECIPE, new Set(["codex", "pi"]));
-    expect(agents.rows.filter(r => r.kind === "agent").map(r => [r.id, r.on])).toEqual([["claude", false], ["codex", true], ["gemini", false], ["opencode", false], ["pi", true], ["hermes", false]]);
+    expect(agents.rows.filter(r => r.kind === "agent").map(r => [r.id, r.on])).toEqual([["claude", false], ["codex", true], ["gemini", false], ["opencode", false], ["pi", true], ["hermes", false], ["crush", false], ["qwen", false], ["goose", false], ["amp", false]]);
     const both = withPicked(RECIPE, new Set(["codex", "gh"]));
     expect(both.rows.filter(r => r.on).map(r => r.id)).toEqual(["codex", "curl", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh"]);
   });
