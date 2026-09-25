@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { CATALOG_AGENTS, CLAUDE_PLUGIN_SKILLS, CODEX_TOML, OPENCODE_JSON, SHARED_SKILLS, SKILL_NAME, WSP_SKILL_NAME, isSystemSkill, skillsDirOf } from "../src/index.js";
+import { CATALOG_AGENTS, CLAUDE_PLUGIN_SKILLS, CODEX_TOML, OPENCODE_JSON, SHARED_SKILLS, SKILL_NAME, WSP_SKILL_NAME, catalogEntry, isSystemSkill, ownSkillFolder, skillsDirOf, type AgentEntry } from "../src/index.js";
 
 describe("the folders each agent loads skills from", () => {
   it("every agent names its own folder under the home first, and project folders relative to the project", () => {
@@ -41,5 +41,17 @@ describe("the skills wsp writes itself", () => {
     expect(isSystemSkill(SKILL_NAME)).toBe(true);
     expect(isSystemSkill("wsp-review")).toBe(false);
     expect(isSystemSkill("pdf")).toBe(false);
+  });
+});
+
+describe("where an install puts a skill for each agent", () => {
+  const agent = (id: string): AgentEntry => catalogEntry(id) as AgentEntry;
+  it("gives an agent that reads the shared folder nothing of its own, and the rest their own folder and how it takes one", () => {
+    expect(ownSkillFolder(agent("claude"), false)).toEqual({ dir: "~/.claude/skills", lands: "link" });
+    expect(ownSkillFolder(agent("gemini"), false)).toEqual({ dir: "~/.gemini/skills", lands: "copy" });
+    for (const id of ["codex", "opencode", "pi"]) expect(ownSkillFolder(agent(id), false), id).toBeUndefined();
+    expect(ownSkillFolder(agent("claude"), true)).toEqual({ dir: ".claude/skills", lands: "link" });
+    expect(ownSkillFolder(agent("pi"), true)).toBeUndefined();
+    expect(ownSkillFolder(agent("hermes"), true)).toBeUndefined();
   });
 });

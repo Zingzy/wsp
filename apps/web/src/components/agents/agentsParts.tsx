@@ -3,31 +3,70 @@
 // outline button with its glyph, a row's or a head's lead, the agents' marks
 // after a name, and an MCP server's status as a dot and a word.
 import type { LucideIcon } from "lucide-react";
+import { useState } from "react";
 import { agentName } from "@wsp/catalog";
 import { cn } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
-import { Button, DANGER_BUTTON } from "../ui/button.js";
+import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../ui/alert-dialog.js";
+import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../ui/button.js";
 import { Spinner } from "../ui/spinner.js";
-import { agentNames, type RowAct } from "./agentsRows.js";
+import { AGENTS_LIST_WORDS as W, agentNames, type RowAct } from "./agentsRows.js";
 import { NARROW } from "./agentsWidths.js";
 import type { Lead, ServerState, ServerStatus } from "./kinds/kind.js";
 
 /** One act as an xs outline button with its glyph: held where it has no road. A held button takes no pointer, so it
- * stands in a box that does: the box carries the hover, and a press on it lands there rather than on the row under it. */
+ * stands in a box that does: the box carries the hover, and a press on it lands there rather than on the row under it.
+ * An act that asks first opens its confirmation, whose own button is the one red at rest. */
 export function ActButton({ act, className }: { act: RowAct; className?: string }) {
+  const [asking, setAsking] = useState(false);
   const boxed = act.run === undefined || act.hover !== undefined;
   const Icon = act.icon;
+  const run = act.run === undefined ? undefined : act.confirm === undefined ? act.run : () => setAsking(true);
   const button = (
-    <Button data-k={`act-${act.id}`} size="xs" variant="outline" held={act.run === undefined} className={cn(act.destructive === true && DANGER_BUTTON, !boxed && className)} {...(act.run === undefined ? {} : { onClick: act.run })}>
+    <Button data-k={`act-${act.id}`} size="xs" variant="outline" held={run === undefined} className={cn(act.destructive === true && DANGER_BUTTON, !boxed && className)} {...(run === undefined ? {} : { onClick: run })}>
       {act.busy === true ? <Spinner className="size-3.5" /> : Icon === undefined ? null : <Icon aria-hidden className="size-3.5" />}
       {act.label}
     </Button>
   );
-  if (!boxed) return button;
+  const confirm =
+    act.confirm === undefined || act.run === undefined ? null : (
+      <AlertDialog open={asking} onOpenChange={setAsking}>
+        <AlertDialogPopup data-k={`confirm-${act.id}`}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{act.confirm.title}</AlertDialogTitle>
+            <AlertDialogDescription>{act.confirm.body}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>{W.cancel}</AlertDialogClose>
+            <Button
+              data-k={`confirm-${act.id}-go`}
+              variant="destructive"
+              onClick={() => {
+                setAsking(false);
+                act.run!();
+              }}
+            >
+              {Icon === undefined ? null : <Icon aria-hidden />}
+              {act.label}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    );
+  if (!boxed)
+    return confirm === null ? (
+      button
+    ) : (
+      <>
+        {button}
+        {confirm}
+      </>
+    );
   return (
     <span className={cn("inline-flex", className)} {...(act.hover === undefined ? {} : { title: act.hover, "data-act-hover": act.id })}>
       {button}
+      {confirm}
     </span>
   );
 }
