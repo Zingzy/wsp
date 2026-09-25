@@ -27,6 +27,10 @@ describe("agentsHere", () => {
       ["opencode", false, false],
       ["pi", true, false],
       ["hermes", false, false],
+      ["crush", false, false],
+      ["qwen", false, false],
+      ["goose", false, false],
+      ["amp", false, false],
     ]);
     // The version is read off the command when it is on PATH, the number alone; a command that answers without one
     // or that is not on PATH gives none.

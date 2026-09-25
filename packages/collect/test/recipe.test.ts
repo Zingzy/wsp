@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The sources of a tick, in their order, and the shape the file takes.
-import { CATALOG } from "@wsp/catalog";
+import { CATALOG, CATALOG_AGENTS } from "@wsp/catalog";
 import { Recipe } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { computeRecipe, unknownCommands } from "../src/recipe.js";
@@ -51,6 +51,10 @@ describe("computeRecipe", () => {
       { agent: "opencode", state: "no-reader", sessions: 0, calls: 0 },
       { agent: "pi", state: "no-reader", sessions: 0, calls: 0 },
       { agent: "hermes", state: "empty", sessions: 0, calls: 0 },
+      { agent: "crush", state: "no-reader", sessions: 0, calls: 0 },
+      { agent: "qwen", state: "no-reader", sessions: 0, calls: 0 },
+      { agent: "goose", state: "no-reader", sessions: 0, calls: 0 },
+      { agent: "amp", state: "no-reader", sessions: 0, calls: 0 },
     ]);
   });
 
@@ -235,6 +239,6 @@ describe("computeRecipe", () => {
     await computeRecipe(laptop(), { ...CLAUDE_THREADS, onPresent: e => present.push(e.id), onHistory: h => read.push(`${h.agent} ${h.state}`) });
     expect(present).toEqual(["claude", "node", "git", "gh"]);
     expect(read[0]).toBe("claude read");
-    expect(read).toHaveLength(6);
+    expect(read).toHaveLength(CATALOG_AGENTS.length);
   });
 });

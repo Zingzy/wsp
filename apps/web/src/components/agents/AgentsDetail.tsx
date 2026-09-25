@@ -130,7 +130,7 @@ function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
           {fact.agent === undefined ? null : <HarnessMark harness={fact.agent} label={agentName(fact.agent)} className="size-3.5" />}
           {fact.status === undefined ? null : <ServerStatusView status={fact.status} />}
           {fact.value === undefined ? null : fact.line === true ? (
-            <CopyRow k={`fact-${fact.id}`} value={fact.value} whole />
+            <CopyRow k={`fact-${fact.id}`} value={fact.value} />
           ) : fact.href !== undefined ? (
             <button type="button" data-fact-value title={fact.href} onClick={() => void window.open(fact.href, "_blank", "noopener,noreferrer")} className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 truncate font-mono text-xs text-foreground underline-offset-4 transition-colors duration-150 hover:underline">
               <span className="truncate">{fact.value}</span>

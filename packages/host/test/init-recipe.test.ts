@@ -470,7 +470,8 @@ describe("the small recipe", () => {
   it("withCatalogAgents adds a bare agents row and a bare login row for every catalog agent this computer has none for, and leaves the found ones alone", () => {
     const rows = withCatalogAgents(FIXTURE).entries;
     const added = rows.slice(FIXTURE.entries.length);
-    expect(added.map(e => e.id)).toEqual(["agents/gemini", "logins/gemini", "agents/opencode", "logins/opencode", "agents/pi", "logins/pi", "agents/hermes", "logins/hermes"]);
+    expect(added.map(e => e.id)).toEqual(["agents/gemini", "logins/gemini", "agents/opencode", "logins/opencode", "agents/pi", "logins/pi", "agents/hermes", "logins/hermes", "agents/crush", "agents/qwen", "agents/goose", "agents/amp"]);
+    // An agent the catalog has no sign-in for gets no login row: there is nothing to sign in to or copy.
     expect(added.find(e => e.id === "agents/gemini")).toEqual({ rung: "agents", id: "agents/gemini", label: "Gemini CLI", paths: [], bytes: 0, default: "skip" });
     expect(added.find(e => e.id === "logins/hermes")).toEqual({ rung: "logins", id: "logins/hermes", label: "Hermes Agent login", group: "Agent logins", paths: [], bytes: 0, default: "skip" });
     // A bare row starts off and unticked; the recipe decides.

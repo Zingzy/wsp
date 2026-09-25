@@ -148,6 +148,9 @@ describe("the list grammar", () => {
     expect(pi.querySelector("[data-harness-mark]")?.getAttribute("class")).toContain("grayscale");
     expect(quick("agent-pi")?.textContent).toBe("Install");
     expect(quick("agent-pi")?.closest("[title]")?.getAttribute("title")).toBe(W.notYet);
+    // One fact under an agent not installed: who it is, in the catalog's words.
+    expect(subtext("agent-pi")).toBe("A small coding agent for the terminal with read, bash, edit and write tools and saved sessions.");
+    expect(pi.querySelector("[data-row-state]")).toBeNull();
     expect(within(document.querySelector<HTMLElement>("[data-agents-group=installed]")!).queryByText("Pi")).toBeNull();
   });
 
@@ -281,6 +284,7 @@ describe("the detail", () => {
       ["Version", "0.62.0"],
       ["Installed at", "~/.local/bin/codex"],
       ["wsp tools", "not added"],
+      ["Threads", "in wsp"],
       ["Made by", "OpenAI"],
       ["License", "Apache-2.0"],
       ["Homepage", "developers.openai.com/codex"],
@@ -328,6 +332,7 @@ describe("the detail", () => {
     expect(facts(detail)).toEqual([
       ["Status", "not installed"],
       ["Latest", "0.84.4"],
+      ["Threads", "not yet in wsp"],
       ["Made by", "Earendil Works"],
       ["License", "MIT"],
       ["Repository", "github.com/earendil-works/pi"],
@@ -338,6 +343,35 @@ describe("the detail", () => {
     fireEvent.click(detail.querySelector<HTMLElement>("[data-fact=repo] [data-fact-value]")!);
     expect(opened).toHaveBeenCalledWith("https://github.com/earendil-works/pi", "_blank", "noopener,noreferrer");
     opened.mockRestore();
+  });
+
+  it("says who each agent the catalog added is, the release or package it installs, and no Repository where the source is not public", () => {
+    const available = (id: string, name: string): AgentsReport["agents"][number] => ({ id, name, installed: false, road: "none", signIn: "none", signInRoad: "none", wspTools: false });
+    draw({ report: { ...AGENTS_REPORT, agents: [...AGENTS_REPORT.agents, available("crush", "Crush"), available("amp", "Amp")] } });
+    expect(subtext("agent-crush")).toMatch(/^Charm's coding agent for the terminal\./);
+    expect(quick("agent-crush")?.textContent).toBe("Install");
+    let detail = openRow("agent-crush");
+    expect(facts(detail)).toEqual([
+      ["Status", "not installed"],
+      ["Threads", "not yet in wsp"],
+      ["Made by", "Charm"],
+      ["License", "FSL-1.1-MIT"],
+      ["Homepage", "charm.sh/crush"],
+      ["Repository", "github.com/charmbracelet/crush"],
+      ["Install", "the v0.96.1 release of github.com/charmbracelet/crush"],
+    ]);
+    // A release is words about where the bytes come from, not a line to copy.
+    expect(detail.querySelector("[data-fact=install] [data-copy-row]")).toBeNull();
+    fireEvent.click(detail.querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
+    detail = openRow("agent-amp");
+    expect(facts(detail)).toEqual([
+      ["Status", "not installed"],
+      ["Threads", "not yet in wsp"],
+      ["Made by", "Sourcegraph"],
+      ["License", "proprietary"],
+      ["Homepage", "ampcode.com"],
+      ["Install", "npm install -g @ampcode/cli@0.0.1790352060-g26b83c"],
+    ]);
   });
 
   it("offers Update first where a newer version is out, and names the latest and the recipe's pin beside the version", () => {
