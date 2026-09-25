@@ -2102,8 +2102,8 @@ code {
 }
 
 /* On macOS the desktop window frosts the sidebar's column with the system's
-   own glass, so nothing in the sidebar paints a background over it. The main
-   column keeps its solid background, so text never sits on the desktop. */
+   own glass, so nothing in the sidebar paints a background over it; in dark
+   mode each region lays its own share of the ground over that glass (below). */
 @utility sidebar-vibrancy {
   background: transparent;
   border-color: var(--sidebar-border);

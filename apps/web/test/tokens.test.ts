@@ -69,20 +69,75 @@ describe("index.css", () => {
       }
 
       /* On macOS the desktop window frosts the sidebar's column with the system's
-         own glass, so nothing in the sidebar paints a background over it. The main
-         column keeps its solid background, so text never sits on the desktop. */
+         own glass, so nothing in the sidebar paints a background over it; in dark
+         mode each region lays its own share of the ground over that glass (below). */
       @utility sidebar-vibrancy {
         background: transparent;
         border-color: var(--sidebar-border);
 
         & > [data-slot="sidebar-inner"] {
-          background: var(--sidebar-veil, transparent);
+          background: transparent;
         }
       }
 
-      /* The owner's pick over the window's sidebar material, compared live against window and hud on 2026-09-24. */
-      :root:not([data-theme="light"]):is(.dark) {
-        --sidebar-veil: rgb(16 16 18 / 55%);
+      /* Dark mode on the Mac: the whole window stands on the glass, each region #060606 at its own share over it, tuned
+         live with the owner on 2026-09-25 (the dev build's Material panel, Cmd+Shift+M, moves the same variables). Inside
+         the panel every edge is a hairline and cards a faint tint; the line tokens are the contrast ones, which every
+         border utility reads. Light mode keeps its solid ground. */
+      .desktop-mac:is(.dark, [data-theme="dark"]) [data-slot="sidebar-inset"] {
+        background: transparent;
+      }
+
+      .desktop-mac:is(.dark, [data-theme="dark"]) {
+        --material-centre: 67%;
+        --material-panel: 74%;
+        --material-sidebar: 40%;
+        --material-line: 10%;
+        --material-card: 2%;
+      }
+
+      .desktop-mac:is(.dark, [data-theme="dark"]) [data-slot="sidebar-inner"] {
+        background: rgb(6 6 6 / var(--material-sidebar));
+      }
+
+      .desktop-mac:is(.dark, [data-theme="dark"]) [data-shell-center] {
+        background: rgb(6 6 6 / var(--material-centre));
+      }
+
+      /* The composer floats over the chat column: a lifted pane of the same material, the text behind it blurred away. */
+      .desktop-mac:is(.dark, [data-theme="dark"]) [data-shell-center] .group\\/composer-surface {
+        --chat-composer-glass-surface: rgb(24 24 26);
+      }
+
+      /* A translucent terminal shows the window's glass through its canvas, so with one open the centre's share moves off
+         the whole column onto the thread and the header, and the drawer's own ground stays clear. */
+      html.desktop-mac:is(.dark, [data-theme="dark"]):has([data-terminal-translucent]) [data-shell-center] {
+        background: transparent;
+      }
+
+      html.desktop-mac:is(.dark, [data-theme="dark"]):has([data-terminal-translucent]) :is([data-shell-center] > header, [data-terminal-beside], [data-shell-center] [data-terminal-tabs]) {
+        background: rgb(6 6 6 / var(--material-centre));
+      }
+
+      /* The same in the right panel: holding a translucent terminal, its share moves onto the tab strip. */
+      html.desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) {
+        background: transparent;
+        /* The hairline read against the share; over the bare glass it takes the grey it shows there, as a solid line. */
+        border-color: rgb(31 31 33);
+      }
+
+      html.desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"]:has([data-terminal-translucent]) [data-right-panel-tabbar] {
+        background: rgb(6 6 6 / var(--material-panel));
+      }
+
+      .desktop-mac:is(.dark, [data-theme="dark"]) [data-preview-panel-mode="inline"] {
+        background: rgb(6 6 6 / var(--material-panel));
+        border-color: var(--contrast-border);
+        --background: transparent;
+        --card: rgb(255 255 255 / var(--material-card));
+        --muted: rgb(255 255 255 / calc(var(--material-card) + 1%));
+        --contrast-border: rgb(255 255 255 / var(--material-line));
+        --contrast-input: rgb(255 255 255 / calc(var(--material-line) + 6%));
       }
 
       /* The window paints the glass behind the page, so the page's own canvas is
@@ -159,14 +214,16 @@ describe("index.css", () => {
          painting so the window's own material shows through the canvas alone, and
          the chrome around it paints the app background itself: the right pane's tab
          strip, the terminal tabs beside a split, the header row and the thread above
-         a drawer, and every column and banner that does not hold the canvas. In a
-         browser tab there is no material, and the canvas blends over the pane's token. */
+         a drawer, and every column and banner that does not hold the canvas. In dark
+         mode every region already paints its own share over the glass, so only light
+         mode repaints the chrome. In a browser tab there is no material, and the
+         canvas blends over the pane's token. */
       html.desktop-mac:has([data-terminal-translucent]),
       html.desktop-mac :has([data-terminal-translucent]) {
         background: transparent;
       }
 
-      html.desktop-mac:has([data-terminal-translucent]) :is([data-right-panel-tabbar], [data-terminal-tabs], [data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > :not(:has([data-terminal-translucent])), [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
+      html.desktop-mac:not(.dark, [data-theme="dark"]):has([data-terminal-translucent]) :is([data-right-panel-tabbar], [data-terminal-tabs], [data-shell-center] > header, [data-terminal-beside], [data-slot="sidebar-inset"] > :not(:has([data-terminal-translucent])), [data-slot="sidebar-inset"] > div > :not(:has([data-terminal-translucent]))) {
         background: var(--background);
       }
 
