@@ -107,20 +107,9 @@ export const WHERE_WORDS = {
   cannotSaveKey: "This wsp cannot save a key from here.",
 } as const;
 
-/** What Add a computer says beyond PLACES_WORDS.sheet: the one field, why Add waits, and the two lines the
- * joined screen says. One road, so no word here names one. */
-export type AddRoad = "ssh" | "cloud" | "code";
-
-/** The three roads as the Computers page draws them, each under its picture. */
-export const ADD_ROADS: Record<AddRoad, { title: string; line: string }> = {
-  ssh: { title: "Your own server", line: "over ssh" },
-  cloud: { title: "A cloud", line: "Solari or Box by ASCII" },
-  code: { title: "A computer running wsp", line: "a Mac or PC you sit at" },
-};
-
+/** What Add a computer says beyond PLACES_WORDS.sheet and the roads' own names. */
 export const ADD_COMPUTER_WORDS = {
   title: "Add a computer",
-  guide: "Read the guide",
   user: "User",
   host: "Host",
   hostPlaceholder: "box.example.com or an ssh alias",
@@ -133,11 +122,8 @@ export const ADD_COMPUTER_WORDS = {
   suggested: "From your ssh config",
   copy: "Copy",
   copied: "Copied",
-  keyLabel: "API key",
-  keyPlaceholder: "Paste the API key",
   replaceKey: "Paste a new key to replace it",
   keySaved: "key saved",
-  noKey: "no key",
   getKey: "Get a key",
   save: "Save",
   checking: "Checking",
@@ -152,11 +138,7 @@ export const ADD_COMPUTER_WORDS = {
   expired: "code expired",
   newCode: "New code",
   noMint: "this wsp cannot make a join line from the app yet",
-  login: "ssh login",
-  loginPlaceholder: "root@host or an ssh alias",
-  add: "Add",
   adds: "adds",
-  loginFirst: "type the login first",
   /** Why Add is held on a wsp whose host cannot log in over ssh yet. */
   noRoad: "this wsp cannot log in over ssh yet",
   /** What to do about a login ssh would not take, short enough that what ssh said and this together stand on the
@@ -164,8 +146,6 @@ export const ADD_COMPUTER_WORDS = {
    * the ssh agent and config as they stand, so the key a box wants is named where every other ssh client reads it. */
   refusedFix: "Check the user and the address, or name a key in your ssh config.",
   running: "closing keeps it going",
-  named: "Named after its hostname.",
-  runsWorkspaces: "It runs your tasks. Your image is built there the first time a task is created on it.",
 } as const;
 
 /** Each size source as its segment names it: whole at every width, since a cut segment is a defect. */

@@ -167,6 +167,16 @@ describe("search", () => {
   });
 });
 
+describe("search over a computer", () => {
+  it("finds a computer by the facts its chips say", async () => {
+    useStore.setState({ places: [here], projects: [] });
+    mountSettings({ api: settingsApi().api });
+    await settle();
+    fireEvent.change(field(), { target: { value: "210 GB free" } });
+    expect(rowTitles()).toEqual(["This Mac"]);
+  });
+});
+
 describe("the row grammar", () => {
   const walk = (): { rows: HTMLElement[]; lines: HTMLElement[]; cards: HTMLElement[] } => ({
     rows: [...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-row]")],

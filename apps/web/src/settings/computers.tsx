@@ -49,15 +49,7 @@ export function holdingsFor(
   return held;
 }
 
-/** The facts a computer's list row says under its name, dots between, none of them where none has arrived. */
-export function computerFacts(place: PlaceView, count: number, spend: PlaceSpend | undefined): string {
-  if (isProviderPlace(place)) {
-    return [WHERE_WORDS.cloud, place.rateUsdPerHour === undefined ? undefined : fmtRate(place.rateUsdPerHour), count === 0 ? undefined : plural(count, "task"), spend === undefined ? undefined : spentThisMonth(spend.monthUsd)].filter((word): word is string => word !== undefined).join(" · ");
-  }
-  return [place.shape === undefined ? undefined : fmtSize(place.shape, placeCpuWord(place)), place.diskFreeBytes === undefined ? undefined : fmtBytes(place.diskFreeBytes), count === 0 ? undefined : plural(count, "task")].filter((word): word is string => word !== undefined).join(" · ");
-}
-
-/** The same facts as chips, each with its glyph. */
+/** The facts a computer's list row says under its name, each with its glyph, none of them where none has arrived. */
 export function computerChips(place: PlaceView, count: number, spend: PlaceSpend | undefined): ChipItem[] {
   const workspaces: ChipItem | null = count === 0 ? null : { text: plural(count, "task"), icon: LayersIcon };
   if (isProviderPlace(place)) {
@@ -82,6 +74,7 @@ export function computerChips(place: PlaceView, count: number, spend: PlaceSpend
  * state word while there is one, then the chevron where the row opens a page. */
 export function computerRowData(place: PlaceView, o: { here: boolean; count: number; spend?: PlaceSpend | undefined; now: number; state?: string | undefined; open?: (() => void) | undefined }): SettingsRowData {
   const state = o.state ?? placeStateWord(place, absentOf(place, o.now, o.here));
+  const chips = computerChips(place, o.count, o.spend);
   return {
     kind: "row",
     id: place.id,
@@ -92,8 +85,8 @@ export function computerRowData(place: PlaceView, o: { here: boolean; count: num
       </span>
     ),
     ...(place.default ? { mark: WHERE_WORDS.default } : {}),
-    description: computerFacts(place, o.count, o.spend),
-    chips: computerChips(place, o.count, o.spend),
+    description: chips.map(chip => chip.text).join(" · "),
+    chips,
     mono: true,
     ...(state === "" ? {} : { word: state, wordClass: "fact" }),
     ...(o.open === undefined ? {} : { open: o.open }),

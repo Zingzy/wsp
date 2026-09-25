@@ -7,7 +7,7 @@
 // another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL } from "@wsp/protocol";
+import { COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -510,6 +510,28 @@ describe("a computer's own page", () => {
   });
 });
 
+describe("a computer's icon", () => {
+  it("reads the default off what the computer is, writes a pick as that computer's look, and the row draws the pick", async () => {
+    useStore.setState({ places: [here, box], workspaces: [] });
+    const { api, sets } = computersApi();
+    await mountComputers(api, { kind: "computer", id: "p_2" });
+    const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=computer-icon]")!;
+    expect(select.textContent).toBe("Server");
+    fireEvent.click(select);
+    const option = await screen.findByRole("option", { name: "Home" });
+    await settle();
+    // Under jsdom the select takes a click on an item only once a key has highlighted it.
+    fireEvent.keyDown(option, { key: "Enter" });
+    fireEvent.click(option);
+    await waitFor(() => expect(sets).toEqual([{ computerLook: { p_2: { icon: "home" } } }]));
+    cleanup();
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false, computerLook: { p_2: { icon: "home" } } } });
+    await mountComputers(computersApi().api);
+    expect(listRow("p_2").querySelector("[data-computer-glyph]")?.classList.contains("lucide-house")).toBe(true);
+    expect(listRow("here").querySelector("[data-computer-glyph]")?.classList.contains("lucide-monitor")).toBe(true);
+  });
+});
+
 describe("the cloud's page", () => {
   const HASH = "a".repeat(63) + "1";
   const IMAGE: SealedImage = {
@@ -608,7 +630,7 @@ describe("Add a computer on the page", () => {
     expect(document.querySelectorAll("[data-k='road-ssh'] input")).toHaveLength(3);
     expect(plan()).toHaveLength(PlaceAddStep.options.length);
     expect(plan().every(([, state]) => state === "waiting")).toBe(true);
-    expect(document.querySelector("[data-k='guide']")?.getAttribute("href")).toContain("/docs/computers/ssh");
+    expect(document.querySelector("[data-k='road-ssh'] header")?.textContent).toBe(document.querySelector("[data-add-road='ssh'] span.text-\\[13px\\]")?.textContent);
   });
 
   it("holds Add until a host is typed, and on a wsp whose host cannot log in over ssh at all", async () => {
@@ -767,6 +789,9 @@ describe("Add a computer on the page", () => {
     await open("cloud", { initKeys: async (k: { provider?: string; key?: string }) => (asked.push(k), setupOf({ keys: { solari: false, box: k.provider === "box" } })) } as unknown as Partial<Api>, setupOf({ keys: { solari: false, box: false } }));
     const blocks = [...document.querySelectorAll("[data-k='road-cloud'] [data-provider]")];
     expect(blocks.map(b => b.getAttribute("data-provider"))).toEqual(["box", "solari"]);
+    // Each provider by the name the protocol gives it, and the picker's line names the same ones.
+    expect(blocks.map(b => b.querySelector("span.text-\\[14px\\]")?.textContent)).toEqual([PROVIDER_KEY_WORDS["box"]!.name, PROVIDER_KEY_WORDS["solari"]!.name]);
+    expect(document.querySelector("[data-add-road='cloud']")?.textContent).toContain(`${PROVIDER_KEY_WORDS["box"]!.name} or ${PROVIDER_KEY_WORDS["solari"]!.name}`);
     expect(document.body.textContent).not.toContain("no key");
     const box = blocks[0]!;
     fireEvent.change(box.querySelector("[data-k='cloud-key']")!, { target: { value: "k-123" } });
@@ -774,6 +799,15 @@ describe("Add a computer on the page", () => {
     await waitFor(() => expect(box.querySelector("[data-k='key-state']")?.textContent).toBe(ADD_COMPUTER_WORDS.keySaved));
     expect(asked).toEqual([{ provider: "box", key: "k-123" }]);
     expect(blocks[1]!.querySelector("[data-k='key-state']")).toBeNull();
+  });
+
+  it("draws the ssh hosts the host suggests as it answered them, and asks again once the computers change", async () => {
+    let asked = 0;
+    await open("ssh", { addComputerOverSsh: async () => box, sshHosts: async () => (asked++, [{ alias: "hetzner", hostName: "65.21.4.12", from: "config" }]) } as unknown as Partial<Api>);
+    useStore.setState({ places: [here, box] });
+    await waitFor(() => expect(asked).toBe(2));
+    // The host is the one that leaves out the computers already added; a row it names stands, even under a computer's name.
+    await waitFor(() => expect([...document.querySelectorAll("[data-ssh-host]")].map(b => b.getAttribute("data-ssh-host"))).toEqual(["hetzner"]));
   });
 
   it("mints the join line, counts the code down, and holds New code where this wsp mints none", async () => {

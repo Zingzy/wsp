@@ -5,7 +5,7 @@
 // to dial back; a cloud is its provider's key, each provider on its own; a
 // computer already running wsp types the join line this host mints. Every
 // state is read off what the host answered.
-import { BookOpenIcon, CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, ExternalLinkIcon, HashIcon, KeyRoundIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, XIcon, type LucideIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, ExternalLinkIcon, HashIcon, KeyRoundIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, XIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { create } from "zustand";
 import { PLACES_WORDS, PLACE_INSTALL, PLACE_LOGIN_REFUSED_KIND, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, type InitSetup, type PlaceView } from "@wsp/protocol";
@@ -16,7 +16,7 @@ import { Spinner } from "../components/ui/spinner.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { RequestError, type Api, type InstallStage } from "../protocol/client.js";
-import { ADD_COMPUTER_WORDS, ADD_ROADS, type AddRoad } from "./format.js";
+import { ADD_COMPUTER_WORDS } from "./format.js";
 import { ComputerRow } from "./computers.js";
 import { RefusalSlot } from "./sheetParts.js";
 
@@ -24,11 +24,6 @@ const MINE = ADD_COMPUTER_WORDS;
 const PLAN_FACTS: Partial<Record<PlaceAddStep, string>> = { wsp: PLACE_INSTALL.weight };
 const INPUT = "h-10 w-full font-mono [&_input]:h-[38px] [&_input]:ps-9 [&_input]:text-[13px] [&_input]:leading-[38px] sm:[&_input]:h-[38px] sm:[&_input]:text-[13px] sm:[&_input]:leading-[38px]";
 const KEYCAP = "h-9 px-4 sm:h-9";
-const GUIDES: Record<AddRoad, string> = {
-  ssh: "https://wsp.site/docs/computers/ssh",
-  cloud: "https://wsp.site/docs/computers/cloud",
-  code: "https://wsp.site/docs/computers/join",
-};
 
 type JoinLines = Awaited<ReturnType<NonNullable<Api["mintJoin"]>>>;
 type SshHost = Awaited<ReturnType<NonNullable<Api["sshHosts"]>>>[number];
@@ -50,41 +45,43 @@ function Bar({ w, strong = false }: { w: number; strong?: boolean }) {
   return <span className={cn("block h-1.5 rounded-full", strong ? "bg-foreground/35" : "bg-foreground/15")} style={{ width: `${w}%` }} />;
 }
 
-function Picture({ road }: { road: AddRoad }) {
-  if (road === "ssh") {
-    return (
-      <div className="flex h-full items-center justify-center gap-4 p-5">
-        <div className="flex w-[52%] flex-col gap-2 rounded-[6px] border border-border bg-background p-3">
-          <span className="flex items-center gap-1.5">
-            <TerminalIcon aria-hidden className="size-3 text-foreground/50" />
-            <Bar w={62} strong />
+function SshPicture() {
+  return (
+    <div className="flex h-full items-center justify-center gap-4 p-5">
+      <div className="flex w-[52%] flex-col gap-2 rounded-[6px] border border-border bg-background p-3">
+        <span className="flex items-center gap-1.5">
+          <TerminalIcon aria-hidden className="size-3 text-foreground/50" />
+          <Bar w={62} strong />
+        </span>
+        <Bar w={84} />
+        <Bar w={48} />
+      </div>
+      <div className="flex w-[30%] flex-col gap-1.5">
+        {[0, 1, 2].map(at => (
+          <span key={at} className="flex items-center gap-1.5 rounded-[4px] border border-border bg-background px-2 py-1.5">
+            <span className={cn("size-1.5 rounded-full", at === 0 ? "bg-foreground/50" : "bg-foreground/20")} />
+            <Bar w={70} />
           </span>
-          <Bar w={84} />
-          <Bar w={48} />
-        </div>
-        <div className="flex w-[30%] flex-col gap-1.5">
-          {[0, 1, 2].map(at => (
-            <span key={at} className="flex items-center gap-1.5 rounded-[4px] border border-border bg-background px-2 py-1.5">
-              <span className={cn("size-1.5 rounded-full", at === 0 ? "bg-foreground/50" : "bg-foreground/20")} />
-              <Bar w={70} />
-            </span>
-          ))}
-        </div>
+        ))}
       </div>
-    );
-  }
-  if (road === "cloud") {
-    return (
-      <div className="relative flex h-full items-center justify-center">
-        <CloudIcon aria-hidden strokeWidth={1} className="size-24 text-foreground/25" />
-        <div className="absolute inset-x-0 top-[48%] flex justify-center gap-1.5">
-          {[0, 1, 2].map(at => (
-            <span key={at} className="h-4 w-6 rounded-[3px] border border-border bg-background" />
-          ))}
-        </div>
+    </div>
+  );
+}
+
+function CloudPicture() {
+  return (
+    <div className="relative flex h-full items-center justify-center">
+      <CloudIcon aria-hidden strokeWidth={1} className="size-24 text-foreground/25" />
+      <div className="absolute inset-x-0 top-[48%] flex justify-center gap-1.5">
+        {[0, 1, 2].map(at => (
+          <span key={at} className="h-4 w-6 rounded-[3px] border border-border bg-background" />
+        ))}
       </div>
-    );
-  }
+    </div>
+  );
+}
+
+function CodePicture() {
   return (
     <div className="flex h-full items-center justify-center gap-3 px-5">
       <LaptopIcon aria-hidden strokeWidth={1.25} className="size-12 text-foreground/40" />
@@ -100,7 +97,7 @@ function Picture({ road }: { road: AddRoad }) {
 function RoadPicker({ value, onChange }: { value: AddRoad | null; onChange: (road: AddRoad) => void }) {
   return (
     <div role="radiogroup" aria-label={MINE.title} className="grid grid-cols-3 gap-4 max-sm:grid-cols-1" data-k="add-roads">
-      {(Object.keys(ADD_ROADS) as AddRoad[]).map(road => {
+      {(Object.keys(ROADS) as AddRoad[]).map(road => {
         const chosen = road === value;
         return (
           <button key={road} type="button" role="radio" aria-checked={chosen} data-add-road={road} onClick={() => onChange(road)} className="group flex cursor-pointer flex-col gap-2.5 text-left outline-none">
@@ -111,11 +108,11 @@ function RoadPicker({ value, onChange }: { value: AddRoad | null; onChange: (roa
                 "group-focus-visible:ring-2 group-focus-visible:ring-ring",
               )}
             >
-              <Picture road={road} />
+              {ROADS[road].picture}
             </span>
             <span className="flex flex-col gap-0.5 px-0.5">
-              <span className={cn("text-[13px] transition-colors duration-150", chosen ? "text-foreground" : "text-foreground/80 group-hover:text-foreground")}>{ADD_ROADS[road].title}</span>
-              <span className="font-mono text-[11px] text-muted-foreground">{ADD_ROADS[road].line}</span>
+              <span className={cn("text-[13px] transition-colors duration-150", chosen ? "text-foreground" : "text-foreground/80 group-hover:text-foreground")}>{ROADS[road].title}</span>
+              <span className="font-mono text-[11px] text-muted-foreground">{ROADS[road].line}</span>
             </span>
           </button>
         );
@@ -157,20 +154,13 @@ function Joined({ place, now, onAgain }: { place: PlaceView; now: number; onAgai
 }
 
 
-/** One road's panel: its name and guide over the flow, the action in the foot. */
-function RoadPanel({ road, children, foot }: { road: AddRoad; children: ReactNode; foot?: ReactNode }) {
+/** One road's flow under the name AddComputer draws over it, the action in the foot. */
+function RoadBody({ children, foot }: { children: ReactNode; foot?: ReactNode }) {
   return (
-    <section data-k={`road-${road}`} className="flex flex-col gap-6">
-      <header className="flex items-center gap-3">
-        <span className="text-[15px] font-medium text-foreground">{ADD_ROADS[road].title}</span>
-        <a data-k="guide" href={GUIDES[road]} target="_blank" rel="noopener noreferrer" className="ms-auto inline-flex items-center gap-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground">
-          <BookOpenIcon aria-hidden className="size-3.5" />
-          {MINE.guide}
-        </a>
-      </header>
+    <>
       <div className="flex flex-col gap-6">{children}</div>
       {foot === undefined ? null : <footer className="flex items-center gap-3 border-border border-t pt-5">{foot}</footer>}
-    </section>
+    </>
   );
 }
 
@@ -233,9 +223,10 @@ function SshRoad({ now }: { now: () => number }) {
   const setStages = (next: InstallStage[] | null | ((held: InstallStage[] | null) => InstallStage[] | null)): void =>
     setRun(run => ({ stages: typeof next === "function" ? next(run.stages) : next }));
   const [hosts, setHosts] = useState<SshHost[] | null>(null);
+  const placeIds = places.map(p => p.id).join(" ");
   useEffect(() => {
     void api?.sshHosts?.().then(setHosts, () => setHosts([]));
-  }, [api]);
+  }, [api, placeIds]);
   const add = (login: { user: string; host: string; port: string }): void => {
     if (login.host.trim() === "" || api?.addComputerOverSsh === undefined) return;
     setUser(login.user);
@@ -252,21 +243,19 @@ function SshRoad({ now }: { now: () => number }) {
   };
   if (installed !== null) {
     return (
-      <RoadPanel road="ssh">
+      <RoadBody>
         <Joined place={installed} now={now()} onAgain={() => { setInstalled(null); setStages(null); setHost(""); setUser(""); setPort(""); }} />
-      </RoadPanel>
+      </RoadBody>
     );
   }
   const running = stages !== null && refusal === null;
   const held = api?.addComputerOverSsh === undefined ? MINE.noRoad : undefined;
-  const known = new Set(places.flatMap(p => [p.road?.ssh, p.name].filter((w): w is string => w !== undefined)));
-  const suggested = (hosts ?? []).filter(h => !known.has(h.alias));
+  const suggested = hosts ?? [];
   const enter = (e: React.KeyboardEvent): void => {
     if (e.key === "Enter") add({ user, host, port });
   };
   return (
-    <RoadPanel
-      road="ssh"
+    <RoadBody
       foot={
         <>
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
@@ -318,17 +307,11 @@ function SshRoad({ now }: { now: () => number }) {
           </ul>
         </div>
       ) : null}
-    </RoadPanel>
+    </RoadBody>
   );
 }
 
-/** A provider as a person knows it: the key's own name without the words for a key, and Box with its maker. */
-function providerName(id: string, keyName: string): string {
-  const bare = keyName.replace(/ API key$/, "");
-  return id === "box" ? `${bare} by ASCII` : bare;
-}
-
-function ProviderKey({ id, words, held }: { id: string; words: { keyName: string; keyConsole?: string }; held: boolean }) {
+function ProviderKey({ id, words, held }: { id: string; words: (typeof PROVIDER_KEY_WORDS)[string]; held: boolean }) {
   const api = useStore(s => s.api);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -357,7 +340,7 @@ function ProviderKey({ id, words, held }: { id: string; words: { keyName: string
     <div data-provider={id} className="flex flex-col gap-3 py-5 first:pt-0 last:pb-0">
       <div className="flex items-center gap-2.5">
         <CloudIcon aria-hidden className="size-4 text-muted-foreground" />
-        <span className="text-[14px] text-foreground">{providerName(id, words.keyName)}</span>
+        <span className="text-[14px] text-foreground">{words.name}</span>
         {has ? (
           <span data-k="key-state" className="inline-flex items-center gap-1 font-mono text-[11px] text-foreground/70">
             <CheckIcon aria-hidden className="size-3" />
@@ -387,13 +370,13 @@ function ProviderKey({ id, words, held }: { id: string; words: { keyName: string
 
 function CloudRoad({ setup }: { setup: InitSetup | null }) {
   return (
-    <RoadPanel road="cloud">
+    <RoadBody>
       <div className="flex flex-col divide-y divide-border">
         {Object.entries(PROVIDER_KEY_WORDS).map(([id, words]) => (
           <ProviderKey key={id} id={id} words={words} held={setup?.keys[id] === true} />
         ))}
       </div>
-    </RoadPanel>
+    </RoadBody>
   );
 }
 
@@ -418,17 +401,16 @@ function CodeRoad({ now }: { now: () => number }) {
   const joined = before.current === null ? undefined : places.find(p => !before.current!.has(p.id));
   if (joined !== undefined) {
     return (
-      <RoadPanel road="code">
+      <RoadBody>
         <Joined place={joined} now={now()} onAgain={again} />
-      </RoadPanel>
+      </RoadBody>
     );
   }
   const left = mint === null ? 0 : Math.max(0, Date.parse(mint.expiresAt) - now());
   const expired = mint !== null && left === 0;
   const noMint = api?.mintJoin === undefined;
   return (
-    <RoadPanel
-      road="code"
+    <RoadBody
       foot={
         <>
           <span data-k="code-left" className="font-mono text-[11px] text-muted-foreground">
@@ -452,7 +434,7 @@ function CodeRoad({ now }: { now: () => number }) {
         ))}
       </Step>
       {said !== null ? <RefusalSlot k="code-refusal" said={said} /> : null}
-    </RoadPanel>
+    </RoadBody>
   );
 }
 
@@ -468,6 +450,21 @@ function Step({ n, word, children }: { n: number; word: string; children: ReactN
   );
 }
 
+interface Road {
+  title: string;
+  line: string;
+  picture: ReactNode;
+  panel: (at: { setup: InitSetup | null; now: () => number }) => ReactNode;
+}
+
+/** Every road Add a computer offers, in the order the picker draws them: a new road is one entry here. */
+const ROADS = {
+  ssh: { title: "Your own server", line: "over ssh", picture: <SshPicture />, panel: ({ now }) => <SshRoad now={now} /> },
+  cloud: { title: "A cloud", line: Object.values(PROVIDER_KEY_WORDS).map(p => p.name).join(" or "), picture: <CloudPicture />, panel: ({ setup }) => <CloudRoad setup={setup} /> },
+  code: { title: "A computer running wsp", line: "a Mac or PC you sit at", picture: <CodePicture />, panel: ({ now }) => <CodeRoad now={now} /> },
+} satisfies Record<string, Road>;
+type AddRoad = keyof typeof ROADS;
+
 export function AddComputer({ setup, now = () => Date.now() }: { setup: InitSetup | null; now?: () => number }) {
   const asked = useStore(s => s.addComputerOpen);
   const [road, setRoad] = useState<AddRoad | null>(null);
@@ -482,9 +479,10 @@ export function AddComputer({ setup, now = () => Date.now() }: { setup: InitSetu
     <div ref={root} className="flex flex-col gap-12" data-k="add-computer">
       <RoadPicker value={road} onChange={setRoad} />
       {road === null ? null : (
-        <div key={road} className="motion-safe:animate-[road-in_200ms_ease-out]">
-          {road === "ssh" ? <SshRoad now={now} /> : road === "cloud" ? <CloudRoad setup={setup} /> : <CodeRoad now={now} />}
-        </div>
+        <section key={road} data-k={`road-${road}`} className="flex flex-col gap-6 motion-safe:animate-[road-in_200ms_ease-out]">
+          <header className="text-[15px] font-medium text-foreground">{ROADS[road].title}</header>
+          {ROADS[road].panel({ setup, now })}
+        </section>
       )}
     </div>
   );

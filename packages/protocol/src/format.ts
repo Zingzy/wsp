@@ -1768,13 +1768,13 @@ export const imageBuiltOnLine = (place: string): string => `your image is built 
 /** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
 export const SOLARI_CONSOLE = "console.getsolari.com";
 
-/** What a person calls a provider's key and where they get one, keyed by the word WSP_PROVIDER holds. The host's
+/** What a person calls a provider, its key and where they get one, keyed by the word WSP_PROVIDER holds. The host's
  * provider registry reads its keyName and keyConsole from here and the app's provider rows read the same, so the
  * screen that asks for a key and the terminal that asks for it say one thing. A provider that takes no key has no
  * row. */
-export const PROVIDER_KEY_WORDS: Record<string, { keyName: string; keyConsole?: string }> = {
-  box: { keyName: "Box API key", keyConsole: "ascii.dev" },
-  solari: { keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
+export const PROVIDER_KEY_WORDS: Record<string, { name: string; keyName: string; keyConsole?: string }> = {
+  box: { name: "Box by ASCII", keyName: "Box API key", keyConsole: "ascii.dev" },
+  solari: { name: "Solari", keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
 };
 
 /** Every word of the six screens that build the image, opened from Settings under the title the image section
@@ -3831,30 +3831,16 @@ export const PLACES_WORDS = {
   addComputer: "Add a computer",
   connectProvider: "Connect a provider",
   sheet: {
-    title: "Add a computer",
     description: `A computer you own runs workspaces for your wsp. It ${PLACE_CONNECTS}. You open nothing on it.`,
     /** The one line both roads say, because it is the reason a person adds a computer at all: a turn already
      * running there is that computer's own and its daemon holds it while this host sleeps, and only the start of
      * the next one needs this host awake. */
     whileAsleep: "Threads there keep running while this Mac sleeps; new ones start when it wakes.",
-    appRoad: 'On that computer, open wsp and press "This Mac joins another wsp". Type these.',
-    address: "Address",
-    code: "Code",
-    waiting: "waiting for it to connect",
-    connected: (from: string): string => `connected from ${from} · keys exchanged`,
-    reading: "reading what it has",
-    joined: (os: string, agents: readonly string[]): string => `joined · ${os}${agents.length === 0 ? "" : ` · ${agents.join(", ")} found`}`,
-    joinedTitle: (name: string): string => `${name} joined`,
-    noApp: "No app on that computer",
-    noAppLine: "In its terminal, install wsp, then join:",
     install: "npm i -g @zingzy/wsp",
     /** The line typed in a terminal on the computer being joined. The token is the code and the fingerprint of the
      * key this host will prove, as joinToken writes them, so the line names which host it is joining. */
     joinLine: (url: string, token: string): string => `wsp join ${url} --code ${token}`,
     relayNote: "when the host is linked to your relay",
-    escStays: "esc closes, the code stays good",
-    newCode: "New code",
-    close: "Close",
     /** Said once, the first time the door binds: a Mac with its firewall on asks whether wsp may accept connections. */
     firewall: "macOS may ask once whether wsp can accept connections; allow it",
   },
