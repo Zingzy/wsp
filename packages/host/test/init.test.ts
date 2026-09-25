@@ -18,7 +18,6 @@ import { BUILDER_DISK_GB, LocalBackend, SNAPSHOT_STORAGE, type BackendPricing, t
 import { HERE_PLACE_ID, ALREADY_APPLIED, BUILD_NEEDS_FILE_FIX, DAEMON_TOKEN_PATH, buildNeedsFileLine, folderName, MACHINE_GONE_LINE, Recipe, SEAL_FAILED_LINE, SIGN_IN_DEFERRED_WORD, SIGN_IN_LATER, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { copyKey, DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localExecStream, memoryStore, type GoldenRecipe, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { shellLine } from "../src/signin-relay.js";
 import { catalogEntry } from "@wsp/catalog";
 import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
 import { hostPlatform } from "../src/verbs.js";
@@ -1110,7 +1109,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(out).toMatch(/Agents\n│\s+4 installed: Claude Code, Codex, Hermes Agent, Gemini CLI\n/);
     // Only the GitHub CLI signs in on the machine: Claude Code's token is this computer's and Codex's login is the
     // computer's that runs the workspaces, so neither opens a pty there.
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([shellLine(loginOf("gh"))]);
+    expect(f.link.ptys.map(p => p.ran)).toEqual([loginOf("gh")]);
     expect(out).toContain(`Gemini CLI login: ${SIGN_IN_DEFERRED_WORD}`);
     expect(f.reads).toEqual([]);
     const log = f.backends[0]!.machines[0]!.execLog;
@@ -1311,7 +1310,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(signInItems(applyRecipe(withCatalogAgents(held), ticking("claude")), new Map(), "darwin", HOME_HERE).initial.get("logins/claude")).toBe("token");
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     expect(f.reads).toEqual([]);
-    expect(f.link.ptys.map(p => p.writes[0]).filter(w => w?.includes("exec bash -c $'claude"))).toEqual([]);
+    expect(f.link.ptys.map(p => p.writes[0]).filter(w => w?.includes("exec bash -c claude"))).toEqual([]);
     expect(loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/claude")?.choice).toBe("token");
     expect(f.text()).toContain("Nothing asked for on this computer: Claude Code login. --yes asks nothing; paste it from the app.");
   });
@@ -1379,11 +1378,11 @@ describe("wsp init, the secrets step", () => {
     expect(out).not.toContain("s3cret");
     // The machine's secrets file is read first (nothing there on a fresh builder, no fish), then the one write, and
     // only then the sign-ins.
-    const read = f.link.ptys.find(p => p.writes[0]!.startsWith(readCommand()))!;
+    const read = f.link.ptys.find(p => p.ran!.startsWith(readCommand()))!;
     expect(read.created["env"]).toEqual({ PS1: "" });
     const pty = f.link.ptys.find(p => p.created["env"] !== undefined && "WSP_SECRET_LINE" in (p.created["env"] as object))!;
     expect(pty.created).toEqual({ cols: 200, rows: 50, shell: "/bin/sh", env: { PS1: "", WSP_SECRET_LINE: "export ANTHROPIC_API_KEY='s3cret-value'" } });
-    expect(pty.writes).toEqual([`${appendCommand(false)}; printf '\\nWSP_STATUS %s\\n' $?; exit\r`]);
+    expect(pty.ran).toBe(appendCommand(false));
     expect(pty.killed).toBe(true);
     const lines = f.link.ptys.map(p => p.writes[0]!);
     expect(lines.indexOf(pty.writes[0]!)).toBeLessThan(lines.findIndex(l => l.includes("; exec bash -c ")));
@@ -1472,7 +1471,7 @@ describe("wsp init, the sign-in stage", () => {
     const out = f.text();
     expect(out).toMatch(/Supabase login\s+skipped\s+skipped by you/);
     // Three login ptys (default, retry, fallback), no status run after any of them and no check script since nothing was copied; o never reached the machine.
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([shellLine("supabase login"), shellLine("supabase login"), shellLine("supabase login --no-browser")]);
+    expect(f.link.ptys.map(p => p.ran)).toEqual(["supabase login", "supabase login", "supabase login --no-browser"]);
     expect(f.link.ptys.flatMap(p => p.writes.slice(1))).toEqual(["\x03", "\x03", "\x03"]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [{ id: "logins/supabase", label: "Supabase login", state: "skipped", command: "supabase login --no-browser", note: "skipped by you" }],
@@ -1496,7 +1495,7 @@ describe("wsp init, the sign-in stage", () => {
     await firstWorkspace(f, "");
     const result = await run;
     expect(result.code).toBe(0);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([shellLine("supabase login")]);
+    expect(f.link.ptys.map(p => p.ran)).toEqual(["supabase login"]);
     expect(f.text()).not.toContain("r retry");
     expect(result.logins?.[0]).toEqual({ id: "logins/supabase", label: "Supabase login", state: "skipped", command: "supabase login", exit: 127, note: "supabase is not on the machine" });
   });
@@ -1757,7 +1756,7 @@ describe("wsp init, flags and no terminal", () => {
     // for the machine is run there and its page handed over.
     expect(f.text()).toContain("GitHub CLI login: copied");
     expect(f.text()).toContain(`Gemini CLI login: open ${GEMINI_URL} on this computer`);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([shellLine("gemini --skip-trust")]);
+    expect(f.link.ptys.map(p => p.ran)).toEqual(["gemini --skip-trust"]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
         // Claude Code's row is the vault's, and off a terminal there is nobody to paste its token.
@@ -1909,7 +1908,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.text()).toContain("GitHub CLI login: copied");
     // The screens never ran, so nothing was typed at: the only pty is the one sign-in chosen for the machine.
     expect(f.text()).not.toMatch(/◆  Agents|◆  Sign-ins/);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([shellLine("gemini --skip-trust")]);
+    expect(f.link.ptys.map(p => p.ran)).toEqual(["gemini --skip-trust"]);
   });
 
   it("on a terminal without the flag the screens still run", async () => {

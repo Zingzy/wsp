@@ -4125,11 +4125,22 @@ describe("the agents on a computer you own", () => {
     expect(frames).toContain("pty.create");
     expect((await c.request("agents.signInCode", { signInId, code: "ABCD-1234" })).ok).toBe(true);
     expect(typed).toEqual(["ABCD-1234"]);
+    // Asking again from the same socket joins the one it already follows, and its steps still come once.
+    expect(await c.request("agents.signIn", { target: { placeId }, agent: "codex" })).toMatchObject({ ok: true, signInId });
+    await new Promise(r => setTimeout(r, 20));
+    expect(c.events.filter(e => e.type === "agents.signIn")).toHaveLength(1);
     const issued = await c.request("ticket.issue", { purpose: "connect" });
     const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
     sockets.push(ticketed.ws);
-    expect(await ticketed.request("agents.signIn", { target: { placeId }, agent: "codex" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
-    expect(await ticketed.request("agents.signInCode", { signInId, code: "x" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
+    for (const [op, extra] of [
+      ["agents.signIn", { target: { placeId }, agent: "codex" }],
+      ["agents.signInCode", { signInId, code: "x" }],
+      ["agents.signInStop", { signInId }],
+      ["agents.signInLine", { target: { placeId }, agent: "codex" }],
+      ["agents.addTools", { target: { placeId: HERE_PLACE_ID }, agent: "codex" }],
+    ] as const) {
+      expect(await ticketed.request(op, extra), op).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+    }
     expect(await ticketed.request("agents.key", { agent: "claude", key: "sk-ant-oat01-x" })).toMatchObject({ ok: false, error: AGENTS_KEY_REFUSAL });
     expect((await c.request("agents.key", { agent: "claude", key: "sk-ant-oat01-x" })).ok).toBe(true);
     expect(keys).toEqual(["claude sk-ant-oat01-x"]);

@@ -6,8 +6,8 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { SIGN_IN_ROWS, sharedLoginOf } from "@wsp/catalog";
 import { BOX_SIGN_IN_MS, placeLink, relaySignIn, sharedAgentsOn, sharedOn, targetLink } from "../src/place-signin.js";
-import { shellLine, type RelayTerminal } from "../src/signin-relay.js";
-import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
+import { type RelayTerminal } from "../src/signin-relay.js";
+import { execsBeside, fakePtyLink, type FakePty } from "./fake-pty-link.js";
 import type { HostClient } from "../src/verbs.js";
 import type { SignInLine } from "@wsp/protocol";
 
@@ -54,12 +54,13 @@ describe("the sign-in the host planned, run on that computer's terminal and show
       l.data(pty, "Open https://auth.openai.com/device and enter CODE-1234\r\n");
       l.exit(pty, 0);
     });
-    expect(link.ops.filter(o => o.op === "exec").map(o => o.extra["cmd"])).toEqual(["mkdir -p '/var/lib/wsp/logins/codex'"]);
+    expect(execsBeside(link).map(o => o.extra["cmd"])).toEqual(["mkdir -p '/var/lib/wsp/logins/codex'"]);
+    expect([...link.staged.values()].every(s => s.cleared)).toBe(true);
     const [flow, status] = link.ptys;
     expect(flow!.created["env"]).toEqual({ CODEX_HOME: "/var/lib/wsp/logins/codex" });
-    expect(flow!.writes[0]).toBe(shellLine("codex login --device-auth"));
+    expect(flow!.ran).toBe("codex login --device-auth");
     expect(status!.created["env"]).toMatchObject({ CODEX_HOME: "/var/lib/wsp/logins/codex" });
-    expect(status!.writes[0]).toContain("codex login status");
+    expect(status!.ran).toBe("codex login status");
     expect(answer).toEqual({ signedIn: true });
   });
 
@@ -79,7 +80,7 @@ describe("the sign-in the host planned, run on that computer's terminal and show
   it("runs a line with nothing first and no status, as one server's sign-in is, and reads it by its own exit", async () => {
     const server = { command: "runuser -u 'ada' -- bash -c 'claude mcp login notion --no-browser'" };
     const { answer, link } = await signIn((l, pty) => l.exit(pty, 0), server, undefined);
-    expect(link.ops.filter(o => o.op === "exec")).toEqual([]);
+    expect(execsBeside(link)).toEqual([]);
     expect(link.ptys[0]!.created["env"]).toBeUndefined();
     expect(answer).toEqual({ signedIn: true });
     expect(BOX_SIGN_IN_MS).toBeGreaterThan(60_000);

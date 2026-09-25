@@ -7,7 +7,7 @@
 // pty reports each page the tool prints and the code beside it, types what a
 // page hands back, and asks the tool's own status until it says signed in.
 // The vault and the wsp tools are the two writes that sit beside it.
-import { CATALOG_AGENTS, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, mintsToken, questionsOf, serverSignInRoad, sharedLoginOf, signInRoadOf, tokenIn, type Question, type StatusCheck } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, asksThePerson, hasLogin, keyEnvOf, loginHomeIn, mintsToken, questionsOf, serverSignInRoad, sharedLoginOf, signInRoadOf, tokenIn, type Question, type StatusCheck } from "@wsp/catalog";
 import { asLogin, targetLogin } from "@wsp/engine";
 import {
   addToolsHereRefusal,
@@ -29,7 +29,7 @@ import { writeEnvFile } from "./env-keys.js";
 import { STOPPED_NOTE, cadence, codeIn } from "./init-handoff.js";
 import { installMcp } from "./mcp-install.js";
 import { BOX_SIGN_IN_MS } from "./place-signin.js";
-import { TOOL_STARTS, runQuiet, watchPty, type WatchOutcome } from "./signin-relay.js";
+import { runQuiet, watchPty, type WatchOutcome } from "./signin-relay.js";
 
 /** One sign-in as the watched pty runs it: the line, the questions the row answers, the shape of the code it prints,
  * whether what its page hands back is typed into it, and the tool's own status check. */
@@ -109,7 +109,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   if (line.prepare !== undefined) await link.op("exec", { cmd: line.prepare });
   run.emit({ state: "running" });
   let seen = "";
-  let said: string | undefined;
+  let said = "";
   const codes: string[] = [];
   let told: { url: string; code?: string } | undefined;
   const page = (url: string): void => {
@@ -133,9 +133,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
     ...(o.flushMs !== undefined ? { flushMs: o.flushMs } : {}),
     onData: chunk => {
       if (seen.length < TEXT_CAP) seen += chunk;
-      const at = said === undefined ? chunk.indexOf(TOOL_STARTS) : -1;
-      if (said === undefined && at < 0) return;
-      said = ((said ?? "") + (at < 0 ? chunk : chunk.slice(at + TOOL_STARTS.length))).slice(-TEXT_CAP);
+      said = (said + chunk).slice(-TEXT_CAP);
     },
     onUrl: page,
     onScanned: () => {
@@ -179,7 +177,7 @@ export async function watchSignIn(plan: SignInPlan, run: SignInRun, o: { pollMs?
   if (outcome.dropped) return void run.emit({ state: "failed", said: "the computer's terminal link dropped" });
   const through = plan.status === undefined ? outcome.exitCode === 0 : await asked();
   if (through) return void run.emit({ state: "signed-in" });
-  run.emit({ state: "failed", said: lastSaid(said ?? "", codes) ?? `it ended with exit ${outcome.exitCode}` });
+  run.emit({ state: "failed", said: lastSaid(said, codes) ?? `it ended with exit ${outcome.exitCode}` });
 }
 
 export interface HostActsOptions {
@@ -209,13 +207,15 @@ export function hostActs(o: HostActsOptions): AgentsActs {
       }
       const name = keyEnvOf(row);
       if (name === undefined) throw new Error(noVaultKeyRefusal(entry.name));
-      writeEnvFile(o.vaultFile, { [name]: key.trim() });
+      const value = key.trim();
+      if (value === "") throw new Error(`The key for ${entry.name} is empty.`);
+      writeEnvFile(o.vaultFile, { [name]: value });
     },
     addTools: async (on, agent) => {
       if (on.kind !== "here") throw new Error(addToolsHereRefusal);
+      if (!MCP_AGENTS.some(a => a.id === agent)) throw new Error(`${agentOf(agent).name} has no MCP config wsp knows, so the wsp tools were not written`);
       const placed = installMcp(agent, o.wspServer(), o.home());
-      if (placed.path === undefined) throw new Error(`${placed.agent} has no MCP config wsp knows, so the wsp tools were not written`);
-      return { file: placed.path };
+      return { file: placed.path! };
     },
   };
 }

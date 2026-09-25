@@ -824,7 +824,7 @@ describe("the init job, manual road", () => {
     // A login on the callback road runs with a browser to find, so its page can return to the machine instead.
     expect(held.ptys.some(p => (p.created["env"] as Record<string, string> | undefined)?.["DISPLAY"] !== undefined)).toBe(true);
     await f.jobs.signInCode({ tool: "gemini", code: PASTED });
-    const login = held.ptys.find(p => p.writes[0]?.includes("exec bash -c $'gemini"))!;
+    const login = held.ptys.find(p => p.writes[0]!.includes("exec bash -c") && p.ran?.startsWith("gemini"))!;
     expect(login.writes.slice(1)).toContain(`${PASTED}\r`);
     await f.settled();
     const done = f.jobs.view()!;

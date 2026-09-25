@@ -1405,7 +1405,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // A sign-in on one of the person's computers is theirs alone, and its page and code go to the sockets
               // following it and to no other: they are what finishes that login.
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               let queued: Record<string, unknown>[] | null = [];
@@ -1415,6 +1415,11 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               };
               const ask = msg.op === "servers.signIn" ? { agent: msg.agent, server: msg.name } : { agent: msg.agent };
               const { signInId, leave } = await rt.agents.signIn(msg.target, ask, emit, origin);
+              if (signIns.has(signInId)) {
+                leave();
+                send({ id: msg.id, ok: true, signInId });
+                return;
+              }
               signIns.add(signInId);
               detaches.push(leave);
               if (ws.readyState !== ws.OPEN) {
@@ -1430,7 +1435,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "agents.signInCode":
             case "agents.signInStop":
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               if (!signIns.has(msg.signInId)) {
@@ -1444,7 +1449,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "agents.signInLine":
               // It carries paths and commands only, and only the host's own command line runs one.
               if (!ownRoad() || me?.kind !== "host") {
-                send({ id: msg.id, ok: false, error: ownRoad() ? SIGN_IN_LINE_REFUSAL : PLACES_TICKET_REFUSAL });
+                send(ownRoad() ? { id: msg.id, ok: false, error: SIGN_IN_LINE_REFUSAL } : { id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               send({ id: msg.id, ok: true, line: await rt.agents.signInLine(msg.target, { agent: msg.agent, ...(msg.name !== undefined ? { server: msg.name } : {}) }, origin) });
@@ -1461,7 +1466,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "agents.addTools":
               if (!ownRoad()) {
-                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;
               }
               send({ id: msg.id, ok: true, ...(await rt.agents.addTools(msg.target, msg.agent, origin)) });

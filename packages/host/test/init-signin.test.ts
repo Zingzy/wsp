@@ -7,7 +7,6 @@
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
-import { shellLine } from "../src/signin-relay.js";
 import { describe, expect, it } from "vitest";
 import { flowHooks, settledOutcomes, signInStage, stageLogins, type SignInFlow, type SignInStageOptions } from "../src/init-signin.js";
 import { vaultRows } from "../src/init-vault.js";
@@ -58,7 +57,7 @@ function signInOnTheMachine(order: "before" | "after" | "never") {
   };
   let pty: FakePty | undefined;
   link.script = (p, line) => {
-    if (line !== shellLine(loginOf("codex"))!.slice(0, -1)) return;
+    if (line !== `printf '\\036'; exec bash -c ${loginOf("codex")}`) return;
     pty = p;
     if (order === "before") shim(PAGE, 42485);
     link.data(p, `Opening browser to sign in...\r\nIf the browser didn't open, visit: ${PRINTED}\r\nPaste code here if prompted > `);
@@ -97,7 +96,7 @@ describe("the sign-in stage", () => {
     };
     const st = stage(link, { logins: [{ ...CODEX, choice: "machine" }, { ...GH, choice: "machine" }] });
     const rows = await st.run;
-    expect(link.ptys.map(p => p.writes[0])).toEqual([shellLine(loginOf("codex")), shellLine(loginOf("gh"))]);
+    expect(link.ptys.map(p => p.ran)).toEqual([loginOf("codex"), loginOf("gh")]);
     expect(rows).toEqual([
       { id: "logins/codex", label: "Codex login", state: "signed-in", command: loginOf("codex"), exit: 0, note: `${loginOf("codex")} exited 0` },
       { id: "logins/gh", label: "GitHub CLI login", state: "signed-in", command: loginOf("gh"), exit: 0, note: `${loginOf("gh")} exited 0` },
@@ -217,6 +216,6 @@ describe("what an answer means at build time", () => {
     const st = stage(link, { logins: [BARE] });
     const [r] = await st.run;
     expect(r).toMatchObject({ state: "signed-in", exit: 0, command: loginOf("codex") });
-    expect(link.ptys.map(p => p.writes[0])).toEqual([shellLine(loginOf("codex"))]);
+    expect(link.ptys.map(p => p.ran)).toEqual([loginOf("codex")]);
   });
 });

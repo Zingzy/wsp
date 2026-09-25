@@ -8,6 +8,7 @@
 import type { Readable, Writable } from "node:stream";
 import { stripVTControlCharacters, styleText } from "node:util";
 import type { Question } from "@wsp/catalog";
+import { hasControlChar, lastLine, shellQuote } from "@wsp/protocol";
 import type { PtyLink } from "@wsp/runtime";
 
 export type { PtyLink };
@@ -151,23 +152,44 @@ function ptyIdOf(reply: Record<string, unknown>): string {
  * prompt and its echo of the line, which are not the tool's words. */
 export const TOOL_STARTS = "\x1e";
 
-/** The command as the inside of bash's $'...': every byte the line editor would act on rather than insert, and the
- * quote, the backslash and history's `!`, spelled as the escape that turns back into it. */
-function ansiC(command: string): string {
-  let out = "";
-  for (const byte of Buffer.from(command, "utf8")) {
-    const c = String.fromCharCode(byte);
-    out += byte < 0x20 || byte > 0x7e || c === "'" || c === "\\" || c === "!" ? `\\x${byte.toString(16).padStart(2, "0")}` : c;
-  }
-  return out;
+/** Puts a command in a file only the daemon's login can read, in a folder of its own, and answers the folder. */
+const STAGE = `umask 077 && d=$(mktemp -d "\${TMPDIR:-/tmp}/wsp-line.XXXXXX") && cat > "$d/line" && printf '%s' "$d"`;
+
+/** A command put where a short typed line reads it: a canonical tty line holds 1024 bytes on macOS and bash takes the
+ * typed line before its line editor has the tty, so a command typed whole is cut off past that. */
+export interface Staged {
+  dir: string;
+  /** The folder's file, quoted for the shell. */
+  file: string;
+  clear(): Promise<void>;
 }
 
-/** The one line typed into the pty's bash: the command handed whole to `bash -c` as one $'...' word of printable
- * characters, so a control character in a name is data and never a key the line editor obeys, and exec'd, so the pty
- * ends with the tool whatever way it ends. */
-export function shellLine(command: string | undefined): string | undefined {
-  if (command === undefined) return undefined;
-  return `printf '\\036'; exec bash -c $'${ansiC(command)}'\r`;
+async function stage(link: PtyLink, command: string): Promise<Staged> {
+  const reply = await link.op("exec", { cmd: STAGE, stdin: Buffer.from(command, "utf8").toString("base64") });
+  const dir = typeof reply["stdout"] === "string" ? reply["stdout"] : "";
+  if (reply["exitCode"] !== 0 || !dir.startsWith("/") || hasControlChar(dir)) {
+    throw new Error(`could not put the command on that computer: ${lastLine(String(reply["stderr"] ?? reply["error"] ?? "")) ?? "no reason given"}`);
+  }
+  return { dir, file: shellQuote(`${dir}/line`), clear: async () => void (await link.op("exec", { cmd: `rm -rf -- ${shellQuote(dir)}` }).catch(() => {})) };
+}
+
+/** The line typed into the pty's bash: it reads the staged command, removes its folder, prints the byte that marks the
+ * tool starting and exec's the command, so the pty ends with the tool whatever way it ends. */
+export function shellLine(staged: Pick<Staged, "dir" | "file">): string {
+  return `c=$(< ${staged.file}); rm -rf -- ${shellQuote(staged.dir)}; printf '\\036'; exec bash -c "$c"\r`;
+}
+
+/** Hands on only what the pty printed once the tool started: a login banner, the prompt and the echo of the typed line
+ * are the shell's, so a page or a code read there is not the tool's. */
+function fromTool(): (chunk: string) => string {
+  let started = false;
+  return chunk => {
+    if (started) return chunk;
+    const at = chunk.indexOf(TOOL_STARTS);
+    if (at < 0) return "";
+    started = true;
+    return chunk.slice(at + TOOL_STARTS.length);
+  };
 }
 
 export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
@@ -178,6 +200,8 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
   // bash by name: the person's login shell may read interactive rc files that would sit under the typed line.
   const ptyId = ptyIdOf(await o.link.op("pty.create", { cols, rows, shell: "bash", ...(o.env !== undefined ? { env: o.env } : {}) }));
   const scanner = new UrlScanner();
+  const tool = o.command === undefined ? (chunk: string) => chunk : fromTool();
+  let staged: Staged | undefined;
   const outcome: RelayOutcome = { exitCode: -1, timedOut: false, dropped: false, urls: 0, opened: 0 };
   let offer: { url: string; at: number; typed: boolean } | undefined;
   let done: (() => void) | undefined;
@@ -196,7 +220,9 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
     if (e["type"] === "pty.data") {
       const data = String(e["data"]);
       output.write(data);
-      show(scanner.feed(data));
+      const said = tool(data);
+      if (said === "") return;
+      show(scanner.feed(said));
       if (flush) clearTimeout(flush);
       flush = setTimeout(() => show(scanner.flush()), o.flushMs ?? FLUSH_MS);
       flush.unref();
@@ -247,8 +273,10 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
     input.on("data", onData);
     input.resume();
     output.on("resize", onResize);
-    const line = shellLine(o.command);
-    if (line !== undefined) await o.link.op("pty.write", { ptyId, data: line });
+    if (o.command !== undefined) {
+      staged = await stage(o.link, o.command);
+      await o.link.op("pty.write", { ptyId, data: shellLine(staged) });
+    }
     await exited;
   } finally {
     clearTimeout(timer);
@@ -259,6 +287,7 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
     if (rawSet && input.setRawMode) input.setRawMode(wasRaw);
     detach();
     await o.link.op("pty.kill", { ptyId }).catch(() => {});
+    await staged?.clear();
   }
   return outcome;
 }
@@ -327,10 +356,13 @@ export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
     for (const url of urls) o.onUrl?.(url);
   };
   const questions = new QuestionScanner(o.questions ?? []);
+  const tool = fromTool();
+  let staged: Staged | undefined;
   const detach = o.link.onEvent(e => {
     if (e["ptyId"] !== ptyId) return;
     if (e["type"] === "pty.data") {
-      const data = String(e["data"]);
+      const data = tool(String(e["data"]));
+      if (data === "") return;
       o.onData?.(data);
       for (const asked of questions.feed(data)) {
         if ("answer" in asked.question) void o.link.op("pty.write", { ptyId, data: asked.question.answer }).catch(() => {});
@@ -355,8 +387,8 @@ export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
   try {
     okOrThrow("pty.attach", await o.link.op("pty.attach", { ptyId }));
     o.onTyping?.(async data => void okOrThrow("pty.write", await o.link.op("pty.write", { ptyId, data })));
-    const line = shellLine(o.command);
-    if (line !== undefined) await o.link.op("pty.write", { ptyId, data: line });
+    staged = await stage(o.link, o.command);
+    await o.link.op("pty.write", { ptyId, data: shellLine(staged) });
     await exited;
   } finally {
     clearTimeout(timer);
@@ -364,6 +396,7 @@ export async function watchPty(o: WatchOptions): Promise<WatchOutcome> {
     o.onTyping?.(undefined);
     detach();
     await o.link.op("pty.kill", { ptyId }).catch(() => {});
+    await staged?.clear();
   }
   return outcome;
 }
@@ -408,14 +441,17 @@ export async function runQuiet(link: PtyLink, command: string, timeoutMs: number
     if (done !== undefined && markAtEnd() < 0) dropped = true;
     done?.();
   });
+  let staged: Staged | undefined;
   try {
     okOrThrow("pty.attach", await link.op("pty.attach", { ptyId }));
-    await link.op("pty.write", { ptyId, data: `${command}; printf '\\n${STATUS_MARK} %s\\n' $?; exit\r` });
+    staged = await stage(link, command);
+    await link.op("pty.write", { ptyId, data: `c=$(cat ${staged.file}); rm -rf -- ${shellQuote(staged.dir)}; eval "$c"; printf '\\n${STATUS_MARK} %s\\n' $?; exit\r` });
     await exited;
   } finally {
     clearTimeout(timer);
     detach();
     await link.op("pty.kill", { ptyId }).catch(() => {});
+    await staged?.clear();
   }
   const lines = text.replace(/\r/g, "").split("\n");
   const markAt = markAtEnd();

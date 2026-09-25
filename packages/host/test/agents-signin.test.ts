@@ -2,11 +2,10 @@
 // Signing an agent or one of its MCP servers in from the app: the line each
 // target runs, the watched pty over a scripted link, the vault and the wsp
 // tools. Nothing here reaches a real agent, a box or a vendor.
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { shellLine } from "../src/signin-relay.js";
 import { describe, expect, it } from "vitest";
 import type { Machine } from "@wsp/engine";
 import { HERE_PLACE_ID, addToolsHereRefusal, controlSignInRefusal, noVaultKeyRefusal, notTokenRefusal, serverSignInCopyRefusal, signInTerminalRefusal, signInVaultRefusal, type AgentsSignInEvent } from "@wsp/protocol";
@@ -80,8 +79,9 @@ describe("the line a sign-in runs where it stands", () => {
 });
 
 describe("a watched sign-in", () => {
-  const run = async (script: (link: ReturnType<typeof fakePtyLink>, pty: FakePty, line: string) => void, plan: Awaited<ReturnType<typeof planSignIn>>) => {
+  const run = async (script: (link: ReturnType<typeof fakePtyLink>, pty: FakePty, line: string) => void, plan: Awaited<ReturnType<typeof planSignIn>>, banner?: string) => {
     const link = fakePtyLink();
+    if (banner !== undefined) link.banner = banner;
     link.script = (pty, line) => script(link, pty, line);
     const steps: Omit<AgentsSignInEvent, "type" | "signInId">[] = [];
     let type: ((code: string) => Promise<void>) | undefined;
@@ -106,13 +106,29 @@ describe("a watched sign-in", () => {
     expect(t.link.ops[0]).toEqual({ op: "exec", extra: { cmd: "mkdir -p '/var/lib/wsp/logins/codex'" } });
     const [flow] = t.link.ptys;
     expect(flow!.created["env"]).toEqual({ CODEX_HOME: "/var/lib/wsp/logins/codex" });
-    expect(flow!.writes[0]).toBe(shellLine("codex login --device-auth"));
+    expect(flow!.ran).toBe("codex login --device-auth");
     expect(t.steps[0]).toEqual({ state: "running" });
     expect(t.steps).toContainEqual({ state: "waiting", url: "https://auth.openai.com/codex/device", code: "ABCD-12345", paste: false });
     expect(t.steps.at(-1)).toEqual({ state: "signed-in" });
     // Every status ran with the same store as the flow.
     expect(t.link.ptys.slice(1).every(p => (p.created["env"] as Record<string, string>)["CODEX_HOME"] === "/var/lib/wsp/logins/codex")).toBe(true);
     expect(flow!.killed).toBe(true);
+  });
+
+  it("reads the page and the code from the tool alone, never from what the shell printed before it started", async () => {
+    let signedIn = false;
+    const plan = await planSignIn(rootBox(), { agent: "codex" });
+    const t = await run((l, pty, line) => {
+      if (line.includes("WSP_STATUS")) {
+        l.data(pty, `${signedIn ? "Logged in using ChatGPT" : "Not logged in"}\r\nWSP_STATUS ${signedIn ? 0 : 1}\r\n`);
+        l.exit(pty, 0);
+        return;
+      }
+      l.data(pty, "Open https://auth.openai.com/codex/device\r\nEnter this one-time code\r\n   ABCD-12345\r\n");
+      setTimeout(() => (signedIn = true), 40);
+    }, plan, "Last login: see https://evil.example/login and enter EVIL-99999\r\n");
+    await t.done;
+    expect(t.steps.filter(s => s.state === "waiting")).toEqual([{ state: "waiting", url: "https://auth.openai.com/codex/device", code: "ABCD-12345", paste: false }]);
   });
 
   it("types what the page hands back into the tool with the Enter the person would press, and says what the tool said when it did not land", async () => {
@@ -185,6 +201,7 @@ describe("the host's acts that write", () => {
     await a.key("claude", "  sk-ant-oat01-abcdefghijklmnopqrstuvwxyz  ");
     await a.key("gemini", "AIzaFake");
     await expect(a.key("pi", "x")).rejects.toThrow(noVaultKeyRefusal("Pi"));
+    await expect(a.key("gemini", "   ")).rejects.toThrow("The key for Gemini CLI is empty.");
     const env = readFileSync(join(dir, ".env"), "utf8");
     expect(env).toContain("CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abcdefghijklmnopqrstuvwxyz\n");
     expect(env).toContain("GEMINI_API_KEY=AIzaFake");
@@ -197,6 +214,12 @@ describe("the host's acts that write", () => {
     expect(config).toContain("[mcp_servers.wsp]");
     expect(config).toContain('"/usr/local/bin/wsp"');
     await expect(a.addTools(rootBox(), "codex")).rejects.toThrow(addToolsHereRefusal);
+  });
+
+  it("refuses the wsp tools for an agent with no MCP config before writing anything", async () => {
+    const { home, acts: a } = acts();
+    await expect(a.addTools({ kind: "here" }, "pi")).rejects.toThrow("Pi has no MCP config wsp knows, so the wsp tools were not written");
+    expect(readdirSync(home)).toEqual([]);
   });
 });
 
@@ -249,7 +272,7 @@ describe("the sign-in lines at the person's terminal", () => {
     expect(await runVerb(verb, ["agents", "signin", "gemini"], io, () => "/tmp/state.json", { env: {}, dial: async () => client, terminal: terminal(), open: async () => false })).toBe(1);
     expect(asked.find(a => a.op === "agents.signInLine")?.params).toEqual({ target: { placeId: HERE_PLACE_ID }, agent: "gemini" });
     expect(asked.find(a => a.op === "daemon.open")?.params).toEqual({ placeId: HERE_PLACE_ID });
-    expect(link.ptys[0]!.writes[0]).toBe(shellLine("gemini --skip-trust"));
+    expect(link.ptys[0]!.ran).toBe("gemini --skip-trust");
     expect(io.lines).toEqual(["Gemini CLI is not signed in on this computer."]);
   });
 
