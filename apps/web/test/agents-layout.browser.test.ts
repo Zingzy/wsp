@@ -301,6 +301,55 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     expect(await page!.evaluate(() => (document.activeElement as HTMLElement).closest<HTMLElement>("[data-agents-row]")?.dataset["agentsRow"])).toBe("agent-opencode");
   });
 
+  it("scrolls a long install line sideways in its own box at 360, never broken, never cut and never under the copy glyph", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    for (const width of [358, 360]) {
+      await at(width).locator('[data-agents-row="agent-pi"] [data-row-trigger]').click();
+      const box = at(width).locator("[data-fact=install] [data-copy-row]");
+      await box.waitFor();
+      const m = await box.evaluate(row => {
+        const value = row.querySelector<HTMLElement>("[data-k]")!;
+        const glyph = row.querySelector<HTMLElement>("button")!;
+        const v = value.getBoundingClientRect();
+        const g = glyph.getBoundingClientRect();
+        const r = row.getBoundingClientRect();
+        value.scrollLeft = value.scrollWidth;
+        return { valueRight: v.right, glyphLeft: g.left, glyphRight: g.right, rowRight: r.right, height: Math.round(r.height), scrolls: value.scrollWidth > value.clientWidth, scrolled: value.scrollLeft > 0, overflowX: getComputedStyle(value).overflowX };
+      });
+      expect(m.valueRight, `${width}`).toBeLessThanOrEqual(m.glyphLeft);
+      expect(m.glyphRight, `${width}`).toBeLessThanOrEqual(m.rowRight);
+      expect(m.height, `${width}`).toBe(40);
+      expect(m.overflowX, `${width}`).toBe("auto");
+      expect(m.scrolls && m.scrolled, `${width}`).toBe(true);
+      await at(width).locator("[data-k=agents-back]").click();
+    }
+  });
+
+  it("fades a copy line's right edge only while it overflows its box, and drops the fade once it is scrolled to its end", async () => {
+    await open("screen=agents-widths&theme=dark");
+    await page!.waitForSelector("[data-agents-row]");
+    const read = (width: number) =>
+      at(width)
+        .locator("[data-fact=install] [data-copy-row] [data-k]")
+        .evaluate(v => ({ scrolls: v.scrollWidth > v.clientWidth, mask: getComputedStyle(v).maskImage }));
+    const install = async (width: number): Promise<void> => {
+      await at(width).locator('[data-agents-row="agent-pi"] [data-row-trigger]').click();
+      await at(width).locator("[data-fact=install] [data-copy-row]").waitFor();
+    };
+    // A long line in the panel's floor: the fade stands, and leaves once the line is scrolled to its end.
+    await install(360);
+    expect(await read(360)).toEqual({ scrolls: true, mask: expect.stringMatching(/linear-gradient/) });
+    await at(360).locator("[data-fact=install] [data-copy-row] [data-k]").evaluate(v => void (v.scrollLeft = v.scrollWidth));
+    await expect.poll(async () => (await read(360)).mask).toBe("none");
+    // The same line in a box wide enough for it: no fade; narrowed, it is measured again and fades.
+    await at(760).evaluate(el => void (el.style.width = "1400px"));
+    await install(760);
+    await expect.poll(async () => await read(760)).toEqual({ scrolls: false, mask: "none" });
+    await at(760).evaluate(el => void (el.style.width = "360px"));
+    await expect.poll(async () => (await read(760)).mask).toMatch(/linear-gradient/);
+  });
+
   it("photographs every tab and a detail of each kind at 360, 480 and 696 in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(`screen=agents-widths&theme=${theme}`);

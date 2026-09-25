@@ -235,6 +235,10 @@ describe("readHistories", () => {
       ["opencode", "no-reader", 0, 0],
       ["pi", "no-reader", 0, 0],
       ["hermes", "unreadable", 0, 0],
+      ["crush", "no-reader", 0, 0],
+      ["qwen", "no-reader", 0, 0],
+      ["goose", "no-reader", 0, 0],
+      ["amp", "no-reader", 0, 0],
     ]);
   });
 });

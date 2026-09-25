@@ -1419,8 +1419,7 @@ export function nodeMajorFor(floor: number, now: Date): NodeMajor | undefined {
 
 /** Every installer pins a version; npm checks the registry's integrity hash for each tarball, uv is checksummed
  * by its release, git checkouts compare the commit. The catalog's agents install by their roads. Aider is not a
- * catalog agent (its project state has no measured resolver, so wsp does not ship it); its line stays for recipes
- * that tick it: https://aider.chat/docs/install.html, the uv tool line. */
+ * catalog agent; its line stays for recipes that tick it: https://aider.chat/docs/install.html, the uv tool line. */
 export function agentInstallers(agents: readonly AgentEntry[]): Record<string, AgentInstaller> {
   return {
     ...Object.fromEntries(agents.map(a => [a.id, agentInstaller(a)])),

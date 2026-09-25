@@ -7,10 +7,11 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
 import { pinMismatchLine, SHARED_TOOL_ROOTS, TOOLS_PATH, WORKSPACE_OVERLAID } from "@wsp/protocol";
-import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, installShown, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, RELEASE_PINS, LOCAL_BIN, installHomes, TOOL_PREFIX, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, installShown, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NO_SIGN_IN, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, RELEASE_PINS, runsThreads, THREAD_AGENTS, LOCAL_BIN, installHomes, TOOL_PREFIX, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -103,7 +104,7 @@ describe("catalog", () => {
 
   it("names the artifact and the sum before anything runs: every release row a pinned tag and an asset per arch, every cask a version and two sums, and no row asking a vendor what its current version is", () => {
     const releases = CATALOG.filter(e => e.installRoad.road === "release");
-    expect(releases.map(e => e.id)).toEqual(["gh", "cloudflared", "fly", "supabase", "doppler", "yq", "golangci-lint", "mise", "git-delta", "bazel"]);
+    expect(releases.map(e => e.id)).toEqual(["crush", "goose", "gh", "cloudflared", "fly", "supabase", "doppler", "yq", "golangci-lint", "mise", "git-delta", "bazel"]);
     for (const e of releases) {
       const road = e.installRoad as Extract<InstallRoad, { road: "release" }>;
       const pin = RELEASE_PINS[road.repo!];
@@ -261,15 +262,18 @@ describe("catalog", () => {
     expect(new Set(LOGIN_ROWS.map(r => r.id)).size).toBe(LOGIN_ROWS.length);
   });
 
-  it("ships exactly the six agents whose project state a move can follow, each with a pinned road, a smoke and a resolver", () => {
-    expect(CATALOG_AGENTS.map(a => a.id)).toEqual(["claude", "codex", "gemini", "opencode", "pi", "hermes"]);
-    for (const a of CATALOG_AGENTS) {
+  it("ships the six agents whose project state a move can follow, each with a measured road, a smoke and a resolver", () => {
+    const shipped = CATALOG_AGENTS.filter(a => a.source.road === "measured");
+    expect(shipped.map(a => a.id)).toEqual(["claude", "codex", "gemini", "opencode", "pi", "hermes"]);
+    for (const a of shipped) {
       expect(a.projectState.length, a.id).toBeGreaterThan(0);
+      expect(hasLogin(a.signIn) || mintsToken(a.signIn), a.id).toBe(true);
+      expect(sizeBytes(a.size), a.id).toBeGreaterThan(0);
+    }
+    for (const a of CATALOG_AGENTS) {
       expect(a.stateHome, a.id).toMatch(/^\.[\w./-]*[\w-]$/);
       if (a.guestStateHome !== undefined) expect(a.guestStateHome, a.id).toMatch(/^\/root\//);
-      expect(hasLogin(a.signIn) || mintsToken(a.signIn), a.id).toBe(true);
-      expect(smokeOf(a)).toBe(`${a.id} --version`);
-      expect(sizeBytes(a.size), a.id).toBeGreaterThan(0);
+      expect(smokeOf(a)).toBe(`${a.bin} --version`);
     }
     expect(CATALOG_AGENTS.filter(a => a.guestStateHome !== undefined).map(a => [a.id, a.guestStateHome])).toEqual([["claude", "/root/.claude-cfg"]]);
     expect(installLine(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.153.0");
@@ -280,6 +284,56 @@ describe("catalog", () => {
     for (const a of CATALOG_AGENTS) if (a.installRoad.road === "npm") expect(a.installRoad.version, a.id).toMatch(/^\d/);
   });
 
+  it("keeps one module per agent under src/agents, each registered once, the agents first in the catalog", () => {
+    const dir = fileURLToPath(new URL("../src/agents/", import.meta.url));
+    const modules = readdirSync(dir).filter(f => f.endsWith(".ts") && f !== "index.ts" && f !== "entry.ts").map(f => f.replace(/\.ts$/, "")).sort();
+    expect([...CATALOG_AGENTS.map(a => a.id)].sort()).toEqual(modules);
+    expect(CATALOG_AGENTS.map(a => a.id)).toEqual(["claude", "codex", "gemini", "opencode", "pi", "hermes", "crush", "qwen", "goose", "amp"]);
+    expect(CATALOG.slice(0, CATALOG_AGENTS.length)).toEqual(CATALOG_AGENTS);
+    expect(CATALOG.slice(CATALOG_AGENTS.length).every(e => e.kind === "tool")).toBe(true);
+  });
+
+  it("manages Crush, Qwen Code, Goose and Amp by a pinned road with nothing of theirs measured or carried yet", () => {
+    const added = ["crush", "qwen", "goose", "amp"].map(id => catalogEntry(id) as AgentEntry);
+    for (const a of added) {
+      expect(a.source, a.id).toEqual({ sessions: 0, images: 0, road: "unmeasured" });
+      expect(a.projectState, a.id).toEqual([]);
+      expect(a.configPaths, a.id).toEqual([]);
+      expect(a.signIn, a.id).toEqual(NO_SIGN_IN);
+      expect(a.mcp, a.id).toBeUndefined();
+      expect(runsThreads(a.id), a.id).toBe(false);
+    }
+    // A release road carries the tag and both arches' assets with their sums, off the pins table.
+    for (const [id, repo] of [["crush", "charmbracelet/crush"], ["goose", "aaif-goose/goose"]] as const) {
+      const pin = RELEASE_PINS[repo]!;
+      expect(catalogEntry(id)!.installRoad, id).toEqual({ road: "release", repo, version: pin.tag, assets: pin.assets });
+      expect(pin.assets.x86_64?.sha256, id).toMatch(/^[0-9a-f]{64}$/);
+      expect(pin.assets.aarch64?.sha256, id).toMatch(/^[0-9a-f]{64}$/);
+      expect(installLine(catalogEntry(id)!), id).toContain('sha256sum -c -');
+    }
+    expect(RELEASE_PINS["charmbracelet/crush"]!.assets.x86_64).toEqual({ name: "crush_0.96.1_Linux_x86_64.tar.gz", sha256: "5411b0906a82162dcab4a99071d70accf1caad0eee69789416dd607943c6680d" });
+    expect(installShown(catalogEntry("crush")!)).toEqual({ words: "the v0.96.1 release of github.com/charmbracelet/crush" });
+    expect(installShown(catalogEntry("goose")!)).toEqual({ words: "the v1.52.0 release of github.com/aaif-goose/goose" });
+    // Goose moved to the AAIF at the Linux Foundation: github.com/block/goose only redirects there, and the assets are the same bytes.
+    expect(RELEASE_PINS["block/goose"]).toBeUndefined();
+    expect(RELEASE_PINS["aaif-goose/goose"]!.assets.x86_64).toEqual({ name: "goose-x86_64-unknown-linux-gnu.tar.gz", sha256: "4aee1f770b405c44194c0e9407df1fb06bda4c50eee935f0d8fd10731821cc5e" });
+    expect(RELEASE_PINS["aaif-goose/goose"]!.assets.aarch64).toEqual({ name: "goose-aarch64-unknown-linux-gnu.tar.gz", sha256: "ae602c4f6e9a785bf087da52c89908d4dc6aa605dcc17bf83293873f626d9c85" });
+    expect(installLine(catalogEntry("goose")!)).toContain("https://github.com/aaif-goose/goose/releases/download/v1.52.0/");
+    expect((catalogEntry("goose") as AgentEntry).about.repo).toBe("https://github.com/aaif-goose/goose");
+    expect(installShown(catalogEntry("qwen")!)).toEqual({ line: "npm install -g --ignore-scripts @qwen-code/qwen-code@0.24.5" });
+    expect(installShown(catalogEntry("amp")!)).toEqual({ line: "npm install -g @ampcode/cli@0.0.1790352060-g26b83c" });
+    expect((catalogEntry("qwen") as AgentEntry).node).toBe(22);
+    expect(catalogEntry("crush")!.size).toEqual({ bytes: 86818976, on: "2026-09-26", method: "unpacked" });
+    expect(sizeBytes(catalogEntry("amp")!.size)).toBeUndefined();
+    // Every folder an install writes a skill into is one of the agent's own, under the home.
+    for (const a of added) for (const r of a.skillRoots.user) expect(r.dir, a.id).toMatch(/^~\//);
+  });
+
+  it("says which agents wsp opens threads on", () => {
+    expect(CATALOG_AGENTS.filter(a => runsThreads(a.id)).map(a => a.id)).toEqual([...THREAD_AGENTS]);
+    expect(runsThreads("nope")).toBe(false);
+  });
+
   it("says who makes each agent, what it is in a sentence or two, its license, where it lives, and the line a person pastes to install it", () => {
     expect(CATALOG_AGENTS.map(a => [a.id, a.about.creator, a.about.license])).toEqual([
       ["claude", "Anthropic", "proprietary"],
@@ -288,18 +342,27 @@ describe("catalog", () => {
       ["opencode", "Anomaly", "MIT"],
       ["pi", "Earendil Works", "MIT"],
       ["hermes", "Nous Research", "MIT"],
+      ["crush", "Charm", "FSL-1.1-MIT"],
+      ["qwen", "Qwen team, Alibaba", "Apache-2.0"],
+      ["goose", "Block", "Apache-2.0"],
+      ["amp", "Sourcegraph", "proprietary"],
     ]);
     for (const a of CATALOG_AGENTS) {
       const sentences = a.about.description.split(/(?<=\.) /);
       expect(sentences.length, a.id).toBeLessThanOrEqual(2);
       for (const s of sentences) expect(s, a.id).toMatch(/^[A-Z].*\.$/);
-      expect(a.about.repo, a.id).toMatch(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/);
+      expect(a.about.description, a.id).not.toMatch(/\bAI\b/);
+      if (a.about.repo !== undefined) expect(a.about.repo, a.id).toMatch(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/);
       if (a.about.homepage !== undefined) expect(a.about.homepage, a.id).toMatch(/^https:\/\//);
     }
-    expect(installShown(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.153.0");
-    // A vendor's script is many lines no person pastes.
-    expect(installShown(catalogEntry("claude")!)).toBeUndefined();
-    expect(installShown(catalogEntry("hermes")!)).toBeUndefined();
+    // Amp's source is not public.
+    expect(CATALOG_AGENTS.filter(a => a.about.repo === undefined).map(a => a.id)).toEqual(["amp"]);
+    expect(installShown(catalogEntry("codex")!)).toEqual({ line: "npm install -g @openai/codex@0.153.0" });
+    // A vendor's script is many lines no person pastes, and a release is a download checked against its sum.
+    expect(installShown(catalogEntry("claude")!)).toEqual({ words: "by its own installer" });
+    expect(installShown(catalogEntry("hermes")!)).toEqual({ words: "by its own installer" });
+    expect(installShown(catalogEntry("gh")!)).toEqual({ words: "the v2.101.0 release of github.com/cli/cli" });
+    expect(installShown(catalogEntry("gcloud")!)).toEqual({ words: "Google's Linux release" });
   });
 
   it("gives every entry one install line from its road's module: apt, npm, Homebrew as linuxbrew, a release at its current tag, a vendor's download", () => {
@@ -703,12 +766,13 @@ describe("catalog", () => {
   it("says which roads no guest has run yet", () => {
     const unmeasured = CATALOG.filter(e => e.source.road === "unmeasured").map(e => e.id);
     expect(unmeasured).toEqual([
+      "crush", "qwen", "goose", "amp",
       "curl", "pnpm", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "agent-browser",
       "docker", "rust", "maven", "bun", "yarn", "ruff", "black", "mypy", "pyright", "pytest", "prettier", "eslint", "typescript",
       "wrangler", "cloudflared", "kubectl", "aws", "vercel", "netlify", "fly", "supabase", "railway", "doppler", "op", "ffmpeg", "yq", "git-lfs", "tmux",
       "ruby", "php", "postgresql-client", "redis-tools", "golangci-lint", "mise", "git-delta", "shellcheck", "swift", "elixir", "bazel", "llvm", "playwright",
     ]);
-    for (const e of CATALOG_AGENTS) expect(e.source.road, e.id).toBe("measured");
+    expect(CATALOG_AGENTS.filter(e => e.source.road !== "measured").map(e => e.id)).toEqual(["crush", "qwen", "goose", "amp"]);
   });
 
   it("gives every row a size in bytes with the day and the way it was measured, or the reason nobody could measure it", () => {
@@ -728,7 +792,8 @@ describe("catalog", () => {
     // The rows are the one place a size lives: no table of formula or global sizes beside them.
     expect(Object.keys(catalog).filter(k => /_(MIB|BYTES)$/.test(k))).toEqual([]);
     // Every row has a number: 1Password's is its one file unpacked from the deb, since its package carries no Installed-Size.
-    expect(CATALOG.filter(e => !("bytes" in e.size)).map(e => e.id)).toEqual([]);
+    // Qwen Code and Amp install by npm, whose bytes only an install could read.
+    expect(CATALOG.filter(e => !("bytes" in e.size)).map(e => e.id)).toEqual(["qwen", "amp"]);
     expect(catalogEntry("op")!.size).toEqual({ bytes: 42950840, on: "2026-09-07", method: "unpacked" });
     for (const text of Object.values(SIZE_METHODS)) expect(text).not.toMatch(/\u2014/);
     // The du rows were read on a Debian bookworm host, the node:22-bookworm image among them; the label says the host, not one image.
