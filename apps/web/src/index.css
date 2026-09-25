@@ -369,8 +369,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
 @utility dropdown-glass {
   /* Near solid, so the rows under a menu never read through it; the blur only softens what little shows. */
   background: color-mix(in srgb, var(--popover) 96%, transparent);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px) var(--glass-ground,);
+  backdrop-filter: blur(8px) var(--glass-ground,);
   border: 1px solid color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
   box-shadow: 0 12px 32px -12px rgb(0 0 0 / 45%), 0 2px 6px -2px rgb(0 0 0 / 25%);
 
