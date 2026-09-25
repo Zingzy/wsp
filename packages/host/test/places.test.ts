@@ -1098,6 +1098,35 @@ describe("wsp add on a computer reached over ssh", () => {
     expect(said).not.toContain("somebody else");
   });
 
+  it("says a failed step's sentence once: the step is marked on its line and the sentence is the failure's own", async () => {
+    const io = captured();
+    const frames: ((frame: Record<string, unknown>) => void)[] = [];
+    const sentence = "root@10.0.0.9 cannot reach this computer at http://192.168.1.20:4640, so nothing of wsp's went onto it";
+    const client = {
+      request: async (_op: string, params?: Record<string, unknown>) => {
+        const addId = String(params!["addId"]);
+        for (const fn of frames) {
+          fn({ type: "place.stage", addId, step: "connect", state: "done", note: "Linux 6.8.0" });
+          fn({ type: "place.stage", addId, step: "reach", state: "failed", note: sentence });
+        }
+        throw new Error(sentence);
+      },
+      events: async () => {},
+      onFrame: (fn: (frame: Record<string, unknown>) => void) => {
+        frames.push(fn);
+        return () => frames.splice(frames.indexOf(fn), 1);
+      },
+      closeWords: () => "",
+      closed: Promise.resolve(),
+      close: () => {},
+      terminate: () => {},
+    };
+    const deps = { ...systemPlaceDeps, dial: async () => client as never };
+    await expect(addCommand(io, opts(tmp("add-ssh-failed")), ["root@10.0.0.9"], addFlags("box", "2222", undefined), deps)).rejects.toThrow(sentence);
+    expect(io.lines).toContain(`  x ${PLACE_ADD_WORDS.reach}`);
+    expect([...io.lines, ...io.errors].filter(line => line.includes(sentence))).toEqual([]);
+  });
+
   it("prints the recipe's own rows as they land, after the join lines and before the sign-in it needs them for", async () => {
     const io = { ...captured(), isTTY: true, ask: async () => "no" };
     const frames: ((frame: Record<string, unknown>) => void)[] = [];
@@ -3865,6 +3894,35 @@ describe("what wsp add prints while a project lands on a computer", () => {
       "npm ci in /srv/landing-906.",
       done,
     ]);
+  });
+
+  it("leaves a failed stage's sentence to the failure, which the terminal prints once", async () => {
+    const io = captured();
+    const sentence = "git clone https://github.com/spoo-me/spoo-ts failed on spoo: Repository not found.";
+    const sinks: ((f: Record<string, unknown>) => void)[] = [];
+    const dial: NonNullable<Parameters<typeof addCommand>[4]>["dial"] = () =>
+      Promise.resolve({
+        request: (op: string) => {
+          if (op === "places.list") return Promise.resolve({ places: [spooRow] } as never);
+          for (const sink of sinks) {
+            sink(stage("p_1", "cloning", "Cloning https://github.com/spoo-me/spoo-ts into /wsp/projects/pr_1a2b3c4d/checkout."));
+            sink(stage("p_1", "failed", sentence));
+          }
+          return Promise.reject(new Error(sentence));
+        },
+        events: () => Promise.resolve(),
+        onFrame: (fn: (f: Record<string, unknown>) => void) => {
+          sinks.push(fn);
+          return () => {};
+        },
+        closed: Promise.resolve(),
+        closeWords: () => "",
+        close: () => {},
+        drop: () => {},
+      } as never);
+    await expect(addCommand(io, opts(tmp("add-stage-failed")), ["https://github.com/spoo-me/spoo-ts"], { on: "spoo" }, addDeps(dial))).rejects.toThrow(sentence);
+    expect(io.lines).toEqual(["Cloning https://github.com/spoo-me/spoo-ts into /wsp/projects/pr_1a2b3c4d/checkout."]);
+    expect(io.errors).toEqual([]);
   });
 
   it("prints no stage at all where no computer was named, so another session's add never lands in this terminal", async () => {

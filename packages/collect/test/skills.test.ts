@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { detectSkills, skillFrontmatter, skillRoots } from "../src/detect/skills.js";
+import { detectSkills, skillFrontmatter, skillMdFrontmatter, skillRoots } from "../src/detect/skills.js";
 import type { Host } from "../src/host.js";
 import { nodeHost } from "../src/live-host.js";
 import { agentHome } from "./agent-home.js";
@@ -122,5 +122,26 @@ describe("the skills on a computer", () => {
     expect(skillFrontmatter("name: c\ndescription: starts here\n  and goes on")).toEqual({ name: "c", description: "starts here and goes on" });
     expect(skillFrontmatter("title: none")).toEqual({});
     expect(skillFrontmatter("name: pdf\nname: memo")).toEqual({ name: "pdf", names: 2 });
+  });
+
+  it("reads the name key however YAML spells it, and nothing past the closing ---", () => {
+    expect(skillMdFrontmatter("---\nname: pdf\n---\n").name).toBe("pdf");
+    expect(skillMdFrontmatter("---\nname: \"pdf\"\n---\n").name).toBe("pdf");
+    expect(skillMdFrontmatter("---\nname: 'pdf'\n---\n").name).toBe("pdf");
+    expect(skillMdFrontmatter("---\ndescription: none\n---\n").name).toBeUndefined();
+    expect(skillMdFrontmatter("---\ndescription: none\n---\nname: pdf\n").name).toBeUndefined();
+    expect(skillMdFrontmatter("---\nname : pdf\n---\n").name).toBe("pdf");
+    expect(skillMdFrontmatter('---\n"name": pdf\n---\n').name).toBe("pdf");
+    expect(skillMdFrontmatter("---\n'name': pdf\n---\n").name).toBe("pdf");
+    expect(skillMdFrontmatter("---\nname: pdf # the pdf skill\n---\n").name).toBe("pdf");
+    expect(skillMdFrontmatter('---\nname: "pdf" # quoted\n---\n').name).toBe("pdf");
+    expect(skillMdFrontmatter("---\nname: a#b\n---\n").name).toBe("a#b");
+    expect(skillMdFrontmatter("---\nname: 'it''s'\ndescription: \"say \\\"hi\\\"\"\n---\n")).toEqual({ name: "it's", description: 'say "hi"' });
+    expect(skillMdFrontmatter("---\nnamed: pdf\n  name: memo\n---\n").name).toBeUndefined();
+    expect(skillMdFrontmatter('---\nname: pdf\n"name": memo\n---\n')).toEqual({ name: "pdf", names: 2 });
+    expect(skillMdFrontmatter("---\nname: pdf\nname : memo\n---\n")).toEqual({ name: "pdf", names: 2 });
+    expect(skillMdFrontmatter('---\nname: pdf\n"name" : memo\n---\n')).toEqual({ name: "pdf", names: 2 });
+    expect(skillMdFrontmatter("---\nname: pdf\n'name' : memo\n---\n")).toEqual({ name: "pdf", names: 2 });
+    expect(skillMdFrontmatter("---\nname: # c\n---\n")).toEqual({});
   });
 });

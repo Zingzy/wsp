@@ -1243,7 +1243,8 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
       const stage = ProjectAddEvent.safeParse(frame);
       if (!stage.success || onId === undefined || stage.data.computer !== onId) return;
       if (stage.data.stage === "done") said.add(stage.data.projectId);
-      io.log(stage.data.message);
+      // A failed stage's sentence is the failure's own, which the terminal prints as the command's error.
+      if (stage.data.stage !== "failed") io.log(stage.data.message);
     });
     await client.events();
     try {
@@ -1365,7 +1366,9 @@ export function stageLines(event: PlaceStageEvent): string[] {
   const mark = event.state === "done" ? "·" : event.state === "failed" ? "x" : " ";
   // A running step says its note as a finished one does: what the box was read as and where it will dial back are
   // read while the step they belong to is still running, and holding them until it ends is holding them too long.
-  return [`  ${mark} ${PLACE_ADD_WORDS[event.step]}${event.note === undefined ? "" : `: ${event.note}`}`];
+  // A failed step's note is the failure's first line, which the terminal prints whole as the command's error.
+  const note = event.note === undefined || event.state === "failed" ? "" : `: ${event.note}`;
+  return [`  ${mark} ${PLACE_ADD_WORDS[event.step]}${note}`];
 }
 
 /** What an install prints once the computer is in: what it is, the key its ssh answered with so a person can check
