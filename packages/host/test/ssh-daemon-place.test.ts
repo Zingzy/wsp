@@ -10,10 +10,10 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SYSTEMD_LINE, sshDaemonPaths } from "@wsp/protocol";
+import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SYSTEMD_LINE, sshDaemonPaths, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
-import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonBinaryOn, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, profileSourceStep, DAEMON_UNIT, daemonUnit, deployScript, loginFilesStep, removeDaemonScript, sshDaemonPlace, WSP_WORKSPACE_APPARMOR_PATH, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
+import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonBinaryOn, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, profileSourceStep, DAEMON_UNIT, daemonUnit, deployScript, loginFilesStep, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 
 const LOGIN = { home: "/home/maya", path: "/usr/local/bin:/usr/bin:/bin" };
@@ -66,7 +66,7 @@ describe("the place a fork keeps its daemon", () => {
   it("spells the guest's own layout: /root, a system unit, and the edge-reachable bind", () => {
     const cloud = deployScript(CLOUD_PLACE, "aabbcc");
     expect(cloud).toContain("mkdir -p /root/wsp-daemon /root/.wsp/inbox");
-    expect(cloud).toContain("tar -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon");
+    expect(cloud).toContain("tar --no-same-owner -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon");
     expect(cloud).toContain(`cat > /etc/systemd/system/${DAEMON_UNIT} <<'WSP_UNIT'`);
     expect(cloud).toContain(`systemctl restart ${DAEMON_UNIT}`);
     expect(cloud).not.toContain("systemctl --user");
@@ -121,7 +121,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     const at = sshDaemonPaths(LOGIN.home);
     const s = script();
     expect(s).toContain(`mkdir -p '${at.dir}' '${at.inbox}' '${at.binDir}' '${at.unitDir}'`);
-    expect(s).toContain(`tar -xzf '${at.bundle}' -C '${at.dir}'`);
+    expect(s).toContain(`tar --no-same-owner -xzf '${at.bundle}' -C '${at.dir}'`);
     // The token's value is not in this script: it lands over the byte road, which the case below pins. The path
     // the daemon reads it from is, on the unit's own line.
     expect(s).not.toContain("aabbcc");
@@ -507,7 +507,7 @@ describe("the place a computer joined over ssh keeps its agent", () => {
     const s = joined();
     expect(s).toContain(`trap "rm -f '/home/maya/.wsp/join-code'" EXIT`);
     // Before anything lands: a deploy that dies at the unpack must leave no code on their disk either.
-    expect(s.indexOf("trap ")).toBeLessThan(s.indexOf("tar -xzf"));
+    expect(s.indexOf("trap ")).toBeLessThan(s.indexOf("tar --no-same-owner -xzf"));
     // Every other place carries no trap at all, so what a fork's deploy writes is what it always wrote.
     expect(deployScript(CLOUD_PLACE, "aabbcc")).not.toContain("trap ");
     expect(script()).not.toContain("trap ");

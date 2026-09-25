@@ -510,6 +510,10 @@ export class PlaceLoginRefusedError extends Error {
  * The one refusal a default place may be passed over for; every other failure on it is the person's to read. */
 export class PlaceForksNowhereError extends Error {}
 
+/** An add that failed after bytes landed and whose installer took every one of them back off the computer, so a
+ * join that had landed there no longer stands on it either. */
+export class PlaceAddTakenBackError extends Error {}
+
 /** A computer that is not forked into while the recipe job on it runs, which is a state of that job and not a
  * fact about the computer: the sentence is the person's own either way, and the class is what tells the roads
  * that only wait for the job apart from the ones that report a refusal. The kind rides the class, so every road
@@ -1318,6 +1322,18 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     return { report: taken, ...(client === undefined ? {} : { device: { deviceId: client.deviceId, deviceToken: client.deviceToken } }) };
   };
 
+  /** Takes a place off this host: its link, its record, the default it may be, and anyone waiting on its dial. */
+  const forget = async (placeId: string): Promise<void> => {
+    if (live.has(placeId)) cut(placeId, "removed from this host");
+    kept.delete(placeId);
+    backends.delete(placeId);
+    await store.delete(PLACES, placeId);
+    if ((await defaultId()) === placeId) await store.delete(DEFAULT_COLLECTION, DEFAULT_ID);
+    woken(placeId, false);
+    closedAt.delete(placeId);
+    emit({ type: "place.removed", placeId });
+  };
+
   const door: PlaceDoor = {
     answerChallenge: challenge,
 
@@ -1654,9 +1670,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const { code } = await devices.issue({ now: at, ttlMs: PAIR_CODE_TTL_MS });
       const waiting: { placeId?: string; login?: PlaceLogin; back?: PlaceBack; woken?: (placeId: string) => void } = {};
       awaiting.set(code, waiting);
+      let installing = true;
       try {
         const { addId: _stream, ...asked } = req;
         const installed = await install({ ...asked, code: joinToken(code, keyFingerprint(wiring.hostKey.publicKey)) }, stage);
+        installing = false;
         // The road back to this computer is the host's the moment the install answers, and what the wait comes to
         // does not change it: the computer that most needs a login held here is the one whose agent never dials.
         // A join still to land carries it off this entry; one that already landed has its record written again.
@@ -1709,6 +1727,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         stage(step, "failed", (e instanceof Error ? e.message : String(e)).split("\n")[0]!);
         // The code went to the box as a file, so an add that failed spends it rather than leave it good for ten minutes.
         await devices.spend(code, at).catch(() => false);
+        // The install took its join back off the box, so the record that join made names a computer that no longer
+        // carries it. One it could not take back keeps its record, which is the road a remove sweeps it by.
+        if (installing && waiting.placeId !== undefined && e instanceof PlaceAddTakenBackError) await forget(waiting.placeId);
         // A forward stays held for as long as a record dials back through it, and goes with an add that left none.
         if (waiting.login !== undefined && waiting.back !== undefined) {
           const landed = waiting.placeId === undefined ? undefined : await recordOf(waiting.placeId);
@@ -1948,13 +1969,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (reach !== undefined) cut(placeId, "removed from this host");
       // After the sweep, since the link that sweep may ride comes in through the forward.
       if (login !== undefined && held.road?.back !== undefined) wiring.back?.release(login);
-      kept.delete(placeId);
-      backends.delete(placeId);
-      await store.delete(PLACES, placeId);
-      if ((await defaultId()) === placeId) await store.delete(DEFAULT_COLLECTION, DEFAULT_ID);
-      woken(placeId, false);
-      closedAt.delete(placeId);
-      emit({ type: "place.removed", placeId });
+      await forget(placeId);
       return { removed: true, swept, ...(note !== undefined ? { note } : {}) };
     },
 

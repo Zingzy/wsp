@@ -231,8 +231,17 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
         match op {
             Some("place.leave") => {
                 let home = crate::place::place_home(ctx.options.home.as_deref());
-                let swept =
-                    fs::blocking(move || Ok(crate::place::sweep_place_home(&home, &crate::place::sh_stdout))).await.unwrap_or_default();
+                let swept = fs::blocking(move || {
+                    let mut swept = crate::place::sweep_place_home(&home, &crate::place::sh_stdout);
+                    // Only root's install loaded the profile, and only root can take it off.
+                    if nix::unistd::geteuid().is_root() {
+                        let profile = std::path::Path::new(wsp_frames::numbers::WORKSPACE_APPARMOR_PATH);
+                        swept.extend(crate::place::sweep_workspace_profile(profile, &crate::place::sh_stdout));
+                    }
+                    Ok(swept)
+                })
+                .await
+                .unwrap_or_default();
                 return Outgoing::Leave(text(&Reply::new(id, PlaceLeaveReply { swept })));
             }
             Some("place.update") => return place_update(ctx, id, &frame).await,

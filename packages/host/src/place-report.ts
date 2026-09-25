@@ -11,9 +11,9 @@ import { homedir, arch as osArch, platform, release, type as osType, uptime as u
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, besideConfig, landedFilesScript, localShape, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
-import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
+import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOwnedPaths, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { dirname, join, relative, sep } from "node:path";
-import { sshDaemonPlace, type DaemonPlace } from "./doctor.js";
+import { apparmorOffStep, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { mcpServerCommand, onPath, runningWsp, type RunningWsp } from "./mcp-install.js";
 import { runAll, runFailureLine, serviceManagerFor, STOP_WAIT_MS, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
 
@@ -199,13 +199,15 @@ export const sweptSaid = (said: string): string[] =>
 
 export interface PlaceSweepOptions {
   home?: string;
-  /** How the ownership read is run; this computer's own sh unless a caller hands another way of running one. */
+  /** How the ownership read and the profile's unload are run; this computer's own sh unless a caller hands another. */
   sh?: (script: string) => string;
   /** Which manager holds the place's unit; this computer's own unless a caller hands another, and a caller that
    * means none (a computer wsp writes no unit for) hands undefined on purpose. */
   manager?: ServiceManager | undefined;
   run?: ServiceRunner;
   uid?: number;
+  /** Where the workspace profile a root install loaded sits; the one every install writes unless a caller hands another. */
+  apparmorProfile?: string;
 }
 
 /** Which service the agent on this computer is, for the manager that holds it. Exported because the update road
@@ -299,6 +301,12 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
     }
     rmSync(path, { recursive: true, force: true });
     removed.push(path);
+  }
+  // The workspace profile only root's install loaded, unloaded before its file goes, as the host's remove does it.
+  const profile = opts.apparmorProfile ?? WSP_WORKSPACE_APPARMOR_PATH;
+  if ((opts.uid ?? process.getuid?.()) === 0 && there(profile)) {
+    sh(apparmorOffStep(profile).join("\n"));
+    if (!there(profile)) removed.push(profile);
   }
   const said = unsourced(sshDaemonPlace({ home, path: "" }));
   if (said !== undefined) removed.push(said);
