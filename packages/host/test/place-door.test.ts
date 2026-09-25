@@ -79,17 +79,30 @@ async function freePair(): Promise<number> {
   throw new Error("no free app port whose door port is free beside it");
 }
 
-async function up(opts: { port: number; door?: "closed" | "open"; listen?: string; runtime?: Runtime; back?: PlaceBackHolder } = { port: 0 }): Promise<HostHandle> {
-  handle = await startHost({
-    runtime: opts.runtime ?? testRuntime(),
-    webDir: fakeWebDir(),
-    port: opts.port,
-    wsPort: 0,
-    ...(opts.door !== undefined ? { door: opts.door } : {}),
-    ...(opts.listen !== undefined ? { listen: opts.listen } : {}),
-    ...(opts.back !== undefined ? { back: opts.back } : {}),
-  });
-  return handle;
+/** A host on a pair freePair picked, and on a fresh pair when another process takes the app port between the probe
+ * and the bind; `first` runs on each pair before the host starts. */
+async function up(opts: { door?: "closed" | "open"; listen?: string; runtime?: Runtime; back?: PlaceBackHolder } = {}, first?: (port: number) => Promise<void>): Promise<HostHandle> {
+  const runtime = opts.runtime ?? testRuntime();
+  for (let tries = 0; ; tries += 1) {
+    const port = await freePair();
+    await first?.(port);
+    try {
+      handle = await startHost({
+        runtime,
+        webDir: fakeWebDir(),
+        port,
+        wsPort: 0,
+        ...(opts.door !== undefined ? { door: opts.door } : {}),
+        ...(opts.listen !== undefined ? { listen: opts.listen } : {}),
+        ...(opts.back !== undefined ? { back: opts.back } : {}),
+      });
+      return handle;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EADDRINUSE" || tries >= 4) throw e;
+      await letGo(held);
+      held = undefined;
+    }
+  }
 }
 
 /** The boot object out of the page a port served, which is the one inline script it carries. */
@@ -100,8 +113,8 @@ async function bootOf(port: number): Promise<BootPayload> {
 
 describe("the door a host opens for computers you own", () => {
   it("sits the offset above the app port, serves the page with no digest on it, and keeps the token's digest on the loopback page", async () => {
-    const port = await freePair();
-    const h = await up({ port, door: "open" });
+    const h = await up({ door: "open" });
+    const port = h.port;
     expect(h.door.port()).toBe(port + PLACE_PORT_OFFSET);
     expect(DEFAULT_PLACE_PORT).toBe(DEFAULT_PORT + PLACE_PORT_OFFSET);
     const door = await bootOf(port + PLACE_PORT_OFFSET);
@@ -113,8 +126,8 @@ describe("the door a host opens for computers you own", () => {
   });
 
   it("asks a request on the door for a paired device's token and reaches the one runtime over its own port", async () => {
-    const port = await freePair();
-    const h = await up({ port, door: "open" });
+    const h = await up({ door: "open" });
+    const port = h.port;
     const refused = await fetch(`http://127.0.0.1:${port + PLACE_PORT_OFFSET}/api/workspaces`);
     expect(refused.status).toBe(401);
     expect((await refused.json()).error).toBe(API_UNAUTHORIZED);
@@ -131,8 +144,8 @@ describe("the door a host opens for computers you own", () => {
   });
 
   it("opens none until it is asked, then answers the same view twice, since the place file names the port for good", async () => {
-    const port = await freePair();
-    const h = await up({ port });
+    const h = await up();
+    const port = h.port;
     expect(h.door.port()).toBeUndefined();
     await expect(fetch(`http://127.0.0.1:${port + PLACE_PORT_OFFSET}/`)).rejects.toThrow();
     const first = await h.door.open();
@@ -145,16 +158,14 @@ describe("the door a host opens for computers you own", () => {
   });
 
   it("says who holds the port rather than stepping to a free one", async () => {
-    const port = await freePair();
-    held = await hold(port + PLACE_PORT_OFFSET);
+    const h = await up({}, async at => void (held = await hold(at + PLACE_PORT_OFFSET)));
+    const port = h.port;
     expect(held).toBeDefined();
-    const h = await up({ port });
     await expect(h.door.open()).rejects.toThrow(doorPortHeldLine(port + PLACE_PORT_OFFSET));
   });
 
   it("opens none on a host that already answers beyond this computer, and names that host's own port instead", async () => {
-    const port = await freePair();
-    const h = await up({ port, listen: "0.0.0.0" });
+    const h = await up({ listen: "0.0.0.0" });
     const view = await h.door.open();
     expect(h.door.port()).toBeUndefined();
     expect(view.port).toBe(h.port);
@@ -177,20 +188,18 @@ describe("the door a forward back from a box lands on", () => {
   };
 
   it("is the door's own listener as it stands, read at each ask", async () => {
-    const port = await freePair();
     const kept = doorKept();
-    await up({ port, back: kept.back });
+    const { port } = await up({ back: kept.back });
     expect(await kept.door()).toBe(port + PLACE_PORT_OFFSET);
     await handle!.door.close();
     expect(await kept.door()).toBe(port + PLACE_PORT_OFFSET);
   });
 
   it("refuses a door port another program holds on this computer's loopback, so no forward lands on that program", async () => {
-    const port = await freePair();
-    held = await hold(port + PLACE_PORT_OFFSET, LOOPBACK);
-    expect(held).toBeDefined();
     const kept = doorKept();
-    const h = await up({ port, back: kept.back });
+    const h = await up({ back: kept.back }, async at => void (held = await hold(at + PLACE_PORT_OFFSET, LOOPBACK)));
+    const port = h.port;
+    expect(held).toBeDefined();
     await expect(h.door.open()).rejects.toThrow(doorPortHeldLine(port + PLACE_PORT_OFFSET));
     await expect(kept.door()).rejects.toThrow(doorPortHeldLine(port + PLACE_PORT_OFFSET));
     expect(h.door.port()).toBeUndefined();
@@ -198,16 +207,14 @@ describe("the door a forward back from a box lands on", () => {
   });
 
   it("is nothing on a host with no door of its own, whose main port a forward would land on", async () => {
-    const port = await freePair();
     const kept = doorKept();
-    await up({ port, listen: "0.0.0.0", back: kept.back });
+    await up({ listen: "0.0.0.0", back: kept.back });
     expect(await kept.door()).toBeUndefined();
   });
 
   it("lets every forward go before the door closes with the host", async () => {
-    const port = await freePair();
     const kept = doorKept();
-    const h = await up({ port, back: kept.back });
+    const h = await up({ back: kept.back });
     await h.close();
     handle = undefined;
     expect(kept.closed()).toBe(true);
@@ -225,9 +232,8 @@ describe("a request that arrives on the door", () => {
 
   // A reverse forward lands on the door from the loopback, so the peer's address says nothing about the road.
   it("refuses a thread's token on the socket from 127.0.0.1, and the owner's own port still takes it", async () => {
-    const port = await freePair();
     const runtime = testRuntime();
-    await up({ port, door: "open", runtime });
+    const { port } = await up({ door: "open", runtime });
     const token = await threadToken(runtime);
     const carried = await WsClient.connectTo(`ws://127.0.0.1:${port + PLACE_PORT_OFFSET}${WS_PATH}`);
     const refused = await carried.request("auth", { token });
@@ -240,9 +246,8 @@ describe("a request that arrives on the door", () => {
   });
 
   it("refuses a thread's token on the fork route from 127.0.0.1, and the owner's own port still forks with it", async () => {
-    const port = await freePair();
     const runtime = testRuntime();
-    await up({ port, door: "open", runtime });
+    const { port } = await up({ door: "open", runtime });
     const token = await threadToken(runtime);
     const post = (at: number, name: string): Promise<Response> =>
       fetch(`http://127.0.0.1:${at}/api/workspaces`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ name }) });
@@ -256,9 +261,9 @@ describe("a request that arrives on the door", () => {
   });
 
   it("refuses a thread's token on a socket the door let in before it closed", async () => {
-    const port = await freePair();
     const runtime = testRuntime();
-    const h = await up({ port, door: "open", runtime });
+    const h = await up({ door: "open", runtime });
+    const port = h.port;
     const token = await threadToken(runtime);
     const early = await WsClient.connectTo(`ws://127.0.0.1:${port + PLACE_PORT_OFFSET}${WS_PATH}`);
     // The listener's close waits on the upgraded socket, so it is not awaited until that socket ends.
@@ -271,9 +276,8 @@ describe("a request that arrives on the door", () => {
   });
 
   it("still answers the door's own ops from 127.0.0.1: a pairing code, a join and a place's dial back", async () => {
-    const port = await freePair();
     const runtime = testRuntime();
-    await up({ port, door: "open", runtime });
+    const { port } = await up({ door: "open", runtime });
     const door = `ws://127.0.0.1:${port + PLACE_PORT_OFFSET}${WS_PATH}`;
     const nonce = (): string => randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64");
 

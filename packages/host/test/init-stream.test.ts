@@ -485,6 +485,25 @@ describe("stage stream on a terminal", () => {
     }
   });
 
+  it("a copy's failed frame on the same host never reaches this run's stream: a frame naming a place is that copy's build", async () => {
+    const { output, stderr } = terminal(80, 30);
+    let listener: ((e: unknown) => void) | undefined;
+    const rt = { events: { on: (_type: string, l: (e: unknown) => void) => ((listener = l), () => (listener = undefined)) } } as unknown as Pick<Runtime, "events">;
+    const records: Record<string, unknown>[] = [];
+    const view = await streamStages(
+      rt,
+      { output, stderr, isTTY: false, json: r => records.push(r) },
+      SEAL_STEPS,
+      async () => {
+        listener!({ type: "golden.stage", name: "default", stage: "failed", detail: "the copy at box died", place: "box" });
+        listener!({ type: "golden.stage", name: "default", stage: "sealed" });
+      },
+      () => {},
+    );
+    expect(view.failure).toBeUndefined();
+    expect(records.map(r => r["stage"])).toEqual(["sealed"]);
+  });
+
   for (const cols of [80, 120]) {
     it(`a warning Node prints to stderr past the stream settles above the block and no step is drawn twice, at ${cols} columns`, () => {
       vi.useFakeTimers();

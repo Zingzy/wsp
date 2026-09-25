@@ -315,6 +315,13 @@ export interface StageFrame {
 /** A golden.stage event off the runtime as the stream takes it. */
 export const toFrame = (e: GoldenStageEvent): StageFrame => ({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.step !== undefined ? { step: e.step } : {}), ...(e.left !== undefined ? { left: e.left } : {}) });
 
+/** The golden.stage events of this run's own build: one naming a place is a copy's, built there by another road on
+ * the same host. */
+const onOwnStages = (rt: Pick<Runtime, "events">, take: (e: GoldenStageEvent) => void): (() => void) =>
+  rt.events.on("golden.stage", e => {
+    if (e.type === "golden.stage" && e.place === undefined) take(e);
+  });
+
 /** The words the terminal shows for each prepare stage while it runs and once
  * it is over. The stage names are the protocol's; the harness stage installs
  * whatever agents were ticked, and names none of them. The engine decides the
@@ -1167,8 +1174,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   runLog.note(`recipe ${imp.recipeHash} from ${path}`);
   // Every frame the golden reports, the build's and the seal's, lands in the log for the process's life.
   const logged = (rt: Runtime): Runtime => {
-    rt.events.on("golden.stage", e => {
-      if (e.type === "golden.stage" && e.name === GOLDEN_NAME) runLog.stage(e.stage, e.detail);
+    onOwnStages(rt, e => {
+      if (e.name === GOLDEN_NAME) runLog.stage(e.stage, e.detail);
     });
     return rt;
   };
@@ -1342,9 +1349,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (attach === undefined) await stopKeptBuilder(rt, io.output);
 
   const stream = new StageStream(io.output, io.isTTY, PREPARE_STEPS, runLog.note, io.stderr, io.json);
-  const off = rt.events.on("golden.stage", e => {
-    if (e.type === "golden.stage") stream.push(toFrame(e));
-  });
+  const off = onOwnStages(rt, e => stream.push(toFrame(e)));
   const retry = opts.retry ?? DEFAULT_RETRY;
   stream.start();
   // From here a machine may be billing. The first signal ends the stage in flight and the builder with it; the
@@ -1688,9 +1693,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 /** One stage stream around one runtime call; the frames it draws are the golden's, whatever the call. */
 export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO, "output" | "stderr" | "isTTY" | "json">, words: readonly StageWords[], run: () => Promise<unknown>, sink: (line: string) => void): Promise<StageView> {
   const stream = new StageStream(io.output, io.isTTY, words, sink, io.stderr, io.json);
-  const off = rt.events.on("golden.stage", e => {
-    if (e.type === "golden.stage") stream.push(toFrame(e));
-  });
+  const off = onOwnStages(rt, e => stream.push(toFrame(e)));
   stream.start();
   let view!: StageView;
   // The stop sits in the finally so a run that rejects still hands the console back and settles the block.
