@@ -12,7 +12,7 @@ import { CATALOG_AGENTS, PROJECT_SHARED_SKILLS, SHARED_SKILLS, isSystemSkill, ow
 import { detectSkills, expand, nodeHost, skillRoots, tilde, type Host } from "@wsp/collect";
 import type { ExecResult } from "@wsp/engine";
 import { noSuchSkillRefusal, pluginSkillRefusal, projectSkillOffRefusal, shellQuote, systemSkillRefusal, type SkillAdded, type SkillPreview, type SkillRow } from "@wsp/protocol";
-import type { AgentsOn, SkillAsk, SkillsActs } from "@wsp/runtime";
+import { projectOf, type AgentsOn, type SkillAsk, type SkillsActs } from "@wsp/runtime";
 import { getSkill, searchSkills, skillArchive, skillPreview, type SkillsFetch } from "./skills-sh.js";
 import { firstLine, roadOf, type Road } from "./target-road.js";
 
@@ -45,17 +45,17 @@ const LINK_ABOVE = [
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
 
 /** The project a target holds, which a project's skill needs. */
-function projectOf(on: AgentsOn): string {
-  const project = on.kind === "box" ? undefined : on.project;
-  if (project === undefined) throw usage("A project's skill goes in from a workspace, which names the project.");
+function theProject(on: AgentsOn): string {
+  const project = projectOf(on);
+  if (project === undefined) throw usage("A project's skill goes in from a workspace of that project, or from its computer's page.");
   return project;
 }
 
 /** The one skill the act names, off the same reader the report uses: the project's with `project`, else the one that
  * is not a project's, a person's own before a plugin's of the same name. */
 async function findSkill(road: Road, on: AgentsOn, ask: SkillAsk): Promise<{ row: SkillRow; roots: string[] }> {
-  const project = on.kind === "box" ? undefined : on.project;
-  const roots = await skillRoots(road.host, project !== undefined ? { project } : {});
+  // Only the one project an act names: two projects' skills of one name would leave the act guessing.
+  const roots = await skillRoots(road.host, projectOf(on) !== undefined ? { projects: on.projects! } : {});
   const read = await detectSkills(road.host, roots);
   const rows = read.skills.filter(s => s.name === ask.name && (ask.project === true ? s.scope === "project" : s.scope !== "project"));
   const row = rows.find(s => s.scope !== "plugin") ?? rows[0];
@@ -136,7 +136,7 @@ export function skillsActs(o: SkillsActsOptions = {}): SkillsActs {
       return { ...skillPreview(new TextEncoder().encode(res.stdout.slice(cut + 1))), size };
     },
     add: async (on, ask): Promise<SkillAdded> => {
-      const project = ask.project === true ? projectOf(on) : undefined;
+      const project = ask.project === true ? theProject(on) : undefined;
       const unknown = (ask.agents ?? []).filter(id => !CATALOG_AGENTS.some(a => a.id === id));
       if (unknown.length > 0) throw usage(`The catalog has no agent ${unknown.join(", ")}.`);
       const got = await getSkill(fetch, ask.skill);

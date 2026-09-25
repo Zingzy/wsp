@@ -4,7 +4,7 @@
 // reading the agents, skills and servers off it is the host's, since the
 // catalog's readers live there. A read never wakes a machine.
 import { randomBytes } from "node:crypto";
-import { AgentsReport, HERE_PLACE_ID, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
+import { AgentsReport, HERE_PLACE_ID, THIS_COMPUTER, noSuchAgentsProjectRefusal, sharedAgentsProjectRefusal, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview, isJoinedComputer, nappingAgentsRefusal, nappingServersRefusal, nappingSignInRefusal, nappingSkillsRefusal, nappingToolsRefusal, noSignInRefusal, noSuchPlaceRefusal, providerAgentsRefusal, type AgentSignInState, type AgentsProject, type AgentsSignInEvent, type AgentsTarget, type DaemonFrame, type PageReach, type ServerAdd, type ServerAsk, type WorkspacePhase, withoutControlChars } from "@wsp/protocol";
 import type { Machine } from "@wsp/engine";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
@@ -13,15 +13,19 @@ import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
  * to where the road runs as root and the home is somebody else's. */
 export type AgentsRead = Omit<AgentsReport, "target" | "readAt" | "stale" | "reach"> & { runAs?: string };
 
-/** Where a read runs: this computer, with a project's folder when a workspace here is the target; a computer you
- * joined, over its link, with the login and the sign-ins and versions its own report carries; or any other machine,
- * with the project's folder on it. */
+/** Where a read runs: this computer; a computer you joined, over its link, with the login and the sign-ins and
+ * versions its own report carries; or any other machine. `projects` are the projects whose folders it covers, each
+ * folder absolute on that machine: every one a computer holds for a read of it, the one a target names, or a
+ * workspace's own. An act, or a server started for its tools, works in a project only where exactly one is named. */
 export type AgentsOn =
-  | { kind: "here"; project?: string }
+  | { kind: "here"; projects?: readonly AgentsProject[] }
   /** `relayed`: this host forwards that computer's sign-in callback port from this computer. */
-  | { kind: "box"; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string; relayed?: boolean }
+  | { kind: "box"; machine: Pick<Machine, "exec">; login: { HOME?: string; PATH?: string }; signIns?: Record<string, AgentSignInState>; versions?: Record<string, string>; logins?: string; relayed?: boolean; projects?: readonly AgentsProject[] }
   /** `relayed`: this host forwards the workspace's sign-in callback port from this computer. */
-  | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; project?: string; relayed?: boolean };
+  | { kind: "machine"; machine: Pick<Machine, "exec" | "id" | "putBytes" | "uploadUrl">; projects?: readonly AgentsProject[]; relayed?: boolean };
+
+/** The one project's folder an act there works in: the project its target named, or the workspace's own. */
+export const projectOf = (on: AgentsOn): string | undefined => (on.projects?.length === 1 ? on.projects[0]!.path : undefined);
 
 /** Where a sign-in page that returns to localhost reaches the harness on the target: the one rule the sign-in is
  * planned by and the report tells the app. A line handed to another login can open neither the pty's device its page
@@ -140,19 +144,21 @@ export interface ServerIcons {
 /** The refusal for a runtime served without the readers. */
 export const NO_AGENTS_READER = "this runtime carries no agents reader; the host that serves the app wires one";
 
-/** One workspace as the read needs it. */
+/** One workspace as the read needs it: its project with the folder of its checkout on its machine. */
 export interface AgentsWorkspace {
   name: string;
   phase: WorkspacePhase;
   local: boolean;
   machine: Machine;
-  project: string;
+  project: AgentsProject;
 }
 
 export interface AgentsReadOptions<Caller> {
   reader: AgentsReader | undefined;
   places: () => PlaceDoor | undefined;
   workspace: (id: string, origin?: Caller) => Promise<AgentsWorkspace>;
+  /** The projects this host holds on a computer, each with its folder there; none where it holds none. */
+  projects?: (placeId: string) => Promise<readonly AgentsProject[]>;
   acts?: AgentsActs;
   skills?: SkillsActs;
   servers?: ServersActs;
@@ -202,6 +208,8 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
   serversToggle(target: AgentsTarget, ask: ServerAsk & { on: boolean }, origin?: Caller): Promise<{ file: string }>;
   serversIcon(host: string, refresh?: boolean): Promise<string | null>;
 } {
+  /** A write in one project of a computer changes the computer's report, which is the one a page reads. */
+  const changed = (target?: AgentsTarget): void => o.changed(target === undefined || !("placeId" in target) ? target : { placeId: target.placeId });
   /** The last report read off each workspace while it ran, which is what a napping one answers. */
   const last = new Map<string, AgentsReport>();
   /** The host's callback relays, which register once they hold their links. */
@@ -272,13 +280,25 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     try {
       return await run();
     } finally {
-      o.changed(target);
+      changed(target);
     }
   };
-  /** Where a target's lines run, or the napping workspace's name. */
-  const onOf = async (target: AgentsTarget, origin?: Caller): Promise<AgentsOn | Napping> => {
+  /** The projects a computer's target covers: the one it names, every one this host holds there for a read, and none
+   * for an act that names none. */
+  const projectsAt = async (target: { placeId: string; project?: string }, computer: string, read: boolean): Promise<{ projects?: readonly AgentsProject[] }> => {
+    if (target.project === undefined && !read) return {};
+    const held = (await o.projects?.(target.placeId)) ?? [];
+    if (target.project === undefined) return { projects: held };
+    const byName = held.filter(p => p.name === target.project);
+    const named = held.find(p => p.id === target.project) ?? (byName.length === 1 ? byName[0] : undefined);
+    const said = withoutControlChars(target.project);
+    if (named === undefined) throw usage(byName.length > 1 ? sharedAgentsProjectRefusal(said, computer) : noSuchAgentsProjectRefusal(said, computer));
+    return { projects: [named] };
+  };
+  /** Where a target's lines run, or the napping workspace's name; `read` covers every project a computer holds. */
+  const onOf = async (target: AgentsTarget, origin?: Caller, read = false): Promise<AgentsOn | Napping> => {
     if ("placeId" in target) {
-      if (target.placeId === HERE_PLACE_ID) return { kind: "here" };
+      if (target.placeId === HERE_PLACE_ID) return { kind: "here", ...(await projectsAt(target, THIS_COMPUTER, read)) };
       const door = o.places();
       if (door === undefined) throw new Error(NO_PLACE_DOOR);
       const rows = await door.list(o.now());
@@ -297,16 +317,17 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         ...(report?.agentVersions !== undefined ? { versions: report.agentVersions } : {}),
         ...(row.logins !== undefined ? { logins: row.logins } : {}),
         ...(reached(target) ? { relayed: true } : {}),
+        ...(await projectsAt(target, row.name, read)),
       };
     }
     const ws = await o.workspace(target.workspaceId, origin);
     if (ws.phase === "napping") return { napping: ws.name };
-    return ws.local ? { kind: "here", project: ws.project } : { kind: "machine", machine: ws.machine, project: ws.project, ...(o.relayed?.() === true ? { relayed: true } : {}) };
+    return ws.local ? { kind: "here", projects: [ws.project] } : { kind: "machine", machine: ws.machine, projects: [ws.project], ...(o.relayed?.() === true ? { relayed: true } : {}) };
   };
   return {
     async read(target, origin) {
       const reader = readerOf();
-      const on = await onOf(target, origin);
+      const on = await onOf(target, origin, true);
       if ("napping" in on) {
         const held = "workspaceId" in target ? last.get(target.workspaceId) : undefined;
         if (held === undefined) throw usage(nappingAgentsRefusal(on.napping));
@@ -382,7 +403,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
             channel.close();
             log(`sign-in ${signInId} ended: ${what}: ${stoppedBy ? "stopped" : (run.last?.state ?? "failed")}`);
             o.reader?.forget?.(JSON.stringify(target));
-            o.changed(target);
+            changed(target);
           });
         return { signInId, run };
       })();
@@ -413,7 +434,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
     },
     async key(agent, key) {
       await actsOf().key(agent, key);
-      o.changed();
+      changed();
     },
     skillsSearch: (q, limit = SKILLS_SEARCH_LIMIT) => skillsOf().search(q, limit).then(hits => hits.map(h => SkillHit.parse(h))),
     skillsGet: async skill => SkillPreview.parse(await skillsOf().get(skill)),
@@ -439,7 +460,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
       const on = await onOf(target, origin);
       if ("napping" in on) throw usage(nappingSignInRefusal(on.napping));
       const added = await acts.addTools(on, agent);
-      o.changed(target);
+      changed(target);
       return added;
     },
     forwards: relay => {

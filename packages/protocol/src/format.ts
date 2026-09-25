@@ -2147,8 +2147,6 @@ export const initForkLine = (size: WorkspaceSize): string => `Forked from the im
 export const SIGN_IN_NEVER_REACHED = "the build never reached this sign-in";
 /** What any other row says when the build ended with it unfinished, whether or not it had started. */
 export const NEVER_REACHED = "the build ended before this step";
-/** What the first workspace's row says when the build carried no name, which is the answer that forks nothing. */
-export const NO_FIRST_WORKSPACE = "no name was given, so nothing was forked";
 
 /** The state word of a sign-in row while its page waits for the person. */
 export const SIGN_IN_OPEN_STATE = INIT_ROW_STATES.open;
@@ -2263,9 +2261,15 @@ const openSignIn = (rows: InitJob["rows"]): InitJob["rows"][number] | undefined 
  * phase word says where those stand. The host writes the job's needsYou from this and every surface reads that
  * field, so nothing derives the wait twice. */
 export function initNeedWhat(job: Pick<InitJob, "rows">): string | undefined {
-  const open = openSignIn(job.rows);
-  return open === undefined ? undefined : signInTo(open.label);
+  const label = initSignInWaitedOn(job);
+  return label === undefined ? undefined : signInTo(label);
 }
+
+/** The sign-in the job waits on the person for, by its row's label, or nothing. */
+export const initSignInWaitedOn = (job: Pick<InitJob, "rows">): string | undefined => openSignIn(job.rows)?.label;
+
+/** What a card that started the build says while that sign-in waits. */
+export const signInWaitLine = (label: string): string => `Waiting for your sign-in to ${label}`;
 
 /** What the app says when it needs the person: the toast's opening and a system notification's title. */
 export const NEEDS_YOU = "wsp needs you";

@@ -13,7 +13,7 @@ import { Input } from "../components/ui/input.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
-import { FIELD_LABEL, LONE_FIELD } from "../sidebar/cloud-setup/rows.js";
+import { FIELD_LABEL, LONE_FIELD } from "../settings/recipe/rows.js";
 import { SetupScreen } from "../sidebar/cloud-setup/SetupScreen.js";
 import { codeIsWhole, sentCode, shownCode } from "./pairingCode.js";
 

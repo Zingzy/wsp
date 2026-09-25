@@ -16,9 +16,8 @@ import { HarnessMark } from "../chat/HarnessMark.js";
 import { Button } from "../ui/button.js";
 import { Checkbox } from "../ui/checkbox.js";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group.js";
-import { SegmentedControl } from "../ui/segmented-control.js";
 import { Spinner } from "../ui/spinner.js";
-import { ActButton, AgentMarks, LeadMark, ServerStatusView } from "./agentsParts.js";
+import { ActButton, AgentMarks, LeadMark, OneOf, ServerStatusView } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W } from "./agentsRows.js";
 import { NARROW } from "./agentsWidths.js";
 import type { AddForm, AddFormProps, AddLevel, AddModule, AddRow, Choice, DetailView, Fact, Lead, UnderLevel, UnderRow } from "./kinds/kind.js";
@@ -159,8 +158,8 @@ function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
   );
 }
 
-/** One pick a detail asks for, in the label column's grammar: ticks for several, a segmented control for one of a
- * few; a held option stands ticked and says why on its hover. */
+/** One pick a detail asks for, in the label column's grammar: ticks for several, a select for one of a few; a held
+ * option stands ticked and says why on its hover. */
 function ChoiceLine({ choice }: { choice: Choice }) {
   return (
     <div data-choice={choice.id} className="flex min-h-7 items-start gap-3">
@@ -179,7 +178,9 @@ function ChoiceLine({ choice }: { choice: Choice }) {
           })}
         </span>
       ) : (
-        <SegmentedControl value={choice.value[0] ?? ""} onChange={v => choice.set([v])} className="h-7" segmentClassName="px-2.5 text-xs" segments={choice.options.map(o => ({ value: o.value, label: o.label }))} />
+        <span className="min-w-0 flex-1">
+          <OneOf k={`${choice.id}-pick`} label={choice.label} options={choice.options} value={choice.value[0] ?? ""} set={v => choice.set([v])} {...(choice.lost === undefined ? {} : { lost: choice.lost })} className="h-7 min-h-7 sm:min-h-7" />
+        </span>
       )}
     </div>
   );
@@ -366,6 +367,22 @@ export function UnderRowLevel({ row, back, backLabel }: { row: UnderRow; back: (
       <LevelHead back={back} backLabel={backLabel} title={row.title} headRef={headRef} />
       <div data-level-body className="px-4 pt-2">
         {row.body === undefined ? null : <p className="whitespace-pre-line break-words text-[13px] leading-5 text-foreground">{row.body}</p>}
+        {row.list === undefined ? null : (
+          <section data-k="under-list" aria-label={row.list.label} className={cn("flex flex-col gap-3", row.body !== undefined && "mt-5")}>
+            <h4 className="font-mono text-[11px] leading-4 tracking-[0.12em] text-muted-foreground uppercase">{row.list.label}</h4>
+            <ul className="flex flex-col gap-3">
+              {row.list.items.map(item => (
+                <li key={item.name} data-under-item={item.name} className="flex min-w-0 flex-col gap-0.5">
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="truncate font-mono text-xs leading-5 text-foreground">{item.name}</span>
+                    {item.fact === undefined ? null : <span className={cn(FACT, "shrink-0")}>{item.fact}</span>}
+                  </span>
+                  {item.about === undefined ? null : <span className="break-words text-xs leading-4 text-muted-foreground">{item.about}</span>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
     </div>
   );

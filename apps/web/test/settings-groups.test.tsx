@@ -19,6 +19,7 @@ import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { crumb, descriptionOf, lineLabels, lineOf, mountSettings, pageAt, resetSettings, rowOf, rowTitles, settingsApi, settle, wordOf } from "./settings-harness.js";
 import { lastNotice } from "./notice-text.js";
 import { useNotices } from "../src/notices/store.js";
+import { pickOption } from "./select.js";
 
 const AT = "2026-09-12T09:14:00.000Z";
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, takesForks: false };
@@ -166,12 +167,7 @@ describe("a project's Look", () => {
     const hueSelect = document.querySelector<HTMLElement>("[data-settings-page] [data-k=project-hue]")!;
     expect(iconSelect.textContent).toBe("Rocket");
     expect(hueSelect.textContent).toBe("Neutral");
-    fireEvent.click(hueSelect);
-    const option = await screen.findByRole("option", { name: "Teal" });
-    await settle();
-    // Under jsdom the select takes a click on an item only once a key has highlighted it.
-    fireEvent.keyDown(option, { key: "Enter" });
-    fireEvent.click(option);
+    await pickOption(hueSelect, "Teal");
     await waitFor(() => expect(sets).toEqual([{ projectLook: { pr_spoo: { icon: "rocket", hue: "teal" } } }]));
     // The select leaves a portal React must unmount itself before the file's teardown empties the body.
     cleanup();

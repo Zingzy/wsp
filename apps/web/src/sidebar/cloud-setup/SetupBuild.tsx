@@ -19,9 +19,9 @@ import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, SIGN_IN_STAGE_ID, initBuildRows, in
 import { Button } from "../../components/ui/button.js";
 import { cn } from "../../lib/utils.js";
 import { ansiSpans, toolPrefix } from "./ansi.js";
-import { Card, META, NAME, ROW, ROW_LINE, RowState, Slot } from "./rows.js";
+import { Card, META, NAME, ROW, ROW_LINE, RowState, Slot } from "../../settings/recipe/rows.js";
 import { SignInCode } from "./SignInCode.js";
-import { RowMark, hasRowMark } from "./SignInMark.js";
+import { RowMark, hasRowMark } from "../../settings/recipe/SignInMark.js";
 import { SetupScreen, type ScreenAction } from "./SetupScreen.js";
 
 /** The most lines the open stage's block shows at once: eight, six under a 700 px window; fewer lines make a shorter

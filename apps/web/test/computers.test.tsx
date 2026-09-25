@@ -7,7 +7,7 @@
 // another computer.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { type InitJob, COPY_CURRENT, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PLACE_LOGIN_REFUSED_KIND, PlaceAddStep, absentRoad, fmtBytes, fmtSize, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type AgentsReport, type AgentsTarget, type EventUnion, type InitSetup, type PlaceAddJob, type PlaceProvision, type PlaceView, type SealedImage, type SessionView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, PROVIDER_KEY_WORDS } from "@wsp/protocol";
 import { render } from "@testing-library/react";
 import { makeApi, ProtocolClient, RequestError, type Api, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -21,6 +21,7 @@ import { useSettingsStore, type SettingsAt } from "../src/settings/settingsStore
 import { SettingsRow } from "../src/sidebar/SettingsRow.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 import { descriptionOf, lineLabels, lineOf, mountSettings, pageAt, resetSettings, rowOf, settingsApi, settle, wordOf } from "./settings-harness.js";
+import { pickOption } from "./select.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 
@@ -90,7 +91,7 @@ const openPage = (id: string): void => {
 /** The agent rows of the open page, by the name a person reads. */
 const agentTitles = (): string[] => [...document.querySelectorAll("[data-settings-page] [data-agents-row] [data-row-title]")].map(t => t.textContent ?? "");
 /** A report with nothing on it. */
-const EMPTY_REPORT: AgentsReport = { ...AGENTS_REPORT, agents: [], skills: [], servers: [] };
+const EMPTY_REPORT: AgentsReport = { ...AGENTS_REPORT, agents: [], skills: [], servers: [], projects: [] };
 /** The word the laptop's own page reads it by while it is away, which is what every act there is held with. */
 const stateOfPage = (): string | undefined => absentOf(laptop, Date.now())?.away;
 const lineValue = (k: string): string | undefined => document.querySelector(`[data-settings-page] [data-k='${k}'] [data-settings-word]`)?.textContent ?? undefined;
@@ -314,8 +315,15 @@ describe("a computer's own page", () => {
     expect(agentTitles()).toEqual(["Claude Code", "Codex", "OpenCode", "Pi"]);
     // The manager stands where the Agents card stood, the section named for all three kinds.
     expect(document.querySelector("[data-settings-card='agents'] section")?.getAttribute("aria-label")).toBe("Agents, MCP servers and skills");
-    expect(document.querySelector("[data-settings-card='agents'] [data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on this Mac.");
+    expect(document.querySelector("[data-settings-card='agents'] [data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on this Mac and in its projects.");
     expect(document.querySelector("[data-settings-card='agents'] [data-settings-head]")).toBeNull();
+  });
+
+  it("says the page covers each project once the computer holds any, and only then", async () => {
+    useStore.setState({ places: [here] });
+    const projects = [{ id: "pr_app", name: "app", path: "~/code/app" }];
+    await mountComputers(computersApi({ agentsRead: async () => ({ ...AGENTS_REPORT, projects }) }).api, { kind: "computer", id: "here" });
+    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on this Mac and in its projects.");
   });
 
   it("says so when a computer reported no agent at all, the head naming that computer", async () => {
@@ -567,12 +575,7 @@ describe("a computer's icon", () => {
     await mountComputers(api, { kind: "computer", id: "p_2" });
     const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=computer-icon]")!;
     expect(select.textContent).toBe("Server");
-    fireEvent.click(select);
-    const option = await screen.findByRole("option", { name: "Home" });
-    await settle();
-    // Under jsdom the select takes a click on an item only once a key has highlighted it.
-    fireEvent.keyDown(option, { key: "Enter" });
-    fireEvent.click(option);
+    await pickOption(select, "Home");
     await waitFor(() => expect(sets).toEqual([{ computerLook: { p_2: { icon: "home" } } }]));
     cleanup();
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false, computerLook: { p_2: { icon: "home" } } } });
@@ -597,9 +600,9 @@ describe("the cloud's page", () => {
   };
   const copy = { place: "hetzner", version: 1, hash: HASH, snapshotId: "snap_h", builtAt: "2026-09-12T10:00:00.000Z", sizeBytes: 4.2 * 1024 ** 3 };
 
-  it("carries the spend as a line, the Image card with Edit image in it, the copies as lines and Remove saying the key is forgotten, while the key is held", async () => {
+  it("carries the spend as a line, the Image card with what the image holds and Edit in it, the copies as lines and Remove saying the key is forgotten, while the key is held", async () => {
     const api = computersApi(
-      { image: async () => ({ image: IMAGE, copies: [copy], projects: [] }), spend: async () => [{ place: "solari", monthUsd: 4.12, rateUsdPerHour: 0.16 }] } as Partial<Api>,
+      { image: async () => ({ image: IMAGE, copies: [copy], projects: [] }), spend: async () => [{ place: "solari", monthUsd: 4.12, rateUsdPerHour: 0.16 }], initStart: async () => ({}) as InitJob } as Partial<Api>,
       setupOf({ keys: { solari: true } }),
     ).api;
     useStore.setState({ places: [here, { ...solari, buildsImages: true }], workspaces: [atSolari("ws_y"), atSolari("ws_z")] });
@@ -609,15 +612,14 @@ describe("the cloud's page", () => {
     expect(lineValue("spend")).toBe("$4.12 this month · $0.16/hr");
     expect([...document.querySelectorAll("[data-settings-page] [data-settings-card]")].map(card => card.getAttribute("data-settings-card"))).toEqual(["cloud", "image", "agents", "copies", "acts"]);
     expect(document.querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("none");
-    expect(document.querySelector("[data-k='edit-image']")?.textContent).toBe(IMAGE_WORDS.edit);
+    expect(document.querySelector("[data-k='edit-recipe']")?.textContent).toBe(IMAGE_WORDS.holdsEdit);
     expect([...document.querySelectorAll("[data-k='image-copy']")].map(row => [row.getAttribute("data-place"), row.querySelector("[data-settings-word]")?.textContent])).toEqual([["hetzner", expect.stringMatching(new RegExp(`^v1 · ${COPY_CURRENT} · 4.2 GB · `))]]);
     expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeCloudDescription);
-    fireEvent.click(document.querySelector("[data-k='edit-image']")!);
-    expect(useStore.getState().setupOpen).toBe(true);
+    fireEvent.click(document.querySelector("[data-k='edit-recipe']")!);
     await settle();
-    expect(document.querySelector("[data-cloud-setup-dialog]")).not.toBeNull();
-    act(() => useStore.getState().closeSetup());
-    await settle();
+    // The recipe opens in the card, never the setup sheet.
+    expect(useStore.getState().setupOpen).toBe(false);
+    expect(document.querySelector("[data-settings-card='image'] [data-k='recipe']")).not.toBeNull();
   });
 
   it("says nothing about the image on a cloud whose key this host does not hold, and draws no card with nothing in it", async () => {

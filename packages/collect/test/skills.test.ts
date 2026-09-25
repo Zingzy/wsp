@@ -85,13 +85,28 @@ describe("the skills on a computer", () => {
     expect(skills.find(s => s.name === "pdf")!.paths.map(p => p.path)).not.toContain("~/.agents/skills/cool-tool");
   });
 
-  it("a workspace adds its project's own folders as project skills", async () => {
+  it("a workspace adds its project's own folders as project skills, each naming the project", async () => {
     const { host, project } = fixture();
-    const read = await detectSkills(host, await skillRoots(host, { project }));
-    expect(read.skills.filter(s => s.scope === "project").map(s => [s.name, s.paths])).toEqual([
-      ["deploy", [{ path: "~/code/app/.claude/skills/deploy", agent: "claude" }]],
-      ["lint", [{ path: "~/code/app/.agents/skills/lint", agent: "codex" }]],
+    const read = await detectSkills(host, await skillRoots(host, { projects: [{ id: "pr_app", name: "app", path: project }] }));
+    const app = { id: "pr_app", name: "app", path: "~/code/app" };
+    expect(read.skills.filter(s => s.scope === "project").map(s => [s.name, s.paths, s.project])).toEqual([
+      ["deploy", [{ path: "~/code/app/.claude/skills/deploy", agent: "claude" }], app],
+      ["lint", [{ path: "~/code/app/.agents/skills/lint", agent: "codex" }], app],
     ]);
+  });
+
+  it("a computer's projects each add their folders, and one name in two projects is two rows, one per project", async () => {
+    const { host, home, project } = fixture();
+    const other = join(home, "code", "www");
+    mkdirSync(join(other, ".claude/skills/deploy"), { recursive: true });
+    writeFileSync(join(other, ".claude/skills/deploy/SKILL.md"), "---\nname: deploy\ndescription: Ship www\n---\n");
+    const read = await detectSkills(host, await skillRoots(host, { projects: [{ id: "pr_app", name: "app", path: project }, { id: "pr_www", name: "www", path: other }] }));
+    const deploys = read.skills.filter(s => s.name === "deploy");
+    expect(deploys.map(s => [s.project?.name, s.description, s.paths.map(p => p.path)])).toEqual([
+      ["app", "Deploy the app", ["~/code/app/.claude/skills/deploy"]],
+      ["www", "Ship www", ["~/code/www/.claude/skills/deploy"]],
+    ]);
+    expect(read.skills.filter(s => s.scope !== "project").every(s => s.project === undefined)).toBe(true);
   });
 
   it("an answer cut short is a refusal, and a read that failed is one, never a short list said as whole", async () => {
