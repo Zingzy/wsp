@@ -63,6 +63,13 @@
 //                         refused while the wsp step ran, with the host's fix
 //   settings-computers-refused  Computers with the host refusing the places read
 //                         and the ssh config read
+//   settings-add-joined   the ssh road after a box joined, its Image card under it
+//                         (&image=none: no image anywhere yet; &bare=1: a box
+//                         that takes no copy, which says so in one line)
+//   settings-add-code     the code road, a computer joining a moment after the
+//                         code is made
+//   settings-add-cloud    the cloud road, where a key saved for Box lists it and
+//                         draws its Image card (&image=none as above)
 //   settings-remove-computer  the Remove dialog over the box's page
 //   settings-image-nothing, -copy, -copying, -stopped, -stale, -ready  the box's
 //                         page with its Image card in that state, or the cloud's
@@ -297,6 +304,12 @@ const COMPUTERS: PlaceView[] = [
   box("p_attic", "attic", { provision: provision({ state: "stopped", finishedAt: undefined, said: "the link dropped" }) }),
   { id: "solari", kind: "provider", name: "solari", default: false, takesForks: true, buildsImages: true, rateUsdPerHour: 0.11 } as PlaceView,
 ];
+/** The computer an add screen has just added, holding no copy of the image yet, and the cloud a saved key lists. */
+const ADDED = box("p_new", "hetzner", { shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * GB, ...(params.get("bare") === "1" ? { buildsImages: false } : {}) });
+const BOX_CLOUD = { id: "box", kind: "provider", name: "box", default: false, takesForks: true, buildsImages: true, rateUsdPerHour: 0.018 } as PlaceView;
+const ADD_SCREENS = ["settings-add-joined", "settings-add-code", "settings-add-cloud"];
+/** A key the cloud road's Save hands the host: once it lands, the host lists the cloud the key opened. */
+let keySaved = false;
 
 /** The Image card in each state it reads, on the box's page or the cloud's (?computer=solari): no image anywhere, an
  * image with no copy there, a copy building, a build that stopped, a copy a newer version left behind, and the copy
@@ -327,6 +340,7 @@ const SETTINGS_SCREENS: Record<string, SettingsAt> = {
   "settings-add-computer": { kind: "group", group: "computers" },
   "settings-add-computer-failed": { kind: "group", group: "computers" },
   "settings-computers-refused": { kind: "group", group: "computers" },
+  ...Object.fromEntries(ADD_SCREENS.map(name => [name, { kind: "group", group: "computers" } as SettingsAt])),
   "settings-remove-computer": { kind: "computer", id: "p_spoo" },
   ...Object.fromEntries(IMAGE_SCREENS.map(name => [name, { kind: "computer", id: imageAt.id } as SettingsAt])),
 };
@@ -347,8 +361,10 @@ const FAILED_ADD: PlaceAddJob = {
   fix: "Install one of them there, then add again.",
 };
 const settings = settingsAt !== undefined;
+/** The add over ssh that joined the box a moment ago, as the window that asked it keeps it. */
+const JOINED_ADD: PlaceAddJob = { addId: "a_new", address: "root@hetzner", startedAt: AT, state: "done", steps: [], placeId: "p_new" };
 /** Every computer this host holds on a settings screen: this Mac, three boxes and the cloud whose key it holds. */
-const computers = settings ? COMPUTERS : places;
+const computers = settings ? [...COMPUTERS, ...(screen === "settings-add-joined" ? [ADDED] : [])] : places;
 /** The image this host sealed and where it stands, on the cloud's page. */
 const IMAGE: SealedImage = {
   name: "default",
@@ -408,7 +424,27 @@ const api = {
   watchStatuses: async () => [],
   capabilities: async () => caps({}),
   getGolden: async () => ({ head: null, versions: [] }),
-  placesList: async () => (screen === "settings-computers-refused" ? Promise.reject(new RequestError("wsp could not read its places: state.json is not valid JSON. Fix or move ~/.wsp/state.json, then start wsp again.", undefined, "Fix or move ~/.wsp/state.json, then start wsp again.")) : { places: computers, adds: screen === "settings-add-computer-failed" ? [FAILED_ADD] : [] }),
+  placesList: async () =>
+    screen === "settings-computers-refused"
+      ? Promise.reject(new RequestError("wsp could not read its places: state.json is not valid JSON. Fix or move ~/.wsp/state.json, then start wsp again.", undefined, "Fix or move ~/.wsp/state.json, then start wsp again."))
+      : { places: [...computers, ...(keySaved ? [BOX_CLOUD] : [])], adds: screen === "settings-add-computer-failed" ? [FAILED_ADD] : screen === "settings-add-joined" ? [JOINED_ADD] : [] },
+  ...(screen === "settings-add-cloud"
+    ? {
+        initKeys: async () => {
+          keySaved = true;
+          return { keys: { solari: true, box: true }, home: "/Users/dev", agents: [], pricing: null, job: null };
+        },
+      }
+    : {}),
+  ...(screen === "settings-add-code"
+    ? {
+        // The computer typing the line joins a moment after the code is made, as a place.joined would land it.
+        mintJoin: async () => {
+          setTimeout(() => useStore.setState(s => ({ places: [...s.places, ADDED] })), 400);
+          return { joins: [{ url: "http://192.168.1.20:4640", line: "wsp join http://192.168.1.20:4640 --code 7Q4F-M2XK" }], expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() };
+        },
+      }
+    : {}),
   ...(screen === "settings-computers-refused" ? { sshHosts: async () => Promise.reject(new RequestError("~/.ssh/config: permission denied")) } : {}),
   projectsList: async () => (drawsSidebar ? RECORDED : []),
   workspacesLanding: async (project: string) => landings[project] ?? landings["pr_spoo"]!,
@@ -438,7 +474,7 @@ const api = {
   daemon: { open: () => () => {} },
   spend: async () => (settings ? [{ place: "solari", monthUsd: 1.2, rateUsdPerHour: 0.11 }] : []),
   image: async () =>
-    !settings || screen === "settings-image-nothing"
+    !settings || screen === "settings-image-nothing" || params.get("image") === "none"
       ? { image: null, copies: [], projects: [] }
       : screen === "settings-image-copy"
         ? { image: IMAGE_RECORD, copies: IMAGE_COPIES.filter(copy => copy.place !== imageAt.word), projects: [] }
@@ -528,7 +564,7 @@ useStore.setState({
   preferences: { ...DEFAULT_PREFERENCES, ...picks, ...(sidebarWidth !== null ? { sidebarWidth: Number(sidebarWidth) } : {}), ...(screen === "settings-light-picked" ? { theme: "light" as const } : {}) },
   places: computers,
   settingsOpen: settings,
-  addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed" || screen === "settings-computers-refused",
+  addComputerOpen: screen === "settings-add-computer" || screen === "settings-add-computer-failed" || screen === "settings-computers-refused" || ADD_SCREENS.includes(screen),
   release:
     screen === "settings-about-behind"
       ? { state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "https://github.com/Zingzy/wsp/releases/tag/v0.3.0", publishedAt: AT }, checkedAt: AT, triedAt: AT, shape: "app" }
@@ -545,6 +581,7 @@ useStore.setState({
 } as never);
 // This window watched the add fail: one read off the host at a reload alone leaves the form clean.
 if (screen === "settings-add-computer-failed") useAdds.setState({ jobs: { [FAILED_ADD.addId]: FAILED_ADD } });
+if (screen === "settings-add-joined") useAdds.setState({ jobs: { [JOINED_ADD.addId]: JOINED_ADD }, heard: [JOINED_ADD.addId] });
 useStore.getState().bind(api);
 // The frames a copy build at the box sent, set after the bind, whose pull starts every place over.
 if (screen === "settings-image-copying") useStore.setState({ goldenFrames: { [imageAt.id]: [{ type: "golden.stage", name: "default", stage: "applying-setup", place: imageAt.id }] } });

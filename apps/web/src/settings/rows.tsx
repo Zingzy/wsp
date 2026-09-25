@@ -17,7 +17,8 @@
 // card whose slots are buttons and chevrons keeps them beside the text and
 // stands at 64. A description gets the room the slot leaves it: two lines of
 // the whole width where the slot has moved under it, three of the narrower
-// box where it stands beside it. One height per card either way, nothing cut.
+// box where it stands beside it. A row carrying chips grows there instead, so
+// no chip is cut. One height per card otherwise, nothing cut.
 import { Chips, type ChipItem } from "../components/ui/chips.js";
 import { ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -165,7 +166,7 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
       {slot}
     </>
   );
-  const rowClass = cn("flex items-center gap-6 px-5", chips === undefined ? ROW_CLASS : "min-h-24 gap-5 px-6 py-5", drops ? `${DROPPED_ROW_CLASS} max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-1` : NARROW_ROW_CLASS);
+  const rowClass = cn("flex items-center gap-6 px-5", chips === undefined ? ROW_CLASS : "min-h-24 gap-5 px-6 py-5", chips === undefined && (drops ? DROPPED_ROW_CLASS : NARROW_ROW_CLASS), drops && "max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-1");
   // Marked, so the height a row stands at below 640 px is read off the row rather than worked out a second time.
   const dropMark = drops ? { "data-settings-drops": "" } : {};
   if (open !== undefined) {
