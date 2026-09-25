@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Image card on a computer's page, and under Add a computer once that
 // computer is added: what stands there of your image, as imageState reads it,
-// and the one press that state invites. A copy is built only on Copy, never on
-// opening the page, and the time and the rate stand beside the press, since a
-// build bills where it runs. The image's own first build is not started from
-// here: Edit image is the door that builds it.
+// and the one press that state invites; under it what the image holds, on
+// every computer's card alike, with Edit; and the recipe itself, opened in
+// place by Build your image here or Edit. A copy is built only on Copy, never
+// on opening the page, and the time and the rate stand beside the press, since
+// a build bills where it runs. While the image builds anywhere, every press
+// that would start another build is held with where it is building.
 import { PencilIcon } from "lucide-react";
-import { useState } from "react";
-import { HERE_PLACE_ID, copyAsksSignIns, type PlaceView, type SealedImageView } from "@wsp/protocol";
+import { useEffect, useState } from "react";
+import { CLOUD_SETUP_WORDS, HERE_PLACE_ID, copyAsksSignIns, initJobBuilding, initJobOver, initSignInWaitedOn, signInWaitLine, type PlaceView, type SealedImageView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import type { ChipItem } from "../components/ui/chips.js";
 import { Spinner } from "../components/ui/spinner.js";
@@ -15,7 +17,8 @@ import { failureOf, type Failure } from "../protocol/failure.js";
 import { useGoldenFrames, useStore } from "../protocol/store.js";
 import { requestNewWorkspace } from "../shell/shellRequests.js";
 import { FACT, WHERE_WORDS } from "./format.js";
-import { copyCost, IMAGE_WORDS } from "./image.js";
+import { copyCost, IMAGE_WORDS, recipeNames } from "./image.js";
+import { ImageRecipe } from "./ImageRecipe.js";
 import { imageChips, imageState, type ImageState } from "./imageState.js";
 import { placeName, projectOn } from "./places.js";
 import { RefusalSlot } from "./sheetParts.js";
@@ -65,6 +68,17 @@ type Press = { word: string; heldWhy?: string; run?: () => void };
 export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView; name: string; state: ImageState; view: SealedImageView; ctx: SettingsContext }) {
   const [pressing, setPressing] = useState(false);
   const [refused, setRefused] = useState<Failure | null>(null);
+  const job = useStore(s => s.initJob);
+  const building = job !== null && initJobBuilding(job.phase);
+  // A recipe still being chosen stands open on every card that opens, since it is one job whichever card began it.
+  const [recipeOpen, setRecipeOpen] = useState(() => job !== null && !initJobOver(job.phase) && !building);
+  useEffect(() => {
+    if (building) setRecipeOpen(false);
+  }, [building]);
+  const open = recipeOpen && !building;
+  const buildingAt = building ? ctx.places.find(p => p.id === job.place?.id) : undefined;
+  const buildHeld = building ? IMAGE_WORDS.buildingOn(buildingAt === undefined ? (job.place?.name ?? name) : placeName(buildingAt, buildingAt.id === HERE_PLACE_ID)) : ctx.api?.initStart === undefined ? WHERE_WORDS.notYet : undefined;
+  const openRecipe = (): void => setRecipeOpen(true);
   const build = ctx.api?.imageBuild;
   const image = view.image;
   const force = image !== null && copyAsksSignIns(image);
@@ -77,7 +91,7 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
       .finally(() => setPressing(false));
   };
   const copyPress: Press = { word: force ? IMAGE_WORDS.copyAnyway : IMAGE_WORDS.copyHere, ...(build === undefined ? { heldWhy: WHERE_WORDS.notYet } : { run: copy }) };
-  const buildPress: Press = { word: IMAGE_WORDS.buildHere, heldWhy: IMAGE_WORDS.buildHeld };
+  const buildPress: Press = { word: IMAGE_WORDS.buildHere, ...(buildHeld === undefined ? { run: openRecipe } : { heldWhy: buildHeld }) };
   const project = projectOn(place, ctx.projects);
   const cost = copyCost(place.rateUsdPerHour);
   const title = standingTitle(state, image !== null);
@@ -87,12 +101,17 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
       case "none":
         if (image === null) return { title, description: IMAGE_WORDS.chooseAndBuild, press: buildPress };
         return { title, description: force ? IMAGE_WORDS.copyAsks(image.version) : IMAGE_WORDS.copyComes(image.version), cost, press: copyPress };
-      case "building":
-        return { title, description: IMAGE_WORDS.steps(state.job.progress.done, state.job.progress.total), mono: true, busy: true };
+      case "building": {
+        // Until the build's own rows are drawn here, a sign-in it waits on opens the setup sheet at that step.
+        const waitedOn = initSignInWaitedOn(state.job);
+        return waitedOn === undefined
+          ? { title, description: IMAGE_WORDS.steps(state.job.progress.done, state.job.progress.total), mono: true, busy: true }
+          : { title, description: signInWaitLine(waitedOn), press: { word: CLOUD_SETUP_WORDS.build.open, run: ctx.openSetup } };
+      }
       case "copying":
         return { title, description: state.line, mono: true, busy: true };
       case "stopped":
-        // A first build that stopped has no record to copy; building it again is the job's, held with its reason.
+        // A first build that stopped has no record to copy; building it again opens the recipe.
         return image === null
           ? { title, description: state.said, mono: true, press: buildPress }
           : { title, description: state.said, mono: true, cost, ...(force ? { note: IMAGE_WORDS.copyAsks(image.version) } : {}), press: { ...copyPress, word: force ? IMAGE_WORDS.copyAnyway : IMAGE_WORDS.tryAgain } };
@@ -115,9 +134,11 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
     }
   })();
 
+  // While the recipe stands open it is the one thing to press, so the state row keeps its words and drops its press.
+  const press = open ? undefined : row.press;
   const control = row.busy ? (
     <Spinner className="size-4 text-muted-foreground" />
-  ) : row.press === undefined ? undefined : (
+  ) : press === undefined ? undefined : (
     <>
       {row.cost === undefined ? null : (
         <span data-k="image-cost" className={cn(FACT, "flex shrink-0 flex-col items-end whitespace-nowrap leading-4")}>
@@ -126,12 +147,12 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
           ))}
         </span>
       )}
-      <Button data-k="image-press" size="xs" variant="default" held={row.press.heldWhy !== undefined} disabled={pressing} onClick={row.press.run}>
-        {row.press.word}
+      <Button data-k="image-press" size="xs" variant="default" held={press.heldWhy !== undefined} disabled={pressing} onClick={press.run}>
+        {press.word}
       </Button>
     </>
   );
-  const waiting = row.press?.heldWhy ?? row.note;
+  const waiting = press?.heldWhy ?? row.note ?? (image !== null && !open ? buildHeld : undefined);
   const stateRow: Omit<SettingsRowData, "kind"> = {
     id: "image-state",
     title: row.title,
@@ -141,21 +162,37 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
     ...(control === undefined ? {} : { control }),
     attrs: { "data-k": "image-state", "data-state": state.kind },
   };
+  const holds: Omit<SettingsRowData, "kind"> | undefined =
+    image === null
+      ? undefined
+      : {
+          id: "image-holds",
+          title: IMAGE_WORDS.holds,
+          description: image.recipe === undefined ? IMAGE_WORDS.noRecipe(image.version) : recipeNames(image.recipe),
+          ...(open
+            ? {}
+            : {
+                control: (
+                  <Button data-k="edit-recipe" size="xs" variant="outline" held={buildHeld !== undefined} onClick={openRecipe}>
+                    <PencilIcon aria-hidden className="size-3.5" />
+                    {IMAGE_WORDS.holdsEdit}
+                  </Button>
+                ),
+              }),
+          attrs: { "data-k": "image-holds" },
+        };
   return (
     <div className="flex flex-col gap-3">
-      <div className={cn(CARD_SURFACE, "flex flex-col")}>
-        <Row {...stateRow} drops={row.cost !== undefined} />
+      <div className={cn(CARD_SURFACE, "flex flex-col divide-y divide-border")}>
+        <Row {...stateRow} drops={row.cost !== undefined && press !== undefined} />
+        {holds === undefined ? null : <Row {...holds} />}
       </div>
-      {/* The slot stands in every state, so a refusal or a held press's reason arriving moves nothing under the card. */}
-      <div className="flex items-start gap-4">
-        <div className="min-w-0 flex-1">
-          <RefusalSlot k="image-refusal" {...(refused === null ? {} : { said: refused.said, ...(refused.fix === undefined ? {} : { fix: refused.fix }) })} {...(waiting === undefined ? {} : { waiting })} />
-        </div>
-        <Button data-k="edit-image" size="xs" variant="outline" onClick={ctx.openSetup}>
-          <PencilIcon aria-hidden className="size-3.5" />
-          {IMAGE_WORDS.edit}
-        </Button>
-      </div>
+      {open ? (
+        <ImageRecipe place={place} name={name} version={image?.version} onClose={() => setRecipeOpen(false)} />
+      ) : (
+        // The slot stands in every state, so a refusal or a held press's reason arriving moves nothing under the card.
+        <RefusalSlot k="image-refusal" {...(refused === null ? {} : { said: refused.said, ...(refused.fix === undefined ? {} : { fix: refused.fix }) })} {...(waiting === undefined ? {} : { waiting })} />
+      )}
     </div>
   );
 }

@@ -6,7 +6,8 @@
 // here: whether a copy stands on the record is copyStanding in the protocol,
 // which the command line reads too, and where today ends is daysBack in the
 // app's timestamp reading, which every surface that says "today" reads.
-import { BUILD_TAKES_UNMEASURED, chargesNothing, fmtBytes, fmtRate, plural, sealedLoginsHeld, type PlaceView, type SealedImage, type SealedImageCopy } from "@wsp/protocol";
+import { catalogEntry } from "@wsp/catalog";
+import { BUILD_TAKES_UNMEASURED, chargesNothing, customRows, fmtBytes, fmtRate, plural, sealedLoginsHeld, type PlaceView, type Recipe, type SealedImage, type SealedImageCopy } from "@wsp/protocol";
 import { HardDriveIcon, KeyRoundIcon, TagIcon } from "lucide-react";
 import type { ChipItem } from "../components/ui/chips.js";
 import { placeNamed } from "./places.js";
@@ -33,8 +34,19 @@ export const IMAGE_WORDS = {
   },
   chooseAndBuild: "Choose what goes on your image and build it here.",
   buildHere: "Build your image here",
-  /** Said under the card while Build your image here is held: the one door that builds it today. */
-  buildHeld: "Not from this page yet: Edit image builds it.",
+  /** Said under the card while the image builds, holding every press that would start another build. */
+  buildingOn: (computer: string): string => `Your image is building on ${computer}.`,
+  /** The row under the state that says what the image holds, and the press that opens its recipe. */
+  holds: "On your image",
+  holdsEdit: "Edit",
+  noRecipe: (version: number): string => `v${version} was sealed before what goes on it was kept.`,
+  /** The recipe's own words, where they are not the setup's: its close, the step after every screen is answered,
+   * and where a build goes when that is not this computer. */
+  close: "Close",
+  build: "Build",
+  readyHeadline: "Ready to build",
+  buildsHere: (computer: string): string => `Your image is built on ${computer}.`,
+  buildsHome: (home: string, version: number): string => `Your image lives on ${home}, so v${version} is built there. Copy it here once it is sealed.`,
   copyComes: (version: number): string => `v${version} comes with your sign-ins. Nothing is asked again.`,
   copyAsks: (version: number): string => `v${version} holds no sign-ins, so each is asked again here.`,
   copyHere: "Copy your image here",
@@ -63,6 +75,16 @@ const DAY = new Intl.DateTimeFormat(APP_LOCALE, { month: "short", day: "numeric"
 export function recordChips(image: SealedImage): ChipItem[] {
   const size: ChipItem[] = image.usedBytes === undefined ? [] : [{ text: fmtBytes(image.usedBytes), icon: HardDriveIcon }];
   return [{ text: `v${image.version}`, icon: TagIcon }, ...size, { text: plural(sealedLoginsHeld(image), "sign-in"), icon: KeyRoundIcon }];
+}
+
+/** What the recipe puts on the image, as names: the agents ticked, then the tools ticked and the rows added by hand,
+ * each list comma-joined and the two apart. A row outside the catalog reads by its own id. */
+export function recipeNames(recipe: Recipe): string {
+  const named = (kind: "agent" | "tool"): string[] => recipe.rows.filter(row => row.on && row.kind === kind).map(row => catalogEntry(row.id)?.name ?? row.id);
+  return [named("agent"), [...named("tool"), ...customRows(recipe).map(row => row.name)]]
+    .filter(names => names.length > 0)
+    .map(names => names.join(", "))
+    .join(" · ");
 }
 
 /** A stamp as the section reads one: the clock alone on the day it happened, the day and the clock before that, so

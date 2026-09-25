@@ -14,7 +14,7 @@ import { basename, join, relative } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, markedDefault, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
+import { HERE_PLACE_ID, CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, markedDefault, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -606,7 +606,7 @@ describe("the init job, manual road", () => {
     expect((await f.rt.workspaces.list()).find(w => w.name === "e2e")!.golden).toBe(goldenHead(await f.rt.golden.get())!.snapshotId);
   });
 
-  it("a build with an empty name forks nothing and says so on the row it still draws, so the list never ends on a step nobody can read", async () => {
+  it("a build with an empty name forks nothing and draws no first-workspace row, since nothing was asked there to count", async () => {
     const f = fake();
     await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     await forkable(f);
@@ -614,13 +614,14 @@ describe("the init job, manual road", () => {
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
     const building = await f.jobs.build({ firstWorkspace: "   ", importFolder: f.home });
-    expect(building.rows.at(-1)).toMatchObject({ kind: "workspace", state: "skipped", detail: NO_FIRST_WORKSPACE });
+    expect(building.rows.some(r => r.kind === "workspace")).toBe(false);
     expect(building.rows.some(r => r.kind === "project")).toBe(false);
     await f.settled();
     const done = f.jobs.view()!;
     expect(done.phase).toBe("done");
     expect(done.workspace).toBeUndefined();
-    expect(done.rows.at(-1)).toMatchObject({ kind: "workspace", state: "skipped" });
+    expect(done.rows.some(r => r.kind === "workspace")).toBe(false);
+    expect(done.progress.done).toBe(done.progress.total);
     expect((await f.rt.workspaces.list()).map(w => w.name)).toEqual(["this-mac"]);
   });
 
@@ -633,12 +634,12 @@ describe("the init job, manual road", () => {
     // Nothing is seeded: with no workspace in the list the old rule would have asked, and a folder alone answered yes.
     expect(await f.rt.workspaces.list()).toEqual([]);
     const building = await f.jobs.build({ firstWorkspace: "", importFolder: f.home });
-    expect(building.rows.at(-1)).toMatchObject({ kind: "workspace", state: "skipped", detail: NO_FIRST_WORKSPACE });
+    expect(building.rows.some(r => r.kind === "workspace")).toBe(false);
     await f.settled();
     const done = f.jobs.view()!;
     expect(done.phase).toBe("done");
     expect(done.workspace).toBeUndefined();
-    expect(done.rows.filter(r => r.kind === "workspace" || r.kind === "project")).toHaveLength(1);
+    expect(done.rows.filter(r => r.kind === "workspace" || r.kind === "project")).toHaveLength(0);
     expect(await f.rt.workspaces.list()).toEqual([]);
   });
 
@@ -1644,6 +1645,71 @@ describe("the init job, terminal road", () => {
     await f.settled();
     await expect(f.jobs.build({})).rejects.toThrow(buildPlaceAskLine(["solari", "box"]));
     expect([solari.machines, box.machines]).toEqual([[], []]);
+  });
+
+  it("two builds sent inside the place's answer boot one builder: the job is building before that await and a second build meets the one-job refusal", async () => {
+    const f = fake();
+    await forkable(f);
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    const real = f.rt.golden.buildPlace.bind(f.rt.golden);
+    let asked = 0;
+    let letGo: () => void = () => {};
+    const gate = new Promise<void>(r => (letGo = r));
+    f.rt.golden.buildPlace = async (on?: string) => {
+      asked += 1;
+      await gate;
+      return real(on);
+    };
+    const first = f.jobs.build({});
+    const second = f.jobs.build({}).then(
+      () => "built",
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    );
+    letGo();
+    await first;
+    expect(await second).toBe("an init job is already running; cancel it or let it finish first");
+    await f.settled();
+    expect(asked).toBe(1);
+  });
+
+  it("a cancel sent inside the place's answer stops the build before any builder boots", async () => {
+    const f = fake();
+    await forkable(f);
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    const real = f.rt.golden.buildPlace.bind(f.rt.golden);
+    let letGo: () => void = () => {};
+    const gate = new Promise<void>(r => (letGo = r));
+    f.rt.golden.buildPlace = async (on?: string) => {
+      await gate;
+      return real(on);
+    };
+    const build = f.jobs.build({});
+    await f.jobs.cancel();
+    letGo();
+    await build;
+    await f.settled();
+    const job = f.jobs.view()!;
+    expect(job.phase).toBe("cancelled");
+    expect(job.place).toBeUndefined();
+    expect(job.rows.some(row => row.kind === "stage")).toBe(false);
+  });
+
+  it("a place that refuses the build leaves the job on its screens, so the person can build again", async () => {
+    const f = fake();
+    await forkable(f);
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    f.rt.golden.buildPlace = async () => {
+      throw new Error("no place named nowhere");
+    };
+    await expect(f.jobs.build({ on: "nowhere" })).rejects.toThrow("no place named nowhere");
+    expect(f.jobs.view()!.phase).toBe("answering");
+    await f.jobs.step({ at: 0 });
+    expect(f.jobs.view()!.step).toBe(0);
   });
 
   it("the build lands on the place --on names and is priced there: that place's own backend makes the builder and the record names it", async () => {

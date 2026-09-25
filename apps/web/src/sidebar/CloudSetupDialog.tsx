@@ -11,19 +11,20 @@
 // screens to a reader and nothing else, so its title stands for screen readers
 // alone, and a caller that names its own draws it in the sheet's corner, where
 // Settings says which of its rows this sheet was opened from.
-import { useCallback, useEffect, useState } from "react";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initDiskOverLine, initImageBytes, initJobOver, initStepCounter, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { useEffect, useState } from "react";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initJobOver, initStepCounter, type InitJob, type InitSetup } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import { RequestError } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { IMAGE_WORDS } from "../settings/image.js";
-import { draftOf, SetupAnswers, type Draft } from "./cloud-setup/SetupAnswers.js";
-import { SetupAgent } from "./cloud-setup/SetupAgent.js";
+import { AgentLine, agentStepWords } from "../settings/recipe/AgentLine.js";
+import { ReadingRows } from "../settings/recipe/ReadingRows.js";
+import { RecipeScreen, type Draft } from "../settings/recipe/RecipeScreen.js";
+import { RoadChoice, roadReady, type RoadPick } from "../settings/recipe/RoadChoice.js";
+import { keptAt, recipeAt, useRecipeJob } from "../settings/recipe/useRecipeJob.js";
 import { SetupAsk } from "./cloud-setup/SetupAsk.js";
 import { SetupBuild } from "./cloud-setup/SetupBuild.js";
-import { SetupChoice, type RoadPick } from "./cloud-setup/SetupChoice.js";
-import { SetupFacts } from "./cloud-setup/SetupFacts.js";
 import { SetupKeys, type KeyCheckShown } from "./cloud-setup/SetupKeys.js";
 import { SetupScreen } from "./cloud-setup/SetupScreen.js";
 
@@ -32,69 +33,32 @@ type Step = "choice" | "keys" | "job";
 /** Where the sheet opens: on the job when one stands, on the choice otherwise. */
 const stepFor = (job: InitJob | null): Step => (job === null || initJobOver(job.phase) ? "choice" : "job");
 
-/** The screen the first launch already answered on this computer, left out of the app's setup. */
-const FIRST_LAUNCH_SCREEN = "wsp";
-
 /** The build question's two typed answers, as the draft names them. */
 const ASK_NAME = "name";
 const ASK_FOLDER = "folder";
 
-/** The steps the app walks: the screens the host shows, less the one the first launch answered, then the first
- * workspace's question; the count over each title is of these. */
-const shownOf = (job: InitJob): InitScreen[] => job.screens.filter(s => s.id !== FIRST_LAUNCH_SCREEN);
-
-/** What the host kept of a step the person left mid-answer, if anything. */
-const keptAt = (job: InitJob, at: string): InitDraft | undefined => job.drafts?.find(d => d.at === at);
-
 export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
-  const api = useStore(s => s.api);
   const saveKeys = useStore(s => s.saveKeys);
-  const job = useStore(s => s.initJob);
   const select = useStore(s => s.select);
+  const recipe = useRecipeJob();
+  const { api, job, draft, setDraft, refusal, setRefusal, keep, attempt } = recipe;
   const [setup, setSetup] = useState<InitSetup | null>(null);
   const [step, setStep] = useState<Step>(() => stepFor(job));
   const [pick, setPick] = useState<RoadPick>({ road: "manual" });
-  const [draft, setDraft] = useState<{ key: string; draft: Draft } | null>(null);
-  const [refusal, setRefusal] = useState<string | null>(null);
   const [check, setCheck] = useState<KeyCheckShown | null>(null);
   // Whether the key step opens on an empty field though a key is saved: after a build the saved key failed, yes.
   const [keyChange, setKeyChange] = useState(false);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     void api?.initGet?.().then(setSetup, e => setRefusal(errorText(e)));
-  }, [api]);
+  }, [api, setRefusal]);
   // A job that starts while the sheet is open is drawn from where the host says it stands.
   const jobId = job?.id;
   useEffect(() => {
-    setDraft(null);
     if (jobId !== undefined) setStep("job");
   }, [jobId]);
-  // What a step has and has not sent goes to the host as it changes, so the sheet holds nothing a close would lose.
-  // A refused keep is left alone: it costs the person nothing and the step's own Continue is what must be heard.
-  const keep = useCallback(
-    (at: string, next: Draft): void => {
-      void api?.initDraft?.({ at, ticks: [...next.ticks], answers: next.answers }).catch(() => {});
-    },
-    [api],
-  );
-  const attempt = useCallback(async (work: () => Promise<unknown>): Promise<boolean> => {
-    setRefusal(null);
-    try {
-      await work();
-      return true;
-    } catch (e) {
-      setRefusal(errorText(e));
-      return false;
-    }
-  }, []);
   // The step moves once the host has taken the start, so a refused one leaves the choice up with the refusal under it.
-  const start = (): void => {
-    if (api?.initStart === undefined) return;
-    void attempt(async () => {
-      await api.initStart!({ road: pick.road, ...(pick.harness !== undefined ? { harness: pick.harness } : {}) });
-      setStep("job");
-    });
-  };
+  const start = (): void => recipe.startRoad(pick, () => setStep("job"));
   // The key step is on every run, so a person always sees that a key is set and can change it.
   const onContinueChoice = (): void => {
     if (setup === null) return;
@@ -141,44 +105,56 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
 
   let body;
   if (step === "choice" || setup === null) {
-    body = setup === null ? <SetupScreen k="loading" headline={CLOUD_SETUP_WORDS.choice.headline} top={CLOUD_SETUP_WORDS.choice.top} refusal={refusal} /> : <SetupChoice agents={setup.agents} pick={pick} onPick={setPick} onContinue={onContinueChoice} refusal={refusal} />;
+    const words = CLOUD_SETUP_WORDS.choice;
+    body =
+      setup === null ? (
+        <SetupScreen k="loading" headline={words.headline} top={words.top} refusal={refusal} />
+      ) : (
+        <SetupScreen k="choice" headline={words.headline} top={words.top} refusal={refusal} primary={{ word: words.keycap, onPress: onContinueChoice, disabled: !roadReady(setup.agents, pick) }}>
+          <RoadChoice agents={setup.agents} pick={pick} onPick={setPick} />
+        </SetupScreen>
+      );
   } else if (step === "keys") {
     body = <SetupKeys setup={setup} onSave={onSaveKeys} onBack={() => setStep("choice")} refusal={refusal} check={check} busy={saving} change={keyChange} />;
   } else if (job !== null && initAgentStep(job)) {
+    const words = agentStepWords(job);
     body = (
-      <SetupAgent
-        job={job}
+      <SetupScreen
+        k="agent"
+        headline={words.headline}
+        top={words.top}
         refusal={refusal}
-        onOpenThread={() => {
-          if (job.thread === undefined) return;
-          select(job.thread.workspaceId, job.thread.id);
-          onClose();
-        }}
-        onRetry={() => {
-          const harness = job.thread?.harness;
-          if (api?.initStart === undefined || harness === undefined) return;
-          void attempt(() => api.initStart!({ road: "agent", harness }));
-        }}
-        onAgain={again}
-      />
+        {...(words.over
+          ? {
+              primary: {
+                word: CLOUD_SETUP_WORDS.agent.retry,
+                onPress: recipe.retryAgent,
+              },
+              secondary: { word: CLOUD_SETUP_WORDS.agent.again, onPress: again },
+            }
+          : {})}
+      >
+        <AgentLine
+          job={job}
+          onOpenThread={() => {
+            if (job.thread === undefined) return;
+            select(job.thread.workspaceId, job.thread.id);
+            onClose();
+          }}
+        />
+      </SetupScreen>
     );
   } else if (job === null || job.phase === "reading") {
-    body = <SetupFacts job={job} refusal={refusal} />;
+    body = (
+      <SetupScreen k="reading" headline={CLOUD_SETUP_WORDS.reading.headline} top={CLOUD_SETUP_WORDS.reading.top} refusal={refusal}>
+        <ReadingRows job={job} />
+      </SetupScreen>
+    );
   } else if (job.phase === "answering") {
-    const shown = shownOf(job);
+    const { shown, index, screen } = recipeAt(job);
     const total = shown.length + 1;
-    const at = job.screens[job.step];
-    const index = at === undefined || at.id === FIRST_LAUNCH_SCREEN ? shown.length : shown.findIndex(s => s.id === at.id);
-    const screen = shown[index];
-    const stepTo = (i: number): void => void attempt(() => api!.initStep!({ at: job.screens.findIndex(s => s.id === shown[i]!.id) }));
-    const startOver = (): void =>
-      void attempt(async () => {
-        await api!.initCancel!();
-        again();
-      });
+    const startOver = (): void => recipe.startOver(again);
     if (screen === undefined) {
-      // The first launch's answer for the MCP rows rides with the build: the agents here it configured.
-      const firstLaunch = job.screens.find(s => s.id === FIRST_LAUNCH_SCREEN);
       const kept = keptAt(job, INIT_BUILD_STEP);
       const typed = draft !== null && draft.key === INIT_BUILD_STEP ? draft.draft.answers : { [ASK_NAME]: kept?.answers[ASK_NAME] ?? FIRST_WORKSPACE, [ASK_FOLDER]: kept?.answers[ASK_FOLDER] ?? "" };
       const asked = (o: { name: string; folder: string }): Draft => ({ ticks: new Set<string>(), answers: { [ASK_NAME]: o.name, [ASK_FOLDER]: o.folder }, keys: {} });
@@ -193,50 +169,24 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
           // Leaving a field the person did not change keeps nothing: a blur is not news, and a keep is a whole view
           // to every client watching the job.
           onKeep={o => (o.name === (kept?.answers[ASK_NAME] ?? FIRST_WORKSPACE) && o.folder === (kept?.answers[ASK_FOLDER] ?? "") ? undefined : keep(INIT_BUILD_STEP, asked(o)))}
-          onBuild={o =>
-            void attempt(async () => {
-              if (firstLaunch !== undefined) await api!.initAnswer!({ screen: firstLaunch.id, ticks: setup.agents.filter(a => a.configured).map(a => wspToolsRowId(a.id)).filter(id => firstLaunch.items.some(i => i.id === id)) });
-              await api!.initBuild!(o);
-            })
-          }
-          onBack={() => (shown.length > 0 ? stepTo(shown.length - 1) : startOver())}
+          onBuild={o => void attempt(() => recipe.build(setup.agents, o))}
+          onBack={() => (shown.length > 0 ? recipe.stepTo(shown.length - 1) : startOver())}
         />
       );
     } else {
-      const key = screen.id;
-      const current = draft !== null && draft.key === key ? draft.draft : draftOf(screen, keptAt(job, key));
-      const image = { used: initImageBytes(job, { at: screen.id, ticks: current.ticks }), ...(job.disk !== undefined ? { total: job.disk.total } : {}) };
-      const over = image.total !== undefined ? Math.max(0, image.used - image.total) : 0;
+      const current = recipe.draftAt(screen);
       body = (
-        <SetupAnswers
-          key={`${job.id}:${key}`}
-          screen={screen}
+        <SetupScreen
+          key={`${job.id}:${screen.id}`}
+          k={`screen-${screen.id}`}
           counter={initStepCounter(index + 1, total)}
-          draft={current}
-          onDraft={next => {
-            setDraft({ key, draft: next });
-            // A typed key is not drafted, so a keystroke in one pushes no view to every client watching the job.
-            if (next.ticks !== current.ticks || next.answers !== current.answers) keep(key, next);
-          }}
+          headline={screen.top}
           refusal={refusal}
-          image={image}
-          primary={{
-            word: CLOUD_SETUP_WORDS.screen.keycap,
-            onPress: () => {
-              if (over > 0) {
-                setRefusal(initDiskOverLine(over));
-                return;
-              }
-              void attempt(async () => {
-                const typed = Object.fromEntries(Object.entries(current.keys).filter(([, v]) => v.trim() !== ""));
-                if (Object.keys(typed).length > 0) await saveKeys({ rows: typed });
-                await api!.initAnswer!({ screen: screen.id, ticks: [...current.ticks], answers: current.answers });
-                setDraft(null);
-              });
-            },
-          }}
-          secondary={index > 0 ? { word: CLOUD_SETUP_WORDS.screen.back, onPress: () => stepTo(index - 1) } : { word: CLOUD_SETUP_WORDS.screen.again, onPress: startOver }}
-        />
+          primary={{ word: CLOUD_SETUP_WORDS.screen.keycap, onPress: () => recipe.answer(screen) }}
+          secondary={index > 0 ? { word: CLOUD_SETUP_WORDS.screen.back, onPress: () => recipe.stepTo(index - 1) } : { word: CLOUD_SETUP_WORDS.screen.again, onPress: startOver }}
+        >
+          <RecipeScreen screen={screen} draft={current} onDraft={next => recipe.edit(screen, current, next)} image={recipe.imageAt(screen, current)} />
+        </SetupScreen>
       );
     }
   } else {

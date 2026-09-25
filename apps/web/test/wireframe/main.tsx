@@ -75,6 +75,10 @@
 //                         page with its Image card in that state, or the cloud's
 //                         with &computer=solari; settings-computer is the box's
 //                         ready card and settings-cloud the cloud's copy behind
+//   settings-image-recipe, -recipe-last, -recipe-choice  the box's card with the
+//                         recipe open on its first screen, on the screen that
+//                         builds, and on the road before any job (&image=none);
+//                         settings-image-signin, a build there waiting on a sign-in
 //   bring-back-paused    the row's menu on a machine that is stopped, with
 //                        Bring back held and its reason under the pointer
 //   bring-back-absent    the same on a workspace whose computer is not
@@ -93,7 +97,7 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { CREATE_READY, DEFAULT_PREFERENCES, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
@@ -314,8 +318,22 @@ let keySaved = false;
 /** The Image card in each state it reads, on the box's page or the cloud's (?computer=solari): no image anywhere, an
  * image with no copy there, a copy building, a build that stopped, a copy a newer version left behind, and the copy
  * standing. The record carries a recipe here, so the ready card draws every chip a real record gives it. */
-const IMAGE_SCREENS = ["settings-image-nothing", "settings-image-copy", "settings-image-copying", "settings-image-stopped", "settings-image-stale", "settings-image-ready"];
+const RECIPE_SCREENS = ["settings-image-recipe", "settings-image-recipe-last", "settings-image-recipe-choice", "settings-image-signin"];
+const IMAGE_SCREENS = [...RECIPE_SCREENS, "settings-image-nothing", "settings-image-copy", "settings-image-copying", "settings-image-stopped", "settings-image-stale", "settings-image-ready"];
 const imageAt = params.get("computer") === "solari" ? { id: "solari", word: "solari" } : { id: "p_spoo", word: "spoo" };
+/** The init job the recipe screens stand on, which the host hands over with its setup. */
+function recipeJob(): InitJob | null {
+  if (screen === "settings-image-signin")
+    return { id: "init_w", road: "manual", phase: "signing-in", keys: {}, step: 3, stoppable: true, screens: [], rows: [{ id: "sign-in/claude", kind: "sign-in", tool: "claude", label: "Claude Code", state: "waiting for you" }], progress: { done: 4, total: 11 }, needsYou: { what: "sign in to Claude Code", since: 1 }, log: [], place: { id: imageAt.id, name: imageAt.word } };
+  if (screen !== "settings-image-recipe" && screen !== "settings-image-recipe-last") return null;
+  const MB = 1024 * 1024;
+  const screens: InitScreen[] = [
+    { id: "agents", title: "Agents", top: "Which agents go on the image", items: [{ id: "claude", label: "Claude Code", size: 208 * MB, why: "used here, 412 sessions", detail: [] }, { id: "codex", label: "Codex", size: 455 * MB, why: "used here, 38 sessions", detail: [] }, { id: "hermes", label: "Hermes Agent", size: 484 * MB, why: "not installed here", detail: [] }], ticks: ["claude", "codex"], answers: {}, footer: [], tally: "agents" },
+    { id: "tools", title: "Tools", top: "Tools from your usage", items: [{ id: "node", label: "node", size: 60 * MB, group: "always on the image", detail: [], lock: "on" }, { id: "gh", label: "gh", size: 12 * MB, why: "29,623 calls", group: "from your usage", detail: [] }, { id: "rg", label: "ripgrep", size: 6 * MB, why: "8,112 calls", group: "from your usage", detail: [] }], ticks: ["node", "gh", "rg"], answers: {}, footer: [], tally: "tools" },
+    { id: "logins", title: "Sign-ins", top: "How sign-ins reach the machine", items: [{ id: "logins/claude", label: "Claude Code login", group: "Agents", mark: "claude", why: "Keychain", detail: [], choices: [{ value: "copy", label: "copy from this Mac" }, { value: "machine", label: "sign in on the machine" }, { value: "later", label: "later" }] }, { id: "logins/gh", label: "GitHub CLI login", group: "Developer CLIs", mark: "gh", why: "hosts.yml", detail: [], choices: [{ value: "copy", label: "copy from this Mac" }, { value: "skip", label: "skip" }] }], ticks: [], answers: { "logins/claude": "copy", "logins/gh": "copy" }, footer: [] },
+  ];
+  return { id: "init_w", road: "manual", phase: "answering", keys: {}, step: screen === "settings-image-recipe" ? 0 : 2, stoppable: true, disk: { fixed: 2 * GB, total: 20 * GB }, screens, rows: [], progress: { done: 0, total: 0 }, log: [] };
+}
 const firstRunScreens = ["first-run", "first-run-refused", "first-run-starting", "first-run-no-agent", "first-run-agents"];
 /** The screens that are Settings in the centre rather than a workspace, each by the page it opens on. */
 const SETTINGS_SCREENS: Record<string, SettingsAt> = {
@@ -479,7 +497,7 @@ const api = {
             // states a row here can be read in.
             CATALOG_AGENTS.map((entry, at) => ({ id: entry.id, name: entry.name, configured: at === 0, takesTools: true })),
     pricing: null,
-    job: null,
+    job: recipeJob(),
   }),
   // The one screen that records a project: refused by the runtime's own sentence, or still running, or taken.
   projectsAdd: async () => {
@@ -492,7 +510,7 @@ const api = {
   daemon: { open: () => () => {} },
   spend: async () => (settings ? [{ place: "solari", monthUsd: 1.2, rateUsdPerHour: 0.11 }] : []),
   image: async () =>
-    !settings || screen === "settings-image-nothing" || params.get("image") === "none"
+    !settings || screen === "settings-image-nothing" || screen === "settings-image-recipe" || screen === "settings-image-recipe-last" || screen === "settings-image-signin" || params.get("image") === "none"
       ? { image: null, copies: [], projects: [] }
       : screen === "settings-image-copy"
         ? { image: IMAGE_RECORD, copies: IMAGE_COPIES.filter(copy => copy.place !== imageAt.word), projects: [] }
@@ -502,6 +520,8 @@ const api = {
             ? { image: IMAGE_RECORD, copies: IMAGE_COPIES.map(copy => (copy.place === imageAt.word ? { ...copy, version: 3, hash: IMAGE.hash } : copy)), projects: [] }
             : { image: IMAGE, copies: IMAGE_COPIES, projects: [] },
   imageBuild: async () => new Promise<never>(() => {}),
+  initStart: async () => new Promise<never>(() => {}),
+  initDraft: async () => new Promise<never>(() => {}),
   hostTerminalConfig: async () => ({ files: [] }),
   agentsRead: async () => AGENTS_REPORT,
   serversIcon: async (host: string) => SERVER_ICON[host]?.() ?? null,
