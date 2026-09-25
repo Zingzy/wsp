@@ -4,9 +4,10 @@
 // under them. Over ssh the host logs in, installs wsp and waits for the box
 // to dial back; a cloud is its provider's key, each provider on its own; a
 // computer already running wsp types the join line this host mints. Once a
-// computer is added the panel goes on to its image, the card its own page
-// draws. Every state is read off what the host answered.
-import { CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, ExternalLinkIcon, HashIcon, KeyRoundIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, XIcon, type LucideIcon } from "lucide-react";
+// computer is added the panel goes on to the sign-ins that live on it and to
+// its image, the card its own page draws. Every state is read off what the
+// host answered.
+import { CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, HashIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, XIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PLACES_WORDS, PLACE_INSTALL, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, placeBuildsNoImageLine, type InitSetup, type PlaceAddJob, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
@@ -21,16 +22,17 @@ import { failureOf, type Failure } from "../protocol/failure.js";
 import { addFix, addOverSsh, useAdds, useShownAdd, type SshDraft } from "./adds.js";
 import { ADD_COMPUTER_WORDS, FACT } from "./format.js";
 import { ComputerRow } from "./computers.js";
+import { ComputerSignIns } from "./ComputerSignIns.js";
 import { IMAGE_WORDS } from "./image.js";
 import { useImageCard, useImageStanding } from "./ImageCard.js";
 import { isProviderPlace, placeName } from "./places.js";
 import { Card } from "./rows.js";
 import { useSettingsContext } from "./settingsContext.js";
+import { INPUT, ProviderKey } from "./ProviderKey.js";
 import { RefusalSlot } from "./sheetParts.js";
 
 const MINE = ADD_COMPUTER_WORDS;
 const PLAN_FACTS: Partial<Record<PlaceAddStep, string>> = { wsp: PLACE_INSTALL.weight };
-const INPUT = "h-10 w-full font-mono [&_input]:h-[38px] [&_input]:ps-9 [&_input]:text-[13px] [&_input]:leading-[38px] sm:[&_input]:h-[38px] sm:[&_input]:text-[13px] sm:[&_input]:leading-[38px]";
 const KEYCAP = "h-9 px-4 sm:h-9";
 
 type JoinLines = Awaited<ReturnType<NonNullable<Api["mintJoin"]>>>;
@@ -182,6 +184,7 @@ function Joined({ place, now, onAgain }: { place: PlaceView; now: number; onAgai
           {MINE.another}
         </Button>
       </div>
+      <ComputerSignIns place={place} now={now} />
       <ImageNext place={place} />
     </div>
   );
@@ -354,73 +357,6 @@ function SshForm({ job }: { job: PlaceAddJob | undefined }) {
   );
 }
 
-function ProviderKey({ id, words, held, kept, onKept }: { id: string; words: (typeof PROVIDER_KEY_WORDS)[string]; held: boolean; kept: boolean; onKept: (yes: boolean) => void }) {
-  const canSave = useStore(s => s.api?.initKeys !== undefined);
-  const place = useStore(s => s.places.find(p => isProviderPlace(p) && p.id === id));
-  const listed = place !== undefined;
-  const [key, setKey] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [refusal, setRefusal] = useState<{ said: string; fix?: string } | null>(null);
-  const has = held || kept;
-  const save = (): void => {
-    if (key.trim() === "" || !canSave) return;
-    setBusy(true);
-    setRefusal(null);
-    // Through the store, which reads the places again: "key saved" waits for the row that save makes.
-    useStore
-      .getState()
-      .saveKeys({ provider: id, key: key.trim() })
-      .then(
-        next => {
-          setBusy(false);
-          if (next.keys[id] === true) {
-            onKept(true);
-            setKey("");
-          } else {
-            onKept(false);
-            setRefusal(MINE.keyRefused(words));
-          }
-        },
-        (e: unknown) => {
-          setBusy(false);
-          const failure = failureOf(e);
-          setRefusal({ said: failure.said, ...(failure.fix === undefined ? {} : { fix: failure.fix }) });
-        },
-      );
-  };
-  return (
-    <div data-provider={id} className="flex flex-col gap-3 py-5 first:pt-0 last:pb-0">
-      <div className="flex items-center gap-2.5">
-        <CloudIcon aria-hidden className="size-4 text-muted-foreground" />
-        <span data-k="provider-name" className="text-[14px] text-foreground">{words.name}</span>
-        {has ? (
-          <span data-k="key-state" className="inline-flex items-center gap-1 font-mono text-[11px] text-foreground/70">
-            {listed ? <CheckIcon aria-hidden className="size-3" /> : null}
-            {listed ? MINE.keySaved : MINE.keyKept}
-          </span>
-        ) : null}
-        {words.keyConsole === undefined ? null : (
-          <a href={`https://${words.keyConsole}`} target="_blank" rel="noopener noreferrer" className="ms-auto inline-flex items-center gap-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground">
-            {MINE.getKey}
-            <ExternalLinkIcon aria-hidden className="size-3" />
-          </a>
-        )}
-      </div>
-      <div className="flex items-center gap-2">
-        <span className="relative block min-w-0 flex-1">
-          <KeyRoundIcon aria-hidden className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input data-k="cloud-key" nativeInput type="password" autoComplete="off" spellCheck={false} value={key} placeholder={has ? MINE.replaceKey : words.keyName} aria-label={words.keyName} {...(refusal === null ? {} : { "aria-invalid": true })} onChange={e => setKey(e.target.value)} onKeyDown={e => (e.key === "Enter" && !busy ? save() : undefined)} className={INPUT} />
-        </span>
-        <Button data-k="cloud-save" variant={has ? "outline" : "default"} className="h-10 px-4 sm:h-10" held={busy || key.trim() === ""} onClick={save}>
-          {busy ? MINE.checking : has ? MINE.replace : MINE.save}
-        </Button>
-      </div>
-      {refusal !== null ? <RefusalSlot k="cloud-refusal" {...refusal} /> : null}
-      {held && !kept && place !== undefined ? <HeldImage place={place} /> : null}
-    </div>
-  );
-}
-
 /** Under a key the host held before this window: where that cloud's image stands, opening the cloud's page, whose
  * card is the one a key saved here draws under the list. */
 function HeldImage({ place }: { place: PlaceView }) {
@@ -445,9 +381,14 @@ function CloudRoad({ setup }: { setup: InitSetup | null }) {
   return (
     <RoadBody>
       <div className="flex flex-col divide-y divide-border">
-        {Object.entries(PROVIDER_KEY_WORDS).map(([id, words]) => (
-          <ProviderKey key={id} id={id} words={words} held={setup?.keys[id] === true} kept={kept.includes(id)} onKept={onKept(id)} />
-        ))}
+        {Object.entries(PROVIDER_KEY_WORDS).map(([id, words]) => {
+          const listed = places.find(p => isProviderPlace(p) && p.id === id);
+          return (
+            <ProviderKey key={id} id={id} words={words} held={setup?.keys[id] === true} kept={kept.includes(id)} onKept={onKept(id)}>
+              {setup?.keys[id] === true && !kept.includes(id) && listed !== undefined ? <HeldImage place={listed} /> : null}
+            </ProviderKey>
+          );
+        })}
       </div>
       {added.map(place => (
         <ImageNext key={place.id} place={place} />

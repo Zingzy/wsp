@@ -500,8 +500,9 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       await card.locator('[data-agents-row="agent-codex"] [data-row-slot] [data-k=act-sign-in]').click();
       await card.locator("[data-k=sign-in-code]").waitFor();
       expect(await card.locator("[data-detail-acts] button").first().textContent()).toBe("Cancel");
+      // A device code is typed on the page, so the flow holds the code's line and no field's.
       const lines = await card.locator("[data-sign-in-line]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
-      expect(lines).toEqual([40, 40]);
+      expect(lines).toEqual([40]);
       expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
       await card.screenshot({ path: join(SHOTS_DIR, `agents-signin-page-${theme}.png`), animations: "disabled" });
     }

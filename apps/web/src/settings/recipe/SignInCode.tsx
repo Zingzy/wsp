@@ -8,7 +8,7 @@ import { CLOUD_SETUP_WORDS } from "@wsp/protocol";
 import { Button } from "../../components/ui/button.js";
 import { Input } from "../../components/ui/input.js";
 import { cn } from "../../lib/utils.js";
-import { FIELD } from "../../settings/recipe/rows.js";
+import { FIELD } from "./rows.js";
 
 /** `ask`: what the page hands back where it is not a code. */
 export function SignInCode({ label, onCode, ask, className }: { label: string; onCode: (code: string) => void; ask?: string; className?: string }) {

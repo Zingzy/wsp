@@ -4,8 +4,8 @@
 // status is read as afterwards. The pty is scripted here; nothing dials a box.
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { SIGN_IN_ROWS, sharedLoginOf } from "@wsp/catalog";
-import { BOX_SIGN_IN_MS, placeLink, relaySignIn, sharedAgentsOn, sharedOn, targetLink } from "../src/place-signin.js";
+import { SIGN_IN_ROWS, sharedAgentsOn, sharedLoginOf, sharedOn } from "@wsp/catalog";
+import { BOX_SIGN_IN_MS, placeLink, relaySignIn, targetLink } from "../src/place-signin.js";
 import { type RelayTerminal } from "../src/signin-relay.js";
 import { execsBeside, fakePtyLink, type FakePty } from "./fake-pty-link.js";
 import type { HostClient } from "../src/verbs.js";

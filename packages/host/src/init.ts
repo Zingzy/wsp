@@ -11,7 +11,7 @@ import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type HistoryProgress, type Manifest, type ManifestEntry, type Platform, type ProjectScan, type Rung } from "@wsp/collect";
-import { SnapshotFailedError, checkProviderKey, describeAge, keyCheckLine, type BackendPricing } from "@wsp/engine";
+import { SnapshotFailedError, checkProviderKey, describeAge, keyCheckLine, type BackendPricing, type MachineBackend } from "@wsp/engine";
 import type { GoldenStageEvent, GoldenStep, Recipe, RecipeCustomRow, RecipeHistory, ToolPin, WorkspaceView } from "@wsp/protocol";
 import { PrepareStoppedError, type GoldenBuilderView, type GoldenImport, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
@@ -19,7 +19,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, plural, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, BREW_ID_PREFIX, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, SIGN_IN_ANSWERS, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
+import { ALREADY_APPLIED, BREW_ID_PREFIX, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, savedKeyStoppedLine, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, SIGN_IN_ANSWERS, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
 import { importResultPath, keychainLogins, readSecrets, refusedIsDir, type SecretReader } from "./init-import.js";
 import { planGoldenRecipe, planImport, wantsBrew, type BuildContext } from "./image-recipe.js";
 import {
@@ -205,6 +205,12 @@ export interface InitOptions {
   /** The place the builder is made at and the seal filed under, a joined computer or a provider by the name or id
    * wsp places lists; absent is the provider the runtime forks on. */
   place?: string;
+  /** The provider the runtime forks on, by id, for the words of a saved key it refuses when no place is named. A run
+   * that names neither it nor a place checks no saved key. */
+  provider?: string;
+  /** The backend `place` forks with, as the caller already read it, which is the one asked about its saved key;
+   * absent, a named place is read here, and no place is the runtime's own. */
+  placeBackend?: MachineBackend;
   /** Where the build goes when a host on this computer already serves the state file: this run asks its screens,
    * writes the recipe and asks for the spend, then hands over and prints what comes back. Its answer is this run's
    * exit code. Nothing after the confirm runs here: a second runtime on one state file is what the host lock
@@ -308,6 +314,13 @@ export interface StageFrame {
 
 /** A golden.stage event off the runtime as the stream takes it. */
 export const toFrame = (e: GoldenStageEvent): StageFrame => ({ type: "golden.stage", name: e.name, stage: e.stage, ...(e.detail !== undefined ? { detail: e.detail } : {}), ...(e.step !== undefined ? { step: e.step } : {}), ...(e.left !== undefined ? { left: e.left } : {}) });
+
+/** The golden.stage events of this run's own build: one naming a place is a copy's, built there by another road on
+ * the same host. */
+const onOwnStages = (rt: Pick<Runtime, "events">, take: (e: GoldenStageEvent) => void): (() => void) =>
+  rt.events.on("golden.stage", e => {
+    if (e.type === "golden.stage" && e.place === undefined) take(e);
+  });
 
 /** The words the terminal shows for each prepare stage while it runs and once
  * it is over. The stage names are the protocol's; the harness stage installs
@@ -1161,8 +1174,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   runLog.note(`recipe ${imp.recipeHash} from ${path}`);
   // Every frame the golden reports, the build's and the seal's, lands in the log for the process's life.
   const logged = (rt: Runtime): Runtime => {
-    rt.events.on("golden.stage", e => {
-      if (e.type === "golden.stage" && e.name === GOLDEN_NAME) runLog.stage(e.stage, e.detail);
+    onOwnStages(rt, e => {
+      if (e.name === GOLDEN_NAME) runLog.stage(e.stage, e.detail);
     });
     return rt;
   };
@@ -1317,24 +1330,26 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // The saved key is read here, ahead of every other call this run makes to the provider: the kept builder's stop and
   // the create both carry it, and a refusal on either of those has no word about the key in it. The failed frame is
   // the run's own, so the first stage carries the reason and the rows after it read as never reached.
-  const key = await checkProviderKey(rt.backend);
-  const keyLine = keyCheckLine(key, true);
-  if (keyLine !== undefined) {
-    runLog.note(`failed: ${keyLine}`);
-    log.error(keyLine, out);
-    log.step(logLine(), out);
-    io.json?.({ event: "stage", stage: "failed", detail: keyLine });
-    io.json?.({ event: "key-check-failed", message: keyLine, refused: key.state === "refused" });
-    cancel(SAVED_KEY_STOPPED_LINE, out);
-    await closeRuntime();
-    return { code: 1 };
+  const provider = opts.place ?? opts.provider;
+  if (provider !== undefined) {
+    const at = opts.placeBackend ?? (opts.place === undefined ? rt.backend : (await rt.golden.buildPlace(opts.place)).backend);
+    const key = await checkProviderKey(at);
+    const keyLine = keyCheckLine(key, provider, true);
+    if (keyLine !== undefined) {
+      runLog.note(`failed: ${keyLine}`);
+      log.error(keyLine, out);
+      log.step(logLine(), out);
+      io.json?.({ event: "stage", stage: "failed", detail: keyLine });
+      io.json?.({ event: "key-check-failed", message: keyLine, refused: key.state === "refused" });
+      cancel(savedKeyStoppedLine(provider), out);
+      await closeRuntime();
+      return { code: 1 };
+    }
   }
   if (attach === undefined) await stopKeptBuilder(rt, io.output);
 
   const stream = new StageStream(io.output, io.isTTY, PREPARE_STEPS, runLog.note, io.stderr, io.json);
-  const off = rt.events.on("golden.stage", e => {
-    if (e.type === "golden.stage") stream.push(toFrame(e));
-  });
+  const off = onOwnStages(rt, e => stream.push(toFrame(e)));
   const retry = opts.retry ?? DEFAULT_RETRY;
   stream.start();
   // From here a machine may be billing. The first signal ends the stage in flight and the builder with it; the
@@ -1678,9 +1693,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
 /** One stage stream around one runtime call; the frames it draws are the golden's, whatever the call. */
 export async function streamStages(rt: Pick<Runtime, "events">, io: Pick<InitIO, "output" | "stderr" | "isTTY" | "json">, words: readonly StageWords[], run: () => Promise<unknown>, sink: (line: string) => void): Promise<StageView> {
   const stream = new StageStream(io.output, io.isTTY, words, sink, io.stderr, io.json);
-  const off = rt.events.on("golden.stage", e => {
-    if (e.type === "golden.stage") stream.push(toFrame(e));
-  });
+  const off = onOwnStages(rt, e => stream.push(toFrame(e)));
   stream.start();
   let view!: StageView;
   // The stop sits in the finally so a run that rejects still hands the console back and settles the block.

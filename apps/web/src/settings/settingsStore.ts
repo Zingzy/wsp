@@ -72,12 +72,16 @@ interface SettingsState {
   readonly addProjectAt: number | null;
   /** How many times the devices list has been asked for again, which the read effect follows. */
   readonly devicesAsked: number;
+  /** The computer whose image build a card is drawing now, which is where that build's waits are said. */
+  readonly buildShown: string | null;
   go(at: SettingsAt): void;
   setSearch(search: string): void;
   setReads(patch: Partial<SettingsReads>): void;
   openAddProject(): void;
   closeAddProject(): void;
   rereadDevices(): void;
+  showBuild(placeId: string): void;
+  hideBuild(placeId: string): void;
 }
 
 export const useSettingsStore = create<SettingsState>(set => ({
@@ -86,6 +90,7 @@ export const useSettingsStore = create<SettingsState>(set => ({
   reads: NO_READS,
   addProjectAt: null,
   devicesAsked: 0,
+  buildShown: null,
   go(at) {
     set({ at, search: "" });
     try {
@@ -108,5 +113,11 @@ export const useSettingsStore = create<SettingsState>(set => ({
   },
   rereadDevices() {
     set(s => ({ devicesAsked: s.devicesAsked + 1 }));
+  },
+  showBuild(placeId) {
+    set({ buildShown: placeId });
+  },
+  hideBuild(placeId) {
+    set(s => (s.buildShown === placeId ? { buildShown: null } : {}));
   },
 }));

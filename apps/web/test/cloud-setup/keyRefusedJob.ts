@@ -10,7 +10,7 @@ import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, NEVER_REACHED, SIGN_IN_NEVER_REACH
 
 /** What the provider answered, as its own status and word. */
 export const KEY_REFUSED_SAID = "401 Unauthorized";
-export const KEY_REFUSED_LINE = savedKeyRefusedLine(KEY_REFUSED_SAID);
+export const KEY_REFUSED_LINE = savedKeyRefusedLine(KEY_REFUSED_SAID, "solari");
 
 /** A stage the build never reached: still listed, in the build's own order, so nothing moves under the person
  * reading why it stopped. */

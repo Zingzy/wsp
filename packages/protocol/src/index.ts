@@ -2856,8 +2856,9 @@ export const PlaceView = z.object({
   agents: z.array(z.string()).optional(),
   /** What each of those agents answered its own version flag with, as that computer last reported it. */
   agentVersions: z.record(z.string()).optional(),
-  /** One word per reported agent for whether a turn there needs a sign-in first. Absent on a computer whose daemon
-   * is older than the logins list the word is read from, which is unknown rather than none. */
+  /** One word per reported agent for whether a turn there needs a sign-in first, off that computer's last report and
+   * any sign-in this host ran there since. Absent on a computer whose daemon is older than the logins list the word
+   * is read from, which is unknown rather than none. */
   signIns: z.record(AgentSignInState).optional(),
   /** Where that computer keeps the logins every workspace on it shares, off what its backend last said. What the
    * sign-in on that computer points the tool's own store at, and what a create there shares in. Absent on a

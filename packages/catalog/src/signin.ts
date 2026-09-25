@@ -482,7 +482,12 @@ export const SHARED_LOGINS: readonly SharedLogin[] = Object.values(SIGN_IN_ROWS 
 /** What a create on a computer that keeps its logins at `logins` shares into the workspace: one mount per login
  * signed in there, from that computer's own file to the path the tool reads it at inside. */
 export function sharesIn(logins: string): { source: string; target: string }[] {
-  return SHARED_LOGINS.map(s => ({ source: `${loginHomeIn(logins, s)}/${s.file}`, target: s.target }));
+  return SHARED_LOGINS.map(s => ({ source: `${logins}/${sharedFileIn(s)}`, target: s.target }));
+}
+
+/** The file a shared login writes, named under the logins folder as a computer lists that folder. */
+export function sharedFileIn(shared: SharedLogin): string {
+  return `${shared.dir}/${shared.file}`;
 }
 
 /** The paths a builder may never hold when the seal reads it: the login files the pack used to copy, the key
