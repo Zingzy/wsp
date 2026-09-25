@@ -100,13 +100,14 @@ describe("signing an agent in from its row", () => {
     expect(h.started.map(s => [s.target, s.agent, s.server])).toEqual([[{ placeId: "p_spoo" }, "codex", undefined]]);
     const flow = detail().querySelector<HTMLElement>("[data-k=sign-in-flow]")!;
     expect(flow).not.toBeNull();
-    // Both lines stand from the press, so nothing under them moves when the page's code arrives.
-    expect(flow.querySelectorAll("[data-sign-in-line]")).toHaveLength(2);
+    // A device code is typed on the page, so only the code's line stands, from the press on.
+    expect(flow.querySelectorAll("[data-sign-in-line]")).toHaveLength(1);
     // While it runs, Cancel is the next step.
     expect(detail().querySelector("[data-detail-acts] button")?.textContent).toBe(AGENTS_LIST_WORDS.cancel);
     act(() => h.started[0]!.step({ state: "waiting", url: "https://auth.openai.com/codex/device", code: "ABCD-12345", paste: false }));
     expect(flow.querySelector("[data-k=sign-in-code]")?.textContent).toBe("ABCD-12345");
     expect(flow.querySelector("[data-k=code-field]")).toBeNull();
+    expect(flow.querySelectorAll("[data-sign-in-line]")).toHaveLength(1);
     const openButton = flow.querySelector<HTMLButtonElement>("[data-k=sign-in-open]")!;
     expect(openButton.textContent).toBe("Open");
     expect(openButton.querySelector("svg")).not.toBeNull();
@@ -117,6 +118,28 @@ describe("signing an agent in from its row", () => {
     openRow("agent-codex");
     act(() => h.started[0]!.step({ state: "signed-in" }));
     expect(detail().querySelector("[data-k=sign-in-flow]")).toBeNull();
+  });
+
+  it("keeps the field's line standing from the press for a sign-in whose page hands a code back, through every state it takes", async () => {
+    const h = host();
+    const coded = { ...AGENTS_REPORT, agents: AGENTS_REPORT.agents.map(a => (a.id === "codex" ? { ...a, signInRoad: "code" as const } : a)) };
+    render(<List report={coded} />);
+    openRow("agent-codex");
+    fireEvent.click(actIn("sign-in"));
+    await settle();
+    const lines = (): number => detail().querySelectorAll("[data-k=sign-in-flow] [data-sign-in-line]").length;
+    expect(lines()).toBe(2);
+    act(() => h.started[0]!.step({ state: "waiting", url: "https://auth.openai.com/oauth/authorize", paste: true }));
+    expect(detail().querySelector("[data-k=code-field]")).not.toBeNull();
+    expect(lines()).toBe(2);
+    act(() => h.started[0]!.step({ state: "failed", said: "code expired" }));
+    expect(lines()).toBe(2);
+    // A start the host refused keeps the same lines too.
+    act(() => useStore.setState({ api: { ...useStore.getState().api!, agentsSignIn: async () => Promise.reject(new Error("not connected")) } as unknown as Api }));
+    fireEvent.click(actIn("sign-in"));
+    await settle();
+    expect(detail().querySelector("[data-k=sign-in-refused]")?.textContent).toContain("not connected");
+    expect(lines()).toBe(2);
   });
 
   it("stops a running sign-in on the host from Cancel and drops what it drew, and a step or an answer for it after that is dropped too", async () => {
@@ -308,9 +331,9 @@ describe("signing an agent in from its row", () => {
 describe("a server's sign-in road", () => {
   it("is the one the host said the report's page reaches, never worked out again from where the list stands", () => {
     const linear = AGENTS_REPORT.servers.find(r => r.name === "linear")!;
-    expect(serverSignInStart(linear, { where: "here", reach: "relay" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "callback" });
-    expect(serverSignInStart(linear, { where: "here", reach: "none" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "address" });
-    expect(serverSignInStart(linear, { where: "here" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "address" });
+    expect(serverSignInStart(linear, { where: "here", reach: "relay" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "callback", pastes: true });
+    expect(serverSignInStart(linear, { where: "here", reach: "none" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "address", pastes: true });
+    expect(serverSignInStart(linear, { where: "here" })).toEqual({ kind: "run", agent: "claude", server: "linear", finish: "address", pastes: true });
   });
 });
 

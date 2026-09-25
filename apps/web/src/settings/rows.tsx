@@ -110,13 +110,22 @@ const DESCRIPTION_CLASS = "text-xs leading-4 text-muted-foreground";
 /** The hover a row that opens a page takes: the sidebar rows' step, in the same 150 ms. */
 const OPENS_CLASS = "w-full cursor-pointer text-left transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset";
 
-export function Card({ id, head, under, body, children }: { id: string; head?: ReactNode; under?: ReactNode; body?: ReactNode; children?: ReactNode }) {
+export function Card({ id, head, lede, under, body, children }: { id: string; head?: ReactNode; /** One sentence under the head, for a card whose rows need the why. */ lede?: string; under?: ReactNode; body?: ReactNode; children?: ReactNode }) {
   return (
     <section data-settings-card={id} {...(typeof head === "string" ? { "aria-label": head } : {})} className="flex flex-col gap-3">
-      {head === undefined ? null : (
-        <h2 data-settings-head className="text-[13px] leading-4 font-medium text-foreground">
-          {head}
-        </h2>
+      {head === undefined && lede === undefined ? null : (
+        <div className="flex flex-col gap-1.5">
+          {head === undefined ? null : (
+            <h2 data-settings-head className="text-[13px] leading-4 font-medium text-foreground">
+              {head}
+            </h2>
+          )}
+          {lede === undefined ? null : (
+            <p data-settings-lede className="text-xs leading-4 text-muted-foreground">
+              {lede}
+            </p>
+          )}
+        </div>
       )}
       {body ?? <div className={cn(CARD_SURFACE, "flex flex-col divide-y divide-border")}>{children}</div>}
       {under === undefined ? null : <div className="flex gap-2">{under}</div>}

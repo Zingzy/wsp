@@ -7,7 +7,7 @@ import { BotIcon, CircleArrowUpIcon, DownloadIcon, SquareTerminalIcon, Trash2Ico
 import { catalogEntry, installShown, runsThreads, type AgentEntry } from "@wsp/catalog";
 import { compareVersions, MCP_SERVER_NAME, type AgentRow, type AgentsReport } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, agentSignInStart, editImageAct, heldReason, holdAll, notYet, onImage, signInAct, waitingFlow, type RowAct, type RowsContext } from "../agentsRows.js";
-import { kind, matchesAny, type Fact, type KindModule } from "./kind.js";
+import { kind, matchesAny, rowKey, type Fact, type KindModule } from "./kind.js";
 
 export interface AgentItem {
   readonly row: AgentRow;
@@ -15,9 +15,11 @@ export interface AgentItem {
   readonly toolsFile?: string;
 }
 
-const signedIn = (row: AgentRow): boolean => row.signIn === "signed-in" || row.signIn === "vault-key";
+/** Whether a turn there needs no sign-in first: its own login stands, or the key this host keeps for it. */
+export const signedIn = (row: Pick<AgentRow, "signIn">): boolean => row.signIn === "signed-in" || row.signIn === "vault-key";
 
-const signInWord = (row: AgentRow): string =>
+/** The one word for where an agent's sign-in stands, which every row that draws an agent's state reads. */
+export const signInWord = (row: Pick<AgentRow, "signIn">): string =>
   row.signIn === "signed-in" ? W.signedIn : row.signIn === "vault-key" ? W.yourKey : row.signIn === "none" ? W.needsSignIn : W.notChecked;
 
 /** The newer version its vendor publishes, where one is newer than what stands there. */
@@ -25,7 +27,10 @@ const newerThan = (row: AgentRow): string | undefined => (row.version !== undefi
 
 const ownHold = (row: AgentRow): string | undefined => (row.road === "own" ? W.ownHold : row.road === "shim" ? W.shimHold : undefined);
 
-const rowId = (row: AgentRow): string => `agent-${row.id}`;
+/** An agent's row by its id, which its sign-in's flow is kept under wherever the row is drawn. */
+export const agentRowId = (agent: string): string => rowKey(["agent"], undefined, agent);
+
+const rowId = (row: AgentRow): string => agentRowId(row.id);
 
 const agentEntry = (id: string): AgentEntry | undefined => {
   const e = catalogEntry(id);

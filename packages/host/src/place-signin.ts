@@ -4,7 +4,7 @@
 // that computer's daemon keeps the logins its workspaces share, anything else
 // as the owner of the home. The pty is that computer's own, reached through
 // the host over the link it holds: nothing here dials it.
-import { loginSignIn, sharedLoginOf, type SharedLogin } from "@wsp/catalog";
+import { loginSignIn } from "@wsp/catalog";
 import { lastLine, type AgentsTarget, type SignInLine } from "@wsp/protocol";
 import { relayPty, runQuiet, type PtyLink, type RelayTerminal } from "./signin-relay.js";
 import type { HostClient } from "./verbs.js";
@@ -59,18 +59,6 @@ export async function targetLink(client: HostClient, target: AgentsTarget): Prom
       await client.request("daemon.close", { channel }).catch(() => undefined);
     },
   };
-}
-
-/** What a computer's own sign-in row is, or nothing: an agent whose login lives on the computer that runs the
- * workspaces declares what it shares, and that declaration is the only thing that makes this road exist. */
-export function sharedOn(agent: string): SharedLogin | undefined {
-  const row = loginSignIn(agent);
-  return row === undefined ? undefined : sharedLoginOf(row);
-}
-
-/** Which of the agents a computer reported sign in there once rather than in the image, in the order it named them. */
-export function sharedAgentsOn(agents: readonly string[]): string[] {
-  return agents.filter(id => sharedOn(id) !== undefined);
 }
 
 export interface BoxSignIn {

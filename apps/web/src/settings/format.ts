@@ -124,6 +124,9 @@ export const ADD_COMPUTER_WORDS = {
   replace: "Replace",
   adding: "Adding",
   another: "Add another",
+  signInsOn: (computer: string): string => `Sign-ins on ${computer}`,
+  signInsWhy: (agents: readonly string[], computer: string): string =>
+    `${new Intl.ListFormat("en", { type: "conjunction" }).format(agents)} ${agents.length === 1 ? "keeps" : "keep"} one login for every workspace on ${computer}, so sign in once here.`,
   suggested: "From your ssh config",
   copy: "Copy",
   copied: "Copied",

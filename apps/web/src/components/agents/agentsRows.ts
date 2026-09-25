@@ -193,7 +193,7 @@ export interface ServerTools {
  * host's vault under the line that mints it, a line the person runs in their terminal, or typed into a task's own
  * terminal on this computer. Worked out here off the report and the catalog, so every row reads one rule. */
 export type SignInStart =
-  | { readonly kind: "run"; readonly agent: string; readonly server?: string; readonly finish?: ServerFinish }
+  | { readonly kind: "run"; readonly agent: string; readonly server?: string; readonly finish?: ServerFinish; readonly pastes?: boolean }
   | { readonly kind: "vault"; readonly agent: string; readonly mint?: string; readonly word: "token" | "key" }
   | { readonly kind: "copy"; readonly line: string; readonly why?: string }
   | { readonly kind: "terminal"; readonly line: string };
@@ -204,7 +204,7 @@ export type ServerFinish = "callback" | "address";
 
 /** A sign-in as its detail draws it while it stands. */
 export type SignInFlow =
-  | { readonly kind: "run"; readonly state: "running" | "waiting" | "failed"; readonly finish?: ServerFinish; readonly url?: string; readonly code?: string; readonly paste?: boolean; readonly said?: string }
+  | { readonly kind: "run"; readonly state: "running" | "waiting" | "failed"; readonly finish?: ServerFinish; readonly pastes?: boolean; readonly url?: string; readonly code?: string; readonly paste?: boolean; readonly said?: string }
   | { readonly kind: "vault"; readonly agent: string; readonly mint?: string; readonly word: "token" | "key"; readonly saving?: boolean; readonly refused?: string }
   | { readonly kind: "copy"; readonly line: string; readonly why?: string };
 
@@ -375,7 +375,7 @@ export function agentSignInStart(row: AgentRow, ctx: RowsContext): SignInStart |
     if (ctx.typeInTerminal !== undefined && signIn !== undefined && hasLogin(signIn)) return { kind: "terminal", line: signIn.login };
     return { kind: "copy", line: ctx.where === "box" && ctx.computer !== undefined ? `wsp add ${ctx.computer} --sign-in ${row.id}` : `wsp agents signin ${row.id}` };
   }
-  return row.signInRoad === "none" ? undefined : { kind: "run", agent: row.id };
+  return row.signInRoad === "none" ? undefined : { kind: "run", agent: row.id, ...(row.signInRoad === "code" ? { pastes: true } : {}) };
 }
 
 /** How one server's Sign in goes: its harness's own command in a watched pty, or the line the person runs where
@@ -383,7 +383,7 @@ export function agentSignInStart(row: AgentRow, ctx: RowsContext): SignInStart |
 export function serverSignInStart(row: McpRow, ctx: RowsContext): SignInStart | undefined {
   const road = serverSignInRoad(row.agent, row.name, ctx.reach ?? "none");
   if (road === undefined) return undefined;
-  if (road.kind === "pty") return { kind: "run", agent: row.agent, server: row.name, finish: road.finish === "callback" ? "callback" : "address" };
+  if (road.kind === "pty") return { kind: "run", agent: row.agent, server: row.name, finish: road.finish === "callback" ? "callback" : "address", pastes: true };
   return { kind: "copy", line: road.line, ...(road.why === "callback" ? { why: AGENTS_LIST_WORDS.pageStaysHere(ctx.computer ?? "that computer") } : {}) };
 }
 

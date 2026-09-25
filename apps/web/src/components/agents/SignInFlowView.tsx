@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One sign-in as it stands, drawn under an agent's or a server's acts in its
-// detail: a watched run holds two lines from the press, the code the tool
-// printed with Open, then the field a page's answer goes back through where
-// the tool takes one, or the wait on the browser where the harness takes the
-// redirect itself; a token or key is pasted under the line that mints it; a
+// detail: a watched run holds its lines from the press, the code the tool
+// printed with Open, then the field a page's answer goes back through, only
+// for a sign-in whose page can hand one back; or the wait on the browser
+// where the harness takes the redirect itself; a token or key is pasted under
+// the line that mints it; a
 // row only the person can finish shows the line for their terminal. A failure
 // lands in the refusal slot in the tool's own words.
 import { CheckIcon, ExternalLinkIcon } from "lucide-react";
@@ -103,9 +104,11 @@ export function SignInFlowView({ view, label }: { view: FlowView; label: string 
           </>
         )}
       </div>
-      <div data-sign-in-line className="flex h-10 items-center">
-        {flow.paste === true && flow.state === "waiting" ? <SignInCode label={label} onCode={view.code} {...(flow.finish !== undefined ? { ask: AGENTS_LIST_WORDS.landedAddress } : {})} /> : null}
-      </div>
+      {flow.pastes === true || flow.paste === true ? (
+        <div data-sign-in-line className="flex h-10 items-center">
+          {flow.paste === true && flow.state === "waiting" ? <SignInCode label={label} onCode={view.code} {...(flow.finish !== undefined ? { ask: AGENTS_LIST_WORDS.landedAddress } : {})} /> : null}
+        </div>
+      ) : null}
       <RefusalSlot k="sign-in-refused" {...(flow.state === "failed" && flow.said !== undefined ? { said: flow.said } : {})} />
     </div>
   );

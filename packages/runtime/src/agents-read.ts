@@ -396,12 +396,20 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         const forward = ask.server !== undefined ? forwardOf(target) : undefined;
         void plan({ link, emit: step, typing: write => (write === undefined ? delete run.type : (run.type = write)), stop: stopped, ...(forward !== undefined ? { forward } : {}) })
           .catch((e: unknown) => step({ state: "failed", said: e instanceof Error ? e.message : String(e) }))
-          .finally(() => {
+          .finally(async () => {
             forward?.close();
             running.delete(signInId);
             if (starting.get(key) === begun) starting.delete(key);
             channel.close();
             log(`sign-in ${signInId} ended: ${what}: ${stoppedBy ? "stopped" : (run.last?.state ?? "failed")}`);
+            // That computer lists its logins only when it dials, so a landed one is written here before the reports read again.
+            if ("placeId" in target && ask.server === undefined && run.last?.state === "signed-in") {
+              try {
+                await o.places()?.loginLanded(target.placeId, ask.agent);
+              } catch (e) {
+                log(`sign-in ${signInId}: the landed login was not noted: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            }
             o.reader?.forget?.(JSON.stringify(target));
             changed(target);
           });
