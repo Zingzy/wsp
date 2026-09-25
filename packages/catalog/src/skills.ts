@@ -18,6 +18,9 @@ export const SHARED_SKILLS = "~/.agents/skills";
 /** The same folder inside a project. */
 export const PROJECT_SHARED_SKILLS = ".agents/skills";
 
+/** The XDG agents folder, which several agents read beside the shared one and none of them owns. */
+export const XDG_SHARED_SKILLS = "~/.config/agents/skills";
+
 /** An agent's skill folders: its own first, which is where the wsp skill goes with the MCP server, then the ones it
  * also reads; and the folders it reads inside a project. */
 export interface SkillRoots {

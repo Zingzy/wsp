@@ -8,3 +8,6 @@
 
 export const THREAD_AGENTS = ["claude", "codex"] as const;
 export type ThreadAgent = (typeof THREAD_AGENTS)[number];
+
+/** Whether wsp can open a thread on this agent; the others it installs and manages only. */
+export const runsThreads = (id: string): boolean => (THREAD_AGENTS as readonly string[]).includes(id);
