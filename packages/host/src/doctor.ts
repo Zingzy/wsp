@@ -851,6 +851,10 @@ export function daemonOwnedPaths(place: DaemonPlace): string[] {
   ];
 }
 
+/** What a failed add's undo answers with when a place file stands that neither the read nor this add's join put
+ * there: another add took the box meanwhile. */
+export const ADD_TAKEN_LINE = "WSP_ADD_TAKEN";
+
 /** What the removal answers with once the machine carries nothing of wsp's any more. */
 export const DAEMON_GONE_LINE = "DAEMON_REMOVED";
 
@@ -921,11 +925,15 @@ export function addFound(stdout: string, count: number): ReadonlySet<number> | u
  * so its agent lets go of the files, then the files, the profile, wsp's line in the login file and the folders it
  * made, deepest first. A path under a folder that has become a link since the read is left, as both leave roads
  * leave one. The last line is said only when every write taken back is gone; a folder left holding what is not
- * the add's is not one of them. */
-export function addUndoScript(place: DaemonPlace, writes: readonly AddWrite[], found: ReadonlySet<number>, systemctl: string): string {
+ * the add's is not one of them. A place file this add's join did not write and the read did not find is another
+ * add's, so the undo stops before its first removal. A unit this add wrote fresh counts as left while it runs. */
+export function addUndoScript(place: DaemonPlace, writes: readonly AddWrite[], found: ReadonlySet<number>, systemctl: string, joined: boolean): string {
   const home = place.root.replace(/\/+$/, "");
   const unitHeld = writes.some((w, i) => w.as === "unit" && found.has(i));
   const taken = writes.filter((w, i) => !found.has(i) && (unitHeld || (w.as !== "running" && w.as !== "enabled")));
+  const checked = [...taken.filter(w => w.as !== "folder"), ...(unitHeld ? [] : writes.filter((w, i) => w.as === "running" && !found.has(i)))];
+  const placeFile = joinOf(place).file;
+  const raced = joined ? [] : writes.filter((w, i) => w.path === placeFile && w.as === "own" && !found.has(i));
   const at = (as: AddWrite["as"]): string[] => taken.flatMap(w => (w.as === as ? [w.path] : []));
   const unit = (path: string): string => shellQuote(posix.basename(path));
   const unlinked = (path: string, line: string): string => {
@@ -934,6 +942,7 @@ export function addUndoScript(place: DaemonPlace, writes: readonly AddWrite[], f
   };
   return [
     ...place.exportEnv,
+    ...raced.map(w => `if ${stillThere(place, w, systemctl)}; then echo ${ADD_TAKEN_LINE}; exit 0; fi`),
     ...at("unit").flatMap(path => [`${systemctl} disable --now ${unit(path)} 2>/dev/null || true`, `rm -f ${sh(place, path)}`, `${systemctl} daemon-reload 2>/dev/null || true`]),
     ...at("running").map(path => `${systemctl} stop ${unit(path)} 2>/dev/null || true`),
     ...at("enabled").map(path => `${systemctl} disable ${unit(path)} 2>/dev/null || true`),
@@ -943,7 +952,7 @@ export function addUndoScript(place: DaemonPlace, writes: readonly AddWrite[], f
     ...at("login").map(path => `[ -s ${sh(place, path)} ] || rm -f ${sh(place, path)}`),
     ...at("folder").map(path => unlinked(path, `rmdir ${sh(place, path)} 2>/dev/null || true`)),
     "left=0",
-    ...taken.filter(w => w.as !== "folder").map(w => (w.as === "login" ? `[ -e ${sh(place, w.path)} ] && [ ! -s ${sh(place, w.path)} ] && left=1` : `${stillThere(place, w, systemctl)} && left=1`)),
+    ...checked.map(w => (w.as === "login" ? `[ -e ${sh(place, w.path)} ] && [ ! -s ${sh(place, w.path)} ] && left=1` : `${stillThere(place, w, systemctl)} && left=1`)),
     `[ "$left" = 0 ] && echo ${DAEMON_GONE_LINE}`,
   ].join("\n");
 }
@@ -1048,18 +1057,24 @@ export const placeInstallFailedLine = (name: string, step: PlaceDeployStep, said
 /** A tool's closing line after the one that said why, which is not the box's reason. */
 const TOOL_TRAILER = /^tar: (Exiting with failure status due to previous errors|Error is not recoverable: exiting now)$/;
 
-/** Under set -e the line that ended the script is the last the box wrote on stderr. */
-function joinedFailureLine(join: DaemonJoin, res: { stdout: string; stderr: string; exitCode: number }): string {
+/** The step a joined deploy reached, off the marks it printed; "service" is past the join writing its place file. */
+function joinedStep(join: DaemonJoin, stdout: string): PlaceDeployStep {
   let step: PlaceDeployStep = "files";
   // Whichever address answered: the join may spell it as it normalised it.
   const [joinedHead, joinedTail] = joinedLine(join.name, "\0").split("\0") as [string, string];
-  for (const raw of res.stdout.split("\n")) {
+  for (const raw of stdout.split("\n")) {
     const line = raw.trim();
     const word = line.startsWith(`${WSP_STEP_LINE} `) ? line.slice(WSP_STEP_LINE.length + 1) : undefined;
     if (word !== undefined && isDeployStep(word)) step = word;
     else if (line === WSP_READY_LINE) step = "join";
     else if (line.startsWith(joinedHead) && line.endsWith(joinedTail)) step = "service";
   }
+  return step;
+}
+
+/** Under set -e the line that ended the script is the last the box wrote on stderr. */
+function joinedFailureLine(join: DaemonJoin, res: { stdout: string; stderr: string; exitCode: number }): string {
+  const step = joinedStep(join, res.stdout);
   const said = clientWords(res.stderr.replace(/\r/g, ""))
     .split("\n")
     .map(line => line.trim())
@@ -1085,6 +1100,9 @@ export function deployFailureLine(place: DaemonPlace, res: { stdout: string; std
 /** A joined deploy whose own join refused the computer as already in a wsp, read off the join's line on stderr
  * before any sentence is capped: what stands there is another add's, and nothing of it is this add's to take back. */
 export class PlaceAlreadyJoinedError extends Error {}
+
+/** A joined deploy that failed after its own join wrote the place file, so the place file on the box is this add's. */
+export class PlaceJoinedThenFailedError extends Error {}
 
 const joinSaidAlreadyJoined = (stderr: string): boolean => stderr.split("\n").some(line => line.replace(/\r/g, "").trim() === ALREADY_JOINED_LINE);
 
@@ -1131,7 +1149,9 @@ export async function deployDaemon(
     if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
       if (place.join !== undefined) console.warn(deployFailureDetail(place, res, suffix, targets));
       const line = deployFailureLine(place, res, suffix, targets);
-      throw place.join !== undefined && joinSaidAlreadyJoined(res.stderr) ? new PlaceAlreadyJoinedError(line) : new Error(line);
+      if (place.join === undefined) throw new Error(line);
+      if (joinSaidAlreadyJoined(res.stderr)) throw new PlaceAlreadyJoinedError(line);
+      throw joinedStep(place.join, res.stdout) === "service" ? new PlaceJoinedThenFailedError(line) : new Error(line);
     }
     const port = Number(new RegExp(`${DAEMON_PORT_LINE} (\\d+)`).exec(res.stdout)?.[1] ?? 0);
     return { token, ...(port > 0 ? { port } : {}) };

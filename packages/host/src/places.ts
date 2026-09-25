@@ -88,7 +88,7 @@ import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSea
 import { BackCutError, backUrl, heldPlaceScript, placeBackHolder } from "./place-back.js";
 import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, hasLogin, keyEnvOf, loginSignIn } from "@wsp/catalog";
-import { DAEMON_GONE_LINE, PLACE_JOINED_LINE, PlaceAlreadyJoinedError, WSP_READY_LINE, addFound, addFoundScript, addUndoScript, cappedLine, daemonFlags, deployDaemon, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
+import { ADD_TAKEN_LINE, DAEMON_GONE_LINE, PLACE_JOINED_LINE, PlaceAlreadyJoinedError, PlaceJoinedThenFailedError, WSP_READY_LINE, addFound, addFoundScript, addUndoScript, cappedLine, daemonFlags, deployDaemon, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
 import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
@@ -507,6 +507,12 @@ const UNDO_MS = 120_000;
  * the undo of a failed add takes back folders up to it. */
 export const placeRootHomeRefusal = (address: string): string => `${address.slice(0, 64)} answered with / for its login's home folder; wsp keeps its files in a home folder of their own, so give that login one and add the box again`;
 
+/** A failed add's sentence where another add took the box between the read and the undo, which then took nothing. */
+export const addTakenLine = (said: string): string => {
+  const tail = "another add took the box meanwhile, so nothing was taken back off it";
+  return `${cappedLine(said, SSH_LINE_CAP - tail.length - 2)}; ${tail}`;
+};
+
 /** A failed add's sentence with what taking it back off the box came to, the box's line cut first so the end stands. */
 export function addUndoneLine(said: string, undone: boolean, agentWasRunning = false): string {
   const kept = agentWasRunning ? "wsp's agent was running there before this add and is left running, and " : "";
@@ -683,15 +689,16 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       // A box that refused at the preflight, or never answered it, was sent nothing. A join refused as already joined
       // stands beside another add that won the box between the read and the deploy, and what is there is that add's.
       if (machineLacksLine(e) !== undefined || machineNeverAnswered(e) || e instanceof PlaceAlreadyJoinedError) throw e;
-      const undone =
-        found !== undefined &&
-        (await machine.run(addUndoScript(place, writes, found, unit.systemctl.join(" ")), { deadlineMs: UNDO_MS }).then(
-          res => res.exitCode === 0 && res.stdout.includes(DAEMON_GONE_LINE),
-          () => false,
-        ));
+      const said = e instanceof Error ? e.message : String(e);
+      const answer =
+        found === undefined
+          ? undefined
+          : await machine.run(addUndoScript(place, writes, found, unit.systemctl.join(" "), e instanceof PlaceJoinedThenFailedError), { deadlineMs: UNDO_MS }).catch(() => undefined);
+      if (answer?.stdout.includes(ADD_TAKEN_LINE) === true) throw new Error(addTakenLine(said));
+      const undone = answer !== undefined && answer.exitCode === 0 && answer.stdout.includes(DAEMON_GONE_LINE);
       const agentWasRunning = found !== undefined && writes.some((w, i) => w.as === "running" && found.has(i));
-      const said = addUndoneLine(e instanceof Error ? e.message : String(e), undone, agentWasRunning);
-      throw undone ? new PlaceAddTakenBackError(said) : new Error(said);
+      const line = addUndoneLine(said, undone, agentWasRunning);
+      throw undone ? new PlaceAddTakenBackError(line) : new Error(line);
     });
     return { name, ssh: road.ssh, ...(reach.keyPath !== undefined ? { sshKeyPath: reach.keyPath } : {}), ...(hostKey !== undefined ? { hostKey } : {}), ...(back !== undefined ? { back } : {}) };
   };
