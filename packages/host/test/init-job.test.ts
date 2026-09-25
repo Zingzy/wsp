@@ -1664,4 +1664,25 @@ describe("the init job, terminal road", () => {
     expect((await f.rt.image.get()).image).toMatchObject({ version: 1, place: "box" });
     expect(goldenHead(await f.rt.golden.get())?.version).toBe(1);
   });
+
+  it("the job names the place its build was sent to, and once the image stands a build named at another place goes to the image's own", async () => {
+    const box = stubBackend();
+    const f = fake({ places: wired => { box.execImpl = wired.execImpl; return { wired: "solari", backend: p => (p === "solari" ? wired : p === "box" ? box : undefined), list: () => ["solari", "box"] }; } });
+    saveSmallRecipe(smallRecipePath(f.statePath), RECIPE);
+    await f.jobs.start({ road: "terminal" });
+    await f.settled();
+    expect(f.jobs.view()!.place).toBeUndefined();
+    expect((await f.jobs.build({ on: "box" })).place).toEqual({ id: "box", name: "box" });
+    await f.settled();
+    expect(f.jobs.view()).toMatchObject({ phase: "done", place: { id: "box", name: "box" } });
+
+    expect((await f.jobs.get({ on: "solari" })).place).toEqual({ id: "box", name: "box" });
+    await f.jobs.start({ road: "terminal" });
+    await f.settled();
+    expect((await f.jobs.build({ on: "solari", rebuild: true })).place).toEqual({ id: "box", name: "box" });
+    await f.settled();
+    expect(f.jobs.view()!.phase).toBe("done");
+    expect(f.backend.machines).toEqual([]);
+    expect((await f.rt.image.get()).image).toMatchObject({ version: 2, place: "box" });
+  });
 });
