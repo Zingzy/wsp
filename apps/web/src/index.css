@@ -2148,7 +2148,7 @@ html.desktop-mac:is(.dark, [data-theme="dark"]):has([data-terminal-translucent])
   background: transparent;
 }
 
-html.desktop-mac:is(.dark, [data-theme="dark"]):has([data-terminal-translucent]) :is([data-shell-center] > header, [data-terminal-beside]) {
+html.desktop-mac:is(.dark, [data-theme="dark"]):has([data-terminal-translucent]) :is([data-shell-center] > header, [data-terminal-beside], [data-shell-center] [data-terminal-tabs]) {
   background: rgb(6 6 6 / var(--material-centre));
 }
 
