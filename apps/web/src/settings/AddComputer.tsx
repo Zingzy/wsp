@@ -3,11 +3,12 @@
 // the way the theme is picked, and the picked road's whole flow in a panel
 // under them. Over ssh the host logs in, installs wsp and waits for the box
 // to dial back; a cloud is its provider's key, each provider on its own; a
-// computer already running wsp types the join line this host mints. Every
-// state is read off what the host answered.
+// computer already running wsp types the join line this host mints. Once a
+// computer is added the panel goes on to its image, the card its own page
+// draws. Every state is read off what the host answered.
 import { CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, ExternalLinkIcon, HashIcon, KeyRoundIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, XIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { PLACES_WORDS, PLACE_INSTALL, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, type InitSetup, type PlaceAddJob, type PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, PLACE_INSTALL, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, placeBuildsNoImageLine, type InitSetup, type PlaceAddJob, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Kbd } from "../components/ui/kbd.js";
@@ -17,8 +18,13 @@ import { useStore } from "../protocol/store.js";
 import { NO_REASON, type Api } from "../protocol/client.js";
 import { failureOf, type Failure } from "../protocol/failure.js";
 import { addFix, addOverSsh, useAdds, useShownAdd, type SshDraft } from "./adds.js";
-import { ADD_COMPUTER_WORDS } from "./format.js";
+import { ADD_COMPUTER_WORDS, FACT } from "./format.js";
 import { ComputerRow } from "./computers.js";
+import { IMAGE_WORDS } from "./image.js";
+import { useImageCard, useImageStanding } from "./ImageCard.js";
+import { isProviderPlace, placeName } from "./places.js";
+import { Card } from "./rows.js";
+import { useSettingsContext } from "./settingsContext.js";
 import { RefusalSlot } from "./sheetParts.js";
 
 const MINE = ADD_COMPUTER_WORDS;
@@ -152,13 +158,30 @@ function CopyLine({ text, k }: { text: string; k: string }) {
   );
 }
 
+/** Where an add goes on to: the image on the computer just added, as the card its own page draws, or the one line
+ * saying it takes none. Getting here builds nothing; a copy is built on the card's press alone. */
+function ImageNext({ place }: { place: PlaceView }) {
+  const card = useImageCard(place, useSettingsContext());
+  if (place.buildsImages === false) {
+    return (
+      <p data-k="no-image-here" className="text-[13px] leading-5 text-muted-foreground">
+        {placeBuildsNoImageLine(placeName(place))}
+      </p>
+    );
+  }
+  return card === undefined ? null : <Card id={card.id} head={card.head} body={card.body} />;
+}
+
 function Joined({ place, now, onAgain }: { place: PlaceView; now: number; onAgain: () => void }) {
   return (
-    <div className="flex flex-col gap-3" data-k="joined">
-      <ComputerRow place={place} now={now} />
-      <Button size="xs" variant="outline" className="self-start" onClick={onAgain}>
-        {MINE.another}
-      </Button>
+    <div className="flex flex-col gap-6" data-k="joined">
+      <div className="flex flex-col gap-3">
+        <ComputerRow place={place} now={now} />
+        <Button size="xs" variant="outline" className="self-start" onClick={onAgain}>
+          {MINE.another}
+        </Button>
+      </div>
+      <ImageNext place={place} />
     </div>
   );
 }
@@ -330,13 +353,13 @@ function SshForm({ job }: { job: PlaceAddJob | undefined }) {
   );
 }
 
-function ProviderKey({ id, words, held }: { id: string; words: (typeof PROVIDER_KEY_WORDS)[string]; held: boolean }) {
+function ProviderKey({ id, words, held, kept, onKept }: { id: string; words: (typeof PROVIDER_KEY_WORDS)[string]; held: boolean; kept: boolean; onKept: (yes: boolean) => void }) {
   const canSave = useStore(s => s.api?.initKeys !== undefined);
-  const listed = useStore(s => s.places.some(p => p.kind === "provider" && p.id === id));
+  const place = useStore(s => s.places.find(p => isProviderPlace(p) && p.id === id));
+  const listed = place !== undefined;
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<{ said: string; fix?: string } | null>(null);
-  const [kept, setKept] = useState(false);
   const has = held || kept;
   const save = (): void => {
     if (key.trim() === "" || !canSave) return;
@@ -350,10 +373,10 @@ function ProviderKey({ id, words, held }: { id: string; words: (typeof PROVIDER_
         next => {
           setBusy(false);
           if (next.keys[id] === true) {
-            setKept(true);
+            onKept(true);
             setKey("");
           } else {
-            setKept(false);
+            onKept(false);
             setRefusal(MINE.keyRefused(words));
           }
         },
@@ -368,7 +391,7 @@ function ProviderKey({ id, words, held }: { id: string; words: (typeof PROVIDER_
     <div data-provider={id} className="flex flex-col gap-3 py-5 first:pt-0 last:pb-0">
       <div className="flex items-center gap-2.5">
         <CloudIcon aria-hidden className="size-4 text-muted-foreground" />
-        <span className="text-[14px] text-foreground">{words.name}</span>
+        <span data-k="provider-name" className="text-[14px] text-foreground">{words.name}</span>
         {has ? (
           <span data-k="key-state" className="inline-flex items-center gap-1 font-mono text-[11px] text-foreground/70">
             {listed ? <CheckIcon aria-hidden className="size-3" /> : null}
@@ -392,18 +415,42 @@ function ProviderKey({ id, words, held }: { id: string; words: (typeof PROVIDER_
         </Button>
       </div>
       {refusal !== null ? <RefusalSlot k="cloud-refusal" {...refusal} /> : null}
+      {held && !kept && place !== undefined ? <HeldImage place={place} /> : null}
     </div>
   );
 }
 
+/** Under a key the host held before this window: where that cloud's image stands, opening the cloud's page, whose
+ * card is the one a key saved here draws under the list. */
+function HeldImage({ place }: { place: PlaceView }) {
+  const ctx = useSettingsContext();
+  const standing = useImageStanding(place, ctx);
+  if (standing === undefined) return null;
+  return (
+    <button type="button" data-k="held-image" className="mt-3 flex items-center gap-2.5 text-left text-[13px] text-foreground transition-colors duration-150 hover:text-foreground/80" onClick={() => ctx.go({ kind: "computer", id: place.id })}>
+      <span>{IMAGE_WORDS.head(standing.name)}</span>
+      <span className={FACT}>{standing.title}</span>
+      <ChevronRightIcon aria-hidden className="ms-auto size-3.5 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
+/** The providers by key, then the image on each cloud whose key this window saved, once the host lists it. */
 function CloudRoad({ setup }: { setup: InitSetup | null }) {
+  const places = useStore(s => s.places);
+  const [kept, setKept] = useState<readonly string[]>([]);
+  const onKept = (id: string) => (yes: boolean) => setKept(ids => [...ids.filter(k => k !== id), ...(yes ? [id] : [])]);
+  const added = places.filter(p => isProviderPlace(p) && kept.includes(p.id));
   return (
     <RoadBody>
       <div className="flex flex-col divide-y divide-border">
         {Object.entries(PROVIDER_KEY_WORDS).map(([id, words]) => (
-          <ProviderKey key={id} id={id} words={words} held={setup?.keys[id] === true} />
+          <ProviderKey key={id} id={id} words={words} held={setup?.keys[id] === true} kept={kept.includes(id)} onKept={onKept(id)} />
         ))}
       </div>
+      {added.map(place => (
+        <ImageNext key={place.id} place={place} />
+      ))}
     </RoadBody>
   );
 }

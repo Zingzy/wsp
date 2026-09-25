@@ -57,10 +57,10 @@ afterEach(() => {
 });
 
 describe("the settings sidebar", () => {
-  it("lists the seven groups in order with Appearance the one lifted row on a fresh open, and no General", async () => {
+  it("lists the eight groups in order with Appearance the one lifted row on a fresh open, and no General", async () => {
     mountSettings({ api: settingsApi().api });
     await settle();
-    expect(sidebarRowIds()).toEqual(["group:appearance", "group:computers", "group:projects", "group:devices", "group:account", "group:keybindings", "group:about"]);
+    expect(sidebarRowIds()).toEqual(["group:appearance", "group:computers", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"]);
     expect(liftedRowIds()).toEqual(["group:appearance"]);
     expect(document.querySelector("[data-slot=sidebar]")!.textContent).not.toContain("General");
     // The field over the groups and Back at the foot with the chord that does the same.
@@ -79,7 +79,7 @@ describe("the settings sidebar", () => {
     expect(pageAt()).toBe("computers");
     expect(crumb()).toBe("Settings/Computers");
     expect(liftedRowIds()).toEqual(["group:computers"]);
-    expect(sidebarRowIds()).toEqual(["group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "group:devices", "group:account", "group:keybindings", "group:about"]);
+    expect(sidebarRowIds()).toEqual(["group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"]);
     fireEvent.click(document.querySelector("[data-row-id='computer:p_spoo']")!);
     expect(pageAt()).toBe("computer:p_spoo");
     expect(crumb()).toBe("Settings/Computers/spoo");
@@ -99,7 +99,7 @@ describe("the settings sidebar", () => {
     await settle();
     // Appearance is open and the two computers and the one project are already rows: the sub-rows are the
     // sidebar's shape, not a state of it.
-    const before = ["group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:keybindings", "group:about"];
+    const before = ["group:appearance", "group:computers", "computer:here", "computer:p_spoo", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:privacy", "group:keybindings", "group:about"];
     expect(sidebarRowIds()).toEqual(before);
     fireEvent.click(document.querySelector("[data-k=settings-computers]")!);
     expect(sidebarRowIds()).toEqual(before);
@@ -149,7 +149,7 @@ describe("search", () => {
     // A computer or a project under a dimmed group dims with it: left lit under a dimmed head it would read as
     // the one row that matched.
     const dimmed = [...document.querySelectorAll<HTMLElement>("[data-slot=sidebar] [data-sidebar-row][data-dimmed]")].map(row => row.dataset["rowId"]);
-    expect(dimmed).toEqual(["group:appearance", "group:computers", "computer:here", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:keybindings"]);
+    expect(dimmed).toEqual(["group:appearance", "group:computers", "computer:here", "group:projects", "project:pr_spoo", "group:devices", "group:account", "group:privacy", "group:keybindings"]);
     // Standing back is an opacity, never another ink: the sidebar's rest ink is darker than its muted ink on the
     // dark side, so an ink swap read brighter there and did nothing at all on light.
     expect(document.querySelector<HTMLElement>("[data-row-id='computer:here']")?.className).toContain("opacity-50");
@@ -231,7 +231,7 @@ describe("the row grammar", () => {
     window.wsp = { version: "0.2.0" };
     mountSettings({ api });
     await settle();
-    for (const groupId of ["appearance", "computers", "projects", "devices", "account", "keybindings", "about"]) {
+    for (const groupId of ["appearance", "computers", "projects", "devices", "account", "privacy", "keybindings", "about"]) {
       fireEvent.click(document.querySelector(`[data-k=settings-${groupId}]`)!);
       await settle();
       expect(pageAt()).toBe(groupId);

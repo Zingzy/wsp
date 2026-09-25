@@ -1433,6 +1433,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               }
               send({ id: msg.id, ok: true, answer: await rt.agents.tools(msg.target, { agent: msg.agent, name: msg.name, ...(msg.refresh !== undefined ? { refresh: msg.refresh } : {}) }, origin) });
               return;
+            case "servers.icon":
+              // Google is asked by this host for the person's own windows alone: a ticket or a device draws the glyph.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              send({ id: msg.id, ok: true, icon: await rt.agents.serversIcon(msg.host, msg.refresh) });
+              return;
             case "agents.signIn":
             case "servers.signIn": {
               // A sign-in on one of the person's computers is theirs alone, and its page and code go to the sockets
@@ -1582,7 +1590,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, preferences: await rt.preferences.get() });
               return;
             case "preferences.set":
-              send({ id: msg.id, ok: true, preferences: await rt.preferences.set(msg.patch) });
+              send({ id: msg.id, ok: true, ...(await rt.preferences.set(msg.patch)) });
               return;
             case "release.get":
               send({ id: msg.id, ok: true, release: release().get() });

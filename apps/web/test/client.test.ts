@@ -94,16 +94,32 @@ describe("makeApi wrappers", () => {
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "init.build", on: "box" });
   });
 
+  it("serversIcon asks the host for a host's icon and takes only an inline image of a kind the host keeps", async () => {
+    const { api, lastSent } = await connect();
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, icon: png });
+    expect(await api.serversIcon!("mcp.notion.com")).toBe(png);
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "servers.icon", host: "mcp.notion.com" });
+    await api.serversIcon!("mcp.notion.com", true);
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "servers.icon", host: "mcp.notion.com", refresh: true });
+    for (const icon of [null, "https://mcp.notion.com/favicon.ico", "data:image/svg+xml;base64,PHN2Zz4=", "data:text/html;base64,PGI+", `${png}"onerror="x`, 7]) {
+      ScriptedSocket.reply = f => ({ id: f["id"], ok: true, icon });
+      expect(await api.serversIcon!("mcp.notion.com"), String(icon)).toBeNull();
+    }
+  });
+
   it("preferences and setPreferences send the two preferences ops and unwrap the record the wire type vouches for", async () => {
     const { api, lastSent } = await connect();
     const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, projectLook: { pr_1: { icon: "rocket", hue: "teal" } }, labs: false };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record });
     // A record from a host that kept no computer icons or theme picks reads as none and the side defaults rather than
     // failing the whole record.
-    expect(await api.preferences!()).toEqual({ ...record, computerLook: {}, lightTheme: "paper", darkTheme: "graphite" });
+    expect(await api.preferences!()).toEqual({ ...record, computerLook: {}, serverIcons: true, lightTheme: "paper", darkTheme: "graphite" });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.get" });
-    expect(await api.setPreferences!({ theme: "light", sidebarWidth: null })).toEqual({ ...record, computerLook: {}, lightTheme: "paper", darkTheme: "graphite" });
+    expect(await api.setPreferences!({ theme: "light", sidebarWidth: null })).toEqual({ ...record, computerLook: {}, serverIcons: true, lightTheme: "paper", darkTheme: "graphite" });
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.set", patch: { theme: "light", sidebarWidth: null } });
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record, notice: "Server icons are off, but ~/.wsp/icons could not be deleted: permission denied. Delete it by hand." });
+    expect(await api.setPreferences!({ serverIcons: false })).toEqual({ ...record, computerLook: {}, serverIcons: true, lightTheme: "paper", darkTheme: "graphite", notice: "Server icons are off, but ~/.wsp/icons could not be deleted: permission denied. Delete it by hand." });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: { ...record, computerLook: { pl_1: { icon: "server" } } } });
     expect((await api.preferences!()).computerLook).toEqual({ pl_1: { icon: "server" } });
     // A record the wire type does not vouch for is not applied: the page would paint a theme it never checked.

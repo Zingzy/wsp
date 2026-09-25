@@ -43,6 +43,7 @@ export const GROUP_BLURBS = {
   projects: "The repos wsp makes tasks from, each on one computer.",
   devices: "The phones and other computers paired with this wsp.",
   account: "Your sign-in, which lets your other devices find this wsp.",
+  privacy: "What wsp asks of services outside your computers.",
   keybindings: "The keys wsp answers to.",
   about: "Which wsp this is.",
 } as const;
@@ -185,6 +186,13 @@ export const ACCOUNT_WORDS = {
   signOut: "Sign out",
   reach: "Sign in to use this wsp from outside your network. Not from the app yet.",
   reachable: "Reachable from another device outside your network. Not from the app yet.",
+} as const;
+
+/** Settings > Privacy: what this wsp asks of a service outside the person's computers. */
+export const PRIVACY_WORDS = {
+  title: "Privacy",
+  serverIcons: "Server icons from Google",
+  serverIconsDescription: "wsp asks Google for each public server's icon by host name; turning this off deletes the saved icons.",
 } as const;
 
 /** Settings > Devices: every computer and browser paired with this wsp, and the one act on each. */

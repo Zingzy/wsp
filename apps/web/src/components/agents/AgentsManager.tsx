@@ -29,6 +29,7 @@ import { AddFormLevel, AddLevelView, DetailLevel, UnderLevelView, UnderRowLevel 
 import { AGENTS_KINDS } from "./kinds/index.js";
 import type { AgentsShell, AnyKind, GroupBy } from "./kinds/kind.js";
 import { focusRow, rovingKeys } from "./roving.js";
+import { forgetServerIcons } from "./useServerIcon.js";
 
 export type { AgentsShell } from "./kinds/kind.js";
 
@@ -224,7 +225,17 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
     }
     return (
       <span className="inline-flex" title={held ?? readAgo}>
-        <Button data-k="agents-read-again" aria-label={W.readAgain} size="icon-xs" variant="ghost" held={held !== null} onClick={onRefresh}>
+        <Button
+          data-k="agents-read-again"
+          aria-label={W.readAgain}
+          size="icon-xs"
+          variant="ghost"
+          held={held !== null}
+          onClick={() => {
+            forgetServerIcons();
+            onRefresh();
+          }}
+        >
           <RefreshCwIcon className="size-3.5" />
         </Button>
       </span>
