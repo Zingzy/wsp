@@ -5,6 +5,8 @@
 // what stands. No rule of its own lives here, so the card, the command line and
 // the refusals cannot tell a computer's image two ways.
 import { COPY_STALE, copyBuildOf, copyStanding, copyStoppedLine, initJobBuilding, type CopyBuild, type GoldenStageEvent, type InitJob, type PlaceView, type SealedImage, type SealedImageCopy, type SealedImageView } from "@wsp/protocol";
+import { ClockIcon, HistoryIcon } from "lucide-react";
+import type { ChipItem } from "../components/ui/chips.js";
 import { builtWhen, copyOn, IMAGE_WORDS, recordChips } from "./image.js";
 
 export type ImageState =
@@ -53,8 +55,9 @@ export function imageState(place: PlaceView, reads: ImageReads): ImageState | un
 
 /** The facts a state is drawn with, one chip each: what a standing copy is and when it was built, and how far a stale
  * one is behind. A state with no copy standing has none. */
-export function imageChips(state: ImageState, now?: number): string[] {
-  if (state.kind === "ready") return [...recordChips(state.image), IMAGE_WORDS.builtChip(builtWhen(state.copy.builtAt, now)), IMAGE_WORDS.fromChip(state.image.sealedFrom)];
-  if (state.kind === "stale") return [IMAGE_WORDS.behindChip(state.image.version), IMAGE_WORDS.builtChip(builtWhen(state.copy.builtAt, now))];
-  return [];
+export function imageChips(state: ImageState, now?: number): ChipItem[] {
+  if (state.kind !== "ready" && state.kind !== "stale") return [];
+  const built: ChipItem = { text: IMAGE_WORDS.builtChip(builtWhen(state.copy.builtAt, now)), icon: ClockIcon };
+  if (state.kind === "stale") return [{ text: IMAGE_WORDS.behindChip(state.image.version), icon: HistoryIcon }, built];
+  return [...recordChips(state.image), built];
 }

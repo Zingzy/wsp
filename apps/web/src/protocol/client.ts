@@ -62,6 +62,7 @@ import {
   ProjectImportResult,
   ProjectPlan,
   ReleaseView,
+  SealedImageBuilt,
   SealedImageView,
   type SessionEvent,
   type SessionView,
@@ -618,6 +619,9 @@ export interface Api {
    * Remove dialog reads a copy's size to say what comes off that computer. Optional so a fixture that shows no
    * image section need not fake it. */
   image?(name?: string): Promise<SealedImageView>;
+  /** Builds the image's copy at a place, by its id; `force` copies a record that holds no sign-ins. Progress rides
+   * golden.stage frames carrying the place. Optional so a fixture that presses no Copy need not fake it. */
+  imageBuild?(place: string, force?: boolean): Promise<SealedImageBuilt>;
 }
 
 /** Which daemon a channel is to: a workspace's, or a computer's own by its place, HERE_PLACE_ID for this one. */
@@ -845,6 +849,7 @@ export function makeApi(c: ProtocolClient): Api {
     listProjectGoldens: async () => ProjectGolden.array().parse((await c.request<{ projectGoldens?: unknown }>("projectGoldens.list")).projectGoldens),
     // Parsed, not trusted: the section draws a record and its copies only as the wire type vouches for them.
     image: async name => SealedImageView.parse((await c.request<{ view?: unknown }>("image.get", name !== undefined ? { name } : {})).view),
+    imageBuild: async (place, force) => SealedImageBuilt.parse((await c.request<{ build?: unknown }>("image.build", { place, ...(force === true ? { force } : {}) })).build),
     rollbackSnapshot: async (version, name) => {
       const { lineage, existingWorkspaces } = await c.request<SnapshotRollbackResult>("snapshots.rollback", {
         version,

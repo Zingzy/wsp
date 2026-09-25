@@ -7,7 +7,7 @@
 // the default when nothing is marked.
 import { describe, expect, it } from "vitest";
 import { NoProviderBackend, type MachineSpec } from "@wsp/engine";
-import { HERE_PLACE_ID, copyStoppedLine, type GoldenStageEvent, type PlaceView } from "@wsp/protocol";
+import { COPY_BUILD_FIX, HERE_PLACE_ID, copyStoppedLine, type GoldenStageEvent, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, type PlaceBackends } from "../src/runtime.js";
 import { goldenHead } from "../src/index.js";
 import { PlaceProvisioningError, newPlaceKeyPair, type PlaceWiring } from "../src/places.js";
@@ -109,7 +109,7 @@ describe("a copy of the image is built on a press", () => {
     const release = held(solari);
     const building = rt.image.build({ place: "solari" });
     await until(() => frames.some(f => f.place === "solari"));
-    expect((await row("solari")).build).toBe("building your image · creating the machine");
+    expect((await row("solari")).build).toBe("copying your image · creating the machine");
     // The create and a second keep both arrive while the builder is still being made.
     const creating = createOn(rt, { golden: await head(), name: "x", on: "solari" });
     void rt.image.keepCurrent("solari");
@@ -358,7 +358,7 @@ describe("a fork at a place that holds no copy of the image", () => {
     delete record["vault"];
     await store.put("images", "default", record);
     const lines = said(rt);
-    await expect(createOn(rt, { golden: await head(), name: "x", on: "box" })).rejects.toThrow(/holds no sign-ins.*force/);
+    await expect(createOn(rt, { golden: await head(), name: "x", on: "box" })).rejects.toMatchObject({ message: expect.stringContaining("holds no sign-ins"), fix: COPY_BUILD_FIX.noVault });
     expect(box.snapshots).toHaveLength(0);
     expect(lines.filter(l => l.name === "x").some(l => l.message.includes("building your image"))).toBe(false);
     await rt.close();
