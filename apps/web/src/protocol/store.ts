@@ -581,8 +581,9 @@ export const useStore = create<State>((set, get) => {
       if (!api?.setPreferences) return;
       preferenceSetsInFlight++;
       try {
-        const preferences = await api.setPreferences(patch);
+        const { notice, ...preferences } = await api.setPreferences(patch);
         if (--preferenceSetsInFlight === 0) set({ preferences });
+        if (notice !== undefined) addNotice({ kind: "error", text: notice });
       } catch (e) {
         preferenceSetsInFlight--;
         if (e instanceof DisconnectedError) return;

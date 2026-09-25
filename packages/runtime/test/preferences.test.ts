@@ -4,9 +4,11 @@
 // keeps it in the store so a runtime started later on the same state reads
 // it, and pushes the whole record to every subscribed socket; a patch outside
 // the record's own values is refused and changes nothing.
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { DEFAULT_PREFERENCES, LABS_ENV } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRuntime, serveRuntime, type RuntimeServer } from "../src/index.js";
+import { createRuntime, serveRuntime, type RuntimeServer, type ServerIcons } from "../src/index.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
@@ -98,8 +100,8 @@ describe("preferences over the wire", () => {
   it("two patches landing at once keep both fields", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, env: NO_LABS });
     const [a, b] = await Promise.all([rt.preferences.set({ theme: "light" }), rt.preferences.set({ sidebarMode: "spaces" })]);
-    expect(a).toMatchObject({ theme: "light" });
-    expect(b).toMatchObject({ theme: "light", sidebarMode: "spaces" });
+    expect(a.preferences).toMatchObject({ theme: "light" });
+    expect(b.preferences).toMatchObject({ theme: "light", sidebarMode: "spaces" });
     expect(await rt.preferences.get()).toMatchObject({ theme: "light", sidebarMode: "spaces" });
   });
 
@@ -120,5 +122,30 @@ describe("preferences over the wire", () => {
     expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { theme: "sepia" } })).toMatchObject({ ok: false });
     expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { sidebarWidth: 0 } })).toMatchObject({ ok: false });
     expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: DEFAULT_PREFERENCES });
+  });
+
+  it("icons turned off whose folder cannot be deleted still save, tell every socket, and answer with a notice naming the folder", async () => {
+    const folder = join(homedir(), ".wsp", "icons");
+    const icons: ServerIcons = {
+      folder,
+      icon: async () => null,
+      forget: () => {
+        throw Object.assign(new Error(`EACCES: permission denied, rmdir '${folder}'`), { code: "EACCES" });
+      },
+    };
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, env: NO_LABS, serverIcons: icons });
+    srv = await serveRuntime(rt, { port: 0, authToken: "t" });
+    const watcher = await WsClient.connect(srv.port, { token: "t" });
+    expect((await watcher.request("events.subscribe")).ok).toBe(true);
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { serverIcons: false } })).toMatchObject({
+      ok: true,
+      preferences: { serverIcons: false },
+      notice: "Server icons are off, but ~/.wsp/icons could not be deleted: permission denied. Delete it by hand.",
+    });
+    await until(() => watcher.events.some(e => e.type === "preferences.changed"));
+    expect(watcher.events.find(e => e.type === "preferences.changed")).toMatchObject({ preferences: { serverIcons: false } });
+    watcher.close();
+    expect(await rt.preferences.get()).toMatchObject({ serverIcons: false });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { theme: "dark" } })).not.toHaveProperty("notice");
   });
 });

@@ -137,6 +137,21 @@ describe("the preferences record in the store", () => {
     expect(lastNotice()).toBeNull();
   });
 
+  it("a set the host kept but could not finish says the host's notice, not that the setting was not saved", async () => {
+    const said = "Server icons are off, but ~/.wsp/icons could not be deleted: permission denied. Delete it by hand.";
+    const { api, reads } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
+    const kept = api.setPreferences!;
+    api.setPreferences = async patch => ({ ...(await kept(patch)), notice: said });
+    useStore.getState().bind(api);
+    await flush();
+    clearNotices();
+    await useStore.getState().setPreferences({ serverIcons: false });
+    await flush();
+    expect(lastNotice()).toBe(said);
+    expect(reads.count).toBe(1);
+    expect(useStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, labs: true, serverIcons: false });
+  });
+
   it("without the verb on the client the pick still paints and nothing is sent", async () => {
     const { api } = fakeApi({ ...DEFAULT_PREFERENCES, labs: true });
     const { preferences: _p, setPreferences: _s, ...bare } = api;

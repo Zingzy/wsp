@@ -13,6 +13,7 @@ import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../ui/button.js";
 import { Spinner } from "../ui/spinner.js";
 import { AGENTS_LIST_WORDS as W, agentNames, type RowAct } from "./agentsRows.js";
 import { NARROW } from "./agentsWidths.js";
+import { useServerIcon } from "./useServerIcon.js";
 import type { Lead, ServerState, ServerStatus } from "./kinds/kind.js";
 
 /** One act as an xs outline button with its glyph: held where it has no road. A held button takes no pointer, so it
@@ -84,14 +85,18 @@ export function LeadMark({ lead, label, big = false }: { lead: Lead; label: stri
     );
   }
   const Icon = lead.icon;
-  if (lead.kind === "box") {
-    return (
-      <span data-k="lead-box" className={TILE}>
-        <Icon aria-hidden className="size-4 text-foreground/80" />
-      </span>
-    );
-  }
+  if (lead.kind === "box") return <BoxLead icon={Icon} host={lead.host} />;
   return <Icon aria-hidden className={cn("shrink-0 text-foreground/80", big ? "size-5" : "size-4")} />;
+}
+
+/** A server's box: its own icon as the host fetched it, or the glyph where it has none or icons are off. */
+function BoxLead({ icon: Icon, host }: { icon: LucideIcon; host: string | undefined }) {
+  const src = useServerIcon(host);
+  return (
+    <span data-k="lead-box" className={TILE}>
+      {src === null ? <Icon aria-hidden className="size-4 text-foreground/80" /> : <img data-k="server-icon" src={src} alt="" draggable={false} className="size-5 rounded-sm object-contain" />}
+    </span>
+  );
 }
 
 /** The marks of the agents a skill or a server is set up for, after its name: four, or two in a narrow container,
