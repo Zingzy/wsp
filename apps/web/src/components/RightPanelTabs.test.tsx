@@ -43,10 +43,10 @@ const cards = () => [...document.querySelectorAll<HTMLElement>("[data-surface-la
 afterEach(cleanup);
 
 describe("the right panel's launcher", () => {
-  it("offers Browser, Terminal, Diff, Machine, Processes and Agents and nothing else", () => {
+  it("offers Browser, Terminal, Diff, Computer, Processes and Agents and nothing else", () => {
     draw();
     expect(cards()).toEqual(["browser", "terminal", "diff", "machine", "processes", "agents"]);
-    for (const label of ["Browser", "Terminal", "Diff", "Machine", "Processes", "Agents"]) expect(screen.getByText(label)).toBeTruthy();
+    for (const label of ["Browser", "Terminal", "Diff", "Computer", "Processes", "Agents"]) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.queryByText("Files")).toBeNull();
     expect(screen.queryByText("Screen")).toBeNull();
     expect(screen.queryByText("Workspace")).toBeNull();
@@ -77,7 +77,7 @@ describe("the right panel's launcher", () => {
     draw({ surfaces: [{ id: "diff", kind: "diff" }, { id: "machine", kind: "machine" }, { id: "processes", kind: "processes" }], activeSurfaceId: "diff" });
     const strip = document.querySelector("[data-right-panel-tab-list]")?.textContent;
     expect(strip).toContain("Diff");
-    expect(strip).toContain("Machine");
+    expect(strip).toContain("Computer");
     expect(strip).toContain("Processes");
     expect(document.querySelector("[data-pane]")).not.toBeNull();
   });
