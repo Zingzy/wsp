@@ -3153,7 +3153,11 @@ describe("wsp verbs over the host", () => {
       expect(names(await line("workspaces"))).toEqual(["alpha"]);
       expect((await line("exec", "beta", "--", "uname")).io.errors).toEqual([`wsp exec: ${noWorkspaceRefusal("beta")}`]);
       expect((await line("exec", beta.id, "--", "uname")).io.errors).toEqual([`wsp exec: ${noWorkspaceRefusal(beta.id)}`]);
-      expect((await line("exec", beta.id.slice(0, 6), "--", "uname")).io.errors).toEqual([`wsp exec: ${noWorkspaceRefusal(beta.id.slice(0, 6))}`]);
+      // The start has to miss alpha's id too, which a random pair shares for several characters now and then.
+      let n = 6;
+      while (alpha.id.startsWith(beta.id.slice(0, n))) n++;
+      const start = beta.id.slice(0, n);
+      expect((await line("exec", start, "--", "uname")).io.errors).toEqual([`wsp exec: ${noWorkspaceRefusal(start)}`]);
       expect((await line("threads", "beta")).io.errors).toEqual([`wsp threads: ${noWorkspaceRefusal("beta")}`]);
       // A name nothing here carries reads the same, which is the whole of what the two have to say to a thread.
       expect((await line("exec", "gamma", "--", "uname")).io.errors).toEqual([`wsp exec: ${noWorkspaceRefusal("gamma")}`]);
