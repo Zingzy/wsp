@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer, type Server } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { LOOPBACK } from "@wsp/runtime";
 import { PORT_TAKEN_REFUSAL, portInsteadLine, portTakenLine } from "@wsp/protocol";
 import { choosePorts, listenerOf, portHolder, portInUse } from "../src/ports.js";
 import { pickUpPorts, type CliIO } from "../src/cli.js";
 import type { HostLock } from "../src/host-lock.js";
+import { refusedPort } from "../../runtime/test/held-port.js";
 
 const servers: Server[] = [];
 afterEach(async () => {
@@ -34,7 +35,9 @@ describe("ports", () => {
     const who = await listenerOf(port);
     // A box without lsof names nobody; one with it names the process that holds the port.
     if (who !== undefined) expect(who.pid).toBe(process.pid);
-    expect(await listenerOf(await freed())).toBeUndefined();
+    const dark = await refusedPort();
+    onTestFinished(dark.close);
+    expect(await listenerOf(dark.port)).toBeUndefined();
   });
 
   it("the holder of a port is the wsp host whose live lock names it, whichever of its two ports it is", async () => {
@@ -106,16 +109,6 @@ describe("choosing the pair a run binds", () => {
     });
   });
 });
-
-/** A port that was free a moment ago: bound and released. */
-async function freed(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>(resolve => server.listen(0, LOOPBACK, resolve));
-  const addr = server.address();
-  const port = typeof addr === "object" && addr !== null ? addr.port : 0;
-  await new Promise<void>(resolve => server.close(() => resolve()));
-  return port;
-}
 
 describe("the pair wsp up binds", () => {
   // Every case fakes the whole answer in this process, `states: []` included: the real reading asks which state

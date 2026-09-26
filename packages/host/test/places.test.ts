@@ -8,7 +8,6 @@ import { createServer as createHttpServer } from "node:http";
 import { promisify } from "node:util";
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix } from "node:path";
@@ -41,7 +40,7 @@ import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemL
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { computerLines, hostPlatform, placeLines } from "../src/verbs.js";
-import { refusedPort } from "../../runtime/test/held-port.js";
+import { pinnedDroppingPort, refusedPort } from "../../runtime/test/held-port.js";
 import {
   ADD_FLAGS_REFUSAL,
   NOTHING_TO_LEAVE_LINE,
@@ -257,17 +256,6 @@ async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refus
     wss.once("error", fail);
   });
   return { url: `http://127.0.0.1:${port}`, publicKey: key.publicKey, frames };
-}
-
-/** A port this computer held a moment ago and holds no longer, so a dial at it is refused rather than left hanging. */
-async function freePort(): Promise<number> {
-  const server = createServer();
-  const port = await new Promise<number>((done, fail) => {
-    server.once("error", fail);
-    server.listen(0, "127.0.0.1", () => done((server.address() as { port: number }).port));
-  });
-  await new Promise<void>(done => server.close(() => done()));
-  return port;
 }
 
 /** The systemd this computer's real one stands in for in these tests: the module as it is, with the machine's unit
@@ -680,8 +668,10 @@ describe("a computer joining a wsp", () => {
     // The code: the one refusal a host has for a code it is not holding, spent, expired or never minted.
     const spent = await fakeHost({ refuse: PLACE_CODE_REFUSAL });
     await expect(joinCommand(captured(), [spent.url], { code: codeFor(spent, "X") }, joinDepsFor(tmp("join-code"), fakeRunner().run))).rejects.toMatchObject({ name: "JoinRefused", about: "code" });
-    // The address: nothing is listening there. The port was this computer's a moment ago and is free again.
-    const closed = await freePort();
+    // The address: nothing answers there, on a port this test holds so no other test's listen is handed it.
+    const { port: closed, bound, close: closeClosed } = await pinnedDroppingPort();
+    onTestFinished(closeClosed);
+    expect(bound).toBe(false);
     await expect(joinCommand(captured(), [`http://127.0.0.1:${closed}`], { code: NOWHERE_CODE }, joinDepsFor(tmp("join-gone"), fakeRunner().run))).rejects.toMatchObject({ name: "JoinRefused", about: "address" });
     // A refusal about neither field carries neither: a host that would not prove its key, and any other word of its own.
     const wrong = await fakeHost({ wrongKey: true });
