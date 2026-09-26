@@ -120,7 +120,7 @@
         "row-id=thread:migrate",
         "390:key:Escape"
       ],
-      "wait": "opened-thread"
+      "wait": "thread-rows"
     },
     {
       "name": "spawned-thread-header",
@@ -433,6 +433,32 @@
       "widths": [
         1440
       ]
+    },
+    {
+      "name": "thread-list",
+      "at": "/",
+      "fixture": "thread-states",
+      "steps": [
+        "row-id=thread:migrate"
+      ],
+      "wait": "thread-rows",
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "palette-threads",
+      "at": "/",
+      "fixture": "thread-states",
+      "steps": [
+        "key:ControlOrMeta+k",
+        "type:dashboard"
+      ],
+      "wait": "command-palette=true",
+      "widths": [
+        1440
+      ],
+      "settleMs": 700
     }
   ]
 }
