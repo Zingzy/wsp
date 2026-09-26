@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import type { Machine, MachineBackend } from "../src/machine.js";
-import { GoneWatch, KILL_ASKS, MachineAliveError } from "../src/golden.js";
+import { GONE_READS, GoneWatch, KILL_ASKS, MachineAliveError, readGone } from "../src/golden.js";
 import { Workspace } from "../src/lifecycle.js";
 import { reap } from "../src/orphans.js";
 import { SolariBackend } from "../src/solari-backend.js";
@@ -97,4 +97,25 @@ describe("a background stop read back through a gateway whose copies disagree", 
     expect(said).toEqual([`refused ${status}; not asked again, the next start's sweep stops machine m1`]);
     expect(watch.ids()).toEqual([]);
   }, 2_000);
+});
+
+describe("reading whether the provider still has a machine, through a gateway whose copies disagree", () => {
+  const gets = (f: ReturnType<typeof splitGateway>["f"]): number => f.mock.calls.filter(c => (c[1]?.method ?? "GET") === "GET").length;
+
+  it("a 404 from the copy that never held the machine is not gone: the next read finds it running", async () => {
+    const { f } = splitGateway((call, method) => (method === "GET" && call === 0 ? "empty" : "holder"));
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const machine = await b.create({ kind: "sandbox" });
+    expect(await readGone(b, machine.id)).toBe("running");
+    expect(gets(f)).toBe(2);
+  });
+
+  it("a machine neither copy holds reads gone only after GONE_READS reads in a row", async () => {
+    const { f, holder } = splitGateway(() => "holder");
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const machine = await b.create({ kind: "sandbox" });
+    holder.clear();
+    expect(await readGone(b, machine.id)).toBe("gone");
+    expect(gets(f)).toBe(GONE_READS);
+  });
 });

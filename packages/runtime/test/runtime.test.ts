@@ -21,7 +21,7 @@ import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
-import { missesFirstDelete, stubBackend, tokenGuest, type StubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
+import { answersGoneOnce, missesFirstDelete, stubBackend, tokenGuest, type StubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
 import { scriptGuest } from "./script-guest.js";
 import { fakeClock } from "./fake-clock.js";
 import { WebSocketServer } from "ws";
@@ -3789,6 +3789,21 @@ describe("runtime golden builders", () => {
     expect(await rt.golden.builders()).toEqual([expect.objectContaining({ id: b.id })]);
   });
 
+  it("a seal whose kill the provider fails keeps the builder's record when one gateway copy then answers 404 for it", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
+    const b = await rt.golden.prepare();
+    const machine = backend.machines.find(m => m.id === b.id)!;
+    let kills = 0;
+    machine.kill = async () => {
+      kills++;
+      throw Object.assign(new Error("provider 500"), { status: 500 });
+    };
+    answersGoneOnce(backend, machine, () => kills > 0);
+    await expect(rt.golden.seal(b.id)).rejects.toThrow("provider 500");
+    expect(await rt.golden.builders()).toEqual([expect.objectContaining({ id: b.id })]);
+  });
+
   it("stamps its builders with one owner id per store, kept across processes", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -5400,6 +5415,20 @@ describe("runtime golden import", () => {
     expect(frames).toContain("uploading-files:~/.claude.json not re-imported: upload refused");
     expect(frames.at(-1)).toBe("ready:");
     expect(await store.get("builders", b.id)).toMatchObject({ import: { recipeHash: "h1", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"] } });
+  });
+
+  it("a stored builder one gateway copy answers 404 for at the next process's load keeps its record, and the next build attaches to it", async () => {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    const b = await first.golden.prepare();
+    answersGoneOnce(backend, backend.machines[0]!);
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    await second.golden.builders();
+    expect(await store.get("builders", b.id)).toMatchObject({ id: b.id });
+    expect((await second.golden.prepare()).id).toBe(b.id);
+    expect(backend.machines).toHaveLength(1);
   });
 
   it("kill stops a builder of this setup by its recorded id and drops the record, from this process or the next", async () => {

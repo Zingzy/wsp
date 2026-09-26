@@ -60,6 +60,20 @@ export function missesFirstDelete(m: StubMachine): void {
   };
 }
 
+/** The gateway's copy that never held the machine answering one read, as it did on 2026-09-26: the first read of
+ * `m` once `when` holds, by the backend or the handle, is a 404 while the machine runs on at the other copy. */
+export function answersGoneOnce(backend: StubBackend, m: StubMachine, when: () => boolean = () => true): void {
+  let lied = false;
+  const lie = (): boolean => !lied && when() && (lied = true);
+  const get = backend.get.bind(backend);
+  backend.get = async id => {
+    if (id === m.id && lie()) throw Object.assign(new Error("Not found"), { kind: "missing", status: 404 });
+    return get(id);
+  };
+  const state = m.state.bind(m);
+  m.state = async () => (lie() ? "gone" : state());
+}
+
 /** The failure a call the caller's own signal cut off raises; the runtime reads it as neither of the two typed move
  * failures, which is what makes a stopped wake end as stopped rather than as a provider that did not answer. */
 export const abortedCall = (what: string): Error => Object.assign(new Error(`${what} was aborted`), { name: "AbortError" });

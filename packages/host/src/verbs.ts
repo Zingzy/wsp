@@ -4072,7 +4072,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Drops a workspace whose machine the provider no longer has: its record and its threads leave this computer and the person's sidebar, and nothing is asked of the provider. Refused in one line while the machine still exists (pause it, or delete it at the provider, first).",
+        "Drops a workspace whose machine the provider no longer has: its record and its threads leave this computer and the person's sidebar. The provider is read until twelve reads in a row agree the machine is gone, and nothing is asked of the machine. Refused in one line while the machine still exists (pause it, or delete it at the provider, first).",
       input: { workspace: WorkspaceIn },
       output: { workspaceId: z.string(), name: z.string(), threads: z.number().int() },
       call: async ({ workspace: ref }, deps) => {
