@@ -430,7 +430,8 @@ describe("command palette", () => {
     // The workspace it runs on and where that runs, which is what tells it from a thread of the opener's own. This
     // fixture's records name no provider, so where it runs is what the machine is.
     const row = inPalette().getByText("migration on worker").closest<HTMLElement>("[data-slot=command-item]")!;
-    expect(within(row).getByText("worker on a provider")).toBeTruthy();
+    expect([...row.querySelectorAll("[data-fact]")].map(fact => fact.textContent)).toEqual(["worker", "a provider"]);
+    expect(row.querySelector("[data-thread-status]")).not.toBeNull();
   });
 
   it("a thread the sidebar has folded into its archive is still found by title and still opens", async () => {

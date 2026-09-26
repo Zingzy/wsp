@@ -7,22 +7,22 @@
 // the view mounted; a view pinned to an older thread unpins first, since the
 // new thread opens as the workspace's latest. A send from a thread that never
 // started runs as that thread's first turn, so the pin stays where it is.
-// Under the transcript stand the threads this one's agent opened, one row each
-// with the workspace it runs on and a link to it, and the footer weighs the
-// turn's own cost against what those threads spent.
+// Under the transcript stand the threads this one's agent opened, one line each
+// with where it runs and its status, and the footer weighs the turn's own cost
+// against what those threads spent.
 import { HeroAtmosphere, HeroMark } from "./EmptyHero.js";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts } from "@wsp/protocol";
 import { useHarnessCatalog, usePlaces, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
-import { ThreadLink } from "../ThreadLink.js";
+import { Facts } from "../Facts.js";
+import { ThreadRows } from "../threads/ThreadRows.js";
 import { useDiffRevealStore } from "../../diffs/reveal";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
 import { DEFAULT_TIMESTAMP_FORMAT, pausedLine, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
 import { threadsOpenedBy, type ThreadOnWorkspace } from "../../sidebar/threadTree";
-import { onName } from "../../settings/format.js";
 import { computerName, useComputerName } from "../../sidebar/workspaceRows";
 import { TimelineRuleLine } from "./TimelineRuleLine";
 import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
@@ -159,7 +159,7 @@ export function ChatView({
   ) : null;
   const footer = thread.hydrated ? (
     <div className="mx-auto w-full min-w-0 max-w-3xl">
-      {opened.length > 0 ? <OpenedThreadRows opened={opened} /> : null}
+      {opened.length > 0 ? <OpenedThreads opened={opened} /> : null}
       {view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} onThisComputer={onThisComputer} /> : null}
       {paused !== null ? <TimelineRuleLine data-workspace-paused line={paused} /> : null}
     </div>
@@ -256,40 +256,15 @@ function openedSpend(opened: ReadonlyArray<ThreadOnWorkspace>): number {
   return opened.reduce((sum, { thread }) => sum + (thread.costUsd ?? 0), 0);
 }
 
-/** One row per thread this thread's agent opened, wherever each runs: what it is called, the workspace it runs on
- * with where that runs, how it stands, and the page's own address for it, so a person reading the opener can reach
- * every thread it started without hunting the sidebar for it. */
-function OpenedThreadRows({ opened }: { opened: ReadonlyArray<ThreadOnWorkspace> }) {
+/** The threads this thread's agent opened, wherever each runs, one line each under the reply, so a person reading the
+ * opener can reach every thread it started without hunting the sidebar for it. */
+function OpenedThreads({ opened }: { opened: ReadonlyArray<ThreadOnWorkspace> }) {
   const places = usePlaces();
-  return (
-    <>
-      {opened.map(({ thread, runs }) => (
-        <TimelineRuleLine key={thread.id} data-opened-thread line="opened" {...(thread.indicator === null ? {} : { end: thread.indicator.label })}>
-          <ThreadLink thread={thread} className="min-w-0 truncate text-foreground" />{" "}
-          <span className="ms-1 shrink-0 whitespace-nowrap">{`${runs.displayName}${onName(computerName(places, runs))}`}</span>{" "}
-        </TimelineRuleLine>
-      ))}
-    </>
-  );
-}
-
-/** Facts as flex items, the gap between them the only separator. The spaces between draw nothing in a flex row;
- * they keep the words apart in the text content a plain-text read takes. */
-function FlexParts({ parts }: { parts: ReadonlyArray<string> }) {
-  return parts.map((part, at) => (
-    <Fragment key={part}>
-      {at === 0 ? null : " "}
-      <span className="whitespace-nowrap">{part}</span>
-    </Fragment>
-  ));
+  return <ThreadRows label="Threads" className="mt-2" rows={opened.map(({ thread, runs }) => ({ thread, place: computerName(places, runs) }))} />;
 }
 
 function SettledFacts({ parts }: { parts: ReadonlyArray<string> }) {
-  return (
-    <p data-testid="settled-footer" className="ms-1 flex flex-wrap items-center gap-x-3 text-muted-foreground text-xs tabular-nums">
-      <FlexParts parts={parts} />
-    </p>
-  );
+  return <Facts data-testid="settled-footer" parts={parts} className="flex-wrap gap-x-3.5 text-[13px] text-muted-foreground tabular-nums" />;
 }
 
 const TURN_STATUS: Record<TurnSummary["state"], string> = {
@@ -308,14 +283,10 @@ function SettledFooter({ turn, openedCostUsd, onThisComputer }: { turn: TurnSumm
   const failed = turn.state !== "completed";
   const parts = turnSettledParts(turn, openedCostUsd, onThisComputer ? LIST_PRICE_WORD : undefined);
   return (
-    <div
+    <Facts
       data-testid="settled-footer"
-      className={cn(
-        "flex w-full flex-wrap items-center gap-x-3 px-1 pb-2 font-mono text-[11px] tabular-nums",
-        failed ? "text-destructive" : "text-muted-foreground",
-      )}
-    >
-      <FlexParts parts={[TURN_STATUS[turn.state], ...parts]} />
-    </div>
+      parts={[TURN_STATUS[turn.state], ...parts]}
+      className={cn("w-full flex-wrap px-1 pb-2 font-mono text-[11px] tabular-nums", failed ? "text-destructive" : "text-muted-foreground")}
+    />
   );
 }
