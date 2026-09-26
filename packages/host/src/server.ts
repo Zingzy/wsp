@@ -8,9 +8,9 @@ import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
 import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, REQUEST_BODY_MAX_BYTES, REQUEST_BODY_NOT_JSON, REQUEST_BODY_TOO_LARGE, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, isObjectFrame, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
 import { sshHostsIn } from "./ssh-hosts.js";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, threadOf, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
-import { advertiseWord, reachAddresses } from "./pairing.js";
+import { advertiseWord, hereUrl, reachAddresses, type HereAt } from "./pairing.js";
 import { NO_PROJECT_YET } from "./verbs.js";
 import { accountHere, publicHostname } from "./relay-link.js";
 import { wspHome } from "./hosts.js";
@@ -50,6 +50,9 @@ export interface HostOptions {
    * since somebody who names an address has said which one the other end can reach; what this computer answers on
    * follows it, so a word that turns out to be wrong is not the only road back. */
   advertise?: string;
+  /** Filled with the runtime socket's loopback address once it binds, for the runtime this host serves to hand a
+   * turn on this computer: the same value the guest door hands a session. */
+  here?: HereAt;
   /** Auth token for the runtime WS; generated when omitted. */
   authToken?: string;
   /** Envs baked into a workspace created from the JSON route, given the golden version it forks. */
@@ -445,6 +448,11 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   // for a device token first. Every JSON route asks for a token on every address.
   const boundHere = isLoopback(address);
   let rtServer: RuntimeServer;
+  const here: HereAt = opts.here ?? {};
+  // The guest door opens with the relay, ahead of the runtime socket whose port the loopback address names, so a
+  // session that arrives in between waits for the bind rather than reading a host with no loopback.
+  let bound!: () => void;
+  const binding = new Promise<void>(done => (bound = done));
 
   // The wsp a process inside a machine runs, served here: the tool server and the command line, on the link the
   // relay below holds into that machine. The socket and its port are read at each call because the relay starts
@@ -455,7 +463,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       ? undefined
       : guestDoor({
           authorize: token => rtServer.authorize(token),
-          hostUrl: () => `http://${authority(LOOPBACK, rtServer.port)}`,
+          hostUrl: () => binding.then(() => here.url),
           kinds: { mcp: guestMcp(statePath), cli: guestCli(statePath, runningWsp()) },
         });
   // Before the runtime socket: the app lists and stops the relay's forwards through it.
@@ -494,11 +502,11 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     const who = await rtServer.authorize(bearerOf(req.headers.authorization));
     if (who === undefined) return undefined;
     if (who.kind !== "device" || who.device.here === true) return {};
-    const scope = who.device.scope;
+    const thread = threadOf(who.device);
     // A device the person paired is that computer on these routes exactly as it is on a socket: the road is the
     // host's own word here too, so the rule about what it may start on a workspace of this computer is one rule.
-    if (scope === undefined) return { caller: "paired" };
-    return ownRoad(req, doorSockets) ? { caller: { origin: "relayed", by: scope } } : undefined;
+    if (thread === undefined) return { caller: "paired" };
+    return ownRoad(req, doorSockets) ? { caller: { origin: thread.road, by: thread.by } } : undefined;
   };
 
   const handler = (hereFor: (req: IncomingMessage) => boolean) => (req: IncomingMessage, res: ServerResponse) => {
@@ -712,9 +720,12 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       ...(opts.restart !== undefined ? { restart: opts.restart } : {}),
     });
   } catch (e) {
+    bound();
     await relay.close();
     throw e;
   }
+  here.url = hereUrl(address, rtServer.port);
+  bound();
   try {
     page(boundHere);
   } catch (e) {

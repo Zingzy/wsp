@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,11 +14,12 @@ import { HERE_PLACE_ID,
   MCP_SERVER_NAME,
   NOTIFY_ME,
   RUNTIME_OPS,
+  LAUNCH_ENV,
+  SCOPED_MCP_ARG,
   SCOPED_TOKEN_ROAD_REFUSAL,
   THREAD_OPS,
   threadOpRefusal,
   workspaceIdOf,
-  agentsKindRefusal,
   agentsOffRefusal,
   noMcpServersLine,
   spawnActRefusal,
@@ -44,7 +46,7 @@ import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { keyFingerprint } from "@wsp/engine";
 import { newPlaceKeyPair } from "../src/places.js";
-import { stubBackend, copyingFake, createOn, projectOn, testPlatform } from "./stub-backend.js";
+import { stubBackend, copyingFake, createOn, projectOn, tempRepo, testPlatform } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient, createOverWire } from "./ws-client.js";
 
@@ -478,20 +480,52 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("a turn on this computer is told no address and handed no token, whatever its record says", async () => {
+  it("a turn on this computer is told the loopback address and handed its own token, never the address a machine dials", async () => {
+    const held = heldAdapter({ takesMcpServers: true });
+    // Every address this host knows at once: the one the person named, the relay's and its own loopback. The kind
+    // picks, so a Mac turn's token never leaves this computer and a fork is never told an address it cannot dial.
+    const reach: HostReach = { advertise: "https://box.example", url: "https://relay.example", here: "http://127.0.0.1:4801", port: 4700 };
+    const wspMcp = { command: "node", args: ["/opt/wsp/dist/bin.js", "mcp"] };
+    const rt = runtimeWith({ claude: held.factory }, { reach, wspMcp });
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: AGENTS_ON });
+    const lead = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const onMac = await rt.sessions.start(mac.id, { prompt: "hi" });
+    const onLead = await rt.sessions.start(lead.id, { prompt: "hi" });
+    const [macLaunch, leadLaunch] = held.launches;
+    expect(macLaunch!.env[HOST_URL_ENV]).toBe("http://127.0.0.1:4801");
+    expect(macLaunch!.env[HOST_TOKEN_ENV]).toMatch(/\S/);
+    expect(macLaunch!.env[HOST_KEY_ENV]).toBe(keyFingerprint(hostKey.publicKey));
+    expect(leadLaunch!.env[HOST_URL_ENV]).toBe("https://box.example");
+    // Every wsp variable the launch sets is on the one list an agent that filters its servers' environment is told
+    // to pass, so a variable added to the launch and not the list fails here rather than going missing in a tool.
+    expect(Object.keys(macLaunch!.env).filter(name => name.startsWith("WSP_")).sort()).toEqual([...LAUNCH_ENV].sort());
+    // The tools read the launch pair off the environment the agent hands them, so their line names no host; it
+    // carries the mark that makes a tool server missing that pair refuse rather than act as the person.
+    expect(macLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG] });
+    const macThread = onMac.view().threadId!;
+    const devices = await rt.devices.list();
+    expect(devices.find(d => d.scope?.threadId === macThread)?.scope).toEqual({ kind: "thread", threadId: macThread, workspaceId: mac.id, rootThreadId: macThread });
+    // The road is the record's, written at the mint: the Mac's token names this computer and the fork's a machine.
+    const roads = await Promise.all(devices.map(async d => [d.scope?.workspaceId, ((await store.get("devices", d.id)) as { road?: string }).road]));
+    expect(Object.fromEntries(roads)).toEqual({ [mac.id]: "here", [lead.id]: "relayed" });
+    // And the listing leaves the road out: it is the host's own reading, not a column.
+    expect(devices.every(d => !("road" in d))).toBe(true);
+    held.end(0);
+    held.end(1);
+    await onMac.finished;
+    await onLead.finished;
+    await gone(rt);
+    expect(await rt.devices.list()).toEqual([]);
+    await rt.close();
+  });
+
+  it("a turn on this computer under a host that listens on no loopback address is handed no token", async () => {
     const held = heldAdapter();
-    const first = runtimeWith({ claude: held.factory }, { reach: { url: "http://192.168.1.20:4700", port: 4700 } });
-    const mac = await createOn(first, { on: HERE_PLACE_ID, name: "mac" });
-    const stored = (await store.get("workspaces", mac.id)) as Record<string, unknown>;
-    await first.close();
-    // Both doors refuse the switch on this kind, so the record is written by hand: the address is the kind's
-    // answer and not the door's, and a turn here runs beside the host rather than dialling in.
-    await store.put("workspaces", mac.id, { ...stored, agents: AGENTS_ON });
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://192.168.1.20:4700", port: 4700 } });
+    const rt = runtimeWith({ claude: held.factory }, { reach: { advertise: "https://box.example", url: "http://192.168.1.20:4700" } });
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: AGENTS_ON });
     const handle = await rt.sessions.start(mac.id, { prompt: "hi" });
     expect(held.launches[0]!.env[HOST_URL_ENV]).toBeUndefined();
     expect(held.launches[0]!.env[HOST_TOKEN_ENV]).toBeUndefined();
-    expect(held.launches[0]!.env[HOST_KEY_ENV]).toBeUndefined();
     expect(await rt.devices.list()).toEqual([]);
     held.end(0);
     await handle.finished;
@@ -800,6 +834,124 @@ describe("agents spawning agents", () => {
     }
   });
 
+  /** A folder of the person's own with one commit in it: a copy here starts on the branch its parent is on, so the
+   * repo needs a commit to name one. */
+  const committedRepo = (): string => {
+    const repo = tempRepo();
+    execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
+    return repo;
+  };
+  const MAC_REACH: HostReach = { url: "http://10.0.0.2:4700", here: "http://127.0.0.1:4801" };
+
+  it("a thread on this computer drives the host as itself: its copies nest under it, and the person's doors stay shut", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: MAC_REACH });
+    const project = await projectOn(rt, HERE_PLACE_ID, committedRepo());
+    const mac = await createOn(rt, { project: project.id, name: "mac", agents: { spawn: true, maxMachines: 3, maxDepth: 1 } });
+    // What stands beside it and is not its own: the person's other copy of the same project, and another lead's
+    // tree on this computer with a copy that lead's thread made.
+    const other = await createOn(rt, { project: project.id, name: "other" });
+    const lead = await createOn(rt, { project: project.id, name: "lead", agents: AGENTS_ON });
+    const onLead = await rt.sessions.start(lead.id, { prompt: "hi" });
+    const leadScope: ThreadScope = { kind: "thread", threadId: onLead.view().threadId!, workspaceId: lead.id, rootThreadId: onLead.view().threadId! };
+    const theirs = await createOn(rt, { name: "theirs" }, { origin: "here", by: leadScope });
+    const onMac = await rt.sessions.start(mac.id, { prompt: "hi" });
+    const threadId = onMac.view().threadId!;
+    const token = held.launches[1]!.env[HOST_TOKEN_ENV]!;
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const client = await WsClient.connect(srv.port, { token });
+      const made = await client.request("workspaces.create", { project: project.id, name: "kid" });
+      expect(made["error"]).toBeUndefined();
+      const kid = made["workspace"] as { id: string; kind: string; parentThreadId?: string; rootThreadId?: string; parentWorkspaceId?: string };
+      expect(kid.kind).toBe("local");
+      expect(kid.parentThreadId).toBe(threadId);
+      expect(kid.rootThreadId).toBe(threadId);
+      expect(kid.parentWorkspaceId).toBe(mac.id);
+      expect(await store.get("workspaces", kid.id)).toMatchObject({ parentThreadId: threadId, rootThreadId: threadId });
+      // Its own copy and the one it made, and nothing else on this computer.
+      expect(((await client.request("workspaces.list"))["workspaces"] as { name: string }[]).map(w => w.name).sort()).toEqual(["kid", "mac"]);
+      for (const foreign of [other, lead, theirs]) {
+        expect((await client.request("workspaces.get", { workspaceId: foreign.id }))["error"]).toBe(noWorkspaceRefusal());
+      }
+      // The road a connect ticket is minted on is the person's, and so is every door that hands out access.
+      expect((await client.request("ticket.issue", { purpose: "connect" }))["error"]).toBe(threadOpRefusal("ticket.issue", threadId));
+      expect((await client.request("pair.issue"))["error"]).toBe(threadOpRefusal("pair.issue", threadId));
+      expect((await client.request("projects.add", { source: committedRepo(), on: HERE_PLACE_ID }))["error"]).toBe(threadOpRefusal("projects.add", threadId));
+      client.close();
+    } finally {
+      await srv.close();
+      held.end(1);
+      held.end(0);
+      await onMac.finished;
+      await onLead.finished;
+      await rt.close();
+    }
+  });
+
+  it("a thread on this computer is held to the ops a thread on a machine is, and no more", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: MAC_REACH });
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: AGENTS_ON });
+    const handle = await rt.sessions.start(mac.id, { prompt: "hi" });
+    const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
+    const threadId = handle.view().threadId!;
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const client = await WsClient.connect(srv.port, { token });
+      const refused: string[] = [];
+      const reached: string[] = [];
+      for (const op of RUNTIME_OPS) {
+        if (op === "auth" || op === "pair.redeem") continue;
+        const reply = await client.request(op, {});
+        (reply["error"] === threadOpRefusal(op, threadId) ? refused : reached).push(op);
+      }
+      expect(reached.sort()).toEqual([...THREAD_OPS].filter(op => op !== "auth").sort());
+      // The two roads out of a thread's own reach: a connect ticket is a socket with no scope, and a code is a device.
+      expect(refused).toContain("ticket.issue");
+      expect(refused).toContain("pair.issue");
+      client.close();
+    } finally {
+      await srv.close();
+      held.end(0);
+      await handle.finished;
+      await rt.close();
+    }
+  });
+
+  it("a token whose record names a machine's road, or no road at all, reaches no workspace on this computer", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: MAC_REACH });
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: AGENTS_ON });
+    const lead = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const onLead = await rt.sessions.start(lead.id, { prompt: "hi" });
+    const onMac = await rt.sessions.start(mac.id, { prompt: "hi" });
+    const leadToken = held.launches[0]!.env[HOST_TOKEN_ENV]!;
+    const macToken = held.launches[1]!.env[HOST_TOKEN_ENV]!;
+    // A record an older host wrote carries no road: it reads as a machine's, never as this computer's.
+    const macDevice = (await rt.devices.list()).find(d => d.scope?.workspaceId === mac.id)!;
+    const { road: _road, ...unroaded } = (await store.get("devices", macDevice.id)) as Record<string, unknown>;
+    await store.put("devices", macDevice.id, unroaded);
+    const srv = await serveRuntime(rt, { port: 0, authToken: "secret", devices: rt.devices });
+    try {
+      const fromLead = await WsClient.connect(srv.port, { token: leadToken });
+      expect(((await fromLead.request("workspaces.list"))["workspaces"] as { name: string }[]).map(w => w.name)).toEqual(["lead"]);
+      expect((await fromLead.request("workspaces.get", { workspaceId: mac.id }))["error"]).toBe(noWorkspaceRefusal());
+      fromLead.close();
+      const unmarked = await WsClient.connect(srv.port, { token: macToken });
+      expect(((await unmarked.request("workspaces.list"))["workspaces"] as { name: string }[]).map(w => w.name)).toEqual([]);
+      expect((await unmarked.request("workspaces.get", { workspaceId: mac.id }))["error"]).toBe(noWorkspaceRefusal());
+      unmarked.close();
+    } finally {
+      await srv.close();
+      held.end(1);
+      held.end(0);
+      await onMac.finished;
+      await onLead.finished;
+      await rt.close();
+    }
+  });
+
   it("two forks asked for in one tick cannot both take the last place under the root", async () => {
     const rt = runtimeWith({ claude: heldAdapter().factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 1, maxDepth: 1 } });
@@ -844,6 +996,39 @@ describe("agents spawning agents", () => {
     await expect(createOn(rt, { name: "b3" }, asThread(scope))).rejects.toThrow(spawnCapRefusal("t_root", 2, 2));
     expect((await rt.workspaces.list()).filter(w => w.rootThreadId === "t_root")).toHaveLength(2);
     await rt.close();
+  });
+
+  it("a thread's copy on this computer hangs under that thread and passes the same guard a fork does", async () => {
+    const first = runtimeWith({ claude: heldAdapter().factory });
+    // A child copy starts on the branch its parent's checkout is on, so the folder needs a commit to name one.
+    const repo = tempRepo();
+    execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
+    const mac = await createOn(first, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(first, HERE_PLACE_ID, repo)).id });
+    const stored = (await store.get("workspaces", mac.id)) as Record<string, unknown>;
+    await first.close();
+    const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: mac.id, rootThreadId: "t_root" };
+    // A thread on this computer reaches the host on its own road, so the caller is scoped without being relayed.
+    const here: Caller = { origin: "here", by: scope };
+    const off = runtimeWith({ claude: heldAdapter().factory });
+    await expect(createOn(off, { name: "kid" }, here)).rejects.toThrow(agentsOffRefusal("mac", "fork"));
+    await off.close();
+
+    await store.put("workspaces", mac.id, { ...stored, agents: { spawn: true, maxMachines: 1, maxDepth: 1 } });
+    const rt = runtimeWith({ claude: heldAdapter().factory });
+    await expect(createOn(rt, { name: "wide", agents: { maxMachines: 50 } }, here)).rejects.toThrow(spawnActRefusal("t_root", "agents"));
+    const kid = await createOn(rt, { name: "kid" }, here);
+    expect(kid.kind).toBe("local");
+    expect(kid.parentThreadId).toBe("t_root");
+    expect(kid.rootThreadId).toBe("t_root");
+    expect(kid.parentWorkspaceId).toBe(mac.id);
+    expect((await rt.workspaces.list(here)).map(w => w.name).sort()).toEqual(["kid", "mac"]);
+    await expect(createOn(rt, { name: "kid2" }, here)).rejects.toThrow(spawnCapRefusal("t_root", 1, 1));
+    const deep: Caller = { origin: "here", by: { ...scope, threadId: "t_child" } };
+    await store.put("workspaces", mac.id, { ...stored, agents: { spawn: true, maxMachines: 5, maxDepth: 0 } });
+    await rt.close();
+    const capped = runtimeWith({ claude: heldAdapter().factory });
+    await expect(createOn(capped, { name: "kid3" }, deep)).rejects.toThrow(spawnDepthRefusal("t_child", 0, 0));
+    await capped.close();
   });
 
   it("turning the lead's switch off stops the tree it spawned, not only the threads on the lead", async () => {
@@ -893,11 +1078,10 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("a workspace whose agents could not drive this host is refused the switch, in the words both doors read", async () => {
+  it("this computer takes the switch as a fork does, since its agents reach the host as themselves", async () => {
     const rt = runtimeWith({ claude: heldAdapter().factory });
     const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
-    await expect(rt.workspaces.agents(mac.id, { spawn: true })).rejects.toThrow(agentsKindRefusal("local"));
-    // Off is always allowed: a switch that does nothing may be said to do nothing.
+    expect((await rt.workspaces.agents(mac.id, { spawn: true })).agents?.spawn).toBe(true);
     await rt.workspaces.agents(mac.id, { spawn: false });
     const cloud = await createOn(rt, { golden: "snap_g", name: "b1" });
     expect((await rt.workspaces.agents(cloud.id, { spawn: true })).agents?.spawn).toBe(true);

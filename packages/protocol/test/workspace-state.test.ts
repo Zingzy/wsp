@@ -193,18 +193,18 @@ describe("what a workspace's kind changes about its words", () => {
     // the daemon its terminal and its processes ride ever started. A folder is
     // already on this computer, so an import registers its path and copies nothing. Its row's second line is its
     // cores and memory in the size line a fork's row reads, in its own word for a cpu, since its cores are not virtual.
-    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], copiesFolder: true, agents: false, onDelete: { asked: "computer is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" });
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], copiesFolder: true, agents: true, onDelete: { asked: "computer is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" });
     // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it. It
     // carries the same daemon a fork does, put there under the person's own login, so it serves the panes, reads
     // its own load off its own /proc and lists its own processes, and a folder is copied onto it the way one is
     // copied onto a fork. Its cpus are cores like this computer's, though its words win over any size today.
     expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: [], copiesFolder: false, agents: false, onDelete: { asked: "daemon, its unit and its login line come off the computer, which is otherwise left as it is", done: expect.any(Function) }, panel: "What the computer is running, its projects and how it is doing.", access: "asks" });
-    // Only the machines wsp forks run agents that could drive this host: this computer answers no request relayed
-    // from a machine, and a machine somebody already owns is handed no wsp to drive one with.
+    // The machines wsp forks and this computer run agents that drive this host, each over its own road; a machine
+    // somebody already owns is handed no wsp to drive one with.
     expect(agentsMayDrive("cloud")).toBe(true);
-    expect(agentsMayDrive("local")).toBe(false);
+    expect(agentsMayDrive("local")).toBe(true);
     expect(agentsMayDrive("ssh")).toBe(false);
-    expect(agentsKindRefusal("local")).toContain("cannot drive this host");
+    expect(agentsKindRefusal("ssh")).toContain("cannot drive this host");
     // Which kind of source a computer's projects come from: this computer copies a folder of yours beside itself, a
     // machine wsp forks takes a repo any of the three ways it can be named and a folder here it clones and seeds
     // from, and a machine wsp only reaches takes none yet. Whether the folder is copied here is its own word,

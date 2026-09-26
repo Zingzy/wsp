@@ -19,6 +19,7 @@ import {
   localExecStream,
   type GoldenRecipe,
   type GoldenVersion,
+  type HarnessAdapterFactory,
   type LocalWiring,
   type Machine,
   type PlaceWiring,
@@ -30,7 +31,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authRefusal, FORWARD_ENV, jsonLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authRefusal, FORWARD_ENV, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -93,7 +94,7 @@ import { stopRecordedConnector } from "./connector.js";
 import { admittedDevices, hostsCommand, loginCommand, logoutCommand, publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { aimAddress, aimedHost, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
-import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
+import { advertiseWord, devicesCommand, hereUrl, hostReach, pairCommand, type HereAt } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { agentsReader } from "./agents-reader.js";
 import { skillsActs } from "./skills-acts.js";
@@ -737,7 +738,7 @@ export function makeRuntime(
   statePath: string,
   recipe: GoldenRecipe = goldenRecipe(),
   env: ProviderEnv = process.env,
-  agents?: { at?: { address: string; port: number }; advertise?: string; run?: RunningWsp },
+  agents?: { at?: { address: string; port: number }; advertise?: string; run?: RunningWsp; here?: HereAt },
   /** This computer as a workspace, where the caller built the wiring itself and holds a reader off it: the doctor
    * reads the daemon beside this host through the same wiring the copy road runs it from. */
   local: LocalWiring = localWiring(homedir(), process.env, undefined, statePath),
@@ -748,6 +749,8 @@ export function makeRuntime(
   /** The store over the state file, handed in by a caller that has already read it once: a state this build cannot
    * read is refused at every collection read, and a caller that met that refusal has said so already. */
   store: Store = jsonFileStore(statePath, stateWriterHere()),
+  /** The agents a turn runs; a test hands in stand-ins so no real agent starts. */
+  adapters: Record<string, HarnessAdapterFactory> = HARNESS_ADAPTERS,
 ): Runtime {
   const slot = providerSlot(providerBackendFor(env));
   // The place this host's copies are filed under is the provider module it forks on, read at each call: a host that
@@ -764,7 +767,7 @@ export function makeRuntime(
     // reads for its own machines, and the same wsp command an agent's config on this computer is given, so a thread
     // on the local workspace and one on a fork run the same wsp against the same host.
     agents: {
-      ...(agents?.at !== undefined ? { reach: hostReach(agents.at, agents.advertise, () => publicHostname(statePath)) } : {}),
+      ...(agents?.at !== undefined ? { reach: hostReach(agents.at, agents.advertise, () => publicHostname(statePath), undefined, agents.here) } : {}),
       wspMcp: mcpServerCommand(agents?.run ?? runningWsp()),
     },
     local,
@@ -776,7 +779,7 @@ export function makeRuntime(
     // read says which wsp on this computer wrote it.
     store,
     statePath,
-    adapters: HARNESS_ADAPTERS,
+    adapters,
     // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
     // of it is written to a machine.
     vault: () => vaultNow(statePath),
@@ -1281,6 +1284,9 @@ export interface ServeOptions {
   startedBy?: HostStarted;
   /** How this host restarts itself where no command line road brought it up: the desktop hands in its relaunch. */
   restart?: RestartRoad;
+  /** Filled with the loopback address a turn on this computer dials once the host binds. A caller that hands in its
+   * own runtime hands in the cell that runtime's reach reads; absent, the host makes one for the runtime it builds. */
+  here?: HereAt;
 }
 
 /** The road the desktop window brings a host up on, which is wsp up's: the state file it serves is one wsp init
@@ -1292,8 +1298,9 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
   // One wiring for the runtime and for the host over it, so the links this host holds and the recipe its doctor
   // reads come from the same place.
   const links = placeWiring(opts.statePath, opts.advertise);
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links);
-  return hostFor(rt, keys, { ...opts, providerEnv, links }, io, opts.running);
+  const here = opts.here ?? {};
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), here, ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links);
+  return hostFor(rt, keys, { ...opts, providerEnv, links, here }, io, opts.running);
 }
 
 /** The state file read once, before anything else on this host reads it: a file written in a shape this build does
@@ -1325,13 +1332,14 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // Read first, for the reason readOnce carries.
   const store = await readOnce(opts.statePath);
   const links = placeWiring(opts.statePath, opts.advertise);
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, store);
+  const here = opts.here ?? {};
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), here, ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, store);
   try {
     // A state with nothing in it serves as it is: a workspace is one project's copy, so a host with no project has
     // no workspace to record, and wsp add is the road. The host listens for pairing either way.
     if (await servesNothing(rt)) io.log(NO_PROJECT_YET);
     // The road is written into the lock here and nowhere else: this is wsp up, so wsp down stops what it serves.
-    return await hostFor(rt, keys, { ...opts, providerEnv, links, startedBy: opts.startedBy ?? "up" }, io, opts.running);
+    return await hostFor(rt, keys, { ...opts, providerEnv, links, here, startedBy: opts.startedBy ?? "up" }, io, opts.running);
   } catch (e) {
     // A refusal thrown past a runtime this start built leaves the daemon that listing the workspaces dialled and
     // the timers behind it running, and the process stays up on them after the sentence is printed. A runtime a
@@ -1373,6 +1381,8 @@ async function hostFor(
     links?: PlaceWiring;
     /** The restart road the caller holds, which stands above the one the command line road names. */
     restart?: RestartRoad;
+    /** The cell the runtime's reach reads the loopback address from, filled once the host binds. */
+    here?: HereAt;
   },
   io: CliIO,
   run: RunningWsp = runningWsp(),
@@ -1416,6 +1426,7 @@ async function hostFor(
       wsPort: opts.wsPort,
       listen: address,
       ...(opts.advertise !== undefined ? { advertise: opts.advertise } : {}),
+      ...(opts.here !== undefined ? { here: opts.here } : {}),
       door: joined ? "open" : "closed",
       doorLine: line => io.log(line),
       ...(links.back !== undefined ? { back: links.back } : {}),
@@ -1460,6 +1471,7 @@ async function hostFor(
     for (const line of addressLines(opts.statePath, { ...handle, address })) io.log(line);
     if (!isLoopback(address)) io.log(listenBeyondLoopbackLine(address));
     else if (linked) io.log(relayOnLoopbackLine());
+    if (hereUrl(address, handle.wsPort) === undefined) io.log(loopbackThreadsLine(address));
     if (keys.anthropic === undefined) io.log(noClaudeKeyNote(forksNoMachines(rt.backend.capabilities)));
     // The tunnel carries to this host's own app port, so a box on loopback alone is still reachable through the
     // relay and nothing else about how it binds has to change.
@@ -1627,6 +1639,7 @@ export async function upServiceCommand(io: CliIO, opts: ServeAsked, deps: Servic
   io.log(`${manager.words} ${unit.name} is loaded; it serves again at every login`);
   for (const line of addressLines(opts.statePath, lock)) io.log(line);
   if (!isLoopback(opts.address)) io.log(listenBeyondLoopbackLine(opts.address));
+  if (hereUrl(opts.address, lock.wsPort) === undefined) io.log(loopbackThreadsLine(opts.address));
   io.log(`log         ${logPath}`);
   const after = manager.afterLoad?.(at);
   if (after !== undefined) io.log(after);
@@ -2276,11 +2289,12 @@ export const MCP_OPTIONS: Options = {
   json: { type: "boolean" },
   remove: { type: "boolean" },
   state: { type: "string" },
+  scoped: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 };
 
 const mcpInstallUsage = (): string => `wsp ${MCP_COMMAND} install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (${MCP_AGENT_IDS})`;
-const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND} [--host <alias>]\n       ${mcpInstallUsage()}`;
+const mcpUsage = (): string => `usage: wsp ${MCP_COMMAND} [--host <alias>] [${SCOPED_MCP_ARG}]\n       ${mcpInstallUsage()}`;
 
 /** The usage of the command a line stopped short of, whether it is a verb, `mcp` or the word the plumbing folds
  * under; none when no command owns the word. `mcp` needs its own answer here because it is not in the verb table
@@ -2297,7 +2311,7 @@ function commandUsage(word: string): string | undefined {
  * `--json` instead of taking it and printing prose. */
 async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string, run: RunningWsp, env: Readonly<Record<string, string | undefined>>, starts: { start?: HostStarter }): Promise<number> {
   const usage = mcpUsage();
-  let values: { agent?: string[]; host?: string; json?: boolean; remove?: boolean; state?: string; help?: boolean };
+  let values: { agent?: string[]; host?: string; json?: boolean; remove?: boolean; state?: string; scoped?: boolean; help?: boolean };
   let words: string[];
   try {
     ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
@@ -2308,6 +2322,9 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     io.log(mcpPage(words[0] === "install"));
     return 0;
   }
+  // Ahead of every reading of the state: a scoped server missing its pair would otherwise dial this computer's host
+  // on the host's own token, which is acting as the person.
+  if (values.scoped === true && words.length === 0 && hostFromEnv(env) === undefined) return failed(io, jsonAsked(argv), authRefusal(scopedNoPairLine));
   const statePath = statePathOf(values.state);
   if (words.length === 0) {
     // The agent starts the server in its own folder, which is the folder a thread opened with no workspace is placed by.
@@ -2357,14 +2374,15 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
 async function forwardDoor(io: CliIO, argv: string[], env: Readonly<Record<string, string | undefined>>, starts: { start?: HostStarter }): Promise<number> {
   // The token is the host's; it goes down a pipe to the forwarder and never onto a terminal.
   if (io.redraw !== undefined) return 0;
-  let values: { host?: string; state?: string; help?: boolean };
+  let values: { host?: string; state?: string; scoped?: boolean; help?: boolean };
   let words: string[];
   try {
     ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
   } catch {
     return 0;
   }
-  if (values.help === true || words.length > 0) return 0;
+  // A scoped line is a thread's own tools, which never ride the host's token: the wsp run next serves or refuses it.
+  if (values.help === true || values.scoped === true || words.length > 0) return 0;
   const notes: string[] = [];
   try {
     const statePath = statePathFrom(values.state, env, line => notes.push(line));
@@ -2578,13 +2596,14 @@ const MCP_FLAG_WORDS: Readonly<Record<string, string>> = {
   json: "print what each agent took as one JSON object",
   state: COMMON_FLAG_WORDS.state,
   host: "write the server against a host on your account, by the name wsp hosts lists it under, so the tools drive that host",
+  scoped: "what the host puts on a thread's own tools: without the launch pair in the environment the server refuses rather than dial this computer's host on its own token",
 };
 
 /** The tool server's own two pages, each with the flags it reads. `wsp mcp` alone serves; `wsp mcp install` writes
  * an agent's config. Both were two usage lines and no words until a person asked what --agent took. */
 function mcpPage(install: boolean): string {
   const line = COMMAND_LINES.find(l => l.words === (install ? `${MCP_COMMAND} install` : MCP_COMMAND))!;
-  const flags = install ? ["agent", "remove", "json", "state", "host"] : ["state", "host"];
+  const flags = install ? ["agent", "remove", "json", "state", "host"] : ["state", "host", "scoped"];
   return helpPage(line.usage, wrap(`  ${line.about}`, HELP_WIDTH, "  "), flags.map(name => [`--${name}`, MCP_FLAG_WORDS[name]!] as const));
 }
 

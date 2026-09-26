@@ -4,14 +4,14 @@ import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalBackend, NoProviderBackend, type GoldenManifest } from "@wsp/engine";
-import { DAEMON_VERSION, isLocalWorkspace, STATE_SHAPE, type StateShape, type WorkspaceView } from "@wsp/protocol";
+import { AGENTS_ON, DAEMON_VERSION, HOST_TOKEN_ENV, HOST_URL_ENV, isLocalWorkspace, STATE_SHAPE, type StateShape, type WorkspaceView } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, STATE_SHAPE_KEY, stateWrittenByNewerLine, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeSsh } from "../../../packages/runtime/test/fake-ssh.js";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
-import { copyingFake } from "../../../packages/host/test/verbs-fixture.js";
+import { copyingFake, heldAgent } from "../../../packages/host/test/verbs-fixture.js";
 import { checkSetup, openThisComputer } from "../src/setup.js";
-import type { Keys, ProviderEnv } from "@wsp/host";
+import { goldenRecipe, makeRuntime, runningWsp, type HereAt, type Keys, type ProviderEnv } from "@wsp/host";
 
 const SOLARI = "slr_live_fake_desktop_key";
 const GOLDEN: GoldenManifest = {
@@ -127,6 +127,38 @@ describe("checkSetup", () => {
     sources.env = { SOLARI_API_KEY: SOLARI };
     await store.put("goldens", "default", GOLDEN);
     expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: true, runtime: keyed });
+  });
+
+  it("builds the runtime a thread on this computer gets its own token from, at the loopback the host fills in", async () => {
+    const held = heldAgent(false);
+    const here: HereAt = {};
+    const run = { ...runningWsp(), shim: join(dir, "bin", "wsp") };
+    let built: Runtime | undefined;
+    const opened = await openThisComputer({
+      statePath: join(dir, "state.json"),
+      sources,
+      agents: { here, run },
+      // The real build with what the window hands it, and a stand-in agent where a real one would start a process.
+      runtimeFor: (keys, statePath, env, over, agents) =>
+        (built = makeRuntime(keys, statePath, goldenRecipe(), env, agents, localWiring(join(dir, "user")), undefined, over, { claude: held.adapter })),
+    });
+    expect(opened.runtime).toBe(built);
+    const rt = opened.runtime;
+    try {
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-desktop-")));
+      execFileSync("git", ["init", "-q", folder]);
+      const project = await rt.projects.add({ source: folder, name: "mine" });
+      const mac = await rt.workspaces.create({ project: project.id, name: "mine", agents: AGENTS_ON });
+      here.url = "http://127.0.0.1:4801";
+      const turn = await rt.sessions.start(mac.id, { prompt: "hi" });
+      expect(held.envs[0]![HOST_URL_ENV]).toBe("http://127.0.0.1:4801");
+      expect(held.envs[0]![HOST_TOKEN_ENV]).toMatch(/\S/);
+      expect((await rt.devices.list()).map(d => d.scope?.workspaceId)).toEqual([mac.id]);
+      held.release(0, "done");
+      await turn.finished;
+    } finally {
+      await rt.close();
+    }
   });
 
   describe("openThisComputer", () => {

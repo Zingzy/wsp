@@ -7,7 +7,7 @@
 // Images ride `-i`, one flag per image on both exec and resume: exec's flag
 // takes many values and resume's one, and one flag each parses on both, with
 // the `-` after it still read as the prompt (measured on 0.153.0, 2026-09-08).
-import { inFolder, shellQuote } from "@wsp/protocol";
+import { inFolder, LAUNCH_ENV, MCP_SERVER_NAME, shellQuote, type McpServerSpec } from "@wsp/protocol";
 
 const PROMPT_END = "WSP_PROMPT_END";
 const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -47,6 +47,8 @@ export interface BuildCommandOptions {
   permissionMode?: string;
   /** Absolute paths of images already on the machine; the CLI reads each off disk, so it takes no bytes of its own. */
   images?: readonly string[];
+  /** MCP servers this turn gets besides the ones its config names, by the name each takes there. */
+  mcpServers?: Readonly<Record<string, McpServerSpec>>;
 }
 
 /** A value that may ride a codex command line or a SQL literal unquoted; anything else is refused before it does. */
@@ -57,6 +59,27 @@ export function slug(name: string, value: string): string {
 
 /** A config override whose value is a TOML string, which is JSON's quoting for these plain words. */
 const config = (key: string, value: string): string => `-c ${key}=${shellQuote(JSON.stringify(value))}`;
+
+/** A config override whose value is TOML already: a JSON array of strings is one. */
+const configRaw = (key: string, toml: string): string => `-c ${key}=${shellQuote(toml)}`;
+
+const SERVER_NAME_RE = /^[A-Za-z0-9_-]+$/;
+
+/** Each server as a whole config entry: an override naming only env_vars for a server the config does not hold stops
+ * codex at start (measured on codex-cli 0.155.1). */
+function serverFlags(servers: Readonly<Record<string, McpServerSpec>>): string[] {
+  return Object.entries(servers).flatMap(([name, spec]) => {
+    if (!SERVER_NAME_RE.test(name)) throw new Error(`an MCP server name must be one plain word of a config key, got "${name}"`);
+    const at = `mcp_servers.${name}`;
+    return [
+      config(`${at}.command`, spec.command),
+      configRaw(`${at}.args`, JSON.stringify(spec.args)),
+      // Codex hands a server only its own short list of variables (codex-rs/rmcp-client/src/utils.rs at
+      // rust-v0.155.1), so the launch's are named for the wsp one: names only, the values stay in the environment.
+      ...(name === MCP_SERVER_NAME ? [configRaw(`${at}.env_vars`, JSON.stringify(LAUNCH_ENV))] : []),
+    ];
+  });
+}
 
 /** exec takes the mode as -s and resume has no such flag, so both set the config key the flag writes. */
 function accessFlags(mode: string | undefined): string[] {
@@ -71,7 +94,7 @@ function accessFlags(mode: string | undefined): string[] {
  * carries no HOME, so the default folder is `~`, which bash reads from passwd.
  */
 export function buildCommand(options: BuildCommandOptions): string {
-  const { prompt, resume, cwd, model, effort, permissionMode, images } = options;
+  const { prompt, resume, cwd, model, effort, permissionMode, images, mcpServers } = options;
   if (prompt.split("\n").includes(PROMPT_END)) throw new Error(`the prompt has a line that reads ${PROMPT_END}, which ends the prompt`);
   const codex = [
     "codex exec",
@@ -82,6 +105,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     ...(model === undefined ? [] : [`-m ${slug("model", model)}`]),
     ...(effort === undefined ? [] : [config("model_reasoning_effort", slug("effort", effort))]),
     ...(images ?? []).map(path => `-i ${shellQuote(imagePath(path))}`),
+    ...serverFlags(mcpServers ?? {}),
     "-",
   ].join(" ");
   return inFolder(cwd, `${codex} <<'${PROMPT_END}'\n${prompt}\n${PROMPT_END}`);

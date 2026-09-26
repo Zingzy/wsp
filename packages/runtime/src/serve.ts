@@ -102,7 +102,7 @@ import {
   TURN_TOKEN_ENV,
 } from "@wsp/protocol";
 import type { DaemonChannel } from "./daemon-channel.js";
-import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
+import { NO_DEVICE_DOOR, safeEqual, threadOf, type DeviceDoor, type HeldDevice } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import { keyFingerprint, openFrame, verifyPlaceBytes, type Seal } from "@wsp/keys";
 import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
@@ -278,7 +278,7 @@ export type ImageExporter = (o: { image: SealedImage; tar: Buffer; dest: string;
 
 /** Who a token names: this host's own process, or one paired computer. Every road in reads it from one function, so
  * a road cannot be opened wider than the others by accident. */
-export type Authed = { kind: "host" } | { kind: "device"; device: DeviceView };
+export type Authed = { kind: "host" } | { kind: "device"; device: HeldDevice };
 
 export interface RuntimeServer {
   port: number;
@@ -529,7 +529,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     // Whether this socket is one of the person's own rather than the road a machine's requests arrive by. Who may
     // reach this host is never a machine's to hand out, list or take away, and it is the same rule a ticket is. A
     // function rather than a constant: a thread scoped token is read at the auth frame, after this socket was let
-    // in, and the road it names is the same road a relay ticket names.
+    // in, and it always sets the stamp, whichever road its turn runs on.
     const ownRoad = (): boolean => stamped === undefined;
     /** Set while an unauthed socket's first frame is being decided, so a second frame cannot race past the door. */
     let deciding = false;
@@ -833,12 +833,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           throughDoor();
           if (who.kind === "device") {
             bind(who.device);
-            // A token the host minted into a turn's launch is a machine's road into this host, whatever socket it
-            // arrives on: the road is stamped here, over anything the client's own frames say, so every rule
-            // written for a relayed request already holds for it and the scope rides beside it.
-            if (who.device.scope !== undefined) {
-              stamped = "relayed";
-              by = who.device.scope;
+            // A token the host minted into a turn's launch carries the road that turn runs on, stamped here over
+            // anything the client's own frames say: a machine's is relayed, so every rule written for a relayed
+            // request holds for it, and a turn on this computer's is here. Either way the stamp is set, which is
+            // what keeps every door below that asks for the person's own road shut to a thread.
+            const thread = threadOf(who.device);
+            if (thread !== undefined) {
+              stamped = thread.road;
+              by = thread.by;
             }
             // The auth frame and a redeem are the two roads that move a device's last seen; a JSON route reading
             // the same token must not, or every request beyond loopback would rewrite the whole state file.

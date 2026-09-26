@@ -5228,8 +5228,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * holds, so the two flags a person gives on one line never clear the third. */
   z.object({ id: reqId, op: z.literal("workspaces.agents"), workspaceId: z.string() }).extend(WorkspaceAgents.partial().shape),
   /** Drops a workspace whose machine the provider no longer has: the record, its transcripts and its sessions leave the
-   * store, workspace.deleted follows, and nothing is asked of the provider. Refused with the reason (kind "conflict")
-   * while the machine still exists: pause it or delete it at the provider first. */
+   * store and workspace.deleted follows, once twelve reads in a row find the machine gone; nothing is asked of the
+   * machine. Refused with the reason (kind "conflict") while any read still finds it: pause it or delete it at the provider first. */
   z.object({ id: reqId, op: z.literal("workspaces.forget"), workspaceId: z.string() }),
   /** Snapshots the workspace's disk as a project golden and replies with { projectGolden }. Refused when the workspace
    * is not running, holds no project, or its machine is not first-life (kind "notFirstLife"). The guest freezes for
@@ -6022,5 +6022,5 @@ export * from "./app-ports.js";
 export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
+export { LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

@@ -14,7 +14,7 @@ import { basename, join, relative } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, Recipe, savedKeyStoppedLine, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, markedDefault, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
+import { HERE_PLACE_ID, CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, Recipe, savedKeyStoppedLine, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, markedDefault, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
 import { placeWiring } from "../src/places.js";
 import { createRuntime, goldenHead, memoryStore, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
@@ -1501,21 +1501,14 @@ describe("the init job, agent road", () => {
     expect(f.jobs.view()!.phase).toBe("answering");
   });
 
-  it("an agent whose thread cannot be handed the wsp tools is refused before any thread opens, and the setup says which agents can", async () => {
-    // Codex's own adapter is registered here, so the road's refusal is about the tools and not about a missing adapter.
+  it("the setup says which agents can be handed the wsp tools, and both thread agents can", async () => {
     const f = fake({
       agents: [{ id: "claude", name: "Claude Code", found: true, configured: true }, { id: "codex", name: "Codex", found: true, configured: false }],
-      adapters: { codex: () => ({ steers: false, start: () => ({ localId: "s_codex", finished: Promise.resolve({ status: "completed" as const }), interrupt: async () => {} }) }) },
     });
-    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
-    // Codex's adapter renders no MCP server for its CLI, so its thread would write no recipe: the road says so and
-    // the picker reads the same fact off the setup.
-    await expect(f.jobs.start({ road: "agent", harness: "codex" })).rejects.toThrow(noMcpServersLine("Codex"));
-    expect(f.jobs.view()).toBeNull();
-    expect((await f.rt.sessions.list())).toEqual([]);
+    // Claude Code takes the servers as --mcp-config and Codex as config overrides, so the picker offers both.
     expect((await f.jobs.get()).agents).toEqual([
       { id: "claude", name: "Claude Code", configured: true, takesTools: true },
-      { id: "codex", name: "Codex", configured: false, takesTools: false },
+      { id: "codex", name: "Codex", configured: false, takesTools: true },
     ]);
   });
 

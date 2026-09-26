@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { DAEMON_TOKEN_PATH, EXIT_CODES, FORWARD_ENV, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, shellQuote, TURN_TOKEN_ENV, VerbFailure } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, EXIT_CODES, FORWARD_ENV, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, shellQuote, TURN_TOKEN_ENV, VerbFailure } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -663,6 +663,19 @@ describe("the agent contract on the command line and the tool door", () => {
     }
   });
 
+  it("a scoped tool server with no launch pair refuses in one line and never serves as the host", async () => {
+    const io = captured();
+    const inTurn = { ...ownEnv(), [TURN_TOKEN_ENV]: "f".repeat(32) };
+    expect(await cli(["mcp", SCOPED_MCP_ARG, "--state", statePath], io, undefined, inTurn, false)).toBe(EXIT_CODES.auth);
+    expect(io.errors).toEqual([scopedNoPairLine]);
+    expect(io.lines).toEqual([]);
+    // Under --json the refusal is the failure object on stderr, in the class and exit code the contract names.
+    const json = captured();
+    expect(await cli(["mcp", SCOPED_MCP_ARG, "--json", "--state", statePath], json, undefined, inTurn, false)).toBe(EXIT_CODES.auth);
+    expect(json.errors.map(line => JSON.parse(line) as unknown)).toEqual([{ error: scopedNoPairLine, class: "auth", exit: EXIT_CODES.auth }]);
+    expect(json.lines).toEqual([]);
+  });
+
   it("the forwarder's ask of the command line answers the host serving this state file on this computer, and nothing for any other line", async () => {
     const asked = async (argv: string[], ask: string, start?: HostStarter | false, io: Captured = captured()): Promise<Captured> => {
       expect(await cli(argv, io, undefined, { ...ownEnv(), [FORWARD_ENV]: ask }, start)).toBe(0);
@@ -676,7 +689,8 @@ describe("the agent contract on the command line and the tool door", () => {
     expect([screen.lines, screen.errors]).toEqual([[], []]);
     // Every other line of the word is the command line's to answer, which the forwarder runs next: the ask says
     // nothing, writes nothing and serves nothing.
-    for (const argv of [["mcp", "install", "--agent", "claude", "--state", statePath], ["mcp", "--help"], ["mcp", "--nope"], ["mcp", "--host", "nowhere"]]) {
+    // A scoped line is the thread's own tools: never the host's token, so the forwarder runs the wsp that decides.
+    for (const argv of [["mcp", "install", "--agent", "claude", "--state", statePath], ["mcp", "--help"], ["mcp", "--nope"], ["mcp", "--host", "nowhere"], ["mcp", "--scoped", "--state", statePath]]) {
       const said = await asked(argv, "door");
       expect([said.lines, said.errors], argv.join(" ")).toEqual([[], []]);
     }

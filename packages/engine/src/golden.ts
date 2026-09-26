@@ -121,6 +121,23 @@ export async function killUntilGone(backend: MachineBackend, machine: Machine, c
   await readBackGone(backend, machine, confirm);
 }
 
+/** One call per read: a second call for the state can land on the other copy and read gone. */
+const readOnce = (backend: MachineBackend, id: string): Promise<MachineState> =>
+  backend.get(id).then(
+    m => m.seen?.state ?? m.state(),
+    (e: unknown) => (isMissing(e) ? "gone" : Promise.reject(e)),
+  );
+
+/** Whether the provider still has a machine, asking nothing of it: gone once GONE_READS reads in a row answer gone,
+ * else the state the first read that found it answered. A failed read that is not a 404 rejects. */
+export async function readGone(backend: MachineBackend, id: string): Promise<MachineState> {
+  for (let gone = 0; gone < GONE_READS; gone++) {
+    const state = await readOnce(backend, id);
+    if (state !== "gone") return state;
+  }
+  return "gone";
+}
+
 /** One background round: whether the first kill was sent already, and whether the watch is still open. */
 interface WatchRound {
   asked: boolean;
@@ -144,11 +161,7 @@ async function readBackGone(backend: MachineBackend, machine: Machine, confirm: 
     let gone = 0;
     do {
       if (!live()) return false;
-      // One call per read: a second call for the state can land on the other copy and read gone.
-      const state = await backend.get(machine.id).then(
-        m => m.seen?.state ?? m.state(),
-        (e: unknown) => (isMissing(e) ? "gone" : Promise.reject(e)),
-      );
+      const state = await readOnce(backend, machine.id);
       if (state === "gone") {
         if (++gone >= GONE_READS) return true;
         continue;

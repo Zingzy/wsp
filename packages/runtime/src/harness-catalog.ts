@@ -120,6 +120,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     // that model; the sandbox modes are the choices `codex --help` prints for -s. No codex model runs at two context
     // windows, so it takes no window at all.
     pin: { read: "app-server", version: "0.153.0", date: "2026-09-07" },
+    // Servers ride the launch as `-c mcp_servers.<name>...` overrides (checked with `codex mcp get` on 0.155.1).
+    mcpServers: true,
     // The oldest generation model/list still offers, and the cheapest of them.
     smallModel: "gpt-5.2",
     models: [
