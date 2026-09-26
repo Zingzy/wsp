@@ -521,6 +521,25 @@ describe("the table wsp places prints", () => {
     expect(of({ ...rows[1]!, provision: done })).toEqual({ image: "", tools: "1 tool ready" });
   });
 
+  it("says on the computers table how many threads run on a computer and machines on a cloud against its cap, and Full once the count meets it", () => {
+    const printed = computerLines(
+      [
+        { ...rows[0]!, cap: { threads: 6 }, running: 1 },
+        { ...rows[1]!, cap: { threads: 2 }, running: 2 },
+        { ...rows[2]!, cap: { machines: 3, spendPerDayUsd: 10 }, running: 2 },
+        { ...rows[1]!, id: "p_2", name: "fresh", present: false },
+      ],
+      "darwin",
+    );
+    const header = printed[0]!;
+    const column = (line: string, name: string, next: string): string => line.slice(header.indexOf(name), header.indexOf(next)).trim();
+    expect(header).toContain("THREADS");
+    expect(printed.slice(1).map(line => column(line, "THREADS", "MACHINES"))).toEqual(["1/6", "2/2", "", ""]);
+    expect(printed.slice(1).map(line => column(line, "MACHINES", "STATE"))).toEqual(["", "", "2/3", ""]);
+    // The word is the protocol's own, so this table and the app's row cannot say it two ways.
+    expect(printed.slice(1).map(line => column(line, "STATE", "LAST SEEN"))).toEqual(["Ready", "Full", "Ready", "no answer"]);
+  });
+
   it("says how many forks a place holds of how many it takes, and nothing there for one that has not said yet", () => {
     const printed = placeLines([
       { ...rows[1]!, forks: { running: 1, room: 2 } },

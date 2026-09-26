@@ -249,6 +249,9 @@ import {
   turnSpendWord,
   agentsCell,
   placeDaemonBehind,
+  absentComputer,
+  placeRoom,
+  placeStateOf,
   provisionWord,
   namesPlace,
   noSuchPlaceRefusal,
@@ -671,6 +674,8 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     p.copies === undefined ? "" : p.copies,
     p.kind === "provider" ? fmtPrice(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
+    ...capCells(p),
+    placeStateOf(p, p.present === false ? absentComputer(p.name, null) : null).word,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     placeDaemonBehind(p) ?? "",
     p.build ?? "",
@@ -681,7 +686,13 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     // cloud account and on this computer, neither of which reports an agent.
     agentsCell(p),
   ]);
-  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows]);
+  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows]);
+}
+
+/** The THREADS and MACHINES cells: what the row's cap counts against the cap, under the column named for what it counts. */
+function capCells(p: PlaceView): string[] {
+  const room = placeRoom(p);
+  return ["thread", "machine"].map(noun => (room?.noun === noun ? `${room.running}/${room.atOnce}` : ""));
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
@@ -2964,7 +2975,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "computers",
     usage: "wsp computers",
-    about: "your computers: this Mac, each box you added and each cloud account, with what each has, whether it is connected and how many workspaces it holds",
+    about: "your computers: this Mac, each box you added and each cloud account, with what each has, whether it is connected, how many workspaces it holds and what runs there against its cap",
     page: "front",
     options: {},
     run: async ctx => {
@@ -2975,7 +2986,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on, each box joined to it and each cloud account. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now; a cloud row carries its hourly rate. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
+        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on, each box joined to it and each cloud account. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now; a cloud row carries its hourly rate. Every row carries its cap, threads at once on a computer and machines at once and spend per day on a cloud (the number the person set, else one thread per 2.5 GB of memory up to its cores, and 3 machines and $10 a day), and running, the threads running there now on a computer or the machines holding a slot on a cloud; a row whose running meets its cap is full. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
       input: {},
       output: { computers: z.array(PlaceView) },
       call: async (_args, deps) => asJson({ computers: (await (await deps.client()).request<{ places: PlaceView[] }>("places.list")).places }),
