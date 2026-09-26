@@ -14,9 +14,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ROOT } from "../../protocol/test/source-files.js";
 import { DIST, describeWithDists, distOf } from "./built-bin.js";
 
-/** What the host may still hold after a day of agents has gone through it. The landing page prints this number and
- * nothing else names it: lower it here and the page goes red until it says the same thing. */
+/** The budget the landing page promises for what the host still holds after a day of agents: change it here and the
+ * page goes red until it says the same thing. */
 const HOST_MEMORY_BUDGET_MB = 40;
+
+/** What the run is held to, under the promise so a regression is caught while the promise still holds: the host
+ * read 31.3 MB on CI when this was set. */
+const HOST_MEMORY_CAP_MB = 35;
 
 /** The one page that quotes the budget. */
 const PAGE = join("apps", "www", "src", "sections", "story.tsx");
@@ -160,6 +164,30 @@ describe("the page prints the budget the test guards", () => {
   });
 });
 
+describeWithDists("what the host loads to start", ["host"], () => {
+  it("leaves the tool server's library until a tool server opens", async () => {
+    // The library's schemas alone were 8 MB of the budget, held by every host whether or not an agent asked for tools.
+    // register, not registerHooks: the engines floor is Node 22.0 and registerHooks came in 22.15. Its hooks run on a
+    // thread of their own, so the list is read once the hook has seen the last import, which the port keeps in order.
+    const hook = "let port; export const initialize = data => { port = data.port; }; export const load = (url, context, next) => { port.postMessage(url); return next(url, context); };";
+    const script = `
+import { register } from "node:module";
+import { MessageChannel } from "node:worker_threads";
+const { port1, port2 } = new MessageChannel();
+register(${JSON.stringify(`data:text/javascript,${encodeURIComponent(hook)}`)}, { data: { port: port2 }, transferList: [port2] });
+const last = "data:text/javascript,export%20default%200";
+const seen = new Promise(done => port1.on("message", url => (console.log(url), url === last && done())));
+await import(${JSON.stringify(DIST)});
+await import(last);
+await seen;
+port1.close();
+`;
+    const run = await ran(script, tmpdir());
+    expect(run.code, run.out).toBe(0);
+    expect(run.out.split("\n").filter(url => url.includes("@modelcontextprotocol"))).toEqual([]);
+  });
+});
+
 describeWithDists("what the host holds after a day of agents", ["host", "runtime", "engine"], () => {
   let home: string;
 
@@ -170,16 +198,17 @@ describeWithDists("what the host holds after a day of agents", ["host", "runtime
     rmSync(home, { recursive: true, force: true });
   });
 
-  it(`stays under ${HOST_MEMORY_BUDGET_MB} MB with ${THREADS * TURNS_PER_THREAD} turns through it`, async () => {
+  it(`stays under ${HOST_MEMORY_CAP_MB} MB with ${THREADS * TURNS_PER_THREAD} turns through it`, async () => {
     const empty = await ran('global.gc(); console.log(`measured ${JSON.stringify({ heldMb: 0, rssMb: +(process.memoryUsage().rss / 1048576).toFixed(1), turns: 0 })}`)', home);
     expect(empty.code, `an empty node on this runner said: ${empty.out}`).toBe(0);
     const floor = reading(empty.out, "an empty node");
     const run = await ran(hostScript(home), home);
     expect(run.code, run.out).toBe(0);
     const held = reading(run.out, "the host");
-    expect(
-      held.heldMb,
-      `the host held ${held.heldMb} MB after ${held.turns} turns (resident ${held.rssMb} MB, an empty node on this runner ${floor.rssMb} MB)`,
-    ).toBeLessThanOrEqual(HOST_MEMORY_BUDGET_MB);
+    const said = `the host held ${held.heldMb} MB after ${held.turns} turns (resident ${held.rssMb} MB, an empty node on this runner ${floor.rssMb} MB)`;
+    // Printed on a pass too, so the margin a run kept can be read off CI before it is gone.
+    console.log(said);
+    expect(HOST_MEMORY_CAP_MB).toBeLessThanOrEqual(HOST_MEMORY_BUDGET_MB);
+    expect(held.heldMb, said).toBeLessThanOrEqual(HOST_MEMORY_CAP_MB);
   }, 300_000);
 });
