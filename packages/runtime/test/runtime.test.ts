@@ -3207,7 +3207,7 @@ describe("runtime daemon reach", () => {
         throw new Error("daemon deploy failed: NPM_FAIL");
       },
     };
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 100, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const edgeOn = (m: StubMachine): void => {
       m.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
@@ -3223,6 +3223,7 @@ describe("runtime daemon reach", () => {
       await until(() => deployed.length === 2, 5_000);
     } finally {
       stop();
+      await rt.close();
       warn.mockRestore();
     }
     expect(deployed).toEqual(["m1", "m2"]);
