@@ -114,7 +114,7 @@ export const GREY = { bright: 247, mid: 243, dim: 239 } as const;
 /** The one accent beside the ramp: a tick that is on, the row under the cursor, the screen being answered, and the
  * rows this computer's own agents ran. Nothing else on a screen takes a hue. */
 export const accent = (s: string): string => styleText("cyan", s);
-const DOT = unicode ? " • " : "   ";
+const GAP = "   ";
 
 export interface HelpKey {
   key: string;
@@ -125,11 +125,11 @@ export interface HelpKey {
  * at none. */
 export const muted = (s: string, depth: number): string => (depth <= 1 ? s : depth < 8 ? styleText("dim", s) : grey(GREY.mid, s));
 
-/** The help line under a screen at a colour depth: keys in one grey and what they do in a dimmer one from 256 colours up, plain keys and dim words at 16, plain text at none; entries joined with a dot. */
+/** The help line under a screen at a colour depth: keys in one grey and what they do in a dimmer one from 256 colours up, plain keys and dim words at 16, plain text at none; entries apart by three spaces. */
 export function helpLine(keys: readonly HelpKey[], depth: number): string {
-  if (depth <= 1) return keys.map(k => `${k.key} ${k.does}`).join(DOT);
+  if (depth <= 1) return keys.map(k => `${k.key} ${k.does}`).join(GAP);
   const key = depth < 8 ? (s: string) => s : (s: string) => grey(GREY.bright, s);
-  return keys.map(k => `${key(k.key)} ${muted(k.does, depth)}`).join(muted(DOT, depth));
+  return keys.map(k => `${key(k.key)} ${muted(k.does, depth)}`).join(muted(GAP, depth));
 }
 
 /** The columns a card's bar and its two spaces take before each line. clack's log.message writes lines as they are

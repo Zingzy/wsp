@@ -544,7 +544,7 @@ describe("wsp verbs over the host", () => {
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     const [thread] = await rt.sessions.list(worker.id);
     expect(thread).toMatchObject({ harness: "claude", startedBy: "cli", prompt: "build it", status: "completed" });
-    expect(sent.io.lines).toEqual([`created worker ${worker.id}, a copy of ${worker.project.name} at ${worker.project.path}`, `thread ${thread!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
+    expect(sent.io.lines).toEqual([`created worker ${worker.id}, a copy of ${worker.project.name} at ${worker.project.path}`, `thread ${thread!.threadId}  ${THREAD_PREFIX_WORD}`, "re: build it"]);
     expect(sent.io.streamed.endsWith("ready\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
   });
 
@@ -1238,12 +1238,12 @@ describe("wsp verbs over the host", () => {
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
     const [row] = await rt.sessions.list();
     // The id is on stdout while the turn has said nothing: a person watching knows what to stop and what to read.
-    await vi.waitFor(() => expect(started.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`]));
+    await vi.waitFor(() => expect(started.io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`]));
     expect(started.io.streamed).toBe("");
 
     held.release(0, "10");
     expect(await started.ended).toBe(0);
-    expect(started.io.screen.startsWith(`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}\n10`)).toBe(true);
+    expect(started.io.screen.startsWith(`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}\n10`)).toBe(true);
   });
 
   it("a turn stopped on a prompt says so in the terminal that is blocked, with the keys that answer it, and a typed y answers it", async () => {
@@ -1446,7 +1446,7 @@ describe("wsp verbs over the host", () => {
     expect(row).toMatchObject({ harness: "codex", startedBy: "cli", prompt: "write tests", status: "completed" });
     expect(codex.starts.map(s => s.prompt)).toEqual(["write tests"]);
     expect(claude.starts).toEqual([]);
-    expect(io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "codex: write tests"]);
+    expect(io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "codex: write tests"]);
     expect(io.streamed).toBe("code\n$ ls\nx: write tests\ncompleted\n");
     expect(io.errors).toEqual([]);
   });
@@ -1463,10 +1463,10 @@ describe("wsp verbs over the host", () => {
     const [row] = await rt.sessions.list();
     held.release(0, "25.4.0");
     expect(await ended).toBe(0);
-    expect(io.screen).toBe(`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}\n25.4.0\ncompleted\n`);
+    expect(io.screen).toBe(`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}\n25.4.0\ncompleted\n`);
     expect(io.screen.split("25.4.0")).toHaveLength(2);
     expect(io.screen.endsWith("\n")).toBe(true);
-    expect(io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`]);
+    expect(io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`]);
   });
 
   it("a turn watched at a terminal that streamed no prose prints its reply once under the work it showed, since nothing on the screen carries it yet", async () => {
@@ -1477,8 +1477,8 @@ describe("wsp verbs over the host", () => {
     io.sameScreen = true;
     expect(await cli(["run", "alpha", "print the kernel version and nothing else", "--state", statePath], io, undefined, env)).toBe(0);
     const [row] = await rt.sessions.list();
-    expect(io.screen).toBe(`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}\n$ uname -r\n25.4.0\nthe kernel is 25.4.0\ncompleted\n`);
-    expect(io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "the kernel is 25.4.0"]);
+    expect(io.screen).toBe(`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}\n$ uname -r\n25.4.0\nthe kernel is 25.4.0\ncompleted\n`);
+    expect(io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "the kernel is 25.4.0"]);
   });
 
   it("wsp send at a terminal prints the reply once, the copy that streamed, and down a pipe prints it whole at the end", async () => {
@@ -1520,7 +1520,7 @@ describe("wsp verbs over the host", () => {
     held.release(0, "25.4.0");
     expect(await piped.ended).toBe(0);
     expect(piped.io.sameScreen).toBeUndefined();
-    expect(piped.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "25.4.0"]);
+    expect(piped.io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "25.4.0"]);
     expect(piped.io.streamed).toBe("25.4.0\ncompleted\n");
   });
 
@@ -1531,8 +1531,8 @@ describe("wsp verbs over the host", () => {
     const ended = cli(["run", "alpha", "build it", "--state", statePath], io, undefined, env);
     expect(await ended).toBe(0);
     const [row] = await rt.sessions.list();
-    expect(io.screen).toBe(`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}\nre: \n$ ls\nbuild it\nre: build it\ncompleted\n`);
-    expect(io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
+    expect(io.screen).toBe(`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}\nre: \n$ ls\nbuild it\nre: build it\ncompleted\n`);
+    expect(io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "re: build it"]);
   });
 
   it("--json prints the turn's events and its one turn value, at a terminal as into a pipe, and writes no stream", async () => {
@@ -2377,7 +2377,7 @@ describe("wsp verbs over the host", () => {
     expect(joined.io.errors).toEqual(["joined the running turn; --model, --effort dropped, it keeps its own model, effort and access"]);
     expect(joined.io.lines).toEqual(["done STEERED"]);
     expect(joined.io.streamed).toBe("done STEERED\ncompleted\n");
-    expect(opened.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "done STEERED"]);
+    expect(opened.io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "done STEERED"]);
     const [alpha] = await rt.workspaces.list();
     const history = await rt.sessions.history(alpha!.id);
     expect(history.map(e => e.type)).toEqual(["session.start", "session.steer", "session.delta", "session.done", "session.end"]);
@@ -2414,7 +2414,7 @@ describe("wsp verbs over the host", () => {
     held.release(0, "one done");
     await vi.waitFor(() => expect(held.starts).toHaveLength(2));
     expect(held.starts.map(s => [s.prompt, s.resume])).toEqual([["one", undefined], ["two", row!.claudeSessionId]]);
-    expect((await first).io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "one done"]);
+    expect((await first).io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "one done"]);
     held.release(1, "two done");
     const queued = await sent;
     expect(queued.code).toBe(0);
@@ -2513,7 +2513,7 @@ describe("wsp verbs over the host", () => {
     expect(code).toBe(0);
     const [row] = await rt.sessions.list();
     const line = `thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it`;
-    expect(io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
+    expect(io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "re: build it"]);
     expect(io.errors).toEqual([line]);
     const [alpha] = await rt.workspaces.list();
     const history = await rt.sessions.history(alpha!.id);
@@ -2540,10 +2540,10 @@ describe("wsp verbs over the host", () => {
     await vi.waitFor(() => expect(held.steered).toEqual([line]));
     const built = await kid;
     expect(built.code).toBe(0);
-    expect(built.io.lines).toEqual([`thread ${kidRow.threadId} · ${THREAD_PREFIX_WORD}`, "all green"]);
+    expect(built.io.lines).toEqual([`thread ${kidRow.threadId}  ${THREAD_PREFIX_WORD}`, "all green"]);
     expect(built.io.errors).toEqual([]);
     held.release(0, "read the report");
-    expect((await parent).io.lines).toEqual([`thread ${parentRow!.threadId} · ${THREAD_PREFIX_WORD}`, "read the report"]);
+    expect((await parent).io.lines).toEqual([`thread ${parentRow!.threadId}  ${THREAD_PREFIX_WORD}`, "read the report"]);
     expect(held.starts).toHaveLength(2);
     const [alpha] = await rt.workspaces.list();
     const history = await rt.sessions.history(alpha!.id);
@@ -2663,7 +2663,7 @@ describe("wsp verbs over the host", () => {
     expect(code).toBe(0);
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     const [row] = await rt.sessions.list(worker.id);
-    expect(io.lines).toEqual([`created worker ${worker.id}, a copy of ${worker.project.name} at ${worker.project.path}`, `thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
+    expect(io.lines).toEqual([`created worker ${worker.id}, a copy of ${worker.project.name} at ${worker.project.path}`, `thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "re: build it"]);
     expect(io.errors).toEqual([`thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it`]);
 
     const bad = await run("fork", "alpha", "--name", "never", "--send", "build it", "--notify", "nope");
@@ -2696,7 +2696,7 @@ describe("wsp verbs over the host", () => {
     const [row] = await rt.sessions.list();
     expect(row).toMatchObject({ status: "running", startedBy: "cli", prompt: "build it" });
     expect(opened.code).toBe(0);
-    expect(opened.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`]);
+    expect(opened.io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`]);
     expect(opened.io.errors).toEqual([]);
     expect(opened.io.streamed).toBe("");
     held.release(0, "first done");
@@ -2709,7 +2709,7 @@ describe("wsp verbs over the host", () => {
     held.release(1, "second done");
     // A detached send that meets a running turn on an agent that cannot steer waits for its own start, as a followed one does, and says so.
     const third = await run("send", row!.threadId!, "--detach", "third");
-    expect(third.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`]);
+    expect(third.io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`]);
     expect(held.starts).toHaveLength(3);
     const fourth = starting("send", row!.threadId!, "--detach", "fourth");
     // The waiting line is the runtime's answer that this start is behind the running turn: releasing that turn before
@@ -2719,7 +2719,7 @@ describe("wsp verbs over the host", () => {
     held.release(2, "third done");
     await fourth.ended;
     expect(fourth.io.errors).toEqual(["waiting behind the running turn", "queued behind the running turn; it has ended and this turn started"]);
-    expect(fourth.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`]);
+    expect(fourth.io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`]);
     expect(held.starts.map(s => s.prompt)).toEqual(["build it", "more", "third", "fourth"]);
     held.release(3, "fourth done");
   });
@@ -3065,7 +3065,7 @@ describe("wsp verbs over the host", () => {
     const opened = await run("run", "alpha", "first");
     const [row] = await rt.sessions.list();
     expect(opened.code).toBe(0);
-    expect(opened.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "re: first"]);
+    expect(opened.io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "re: first"]);
     expect(opened.io.errors).toEqual([]);
     const sent = await run("send", row!.threadId!, "second", "--json");
     expect(sent.code).toBe(0);
