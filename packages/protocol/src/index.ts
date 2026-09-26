@@ -3731,6 +3731,18 @@ export const placeServesDaemonLine = (workspace: string, computer: string): stri
 export const placeWatchesItselfLine = (computer: string): string =>
   `${computer} watches its own ports and load, which are that computer's rather than one workspace's`;
 
+/** What a watch, read or signal of processes is refused with on a workspace whose computer answers its daemon
+ * frames: that daemon acts on any pid on the computer, the computer's own and every other workspace's, so none of
+ * them goes up its link from one workspace's channel. The Processes pane shows it in place of the table. */
+export const forkProcsUnreadLine = (workspace: string, computer: string): string =>
+  `${workspace}'s processes on ${computer} are not readable from here yet`;
+
+/** What every other op is refused with on that workspace's channel: the frames that computer's daemon answers
+ * inside the workspace they name are its shells, its files and its git, and every other op there runs on the
+ * computer itself. */
+export const forkOpRefusedLine = (op: string, workspace: string, computer: string): string =>
+  `${computer} answers ${workspace}'s shells, files and git from here, not ${op}`;
+
 /** What a person asking for a second workspace on the computer the app itself runs on is told. Its local mode is
  * one workspace, the one it already has; every other workspace is forked at a place. */
 export const localRunsOneLine = (workspace: string): string => `${THIS_COMPUTER} is already a workspace, ${workspace}, the only one it can be`;
@@ -5090,6 +5102,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * written on it, so a window opened later reads the same thing. Nothing is installed and nothing is left
    * running either way. */
   z.object({ id: reqId, op: z.literal("places.dial"), placeId: z.string() }),
+  /** A sign-in run at a terminal on one computer landed, as the tool's own status there said: the host notes the
+   * file that agent's shared login writes, as the app's own sign-in does, so the listing says signed in before
+   * that computer next reports. Answers `{}`. The person's own road only, as every other place op is. */
+  z.object({ id: reqId, op: z.literal("places.loginLanded"), placeId: z.string(), agent: z.string() }),
   /** Opens the door computers you own dial, when this host binds loopback alone, and answers where it is; a host
    * already bound beyond loopback answers its own port and opens nothing. Answers a PlaceDoorView. The person's
    * own road only, as every other place op is. */

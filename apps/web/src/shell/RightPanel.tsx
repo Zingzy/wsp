@@ -20,15 +20,41 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { DiffSurface } from "../diffs/DiffSurface.js";
 import { useAbsentComputer, useWorkspace } from "../protocol/store.js";
 import { useAppDark } from "../settings/theme.js";
-import { useRightPanelStore, type WorkspaceRightPanelState } from "../rightPanelStore.js";
+import { PANE_KINDS, paneOf, type PaneContext, type RightPanelKind } from "../panes.js";
+import { isOpenable, useRightPanelStore, type RightPanelSurface, type WorkspaceRightPanelState } from "../rightPanelStore.js";
 import { HERE_KEY } from "../terminal/computer.js";
 import { openPanelTerminal } from "./shellCommands.js";
 import { useTerminalSurfaces, WorkspaceTerminalPanel } from "../components/WorkspaceTerminalPanel.js";
 
 const NO_PENDING: ReadonlySet<string> = new Set();
-const NO_SESSIONS = {};
-const NO_LABELS: ReadonlyMap<string, string> = new Map();
-const NO_PROJECT_HERE = "Pick a project to review its changes.";
+
+interface PaneView<K extends RightPanelKind> {
+  Surface(props: { workspaceId: string; surface: Extract<RightPanelSurface, { kind: K }>; theme: "light" | "dark" }): ReactNode;
+  /** How the pane opens when the store cannot open it alone. */
+  open?(workspaceId: string): void;
+}
+
+/** What each pane kind draws, the one line per kind the registry in panes.ts cannot hold without importing every
+ * pane into the store. */
+const PANE_VIEWS: { readonly [K in RightPanelKind]: PaneView<K> } = {
+  preview: { Surface: ({ workspaceId, surface }) => <BrowserSurface key={surface.id} workspaceId={workspaceId} surface={surface} /> },
+  terminal: {
+    Surface: ({ workspaceId, surface }) => <WorkspaceTerminalPanel workspaceId={workspaceId} surface={surface} />,
+    open: workspaceId => void openPanelTerminal(workspaceId),
+  },
+  diff: {
+    Surface: ({ workspaceId, theme }) => (
+      <DiffWorkerPoolProvider theme={theme}>
+        <DiffSurface workspaceId={workspaceId} theme={theme} />
+      </DiffWorkerPoolProvider>
+    ),
+  },
+  machine: { Surface: ({ workspaceId }) => <MachineSurface workspaceId={workspaceId} /> },
+  processes: { Surface: ({ workspaceId }) => <ProcessesSurface workspaceId={workspaceId} /> },
+  agents: { Surface: ({ workspaceId }) => <AgentsSurface workspaceId={workspaceId} /> },
+};
+const viewOf = (kind: RightPanelKind): PaneView<RightPanelKind> => PANE_VIEWS[kind] as PaneView<RightPanelKind>;
+
 export function RightPanel({
   workspaceId,
   state,
@@ -64,6 +90,17 @@ export function RightPanel({
     pruneBrowserTabs(workspaceId, openBrowserTabIds);
   }, [pruneBrowserTabs, workspaceId, openBrowserTabIds]);
 
+  const at: PaneContext = { here, workspace, absent };
+  const available = Object.fromEntries(PANE_KINDS.map(kind => [kind, paneOf(kind).available(at)])) as Record<RightPanelKind, boolean>;
+  const unavailableReasons = Object.fromEntries(
+    PANE_KINDS.flatMap(kind => {
+      const reason = paneOf(kind).reason?.(at);
+      return reason === undefined ? [] : [[kind, reason]];
+    }),
+  ) as Partial<Record<RightPanelKind, string>>;
+
+  const ActiveSurface = active === null ? null : viewOf(active.kind).Surface;
+
   const tabs = (
     <RightPanelTabs
       mode={mode}
@@ -75,38 +112,16 @@ export function RightPanel({
       terminalLabelsById={terminalLabelsById}
       onActivate={surface => activateSurface(workspaceId, surface.id)}
       onCloseSurface={surface => closeSurface(workspaceId, surface.id)}
-      onAddBrowser={() => open(workspaceId, "preview")}
-      onAddTerminal={() => void openPanelTerminal(workspaceId)}
-      onAddDiff={() => open(workspaceId, "diff")}
-      onAddMachine={() => open(workspaceId, "machine")}
-      onAddProcesses={() => open(workspaceId, "processes")}
-      onAddAgents={() => open(workspaceId, "agents")}
-      browserAvailable={here || workspace?.phase === "running"}
-      terminalAvailable={here || (workspace?.phase === "running" && absent === null)}
-      diffAvailable={workspace?.phase === "running"}
-      machineAvailable={here || workspace !== null}
-      // The Processes pane carries the start button itself where this host can put the daemon back.
-      processesAvailable={here || (workspace?.phase === "running" && (absent === null || absent.start !== undefined))}
-      // A paused task answers its last report and is never woken for it.
-      agentsAvailable={workspace !== null}
-      // A panel terminal cannot open at all without a pty, so its tab keeps the computer's own sentence as the
-      // reason it is held, and the drawer under the chat is where that sentence carries the button.
-      {...(here ? { unavailableReasons: { diff: NO_PROJECT_HERE } } : absent === null ? {} : { unavailableReasons: { terminal: absent.sentence, processes: absent.sentence } })}
+      onAdd={kind => {
+        const opens = viewOf(kind).open;
+        if (opens) opens(workspaceId);
+        else if (isOpenable(kind)) open(workspaceId, kind);
+      }}
+      available={available}
+      unavailableReasons={unavailableReasons}
     >
-      {active?.kind === "terminal" ? (
-        <WorkspaceTerminalPanel workspaceId={workspaceId} surface={active} />
-      ) : active?.kind === "preview" ? (
-        <BrowserSurface key={active.id} workspaceId={workspaceId} surface={active} />
-      ) : active?.kind === "machine" ? (
-        <MachineSurface workspaceId={workspaceId} />
-      ) : active?.kind === "processes" ? (
-        <ProcessesSurface workspaceId={workspaceId} />
-      ) : active?.kind === "agents" ? (
-        <AgentsSurface workspaceId={workspaceId} />
-      ) : active?.kind === "diff" ? (
-        <DiffWorkerPoolProvider theme={theme}>
-          <DiffSurface workspaceId={workspaceId} theme={theme} />
-        </DiffWorkerPoolProvider>
+      {ActiveSurface !== null && active !== null ? (
+        <ActiveSurface workspaceId={workspaceId} surface={active} theme={theme} />
       ) : (
         <Empty className="flex-1">
           <EmptyHeader>

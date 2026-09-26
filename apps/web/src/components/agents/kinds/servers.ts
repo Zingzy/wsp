@@ -3,15 +3,19 @@
 // agents in one scope name the same server with the same command or address.
 // The row says where it is reached and its state as a dot and a word; the
 // detail is the /mcp view: status, command, names, each agent's file, the
-// tools, and the next step first. Tools are asked only on a click. Turn off
-// and on and Remove act on every agent the entry is set up for, and Add an MCP
-// server is a form in place of the list.
-import { PlugIcon, PowerIcon, PowerOffIcon, RefreshCwIcon, ServerIcon, Trash2Icon, WrenchIcon } from "lucide-react";
+// tools, and the next step first. A server's state is what its one tools
+// connect answered, asked when the tab shows it for the person's own servers,
+// a command only on this computer and elsewhere on Check, and on List tools
+// for a project's; no press but a sign-in, Reconnect or Read
+// again asks again, so opening the tools changes nothing. Turn off and on and
+// Remove act on every agent the entry is set up for, and Add an MCP server is
+// a form in place of the list.
+import { ActivityIcon, PlugIcon, PowerIcon, PowerOffIcon, RefreshCwIcon, ServerIcon, Trash2Icon, WrenchIcon } from "lucide-react";
 import { agentName, mcpSwitch } from "@wsp/catalog";
 import type { AgentsProject, AgentsReport, McpRow, McpTool, McpToolParam, ServerToolsAnswer } from "@wsp/protocol";
-import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, holdAll, notYet, onImage, serverSignInStart, signInAct, waitingFlow, type FlowView, type RowAct, type RowsContext } from "../agentsRows.js";
+import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, holdAll, notYet, onImage, serverSignInStart, signInAct, waitingFlow, type FlowView, type RowAct, type RowsContext, type ToolsState } from "../agentsRows.js";
 import { AddServerForm } from "../AddServerForm.js";
-import { byName, kind, matchesAny, projectGroups, rowKey, type Fact, type GroupBy, type GroupView, type KindModule, type Lead, type ServerState, type ServerStatus, type UnderRow } from "./kind.js";
+import { byName, kind, matchesAny, projectGroups, rowKey, type Fact, type GroupBy, type GroupView, type KindModule, type Lead, type ServerState, type Status, type UnderRow } from "./kind.js";
 
 /** Where a server is set up: the person's own files, or the project's. */
 type Scope = "global" | "project";
@@ -27,8 +31,6 @@ export interface ServerEntry {
   readonly stdio: boolean;
   /** One per agent it is set up for, in the report's order. */
   readonly rows: readonly McpRow[];
-  /** When the report these rows came from was read. */
-  readonly readAt?: string;
 }
 
 const scopeOf = (row: McpRow): Scope => (row.scope === "project" ? "project" : "global");
@@ -39,7 +41,7 @@ const rowId = (row: McpRow): string => rowKey(["server", row.agent, row.scope], 
 
 /** One entry per server: the same name reached the same way in the same scope, and the same project, is one server
  * set up for each agent. */
-export function foldServers(rows: readonly McpRow[], readAt?: string): ServerEntry[] {
+export function foldServers(rows: readonly McpRow[]): ServerEntry[] {
   const out = new Map<string, { name: string; scope: Scope; project?: AgentsProject; reach: string; stdio: boolean; rows: McpRow[] }>();
   for (const row of rows) {
     const key = [scopeOf(row), ...(row.project === undefined ? [] : [row.project.id]), row.name, row.transport.kind, reachOf(row)].join("\0");
@@ -47,19 +49,31 @@ export function foldServers(rows: readonly McpRow[], readAt?: string): ServerEnt
     if (was === undefined) out.set(key, { name: row.name, scope: scopeOf(row), ...(row.project !== undefined ? { project: row.project } : {}), reach: reachOf(row), stdio: row.transport.kind === "stdio", rows: [row] });
     else was.rows.push(row);
   }
-  return [...out].map(([key, e]) => ({ key: `server-${key.replaceAll("\0", "-")}`, ...e, ...(readAt === undefined ? {} : { readAt }) }));
+  return [...out].map(([key, e]) => ({ key: `server-${key.replaceAll("\0", "-")}`, ...e }));
 }
 
-/** One agent's state for a server: off, then the newer of the connect's answer and the report, where a report that
- * checked nothing never outweighs an answer. */
-export function rowState(row: McpRow, answer: ServerToolsAnswer | undefined, reportAt?: string): ServerState {
+/** A command server of the person's own on a computer other than this one, which a check would start there: it waits
+ * for Check, since a joined computer may run more than the person's agents. */
+const heldCommand = (row: McpRow, ctx: RowsContext): boolean => row.transport.kind === "stdio" && row.scope !== "project" && (ctx.where === "box" || ctx.where === "box-task" || ctx.where === "fork");
+
+/** Whether a row's tools connect is asked the moment the tab shows it: the person's own servers that are on and take no
+ * key from the environment, wherever the report is live, a command only on this computer. A project's are what a repo
+ * names, asked on List tools. */
+export const checksOnShow = (row: McpRow, ctx: RowsContext): boolean =>
+  ctx.tools !== undefined && ctx.where !== "provider" && (ctx.heldWhy ?? null) === null && row.enabled && row.scope !== "project" && row.auth !== "env-key" && !heldCommand(row, ctx);
+
+/** One agent's state for a server: off, then what its connect answered, `checking` while that answer is on its way,
+ * and the config's own word for a server nothing asked. */
+export function rowState(row: McpRow, s: ToolsState | undefined, ctx: RowsContext): ServerState {
   if (!row.enabled) return "off";
-  const unchecked = row.auth === "open" || row.auth === "env-key" || row.auth === "unknown";
-  return answer !== undefined && (unchecked || reportAt === undefined || answer.readAt >= reportAt) ? answer.auth : row.auth;
+  if (s?.answer !== undefined) return s.answer.auth;
+  if (s?.listing === true) return "checking";
+  if (s?.error !== undefined) return "failed";
+  return checksOnShow(row, ctx) ? "checking" : heldCommand(row, ctx) ? "unknown" : row.auth;
 }
 
 /** Worst first: what a folded entry's one status says. */
-const WORST: readonly ServerState[] = ["failed", "needs-sign-in", "off", "unknown", "env-key", "open", "signed-in", "connected"];
+const WORST: readonly ServerState[] = ["failed", "needs-sign-in", "off", "checking", "unknown", "env-key", "open", "signed-in", "connected"];
 
 interface Standing {
   readonly row: McpRow;
@@ -67,38 +81,46 @@ interface Standing {
   readonly answer?: ServerToolsAnswer;
   readonly listing: boolean;
   readonly error?: string;
+  /** Why a command there waits for Check. */
+  readonly held?: string;
 }
 
 const standings = (entry: ServerEntry, ctx: RowsContext): Standing[] =>
   entry.rows.map(row => {
     const s = ctx.tools?.of(row);
-    return { row, state: rowState(row, s?.answer, entry.readAt), listing: s?.listing === true, ...(s?.answer === undefined ? {} : { answer: s.answer }), ...(s?.error === undefined ? {} : { error: s.error }) };
+    const held = s === undefined && heldCommand(row, ctx) ? W.checkStarts(ctx.on ?? ctx.computer ?? "") : undefined;
+    return { row, state: rowState(row, s, ctx), listing: s?.listing === true, ...(s?.answer === undefined ? {} : { answer: s.answer }), ...(s?.error === undefined ? {} : { error: s.error }), ...(held === undefined ? {} : { held }) };
   });
 
 const worstOf = (all: readonly Standing[]): Standing => [...all].sort((a, b) => WORST.indexOf(a.state) - WORST.indexOf(b.state))[0]!;
 
-/** The standing whose connect answered, which speaks for the server's tools: the server is one whoever asked. */
-const askedOf = (all: readonly Standing[]): Standing | undefined => all.find(s => s.answer !== undefined || s.error !== undefined || s.listing);
+/** The standing whose connect speaks for the server's tools: one that listed them, else one that answered or is
+ * asking. */
+const askedOf = (all: readonly Standing[]): Standing | undefined => all.find(s => s.answer?.tools !== undefined) ?? all.find(s => s.answer !== undefined || s.error !== undefined || s.listing);
 
-export function statusOf(s: Standing, tools: readonly unknown[] | undefined): ServerStatus {
-  switch (s.state) {
+export function statusOf(s: Standing): Status {
+  const { state } = s;
+  const tools = s.answer?.tools;
+  switch (state) {
     case "connected":
     case "signed-in":
-      return { state: s.state, words: tools !== undefined ? W.toolsCount(tools.length) : s.state === "connected" ? W.connected : W.signedIn };
+      return { state, tone: "good", words: state === "connected" ? W.connected : W.signedIn, ...(tools === undefined ? {} : { count: W.toolsCount(tools.length) }) };
+    case "checking":
+      return { state, tone: "quiet", words: W.checking };
     case "open":
-      return { state: "open", words: W.noSignInNeeded };
+      return { state, tone: "quiet", words: W.noSignInNeeded };
     case "env-key":
-      return { state: "env-key", words: W.keyFromEnvironment };
+      return { state, tone: "quiet", words: W.keyFromEnvironment };
     case "needs-sign-in":
-      return { state: "needs-sign-in", words: "needs sign-in", hover: W.signInToSee };
+      return { state, tone: "waiting", words: W.needsSignIn, hover: W.signInToSee };
     case "failed": {
       const why = s.error ?? s.answer?.refused;
-      return { state: "failed", words: "failed", ...(why === undefined ? {} : { hover: why }) };
+      return { state, tone: "bad", words: W.failed, ...(why === undefined ? {} : { hover: why }) };
     }
     case "off":
-      return { state: "off", words: "off" };
+      return { state, tone: "quiet", words: W.off };
     case "unknown":
-      return { state: "unknown", words: W.notChecked, ...(s.answer?.holder === undefined ? {} : { hover: W.holdsSignIn(agentName(s.answer.holder)) }) };
+      return { state, tone: "quiet", words: W.notChecked, ...(s.answer?.holder !== undefined ? { hover: W.holdsSignIn(agentName(s.answer.holder)) } : s.held !== undefined ? { hover: s.held } : {}) };
   }
 }
 
@@ -108,20 +130,36 @@ function actsOf(entry: ServerEntry, ctx: RowsContext, openUnder: () => void) {
   const worst = worstOf(all);
   const asked = askedOf(all);
   if (ctx.where === "provider") return { all, worst, asked, acts: [] as RowAct[], signIns: new Map<string, RowAct>(), flow: undefined as FlowView | undefined };
-  if (onImage(ctx)) return { all, worst, asked, acts: [editImageAct(ctx)], signIns: new Map<string, RowAct>(), flow: undefined };
   const tools = ctx.tools;
+  const check: RowAct = {
+    id: "check",
+    label: W.check,
+    icon: ActivityIcon,
+    hover: W.startsOnce,
+    inPlace: true,
+    ...(tools === undefined ? {} : { run: () => entry.rows.forEach(r => tools.list(r)) }),
+  };
+  const waitsForCheck = asked?.answer === undefined && asked?.listing !== true && entry.rows.some(r => heldCommand(r, ctx));
+  // A fork is a copy of the image, so its one act besides Check is the image's.
+  if (onImage(ctx)) return { all, worst, asked, acts: [...(waitsForCheck ? [check] : []), editImageAct(ctx)], signIns: new Map<string, RowAct>(), flow: undefined };
   const primary = asked?.row ?? worst.row;
-  const listing = asked?.listing === true;
-  const listed = asked?.answer?.tools;
   const list: RowAct = {
     id: "list-tools",
-    label: listing ? W.listing : W.listTools,
+    label: W.listTools,
     icon: WrenchIcon,
-    hover: asked?.answer?.holder !== undefined ? W.holdsSignIn(agentName(asked.answer.holder)) : W.startsOnce,
-    ...(listing ? { busy: true } : tools === undefined ? {} : { run: () => tools.list(primary) }),
+    hover: W.startsOnce,
+    ...(tools === undefined
+      ? {}
+      : {
+          run: () => {
+            tools.list(primary);
+            openUnder();
+          },
+        }),
   };
+  const listing = asked?.listing === true;
   const reconnect: RowAct = { id: "reconnect", label: listing ? W.listing : W.reconnect, icon: RefreshCwIcon, ...(listing ? { busy: true } : tools === undefined ? {} : { run: () => tools.list(worst.state === "failed" ? worst.row : primary, true) }) };
-  const view: RowAct = { id: "view-tools", label: W.viewTools, icon: WrenchIcon, run: openUnder };
+  const view: RowAct = { id: "view-tools", label: W.viewTools, icon: WrenchIcon, ...(asked?.answer?.holder !== undefined && asked.answer.tools === undefined ? { hover: W.holdsSignIn(agentName(asked.answer.holder)) } : {}), run: openUnder };
   const servers = ctx.servers;
   const busy = servers?.busyOf(entry.key) === true;
   // A server turns off only where every agent it is set up for keeps a switch per server.
@@ -148,17 +186,24 @@ function actsOf(entry: ServerEntry, ctx: RowsContext, openUnder: () => void) {
     if (s.state === "needs-sign-in" || made.act.id === "cancel" || (s.state === "unknown" && !entry.stdio)) signIns.set(s.row.agent, made.act);
   }
   const signIn = signIns.get(worst.row.agent) ?? [...signIns.values()][0];
+  const withSignIn = signIn === undefined ? [] : [signIn];
   const acts: RowAct[] =
     worst.state === "needs-sign-in"
-      ? [...(signIn === undefined ? [] : [signIn]), turnOff, remove]
+      ? [...withSignIn, turnOff, remove]
       : worst.state === "failed"
         ? [reconnect, turnOff, remove]
         : worst.state === "off"
           ? [turnOn, remove]
-          : listed !== undefined
-            ? [view, reconnect, turnOff, remove]
-            : [list, ...(signIn === undefined ? [] : [signIn]), turnOff, remove];
-  return { all, worst, asked, acts: holdAll(acts, ctx), signIns, flow: heldReason(ctx) === undefined ? flow : undefined };
+          : worst.state === "checking"
+            ? [turnOff, remove]
+            : asked?.answer !== undefined
+              ? [view, ...withSignIn, reconnect, turnOff, remove]
+              : entry.rows.some(r => heldCommand(r, ctx))
+                ? [check, turnOff, remove]
+                : [list, ...withSignIn, turnOff, remove];
+  // Opening the tools reads the answer already here, so it stands wherever the other acts are held.
+  const held = holdAll(acts, ctx).map(a => (a.id === view.id ? view : a));
+  return { all, worst, asked, acts: held, signIns, flow: heldReason(ctx) === undefined ? flow : undefined };
 }
 
 const NO_NAV = (): void => {};
@@ -197,11 +242,12 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
   word: "MCP servers",
   noun: n => `${n} ${n === 1 ? "server" : "servers"}`,
   search: "Search MCP servers",
-  add: "Add an MCP server",
+  add: "Add MCP server",
+  line: project => ["MCP servers on ", project === undefined ? "" : `, for ${project}`],
   rowHeight: "h-[84px]",
   groupings: ["scope", "agent", "none"],
   defaultGroup: () => "scope",
-  items: (report: AgentsReport) => foldServers(report.servers, report.readAt).sort(byName),
+  items: (report: AgentsReport) => foldServers(report.servers).sort(byName),
   count: items => items.length,
   key: entry => entry.key,
   matches: (entry, q) => matchesAny(q, entry.name, entry.reach, entry.project?.name, ...entry.rows.flatMap(r => [agentName(r.agent), r.file])),
@@ -214,10 +260,11 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
     return scopeGroups(items, ctx);
   },
   row: (entry, ctx) => {
-    const { worst, asked, acts, flow } = actsOf(entry, ctx, NO_NAV);
-    const status = statusOf(worst, asked?.answer?.tools);
-    const step = worst.state === "needs-sign-in" ? acts.find(a => a.id === "sign-in" || a.id === "cancel") : worst.state === "failed" ? acts.find(a => a.id === "reconnect") : worst.state === "off" ? acts.find(a => a.id === "turn-on") : undefined;
-    const quick = onImage(ctx) || waitingFlow(flow) ? undefined : step;
+    const { worst, acts, flow } = actsOf(entry, ctx, NO_NAV);
+    const status = statusOf(worst);
+    const step =
+      worst.state === "needs-sign-in" ? acts.find(a => a.id === "sign-in" || a.id === "cancel") : worst.state === "failed" ? acts.find(a => a.id === "reconnect") : worst.state === "off" ? acts.find(a => a.id === "turn-on") : acts.find(a => a.id === "check");
+    const quick = waitingFlow(flow) || (onImage(ctx) && step?.id !== "check") ? undefined : step;
     return {
       key: entry.key,
       title: entry.name,
@@ -231,7 +278,8 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
   detail: (entry, ctx, nav) => {
     const { all, worst, asked, acts, signIns, flow } = actsOf(entry, ctx, nav.openUnder);
     const listed = asked?.answer?.tools;
-    const status = statusOf(worst, listed);
+    // The detail's Tools line carries the count, so its status says the word alone.
+    const { count: _count, ...status } = statusOf(worst);
     const first = entry.rows[0]!;
     const names = [...new Set(entry.rows.flatMap(r => r.envNames))].join(", ");
     const disagree = new Set(all.map(s => s.state)).size > 1;
@@ -257,7 +305,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
           value: s.row.file,
           agent: s.row.agent,
           copy: true,
-          ...(disagree ? { fact: statusOf(s, s.answer?.tools).words } : {}),
+          ...(disagree ? { fact: statusOf(s) } : {}),
           ...(act === undefined ? {} : { act: heldReason(ctx) === undefined ? act : { ...act, hover: heldReason(ctx)! } }),
         } satisfies Fact;
       }),
@@ -266,6 +314,7 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
     ];
     const tools = asked?.row ?? first;
     const refresh = ctx.tools === undefined || heldReason(ctx) !== undefined || onImage(ctx) ? undefined : () => ctx.tools!.list(tools, true);
+    const quiet = refused !== undefined || listed !== undefined ? undefined : holder !== undefined ? W.keepsSignIn(agentName(holder)) : worst.state === "needs-sign-in" ? W.signInToSee : undefined;
     return {
       title: entry.name,
       lead: leadOf(entry),
@@ -276,13 +325,19 @@ export const SERVERS_KIND: KindModule<ServerEntry> = {
       ...(wrote !== undefined ? { refused: wrote } : refused === undefined ? {} : { refused }),
       under: {
         title: W.toolsOf(entry.name),
-        reading: asked?.listing === true,
+        reading: asked?.listing === true || worst.state === "checking",
         ...(listed === undefined ? {} : { rows: listed.map(toolRow) }),
         ...(asked?.answer === undefined ? {} : { readAt: asked.answer.readAt }),
         ...(refused === undefined ? {} : { refused }),
+        ...(quiet === undefined ? {} : { empty: quiet }),
         ...(refresh === undefined ? {} : { refresh }),
       },
     };
+  },
+  shown: (entries, ctx) => {
+    const tools = ctx.tools;
+    if (tools === undefined) return;
+    for (const row of entries.flatMap(e => e.rows)) if (checksOnShow(row, ctx) && tools.of(row)?.listing !== true) tools.list(row);
   },
   empty: on => `No MCP servers on ${on} yet.`,
   none: "no MCP servers",

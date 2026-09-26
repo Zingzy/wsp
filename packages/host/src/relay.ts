@@ -826,7 +826,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     armedBySignIn: false,
     machineId,
     ownPorts: false,
-    open: async at => daemonSocketOver(await rt.workspaces.daemonChannel(id, at.onEvent)),
+    open: async at => daemonSocketOver(await rt.workspaces.guestChannel(id, at.onEvent)),
   });
 
   /** The target for one running workspace, on whichever of the two roads its own runtime says it is on. */

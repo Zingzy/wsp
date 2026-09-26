@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { Socket } from "node:net";
+import { isIP, type Socket } from "node:net";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
@@ -202,6 +202,16 @@ function throughConnector(req: IncomingMessage): boolean {
  * read this, so neither can stay open while the other closes. */
 function ownRoad(req: IncomingMessage, door: WeakSet<Socket>): boolean {
   return !door.has(req.socket) && !throughConnector(req) && isLoopback(peerAddress(req.socket.remoteAddress));
+}
+
+/** Where a request came from: the address the connector names for the peer it carried, else the socket's own peer.
+ * Cloudflare writes that header over any a client sends, but a box on the door or on the main port of a host bound
+ * beyond loopback writes every header it sends, so the header is read only off a loopback peer the door did not
+ * let in, and only when it is an address. */
+function peerOf(req: IncomingMessage, door: WeakSet<Socket>): string {
+  const peer = peerAddress(req.socket.remoteAddress);
+  const carried = req.headers["cf-connecting-ip"];
+  return typeof carried === "string" && isIP(carried) !== 0 && !door.has(req.socket) && isLoopback(peer) ? carried : peer;
 }
 
 /** The name in the Host header, without the port an authority carries: what the request asked for, which is not
@@ -585,7 +595,14 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const doorListeners = doorLoopback === undefined ? [doorServer] : [doorServer, doorLoopback];
   // Held per socket rather than read off the port, so a socket the door let in stays the door's after it closes.
   const doorSockets = new WeakSet<Socket>();
-  for (const listener of doorListeners) listener.on("connection", socket => doorSockets.add(socket));
+  // An upgraded socket is no connection its listener ends on close, and the close waits on it while it stands.
+  const doorOpen = new Set<Socket>();
+  for (const listener of doorListeners)
+    listener.on("connection", socket => {
+      doorSockets.add(socket);
+      doorOpen.add(socket);
+      socket.once("close", () => doorOpen.delete(socket));
+    });
   let doorAt: number | undefined;
   let doorOpening: Promise<DoorAt> | undefined;
   /** Where a person is told to dial, with the relay's own name beside it when a connector is carrying this host.
@@ -671,6 +688,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       attach: [server, ...doorListeners],
       originAllowed: originAllows,
       ownRoad: req => ownRoad(req, doorSockets),
+      peerOf: req => peerOf(req, doorSockets),
       door: { open: openDoor },
       devices: rt.devices,
       authToken,
@@ -760,10 +778,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         if (doorAt === undefined) return;
         doorAt = undefined;
         doorOpening = undefined;
-        for (const listener of doorListeners) {
-          listener.closeAllConnections();
-          if (listener.listening) await closeServer(listener);
-        }
+        const closing = doorListeners.filter(listener => listener.listening).map(closeServer);
+        for (const socket of doorOpen) socket.destroy();
+        await Promise.all(closing);
       },
     },
     addProject,

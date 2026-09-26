@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Each server's tools as its last ask on this target stands: asked only when
-// the person presses List tools or Read again, since asking starts the server
-// once on that computer. A new target starts from nothing, and an answer that
-// lands after the target changed is dropped.
+// Each server's tools and state as its last ask on this target stands: asked
+// when the MCP servers tab shows the person's own servers, and on List tools,
+// Reconnect or Read again. The last answer stands while the next one is asked.
+// A new target starts from nothing, and an answer that lands after the target
+// changed is dropped.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentsTarget, McpRow, ServerToolsAnswer } from "@wsp/protocol";
 import { useStore } from "../../protocol/store.js";
