@@ -52,7 +52,7 @@ export const guestSystem = (system: string | undefined): boolean => system === u
  * builds a daemon for that system at all, by uname's word where it builds none. `joined` is a computer already in
  * the wsp, which an update reaches. */
 export function noPlaceSystemLine(system: string, who = "that computer", joined = false): string {
-  const place = `wsp ${joined ? "keeps" : "joins"} only a ${GUEST_DAEMON_TARGETS[0]!.computer} as a place`;
+  const place = `wsp ${joined ? "keeps" : "joins"} only a ${[...new Set(GUEST_DAEMON_TARGETS.map(t => t.computer))].join(" or a ")} as a place`;
   const row = DAEMON_TARGETS.find(t => t.system === system);
   if (row === undefined) return `${who} runs ${system}, and ${place}`;
   return `${who} is a ${row.computer}, and ${place}; a ${row.computer} cannot ${joined ? "be updated as one" : "join yet"}`;
