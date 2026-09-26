@@ -86,8 +86,9 @@ function transportOf(server: McpServer, home: string): McpRow["transport"] {
 const authOf = (server: McpServer): McpRow["auth"] =>
   server.transport.kind === "stdio" ? "open" : server.envRefs.length > 0 ? "env-key" : Object.keys(server.transport.headers).length > 0 ? "open" : "unknown";
 
-/** Names the definition sets or reads, never a value. */
-const envNamesOf = (server: McpServer): string[] => [...new Set([...(server.transport.kind === "stdio" ? Object.keys(server.transport.env) : []), ...server.envRefs])].sort();
+/** Names the definition sets, and those it reads that `held` holds; never a value, and a name nobody holds may be one
+ * written to read like a reference. */
+const envNamesOf = (server: McpServer, held: ReadonlySet<string>): string[] => [...new Set([...(server.transport.kind === "stdio" ? Object.keys(server.transport.env) : []), ...server.envRefs.filter(n => held.has(n))])].sort();
 
 interface Servers {
   rows: McpRow[];
@@ -97,7 +98,7 @@ interface Servers {
 
 /** Every server each agent's own file defines, and each project's the read covers; the first of an agent's files that
  * is there is its config, as the agent itself reads it. */
-async function serversOf(host: Host, projects: readonly AgentsProject[]): Promise<Servers> {
+async function serversOf(host: Host, projects: readonly AgentsProject[], held: ReadonlySet<string>): Promise<Servers> {
   const rows: McpRow[] = [];
   const wsp = new Set<string>();
   const refused: string[] = [];
@@ -120,7 +121,7 @@ async function serversOf(host: Host, projects: readonly AgentsProject[]): Promis
         scope: project !== undefined ? "project" : s.scope,
         file: tilde(host.home, file),
         transport: transportOf(s, host.home),
-        envNames: envNamesOf(s),
+        envNames: envNamesOf(s, held),
         auth: authOf(s),
         enabled: s.disabled !== true,
         ...(project !== undefined ? { project: { ...project, path: tilde(host.home, project.path) } } : {}),
@@ -161,7 +162,7 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
   const agents: readonly AgentEntry[] = CATALOG_AGENTS;
   const [where, servers, skills, recipe] = await Promise.all([
     host.exec.run("sh", ["-c", WHERE, "sh", ...agents.map(a => a.bin)], { timeoutMs: READ_MS }),
-    serversOf(host, projects),
+    serversOf(host, projects, new Set(Object.keys(o.vault))),
     skillRoots(host, { projects }).then(roots => detectSkills(host, roots)),
     o.box !== undefined ? recipeServers(host) : Promise.resolve(undefined),
   ]);

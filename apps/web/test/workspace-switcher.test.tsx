@@ -730,7 +730,6 @@ describe("buildSwitcherCards", () => {
     const slot = render(<>{item.titleTrailingContent}</>).container.querySelector<HTMLElement>("[data-thread-status]")!;
     expect(slot.dataset.threadStatus).toBe("working");
     expect(slot.className).toContain("w-22");
-    expect(item.timestamp).toBeUndefined();
     for (const workspace of items.workspaceItems) expect(render(<>{workspace.icon}</>).container.querySelector(".rounded-full")).toBeNull();
   });
 

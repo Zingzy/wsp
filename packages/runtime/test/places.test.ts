@@ -2536,6 +2536,17 @@ function forks(
   return seen;
 }
 
+/** Every op the computer's daemon serves, off the frames crate itself, with whether its request names the
+ * workspace it is for: a new op there fails this table until it is placed on one side. */
+const daemonOps = (): { op: string; scoped: boolean }[] => {
+  const crate = (file: string): string => readFileSync(new URL(`../../../daemon/crates/wsp-frames/src/${file}`, import.meta.url), "utf8");
+  const listed = (text: string, name: string): string[] => [...text.match(new RegExp(`pub const ${name}: \\[&str; \\d+\\] = \\[([^\\]]*)\\]`))![1]!.matchAll(/"([^"]+)"/g)].map(m => m[1]!);
+  const request = crate("request.rs");
+  const body = request.slice(request.indexOf("pub enum DaemonOp"), request.indexOf("pub const DAEMON_OPS"));
+  const variants = new Map(body.split(/#\[serde\(rename = "/).slice(1).map(part => [part.slice(0, part.indexOf('"')), part.includes("machine_id")] as const));
+  return [...listed(request, "DAEMON_OPS"), ...listed(crate("machine.rs"), "MACHINE_OPS")].map(op => ({ op, scoped: variants.get(op) ?? false }));
+};
+
 describe("a fork at a provider this host is not wired to", () => {
   /** Two providers over two backends, as the host's own table hands them down: the wired one and one more whose key
    * this computer holds. */
@@ -3016,16 +3027,6 @@ describe("a fork on a computer you joined", () => {
     channel.close();
   });
 
-  /** Every op the computer's daemon serves, off the frames crate itself, with whether its request names the
-   * workspace it is for: a new op there fails this table until it is placed on one side. */
-  const daemonOps = (): { op: string; scoped: boolean }[] => {
-    const crate = (file: string): string => readFileSync(new URL(`../../../daemon/crates/wsp-frames/src/${file}`, import.meta.url), "utf8");
-    const listed = (text: string, name: string): string[] => [...text.match(new RegExp(`pub const ${name}: \\[&str; \\d+\\] = \\[([^\\]]*)\\]`))![1]!.matchAll(/"([^"]+)"/g)].map(m => m[1]!);
-    const request = crate("request.rs");
-    const body = request.slice(request.indexOf("pub enum DaemonOp"), request.indexOf("pub const DAEMON_OPS"));
-    const variants = new Map(body.split(/#\[serde\(rename = "/).slice(1).map(part => [part.slice(0, part.indexOf('"')), part.includes("machine_id")] as const));
-    return [...listed(request, "DAEMON_OPS"), ...listed(crate("machine.rs"), "MACHINE_OPS")].map(op => ({ op, scoped: variants.get(op) ?? false }));
-  };
   const PTY = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list"];
   const FILES_AND_GIT = ["fs.list", "fs.read", "git.status", "git.diff", "git.push", "git.pr", "git.prState"];
   const HOST_GUESTS = ["guest.watch", "guest.reply", "guest.close"];
@@ -5153,10 +5154,30 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
     expect(through.opened).toHaveLength(1);
   });
 
-  it("refuses the panes' road, Terminal, Files and Diff, in the doctor's sentence, before a frame reaches that computer", async () => {
+  it("answers git.status for a copy there, the read an ask before a delete makes, and the beat the panes' link opens on", async () => {
     const { made, place } = await blockedFork();
-    await expect(runtime!.workspaces.daemonChannel(made.id, () => {})).rejects.toThrow(SAID);
-    expect(place().frames).toEqual([]);
+    const app = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(app.ws);
+    const opened = await app.request("daemon.open", { workspaceId: made.id });
+    expect(opened.ok, String(opened["error"])).toBe(true);
+    const channel = String(opened["channel"]);
+    const sent = (frame: Record<string, unknown>) => app.request("daemon.send", { channel, frame }).then(r => r["reply"]);
+    expect(await sent({ op: "ping" })).toMatchObject({ ok: true });
+    expect(await sent({ op: "git.status", cwd: "/root/work" })).toMatchObject({ ok: true, branch: "work" });
+    expect(place().frames.filter(f => f["op"] === "git.status")).toMatchObject([{ machineId: made.machineId }]);
+    expect(await sent({ op: "git.diff", cwd: "/root/work" })).toMatchObject({ ok: false, error: SAID });
+  });
+
+  it("refuses every other frame on the panes' road, Terminal, Files and Diff included, in the doctor's sentence before it reaches that computer", async () => {
+    const { made, place } = await blockedFork();
+    const channel = await runtime!.workspaces.daemonChannel(made.id, () => {});
+    for (const { op } of daemonOps().filter(o => o.op !== "git.status" && o.op !== "ping")) {
+      const before = place().asked[op] ?? 0;
+      expect(await channel.send({ op, ptyId: "p1", path: "/root/work", cwd: "/root/work", cols: 80, rows: 24 }), op).toMatchObject({ ok: false, error: SAID });
+      expect(place().asked[op] ?? 0, op).toBe(before);
+    }
+    expect(place().frames.filter(f => f["op"] !== "git.status")).toEqual([]);
+    channel.close();
   });
 
   it("refuses the Browser's road to a port inside the copy in the doctor's sentence", async () => {
