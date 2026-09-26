@@ -633,6 +633,11 @@ const threadStates = () => {
       threadsOn("ws_docs", [[{ ...spawned("docs-move", DOCS_READ, "migrate", "migrate"), status: "failed" }, 30]]),
     ),
     goldens: sealed(),
+    // Two computers the person joined beside the cloud, so the computer switcher lists a row of each kind.
+    places: {
+      p_spoo: place("p_spoo", "spoo", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, runsWorkspaces: true, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }),
+      p_studio: place("p_studio", "studio", 4, { runsWorkspaces: true }),
+    },
   });
 };
 

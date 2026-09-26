@@ -387,6 +387,52 @@
       "widths": [
         1440
       ]
+    },
+    {
+      "name": "threads-computers",
+      "at": "/",
+      "fixture": "thread-states",
+      "steps": [
+        "k=computer-switcher"
+      ],
+      "wait": "computer-switcher-menu",
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "threads-computers-shut",
+      "at": "/",
+      "fixture": "thread-states",
+      "wait": "k=computer-switcher",
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "threads-computer-picked",
+      "at": "/",
+      "fixture": "thread-states",
+      "steps": [
+        "k=computer-switcher",
+        "switcher-option=here"
+      ],
+      "wait": "k=computer-switcher",
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "threads-picker",
+      "at": "/",
+      "fixture": "thread-states",
+      "steps": [
+        "k=project-switcher"
+      ],
+      "wait": "project-switcher-menu",
+      "widths": [
+        1440
+      ]
     }
   ]
 }

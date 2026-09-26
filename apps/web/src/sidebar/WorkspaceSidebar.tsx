@@ -7,8 +7,9 @@
 // agent opened one step in under its opener, and a workspace an agent forked
 // one step in under the thread that forked it with its own threads under
 // that; under one picked project the tree starts at its workspaces. Child
-// lists draw the rails that make it read as a tree. Computers are not here at
-// all: they live in Settings, and a project on another computer names it once
+// lists draw the rails that make it read as a tree. The computer switcher
+// under the project switcher narrows it to the work on one computer, and a
+// project on another computer names it once
 // beside its row. On a wsp with no project the body holds one row that points
 // at the first run in the centre. The settled shelf with the archive nested
 // in it, keyboard traversal, the rebuild of a zombie or gone machine, the
@@ -49,6 +50,8 @@ import { ForwardsList } from "./ForwardsList.js";
 import { AddProjectDialog } from "./AddProjectDialog.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ProjectSwitcher } from "./ProjectSwitcher.js";
+import { ComputerSwitcher } from "./ComputerSwitcher.js";
+import { groupsOn, workspacesOn } from "./computerPick.js";
 import { CHILD_LIST_CLASS, GLYPH_ROW_CLASS, HOVER_GLYPH_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, ROW_SENTENCE_CLASS, TWO_LINE_FIRST_CLASS, TWO_LINE_ROW_CLASS, TWO_LINE_SECOND_CLASS, groupRowId, projectRowK, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads, threadForest, type ThreadNode } from "./Sidebar.logic.js";
@@ -69,6 +72,8 @@ const IDLE_OPEN_KEY = "wsp:sidebar-idle-open";
 const ARCHIVED_OPEN_KEY = "wsp:sidebar-archived-open";
 /** The project the tree is filtered to. A view of this window alone, so it never follows a person to another one. */
 const PROJECT_PICK_KEY = "wsp:sidebar-project";
+/** The computer the tree is filtered to, of this window alone as the project pick is. */
+const COMPUTER_PICK_KEY = "wsp:sidebar-computer";
 const NOTHING_COLLAPSED: ReadonlyArray<string> = [];
 const workspaceIdsCodec: Codec<ReadonlyArray<string>> = {
   decode: raw => {
@@ -80,10 +85,10 @@ const workspaceIdsCodec: Codec<ReadonlyArray<string>> = {
   },
   encode: value => JSON.stringify(value),
 };
-const projectPickCodec: Codec<string | null> = {
+const pickCodec: Codec<string | null> = {
   decode: raw => {
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "string") throw new Error(`Expected a project id, got ${raw}.`);
+    if (typeof parsed !== "string") throw new Error(`Expected an id, got ${raw}.`);
     return parsed;
   },
   encode: value => JSON.stringify(value),
@@ -182,7 +187,8 @@ export function WorkspaceSidebar() {
 
   const [openIdle, setOpenIdle] = useLocalStorage(IDLE_OPEN_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
   const [archivedOpenIds, setArchivedOpenIds] = useLocalStorage(ARCHIVED_OPEN_KEY, NOTHING_COLLAPSED, workspaceIdsCodec);
-  const [pickStored, setPickStored] = useLocalStorage<string | null>(PROJECT_PICK_KEY, null, projectPickCodec);
+  const [pickStored, setPickStored] = useLocalStorage<string | null>(PROJECT_PICK_KEY, null, pickCodec);
+  const [computerStored, setComputerStored] = useLocalStorage<string | null>(COMPUTER_PICK_KEY, null, pickCodec);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   /** The projects whose own rows are shut, by the project's id. */
   const [shutProjects, setShutProjects] = useState<ReadonlySet<string>>(() => new Set());
@@ -213,7 +219,10 @@ export function WorkspaceSidebar() {
   // This window is on another computer and the one running wsp has gone quiet: the rows stand as they were last
   // known, and the line under the head says why nothing moves.
   const asleep = hostAsleep(conn);
-  const projects = useSidebarProjects();
+  const fleet = useSidebarProjects();
+  // A pick for a computer this host no longer holds reads as every computer.
+  const computerPicked = places.some(place => place.id === computerStored) ? computerStored : null;
+  const projects = useMemo(() => workspacesOn(fleet, places, computerPicked), [fleet, places, computerPicked]);
   const launches = useLaunches();
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
   /** The thread rows this body draws for each workspace, by the rules that hide one: its project's row shut, its
@@ -243,7 +252,7 @@ export function WorkspaceSidebar() {
     for (const group of groups) void loadLanding(group.project.id);
   }, [groups, loadLanding]);
   const tripTarget = trip === null ? undefined : workspaces.find(w => w.id === trip.workspaceId);
-  const forgetTarget = forgetting === null ? undefined : projects.find(p => p.id === forgetting.workspaceId);
+  const forgetTarget = forgetting === null ? undefined : fleet.find(p => p.id === forgetting.workspaceId);
 
   const openDialog = (project: string | null): void => setDialog({ key: Date.now(), project });
   // The palette's New workspace lands on the project the head names while one is picked, as the head's plus does.
@@ -630,6 +639,7 @@ export function WorkspaceSidebar() {
           if (group !== undefined) void openContextMenu(event, projectActionsOf(group));
         }}
       />
+      <ComputerSwitcher places={places} pick={computerPicked} onPick={setComputerStored} />
       {asleep ? (
         <p data-sidebar-asleep className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
           {HOST_ASLEEP_LINE}
@@ -653,7 +663,7 @@ export function WorkspaceSidebar() {
       <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
         <SidebarContent fixedHeader={header}>
           <ul data-sidebar-tree className="flex w-full min-w-0 flex-col gap-1 px-[var(--sidebar-content-inset)] pt-1">
-            {picked === null ? groups.map(projectItem) : projectChildren(picked, 0, false)}
+            {picked === null ? groupsOn(groups, places, computerPicked).map(projectItem) : projectChildren(picked, 0, false)}
             {homeless.map(creation => creationItem(creation, 0, false))}
             {projectsRefused !== null ? (
               <li>

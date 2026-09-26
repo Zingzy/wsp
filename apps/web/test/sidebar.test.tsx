@@ -17,7 +17,8 @@ import { placeName } from "../src/settings/places.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestNewWorkspace, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
-import { NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS } from "../src/sidebar/words.js";
+import { useSettingsStore } from "../src/settings/settingsStore.js";
+import { COMPUTER_SWITCHER_WORDS, NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS } from "../src/sidebar/words.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { WorkspaceTerminals, provideTerminals } from "../src/terminal/link.js";
@@ -1346,6 +1347,114 @@ describe("the project switcher", () => {
     const sheet = await screen.findByRole("dialog");
     expect(sheet.dataset["k"]).toBe("add-project");
     expect(menu()).toBeNull();
+  });
+});
+
+describe("the computer switcher", () => {
+  const computerHead = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>("[data-k=computer-switcher]")!;
+  const computerMenu = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-computer-switcher-menu]");
+  const HERE_NAME = placeName(PLACES[0]!);
+  /** The two projects of the project switcher's cases, spoo-landing's workspace on the box and wsp's on this computer. */
+  const two = async () => {
+    const api = fakeApi([API, { ...WEB, place: "here", project: { id: "pr_2", name: "wsp", path: "/Users/dev/wsp", computer: "here" } }], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello", threadId: "thr_1" }), session("s2", "ws_b", { prompt: "world", threadId: "thr_2" })]);
+    api.projectsList = vi.fn(async () => [...PROJECTS, HERE_PROJECT]);
+    await mount(api, "api");
+    await waitFor(() => expect(rowIds()).toContain("project:pr_2"));
+    await waitFor(() => expect(useStore.getState().places).toHaveLength(2));
+    return api;
+  };
+  const pickComputer = (name: string | RegExp): void => {
+    fireEvent.click(computerHead());
+    fireEvent.click(within(computerMenu()!).getByRole("option", { name }));
+  };
+
+  it("stands under the project switcher reading All computers with the monitor and the chevron, and opens to a search field, All computers checked, one row per computer by its name with its glyph and gear, and Add a computer at the foot", async () => {
+    await two();
+    const heads = [...document.querySelectorAll<HTMLElement>("[data-sidebar-search] [data-k$=-switcher]")].map(el => el.dataset["k"]);
+    expect(heads).toEqual(["project-switcher", "computer-switcher"]);
+    expect(computerHead().textContent).toBe(COMPUTER_SWITCHER_WORDS.all);
+    expect(computerHead().className).toBe(head().className);
+    expect(computerHead().querySelector("svg.lucide-monitor")).not.toBeNull();
+    expect(computerHead().querySelector("svg.lucide-chevron-down")).not.toBeNull();
+    expect(computerHead().getAttribute("aria-haspopup")).toBe("listbox");
+    fireEvent.click(computerHead());
+    expect(computerHead().getAttribute("aria-expanded")).toBe("true");
+    const list = within(computerMenu()!);
+    const options = () => list.getAllByRole("option").map(option => option.textContent);
+    expect(options()).toEqual([COMPUTER_SWITCHER_WORDS.all, HERE_NAME, BOX_NAME]);
+    const all = list.getByRole("option", { name: COMPUTER_SWITCHER_WORDS.all });
+    expect(all.getAttribute("aria-selected")).toBe("true");
+    expect(all.querySelector("svg.lucide-check")).not.toBeNull();
+    expect(all.querySelector("svg.lucide-monitor")).not.toBeNull();
+    for (const place of PLACES) {
+      const row = list.getByRole("option", { name: new RegExp(`^${placeName(place)}`) });
+      expect(row.querySelector("[data-computer-glyph]")).not.toBeNull();
+      expect(row.querySelector("[data-k=computer-settings]")!.getAttribute("aria-label")).toBe(COMPUTER_SWITCHER_WORDS.settingsOf(placeName(place)));
+    }
+    expect(list.getByRole("option", { name: new RegExp(`^${BOX_NAME}`) }).querySelector("svg.lucide-cloud")).not.toBeNull();
+    const field = list.getByLabelText(COMPUTER_SWITCHER_WORDS.search) as HTMLInputElement;
+    expect(field.placeholder).toBe(COMPUTER_SWITCHER_WORDS.search);
+    fireEvent.change(field, { target: { value: BOX_NAME.toUpperCase() } });
+    expect(options()).toEqual([COMPUTER_SWITCHER_WORDS.all, BOX_NAME]);
+    expect(list.getByText(COMPUTER_SWITCHER_WORDS.add).closest("button")!.querySelector("svg.lucide-plus")).not.toBeNull();
+    // The project switcher's menu stays shut: each head opens its own.
+    expect(menu()).toBeNull();
+  });
+
+  it("picking a computer lists only the work on it, names it in the head, remembers it in this window, stacks with the project pick, and All computers brings every row back", async () => {
+    await two();
+    pickComputer(new RegExp(`^${BOX_NAME}`));
+    expect(computerMenu()).toBeNull();
+    expect(computerHead().textContent).toBe(BOX_NAME);
+    expect(computerHead().querySelector("svg.lucide-cloud")).not.toBeNull();
+    // The picked head takes the row's own ink, as a picked project's head does, where the menu's rows stay muted.
+    expect(computerHead().querySelector("[data-computer-glyph]")!.getAttribute("class")).not.toContain("text-muted-foreground");
+    fireEvent.click(computerHead());
+    expect(within(computerMenu()!).getByRole("option", { name: new RegExp(`^${BOX_NAME}`) }).querySelector("[data-computer-glyph]")!.getAttribute("class")).toContain("text-muted-foreground");
+    fireEvent.click(computerHead());
+    expect(window.localStorage.getItem("wsp:sidebar-computer")).toBe('"box"');
+    // wsp keeps nothing on the box and lives on this computer, so its row goes with its workspace.
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:thr_1"]);
+    // The project pick stacks on it: wsp on the box is nothing, spoo-landing on the box is its one workspace.
+    fireEvent.click(head());
+    fireEvent.click(within(menu()!).getByRole("option", { name: /^wsp/ }));
+    expect(head().textContent).toBe("wsp");
+    expect(rowIds()).toEqual([]);
+    fireEvent.click(head());
+    fireEvent.click(within(menu()!).getByRole("option", { name: /^spoo-landing/ }));
+    expect(rowIds()).toEqual(["ws:ws_a", "thread:thr_1"]);
+    pickComputer(new RegExp(`^${HERE_NAME}`));
+    expect(rowIds()).toEqual([]);
+    fireEvent.click(head());
+    fireEvent.click(within(menu()!).getByRole("option", { name: SWITCHER_WORDS.all }));
+    expect(rowIds()).toEqual(["project:pr_2", "ws:ws_b", "thread:thr_2"]);
+    pickComputer(COMPUTER_SWITCHER_WORDS.all);
+    expect(computerHead().textContent).toBe(COMPUTER_SWITCHER_WORDS.all);
+    expect(window.localStorage.getItem("wsp:sidebar-computer")).toBeNull();
+    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:thr_1", "project:pr_2", "ws:ws_b", "thread:thr_2"]);
+  });
+
+  it("a stored pick for a computer this host no longer holds reads as All computers", async () => {
+    window.localStorage.setItem("wsp:sidebar-computer", '"gone"');
+    await two();
+    expect(computerHead().textContent).toBe(COMPUTER_SWITCHER_WORDS.all);
+    expect(rowIds()).toContain("project:pr_1");
+    expect(rowIds()).toContain("project:pr_2");
+  });
+
+  it("a computer's gear opens that computer's page in Settings without picking it, and Add a computer opens the add sheet", async () => {
+    await two();
+    fireEvent.click(computerHead());
+    fireEvent.click(within(computerMenu()!).getByRole("option", { name: new RegExp(`^${BOX_NAME}`) }).querySelector<HTMLElement>("[data-k=computer-settings]")!);
+    expect(useSettingsStore.getState().at).toEqual({ kind: "computer", id: "box" });
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(computerHead().textContent).toBe(COMPUTER_SWITCHER_WORDS.all);
+    expect(computerMenu()).toBeNull();
+    useStore.setState({ settingsOpen: false, addComputerOpen: false });
+    fireEvent.click(computerHead());
+    fireEvent.click(within(computerMenu()!).getByText(COMPUTER_SWITCHER_WORDS.add));
+    expect(computerMenu()).toBeNull();
+    expect(useStore.getState()).toMatchObject({ settingsOpen: true, addComputerOpen: true });
   });
 });
 

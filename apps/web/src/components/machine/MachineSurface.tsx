@@ -184,7 +184,7 @@ function HereFacts() {
   return (
     <FactChips
       items={[
-        { text: placeName(place), glyph: <ComputerGlyph place={place} className="size-3" /> },
+        { text: placeName(place), glyph: <ComputerGlyph place={place} className="size-3 text-muted-foreground" /> },
         place.os === undefined ? null : { text: place.os, icon: AppWindowIcon },
         place.shape ? { text: `${place.shape.cpu} cores`, icon: CpuIcon } : null,
         place.shape ? { text: fmtMemGb(place.shape.memMb), icon: MemoryStickIcon } : null,
