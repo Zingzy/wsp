@@ -4559,14 +4559,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await emitStatus(entry, "gone", reason);
     return "settled";
   };
+  /** Records whose gone verdict is being read again: the poll sees the same 404 every tick while the reads run. */
+  const rereading = new Set<string>();
   /** A sighting from outside a verb (the poll, the sweep): a nap or a wake in flight meets the machine itself and
-   * settles what it finds, so the sighting defers to it. */
+   * settles what it finds, so the sighting defers to it. The row never read gone, so a verdict that did not hold
+   * leaves it as it was, and one nothing could check says so. */
   const adoptGone = async (entry: LiveWorkspace, reason: string): Promise<void> => {
-    if (entry.record.phase === "gone" || entry.napping || entry.waking) return;
-    // The poll pushed a gone row before the confirming read answered; a verdict that did not hold corrects it here
-    // rather than leaving the screen wrong until the next poll.
-    const outcome = await settleGone(entry, reason);
-    if (outcome === "not-gone" || outcome === "unchecked") await emitStatus(entry, reachOf(entry), outcome === "not-gone" ? NOT_GONE : GONE_UNCHECKED);
+    const id = entry.record.id;
+    if (entry.record.phase === "gone" || entry.napping || entry.waking || rereading.has(id)) return;
+    rereading.add(id);
+    try {
+      if ((await settleGone(entry, reason)) === "unchecked") await emitStatus(entry, reachOf(entry), GONE_UNCHECKED);
+    } finally {
+      rereading.delete(id);
+    }
   };
   /** A record marked gone over a machine the provider still holds: the state read by id is the word on gone, so the
    * record follows it back rather than leaving a rebuild to abandon a healthy machine that would bill on unrecorded.
@@ -4597,10 +4603,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const entry = live.get(e.status.id);
     if (entry === undefined) return;
     if (e.status.phase === "running" && e.status.machineState === "paused") void adoptPause(entry);
-    // A status about a machine since replaced says nothing about the one now under the record.
-    if (e.status.machineState === "gone" && e.status.phase !== "gone" && e.status.machineId === entry.record.machineId) {
-      void adoptGone(entry, e.status.reason ?? goneWords(e.status.machineId));
-    }
   });
 
   /** How long the machine behind a record has been quiet by its own computer's reading, where that computer
@@ -4774,7 +4776,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return entry === undefined || isAbsentMachine(entry.machine);
   };
 
-  const rereading = new Set<string>();
   /** What the provider said to the load's one read of a record now held, quoted when the record settles gone. */
   const heldAnswers = new Map<string, string>();
   /** A record the load held by a stand-in, read again the way a gone verdict is confirmed: a machine the provider
@@ -9103,6 +9104,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         offerDaemonAgain(entry, s);
         readVersionAgain(entry, s);
       }
+    },
+    onGone: (id, machineId, reason) => {
+      const entry = live.get(id);
+      // A sighting of a machine since replaced says nothing about the one now under the record.
+      if (entry !== undefined && entry.record.machineId === machineId) void adoptGone(entry, reason).catch((e: unknown) => console.warn(`${entry.record.id}'s gone reading was not confirmed: ${e instanceof Error ? e.message : String(e)}`));
     },
     ...(opts.status !== undefined ? { defaults: opts.status } : {}),
     clock,

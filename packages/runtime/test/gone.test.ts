@@ -505,7 +505,7 @@ describe("a gone verdict is checked against the state read before it ends a turn
     };
   };
 
-  it("one 404 over a machine that is there: the record stays running, the row is corrected, and the log says it is not gone", async () => {
+  it("one 404 over a machine that is there: the record stays running, the row never moves, and the log says it is not gone", async () => {
     const { rt, backend, fc, statuses, events } = testRuntime({ goneConfirmMs: CONFIRM });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -539,9 +539,70 @@ describe("a gone verdict is checked against the state read before it ends a turn
         const record = await rt.workspaces.get(ws.id);
         expect(record.phase).toBe("running");
         expect(record.gone).toBeUndefined();
-        expect(statuses.at(-1)).toMatchObject({ id: ws.id, phase: "running", machineState: "running", reason: NOT_GONE });
+        expect(statuses.at(-1)).toMatchObject({ id: ws.id, phase: "running", machineState: "running" });
+        expect(statuses.at(-1)!.reason).toBeUndefined();
         // The window was never dropped, so it still runs from the create that armed it.
         expect(statuses.at(-1)!.idleAt).toBe(T0 + WINDOW);
+      } finally {
+        stop();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("the pushed row: one 404 on the poll leaves it as it was, and it turns gone only when the provider answers gone twelve reads in a row", async () => {
+    const { rt, backend, fc, statuses } = testRuntime({ goneConfirmMs: CONFIRM });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      const edge = await edgeHolding(m);
+      const stop = rt.status.watch();
+      try {
+        await until(() => edge.held.length >= 1);
+        edge.answer(edge.held.shift()!);
+        await until(() => statuses.length >= 1);
+        const shown = statuses.at(-1)!;
+        const listAnswered = async () => {
+          const listed = rt.status.list();
+          await until(() => edge.held.length >= 1);
+          edge.answer(edge.held.shift()!);
+          return listed;
+        };
+
+        flakeOnce(m);
+        const reads = countReads(m);
+        let rows = statuses.length;
+        fc.advance(POLL);
+        await until(() => edge.held.length >= 1);
+        edge.drop(edge.held.shift()!);
+        await until(() => reads.n >= 1);
+        await new Promise(r => setImmediate(r));
+        expect(statuses.slice(rows)).toEqual([]);
+        expect((await listAnswered())[0]).toMatchObject({ machineState: "running", reach: { state: shown.reach.state } });
+        fc.advance(CONFIRM);
+        await until(() => warn.mock.calls.length >= 1);
+        await new Promise(r => setImmediate(r));
+        expect(statuses.slice(rows)).toEqual([]);
+
+        m.killed = true;
+        const gets = vi.spyOn(backend, "get");
+        rows = statuses.length;
+        fc.advance(POLL - CONFIRM);
+        await until(() => edge.held.length >= 1);
+        const before = reads.n;
+        edge.drop(edge.held.shift()!);
+        await until(() => reads.n > before);
+        await new Promise(r => setImmediate(r));
+        // A read of the rows while the verdict waits reads what the record says and starts no second confirmation.
+        expect((await listAnswered())[0]).toMatchObject({ phase: "running", machineState: "running" });
+        expect(statuses.slice(rows).filter(s => s.machineState === "gone")).toEqual([]);
+        fc.advance(CONFIRM);
+        await until(() => statuses.some(s => s.machineState === "gone"));
+        expect(gets.mock.calls.filter(c => c[0] === m.id)).toHaveLength(GONE_READS);
+        expect(statuses.slice(rows).map(s => s.machineState)).toEqual(["gone"]);
+        expect(statuses.at(-1)).toMatchObject({ id: ws.id, phase: "gone", reach: { state: "gone" } });
       } finally {
         stop();
       }
