@@ -1309,9 +1309,21 @@ impl Ops {
     fn running(&self, id: &str) -> Result<Workspace, OpError> {
         let record = self.record(id)?;
         if !runtime::alive(&record.init) {
-            return Err(OpError::plain(format!("workspace {} is stopped", record.id)));
+            return Err(stopped(&record.id));
         }
         Ok(record)
+    }
+
+    /// Where a stopped workspace's copy of its checkout is on this computer and the path it is mounted at inside,
+    /// for the one read that answers a stopped workspace: its branch, off the copy's git directory. None while it
+    /// runs, and the stopped refusal for a stopped workspace made with no project.
+    pub fn copy_of_stopped(&self, id: &str) -> Result<Option<(PathBuf, String)>, OpError> {
+        let record = self.record(id)?;
+        if runtime::alive(&record.init) {
+            return Ok(None);
+        }
+        let copy = record.copy.ok_or_else(|| stopped(&record.id))?;
+        Ok(Some((self.layout.copy_of(&record.id), copy.at)))
     }
 
     fn records(&self) -> Result<Vec<Workspace>, OpError> {
@@ -1505,6 +1517,11 @@ impl Ports for Inward {
             let _ = net.forward_inward(&id, pid, inside, box_port).await;
         });
     }
+}
+
+/// What anything that needs a workspace running is refused with once it has stopped.
+fn stopped(id: &str) -> OpError {
+    OpError::plain(format!("workspace {id} is stopped"))
 }
 
 fn records_under(layout: &Layout) -> Result<Vec<Workspace>, OpError> {
@@ -2013,6 +2030,17 @@ mod tests {
         assert_eq!(ops.rootfs_of_running("wsp-awake").unwrap(), layout.rootfs("wsp-awake"));
         assert_eq!(ops.rootfs_of_running("wsp-asleep").unwrap_err().message, "workspace wsp-asleep is stopped");
         assert_eq!(ops.rootfs_of_running("wsp-x").unwrap_err().message, "no such workspace: wsp-x");
+        // A stopped workspace's copy is where its branch is read from; one running goes inside, and one made with
+        // no project has nothing to read, so it keeps the stopped refusal.
+        assert_eq!(ops.copy_of_stopped("wsp-awake").unwrap(), None);
+        assert_eq!(ops.copy_of_stopped("wsp-asleep").unwrap_err().message, "workspace wsp-asleep is stopped");
+        assert_eq!(ops.copy_of_stopped("wsp-x").unwrap_err().message, "no such workspace: wsp-x");
+        let mut carried = awake("wsp-carried", None);
+        carried.init = Init { pid: i32::MAX, started: 0, boot_id: String::new() };
+        carried.copy = Some(CopyMade { from: "/srv/app".to_owned(), at: "/root/app".to_owned(), made: CopyWord::Plain, ms: 1 });
+        fs::create_dir_all(layout.upper("wsp-carried")).unwrap();
+        bundle::write_json(&layout.record("wsp-carried"), &carried).unwrap();
+        assert_eq!(ops.copy_of_stopped("wsp-carried").unwrap(), Some((layout.copy_of("wsp-carried"), "/root/app".to_owned())));
         assert_eq!(
             ops.exec_in("wsp-asleep", "true", None, Duration::from_secs(1)).await.unwrap_err().message,
             "workspace wsp-asleep is stopped"

@@ -380,7 +380,8 @@ async fn git_status_parses_the_branch_header_and_every_entry_kind_from_porcelain
     assert_eq!(branch["head"], "feature");
     let oid = branch["oid"].as_str().unwrap();
     assert!(oid.len() == 40 && oid.chars().all(|c| c.is_ascii_hexdigit()), "{oid}");
-    assert_eq!((branch["ahead"].as_u64(), branch["behind"].as_u64()), (Some(0), Some(0)));
+    // No upstream: counted against the default branch, main, which feature is one commit past.
+    assert_eq!((branch["ahead"].as_u64(), branch["behind"].as_u64()), (Some(1), Some(0)));
     assert!(branch.get("upstream").is_none(), "{branch}");
     let entries = res["entries"].as_array().unwrap();
     assert!(entries.contains(&json!({ "xy": ".M", "path": "src/index.ts" })), "{entries:?}");
