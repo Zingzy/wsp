@@ -43,9 +43,9 @@ The unit holds no key. It carries `PATH`, `WSP_HOME`, `WSP_LABS`, `WSP_UPDATE_CH
 
 After loading, `wsp up --service` waits up to twenty seconds until the lock exists and the port answers a request. The lock alone is not proof, since a host that cannot bind takes the lock and dies under restart, over and over. On failure it prints the last twenty lines of the log.
 
-`wsp down` stops the service and takes the unit away. `wsp status` prints whether a host is serving this state file, its ports, its token file, what keeps it there and the latest release off `release.json`, with a non-zero exit code when none does.
+`wsp down` stops the service and takes the unit away; running turns keep going until the next host adopts them. `wsp status` prints whether a host is serving this state file, its ports, its token file, what keeps it there and the latest release off `release.json`, with a non-zero exit code when none does.
 
-An install of a newer wsp under a running host changes its files, not the process. Settings > About then says which version the files carry and, where a restart brings the host back, offers Restart host: the service exits and its manager starts it on the new files, a host a command started for itself starts its successor on the same ports, and the app relaunches. A host `wsp up` holds in a terminal is restarted from that terminal. A restart drops every open terminal pane on this computer, every open localhost forward and any sign-in in progress; a forward comes back when the workspace prints its URL again, and running turns continue.
+An install of a newer wsp under a running host changes its files, not the process. Settings > About then says which version the files carry and, where a restart brings the host back, offers Restart host: the service exits and its manager starts it on the new files, a host a command started for itself starts its successor on the same ports, and the app relaunches. `wsp restart` takes the same road from the command line or an agent's tools and answers once the new host serves. A host `wsp up` holds in a terminal is restarted from that terminal. A restart drops every open terminal pane on this computer, every open localhost forward and any sign-in in progress; a forward comes back when the workspace prints its URL again, and running turns continue.
 
 ## What it keeps
 

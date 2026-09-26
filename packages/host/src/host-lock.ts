@@ -35,6 +35,14 @@ const MARKS: readonly HostStarted[] = ["verb", "service"];
 /** What the environment says started this process, and nothing where nothing did. */
 export const startedByEnv = (env: Readonly<Record<string, string | undefined>>): HostStarted | undefined => MARKS.find(word => word === env[STARTED_BY_ENV]);
 
+/** How often a wait on a host coming up or going down on this computer reads the lock again. */
+export const POLL_MS = 200;
+
+/** A load, a stop or a start is a process coming up or going down on this computer, not a network call. One number
+ * for every road that waits on one, so a service, a verb's own child and a line waiting out a restart are given the
+ * same patience. */
+export const SERVICE_WAIT_MS = 20_000;
+
 function isHostLock(v: unknown): v is HostLock {
   return (
     typeof v === "object" &&

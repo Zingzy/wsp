@@ -10,7 +10,7 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { authority, fmtDuration, LABS_ENV, shellQuote, UPDATE_CHECK_ENV } from "@wsp/protocol";
-import { addressLines, dialAddress, servingHost, stateLine, type HostLock } from "./host-lock.js";
+import { addressLines, dialAddress, POLL_MS, servingHost, stateLine, type HostLock } from "./host-lock.js";
 import { providerEnvNames } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { homeNamed } from "./serving-home.js";
@@ -231,6 +231,10 @@ const systemd: ServiceManager = {
       ...Object.entries(plan.env).map(([name, value]) => `Environment=${shellQuote(`${name}=${value}`)}`),
       "Restart=always",
       "RestartSec=5",
+      // The host's own process and nothing else: every turn leads a process group of its own so the next host
+      // re-opens it, and the default kills the unit's whole cgroup, turns included. The agent on a place keeps the
+      // default, since leaving takes the terminals and servers it started down with it.
+      ...(roleWord(plan) === "host" ? ["KillMode=process"] : []),
       `StandardOutput=append:${plan.logPath}`,
       `StandardError=append:${plan.logPath}`,
       "",
@@ -426,12 +430,6 @@ export async function serviceReading(manager: ServiceManager | undefined, at: Se
   const held = (await run(manager.holds(at))).code === 0;
   return `${manager.words} ${unit.name}, ${held ? "loaded" : "installed and not loaded"} (${unit.path})`;
 }
-
-const POLL_MS = 200;
-
-/** A load, a stop or a start is a process coming up or going down on this computer, not a network call. One number
- * for every road that waits on one, so a service and a verb's own child are given the same patience. */
-export const SERVICE_WAIT_MS = 20_000;
 
 /** A sleep a waiter can cut short: the timer goes with it, so a loop that stopped waiting leaves nothing pending
  * behind it. */
