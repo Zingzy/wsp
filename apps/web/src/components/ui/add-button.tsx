@@ -13,9 +13,12 @@ type AddButtonProps = Omit<ComponentProps<typeof Button>, "variant"> & {
   busy?: boolean;
 };
 
+/** The keycap's padding and gap measure to the plus itself, so it takes none of the glyph inset other buttons pull in by. */
+const PLUS_AT_EDGE = "[&_svg]:mx-0";
+
 function AddButton({ primary = false, busy = false, size = "default", className, children, ...props }: AddButtonProps) {
   return (
-    <Button data-add-button="" variant={primary ? "default" : "outline"} size={size} className={cn(size === "default" && "gap-1.5 sm:text-[13px]", className)} {...props}>
+    <Button data-add-button="" variant={primary ? "default" : "outline"} size={size} className={cn(PLUS_AT_EDGE, size === "default" && "gap-1.5 sm:text-[13px]", className)} {...props}>
       {busy ? <Spinner data-k="adding-spinner" aria-hidden role={undefined} className="size-3.5" /> : <PlusIcon aria-hidden className="size-3.5" />}
       {children}
     </Button>

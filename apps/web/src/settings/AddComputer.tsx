@@ -33,7 +33,6 @@ import { RefusalSlot } from "./sheetParts.js";
 
 const MINE = ADD_COMPUTER_WORDS;
 const PLAN_FACTS: Partial<Record<PlaceAddStep, string>> = { wsp: PLACE_INSTALL.weight };
-const KEYCAP = "h-9 px-4 sm:h-9";
 
 type JoinLines = Awaited<ReturnType<NonNullable<Api["mintJoin"]>>>;
 type SshHost = Awaited<ReturnType<NonNullable<Api["sshHosts"]>>>[number];
@@ -304,7 +303,7 @@ function SshForm({ job }: { job: PlaceAddJob | undefined }) {
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
             {running ? MINE.running : <><Kbd>↵</Kbd>{MINE.adds}</>}
           </span>
-          <AddButton primary data-k="ssh-add" className={cn(KEYCAP, "ms-auto")} busy={running} held={running || held !== undefined || host.trim() === ""} onClick={() => add({ user, host, port })}>
+          <AddButton primary data-k="ssh-add" className="ms-auto" busy={running} held={running || held !== undefined || host.trim() === ""} onClick={() => add({ user, host, port })}>
             {running ? MINE.adding : MINE.addComputer}
           </AddButton>
         </>
@@ -485,7 +484,6 @@ export function AddComputer({ setup, now = () => Date.now(), road: first = null 
   }, []);
   useEffect(() => {
     if (!asked) return;
-    root.current?.scrollIntoView({ block: "start", behavior: "smooth" });
     setRoad(r => r ?? "ssh");
     useStore.getState().closeAddComputer();
   }, [asked]);

@@ -4,7 +4,7 @@
 // dialog's, so a project is made in one place whether this is the first or the
 // tenth; a workspace is its own step after it.
 import { Mark } from "../brand/Brand.js";
-import { Button } from "../components/ui/button.js";
+import { AddButton } from "../components/ui/add-button.js";
 import { FIRST_RUN_WORDS } from "../sidebar/words.js";
 import { requestAddProject } from "./shellRequests.js";
 
@@ -18,9 +18,9 @@ export function FirstRun() {
       <p className="mt-1.5 max-w-xs text-sm text-muted-foreground" data-k="sentence">
         {FIRST_RUN_WORDS.sentence}
       </p>
-      <Button type="button" data-k="add-project" className="mt-6" onClick={requestAddProject}>
+      <AddButton primary data-k="add-project" className="mt-6" onClick={requestAddProject}>
         {FIRST_RUN_WORDS.add}
-      </Button>
+      </AddButton>
     </div>
   );
 }

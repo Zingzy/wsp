@@ -15,8 +15,6 @@ import { ADD_COMPUTER_WORDS as MINE } from "./format.js";
 import { isProviderPlace } from "./places.js";
 import { RefusalSlot } from "./sheetParts.js";
 
-const KEY_BUTTON = "h-10 px-4 sm:h-10";
-
 export const INPUT = "h-10 w-full font-mono [&_input]:h-[38px] [&_input]:ps-9 [&_input]:text-[13px] [&_input]:leading-[38px] sm:[&_input]:h-[38px] sm:[&_input]:text-[13px] sm:[&_input]:leading-[38px]";
 
 /** One provider's key: the field, Add or Replace, and the provider's own refusal under it. `held`: the host holds a
@@ -79,11 +77,11 @@ export function ProviderKey({ id, words, held, kept, onKept, children }: { id: s
           <Input data-k="cloud-key" nativeInput type="password" autoComplete="off" spellCheck={false} value={key} placeholder={has ? MINE.replaceKey : words.keyName} aria-label={words.keyName} {...(refusal === null ? {} : { "aria-invalid": true })} onChange={e => setKey(e.target.value)} onKeyDown={e => (e.key === "Enter" && !busy ? save() : undefined)} className={INPUT} />
         </span>
         {has ? (
-          <Button data-k="cloud-save" variant="outline" className={KEY_BUTTON} held={busy || key.trim() === ""} onClick={save}>
+          <Button data-k="cloud-save" variant="outline" className="h-10 px-4 sm:h-10" held={busy || key.trim() === ""} onClick={save}>
             {busy ? MINE.checking : MINE.replace}
           </Button>
         ) : (
-          <AddButton primary data-k="cloud-save" className={KEY_BUTTON} busy={busy} held={busy || key.trim() === ""} onClick={save}>
+          <AddButton primary data-k="cloud-save" busy={busy} held={busy || key.trim() === ""} onClick={save}>
             {busy ? MINE.checking : MINE.add}
           </AddButton>
         )}

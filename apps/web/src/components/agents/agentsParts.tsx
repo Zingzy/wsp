@@ -25,17 +25,19 @@ const TALL = "h-8 sm:h-8 px-2.5";
 /** One act as an xs outline button with its glyph: held where it has no road. A held button takes no pointer, so it
  * stands in a box that does: the box carries the hover, and a press on it lands there rather than on the row under it.
  * An act that asks first opens its confirmation, whose own button is the one red at rest. `tall` stands it at the
- * height of the controls beside it, and `wordClassName` may hide its word, which then stays its name. */
+ * height of the controls beside it, an add as the 32 px keycap itself, and `wordClassName` may hide its word, which then
+ * stays its name. */
 export function ActButton({ act, className, k, tall = false, wordClassName }: { act: RowAct; className?: string; k?: string; tall?: boolean; wordClassName?: string }) {
   const [asking, setAsking] = useState(false);
   const boxed = act.run === undefined || act.hover !== undefined;
   const Icon = act.icon;
   const run = act.run === undefined ? undefined : act.confirm === undefined ? act.run : () => setAsking(true);
+  const keycap = act.add === true && tall;
   const shared = {
     "data-k": k ?? `act-${act.id}`,
-    size: "xs",
+    size: keycap ? "default" : "xs",
     held: run === undefined,
-    className: cn(act.destructive === true && DANGER_BUTTON, tall && TALL, !boxed && className),
+    className: cn(act.destructive === true && DANGER_BUTTON, tall && !keycap && TALL, !boxed && className),
     ...(wordClassName === undefined ? {} : { "aria-label": act.label }),
     ...(run === undefined ? {} : { onClick: run }),
   } as const;

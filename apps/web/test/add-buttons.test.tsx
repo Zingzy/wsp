@@ -3,10 +3,12 @@
 // the one shared Add button: each group's page, a computer's page and a
 // project's page, the Add a computer panel on every road, and the manager on
 // every tab and at its add level.
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InitSetup, PlaceView, ProjectView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
+import { FirstRun } from "../src/shell/FirstRun.js";
+import { useAdds } from "../src/settings/adds.js";
 import { ADD_COMPUTER_WORDS } from "../src/settings/format.js";
 import { drawnGroups } from "../src/settings/groups.js";
 import { useSettingsStore, type SettingsAt } from "../src/settings/settingsStore.js";
@@ -32,8 +34,10 @@ const api = () =>
 /** A button's word as a person hears it: its name where the word is hidden, else its text. */
 const wordOf = (b: HTMLButtonElement): string => (b.getAttribute("aria-label") ?? b.textContent ?? "").trim();
 const addsOn = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>("[data-settings-page] button, [data-slot=dialog-popup] button")].filter(b => wordOf(b).startsWith("Add"));
+/** Rows that carry their plus and stay rows: the Add a project sheet's side list ends in Add a computer. */
+const SIDE_ROWS = ["[data-slot=dialog-popup] aside [data-k=add-computer]"];
 /** The Add buttons standing now that are drawn some other way, by word. */
-const strays = (): string[] => addsOn().filter(b => !b.hasAttribute("data-add-button")).map(wordOf);
+const strays = (): string[] => addsOn().filter(b => !b.hasAttribute("data-add-button") && !SIDE_ROWS.some(row => b.matches(row))).map(wordOf);
 const go = async (at: SettingsAt): Promise<void> => {
   act(() => useSettingsStore.getState().go(at));
   await settle();
@@ -46,6 +50,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
   document.body.innerHTML = "";
 });
@@ -61,10 +66,17 @@ describe("the shared Add button on the settings pages", () => {
       expect({ at, strays: strays() }).toEqual({ at, strays: [] });
       for (const b of addsOn()) seen.add(wordOf(b));
     }
-    expect([...seen]).toEqual(expect.arrayContaining([ADD_COMPUTER_WORDS.title, ADD_COMPUTER_WORDS.addCloud, "Add a project"]));
+    await go({ kind: "group", group: "projects" });
+    act(() => useSettingsStore.getState().openAddProject());
+    await settle();
+    expect(document.querySelector("[data-slot=dialog-popup]")).not.toBeNull();
+    expect({ at: "add-project", strays: strays() }).toEqual({ at: "add-project", strays: [] });
+    for (const b of addsOn()) seen.add(wordOf(b));
+    expect([...seen]).toEqual(expect.arrayContaining([ADD_COMPUTER_WORDS.title, ADD_COMPUTER_WORDS.addCloud, "Add a project", "Add"]));
   });
 
-  it("is every Add in the Add a computer panel, on each road", async () => {
+  it("is every Add in the Add a computer panel, on each road and on the screen a finished add goes on to", async () => {
+    useAdds.setState({ jobs: { a_1: { addId: "a_1", address: "root@spoo", startedAt: "2026-09-12T11:00:00.000Z", state: "done", steps: [], placeId: box.id } }, putAway: null });
     mountSettings({ api: api(), at: { kind: "group", group: "computers" } });
     await settle();
     fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.title }));
@@ -74,6 +86,40 @@ describe("the shared Add button on the settings pages", () => {
       await settle();
       expect({ road, strays: strays() }).toEqual({ road, strays: [] });
     }
+    fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
+    await settle();
+    expect(document.querySelector("[data-k=joined] [data-add-button]")?.textContent).toBe(ADD_COMPUTER_WORDS.another);
+  });
+});
+
+/** The keycap's classes that set its size: the 32 px default and nothing of the xs or of a hand-set height. */
+const keycap = (b: Element | null): void => {
+  const cls = (b?.className ?? "").split(" ");
+  expect(cls).toEqual(expect.arrayContaining(["sm:h-8", "gap-1.5", "sm:text-[13px]"]));
+  expect(cls.filter(c => /^sm:h-(6|9|10)$|^h-(8|10)$|^sm:text-xs$/.test(c))).toEqual([]);
+};
+
+describe("the one size of the shared Add button", () => {
+  it("is the 32 px keycap on the key road, the ssh road, the manager's head and the first run", async () => {
+    mountSettings({ api: api(), at: { kind: "group", group: "computers" } });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.addCloud }));
+    await settle();
+    const keyAdds = document.querySelectorAll("[data-k='cloud-save'][data-add-button]");
+    expect(keyAdds.length).toBeGreaterThan(0);
+    keyAdds.forEach(keycap);
+    fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
+    await settle();
+    keycap(document.querySelector("[data-k='ssh-add']"));
+    await go({ kind: "computer", id: "here" });
+    const tabs = document.querySelectorAll<HTMLElement>("[data-settings-page] [data-slot=segmented-control] [role=radio]");
+    fireEvent.click(tabs[1]!);
+    await settle();
+    keycap(document.querySelector("[data-k=agents-add]"));
+    cleanup();
+    render(<FirstRun />);
+    keycap(document.querySelector("[data-k=add-project]"));
+    expect(document.querySelector("[data-k=add-project]")?.hasAttribute("data-add-button")).toBe(true);
   });
 });
 

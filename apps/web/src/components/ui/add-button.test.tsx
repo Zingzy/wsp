@@ -35,6 +35,12 @@ describe("the shared Add button", () => {
     expect(classes("Add a variable")).not.toContain("gap-1.5");
   });
 
+  it("keeps the plus at the padding's edge and the gap's width, pulled in by neither", () => {
+    render(<AddButton>Add a computer</AddButton>);
+    expect(classes("Add a computer")).toContain("[&_svg]:mx-0");
+    expect(classes("Add a computer")).not.toContain("[&_svg]:-mx-0.5");
+  });
+
   it("is the primary for a sheet's Add, and presses", () => {
     const press = vi.fn();
     render(
