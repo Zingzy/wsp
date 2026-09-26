@@ -3,15 +3,14 @@
 // daemon, a real runtime and the page's own client between them, so every word
 // here was read off a link that really did or did not open. The words come from
 // the one state table the pane and the main screen both read.
-import { createServer } from "node:net";
-import type { AddressInfo } from "node:net";
 import type { DaemonLinkStatus } from "@wsp/protocol";
 
 /** The name the pane is handed for the person's own computer, off its places row. */
 const MAC = "zingzy's MacBook Pro";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { linkDownLine, terminalEmptyLine, terminalInputRefusal, terminalPaneHints, terminalPaneState, terminalPaneTitle, type TerminalPaneState } from "../src/adapt/index.js";
 import { connectDaemonLink, type DaemonLink } from "../src/terminal/daemon-link.js";
+import { pinnedDroppingPort } from "../../../packages/runtime/test/held-port.js";
 import { startRefusingDoor, type RefusingDoor } from "../../../packages/runtime/test/refusing-door.js";
 import { startTcpProxy, type TcpProxy } from "../../../packages/runtime/test/tcp-proxy.js";
 import { startRelayHarness, type RelayHarness } from "./relay-harness.js";
@@ -24,12 +23,11 @@ async function until(cond: () => boolean, ms = 5000): Promise<void> {
   }
 }
 
-/** A port this machine just gave up, so a dial at it is refused by the kernel: a road nothing is behind. */
+/** A road nothing answers on, held for the test so no other test's listen is handed its port. */
 async function deadPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  await new Promise<void>(resolve => server.close(() => resolve()));
+  const { port, bound, close } = await pinnedDroppingPort();
+  onTestFinished(close);
+  expect(bound).toBe(false);
   return port;
 }
 

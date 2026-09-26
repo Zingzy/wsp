@@ -20,6 +20,9 @@ use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use wsp_daemon::{Daemon, Options};
 use wsp_frames::{numbers, words, DaemonEvent};
 
+mod held_port;
+use held_port::refused_port;
+
 const TOKEN: &str = "test-token-123";
 
 struct Running {
@@ -108,18 +111,6 @@ async fn shim(sock: &Path, url: &str) -> String {
     let mut out = String::new();
     s.read_to_string(&mut out).await.unwrap();
     out.lines().next().unwrap_or("").to_owned()
-}
-
-/// A port nothing listens on, on either loopback address the daemon dials.
-async fn refused_port() -> u16 {
-    loop {
-        let v4 = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = v4.local_addr().unwrap().port();
-        drop(v4);
-        if TcpListener::bind(("::1", port)).await.is_ok() {
-            return port;
-        }
-    }
 }
 
 /// [::1] only, at a port free on 127.0.0.1: the daemon dials v4 first and must be refused there.
@@ -1019,7 +1010,9 @@ async fn refuses_a_bad_port_a_duplicate_id_and_a_port_nothing_listens_on() {
     let mut c = authed(&d).await;
     let zero = c.request("tunnel.open", json!({ "tunnelId": "x", "port": 0 })).await;
     assert_eq!((zero["ok"].as_bool(), zero["code"].as_str()), (Some(false), Some("bad-request")));
-    let port = refused_port().await;
+    let held = refused_port().await;
+    let port = held.port;
+    assert!(!held.addrs().into_iter().any(held_port::squatter_binds), "another test's listener could take the refused port");
     let refused = c.request("tunnel.open", json!({ "tunnelId": "x", "port": port })).await;
     assert_eq!(refused["ok"], false);
     assert_eq!(refused["error"], format!("connect ECONNREFUSED ::1:{port}"));
