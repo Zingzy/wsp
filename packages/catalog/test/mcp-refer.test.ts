@@ -208,6 +208,33 @@ describe("what a reference writer refuses rather than guess", () => {
     for (const [text, where] of shapes) await expect(CODEX_TOML.refer(text), text).rejects.toThrow(`${where} is written in a shape wsp does not read, so its values cannot be written by name`);
   });
 
+  it("Codex: reads no variable for an OAuth client secret, so the file stays on this computer and the refusal names the key", async () => {
+    const said = "linear keeps an OAuth client secret in mcp_servers.linear.oauth.client_secret, and Codex reads no variable there, so the file stays on this computer";
+    const spellings = [
+      '[mcp_servers.linear]\nurl = "https://l.example"\n\n[mcp_servers.linear.oauth]\nclient_id = "cid"\nclient_secret = "cs_TESTONLY_table"\n',
+      '[mcp_servers.linear]\nurl = "https://l.example"\noauth = { client_id = "cid", client_secret = "cs_TESTONLY_inline" }\n',
+      '[mcp_servers.linear]\nurl = "https://l.example"\noauth.client_id = "cid"\noauth.client_secret = "cs_TESTONLY_dotted"\nhttp_headers = { Authorization = "Bearer tok_TESTONLY" }\n',
+      'mcp_servers.linear = { url = "https://l.example", oauth = { client_id = "cid", client_secret = "cs_TESTONLY_root" } }\n',
+    ];
+    for (const text of spellings) {
+      await expect(CODEX_TOML.refer(text), text).rejects.toThrow(said);
+      await expect(serversByName(CODEX_TOML, text, new Map(), () => undefined), text).rejects.toThrow(said);
+    }
+    await expect(CODEX_TOML.refer('[mcp_servers.linear]\nurl = "https://l.example"\noauth = "cs_TESTONLY_string"\n')).rejects.toThrow("mcp_servers.linear is written in a shape wsp does not read, so its values cannot be written by name");
+    const clientOnly = '[mcp_servers.linear]\nurl = "https://l.example"\noauth = { client_id = "cid", callback_port = 5555 }\n';
+    expect((await serversByName(CODEX_TOML, clientOnly, new Map(), () => undefined)).text).toBe(clientOnly);
+    const beside = `${spellings[0]}\n[mcp_servers.other]\ncommand = "o"\nenv = { K = "k_TESTONLY" }\n`;
+    const one = await CODEX_TOML.refer(beside, "other");
+    expect(one.servers).toEqual([{ name: "other", values: { K: "k_TESTONLY" } }]);
+  });
+
+  it("the copy's last check refuses a server definition that still carries an OAuth client secret, whatever the format's writer let through", async () => {
+    const lax: McpFormat = { ...CODEX_TOML, refer: async text => ({ text, servers: [{ name: "s", values: {} }], entries: [{ url: "https://s.example", oauth: { client_id: "cid", client_secret: "cs_TESTONLY" } }] }) };
+    await expect(serversByName(lax, "[mcp_servers.s]\n", new Map(), () => undefined)).rejects.toThrow("a server still carries an OAuth client secret after it was written by name, and no agent reads one by name, so the file stays on this computer");
+    const clean: McpFormat = { ...lax, refer: async text => ({ text, servers: [{ name: "s", values: {} }], entries: [{ url: "https://s.example", oauth: { client_id: "cid" } }] }) };
+    expect((await serversByName(clean, "[mcp_servers.s]\n", new Map(), () => undefined)).dropped).toEqual([]);
+  });
+
   it("copies an ordinary config whose unrelated keys and history hold the same short words as a server's values", async () => {
     const claude = JSON.stringify(
       {

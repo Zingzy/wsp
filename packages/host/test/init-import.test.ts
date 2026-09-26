@@ -653,6 +653,22 @@ describe("packPlan: MCP servers travel by name", () => {
   });
 });
 
+describe("packPlan: Codex's OAuth client secret", () => {
+  it("keeps a Codex config holding an OAuth client secret on this computer, names the key, and hands none of its values to the vault", async () => {
+    const home = laptop();
+    const codex = '[mcp_servers.linear]\nurl = "https://mcp.linear.app/mcp"\nhttp_headers = { Authorization = "Bearer lin_api_TESTONLY" }\n\n[mcp_servers.linear.oauth]\nclient_id = "cid"\nclient_secret = "cs_TESTONLY"\n';
+    mkdirSync(join(home, ".codex"));
+    writeFileSync(join(home, ".codex", "config.toml"), codex);
+    const plan = planFiles([row({ rung: "agents", id: "agents/codex", paths: ["~/.codex/config.toml"] })], { home, stat: statOf, platform: "darwin" });
+    const vaulted: Record<string, string>[] = [];
+    const packed = await packPlan(plan, { secrets: new Map(), home, vault: pushVault(vaulted) });
+    expect(listTar(packed.tar).map(e => e.path)).not.toContain(".codex/config.toml");
+    expect(packed.skipped).toContainEqual({ id: "agents/codex", path: "~/.codex/config.toml", note: "left out of the copy: its MCP servers could not be written by name (linear keeps an OAuth client secret in mcp_servers.linear.oauth.client_secret, and Codex reads no variable there, so the file stays on this computer)" });
+    expect(vaulted).toEqual([]);
+    expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toBe(codex);
+  });
+});
+
 describe("packPlan: a value servers.env holds goes back to its reference", () => {
   it("writes the variable's reference where a server added here holds the value in an argument or the address, and Codex's file stays here naming the argument", async () => {
     const home = laptop();

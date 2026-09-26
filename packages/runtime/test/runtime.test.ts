@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -19,6 +19,7 @@ import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { tarRead } from "../../engine/test/tar-read.js";
+import { droppingPort } from "./held-port.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
 import { answersGoneOnce, missesFirstDelete, stubBackend, tokenGuest, type StubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
@@ -4426,18 +4427,6 @@ async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
   }
 }
 
-/** A port nothing listens on: the edge dialed, the guest never answered. */
-async function deadPort(): Promise<number> {
-  const { createServer } = await import("node:net");
-  return new Promise(resolve => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-  });
-}
-
 describe("runtime create stages", () => {
   const ok = { exitCode: 0, stdout: "", stderr: "" };
   /** A stub whose forks carry an edge route to the given port and whose guest hands out the daemon token. */
@@ -4510,7 +4499,8 @@ describe("runtime create stages", () => {
   });
 
   it("a fork whose daemon never answers still becomes a workspace: the stage says so, with the backend's daemon budget in the fault", async () => {
-    const port = await deadPort();
+    const { port, close: closePort } = await droppingPort();
+    onTestFinished(closePort);
     const backend = edgeBackend(port);
     backend.lifecycle.budgets.daemonAnswersMs = 300;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
@@ -4525,7 +4515,8 @@ describe("runtime create stages", () => {
   });
 
   it("a fork whose machine answers for its own daemon is asked over that road, and the route this computer cannot dial decides nothing", async () => {
-    const port = await deadPort();
+    const { port, close: closePort } = await droppingPort();
+    onTestFinished(closePort);
     const backend = edgeBackend(port);
     backend.lifecycle.budgets.daemonAnswersMs = 300;
     const create = backend.create.bind(backend);
@@ -4659,7 +4650,8 @@ describe("runtime verified wake", () => {
 
   it("resume returns but the daemon never answers: waking, one retry, then a golden fork with the vault and the zombie killed", async () => {
     const { backend, tars, untars } = guestBackend();
-    const port = await deadPort();
+    const { port, close: closePort } = await droppingPort();
+    onTestFinished(closePort);
     try {
       const store = memoryStore();
       backend.lifecycle.budgets.daemonAnswersMs = 300;
@@ -4695,7 +4687,8 @@ describe("runtime verified wake", () => {
 
   it("a backend declaring one wake attempt: resume, the check fails, no re-pause, and the fork replaces the machine", async () => {
     const { backend, untars } = guestBackend();
-    const port = await deadPort();
+    const { port, close: closePort } = await droppingPort();
+    onTestFinished(closePort);
     try {
       backend.lifecycle.budgets.daemonAnswersMs = 300;
       backend.lifecycle.budgets.wakeAttempts = 1;
@@ -4729,7 +4722,8 @@ describe("runtime verified wake", () => {
   it("a machine that answers for its own daemon is asked over that road on a wake, so a route this computer cannot dial never throws the container away", async () => {
     const { backend, untars } = guestBackend();
     try {
-      const port = await deadPort();
+      const { port, close: closePort } = await droppingPort();
+      onTestFinished(closePort);
       backend.lifecycle.budgets.daemonAnswersMs = 300;
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
       const ws = await createOn(rt, { golden: "snap_g", name: "x" });
@@ -7962,14 +7956,6 @@ describe("a thread whose start named who to tell", () => {
 });
 
 describe("gone machines", () => {
-  /** A port nothing listens on: a reach probe against it fails at once, the way a dead edge route does. */
-  const closedPort = async (): Promise<number> => {
-    const probe = createServer();
-    await new Promise<void>(r => probe.listen(0, "127.0.0.1", r));
-    const port = (probe.address() as { port: number }).port;
-    await new Promise<void>(r => probe.close(() => r()));
-    return port;
-  };
   /** A turn that announces itself and never settles on its own: only the runtime ending it ends it. */
   const held: HarnessAdapterFactory = () => ({
     steers: false,
@@ -8042,7 +8028,8 @@ describe("gone machines", () => {
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: { claude: held }, status: { pollIntervalMs: 5, costIntervalMs: 5, reconcileMinMs: 0 }, goneConfirmMs: 5 });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    const port = await closedPort();
+    const { port, close: closePort } = await droppingPort();
+    onTestFinished(closePort);
     backend.machines[0]!.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
     await rt.sessions.start(ws.id, { prompt: "work" });
     const events: EventUnion[] = [];
@@ -8083,7 +8070,8 @@ describe("gone machines", () => {
     const rt = createRuntime({ backend, store, adapters: { claude: held }, status: { pollIntervalMs: 5, costIntervalMs: 5, reconcileMinMs: 0 }, goneConfirmMs: 5 });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const m = backend.machines[0]!;
-    const port = await closedPort();
+    const { port, close: closePort } = await droppingPort();
+    onTestFinished(closePort);
     m.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
     await rt.sessions.start(ws.id, { prompt: "work" });
     const events: EventUnion[] = [];
