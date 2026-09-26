@@ -14,18 +14,19 @@ import { join } from "node:path";
 import { request } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentsOffRefusal, AGENTS_ON, API_UNAUTHORIZED, authority, type Caller, crossOriginRefusal, DEVICE_OPS, deviceHeldRefusal, listenBeyondLoopbackLine, LOOPBACK, REQUEST_BODY_NOT_JSON, REQUEST_BODY_TOO_LARGE, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, type BootPayload } from "@wsp/protocol";
+import { agentsOffRefusal, AGENTS_ON, HERE_PLACE_ID, loopbackThreadsLine, relayedRecordRefusal, API_UNAUTHORIZED, authority, type Caller, crossOriginRefusal, DEVICE_OPS, deviceHeldRefusal, listenBeyondLoopbackLine, LOOPBACK, REQUEST_BODY_NOT_JSON, REQUEST_BODY_TOO_LARGE, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, type BootPayload } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
-import { serve, type CliIO } from "../src/cli.js";
+import { localWiring, serve, type CliIO } from "../src/cli.js";
+import { hereUrl } from "../src/pairing.js";
 import { writeRelayRecord } from "../src/relay-link.js";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { addressLines } from "../src/host-lock.js";
 import { httpProbe } from "../src/service.js";
 import { hostAddress } from "../src/verbs.js";
 import { ROUTE_OPS, routeRefusal, startHost, type HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
-import { createOn, projectOn } from "./verbs-fixture.js";
+import { copyingFake, createOn, fakeDaemonStart, projectOn } from "./verbs-fixture.js";
 
 const DEV_BOOT = `<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>`;
 const PAGE = `<!doctype html>
@@ -500,6 +501,34 @@ describe("a host that listens beyond this computer", () => {
     expect(theirs.status).toBe(200);
   });
 
+  it("a thread on this computer copies over the write route as itself, and a token naming a machine's road copies nothing here", async () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-listen-home-"));
+    dirs.push(home);
+    const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, local: localWiring(home, process.env, fakeDaemonStart, undefined, copyingFake()) });
+    handle = await startHost({ runtime, webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    const repo = mkdtempSync(join(tmpdir(), "wsp-listen-repo-"));
+    dirs.push(repo);
+    execFileSync("git", ["init", "-q", repo]);
+    execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
+    const project = await runtime.projects.add({ source: repo, on: HERE_PLACE_ID });
+    const mac = await runtime.workspaces.create({ project: project.id, name: "mac", agents: AGENTS_ON });
+    const scope = { kind: "thread", threadId: "t_1", workspaceId: mac.id, rootThreadId: "t_1" } as const;
+    const here = await runtime.devices.mint("thread abcd1234", scope, Date.now(), "here");
+    const relayed = await runtime.devices.mint("thread efgh5678", { ...scope, threadId: "t_2", rootThreadId: "t_2" }, Date.now(), "relayed");
+    const post = (token: string, name: string): Promise<Response> =>
+      fetch(`http://127.0.0.1:${handle!.port}/api/workspaces`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ name, project: project.id }) });
+
+    const made = await post(here.deviceToken, "kid");
+    expect(made.status).toBe(200);
+    const kid = ((await made.json()) as { workspace: { kind: string; parentThreadId?: string; rootThreadId?: string } }).workspace;
+    expect(kid).toMatchObject({ kind: "local", parentThreadId: "t_1", rootThreadId: "t_1" });
+
+    const carried = await post(relayed.deviceToken, "carried");
+    expect(carried.status).toBe(500);
+    expect(await carried.json()).toEqual({ error: relayedRecordRefusal("carried") });
+    expect((await runtime.workspaces.list()).map(w => w.name).sort()).toEqual(["kid", "mac"]);
+  });
+
   it("a thread's token is refused over the write route from an address of this computer that is not loopback", async ctx => {
     // The half of the road rule the connector's headers cannot prove: the peer's own address. A machine whose only
     // interface is loopback has nowhere else to dial from, and says so rather than reading as a case that ran.
@@ -555,6 +584,41 @@ describe("the address every reading names", () => {
 
   it("says once, as it starts, that the page is now reachable and pairing is the gate", () => {
     expect(listenBeyondLoopbackLine("0.0.0.0")).toContain("wsp host pair");
+  });
+});
+
+describe("where a thread on this computer dials this host", () => {
+  it("is the runtime socket's own port on loopback, one value the guest door and a turn's launch both read", async () => {
+    const cell: { url?: string } = {};
+    handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, here: cell });
+    expect(cell.url).toBe(`http://${LOOPBACK}:${handle.wsPort}`);
+    await handle.close();
+    handle = undefined;
+    // The wildcard answers on loopback too, so a host bound to it is dialled there.
+    const wild: { url?: string } = {};
+    handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: WILDCARD, here: wild });
+    expect(wild.url).toBe(`http://${LOOPBACK}:${handle.wsPort}`);
+  });
+
+  it("is nothing on a host bound to one address beyond loopback, which says so as it starts", async ctx => {
+    expect(hereUrl("192.168.1.20", 4801)).toBeUndefined();
+    expect(hereUrl("::1", 4801)).toBe("http://[::1]:4801");
+    expect(hereUrl("::", 4801)).toBe(`http://${LOOPBACK}:4801`);
+    expect(loopbackThreadsLine("192.168.1.20")).toContain("loopback");
+    const beyond = Object.values(networkInterfaces())
+      .flatMap(rows => rows ?? [])
+      .find(row => row.family === "IPv4" && !row.internal)?.address;
+    if (beyond === undefined) {
+      ctx.skip();
+      return;
+    }
+    const dir = mkdtempSync(join(tmpdir(), "wsp-listen-beyond-"));
+    dirs.push(dir);
+    const cell: { url?: string } = {};
+    const lines: string[] = [];
+    handle = await serve(quietIO(lines), { port: 0, wsPort: 0, address: beyond, statePath: join(dir, "state.json"), webDir: fakeWebDir(), runtime: testRuntime(), here: cell });
+    expect(cell.url).toBeUndefined();
+    expect(lines).toContain(loopbackThreadsLine(beyond));
   });
 });
 

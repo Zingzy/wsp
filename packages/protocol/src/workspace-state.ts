@@ -69,9 +69,9 @@ export interface WorkspaceKindWords {
    * also takes a folder on this computer as a source, seeded onto the clone, and would otherwise read as one. */
   copiesFolder: boolean;
   /** Whether the agents on a machine of this kind could drive this host at all, which is what says the spawn switch
-   * means anything there. A fork's agents reach the host over the road a scoped token opens; this computer answers
-   * no request relayed from a machine, and a machine somebody already owns is handed no wsp to drive one with, so
-   * on both the switch would hand out a token that opens nothing. */
+   * means anything there. A fork's agents reach the host over the road a scoped token opens, and this computer's
+   * over its loopback with a token of the same scope; a machine somebody already owns is handed no wsp to drive
+   * one with, so there the switch would hand out a token that opens nothing. */
   agents: boolean;
   /** What a delete does to a machine of this kind, which is never the same sentence twice: wsp takes away the
    * machine it forked, leaves this computer alone, and on a machine somebody owns takes off what it put there and
@@ -129,7 +129,7 @@ export type ReadingRoad = "daemon" | "host" | false;
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
   cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: machineId => `computer ${machineId} is gone in the cloud` }, panel: "Where it runs, its projects and what it costs.", access: "bypass" },
-  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], copiesFolder: true, agents: false, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" },
+  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], copiesFolder: true, agents: true, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" },
   ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: [], copiesFolder: false, agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL, access: "asks" },
 };
 
@@ -182,7 +182,7 @@ export function agentsMayDrive(kind: WorkspaceKind): boolean {
 
 /** The one sentence both those doors refuse with, so a person reads the same thing whichever they typed. */
 export function agentsKindRefusal(kind: WorkspaceKind): string {
-  return `agents on ${machineWord(kind)} cannot drive this host, so the spawn switch would hand out a token that opens nothing; it is for the machines wsp forks`;
+  return `agents on ${machineWord(kind)} cannot drive this host, so the spawn switch would hand out a token that opens nothing; it is for the machines wsp forks and this computer`;
 }
 
 /** What a sentence calls this workspace's machine. Every kind answers for itself: a refusal on a machine wsp forks

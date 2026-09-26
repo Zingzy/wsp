@@ -53,20 +53,36 @@ export function advertisedUrl(bound: string, port: number, asked?: string, inter
   return isLoopback(at) ? undefined : `http://${authority(at, port)}`;
 }
 
+/** Where a process on this computer dials a host bound there, at that port: the bound address itself when it is
+ * loopback, the IPv4 loopback for the wildcard, which answers there too, and nothing for one address beyond
+ * loopback, which answers there alone. */
+export function hereUrl(bound: string, port: number): string | undefined {
+  if (isLoopback(bound)) return `http://${authority(bound, port)}`;
+  return isWildcard(bound) ? `http://${authority(LOOPBACK, port)}` : undefined;
+}
+
+/** The loopback address of the host's runtime socket, filled by the host once that socket is bound and read at each
+ * use: the one value the guest door hands a session's wsp and a turn on this computer is told. Empty until then,
+ * and on a bind with no loopback. */
+export interface HereAt {
+  url?: string;
+}
+
 /** What a turn's launch is told about this host, for the kinds that need it. The address the person named with
- * --advertise stands above everything, both above every kind's own answer at the launch and above the name a relay
- * carries this host under: somebody who names an address has said which one the other end can reach, and a relay
- * name they never asked for is a guess. Where they named none, the relay's name is what a machine somewhere else
- * dials, since that one works from anywhere, else what this computer answers on; and the port travels only where the
- * host bound the wildcard. That last one is the whole rule about a kind's own address: a host on the wildcard
- * answers on every address this computer has, the ones a machine knows of its own included, and a host bound to one
- * address answers there and nowhere else, however a machine would rather reach it. The url is read at each turn: a
- * quick tunnel is given a new name every time its connector runs. */
+ * --advertise stands above the name a relay carries this host under: somebody who names an address has said which
+ * one the other end can reach, and a relay name they never asked for is a guess. Where they named none, the relay's
+ * name is what a machine somewhere else dials, since that one works from anywhere, else what this computer answers
+ * on; and the port travels only where the host bound the wildcard. That last one is the whole rule about a kind's
+ * own address: a host on the wildcard answers on every address this computer has, the ones a machine knows of its
+ * own included, and a host bound to one address answers there and nowhere else, however a machine would rather
+ * reach it. The url is read at each turn: a quick tunnel is given a new name every time its connector runs. `here`
+ * is apart from all of them, since a token for this computer's loopback never leaves it. */
 export function hostReach(
   at: { address: string; port: number },
   asked: string | undefined,
   publicAt: () => string | undefined,
   interfaces = networkInterfaces(),
+  here: HereAt = {},
 ): HostReach {
   const advertise = advertiseWord(asked);
   return {
@@ -74,6 +90,9 @@ export function hostReach(
     get url(): string | undefined {
       const relayed = advertise === undefined ? publicAt() : undefined;
       return relayed !== undefined ? relayUrlOf(relayed) : advertisedUrl(at.address, at.port, asked, interfaces);
+    },
+    get here(): string | undefined {
+      return here.url;
     },
     ...(isWildcard(at.address) ? { port: at.port } : {}),
   };

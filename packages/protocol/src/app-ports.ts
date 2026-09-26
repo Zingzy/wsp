@@ -140,6 +140,12 @@ export function listenBeyondLoopbackLine(address: string): string {
   return `listening on ${address}: anyone who can reach this computer there can load the page, and pairing is the gate. Run wsp host pair for a code, and wsp host devices to see who took one.`;
 }
 
+/** The line a host bound to one address beyond loopback prints as it starts: a thread on this computer reaches the
+ * host at its loopback, so on that bind it is handed no token and starts nothing under itself. */
+export function loopbackThreadsLine(address: string): string {
+  return `listening on ${address} alone: threads on this computer start children only when the host also listens on loopback, so run wsp up with --listen 0.0.0.0 or 127.0.0.1 for them.`;
+}
+
 export interface AppPorts {
   /** The port the app is served on. */
   port: number;

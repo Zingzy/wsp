@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, assetDir, daemonBinaryHere, installEach, mcpServerSpec, NO_PROJECT_YET, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentsHere, assetDir, daemonBinaryHere, installEach, mcpServerSpec, NO_PROJECT_YET, runningWsp, shimPath, wspHome, type CliIO, type HereAt } from "@wsp/host";
 import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hereWord, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
@@ -202,6 +202,11 @@ function refreshMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+/** The loopback address a thread on this computer dials, filled by each host this window starts once it binds. */
+const loopback: HereAt = {};
+/** The wsp this window's agents run: the shim, as the first launch's install writes it. */
+const wspRunning = (): ReturnType<typeof runningWsp> => ({ ...runningWsp(), shim: shimPath(wspHome()) });
+
 function locate(): Promise<Located> {
   return locateHost(launch());
 }
@@ -213,7 +218,7 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
   if (located.session === undefined) {
     let runtime = recorded;
     if (runtime === undefined) {
-      const state = await checkSetup({ statePath });
+      const state = await checkSetup({ statePath, agents: { here: loopback, run: wspRunning() } });
       if (!state.ready) return false;
       runtime = state.runtime;
     }
@@ -227,8 +232,9 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
       // When a sign-in page opens without a click, it goes to the default browser, not into this window.
       openUrl: url => shell.openExternal(url).then(() => true, () => false),
       // The wsp tools the cloud setup writes into an agent's config run the shim, as the first launch's install does.
-      running: { ...runningWsp(), shim: shimPath(wspHome()) },
+      running: wspRunning(),
       restart: appRestartRoad(app),
+      here: loopback,
     });
   } else {
     session = located.session;
@@ -311,7 +317,7 @@ async function showOnboarding(located: Located): Promise<void> {
   // The one way out of the screen: this computer recorded and the app opened on it.
   const finish = (): Promise<void> =>
     (finishing ??= (async () => {
-      const { runtime, workspace } = await openThisComputer({ statePath });
+      const { runtime, workspace } = await openThisComputer({ statePath, agents: { here: loopback, run: wspRunning() } });
       io.log(workspace === null ? NO_PROJECT_YET : `${workspace.name} (${workspace.id}) is this computer`);
       await showApp(located, runtime);
       for (const channel of ONBOARDING_CHANNELS) ipcMain.removeHandler(channel);
