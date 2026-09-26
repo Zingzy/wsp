@@ -14,9 +14,13 @@
 import { HERE_KEY } from "./terminal/computer.js";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { PANE_KINDS, type RightPanelKind } from "./panes.js";
 
-export const RIGHT_PANEL_KINDS = ["diff", "preview", "terminal", "machine", "processes", "agents"] as const;
-export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
+export type { RightPanelKind } from "./panes.js";
+
+/** A pane of one surface per workspace; the browser and the terminal hold one per tab and pty. */
+type SingletonKind = Exclude<RightPanelKind, "preview" | "terminal">;
+type OpenableKind = Exclude<RightPanelKind, "terminal">;
 
 export type RightPanelSurface =
   | { id: `browser:${string}`; kind: "preview"; resourceId: string }
@@ -29,10 +33,7 @@ export type RightPanelSurface =
       activeTerminalId: string;
       splitDirection?: "horizontal" | "vertical";
     }
-  | { id: "diff"; kind: "diff" }
-  | { id: "machine"; kind: "machine" }
-  | { id: "processes"; kind: "processes" }
-  | { id: "agents"; kind: "agents" };
+  | { [K in SingletonKind]: { id: K; kind: K } }[SingletonKind];
 
 const RIGHT_PANEL_STORAGE_KEY = "wsp:right-panel-state:v1";
 const RIGHT_PANEL_STORAGE_VERSION = 1;
@@ -43,9 +44,6 @@ export interface WorkspaceRightPanelState {
   activeSurfaceId: string | null;
   surfaces: RightPanelSurface[];
 }
-
-type SingletonKind = Exclude<RightPanelKind, "preview" | "terminal">;
-type OpenableKind = Exclude<RightPanelKind, "terminal">;
 
 interface RightPanelStoreState {
   byWorkspaceId: Record<string, WorkspaceRightPanelState>;
@@ -87,13 +85,13 @@ const EMPTY_WORKSPACE_STATE: WorkspaceRightPanelState = {
 const EMPTY_HERE_STATE: WorkspaceRightPanelState = { ...EMPTY_WORKSPACE_STATE, isOpen: false };
 const emptyFor = (key: string): WorkspaceRightPanelState => (key === HERE_KEY ? EMPTY_HERE_STATE : EMPTY_WORKSPACE_STATE);
 
-const SINGLETONS: { [K in SingletonKind]: Extract<RightPanelSurface, { kind: K }> } = {
-  diff: { id: "diff", kind: "diff" },
-  machine: { id: "machine", kind: "machine" },
-  processes: { id: "processes", kind: "processes" },
-  agents: { id: "agents", kind: "agents" },
-};
-const singletonSurface = (kind: SingletonKind): RightPanelSurface => SINGLETONS[kind];
+const isSingleton = (kind: RightPanelKind): kind is SingletonKind => kind !== "preview" && kind !== "terminal";
+/** Whether the store's open takes this kind; a terminal surface opens only onto a pty that exists. */
+export const isOpenable = (kind: RightPanelKind): kind is OpenableKind => kind !== "terminal";
+const SINGLETONS = new Map(
+  PANE_KINDS.filter(isSingleton).map((kind): [SingletonKind, RightPanelSurface] => [kind, { id: kind, kind } as RightPanelSurface]),
+);
+const singletonSurface = (kind: SingletonKind): RightPanelSurface => SINGLETONS.get(kind)!;
 
 const browserSurface = (tabId: string | null): RightPanelSurface =>
   tabId
@@ -142,7 +140,7 @@ const updateWorkspace = (
 };
 
 const isKnownKind = (kind: unknown): kind is RightPanelKind =>
-  typeof kind === "string" && (RIGHT_PANEL_KINDS as readonly string[]).includes(kind);
+  typeof kind === "string" && (PANE_KINDS as readonly string[]).includes(kind);
 
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((entry) => typeof entry === "string");
@@ -157,12 +155,8 @@ function usableSurface(raw: unknown): RightPanelSurface | null {
   const surface = raw as Record<string, unknown>;
   const kind = surface["kind"];
   if (!isKnownKind(kind)) return null;
+  if (isSingleton(kind)) return singletonSurface(kind);
   switch (kind) {
-    case "diff":
-    case "machine":
-    case "processes":
-    case "agents":
-      return singletonSurface(kind);
     case "preview": {
       const resourceId = surface["resourceId"];
       if (resourceId !== null && typeof resourceId !== "string") return null;
