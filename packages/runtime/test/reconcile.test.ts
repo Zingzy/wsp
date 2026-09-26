@@ -2,13 +2,15 @@
 // A record never leaves the store while its machine exists at the provider,
 // and the other way round: a workspace machine of this setup's that no record
 // claims is recorded again at the sweep, never killed, so it can be seen and
-// deleted. A name names at most one workspace, and a fork of a name whose
-// workspace is being deleted is refused in words, so the two never interleave.
+// deleted; a running one whose workspace was deleted here is killed. A name
+// names at most one workspace, and a fork of a name whose workspace is being
+// deleted is refused in words, so the two never interleave.
 // A rename takes the same rule the fork's name takes, keeps the record's id
 // and machine, and leaves the threads on that machine alone.
 import { describe, expect, it, vi } from "vitest";
 import { BLANK_NAME_REFUSAL, RECORD_RESTORED, nameDeletingRefusal, nameTakenRefusal, type EventUnion, type WorkspaceTheme } from "@wsp/protocol";
-import { copyKey, createRuntime } from "../src/runtime.js";
+import { DROPPED_WATCH_MS, copyKey, createRuntime } from "../src/runtime.js";
+import { fakeClock } from "./fake-clock.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 
@@ -152,6 +154,72 @@ describe("the sweep records a machine of this setup that no record claims", () =
     const second = await rt.reap();
     expect(second.adopted).toEqual([{ id: machine.id, workspaceId: ws.id, name: "first", phase: "running" }]);
     expect(machine.killed).toBe(false);
+  });
+
+  it("a machine that comes back after its workspace was deleted is killed by the next start's sweep, not reported and left billing", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, killConfirm: { graceMs: 50, pollMs: 1 } });
+    const ws = await createOn(first, { golden: "snap_g", name: "first" });
+    const machine = backend.machines[0]!;
+    await first.workspaces.delete(ws.id);
+    await first.close();
+    expect(machine.killed).toBe(true);
+
+    // Measured 2026-09-26: a Solari sandbox read gone after its delete listed running again an hour later.
+    machine.killed = false;
+    machine.spec.labels!["createdAt"] = ago(60 * 60_000);
+    const rt = createRuntime({ backend, store, adapters: {}, killConfirm: { graceMs: 50, pollMs: 1 } });
+
+    const result = await rt.reap();
+
+    expect(result.failed).toBeUndefined();
+    expect(result.adopted).toBeUndefined();
+    expect(result.reaped).toMatchObject([{ id: machine.id, reason: "own" }]);
+    expect(machine.killed).toBe(true);
+    expect(await rt.workspaces.list()).toEqual([]);
+    await rt.close();
+  });
+
+  it("a deleted workspace's machine that comes back paused is reported, not left unnamed", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, killConfirm: { graceMs: 50, pollMs: 1 } });
+    const ws = await createOn(first, { golden: "snap_g", name: "first" });
+    const machine = backend.machines[0]!;
+    await first.workspaces.delete(ws.id);
+    await first.close();
+    machine.killed = false;
+    machine.paused = true;
+    machine.spec.labels!["createdAt"] = ago(60 * 60_000);
+    const rt = createRuntime({ backend, store, adapters: {} });
+
+    const result = await rt.reap();
+
+    expect(result.failed).toMatchObject([{ id: machine.id, message: expect.stringContaining("not recorded") }]);
+    expect(machine.killed).toBe(false);
+    await rt.close();
+  });
+
+  it("forgets a deleted machine a week on by the runtime's clock, so the watch list does not grow with every workspace ever deleted", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const t0 = Date.parse("2026-09-01T00:00:00Z");
+    const first = createRuntime({ backend, store, adapters: {}, clock: fakeClock(t0).clock, killConfirm: { graceMs: 50, pollMs: 1 } });
+    const ws = await createOn(first, { golden: "snap_g", name: "first" });
+    await first.workspaces.delete(ws.id);
+    await first.close();
+    const machineId = backend.machines[0]!.id;
+
+    const inside = createRuntime({ backend, store, adapters: {}, clock: fakeClock(t0 + DROPPED_WATCH_MS - 1).clock });
+    await inside.reap();
+    await inside.close();
+    expect(await store.keys("dropped-machines")).toEqual([machineId]);
+
+    const past = createRuntime({ backend, store, adapters: {}, clock: fakeClock(t0 + DROPPED_WATCH_MS).clock });
+    await past.reap();
+    await past.close();
+    expect(await store.keys("dropped-machines")).toEqual([]);
   });
 
   it("builders, smoke forks, another setup's machines and reserved experiments are never recorded as workspaces", async () => {
