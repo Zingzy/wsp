@@ -246,7 +246,7 @@
         "place-row=here",
         "segment=servers"
       ],
-      "wait": "k=agents-add",
+      "wait": "k=agents-empty",
       "settleMs": 700
     },
     {
