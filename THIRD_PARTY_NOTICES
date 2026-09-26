@@ -482,3 +482,14 @@ here are included or relied upon under their own licenses, reproduced below.
    (release 16.30.0). CC0 1.0 Universal.
 
    CC0 1.0 Universal (simple-icons): as under item 8.
+
+10. Whimsy Loaders crab (pixel loader), Sasha
+
+   .claude/skills/wsp-design/references/mockup/crab.js is a transcription of
+   the crab loader from Whimsy Loaders, https://www.whimsically.app/loaders,
+   by Sasha (https://x.com/aleksksaa): the site's exported draw function,
+   its pixel table, timings and alpha values as published, with the canvas
+   loop rewritten around it. The site publishes its loaders for export into
+   web projects and carries no license text beyond a copyright line
+   ("(c) 2026 Whimsy Loaders"). The owner chose to use the crab with this
+   credit.
