@@ -8,7 +8,7 @@ import type { Readable, Writable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { INSTRUCTIONS } from "./skill.js";
-import { VERBS, dialHost, hasTool, toolFailure, toolName, type DialOpts, type HostClient, type Verb, type VerbDeps } from "./verbs.js";
+import { VERBS, c1Escaped, dialHost, hasTool, toolFailure, toolName, type DialOpts, type HostClient, type Verb, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 export interface Dialer {
@@ -64,7 +64,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: V
 export async function serveMcp(statePath: string, opts: { alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"] }, streams: { input: Readable; output: Writable } = { input: process.stdin, output: process.stdout }): Promise<void> {
   const dial = dialer(statePath, pickOf(opts));
   const server = mcpServer(statePath, { dial, ...opts });
-  const transport = new StdioServerTransport(streams.input, streams.output);
+  const transport = new StdioServerTransport(streams.input, c1Escaped(streams.output));
   const closed = new Promise<void>(done => {
     server.server.onclose = () => done();
   });

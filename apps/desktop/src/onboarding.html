@@ -92,9 +92,6 @@
       .glyph { width: 16px; height: 16px; background: currentColor; mask: var(--glyph) center / contain no-repeat; }
       .initial { font: 600 12px/1 var(--font-sans); }
       label.row:has(input:checked) .mark { color: var(--foreground); }
-      /* The brand hues the app draws these marks in; a mark that is monochrome by design keeps the row's ink. */
-      .glyph[data-agent="claude"] { background: var(--agent-claude); }
-      .glyph[data-agent="gemini"] { background: var(--agent-gemini); }
       .name { min-width: 0; flex: 1 0 auto; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; color: var(--foreground); }
       label.row:has(input:disabled) .name { color: var(--muted-foreground); }
       .slot { margin-left: auto; display: flex; min-width: 96px; flex: 0 1 auto; align-items: center; justify-content: flex-end; }
@@ -236,7 +233,7 @@
         slot.removeAttribute("title");
       }
 
-      /** The agents whose glyph stage.mjs copied beside this page; the rest draw their initial. */
+      /** The agents whose glyph stage.mjs wrote beside this page; the rest draw their initial. */
       const GLYPHS = new Set(__AGENT_GLYPHS__);
       /** The agents the scan found on this computer, in the catalog's order; only these can be ticked. */
       let found = [];

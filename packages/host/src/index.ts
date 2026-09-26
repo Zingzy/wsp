@@ -46,7 +46,7 @@ export { SERVING_HOME_SH, defaultHomeIn, homeNamed, servingHome } from "./servin
 export { accountAim, accountHosts, accountRecords, aimedAlias, aimedHost, aliasFrom, defaultHost, hostRoadWord, isUrl, listHosts, noSuchHostLine, readHost, removeHost, severalAccountHostsLine, writeHost, type AccountAim, type HostEntry, type HostRecord, type SshLogin } from "./hosts.js";
 export { connectCommand, disconnectCommand, type ConnectOpts } from "./connect.js";
 export { addLines, hostNameHere, joinPlace, leavePlace, placeNameHere, placeStanding, placeWiring, type JoinPlaceOptions, type JoinedPlace } from "./places.js";
-export { joinedAlready, placeFilePath, placeKeyPath, placeReport, readPlaceFile, writePlaceFile, type PlaceSelfReport } from "./place-report.js";
+export { placeFilePath, placeKeyPath, placeReport, readPlaceFile, writePlaceFile, type PlaceSelfReport } from "./place-report.js";
 export { DAEMON_BIN, DAEMON_TARGETS, GUEST_DAEMON_TARGETS, daemonArtifactName, daemonBinaryIn, daemonTargetHere, type DaemonTarget } from "./daemon-binary.js";
 export { setDefaultHost } from "./hosts.js";
 export { reachAddresses } from "./pairing.js";

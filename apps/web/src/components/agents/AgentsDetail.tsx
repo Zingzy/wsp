@@ -16,9 +16,10 @@ import { CopyRow, RefusalSlot } from "../../settings/sheetParts.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
 import { Button } from "../ui/button.js";
 import { Checkbox } from "../ui/checkbox.js";
+import { Skeleton } from "../ui/skeleton.js";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group.js";
 import { Spinner } from "../ui/spinner.js";
-import { ActButton, AgentMarks, LeadMark, OneOf, ServerStatusView } from "./agentsParts.js";
+import { ActButton, AgentMarks, LeadMark, OneOf, StatusView } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W } from "./agentsRows.js";
 import { NARROW } from "./agentsWidths.js";
 import type { AddForm, AddFormProps, AddLevel, AddModule, AddRow, Choice, DetailView, Fact, Lead, UnderLevel, UnderRow } from "./kinds/kind.js";
@@ -128,7 +129,7 @@ function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
       <span className="flex min-h-7 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 py-1">
         <span className="flex min-w-0 max-w-full items-center gap-2">
           {fact.agent === undefined ? null : <HarnessMark harness={fact.agent} label={agentName(fact.agent)} className="size-3.5" />}
-          {fact.status === undefined ? null : <ServerStatusView status={fact.status} />}
+          {fact.status === undefined ? null : <StatusView status={fact.status} />}
           {fact.value === undefined ? null : fact.line === true ? (
             <CopyRow k={`fact-${fact.id}`} value={fact.value} />
           ) : fact.href !== undefined ? (
@@ -145,7 +146,9 @@ function FactLine({ fact, labelFor }: { fact: Fact; labelFor: string }) {
         </span>
         {trailing ? (
           <span className="flex min-w-0 flex-auto items-center gap-2">
-            {fact.fact === undefined ? null : (
+            {fact.fact === undefined ? null : typeof fact.fact !== "string" ? (
+              <StatusView status={fact.fact} fit />
+            ) : (
               <span data-fact-note className={cn(FACT, "line-clamp-2 min-w-0 break-words")} title={fact.fact}>
                 {fact.fact}
               </span>
@@ -340,7 +343,8 @@ export function UnderLevelView({ level, back, backLabel, now, onRow }: { level: 
   return (
     <div data-agents-under onKeyDown={onKeyDown} className="flex flex-col pb-4">
       <LevelHead back={back} backLabel={backLabel} title={level.title} right={again} headRef={headRef} />
-      <div data-level-body className="flex flex-col gap-0.5 pt-1" role="list" onKeyDown={rovingKeys}>
+      <div data-level-body className="flex flex-col gap-0.5 pt-1" role="list" aria-busy={level.reading} onKeyDown={rovingKeys}>
+        {level.reading && rows.length === 0 ? [0, 1, 2].map(n => <Skeleton key={n} data-k="under-skeleton" className="mx-2 h-12 rounded-lg" />) : null}
         {rows.map((row, at) => (
           <div key={row.key} role="listitem" data-under-row={row.key} className="relative isolate mx-2 flex h-12 items-center rounded-lg px-2">
             <button
@@ -356,6 +360,11 @@ export function UnderLevelView({ level, back, backLabel, now, onRow }: { level: 
           </div>
         ))}
       </div>
+      {level.empty === undefined || level.reading || rows.length > 0 ? null : (
+        <p data-k="under-empty" className={cn(FACT, "px-4 py-2 leading-4")}>
+          {level.empty}
+        </p>
+      )}
       <div className="px-4">{level.refused === undefined ? null : <RefusalSlot k="under-refused" said={level.refused} />}</div>
     </div>
   );

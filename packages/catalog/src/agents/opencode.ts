@@ -12,6 +12,7 @@ export const OPENCODE: AgentEntry = {
   stateHome: ".local/share/opencode",
   name: "OpenCode",
   about: { creator: "Anomaly", description: "The open source coding agent for the terminal.", homepage: "https://opencode.ai", repo: "https://github.com/anomalyco/opencode", license: "MIT" },
+  mark: { source: "https://github.com/simple-icons/simple-icons/blob/develop/icons/opencode.svg", license: "CC0-1.0", svg: `<svg viewBox="0 0 24 24"><path d="M22 24H2V0h20zM17 4.8H7v14.4h10z"/></svg>` },
   context: OPENCODE_CONTEXT,
   // 1.18.18: its own folder, where it holds copies, then Claude Code's and the shared folder, which it loads too.
   skillRoots: {

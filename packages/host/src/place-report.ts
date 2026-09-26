@@ -6,7 +6,8 @@
 // computer's own row.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, statfsSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, statfsSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { homedir, arch as osArch, platform, release, type as osType, uptime as upSeconds, userInfo } from "node:os";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS, configSum } from "@wsp/catalog";
@@ -38,15 +39,47 @@ export function readPlaceFile(path: string): PlaceFile | undefined {
   }
 }
 
-/** Whether this computer already belongs to a wsp. The one reading of it: the join refuses on it and a screen that
- * has its own words for that reads the same thing rather than testing for the file a second time. */
-export const joinedAlready = (home: string): boolean => readPlaceFile(placeFilePath(home)) !== undefined;
+/** What of a join stands on this computer: a place file that parses is a join; one that does not, a dangling link
+ * at its path, or the key with no place file beside it (a join cut off between its two writes) is broken, named by
+ * the path that stands. Read by lstat, so a link counts as there whether or not it points anywhere. */
+export function joinStanding(home: string): { joined: PlaceFile } | { broken: string } | undefined {
+  const file = placeFilePath(home);
+  if (there(file)) {
+    const joined = readPlaceFile(file);
+    return joined !== undefined ? { joined } : { broken: file };
+  }
+  const key = placeKeyPath(home);
+  return there(key) ? { broken: key } : undefined;
+}
 
-/** Writes it at the one mode it is ever kept at; the folder is made first, since a fresh computer has none. */
-export function writePlaceFile(path: string, file: PlaceFile): void {
+/** Creates a file at the one mode wsp keeps its own at, only where nothing stands, a link included, and answers
+ * false where something does. */
+export function writeExclusive(path: string, text: string): boolean {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(path, placeFileText(file), { mode: PLACE_FILE_MODE });
+  try {
+    writeFileSync(path, text, { mode: PLACE_FILE_MODE, flag: "wx" });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw e;
+  }
   chmodSync(path, PLACE_FILE_MODE);
+  return true;
+}
+
+/** Writes it only where none stands and never half: the text goes to a name of its own beside it, which is then
+ * linked onto the path, so a reader finds the whole file or no file. False where one already stands. */
+export function writePlaceFile(path: string, file: PlaceFile): boolean {
+  const temp = `${path}.${randomBytes(6).toString("hex")}`;
+  if (!writeExclusive(temp, placeFileText(file))) throw new Error(`${temp} is already there`);
+  try {
+    linkSync(temp, path);
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw e;
+  } finally {
+    rmSync(temp, { force: true });
+  }
 }
 
 /** The line that runs this same wsp again on this computer, word by word, for the tools a turn's agent is given

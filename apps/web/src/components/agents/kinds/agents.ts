@@ -7,7 +7,7 @@ import { BotIcon, CircleArrowUpIcon, DownloadIcon, SquareTerminalIcon, Trash2Ico
 import { catalogEntry, installShown, runsThreads, type AgentEntry } from "@wsp/catalog";
 import { compareVersions, MCP_SERVER_NAME, type AgentRow, type AgentsReport } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, agentSignInStart, editImageAct, heldReason, holdAll, notYet, onImage, signInAct, waitingFlow, type RowAct, type RowsContext } from "../agentsRows.js";
-import { kind, matchesAny, rowKey, type Fact, type KindModule } from "./kind.js";
+import { kind, matchesAny, rowKey, type Fact, type KindModule, type Status } from "./kind.js";
 
 export interface AgentItem {
   readonly row: AgentRow;
@@ -21,6 +21,13 @@ export const signedIn = (row: Pick<AgentRow, "signIn">): boolean => row.signIn =
 /** The one word for where an agent's sign-in stands, which every row that draws an agent's state reads. */
 export const signInWord = (row: Pick<AgentRow, "signIn">): string =>
   row.signIn === "signed-in" ? W.signedIn : row.signIn === "vault-key" ? W.yourKey : row.signIn === "none" ? W.needsSignIn : W.notChecked;
+
+/** Where an agent's sign-in stands as a dot and its word: working, waiting on a sign-in, or not known. */
+export const signInStatus = (row: Pick<AgentRow, "signIn">): Status => ({
+  state: row.signIn,
+  tone: signedIn(row) ? "good" : row.signIn === "none" ? "waiting" : "quiet",
+  words: signInWord(row),
+});
 
 /** The newer version its vendor publishes, where one is newer than what stands there. */
 const newerThan = (row: AgentRow): string | undefined => (row.version !== undefined && row.latest !== undefined && compareVersions(row.latest, row.version) > 0 ? row.latest : undefined);
@@ -105,7 +112,7 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
   icon: BotIcon,
   word: "Agents",
   noun: n => `${n} ${n === 1 ? "agent" : "agents"}`,
-  add: "Install an agent",
+  line: () => ["Agents on ", ""],
   rowHeight: "h-[72px]",
   groupings: [],
   defaultGroup: () => "none",
@@ -128,14 +135,14 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
     const quick = onImage(ctx) || waitingFlow(flow) ? undefined : step;
     if (!row.installed) {
       const about = agentEntry(row.id)?.about.description;
-      return { key: rowId(row), title: row.name, lead: { kind: "agent", agent: row.id, faded: true }, available: true, ...(about === undefined ? {} : { subtext: about }), ...(quick === undefined ? {} : { quick }) };
+      return { key: rowId(row), title: row.name, lead: { kind: "agent", agent: row.id }, available: true, ...(about === undefined ? {} : { subtext: about }), ...(quick === undefined ? {} : { quick }) };
     }
     return {
       key: rowId(row),
       title: row.name,
       lead: { kind: "agent", agent: row.id },
       ...(row.version === undefined ? {} : { subtext: row.version }),
-      state: waitingFlow(flow) ? W.waitingOnYou : signInWord(row),
+      status: waitingFlow(flow) ? { ...signInStatus(row), words: W.waitingOnYou } : signInStatus(row),
       ...(quick === undefined ? {} : { quick }),
     };
   },
@@ -148,17 +155,17 @@ export const AGENTS_KIND: KindModule<AgentItem> = {
     const installedNote = [row.road === "own" ? W.own : row.road === "shim" && row.via === undefined ? W.shim : undefined, row.via === undefined ? undefined : W.viaShim(row.via)].filter(Boolean).join(", ");
     const facts: Fact[] = row.installed
       ? [
-          { id: "status", label: W.status, value: signInWord(row), ...(row.signInRoad !== "none" ? { fact: W.roads[row.signInRoad] } : {}) },
+          { id: "status", label: W.status, status: signInStatus(row), ...(row.signInRoad !== "none" ? { fact: W.roads[row.signInRoad] } : {}) },
           ...(row.version === undefined ? [] : [{ id: "version", label: W.version, value: row.version, ...(versionFact === "" ? {} : { fact: versionFact }) }]),
           { id: "installed-at", label: W.installedAt, ...(row.path === undefined ? {} : { value: row.path, copy: true }), ...(installedNote === "" ? {} : { fact: installedNote }) },
           { id: "wsp-tools", label: W.wspTools, ...(item.toolsFile === undefined ? { value: W.notAdded, muted: true } : { value: item.toolsFile, copy: true }) },
           threadsFact(row),
           ...aboutFacts(entry),
         ]
-      : [{ id: "status", label: W.status, value: W.notInstalled }, ...(row.latest === undefined ? [] : [{ id: "latest", label: W.latestLabel, value: row.latest }]), threadsFact(row), ...aboutFacts(entry), ...installFact(entry)];
+      : [{ id: "status", label: W.status, status: { state: "not-installed", tone: "quiet", words: W.notInstalled } }, ...(row.latest === undefined ? [] : [{ id: "latest", label: W.latestLabel, value: row.latest }]), threadsFact(row), ...aboutFacts(entry), ...installFact(entry)];
     return {
       title: row.name,
-      lead: { kind: "agent", agent: row.id, ...(row.installed ? {} : { faded: true }) },
+      lead: { kind: "agent", agent: row.id },
       ...(entry === undefined ? {} : { about: entry.about.description }),
       facts,
       acts,

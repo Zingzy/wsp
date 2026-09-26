@@ -4,7 +4,7 @@
 // for. One bundle carries both chips, so every check here runs against both slices. These hold the config both roads
 // read and what the packaged bundle carries.
 import { execFileSync, spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -58,6 +58,10 @@ describe("the mac signing config", () => {
 
   it("notarizes, which happens only once an identity signed and the Apple credentials are set", () => {
     expect(mac).toContain("notarize: true\n");
+  });
+
+  it("keeps Chromium's English strings alone, the one language the app is written in", () => {
+    expect(config).toMatch(/^electronLanguages: \[en-US\]$/m);
   });
 
   it.skipIf(!onMac)("grants the two exceptions measured on arm64 and under an ad hoc signature, the one Electron documents for Intel, and no other", () => {
@@ -115,6 +119,13 @@ describe.skipIf(!onMac || macTree === undefined)("the packaged mac bundle", () =
   it("carries both chips in one bundle, so a download runs on Apple silicon and on Intel alike", () => {
     expect(macTree!.targets).toEqual(MAC_TARGETS);
     expect(archsOf(executableIn(macTree!)).sort()).toEqual(["arm64", "x86_64"]);
+  });
+
+  it("carries the English locale folder alone, in the bundle's resources and in the framework's", () => {
+    const framework = join(macApp, "Contents", "Frameworks", "Electron Framework.framework", "Resources");
+    for (const dir of [resourcesIn(macTree!), framework]) {
+      expect({ dir, locales: readdirSync(dir).filter(name => name.endsWith(".lproj")) }).toEqual({ dir, locales: ["en.lproj"] });
+    }
   });
 
   it("carries one signature that covers the staged native, so a download is not read as damaged", () => {

@@ -10,7 +10,7 @@ import { DownloadIcon, PowerIcon, PowerOffIcon, ScrollTextIcon, Trash2Icon } fro
 import { agentName, catalogEntry, isSystemSkill, ownSkillFolder, type AgentEntry } from "@wsp/catalog";
 import type { AgentsProject, AgentsReport, SkillHit, SkillRow } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, compactCount, holdAll, inProject, notYet, onImage, pickOf, skillKey, whereNow, type RowAct, type RowsContext, type SkillActs, type SkillPicks } from "../agentsRows.js";
-import { byName, kind, matchesAny, projectGroups, rowKey, type AddModule, type Choice, type DetailView, type Fact, type GroupBy, type GroupView, type KindModule } from "./kind.js";
+import { byName, kind, matchesAny, projectGroups, rowKey, type AddModule, type Choice, type DetailView, type Fact, type GroupBy, type GroupView, type KindModule, type Status } from "./kind.js";
 
 /** The folder a skill really lives in: the one that is no link, else the first. */
 const realPath = (row: SkillRow): string => (row.paths.find(p => p.linkTo === undefined) ?? row.paths[0])?.path ?? "";
@@ -21,6 +21,9 @@ const agentsOf = (row: SkillRow): string[] => [...new Set(row.paths.flatMap(p =>
 const isOff = (row: SkillRow): boolean => row.paths.every(p => p.off === true);
 
 const rowId = (row: SkillRow): string => rowKey(["skill", row.scope], row.project, row.name);
+
+const ON: Status = { state: "on", tone: "good", words: W.on };
+const OFF: Status = { state: "off", tone: "quiet", words: W.off };
 
 type Source = "system" | "plugin" | "user" | "project";
 const sourceOf = (row: SkillRow): Source => (isSystemSkill(row.name) ? "system" : row.scope);
@@ -111,7 +114,7 @@ function remoteDetail(hit: SkillHit, report: AgentsReport | null, ctx: RowsConte
   const doc = skills.remoteOf(hit.id);
   const refused = skills.refusedOf(hit.id);
   const facts: Fact[] = [
-    { id: "status", label: W.status, value: there === undefined ? W.notInstalled : W.installed },
+    { id: "status", label: W.status, status: there === undefined ? { state: "not-installed", tone: "quiet", words: W.notInstalled } : { state: "installed", tone: "good", words: W.installed } },
     { id: "source", label: W.source, value: hit.source },
     { id: "installs", label: W.installs, value: compactCount(hit.installs) },
   ];
@@ -161,7 +164,8 @@ export const SKILLS_KIND: KindModule<SkillRow> = {
   word: "Skills",
   noun: n => `${n} ${n === 1 ? "skill" : "skills"}`,
   search: "Search skills",
-  add: "Add a skill",
+  add: "Add skill",
+  line: project => ["Skills on ", project === undefined ? "" : `, for ${project}`],
   rowHeight: "h-14",
   groupings: ["none", "agent", "source"],
   defaultGroup: shell => (shell === "page" ? "source" : "none"),
@@ -191,12 +195,12 @@ export const SKILLS_KIND: KindModule<SkillRow> = {
     const ordered = [...row.paths].sort((a, b) => Number(a.agent !== undefined) - Number(b.agent !== undefined));
     const status: Fact =
       source === "system"
-        ? { id: "status", label: W.status, value: W.alwaysOn, fact: W.keptCurrent }
+        ? { id: "status", label: W.status, status: { ...ON, words: W.alwaysOn }, fact: W.keptCurrent }
         : source === "plugin"
-          ? { id: "status", label: W.status, value: W.on, fact: W.fromPlugin }
+          ? { id: "status", label: W.status, status: ON, fact: W.fromPlugin }
           : source === "project"
-            ? { id: "status", label: W.status, value: isOff(row) ? W.off : W.on, fact: W.inRepo }
-            : { id: "status", label: W.status, value: isOff(row) ? W.off : W.on };
+            ? { id: "status", label: W.status, status: isOff(row) ? OFF : ON, fact: W.inRepo }
+            : { id: "status", label: W.status, status: isOff(row) ? OFF : ON };
     const facts: Fact[] = [
       status,
       ...(row.description === undefined ? [] : [{ id: "description", label: W.description, value: row.description }]),
