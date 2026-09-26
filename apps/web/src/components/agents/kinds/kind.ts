@@ -5,6 +5,7 @@
 // its module and one line in the registry.
 import type { LucideIcon } from "lucide-react";
 import type { ComponentType, RefObject } from "react";
+import type { BrandMark } from "@wsp/catalog";
 import type { AgentsProject, AgentsReport } from "@wsp/protocol";
 import type { DocState, FlowView, PickOption, RowAct, RowsContext } from "../agentsRows.js";
 
@@ -13,9 +14,9 @@ export type GroupBy = "none" | "agent" | "source" | "scope";
 /** Which host draws the manager: a task's panel or a computer's page, where a kind can group by default otherwise. */
 export type AgentsShell = "panel" | "page";
 
-/** What leads a row or a detail's head: an agent's own mark, a server's box with its own icon where it has a host, or
- * the kind's glyph. */
-export type Lead = { readonly kind: "agent"; readonly agent: string } | { readonly kind: "box"; readonly icon: LucideIcon; readonly host?: string } | { readonly kind: "glyph"; readonly icon: LucideIcon };
+/** What leads a row or a detail's head: an agent's own mark, a server's box with its registered brand mark, else its own
+ * icon where it has a host, else the glyph; or the kind's glyph. */
+export type Lead = { readonly kind: "agent"; readonly agent: string } | { readonly kind: "box"; readonly icon: LucideIcon; readonly mark?: BrandMark; readonly host?: string } | { readonly kind: "glyph"; readonly icon: LucideIcon };
 
 /** A server's state as its dot and word say it: `open` needs no sign-in by its config and was never checked;
  * `checking` waits on the one connect that decides it. */

@@ -19,3 +19,4 @@ export * from "./thread-agents.js";
 export * from "./base-image.js";
 export * from "./seed.js";
 export * from "./git-hosts.js";
+export * from "./marks/index.js";
