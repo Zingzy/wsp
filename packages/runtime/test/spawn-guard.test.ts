@@ -397,7 +397,10 @@ describe("agents spawning agents", () => {
     expect((await rt.workspaces.list(asThread(scope))).map(w => w.name).sort()).toEqual(["mine", "ours"]);
     expect((await rt.status.list(undefined, asThread(scope))).map(s => s.name).sort()).toEqual(["mine", "ours"]);
     expect((await rt.workspaces.resolve("mine", asThread(scope))).id).toBe(mine.id);
-    for (const word of ["theirs", theirs.id, theirs.id.slice(0, 6), "nobody"]) {
+    // The start has to miss both visible ids, which a random pair shares for several characters now and then.
+    let len = 6;
+    while ([mine.id, forked.id].some(id => id.startsWith(theirs.id.slice(0, len)))) len++;
+    for (const word of ["theirs", theirs.id, theirs.id.slice(0, len), "nobody"]) {
       await expect(rt.workspaces.resolve(word, asThread(scope))).rejects.toThrow(noWorkspaceRefusal(word));
     }
     // Every id of this host starts ws_, so the start a thread would walk the whole host with answers off its own
