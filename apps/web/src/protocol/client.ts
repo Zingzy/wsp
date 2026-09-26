@@ -190,7 +190,7 @@ export class ProtocolClient {
     const id = this.#next();
     return new Promise<T>((resolve, reject) => {
       this.#pending.set(id, { resolve: v => resolve(v as T), reject });
-      this.#raw({ id, op, ...params });
+      this.#raw({ ...params, id, op });
     });
   }
 

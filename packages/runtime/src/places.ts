@@ -22,6 +22,9 @@ import {
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
   forkRoom,
+  placeCapOf,
+  placeCapRefusal,
+  PlaceCapSet,
   placeLinkTranscript,
   placeRefusalTranscript,
   isPlainPath,
@@ -98,6 +101,8 @@ import type { Store } from "./store.js";
 
 /** One document per joined computer, keyed by the id this host knows it by. */
 const PLACES = "places";
+/** One document per place a person set a cap on, keyed by place id, holding only the numbers they set. */
+const CAPS = "caps";
 /** The one document naming which place a verb means when nobody says: the last one added. */
 const DEFAULT_COLLECTION = "place-default";
 const DEFAULT_ID = "default";
@@ -325,6 +330,8 @@ export interface PlaceRecording {
   forksOn(placeId: string): Promise<string[]>;
   /** The names of the projects recorded on this place, which every workspace of them is a copy for. */
   projectsOn(placeId: string): Promise<string[]>;
+  /** How many of what that place's cap counts run there now, read against every row the list holds. */
+  runningOn(placeId: string, places: readonly Pick<PlaceView, "id" | "kind">[]): Promise<number>;
 }
 
 export interface PlaceDoorOptions {
@@ -456,6 +463,9 @@ export interface PlaceDoor {
    * it holds none. Answers what came back and writes it on the record, so a window opened later reads the same
    * answer. Nothing is installed and nothing is left running either way. */
   dial(placeId: string, now: number): Promise<PlaceDial>;
+  /** Sets numbers on one place's cap, each key left out keeping what stands, and answers the row as it now reads.
+   * Refused as usage for a place this host does not hold and for a key the place's kind does not take. */
+  cap(placeId: string, set: PlaceCapSet): Promise<{ place: PlaceView }>;
   /** The port on this computer's loopback that carries to the daemon on a linked place, opened at the first ask
    * and held with the link. Throws with the place's name when it is not connected or has said no port. */
   road(placeId: string): Promise<number>;
@@ -812,6 +822,21 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const recordOf = async (placeId: string): Promise<PlaceRecord | undefined> => {
     const found = await store.get(PLACES, placeId);
     return isPlaceRecord(found) ? found : undefined;
+  };
+  const capSetOf = async (placeId: string): Promise<PlaceCapSet> => {
+    const parsed = PlaceCapSet.safeParse(await store.get(CAPS, placeId));
+    return parsed.success ? parsed.data : {};
+  };
+  /** Every row's id and kind without asking any computer anything: what the running count places a workspace by. */
+  const rowIds = async (): Promise<Pick<PlaceView, "id" | "kind">[]> => [
+    { id: HERE_PLACE_ID, kind: "computer" },
+    ...(await records()).map(r => ({ id: r.id, kind: "computer" as const })),
+    ...providerIds().map(id => ({ id, kind: "provider" as const })),
+  ];
+  /** A row with its cap and what that cap counts, both read now. */
+  const withCap = async (row: PlaceView, ids: readonly Pick<PlaceView, "id" | "kind">[]): Promise<PlaceView> => {
+    const cap = placeCapOf(row, await capSetOf(row.id));
+    return { ...row, ...(cap !== undefined ? { cap } : {}), running: await recording.runningOn(row.id, ids) };
   };
   /** The version the place reports once it has dialled back, or what it still reads when the wait runs out. The
    * record is what a link writes its report onto, so this reads the one fact every other row reads. */
@@ -1387,12 +1412,50 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     kept.delete(placeId);
     backends.delete(placeId);
     await store.delete(PLACES, placeId);
+    await store.delete(CAPS, placeId);
     await inTurn(async () => {
       if ((await defaultId()) === placeId) await store.delete(DEFAULT_COLLECTION, DEFAULT_ID);
     });
     woken(placeId, false);
     closedAt.delete(placeId);
     emit({ type: "place.removed", placeId });
+  };
+
+  /** The row of the computer the host runs on, off what it says about itself now. */
+  const hereRow = (marked: string): PlaceView => {
+    const here = wiring.here();
+    return {
+      id: HERE_PLACE_ID,
+      kind: "computer",
+      name: here.name,
+      ...(here.label !== undefined ? { label: here.label } : {}),
+      default: marked === HERE_PLACE_ID,
+      ...(here.os !== undefined ? { os: here.os } : {}),
+      ...(here.shape !== undefined ? { shape: here.shape } : {}),
+      ...(here.diskFreeBytes !== undefined ? { diskFreeBytes: here.diskFreeBytes } : {}),
+      ...(here.engine !== undefined ? { engine: here.engine } : {}),
+      present: true,
+      // This computer is where the person's own agents run, never something the host forks into: a copy of the
+      // image on a runtime here is that place's own row, which is the one that says it forks.
+      takesForks: false,
+      buildsImages: false,
+    };
+  };
+  /** A joined computer's row off its record, less the fork room, which asks the computer itself. */
+  const joinedRow = (record: PlaceRecord, marked: string): PlaceView => ({ ...viewOf(record, marked), ...imageFacts(record.id, door.backendOf(record.id)) });
+  const providerRow = (id: string, marked: string): PlaceView => {
+    const rate = providerRate(id);
+    const sizes = providerSizes(id);
+    return {
+      id,
+      kind: "provider",
+      name: id,
+      default: marked === id,
+      takesForks: true,
+      ...(rate !== undefined ? { rateUsdPerHour: rate } : {}),
+      ...(sizes.length > 0 ? { sizes: [...sizes] } : {}),
+      ...imageFacts(id, providerBackend(id)),
+    };
   };
 
   const door: PlaceDoor = {
@@ -1857,7 +1920,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // login that answered is the box speaking and not the agent, and it does not move that date.
       const moved: PlaceRecord = { ...held, dialled, ...(dialled.answered && linked !== undefined ? { lastSeenAt: stamp } : {}) };
       await keep(moved);
-      return { dialled, line: placeDialLine({ name: held.name, road: held.road, linked: linked !== undefined, dialled }), place: viewOf(moved, await defaultId()) };
+      return { dialled, line: placeDialLine({ name: held.name, road: held.road, linked: linked !== undefined, dialled }), place: await withCap(viewOf(moved, await defaultId()), await rowIds()) };
     },
 
     async road(placeId) {
@@ -1893,49 +1956,33 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     homeOf: async placeId => (await recordOf(placeId))?.report.login["HOME"],
 
     async list() {
-      const here = wiring.here();
-      const providers = providerIds();
       const held = await records();
       // This computer first, the computers joined to it after, the providers last; exactly one default, which falls
       // to this computer when the mark names a row that is no longer here.
       const marked = (await markHeld()) ?? HERE_PLACE_ID;
       const room = new Map(await Promise.all(held.map(async r => [r.id, await forksOf(r)] as const)));
-      return [
-        {
-          id: HERE_PLACE_ID,
-          kind: "computer" as const,
-          name: here.name,
-          ...(here.label !== undefined ? { label: here.label } : {}),
-          default: marked === HERE_PLACE_ID,
-          ...(here.os !== undefined ? { os: here.os } : {}),
-          ...(here.shape !== undefined ? { shape: here.shape } : {}),
-          ...(here.diskFreeBytes !== undefined ? { diskFreeBytes: here.diskFreeBytes } : {}),
-          ...(here.engine !== undefined ? { engine: here.engine } : {}),
-          present: true,
-          // This computer is where the person's own agents run, never something the host forks into: a copy of the
-          // image on a runtime here is that place's own row, which is the one that says it forks.
-          takesForks: false,
-          buildsImages: false,
-        },
+      const rows: PlaceView[] = [
+        hereRow(marked),
         ...held.map(r => {
           const forks = room.get(r.id);
-          return { ...viewOf(r, marked), ...(forks !== undefined ? { forks } : {}), ...imageFacts(r.id, door.backendOf(r.id)) };
+          return { ...joinedRow(r, marked), ...(forks !== undefined ? { forks } : {}) };
         }),
-        ...providers.map(id => {
-          const rate = providerRate(id);
-          const sizes = providerSizes(id);
-          return {
-            id,
-            kind: "provider" as const,
-            name: id,
-            default: marked === id,
-            takesForks: true,
-            ...(rate !== undefined ? { rateUsdPerHour: rate } : {}),
-            ...(sizes.length > 0 ? { sizes: [...sizes] } : {}),
-            ...imageFacts(id, providerBackend(id)),
-          };
-        }),
+        ...providerIds().map(id => providerRow(id, marked)),
       ];
+      return Promise.all(rows.map(row => withCap(row, rows)));
+    },
+
+    async cap(placeId, set) {
+      const marked = (await markHeld()) ?? HERE_PLACE_ID;
+      const record = placeId === HERE_PLACE_ID ? undefined : await recordOf(placeId);
+      const row = placeId === HERE_PLACE_ID ? hereRow(marked) : record !== undefined ? joinedRow(record, marked) : providerIds().includes(placeId) ? providerRow(placeId, marked) : undefined;
+      if (row === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(placeId, [wiring.here().name, ...(await records()).map(r => r.name), ...providerIds()])), { kind: "usage" });
+      const refused = placeCapRefusal(row, set);
+      if (refused !== undefined) throw Object.assign(new Error(refused), { kind: "usage" });
+      const given = Object.fromEntries(Object.entries(set).filter(([, value]) => value !== undefined));
+      // Read and written in one turn, so two numbers set at once on one place both stand.
+      await inTurn(async () => store.put(CAPS, placeId, { ...(await capSetOf(placeId)), ...given }));
+      return { place: await withCap(row, await rowIds()) };
     },
 
     async update(placeId, addId) {

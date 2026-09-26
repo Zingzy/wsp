@@ -64,7 +64,7 @@ export class WsClient {
     const id = this.nextId++;
     return new Promise(resolve => {
       this.pending.set(id, resolve);
-      const text = JSON.stringify({ id, op, ...params });
+      const text = JSON.stringify({ ...params, id, op });
       this.ws.send(this.seal === undefined ? text : this.seal.seal(text));
     });
   }
