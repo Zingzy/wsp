@@ -5,7 +5,7 @@
 // command line, the runtime and the app all read them here, so no road can
 // record a project one way and read it back another.
 import { THIS_COMPUTER, thisComputer } from "./format.js";
-import { HERE_PLACE_ID, namesPlace } from "./index.js";
+import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import type { ProjectSource, ProjectView, WorkspaceKind, WorkspaceProject, WorkspaceView } from "./index.js";
 import { folderName, underProject } from "./project-path.js";
 import { shellLine, shellQuote } from "./shell-quote.js";
