@@ -9,18 +9,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, placeWiring, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, hereWord } from "@wsp/protocol";
+import { GET_THE_APP_WORD, HOST_WORDS, hereWord } from "@wsp/protocol";
 import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { WORKSPACE_WORDS } from "../../web/src/actions/format.js";
-import { LOCKUP_OPTICAL_CENTRE } from "../../web/src/brand/optical.js";
-import { SETTINGS_WORDS } from "../../web/src/settings/format.js";
+import { ADD_COMPUTER_WORDS, SETTINGS_WORDS } from "../../web/src/settings/format.js";
 import { workspaceRowId } from "../../web/src/sidebar/rowGrammar.js";
 import { FIRST_RUN_WORDS } from "../../web/src/sidebar/words.js";
 import { VERSION } from "../../../packages/host/src/version.js";
-import { executableIn, treeHere } from "./packaged.js";
+import { builtExecutableHere } from "./packaged.js";
 import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
 import { notForThisPage } from "../src/origin.js";
 
@@ -32,9 +31,9 @@ const DIGEST = /^[0-9a-f]{64}$/;
 function builtApp(): string {
   const fromEnv = process.env["WSP_DESKTOP_APP"];
   if (fromEnv !== undefined) return fromEnv;
-  const tree = treeHere();
-  if (tree === undefined) throw new Error(`no packaged tree for ${process.platform}-${process.arch}`);
-  return executableIn(tree);
+  const built = builtExecutableHere();
+  if (built === undefined) throw new Error(`no packaged tree for ${process.platform}-${process.arch}`);
+  return built;
 }
 
 const GOLDEN = {
@@ -114,6 +113,8 @@ const ONBOARDING_URL = /onboarding\.html/;
 /** Where the photographed states go, beside the render tests' own. */
 const SHOTS = join(tmpdir(), "wsp-render");
 const DEVTOOLS_URL = /^devtools:\/\//;
+/** The words every notice about the app and its host being two releases shares. */
+const VERSION_LINE = /this app is/;
 
 /** The windows the app opened: a devtools window is Chromium's own, enumerated alongside them and able to come first. */
 function appWindows(app: ElectronApplication): Page[] {
@@ -281,8 +282,12 @@ function frameAt(win: Page, url: string): Promise<Frame> {
   );
 }
 
-/** What the page inside a frame made of the worker it asked for. */
-const registerWorker = (frame: Frame): Promise<string> => frame.evaluate(() => (window as unknown as { registerWorker(): Promise<string> }).registerWorker());
+/** What the page inside a frame made of the worker it asked for. A frame has its url from the moment its navigation
+ * commits, before the script at the end of its body has run, so the ask waits for the page to have defined it. */
+async function registerWorker(frame: Frame): Promise<string> {
+  await frame.waitForFunction(() => "registerWorker" in window);
+  return frame.evaluate(() => (window as unknown as { registerWorker(): Promise<string> }).registerWorker());
+}
 
 async function bootOf(page: Page): Promise<{ wsPort: number; tokenHash: string; token?: string }> {
   await page.waitForLoadState("domcontentloaded");
@@ -320,34 +325,10 @@ async function photograph(app: ElectronApplication, page: Page, name: string): P
   return files;
 }
 
-/** The app window as the screen shows it, over a backdrop of one colour: its sidebar is the window's glass, which a
- * page capture paints white, so the file has to come from the screen. Off macOS the page capture stands in. */
-async function photographWindow(app: ElectronApplication, win: Page, file: string, backdrop: string): Promise<string> {
+/** The app window's page as a file. The sidebar is the window's glass, which a page capture paints clear. */
+async function photographPage(win: Page, file: string): Promise<string> {
   mkdirSync(SHOTS, { recursive: true });
-  if (process.platform !== "darwin") {
-    await win.screenshot({ path: file });
-    return file;
-  }
-  const ids = await app.evaluate(({ BrowserWindow, app: electronApp, screen }, color) => {
-    const target = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().startsWith("http://127.0.0.1"))!;
-    const behind = new BrowserWindow({ ...screen.getPrimaryDisplay().bounds, frame: false, show: false, focusable: false, backgroundColor: color });
-    behind.showInactive();
-    // The app under test takes activation so the window is key; the backdrop floats over every other window and the
-    // app one step above it, so nothing else sits between them.
-    electronApp.focus({ steal: true });
-    behind.setAlwaysOnTop(true, "floating", 0);
-    target.setAlwaysOnTop(true, "floating", 1);
-    target.focus();
-    return { target: target.id, behind: behind.id, bounds: target.getBounds() };
-  }, backdrop);
-  // The glass repaints over the new backdrop a few frames later.
-  await win.waitForTimeout(800);
-  const b = ids.bounds;
-  expect(spawnSync("screencapture", ["-R", `${b.x},${b.y},${b.width},${b.height}`, "-x", file]).status).toBe(0);
-  await app.evaluate(({ BrowserWindow }, ids) => {
-    BrowserWindow.fromId(ids.behind)!.close();
-    BrowserWindow.fromId(ids.target)!.setAlwaysOnTop(false);
-  }, ids);
+  await win.screenshot({ path: file });
   return file;
 }
 
@@ -367,6 +348,73 @@ async function refused(url: string): Promise<boolean> {
   } catch {
     return true;
   }
+}
+
+/** The window's frame as the shell set it and the header row as the page drew it, read on a launched app. */
+async function macHeader(app: ElectronApplication, win: Page) {
+  const frame = await app.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows()[0]!;
+    return { id: w.id, buttons: w.getWindowButtonPosition(), bounds: w.getBounds(), content: w.getContentBounds(), title: w.getTitle() };
+  });
+  const page = await win.evaluate(() => {
+    const style = (selector: string) => getComputedStyle(document.querySelector(selector)!);
+    const region = (selector: string) => (style(selector) as unknown as { webkitAppRegion: string }).webkitAppRegion;
+    const buttons = (selector: string) => Array.from(document.querySelector(selector)!.querySelectorAll("button")).map(b => (getComputedStyle(b) as unknown as { webkitAppRegion: string }).webkitAppRegion);
+    return {
+      pageToggles: document.querySelectorAll("header [data-slot=sidebar-trigger]").length,
+      htmlClass: document.documentElement.className,
+      container: style("[data-slot=sidebar-container]").backgroundColor,
+      headerHeight: document.querySelector("[data-slot=sidebar-header]")!.getBoundingClientRect().height,
+      sidebarHeader: region("[data-slot=sidebar-header]"),
+      pageHeader: region("header [data-header-row]"),
+      sidebarButtons: buttons("[data-slot=sidebar-header]"),
+      pageButtons: buttons("header"),
+      sidebarWidth: document.querySelector("[data-slot=sidebar-container]")!.getBoundingClientRect().width,
+    };
+  });
+  return { frame, page };
+}
+
+/** A point of the window, in css pixels across and a fraction of the height down. */
+type WindowPoint = { x: number; y: number };
+
+/** For each theme, at each point: the alpha the window's capture holds there and the alpha the page's own
+ * backgrounds stack to at the element under it, both out of 255. */
+async function readPainted<K extends string>(app: ElectronApplication, win: Page, id: number, points: Record<K, WindowPoint>): Promise<Record<"light" | "dark", Record<K, { captured: number; declared: number }>>> {
+  const out = {} as Record<"light" | "dark", Record<K, { captured: number; declared: number }>>;
+  for (const theme of ["light", "dark"] as const) {
+    // The app's page sets the shell's theme source back to system, so the side is picked where the page reads it.
+    await win.emulateMedia({ colorScheme: theme });
+    // The page holds transitions off for one frame across the flip; once it lets them back every colour is at rest,
+    // and a frame after that the window has painted it.
+    await win.waitForFunction(t => document.documentElement.classList.contains("dark") === (t === "dark") && !document.documentElement.classList.contains("no-transitions"), theme);
+    await win.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+    const declared = await win.evaluate(pts => {
+      const ctx = Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext("2d")!;
+      const alphaOf = (color: string): number => {
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, 1, 1);
+        return ctx.getImageData(0, 0, 1, 1).data[3]! / 255;
+      };
+      const stacked = (p: { x: number; y: number }): number => {
+        let clear = 1;
+        for (let el: Element | null = document.elementFromPoint(p.x, p.y * window.innerHeight); el !== null; el = el.parentElement) clear *= 1 - alphaOf(getComputedStyle(el).backgroundColor);
+        return Math.round((1 - clear) * 255);
+      };
+      return Object.fromEntries(Object.entries(pts).map(([k, p]) => [k, stacked(p as { x: number; y: number })]));
+    }, points as Record<string, WindowPoint>);
+    const captured = await app.evaluate(async ({ BrowserWindow }, args) => {
+      const image = await BrowserWindow.fromId(args.id)!.webContents.capturePage();
+      const { width, height } = image.getSize();
+      const bitmap = image.toBitmap();
+      const scale = width / args.cssWidth;
+      return Object.fromEntries(Object.entries(args.points).map(([k, p]) => [k, bitmap[(Math.round(p.y * height) * width + Math.round(p.x * scale)) * 4 + 3]!]));
+    }, { id, cssWidth: await win.evaluate(() => window.innerWidth), points: points as Record<string, WindowPoint> });
+    out[theme] = Object.fromEntries(Object.keys(points).map(k => [k, { captured: captured[k]!, declared: declared[k]! }])) as Record<K, { captured: number; declared: number }>;
+  }
+  await win.emulateMedia({ colorScheme: null });
+  return out;
 }
 
 interface MenuRow {
@@ -583,19 +631,21 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       });
     };
     await rest();
-    shots.push(await photographWindow(app, win, join(SHOTS, "app-first-run.png"), "#101010"));
+    shots.push(await photographPage(win, join(SHOTS, "app-first-run.png")));
     await add.click();
     const door = win.locator("[role=dialog] [data-k=add-computer]");
     await door.click();
-    const dialog = win.getByRole("dialog");
-    await dialog.waitFor();
-    expect(await dialog.textContent()).toContain(PLACES_WORDS.sheet.description);
-    expect(await dialog.textContent()).not.toMatch(/wsp init|terminal/i);
-    shots.push(await photographWindow(app, win, join(SHOTS, "app-add-computer-sheet.png"), "#101010"));
+    // The door closes the dialog and opens Settings on Computers, whose Add a computer stands on its first road.
+    await win.getByRole("dialog").waitFor({ state: "detached" });
+    const adding = win.locator("[data-settings-page] [data-k=add-computer]");
+    await adding.waitFor();
+    await adding.locator("[data-k=road-ssh]").waitFor();
+    expect(await win.locator("[data-settings-page]").textContent()).toContain(ADD_COMPUTER_WORDS.title);
+    expect(await adding.textContent()).not.toMatch(/wsp init|terminal/i);
+    await rest();
+    shots.push(await photographPage(win, join(SHOTS, "app-add-computer.png")));
     await win.keyboard.press("Escape");
-    await dialog.waitFor({ state: "detached" });
-    // The sheet took the settings page with it on the way in, and Escape leaves that page too.
-    await win.keyboard.press("Escape");
+    await win.locator("[data-settings-page]").waitFor({ state: "detached" });
     await win.locator("[data-k=first-run]").waitFor();
     console.info(`the app on first launch: ${shots.join(" ")}`);
 
@@ -680,9 +730,12 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       localStorage.setItem("wsp-smoke", "kept");
       return localStorage.getItem("wsp-smoke");
     })).toBe("kept");
-    // And the move a person makes through the Hosts menu loads the host page with the session swept first.
+    // And the move a person makes through the Hosts menu loads the host page with the session swept first. The window
+    // is on that url already, so the reload is its own navigation of the main frame, waited for as one.
+    const reloaded = win.waitForEvent("framenavigated", { predicate: frame => frame === win.mainFrame() });
     await hostsMenu(launched.app, hereWord(process.platform === "darwin"));
-    await win.waitForURL(APP_URL);
+    await reloaded;
+    expect(win.url()).toMatch(APP_URL);
     expect(await launched.app.evaluate(({ session }) => Object.keys(session.defaultSession.serviceWorkers.getAllRunning()).length)).toBe(0);
   });
 
@@ -700,17 +753,17 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await refused(`http://127.0.0.1:${existing.port}/`)).toBe(false);
   });
 
-  it("attached to a host of a later release, says so in the sidebar's own sentence with the releases page behind its button", async () => {
+  it("attached to a host of a later release, says so in a notice with the releases page behind its button", async () => {
     existing = await startHost({ runtime: testRuntime(true, LABS_ON), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     const stand = await hostOfVersion(existing, "9.9.9");
     standIn = stand.server;
     launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
-    const line = win.locator("[role=status]");
-    await line.waitFor();
-    expect(await line.textContent()).toContain(`this app is ${VERSION}, the host is 9.9.9: get the new app`);
-    expect(await win.locator("[data-toast-action]").textContent()).toBe(GET_THE_APP_WORD);
-    // The settings page names both halves as well, on About, so the line is never the only place the numbers are.
+    const notice = win.locator("[data-notice]", { hasText: VERSION_LINE });
+    await notice.waitFor();
+    expect(await notice.textContent()).toContain(`this app is ${VERSION}, the host is 9.9.9: get the new app`);
+    expect(await notice.locator("[data-notice-action]").textContent()).toBe(GET_THE_APP_WORD);
+    // The settings page names both halves as well, on About, so the notice is never the only place the numbers are.
     // The palette's Settings row is the road through it.
     await win.keyboard.press("Meta+k");
     await win.locator("[data-command-palette]").getByText(SETTINGS_WORDS.title, { exact: true }).click();
@@ -727,10 +780,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     standIn = stand.server;
     launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
-    const line = win.locator("[role=status]");
-    await line.waitFor();
-    expect(await line.textContent()).toContain(`this app is ${VERSION}, the host is 0.0.1: run the app's own host`);
-    expect(await win.locator("[data-toast-action]").count()).toBe(0);
+    const notice = win.locator("[data-notice]", { hasText: VERSION_LINE });
+    await notice.waitFor();
+    expect(await notice.textContent()).toContain(`this app is ${VERSION}, the host is 0.0.1: run the app's own host`);
+    expect(await notice.locator("[data-notice-action]").count()).toBe(0);
   });
 
   it("attached to a host of its own release, says nothing at all", async () => {
@@ -738,7 +791,13 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     await win.waitForSelector("[data-slot=sidebar-container]");
-    expect(await win.locator("[role=status]").count()).toBe(0);
+    // The page asks the shell for its hosts on load and says the versions once that answers; a second ask answers
+    // after the first, and a frame later anything it said is drawn.
+    await win.evaluate(async () => {
+      await (window as unknown as { wsp: { hosts(): Promise<unknown> } }).wsp.hosts();
+      await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+    });
+    expect(await win.locator("[data-notice]", { hasText: VERSION_LINE }).count()).toBe(0);
   });
 
   it("attaches to a host serving a custom home when that home is named on its launch, with no port hint", async () => {
@@ -890,82 +949,19 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   });
 
   it.runIf(process.platform === "darwin")(
-    "on macOS the header row is the frame: the lights sit inside it, the sidebar shows the window's glass and its text keeps AA contrast over a light and a dark desktop",
+    "on macOS the header row is the frame: the lights sit inside it, both header rows drag, and the window paints nothing under the page, whose dark sidebar lets the glass through",
     async () => {
       launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
       const win = await windowAt(launched.app, APP_URL);
       await win.waitForSelector("[data-slot=sidebar-container]");
       const app = launched.app;
-
-      const frame = await app.evaluate(({ BrowserWindow }) => {
-        const w = BrowserWindow.getAllWindows()[0]!;
-        return { id: w.id, buttons: w.getWindowButtonPosition(), bounds: w.getBounds(), content: w.getContentBounds(), title: w.getTitle() };
-      });
+      const { frame, page } = await macHeader(app, win);
       expect(frame.buttons).toEqual({ x: 16, y: 19 });
       expect(frame.content.height).toBe(frame.bounds.height);
       expect(frame.title).toBe("wsp");
 
-      const page = await win.evaluate((opticalCentre: number) => {
-        const style = (selector: string) => getComputedStyle(document.querySelector(selector)!);
-        const region = (selector: string) => (style(selector) as unknown as { webkitAppRegion: string }).webkitAppRegion;
-        const buttons = (selector: string) => Array.from(document.querySelector(selector)!.querySelectorAll("button")).map(b => (getComputedStyle(b) as unknown as { webkitAppRegion: string }).webkitAppRegion);
-        // Chromium reports mixed colours as color(srgb ...); a canvas pixel reads any of them as 8-bit rgb.
-        const ctx = Object.assign(document.createElement("canvas"), { width: 1, height: 1 }).getContext("2d")!;
-        // rgba, the alpha as a fraction: the chord and the counts paint at part opacity and read as what they composite to.
-        const rgb = (color: string): number[] => {
-          ctx.clearRect(0, 0, 1, 1);
-          ctx.fillStyle = color;
-          ctx.fillRect(0, 0, 1, 1);
-          const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
-          return [r!, g!, b!, a! / 255];
-        };
-        const text = (cls: string): number[] => {
-          const span = document.createElement("span");
-          span.className = cls;
-          document.querySelector("[data-slot=sidebar-inner]")!.append(span);
-          const color = rgb(getComputedStyle(span).color);
-          span.remove();
-          return color;
-        };
-        const colorOf = (selector: string): number[] => rgb(style(selector).color);
-        const lockup = document.querySelector("[data-slot=sidebar-header] [role=img][aria-label=wsp]")!.getBoundingClientRect();
-        const toggle = document.querySelector("[data-slot=sidebar-header] [data-slot=sidebar-trigger]")!.getBoundingClientRect();
-        // The toggle's ink is its icon box: the panel glyph fills the box edge to edge, so the box centre is the ink's.
-        const glyph = document.querySelector("[data-slot=sidebar-header] [data-slot=sidebar-trigger] svg")!.getBoundingClientRect();
-        const searchRow = document.querySelector("button[aria-label='Search']")!.getBoundingClientRect();
-        return {
-          toggleLeft: toggle.left,
-          toggleRight: toggle.right,
-          toggleCentre: { x: toggle.left + toggle.width / 2, y: toggle.top + toggle.height / 2 },
-          glyphCentreY: glyph.top + glyph.height / 2,
-          lockupOpticalY: lockup.top + lockup.height * opticalCentre,
-          searchRow: { x: searchRow.left + searchRow.width * 0.6, y: searchRow.top + searchRow.height / 2 },
-          searchText: colorOf("button[aria-label='Search']"),
-          pageToggles: document.querySelectorAll("header [data-slot=sidebar-trigger]").length,
-          htmlClass: document.documentElement.className,
-          container: style("[data-slot=sidebar-container]").backgroundColor,
-          inner: style("[data-slot=sidebar-inner]").backgroundColor,
-          main: style("[data-slot=sidebar-inset]").backgroundColor,
-          mainRgb: rgb(style("[data-slot=sidebar-inset]").backgroundColor),
-          headerHeight: document.querySelector("[data-slot=sidebar-header]")!.getBoundingClientRect().height,
-          lockupLeft: lockup.left,
-          sidebarHeader: region("[data-slot=sidebar-header]"),
-          pageHeader: region("header [data-header-row]"),
-          sidebarButtons: buttons("[data-slot=sidebar-header]"),
-          pageButtons: buttons("header"),
-          foreground: text("text-sidebar-foreground"),
-          muted: text("text-sidebar-muted-foreground"),
-          quiet: text("text-muted-foreground"),
-          // One icon ink for the sidebar: the search glyph and a section row's chevron both draw in
-          // --sidebar-icon-color, and a section row stands only over a project, which this launch records none of.
-          icon: colorOf("[data-sidebar-search] button svg"),
-          sidebarWidth: document.querySelector("[data-slot=sidebar-container]")!.getBoundingClientRect().width,
-        };
-      }, LOCKUP_OPTICAL_CENTRE);
       expect(page.htmlClass.split(" ")).toContain("desktop-mac");
       expect(page.container).toBe("rgba(0, 0, 0, 0)");
-      expect(page.inner).toBe("rgba(0, 0, 0, 0)");
-      expect(page.main).not.toBe("rgba(0, 0, 0, 0)");
       expect(page.headerHeight).toBe(52);
       expect(page.pageToggles).toBe(0);
       expect(page.sidebarHeader).toBe("drag");
@@ -973,216 +969,20 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       expect(page.pageButtons.length).toBeGreaterThan(1);
       expect([...page.sidebarButtons, ...page.pageButtons].every(r => r === "no-drag")).toBe(true);
 
-      const captured = await app.evaluate(async ({ BrowserWindow }, args) => {
-        const image = await BrowserWindow.fromId(args.id)!.webContents.capturePage();
-        const { width, height } = image.getSize();
-        const bitmap = image.toBitmap();
-        const alphaAt = (x: number, y: number) => bitmap[(y * width + x) * 4 + 3]!;
-        const scale = width / args.bounds.width;
-        return { sidebar: alphaAt(Math.round(args.sidebarWidth * scale) >> 1, Math.round(height * 0.7)), main: alphaAt(Math.round((args.sidebarWidth + 200) * scale), Math.round(height * 0.7)) };
-      }, { id: frame.id, bounds: frame.bounds, sidebarWidth: page.sidebarWidth });
-      expect(captured.sidebar).toBe(0);
-      expect(captured.main).toBe(255);
-
-      // The desktop behind the window is a full-screen window of one colour, so the glass is measured over a known backdrop.
-      const shots = join(tmpdir(), "wsp-render");
-      mkdirSync(shots, { recursive: true });
-      const contrast = (text: number[], glass: number[]): number => {
-        const alpha = text[3] ?? 1;
-        const painted = [0, 1, 2].map(i => text[i]! * alpha + glass[i]! * (1 - alpha));
-        const lum = (c: number[]) => {
-          const [r, g, b] = c.map(v => (v / 255 <= 0.03928 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4));
-          return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
-        };
-        const [hi, lo] = [lum(painted), lum(glass)].sort((x, y) => y - x) as [number, number];
-        return (hi + 0.05) / (lo + 0.05);
-      };
-      const backdropId = await app.evaluate(({ BrowserWindow, app: electronApp, screen }, id) => {
-        const w = BrowserWindow.fromId(id)!;
-        const backdrop = new BrowserWindow({ ...screen.getPrimaryDisplay().bounds, frame: false, show: false, focusable: false, backgroundColor: "#ffffff" });
-        backdrop.showInactive();
-        // The app under test is not the active application: it takes activation so the window is key (coloured lights,
-        // active glass); the backdrop floats over every other window and the app one step above it, so nothing else sits
-        // between them, and both follow whichever Space the screen shows.
-        electronApp.focus({ steal: true });
-        backdrop.setAlwaysOnTop(true, "floating", 0);
-        w.setAlwaysOnTop(true, "floating", 1);
-        w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-        backdrop.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-        w.focus();
-        return backdrop.id;
-      }, frame.id);
-      const lights = async (file: string) => {
-        const b = await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.getBounds(), frame.id);
-        expect(spawnSync("screencapture", ["-R", `${b.x},${b.y},${b.width},${b.height}`, "-x", file]).status).toBe(0);
-        return app.evaluate(({ nativeImage }, args) => {
-          const image = nativeImage.createFromPath(args.file);
-          const { width, height } = image.getSize();
-          const bitmap = image.toBitmap();
-          const scale = width / args.width;
-          const at = (x: number, y: number): number[] => {
-            const i = (y * width + x) * 4;
-            return [bitmap[i + 2]!, bitmap[i + 1]!, bitmap[i]!];
-          };
-          // The red light is the leftmost and the green the rightmost; each centre is the middle of its hue's extent in the
-          // top-left corner (the extent, not the mean: the highlight on a light's crown is not its hue and would pull a
-          // mean down). Hue, not absolute values: the display's tone mapping shifts every pixel while a video plays.
-          const reds: number[][] = [];
-          const greens: number[][] = [];
-          for (let y = 0; y < 80 * scale; y++)
-            for (let x = 0; x < 80 * scale; x++) {
-              const [r, g, bl] = at(x, y);
-              // The yellow light is red-heavy too (its red leads green by about 65); the red light's lead is over 150.
-              if (r! > 150 && r! - g! > 100 && r! - bl! > 60) reds.push([x, y]);
-              if (g! > 120 && g! - r! > 50 && g! - bl! > 50) greens.push([x, y]);
-            }
-          const middle = (values: number[]) => (Math.min(...values) + Math.max(...values) + 1) / 2 / scale;
-          const centre = (pts: number[][]) => ({ x: middle(pts.map(p => p[0]!)), y: middle(pts.map(p => p[1]!)) });
-          return {
-            scale,
-            height: height / scale,
-            reds: reds.length,
-            greens: greens.length,
-            red: centre(reds),
-            green: centre(greens),
-            glass: at(Math.round(30 * scale), Math.round(height * 0.7)),
-            searchRow: at(Math.round(args.searchRow.x * scale), Math.round(args.searchRow.y * scale)),
-            main: at(Math.round(width * 0.75), Math.round(height * 0.7)),
-            probe: at(Math.round(args.probeX * scale), Math.round(8 * scale)),
-          };
-        }, { file, width: b.width, probeX: page.lockupLeft + 2, searchRow: page.searchRow });
-      };
-      const near = (px: number[], to: number[], within: number) => px.every((v, i) => Math.abs(v - to[i]!) <= within);
-      const mainColour = (px: number[]) => near(px, page.mainRgb, 6);
-      // The screen is shared: a shot counts once it shows this window, key, where its frame puts it, over a backdrop unlike
-      // every one measured before (a backdrop that has not repainted yet leaves the glass as the last one did).
-      type Shot = Awaited<ReturnType<typeof lights>>;
-      const inFrame = (shot: Shot, state: "open" | "collapsed", unlike: number[][]) =>
-        mainColour(shot.main) &&
-        shot.reds > 20 &&
-        shot.greens > 20 &&
-        shot.red.x > 18 &&
-        shot.red.x < 26 &&
-        shot.red.y > 20 &&
-        shot.red.y < 32 &&
-        (state === "collapsed" ? mainColour(shot.probe) : near(shot.probe, shot.glass, 4)) &&
-        unlike.every(glass => !near(shot.glass, glass, 2));
-      // Bounded by time, not tries: the last shot comes back either way, so the assertions after it name what was seen.
-      const retake = async (file: string, state: "open" | "collapsed", unlike: number[][] = []): Promise<Shot> => {
-        const deadline = Date.now() + 20_000;
-        let shot = await lights(file);
-        while (!inFrame(shot, state, unlike) && Date.now() < deadline) {
-          // A click elsewhere on this Mac takes the key status back; the window asks for it again before each retake.
-          await app.evaluate(({ BrowserWindow, app: electronApp }, id) => {
-            electronApp.focus({ steal: true });
-            BrowserWindow.fromId(id)!.focus();
-          }, frame.id);
-          await win.waitForTimeout(500);
-          shot = await lights(file);
-        }
-        return shot;
-      };
-      // The sidebar slides for 200 ms; its container's left edge holding still across two frames, at rest for the state, is
-      // the end. The poll runs once a frame, so the edge it saw last time is the frame before.
-      const slid = (state: "open" | "collapsed") =>
-        win.waitForFunction((want: string) => {
-          const { left, width } = document.querySelector("[data-slot=sidebar-container]")!.getBoundingClientRect();
-          const seen = window as unknown as { __sidebarLeft?: number };
-          const before = seen.__sidebarLeft;
-          seen.__sidebarLeft = left;
-          return before === left && (want === "open" ? left === 0 : left <= 1 - width);
-        }, state);
-      // One gap: the third light's centre to the toggle's centre, and the toggle's centre to the first glyph after it. One
-      // vertical centre, measured on ink: the lights' hue extent, the toggle glyph's icon box, the wordmark's optical centre.
-      // The display's tone mapping moves the edge pixels of that hue extent, carrying the light's centre by up to 1 px
-      // at 1x on either axis, so 1 px of drift is that and not a layout change.
-      const CENTRED = 1;
-      const gaps = (shot: Shot, toggleCentre: { x: number; y: number }, contentLeft: number, glyphCentreY: number) => ({
-        lightsToToggle: toggleCentre.x - shot.green.x,
-        toggleToContent: contentLeft - toggleCentre.x,
-        drop: glyphCentreY - shot.green.y,
-      });
-      const expectOneGap = (g: ReturnType<typeof gaps>) => {
-        expect(Math.abs(g.lightsToToggle - g.toggleToContent)).toBeLessThan(2);
-        expect(g.lightsToToggle).toBeGreaterThanOrEqual(28);
-        expect(g.lightsToToggle).toBeLessThanOrEqual(32);
-        expect(Math.abs(g.drop)).toBeLessThanOrEqual(CENTRED);
-      };
-      const glass: Record<string, number[]> = {};
-      for (const [desktop, color] of [["light", "#ffffff"], ["dark", "#101010"]] as const) {
-        const file = join(shots, `desktop-mac-${desktop}.png`);
-        await app.evaluate(({ BrowserWindow }, args) => BrowserWindow.fromId(args.backdropId)!.setBackgroundColor(args.color), { backdropId, color });
-        const shot = await retake(file, "open", Object.values(glass));
-        console.info(`desktop-mac over a ${desktop} desktop: ${file} ${JSON.stringify(shot)}`);
-        expect(shot.reds).toBeGreaterThan(20);
-        expect(shot.red.y).toBeGreaterThan(20);
-        expect(shot.red.y).toBeLessThan(32);
-        expect(shot.red.x).toBeGreaterThan(18);
-        expect(shot.red.x).toBeLessThan(26);
-        const openGaps = gaps(shot, page.toggleCentre, page.lockupLeft, page.glyphCentreY);
-        const wordmarkDrop = page.lockupOpticalY - shot.green.y;
-        console.info(`open header gaps at 1x: ${JSON.stringify({ ...openGaps, wordmarkDrop, lightsY: { red: shot.red.y, green: shot.green.y }, glyphY: page.glyphCentreY, wordmarkY: page.lockupOpticalY })}`);
-        glass[desktop] = shot.glass;
-        const ratios = {
-          foreground: contrast(page.foreground, shot.glass),
-          muted: contrast(page.muted, shot.glass),
-          quiet: contrast(page.quiet, shot.glass),
-          icon: contrast(page.icon, shot.glass),
-          search: contrast(page.searchText, shot.searchRow),
-        };
-        console.info(`over a ${desktop} desktop the glass is rgb(${shot.glass.join(", ")}) and the search row rgb(${shot.searchRow.join(", ")}): ${Object.entries(ratios).map(([k, v]) => `${k} ${v.toFixed(2)}:1`).join(", ")}`);
-        expectOneGap(openGaps);
-        expect(Math.abs(wordmarkDrop)).toBeLessThanOrEqual(CENTRED);
-        // The search row is a plain row on the glass, no fill of its own, and the word Search is AA on it.
-        expect(shot.searchRow).toEqual(shot.glass);
-        for (const ratio of Object.values(ratios)) expect(ratio).toBeGreaterThanOrEqual(4.5);
-
-        // Collapsed, the page header is the frame row: the toggle lands where the sidebar's was, the breadcrumb after it, the row still drags.
-        await win.click("[data-slot=sidebar-header] [data-slot=sidebar-trigger]");
-        await win.waitForSelector("[data-sidebar-state=collapsed]");
-        await win.waitForFunction(x => Math.abs(document.querySelector("header [data-slot=sidebar-trigger]")!.getBoundingClientRect().left - x) < 0.01, page.toggleLeft);
-        await slid("collapsed");
-        const collapsed = await win.evaluate(() => {
-          const row = document.querySelector("header [data-header-row]")!;
-          const toggle = row.querySelector("[data-slot=sidebar-trigger]")!.getBoundingClientRect();
-          const glyph = row.querySelector("[data-slot=sidebar-trigger] svg")!.getBoundingClientRect();
-          const crumb = row.querySelector("[data-thread-breadcrumb]")!;
-          return {
-            toggleLeft: toggle.left,
-            toggleCentre: { x: toggle.left + toggle.width / 2, y: toggle.top + toggle.height / 2 },
-            glyphCentreY: glyph.top + glyph.height / 2,
-            crumbLeft: crumb.getBoundingClientRect().left,
-            crumb: crumb.textContent,
-            region: (getComputedStyle(row) as unknown as { webkitAppRegion: string }).webkitAppRegion,
-            lockups: document.querySelectorAll("header [role=img][aria-label=wsp]").length,
-          };
-        });
-        expect(collapsed.toggleLeft).toBeCloseTo(page.toggleLeft, 1);
-        expect(collapsed.crumbLeft).toBeCloseTo(page.lockupLeft, 1);
-        // Over the first run the header says nothing: that screen's own title says what is being made.
-        expect(collapsed.crumb).toBe("");
-        expect(collapsed.region).toBe("drag");
-        expect(collapsed.lockups).toBe(0);
-        const collapsedFile = join(shots, `desktop-mac-collapsed-${desktop}.png`);
-        const collapsedShot = await retake(collapsedFile, "collapsed");
-        expect(collapsedShot.reds).toBeGreaterThan(20);
-        expect(Math.abs(collapsedShot.red.y - shot.red.y)).toBeLessThanOrEqual(CENTRED);
-        expect(Math.abs(collapsedShot.red.x - shot.red.x)).toBeLessThanOrEqual(CENTRED);
-        const collapsedGaps = gaps(collapsedShot, collapsed.toggleCentre, collapsed.crumbLeft, collapsed.glyphCentreY);
-        console.info(`desktop-mac collapsed over a ${desktop} desktop: ${collapsedFile}; header gaps at 1x: ${JSON.stringify(collapsedGaps)}`);
-        expectOneGap(collapsedGaps);
-        await win.click("header [data-slot=sidebar-trigger]");
-        await win.waitForSelector("[data-sidebar-state=expanded]");
-        await win.waitForFunction(x => Math.abs(document.querySelector("[data-slot=sidebar-header] [data-slot=sidebar-trigger]")!.getBoundingClientRect().left - x) < 0.01, page.toggleLeft);
-        await slid("open");
+      // Each theme lays its own share of ground over the glass, so the window is read in both: at a point in the
+      // sidebar and one in the main column, the page's capture holds exactly the alpha the page's own backgrounds
+      // stack to there, which is what says the window under them is clear.
+      const points = { sidebar: { x: page.sidebarWidth / 2, y: 0.7 }, main: { x: page.sidebarWidth + 200, y: 0.7 } };
+      const painted = await readPainted(app, win, frame.id, points);
+      console.info(`painted alpha by theme: ${JSON.stringify(painted)}`);
+      for (const theme of ["light", "dark"] as const) {
+        for (const at of ["sidebar", "main"] as const) expect(Math.abs(painted[theme][at].captured - painted[theme][at].declared)).toBeLessThanOrEqual(2);
       }
-      // The glass shows what is behind it: the two desktops leave two different tints.
-      expect(glass["light"]).not.toEqual(glass["dark"]);
-      await app.evaluate(({ BrowserWindow }, args) => {
-        BrowserWindow.fromId(args.backdropId)!.close();
-        BrowserWindow.fromId(args.id)!.setAlwaysOnTop(false);
-      }, { id: frame.id, backdropId });
+      // Dark mode stands the whole window on the glass: the sidebar's share lets it through. Light mode keeps the main
+      // column's solid ground.
+      expect(painted.dark.sidebar.captured).toBeLessThan(255);
+      expect(painted.dark.sidebar.captured).toBeGreaterThan(0);
+      expect(painted.light.main.captured).toBe(255);
     },
-    90_000,
   );
 });
