@@ -862,6 +862,17 @@ describe("the threads a thread opened", () => {
     await waitFor(() => expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_bench", "thr_bench"]));
   });
 
+  it("names a thread on this computer's own workspace by the computer's real name, never the host name its workspace is named by", async () => {
+    const MAC: WorkspaceView = { id: "ws_mac", name: "zingzys-MacBook-Pro.local", kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "here" }, phase: "running", golden: "", createdAt: "2026-09-01T00:00:00Z" };
+    const onMac: SessionView = { id: "sess_mac", workspaceId: "ws_mac", harness: "codex", status: "running", startedBy: "agent", threadId: "thr_mac", parentThreadId: PARENT, prompt: "fix the address race" };
+    const { api } = fixtureApi([workspace, MAC], { [WS]: lead }, [rows[0]!, onMac]);
+    (api as { placesList?: unknown }).placesList = async () => ({ places: [{ id: "here", kind: "computer", name: "zingzys-MacBook-Pro.local", label: "zingzy's MacBook Pro", default: true }], adds: [] });
+    await setup(api);
+    const row = await waitFor(() => document.querySelector<HTMLElement>('[data-thread-row="thr_mac"]')!);
+    await waitFor(() => expect(row.querySelector("[data-thread-place]")!.textContent).toBe("zingzy's MacBook Pro"));
+    expect(document.querySelector("[data-thread-rows]")!.textContent).not.toContain("zingzys-MacBook-Pro.local");
+  });
+
   it("leaves the transcript alone on a thread that opened none", async () => {
     const { api } = fixtureApi([workspace], { [WS]: lead });
     await setup(api);

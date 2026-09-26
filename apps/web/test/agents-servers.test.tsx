@@ -18,7 +18,7 @@ import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { pickOption } from "./select.js";
 
 const NOW = Date.parse("2026-09-24T12:03:00.000Z");
-const SERVER = { airtable: "server-global-airtable-stdio-npx -y airtable-mcp-server", github: "server-global-github-stdio-npx -y @modelcontextprotocol/server-github", notion: "server-global-notion-http-mcp.notion.com", sentry: "server-global-sentry-http-mcp.sentry.dev" };
+const SERVER = { airtable: "server-global-airtable-stdio-npx -y airtable-mcp-server", github: "server-global-github-stdio-npx -y @modelcontextprotocol/server-github", linear: "server-global-linear-http-mcp.linear.app", notion: "server-global-notion-http-mcp.notion.com", sentry: "server-global-sentry-http-mcp.sentry.dev" };
 
 function List({ report = AGENTS_REPORT, ctx = {} }: { report?: AgentsReport; ctx?: Partial<RowsContext> }) {
   const servers = useServerActs(report.target);
@@ -85,11 +85,26 @@ describe("Server icons", () => {
     expect(iconIn(rowEl(SERVER.sentry))).toBeNull();
     expect(rowEl(SERVER.sentry).querySelector("[data-k=lead-box] svg")).not.toBeNull();
     expect(iconIn(rowEl(SERVER.airtable))).toBeNull();
-    expect(asked.map(([h]) => h).sort()).toEqual(["mcp.linear.app", "mcp.notion.com", "mcp.sentry.dev"]);
+    expect(asked.map(([h]) => h).sort()).toEqual(["mcp.notion.com", "mcp.sentry.dev"]);
     const d = openRow(SERVER.notion);
     await settle();
     expect(iconIn(d)?.getAttribute("src")).toBe(NOTION);
-    expect(asked).toHaveLength(3);
+    expect(asked).toHaveLength(2);
+  });
+
+  it("draws a registered brand mark in the box of a server reached over its company's address or running its package, in its row and its detail, and asks the host for neither", async () => {
+    const asked = icons({ "mcp.linear.app": NOTION });
+    render(<List />);
+    tab("MCP servers");
+    await settle();
+    const markIn = (el: HTMLElement): string | null | undefined => el.querySelector("[data-k=lead-box] svg[data-brand-mark]")?.getAttribute("data-brand-mark");
+    expect(markIn(rowEl(SERVER.linear))).toBe("linear");
+    expect(markIn(rowEl(SERVER.github))).toBe("github");
+    expect(markIn(rowEl(SERVER.airtable))).toBeUndefined();
+    expect(markIn(rowEl(SERVER.notion))).toBeUndefined();
+    expect(iconIn(rowEl(SERVER.linear))).toBeNull();
+    expect(asked.map(([h]) => h)).not.toContain("mcp.linear.app");
+    expect(markIn(openRow(SERVER.linear))).toBe("linear");
   });
 
   it("asks the host again with refresh after Read again", async () => {

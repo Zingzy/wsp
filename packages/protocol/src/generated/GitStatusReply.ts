@@ -2,4 +2,14 @@
 import type { GitBranch } from "./GitBranch.js";
 import type { GitStatusEntry } from "./GitStatusEntry.js";
 
-export type GitStatusReply = { branch: GitBranch, entries: Array<GitStatusEntry>, root: string, };
+export type GitStatusReply = { branch: GitBranch, entries: Array<GitStatusEntry>, root: string, 
+/**
+ * The entries were not read: a stopped workspace's branch is read off its git directory alone, so an empty
+ * list here says nothing about edits never committed.
+ */
+editsUnread?: boolean, 
+/**
+ * Ahead and behind were not counted: the history of a stopped workspace's copy was too long or too slow to walk
+ * within the daemon's budget, so the zeros say nothing.
+ */
+countsUnknown?: boolean, };
