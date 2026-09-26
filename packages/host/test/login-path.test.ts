@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nodeHost } from "@wsp/collect";
@@ -12,6 +12,7 @@ import { LAUNCHD_PATH, loginEnvOf, needsLoginPath, takeLoginPath } from "../src/
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const PAGE = `<!doctype html>
 <html><head></head><body><div id="root"></div>
@@ -38,8 +39,7 @@ describe("the login shell PATH", () => {
   /** A stand-in for the person's login shell: it records that it ran, then does what the case needs. */
   function fakeShell(body: string): string {
     const file = join(dir, "shell");
-    writeFileSync(file, `#!/bin/sh\n: > ${JSON.stringify(ran)}\n${body}\n`);
-    chmodSync(file, 0o755);
+    writeStub(file, `#!/bin/sh\n: > ${JSON.stringify(ran)}\n${body}\n`);
     return file;
   }
 
@@ -129,8 +129,7 @@ describe("the login shell PATH", () => {
     // A tool only the login shell's PATH names, so a lookup that finds it read the resolved PATH and nothing else.
     const bin = join(dir, "bin");
     mkdirSync(bin);
-    writeFileSync(join(bin, "wsp-fake-tool"), "#!/bin/sh\nexit 0\n");
-    chmodSync(join(bin, "wsp-fake-tool"), 0o755);
+    writeStub(join(bin, "wsp-fake-tool"), "#!/bin/sh\nexit 0\n");
 
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_login_path_key");
     vi.stubEnv("ANTHROPIC_API_KEY", undefined);
@@ -198,8 +197,7 @@ describe("the login shell's environment", () => {
   it("is read even when an rc file waits on its input, since the shell's input is closed", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-login-env-"));
     const shell = join(dir, "sh");
-    writeFileSync(shell, `#!/bin/sh\nread answer\nprintf 'WSP_FROM_RC=yes\\0'\n`);
-    chmodSync(shell, 0o755);
+    writeStub(shell, `#!/bin/sh\nread answer\nprintf 'WSP_FROM_RC=yes\\0'\n`);
     const was = process.env["SHELL"];
     process.env["SHELL"] = shell;
     vi.resetModules();

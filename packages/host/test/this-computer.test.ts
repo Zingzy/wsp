@@ -2,12 +2,13 @@
 // What the host starts for the workspace that is this computer: the daemon
 // its panes and Live rows dial, and the line whoever runs the host reads when
 // it did not start.
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, type LocalDaemonStart } from "../src/cli.js";
 import { LocalDaemon } from "../src/local-daemon.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 let dir: string;
 
@@ -95,8 +96,7 @@ describe("the daemon this computer's panes dial", () => {
   it("hands a restart one bounded line from a daemon that panics at length, and its log every line", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const bin = join(dir, "noisy-daemon");
-    writeFileSync(bin, '#!/bin/sh\ni=0\nwhile [ $i -lt 400 ]; do echo "thread main panicked at src/main.rs:$i:5: called unwrap on an Err value" >&2; i=$((i+1)); done\nexit 101\n');
-    chmodSync(bin, 0o755);
+    writeStub(bin, '#!/bin/sh\ni=0\nwhile [ $i -lt 400 ]; do echo "thread main panicked at src/main.rs:$i:5: called unwrap on an Err value" >&2; i=$((i+1)); done\nexit 101\n');
     const logged: string[] = [];
     const wiring = localWiring(dir, { HOME: dir }, opts => LocalDaemon.start({ ...opts, binary: bin }), join(dir, "state.json"), undefined, line => void logged.push(line));
     const why = await wiring.restartDaemon!().then(

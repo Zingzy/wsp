@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 // Fixture provenance: hand-written in the proc(5) layouts. A fake /proc tree is
 // built per test so the daemon's real read path runs on darwin, and a daemon
@@ -182,16 +182,11 @@ export function fakeStty(): FakeStty {
   const count = join(dir, "count");
   writeFileSync(count, "");
   const stty = join(binDir, "stty");
-  writeFileSync(stty, `#!/bin/sh\necho run >> '${count}'\ncat '${modes}'\n`);
-  chmodSync(stty, 0o755);
+  writeStub(stty, `#!/bin/sh\necho run >> '${count}'\ncat '${modes}'\n`);
   const setModes = (tokens: string): void => {
     writeWhole(modes, `speed 38400 baud; rows 24; columns 80; ${tokens}\n`);
   };
   setModes("icanon echo");
-  // The first run of a script just written costs the system's scan of it, near half a second here; a probe on a
-  // 50 ms clock would read as missing. Run once now, so the daemon's first probe pays nothing, and count from zero.
-  execFileSync(stty, ["-a"]);
-  writeFileSync(count, "");
   return { binDir, setModes, calls: () => readCount(count) };
 }
 

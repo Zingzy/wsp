@@ -4,12 +4,13 @@
 // needs), and /proc is absent, so the descendant walk finds nothing and the
 // group kill alone has to end the tool and its children.
 import { execFile } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { guarded } from "../src/golden-tools.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const run = promisify(execFile);
 /** Seconds a timed-out tool gets to reach its markers: the guard checks once a second from launch, and under load the sh, perl and bash chain took over a second to start. */
@@ -23,8 +24,7 @@ function shimDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "wsp-guard-"));
   dirs.push(dir);
   if (!existsSync("/proc/1/stat")) {
-    writeFileSync(join(dir, "setsid"), "#!/bin/sh\nexec perl -e 'setpgrp(0, 0); exec @ARGV or die $!' -- \"$@\"\n");
-    chmodSync(join(dir, "setsid"), 0o755);
+    writeStub(join(dir, "setsid"), "#!/bin/sh\nexec perl -e 'setpgrp(0, 0); exec @ARGV or die $!' -- \"$@\"\n");
   }
   return dir;
 }

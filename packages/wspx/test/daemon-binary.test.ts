@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { REPO } from "../scripts/bundles.mjs";
 import { refusal, runRefusal, sharedLibrariesNamed } from "../scripts/daemon-binary.mjs";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const script = join(repo, "packages", "wspx", "scripts", "daemon-binary.mjs");
@@ -37,7 +38,7 @@ function stubGh(record: unknown): { bin: string; calls: () => string } {
   const dir = mkdtempSync(join(tmpdir(), "wsp-gh-"));
   made.push(dir);
   writeFileSync(join(dir, "run.json"), JSON.stringify(record));
-  writeFileSync(
+  writeStub(
     join(dir, "gh"),
     [
       "#!/bin/sh",
@@ -54,7 +55,6 @@ function stubGh(record: unknown): { bin: string; calls: () => string } {
       "",
     ].join("\n"),
   );
-  chmodSync(join(dir, "gh"), 0o755);
   return { bin: dir, calls: () => (existsSync(join(dir, "calls")) ? readFileSync(join(dir, "calls"), "utf8") : "") };
 }
 

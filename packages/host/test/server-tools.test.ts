@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -11,6 +11,7 @@ import { serverToolsLateRefusal } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentsReader } from "../src/agents-reader.js";
 import { noSuchServerRefusal } from "../src/server-tools.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const SECRET = "sk-x-fake-secret-value";
 
@@ -105,8 +106,7 @@ function fixture(): Fixture {
   mkdirSync(bin);
   mkdirSync(join(root, "tmp"));
   for (const [name, text] of Object.entries({ server: SERVER, mute: MUTE, crash: CRASH, claude: CLAUDE, escape: ESCAPE, flood: FLOOD, refuses: REFUSES })) {
-    writeFileSync(join(bin, name), text);
-    chmodSync(join(bin, name), 0o755);
+    writeStub(join(bin, name), text);
   }
   return { root, home, bin, config: servers => writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: servers })) };
 }
@@ -172,8 +172,7 @@ const escaped = (f: Fixture): number[] => readFileSync(join(f.home, "escaped.pid
  * the fixture's home, the frame's stdin handed to it; the lines are kept. */
 function box(f: Fixture): { machine: Pick<Machine, "exec">; lines: string[] } {
   const lines: string[] = [];
-  writeFileSync(join(f.bin, "runuser"), `#!/bin/bash\n[ "$1" = -u ] && [ "$2" = ada ] && [ "$3" = -- ] || exit 9\nshift 3\nexec "$@"\n`);
-  chmodSync(join(f.bin, "runuser"), 0o755);
+  writeStub(join(f.bin, "runuser"), `#!/bin/bash\n[ "$1" = -u ] && [ "$2" = ada ] && [ "$3" = -- ] || exit 9\nshift 3\nexec "$@"\n`);
   const machine = {
     exec: (cmd: string, o?: { stdin?: Uint8Array }): Promise<ExecResult> => {
       lines.push(cmd);
@@ -218,8 +217,7 @@ const running = (pid: number): boolean => {
 /** The deadline's timer is the script's sleep: this one runs until the test writes \`up\`, which the returned call does
  * and waits for the answer. */
 function heldTimer(f: Fixture): <T>(asked: Promise<T>) => Promise<T> {
-  writeFileSync(join(f.bin, "sleep"), `#!/bin/bash\n[ "$1" = 30.0 ] || exec /bin/sleep "$@"\necho $$ > "$HOME/timer.pid"\nuntil [ -e "$HOME/up" ] || [ ! -d "$HOME" ]; do /bin/sleep 0.05; done\n`);
-  chmodSync(join(f.bin, "sleep"), 0o755);
+  writeStub(join(f.bin, "sleep"), `#!/bin/bash\n[ "$1" = 30.0 ] || exec /bin/sleep "$@"\necho $$ > "$HOME/timer.pid"\nuntil [ -e "$HOME/up" ] || [ ! -d "$HOME" ]; do /bin/sleep 0.05; done\n`);
   return async asked => {
     await pidIn(join(f.home, "timer.pid"), Infinity);
     writeFileSync(join(f.home, "up"), "");
@@ -273,8 +271,7 @@ describe("one MCP server's tools, on the person's ask", () => {
 
   it("leaves no process a check started running, once its tools/list answered or its deadline passed", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "family"), FAMILY);
-    chmodSync(join(f.bin, "family"), 0o755);
+    writeStub(join(f.bin, "family"), FAMILY);
     f.config({ answers: { command: join(f.bin, "family"), args: [], env: { FAKE_TOKEN: SECRET } }, hangs: { command: join(f.bin, "family"), args: ["hang"] } });
     // The answering one keeps the whole deadline, since a server that waits a second before its answer can pass two
     // on a busy machine; the hanging one is cut at two.
@@ -291,8 +288,7 @@ describe("one MCP server's tools, on the person's ask", () => {
   it("starts at most four servers at once", async () => {
     const f = fixture();
     const names = ["s1", "s2", "s3", "s4", "s5", "s6"];
-    writeFileSync(join(f.bin, "counted"), `#!/bin/bash\ntouch "$HOME/in.$$"; ls "$HOME" | grep -c '^in\\.' >> "$HOME/peak"; sleep 0.3; rm -f "$HOME/in.$$"\nexec "$(dirname "$0")/server"\n`);
-    chmodSync(join(f.bin, "counted"), 0o755);
+    writeStub(join(f.bin, "counted"), `#!/bin/bash\ntouch "$HOME/in.$$"; ls "$HOME" | grep -c '^in\\.' >> "$HOME/peak"; sleep 0.3; rm -f "$HOME/in.$$"\nexec "$(dirname "$0")/server"\n`);
     f.config(Object.fromEntries(names.map(n => [n, { command: join(f.bin, "counted"), args: [n], env: { FAKE_TOKEN: SECRET } }])));
     const reader = agentsReader({ vault: () => ({}), here: () => here(f) });
     const answers = await Promise.all(names.map(name => reader.tools({ kind: "here" }, { key: "here", agent: "claude", name })));
@@ -321,8 +317,7 @@ describe("one MCP server's tools, on the person's ask", () => {
 
   it("stops the server's whole process group when the host's own bound on the run ends it first, and says its time ran out", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "family"), FAMILY);
-    chmodSync(join(f.bin, "family"), 0o755);
+    writeStub(join(f.bin, "family"), FAMILY);
     heldTimer(f);
     f.config({ hangs: { command: join(f.bin, "family"), args: ["hang"] } });
     let now = Date.parse("2026-09-24T12:00:00Z");
@@ -382,16 +377,14 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(readFileSync(join(f.home, "claude-asks"), "utf8").trim().split("\n"), "the harness is asked once per ten minutes, a refresh too").toHaveLength(1);
     mkdirSync(join(f.home, ".codex"));
     writeFileSync(join(f.home, ".codex", "config.toml"), `[mcp_servers.linear]\nurl = "${url}/oauth"\n`);
-    writeFileSync(join(f.bin, "codex"), `#!/bin/bash\necho asked >> "$HOME/codex-asks"\n`);
-    chmodSync(join(f.bin, "codex"), 0o755);
+    writeStub(join(f.bin, "codex"), `#!/bin/bash\necho asked >> "$HOME/codex-asks"\n`);
     expect(await reader.tools({ kind: "here" }, { key: "here", agent: "codex", name: "linear" })).toEqual({ auth: "unknown", holder: "codex", readAt: expect.any(String) });
     expect(existsSync(join(f.home, "codex-asks")), "Codex was asked for its servers").toBe(false);
   });
 
   it("says curl's last words for an address that did not answer, with any query string in a URL cut off", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (7) Failed to connect to https://mcp.example.test/sse?token=${SECRET}&x=1 port 443" >&2\nexit 7\n`);
-    chmodSync(join(f.bin, "curl"), 0o755);
+    writeStub(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (7) Failed to connect to https://mcp.example.test/sse?token=${SECRET}&x=1 port 443" >&2\nexit 7\n`);
     f.config({ notion: { type: "http", url: `https://mcp.example.test/sse?token=${SECRET}` } });
     const answer = await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "notion" });
     expect(answer).toMatchObject({ auth: "failed", refused: "curl: (7) Failed to connect to https://mcp.example.test/sse port 443" });
@@ -400,8 +393,7 @@ describe("one MCP server's tools, on the person's ask", () => {
 
   it("cuts a user and password out of a URL in curl's last words", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (7) Failed to connect to https://ada:${SECRET}@mcp.example.test/sse port 443" >&2\nexit 7\n`);
-    chmodSync(join(f.bin, "curl"), 0o755);
+    writeStub(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (7) Failed to connect to https://ada:${SECRET}@mcp.example.test/sse port 443" >&2\nexit 7\n`);
     f.config({ notion: { type: "http", url: `https://ada:${SECRET}@mcp.example.test/sse` } });
     const answer = await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "notion" });
     expect(answer).toMatchObject({ auth: "failed", refused: "curl: (7) Failed to connect to https://mcp.example.test/sse port 443" });
@@ -542,8 +534,7 @@ describe("one MCP server's tools, on the person's ask", () => {
     const f = fixture();
     const ESC = String.fromCharCode(27);
     const tools = [{ name: `pay${ESC}[31m_out`, description: `Sends money.${ESC}]0;owned${String.fromCharCode(7)}\nSecond line.`, inputSchema: { type: "object", properties: { [`to${ESC}[2J`]: { type: "string", description: `who${ESC}[0m` } } } }];
-    writeFileSync(join(f.bin, "hostile"), `#!/bin/bash\nwhile IFS= read -r line; do case "$line" in *'"method":"initialize"'*) printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{}}' ;; *'"method":"tools/list"'*) cat "$HOME/tools.json" ;; esac; done\n`);
-    chmodSync(join(f.bin, "hostile"), 0o755);
+    writeStub(join(f.bin, "hostile"), `#!/bin/bash\nwhile IFS= read -r line; do case "$line" in *'"method":"initialize"'*) printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{}}' ;; *'"method":"tools/list"'*) cat "$HOME/tools.json" ;; esac; done\n`);
     writeFileSync(join(f.home, "tools.json"), `${JSON.stringify({ jsonrpc: "2.0", id: 2, result: { tools } })}\n`);
     f.config({ hostile: { command: join(f.bin, "hostile"), args: [] } });
     const answer = await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "hostile" });
@@ -563,8 +554,7 @@ describe("one MCP server's tools, on the person's ask", () => {
     const f = fixture();
     const { url } = await remote();
     // curl as it is, keeping every config it was handed.
-    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\nprev=; for a; do [ "$prev" = -K ] && cat "$a" >> "$HOME/curl.k"; prev=$a; done\nexec /usr/bin/curl "$@"\n`);
-    chmodSync(join(f.bin, "curl"), 0o755);
+    writeStub(join(f.bin, "curl"), `#!/bin/bash\nprev=; for a; do [ "$prev" = -K ] && cat "$a" >> "$HOME/curl.k"; prev=$a; done\nexec /usr/bin/curl "$@"\n`);
     f.config({ split: { type: "http", url: `${url}/mcp`, headers: { "X-Key": `${SECRET}\r\nurl = ${url}/stolen#` } } });
     await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "split" });
     const lines = readFileSync(join(f.home, "curl.k"), "utf8").split("\n").filter(l => l !== "");
@@ -573,8 +563,7 @@ describe("one MCP server's tools, on the person's ask", () => {
 
   it("hands the run's marker to no command's argument list", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "grep"), GREP);
-    chmodSync(join(f.bin, "grep"), 0o755);
+    writeStub(join(f.bin, "grep"), GREP);
     f.config({ silent: { command: join(f.bin, "escape"), args: ["mute"] } });
     expect(await agentsReader({ vault: () => ({}), here: () => here(f), toolsMs: 1_000 }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "silent" })).toMatchObject({ refused: serverToolsLateRefusal(1_000) });
     expect(existsSync(join(f.home, "grep-args"))).toBe(true);
@@ -617,8 +606,7 @@ describe("a server whose definition names its values by reference", () => {
 
   it("hands a server only the values its definition names, never a catalog row's key", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "envdump"), `#!/bin/bash\nenv > "$HOME/env.seen"\nexec "$(dirname "$0")/server"\n`);
-    chmodSync(join(f.bin, "envdump"), 0o755);
+    writeStub(join(f.bin, "envdump"), `#!/bin/bash\nenv > "$HOME/env.seen"\nexec "$(dirname "$0")/server"\n`);
     f.config({ airtable: { command: join(f.bin, "envdump"), args: [], env: { FAKE_TOKEN: "${FAKE_TOKEN}", ROW: "${CLAUDE_CODE_OAUTH_TOKEN}" } } });
     const { machine } = box(f);
     const on = { kind: "box" as const, machine, login: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin` } };
@@ -646,8 +634,7 @@ describe("a server whose definition names its values by reference", () => {
 
   it("leaves a reference in a command's arguments as written, so no value reaches the process list", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "argdump"), `#!/bin/bash\nprintf '%s\\n' "$@" > "$HOME/args.seen"\nexec "$(dirname "$0")/server"\n`);
-    chmodSync(join(f.bin, "argdump"), 0o755);
+    writeStub(join(f.bin, "argdump"), `#!/bin/bash\nprintf '%s\\n' "$@" > "$HOME/args.seen"\nexec "$(dirname "$0")/server"\n`);
     f.config({ airtable: { command: join(f.bin, "argdump"), args: ["--token", "${FAKE_TOKEN}"], env: { FAKE_TOKEN: "${FAKE_TOKEN}" } } });
     const { machine, lines } = box(f);
     const on = { kind: "box" as const, machine, login: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin` } };
@@ -658,10 +645,8 @@ describe("a server whose definition names its values by reference", () => {
 
   it("keeps every value it handed a server out of the host's log and off the page, whatever the server says", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "blurts"), `#!/bin/bash\necho "bad token $FAKE_TOKEN" >&2\nexit 1\n`);
-    chmodSync(join(f.bin, "blurts"), 0o755);
-    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (6) Could not resolve host: ${SECRET}.example.test" >&2\nexit 6\n`);
-    chmodSync(join(f.bin, "curl"), 0o755);
+    writeStub(join(f.bin, "blurts"), `#!/bin/bash\necho "bad token $FAKE_TOKEN" >&2\nexit 1\n`);
+    writeStub(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (6) Could not resolve host: ${SECRET}.example.test" >&2\nexit 6\n`);
     f.config({ blurts: { command: join(f.bin, "blurts"), args: [], env: { FAKE_TOKEN: "${FAKE_TOKEN}" } }, refuses: { command: join(f.bin, "refuses"), args: [], env: { FAKE_TOKEN: SECRET } }, host: { type: "http", url: "https://${FAKE_TOKEN}.example.test/mcp" } });
     const logged: string[] = [];
     const { machine } = box(f);
@@ -679,7 +664,7 @@ describe("a server whose definition names its values by reference", () => {
 
   it("stars a handed secret in the tools list a server answers with, on the page and in every tool's words", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "echoes"), `#!/bin/bash
+    writeStub(join(f.bin, "echoes"), `#!/bin/bash
 while IFS= read -r line; do
   case "$line" in
     *'"method":"initialize"'*) printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{}}' ;;
@@ -687,7 +672,6 @@ while IFS= read -r line; do
   esac
 done
 `);
-    chmodSync(join(f.bin, "echoes"), 0o755);
     f.config({ echoes: { command: join(f.bin, "echoes"), args: [], env: { FAKE_TOKEN: "${FAKE_TOKEN}" } } });
     const answer = await agentsReader({ vault, here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "echoes" });
     expect(answer).toMatchObject({ auth: "connected", tools: [{ name: "search-***", description: "Searches *** for you", params: [{ name: "***", type: "***", required: false, description: "token ***" }] }] });
@@ -696,8 +680,7 @@ done
 
   it("stars a short secret as a whole word and leaves a value that is no secret readable", async () => {
     const f = fixture();
-    writeFileSync(join(f.bin, "says"), `#!/bin/bash\necho "token \${FAKE_TOKEN:-none} debug \${DEBUG:-none} at port 10" >&2\nexit 1\n`);
-    chmodSync(join(f.bin, "says"), 0o755);
+    writeStub(join(f.bin, "says"), `#!/bin/bash\necho "token \${FAKE_TOKEN:-none} debug \${DEBUG:-none} at port 10" >&2\nexit 1\n`);
     f.config({ short: { command: join(f.bin, "says"), args: [], env: { FAKE_TOKEN: "${SHORT}" } }, plain: { command: join(f.bin, "says"), args: ["1"], env: { DEBUG: "1" } } });
     const logged: string[] = [];
     const reader = agentsReader({ vault: () => ({ SHORT: "1" }), here: () => here(f), log: line => logged.push(line) });
@@ -735,11 +718,10 @@ const harnessAsks = (f: Fixture): number => (existsSync(join(f.home, "claude-ask
 /** A stub claude whose `mcp get` says Connected for a server named in the home's `signed` file and Needs
  * authentication for any other, keeping each ask. */
 function harness(f: Fixture, extra = ""): void {
-  writeFileSync(
+  writeStub(
     join(f.bin, "claude"),
     `#!/bin/bash\n[ "$1 $2" = "mcp get" ] || exit 9\necho "$3" >> "$HOME/claude-asks"\n${extra}\nif grep -qxF "$3" "$HOME/signed" 2>/dev/null; then echo "  Status: ✓ Connected"; else echo "  Status: ! Needs authentication"; fi\n`,
   );
-  chmodSync(join(f.bin, "claude"), 0o755);
 }
 
 describe("a server's state, off its tools connect alone", () => {
