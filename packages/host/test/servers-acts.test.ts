@@ -109,6 +109,52 @@ describe("adding an MCP server", () => {
     expect(vaulted).toEqual([{ WSP_MCP_TRACKER_AUTHORIZATION: "lin_api_TESTONLY", WSP_MCP_TRACKER_X_TEAM: "eng" }, { WSP_MCP_TRACKER_AUTHORIZATION: "lin_api_TESTONLY" }, { NOTION_TOKEN: "ntn_TESTONLY" }]);
   });
 
+  it("keeps a variable an argument or the address names as ${NAME} by name in each agent's own syntax, the value given with env in the vault alone", async () => {
+    const at = fixture();
+    const vaulted: Record<string, string>[] = [];
+    const acts = serversActs({ vault: v => void vaulted.push({ ...v }) });
+    const secret = "sk_TESTONLY_arg";
+    const stdio = { command: "npx", args: ["acme-mcp", "--token=${ACME_TOKEN}"], env: { ACME_TOKEN: secret } };
+    const http = { url: "https://mcp.acme.example/mcp?key=${ACME_TOKEN}", env: { ACME_TOKEN: secret } };
+    for (const agent of ["claude", "gemini", "opencode"]) {
+      await acts.add(box(at, road(at).machine), { agent, name: "acme", ...stdio });
+      await acts.add(box(at, road(at).machine), { agent, name: "acme2", ...http });
+    }
+    const files = { claude: join(at.home, ".claude.json"), gemini: join(at.home, ".gemini/settings.json"), opencode: join(at.home, ".config/opencode/opencode.json") };
+    for (const file of Object.values(files)) expect(readFileSync(file, "utf8")).not.toContain(secret);
+    expect(json(files.claude).mcpServers!.acme).toEqual({ command: "npx", args: ["acme-mcp", "--token=${ACME_TOKEN}"], env: { ACME_TOKEN: "${ACME_TOKEN}" } });
+    expect(json(files.claude).mcpServers!.acme2).toEqual({ type: "http", url: "https://mcp.acme.example/mcp?key=${ACME_TOKEN}" });
+    expect(json(files.gemini).mcpServers!.acme).toEqual({ command: "npx", args: ["acme-mcp", "--token=${ACME_TOKEN}"], env: { ACME_TOKEN: "${ACME_TOKEN}" } });
+    expect(json(files.gemini).mcpServers!.acme2).toEqual({ httpUrl: "https://mcp.acme.example/mcp?key=${ACME_TOKEN}" });
+    expect(json(files.opencode).mcp!.acme).toMatchObject({ command: ["npx", "acme-mcp", "--token={env:ACME_TOKEN}"], environment: { ACME_TOKEN: "{env:ACME_TOKEN}" } });
+    expect(json(files.opencode).mcp!.acme2).toMatchObject({ url: "https://mcp.acme.example/mcp?key={env:ACME_TOKEN}" });
+    expect(vaulted).toEqual(Array.from({ length: 6 }, () => ({ ACME_TOKEN: secret })));
+  });
+
+  it("refuses a variable an argument or the address names for Codex, which reads no variable there, naming the argument and writing nothing", async () => {
+    const at = fixture();
+    const file = join(at.home, ".codex/config.toml");
+    const before = readFileSync(file, "utf8");
+    const vaulted: Record<string, string>[] = [];
+    const acts = serversActs({ vault: v => void vaulted.push({ ...v }) });
+    await expect(acts.add(box(at, road(at).machine), { agent: "codex", name: "acme", command: "npx", args: ["acme-mcp", "--token=${ACME_TOKEN}"], env: { ACME_TOKEN: "sk_TESTONLY_arg" } })).rejects.toThrow(
+      "Codex reads no variable inside a server's arguments, so --token=${ACME_TOKEN} cannot travel without its value and nothing was written.",
+    );
+    await expect(acts.add(box(at, road(at).machine), { agent: "codex", name: "acme", url: "https://mcp.acme.example/mcp?key=${ACME_TOKEN}", env: { ACME_TOKEN: "sk_TESTONLY_arg" } })).rejects.toThrow(
+      "Codex reads no variable inside a server's address, so https://mcp.acme.example/mcp?key=${ACME_TOKEN} cannot travel without its value and nothing was written.",
+    );
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(vaulted).toEqual([]);
+  });
+
+  it("puts a named variable's value in place in this computer's own file, and leaves a ${...} no variable was given for as typed", async () => {
+    const at = fixture();
+    await serversActs({ here: () => here(at) }).add(HERE, { agent: "codex", name: "acme", command: "npx", args: ["acme-mcp", "--token=${ACME_TOKEN}", "--keep=${HOME}"], env: { ACME_TOKEN: "sk_TESTONLY_arg" } });
+    expect(CODEX_TOML.read(readFileSync(join(at.home, ".codex/config.toml"), "utf8"), at.home).find(s => s.name === "acme")?.transport).toEqual({ kind: "stdio", command: "npx", args: ["acme-mcp", "--token=sk_TESTONLY_arg", "--keep=${HOME}"], env: { ACME_TOKEN: "sk_TESTONLY_arg" } });
+    await serversActs({ here: () => here(at) }).add(HERE, { agent: "claude", name: "acme9", url: "https://mcp.acme.example/mcp?key=${ACME_TOKEN}", env: { ACME_TOKEN: "sk_TESTONLY_arg" } });
+    expect(json(join(at.home, ".claude.json")).mcpServers!.acme9).toEqual({ type: "http", url: "https://mcp.acme.example/mcp?key=sk_TESTONLY_arg" });
+  });
+
   it("refuses a value for a variable a catalog row keeps its key under, naming the row, and writes nothing", async () => {
     const at = fixture();
     const before = readFileSync(join(at.home, ".codex/config.toml"), "utf8");
@@ -410,12 +456,14 @@ describe("the server a person typed", () => {
     expect(refused({ command: "npx", env: { "BAD-NAME": "v" } })).toBe("A variable's name is letters, digits and underscores, not starting with a digit, so nothing was written.");
     expect(refused({ command: "npx", env: { "ACME_KEY=sk-live-SECRET3": "" } })).not.toContain("SECRET3");
     expect(refused({ command: "npx", headers: { A: "v" } })).toBe("Headers go with an address; a command takes variables.");
-    expect(refused({ url: "https://m.example", env: { A: "v" } })).toBe("Variables go with a command; an address takes headers.");
+    expect(refused({ url: "https://m.example", env: { A: "v" } })).toBe("An address takes headers, and a variable only where it names it, so A goes in the address as ${A} or not at all.");
     expect(refused({ url: "https://m.example", headers: { "Bad Header": "v" } })).toBe("A header's name is letters, digits and the marks ! # $ % & ' * + - . ^ _ ` | ~, so nothing was written.");
     expect(refused({ url: "https://m.example", headers: { "Authorization: Bearer SECRET4": "" } })).not.toContain("SECRET4");
     expect(refused({ command: "npx", args: ["a\nb"] })).toBe("The command holds a control character, so nothing was written.");
     const injected = refused({ url: "https://m.example", headers: { Authorization: "Bearer sk-secret\r\nX-Evil: 1" } });
     expect(injected).toBe("A header's value holds a control character, so nothing was written.");
     expect(refused({ command: "npx", env: { A: "sk-secret\u0000" } })).toBe("A variable's value holds a control character, so nothing was written.");
+    expect(refused({ url: "https://m.example/mcp?key=${T}", env: { T: "sk-secret\u0000" } })).toBe("A variable's value holds a control character, so nothing was written.");
+    expect(serverTransport({ url: "https://m.example/mcp?key=${T}", env: { T: "sk-secret" } })).toEqual({ kind: "http", url: "https://m.example/mcp?key=${T}", headers: {} });
   });
 });

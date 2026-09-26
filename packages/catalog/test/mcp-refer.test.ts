@@ -238,6 +238,29 @@ describe("what a reference writer refuses rather than guess", () => {
     await expect(MCP_SERVERS_JSON.refer(JSON.stringify({ mcpServers: { s: { url: "https://s.example", headers: { "X-Auth": "Basic cred123" } }, o: { command: "x", args: ["cred123"] } } }))).rejects.toThrow("s's value still stands");
   });
 
+  it("refuses the copy where a value still stands in an argument or an address, as a flag's value, a header line, a query key or base64, for every agent", async () => {
+    const V = "sk_TESTONLY_arg";
+    const b64 = btoa(V);
+    type Leak = { args?: string[]; url?: string };
+    const files: Record<string, [McpFormat, (leak: Leak) => string]> = {
+      "Claude Code": [MCP_SERVERS_JSON, l => JSON.stringify({ mcpServers: { s: l.url !== undefined ? { type: "http", url: l.url, headers: { Authorization: `Bearer ${V}` } } : { command: "x", args: l.args, env: { TOKEN: V } } } })],
+      "Gemini CLI": [GEMINI_SETTINGS_JSON, l => JSON.stringify({ mcpServers: { s: l.url !== undefined ? { httpUrl: l.url, headers: { Authorization: `Bearer ${V}` } } : { command: "x", args: l.args, env: { TOKEN: V } } } })],
+      OpenCode: [OPENCODE_JSON, l => JSON.stringify({ mcp: { s: l.url !== undefined ? { type: "remote", url: l.url, headers: { Authorization: `Bearer ${V}` } } : { type: "local", command: ["x", ...l.args!], environment: { TOKEN: V } } } })],
+      Codex: [CODEX_TOML, l => (l.url !== undefined ? `[mcp_servers.s]\nurl = ${JSON.stringify(l.url)}\nhttp_headers = { Authorization = "Bearer ${V}" }\n` : `[mcp_servers.s]\ncommand = "x"\nargs = ${JSON.stringify(l.args)}\nenv = { TOKEN = "${V}" }\n`)],
+    };
+    const leaks: [Leak, string][] = [
+      [{ args: [`--token=${V}`] }, "the --token argument"],
+      [{ args: ["-H", `Authorization: Bearer ${V}`] }, "the Authorization header"],
+      [{ url: `https://s.example/mcp?team=eng&key=${V}` }, "the key parameter of an address"],
+      [{ args: ["https://s.example/sse", "--header", `Authorization: Basic ${b64}`] }, "the Authorization header, as base64"],
+    ];
+    for (const [agent, [format, file]] of Object.entries(files)) {
+      for (const [leak, where] of leaks) await expect(format.refer(file(leak)), `${agent}: ${where}`).rejects.toThrow(`s's value still stands in ${where} after it was written by name, so the file stays on this computer`);
+    }
+    // The same flags, keys and header lines carrying no value that left stand.
+    expect((await MCP_SERVERS_JSON.refer(JSON.stringify({ mcpServers: { s: { command: "x", args: ["--token=other", "-H", "Accept: text/plain", "https://s.example/?key=other"], env: { TOKEN: V } } } }))).servers).toEqual([{ name: "s", values: { TOKEN: V } }]);
+  });
+
   it("two headers of one server that would travel under one name", async () => {
     const text = JSON.stringify({ mcpServers: { s: { url: "https://s.example", headers: { "X-Api-Key": "a", X_Api_Key: "b" } } } });
     await expect(MCP_SERVERS_JSON.refer(text)).rejects.toThrow("s sends X-Api-Key and X_Api_Key, which would both travel as WSP_MCP_S_X_API_KEY; rename one");
