@@ -6,7 +6,8 @@
 //! of its own, so this daemon answers its git, and it runs that git inside the workspace: a checkout's hooks and
 //! its config are agent-written and run code, and code of a workspace's belongs in that workspace's namespaces,
 //! its cgroup and its covers rather than as root on the computer. Adding a third way is a module and nothing in
-//! the callers.
+//! the callers. A stopped workspace has nothing to run git in, so `stored` reads its branch off the copy's files
+//! and runs no program at all.
 
 use std::future::Future;
 use std::path::Path;
@@ -19,6 +20,7 @@ use crate::paths::OpError;
 pub(crate) mod here;
 #[cfg(target_os = "linux")]
 pub(crate) mod inside;
+pub(crate) mod stored;
 
 /// What a frame is doing to the workspace it names, which is what that workspace's quiet clock reads. A pane
 /// reading a checkout's status, its diff or a folder asks the workspace nothing: it may be read a hundred times
@@ -140,8 +142,33 @@ pub(crate) async fn git_status<R: Runs>(runner: &R, cwd: &Path) -> Result<GitSta
     check(&res, "status")?;
     let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
     check(&top, "rev-parse")?;
-    let (branch, entries) = parse_porcelain_v2(&stdout_text(&res));
-    Ok(GitStatusReply { branch, entries, root: stdout_text(&top).trim().to_owned() })
+    let (mut branch, entries) = parse_porcelain_v2(&stdout_text(&res));
+    counted_without_upstream(runner, cwd, &mut branch).await?;
+    Ok(GitStatusReply { branch, entries, root: stdout_text(&top).trim().to_owned(), edits_unread: false })
+}
+
+/// A branch with no upstream, or one whose tracking ref is gone, is counted against the default branch, as a
+/// stopped copy's is: porcelain's 0 would read as nothing origin lacks.
+async fn counted_without_upstream<R: Runs>(runner: &R, cwd: &Path, branch: &mut GitBranch) -> Result<(), OpError> {
+    if branch.oid == "(initial)" {
+        return Ok(());
+    }
+    if branch.upstream.is_some() {
+        if rev_exists(runner, cwd, "@{upstream}").await? {
+            return Ok(());
+        }
+        branch.upstream = None;
+    }
+    let Some(base) = default_branch(runner, cwd).await? else { return Ok(()) };
+    let counted = run_git(runner, cwd, &["rev-list", "--left-right", "--count", &format!("{base}...HEAD")], None, None).await?;
+    check(&counted, "rev-list")?;
+    let text = stdout_text(&counted);
+    let mut counts = text.split_whitespace().map(str::parse::<u64>);
+    if let (Some(Ok(behind)), Some(Ok(ahead))) = (counts.next(), counts.next()) {
+        (branch.ahead, branch.behind) = (ahead, behind);
+        return Ok(());
+    }
+    Err(OpError::plain(format!("git rev-list answered {:?}", text.trim())))
 }
 
 pub(crate) async fn rev_exists<R: Runs>(runner: &R, cwd: &Path, rev: &str) -> Result<bool, OpError> {

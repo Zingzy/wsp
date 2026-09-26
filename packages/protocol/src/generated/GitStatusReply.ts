@@ -2,4 +2,9 @@
 import type { GitBranch } from "./GitBranch.js";
 import type { GitStatusEntry } from "./GitStatusEntry.js";
 
-export type GitStatusReply = { branch: GitBranch, entries: Array<GitStatusEntry>, root: string, };
+export type GitStatusReply = { branch: GitBranch, entries: Array<GitStatusEntry>, root: string, 
+/**
+ * The entries were not read: a stopped workspace's branch is read off its git directory alone, so an empty
+ * list here says nothing about edits never committed.
+ */
+editsUnread?: boolean, };
