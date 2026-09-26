@@ -5088,6 +5088,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * written on it, so a window opened later reads the same thing. Nothing is installed and nothing is left
    * running either way. */
   z.object({ id: reqId, op: z.literal("places.dial"), placeId: z.string() }),
+  /** A sign-in run at a terminal on one computer landed, as the tool's own status there said: the host notes the
+   * file that agent's shared login writes, as the app's own sign-in does, so the listing says signed in before
+   * that computer next reports. Answers `{}`. The person's own road only, as every other place op is. */
+  z.object({ id: reqId, op: z.literal("places.loginLanded"), placeId: z.string(), agent: z.string() }),
   /** Opens the door computers you own dial, when this host binds loopback alone, and answers where it is; a host
    * already bound beyond loopback answers its own port and opens nothing. Answers a PlaceDoorView. The person's
    * own road only, as every other place op is. */

@@ -2650,6 +2650,7 @@ describe("wsp add <place> --sign-in <agent>", () => {
 
   /** A host holding one joined computer, answering the listing and planning each line: the sign-in itself is handed in. */
   const planned: { target: unknown; agent: unknown }[] = [];
+  const landed: Record<string, unknown>[] = [];
   const listing = (places: PlaceView[] = [spoo]): NonNullable<Parameters<typeof addCommand>[4]>["dial"] => () =>
     Promise.resolve({
       request: (op: string, params: Record<string, unknown> = {}) =>
@@ -2657,7 +2658,9 @@ describe("wsp add <place> --sign-in <agent>", () => {
           ? Promise.resolve({ places } as never)
           : op === "agents.signInLine"
             ? (planned.push({ target: params["target"], agent: params["agent"] }), Promise.resolve({ line: { command: `${String(params["agent"])} login` } } as never))
-            : Promise.reject(new Error(`unexpected op ${op}`)),
+            : op === "places.loginLanded"
+              ? (landed.push(params), Promise.resolve({} as never))
+              : Promise.reject(new Error(`unexpected op ${op}`)),
       events: () => Promise.resolve(),
       onFrame: () => () => {},
       closed: Promise.resolve(),
@@ -2684,8 +2687,11 @@ describe("wsp add <place> --sign-in <agent>", () => {
     const io = captured();
     const run = signingIn({ signedIn: true, detail: "ChatGPT" });
     planned.length = 0;
+    landed.length = 0;
     expect(await addCommand(io, opts(tmp("signin-place")), ["spoo"], { signIn: "codex" }, run.deps)).toBe(0);
     expect(planned).toEqual([{ target: { placeId: "p_1" }, agent: "codex" }]);
+    // That computer lists its logins only when it dials, so the host is told the one the tool's status said landed.
+    expect(landed).toEqual([{ placeId: "p_1", agent: "codex" }]);
     expect(run.asked).toEqual([{ agent: "codex", line: { command: "codex login" } }]);
     expect(io.lines.join("\n")).toContain("Codex is signed in on spoo (ChatGPT); every workspace there shares that login.");
     // A row that says where that computer keeps its logins is never turned away: the host asks its backend again
@@ -2705,7 +2711,9 @@ describe("wsp add <place> --sign-in <agent>", () => {
   it("answers a sign-in that did not land with what the tool said and the line that runs it again", async () => {
     const io = captured();
     const run = signingIn({ signedIn: false, said: "Not logged in" });
+    landed.length = 0;
     expect(await addCommand(io, opts(tmp("signin-not")), ["spoo"], { signIn: "codex" }, run.deps)).toBe(1);
+    expect(landed).toEqual([]);
     expect(io.lines.join("\n")).toContain("Not logged in");
     expect(io.lines.join("\n")).toContain("wsp add spoo --sign-in codex");
   });
