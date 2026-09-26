@@ -42,7 +42,8 @@ import {
 import { baseNote, CATALOG_AGENTS, CLAUDE_CONFIG_REL, CLAUDE_SETTINGS_FILE, GUEST_HOME, MCP_AGENTS, serversByName } from "@wsp/catalog";
 import type { GoldenLeftBehind, RecipeCustomRow } from "@wsp/protocol";
 import { tarPackCommand } from "./doctor.js";
-import { rowOwning } from "./env-keys.js";
+import type { ServerVault } from "./env-keys.js";
+import { keyOwner } from "./providers.js";
 
 const execFileAsync = promisify(execFile);
 /** The largest file read whole here: an rc file or a login's own settings, never anything bigger. */
@@ -264,8 +265,9 @@ export interface PackOptions {
   onImage?: ReadonlySet<string>;
   /** Every command the recipe or the catalog knows a tool for (see toolNames); an oh-my-zsh plugin by one of these names, off the image, leaves the plugin list. */
   tools?: ReadonlySet<string>;
-  /** Where the values the copy's MCP servers now read by name are kept. */
-  vault?: (values: Readonly<Record<string, string>>) => void;
+  /** Where the values the copy's MCP servers now read by name are kept, and read from where a server added here
+   * holds one in an argument or its address. */
+  vault?: ServerVault;
   /** Asked once the staged tree is what would land, before it is tarred: which of those files need not travel at
    * all. Left out, every staged file is packed, which is the image. */
   leaveOut?: LeaveOut;
@@ -446,6 +448,8 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     // Every agent's MCP servers name a variable for each header and command variable, and the values go to the vault:
     // no machine a copy lands on holds one in a file. A config that cannot be written that way stays here whole.
     const held = new Map<string, { value: string; by: string }>();
+    const owners = opts.vault?.owners() ?? {};
+    const known = Object.fromEntries(Object.entries(opts.vault?.held() ?? {}).map(([name, value]) => [name, { value, by: owners[name] ?? [] }]));
     for (const a of MCP_AGENTS) {
       for (const file of a.mcp.files) {
         const found = stagedFor(file);
@@ -453,7 +457,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
         const text = readFileSync(found.staged, "utf8");
         let named: Awaited<ReturnType<typeof serversByName>>;
         try {
-          named = await serversByName(a.mcp.format, text, held, rowOwning);
+          named = await serversByName(a.mcp.format, text, held, keyOwner, known);
         } catch (e) {
           rmSync(found.staged, { force: true });
           skipped.push({ id: found.owner.id, path: file, note: `left out of the copy: its MCP servers could not be written by name (${e instanceof Error ? e.message : String(e)})` });
@@ -463,7 +467,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
         if (named.text !== text) rewriteStaged(found.staged, named.text);
       }
     }
-    if (held.size > 0) opts.vault?.(Object.fromEntries([...held].map(([name, at]) => [name, at.value])));
+    for (const server of new Set([...held.values()].map(at => at.by))) opts.vault?.hold(Object.fromEntries([...held].filter(([, at]) => at.by === server).map(([name, at]) => [name, at.value])), server);
     // Last over the staged tree, so a hook's script and a login's own file are repointed too and nothing written
     // after this can put a Mac path back.
     const repoint = (dir: string): void => {

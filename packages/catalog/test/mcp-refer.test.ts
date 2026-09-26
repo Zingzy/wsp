@@ -300,3 +300,90 @@ describe("a definition's references read back as the agent starts the server", (
     expect(one(CODEX_TOML, `[mcp_servers.l]\nurl = "https://l.example"\n\n[mcp_servers.l.env_http_headers]\nX-Notion = "UNSET"\n`)).toEqual({ missing: "UNSET" });
   });
 });
+
+describe("a value servers.env holds, written back as its reference on the copy", () => {
+  const V = "sk_TESTONLY_local";
+  const known = (values: Record<string, string>, by: string[] = []): Record<string, { value: string; by: string[] }> => Object.fromEntries(Object.entries(values).map(([n, value]) => [n, { value, by }]));
+  const vault = known({ ACME_TOKEN: V });
+  const rows = (): undefined => undefined;
+  const ADDRESS = `https://s.example/mcp?team=eng&key=${V}`;
+  type Local = { args?: string[]; env?: Record<string, string>; url?: string };
+  const agents: Record<string, [McpFormat, (l: Local) => string, string]> = {
+    "Claude Code": [MCP_SERVERS_JSON, l => JSON.stringify({ mcpServers: { s: l.url !== undefined ? { type: "http", url: l.url } : { command: "x", args: l.args, ...(l.env !== undefined ? { env: l.env } : {}) } } }), "${ACME_TOKEN}"],
+    "Gemini CLI": [GEMINI_SETTINGS_JSON, l => JSON.stringify({ mcpServers: { s: l.url !== undefined ? { httpUrl: l.url } : { command: "x", args: l.args, ...(l.env !== undefined ? { env: l.env } : {}) } } }), "${ACME_TOKEN}"],
+    OpenCode: [OPENCODE_JSON, l => JSON.stringify({ mcp: { s: l.url !== undefined ? { type: "remote", url: l.url } : { type: "local", command: ["x", ...l.args!], ...(l.env !== undefined ? { environment: l.env } : {}) } } }), "{env:ACME_TOKEN}"],
+  };
+
+  for (const [agent, [format, file, ref]] of Object.entries(agents)) {
+    it(`${agent}: a value an argument or the address holds as servers.env does travels as that variable's reference, and reads back as the value`, async () => {
+      for (const local of [{ args: [`--token=${V}`] }, { args: [`--token=${V}`], env: { ACME_TOKEN: V } }, { url: ADDRESS }] as Local[]) {
+        const held = new Map<string, { value: string; by: string }>();
+        const out = await serversByName(format, file(local), held, rows, vault);
+        expect(out.text, JSON.stringify(local)).not.toContain(V);
+        expect(out.text).toContain(local.url !== undefined ? `key=${ref}` : `--token=${ref}`);
+        expect(out.dropped).toEqual([]);
+        expect([...held]).toEqual([["ACME_TOKEN", { value: V, by: "s" }]]);
+        const server = format.read(out.text, HOME)[0]!;
+        if (local.url !== undefined) expect(format.resolve(server, n => vault[n]?.value)).toMatchObject({ transport: { url: ADDRESS } });
+      }
+    });
+
+    it(`${agent}: a value servers.env does not hold still refuses the copy where it stands, and a value standing in no whole place is left alone`, async () => {
+      await expect(serversByName(format, file({ args: [`--token=${V}`], env: { ACME_TOKEN: V } }), new Map(), rows, {})).rejects.toThrow("s's value still stands in the --token argument after it was written by name, so the file stays on this computer");
+      await expect(serversByName(format, file({ args: [`--token=${V}`], env: { ACME_TOKEN: V } }), new Map(), rows, known({ OTHER: "sk_TESTONLY_other" }))).rejects.toThrow("s's value still stands in the --token argument");
+      const plain = await serversByName(format, file({ args: ["--workers=10", "run1"] }), new Map(), rows, known({ N: "1" }));
+      expect(plain.text).toBe(file({ args: ["--workers=10", "run1"] }));
+    });
+
+    it(`${agent}: refuses where the file sets the variable servers.env holds the value under to another value, since the reference would read that one`, async () => {
+      await expect(serversByName(format, file({ args: [`--token=${V}`], env: { ACME_TOKEN: "sk_TESTONLY_other" } }), new Map(), rows, vault)).rejects.toThrow("s passes the value servers.env holds as ACME_TOKEN in the --token argument, which s sets to another value, so the file stays on this computer");
+    });
+
+    it(`${agent}: the final guard still runs after the rewrite, so a value left standing as base64 keeps the file here`, async () => {
+      await expect(serversByName(format, file({ args: [`--token=${V}`, "--header", `Authorization: Basic ${btoa(V)}`] }), new Map(), rows, vault)).rejects.toThrow("s's value still stands in the Authorization header, as base64 after it was written by name");
+    });
+  }
+
+  it("writes the outer place where two known values nest, so a header line's whole credential takes one reference", async () => {
+    const out = await serversByName(MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { s: { command: "x", args: ["-H", "Authorization: Basic cred_TESTONLY"] } } }), new Map(), rows, known({ WHOLE: "Basic cred_TESTONLY", PART: "cred_TESTONLY" }));
+    expect((parseJsonc(out.text) as { mcpServers: { s: { args: string[] } } }).mcpServers.s.args).toEqual(["-H", "Authorization: ${WHOLE}"]);
+  });
+
+  it("refuses a value servers.env holds that stands only percent-encoded or as base64, which cannot be written by name, for every agent", async () => {
+    const odd = "sk TESTONLY/plus+";
+    const encoded = `https://s.example/mcp?key=${encodeURIComponent(odd)}`;
+    const said = "s's value still stands in the key parameter of an address after it was written by name, so the file stays on this computer";
+    for (const [agent, [format, file]] of Object.entries(agents)) await expect(serversByName(format, file({ url: encoded }), new Map(), rows, known({ ODD: odd })), agent).rejects.toThrow(said);
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\nurl = "${encoded}"\n`, new Map(), rows, known({ ODD: odd }))).rejects.toThrow(said);
+    for (const [agent, [format, file]] of Object.entries(agents)) await expect(serversByName(format, file({ args: ["--auth", btoa(V)] }), new Map(), rows, vault), agent).rejects.toThrow("s's value still stands in the file, as base64");
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\ncommand = "x"\nargs = ["${btoa(V)}"]\n`, new Map(), rows, vault)).rejects.toThrow("s's value still stands in the file, as base64");
+  });
+
+  it("writes the name the server itself sets where servers.env holds its value under two", async () => {
+    const out = await serversByName(MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { s: { command: "x", args: [`--token=${V}`], env: { MINE: V } } } }), new Map(), rows, known({ OTHER: V, MINE: V }));
+    expect((parseJsonc(out.text) as { mcpServers: { s: { args: string[] } } }).mcpServers.s.args).toEqual(["--token=${MINE}"]);
+  });
+
+  it("refuses a name servers.env holds with another value for another server, or for none, and takes a new value from the server it belongs to alone as its rotation", async () => {
+    const file = (value: string): string => JSON.stringify({ mcpServers: { s: { command: "x", env: { TOKEN: value } } } });
+    const other = await serversByName(MCP_SERVERS_JSON, file("sk_TESTONLY_second"), new Map(), rows, known({ TOKEN: "sk_TESTONLY_first" }, ["a"]));
+    expect(other.dropped).toEqual([{ name: "s", reason: "sets TOKEN, which a already sets to another value" }]);
+    expect(other.text).not.toContain("sk_TESTONLY_second");
+    const nobody = await serversByName(MCP_SERVERS_JSON, file("sk_TESTONLY_second"), new Map(), rows, known({ TOKEN: "sk_TESTONLY_first" }));
+    expect(nobody.dropped).toEqual([{ name: "s", reason: "sets TOKEN, which servers.env already holds with another value and no server recorded for it" }]);
+    const shared = await serversByName(MCP_SERVERS_JSON, file("sk_TESTONLY_second"), new Map(), rows, known({ TOKEN: "sk_TESTONLY_first" }, ["s", "a"]));
+    expect(shared.dropped).toEqual([{ name: "s", reason: "sets TOKEN, which a already sets to another value" }]);
+    const held = new Map<string, { value: string; by: string }>();
+    const rotated = await serversByName(MCP_SERVERS_JSON, file("sk_TESTONLY_second"), held, rows, known({ TOKEN: "sk_TESTONLY_first" }, ["s"]));
+    expect(rotated.dropped).toEqual([]);
+    expect([...held]).toEqual([["TOKEN", { value: "sk_TESTONLY_second", by: "s" }]]);
+  });
+
+  it("Codex: reads no variable in an argument or an address, so the copy refuses and names where the value stands", async () => {
+    const said = (where: string): string => `s passes the value of ACME_TOKEN in ${where}, and Codex reads no variable there, so the file stays on this computer`;
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\ncommand = "x"\nargs = ["--token=${V}"]\n`, new Map(), rows, vault)).rejects.toThrow(said("the --token argument"));
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\ncommand = "x"\nargs = ["--token=${V}"]\nenv = { ACME_TOKEN = "${V}" }\n`, new Map(), rows, vault)).rejects.toThrow(said("the --token argument"));
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\nurl = "${ADDRESS}"\n`, new Map(), rows, vault)).rejects.toThrow(said("the key parameter of an address"));
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\ncommand = "x"\nargs = ["${V}"]\n`, new Map(), rows, vault)).rejects.toThrow(said("an argument"));
+  });
+});
