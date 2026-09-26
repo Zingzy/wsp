@@ -11,6 +11,7 @@ import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { WsClient } from "./ws-client.js";
+import { until } from "./until.js";
 
 let srv: RuntimeServer | undefined;
 afterEach(async () => {
@@ -359,7 +360,7 @@ describe("removing a project image", () => {
     // A machine the provider lost while no host ran reads gone at the next load, and its record still stands.
     backend.machines.find(m => m.id === lost.machineId)!.killed = true;
     const rt = createRuntime({ backend, store, adapters: {}, hostId: HOST, killConfirm: QUICK });
-    expect((await rt.workspaces.get(lost.id)).phase).toBe("gone");
+    await until(async () => (await rt.workspaces.get(lost.id)).phase === "gone");
     await expect(rt.golden.removeProject(golden.snapshotId)).rejects.toMatchObject({ kind: "conflict", message: projectImageInUseRefusal(golden.snapshotId, ["task-a", "task-b", "task-c"]) });
     expect(backend.snapshots.map(s => s.id)).toEqual([golden.snapshotId]);
     expect(await store.get("project-goldens", golden.snapshotId)).toEqual(golden);

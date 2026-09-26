@@ -11,6 +11,7 @@ import { memoryStore } from "../src/store.js";
 import { WsClient, type WireMsg, createOverWire } from "./ws-client.js";
 import { stubBackend } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
+import { until } from "./until.js";
 
 let srv: RuntimeServer | undefined;
 afterEach(async () => {
@@ -204,6 +205,9 @@ describe("events.subscribe replay", () => {
     // the restart cut) and soon passes the old cursor.
     const second = drivenHarness();
     const rtB = createRuntime({ backend: stubBackend(), store, adapters: { claude: second.adapter }, clock: fc.clock });
+    // The new backend never heard of the first machine: the host confirms it gone once it serves, and the gone
+    // event, its row and its cost tick take three sequences before anything else.
+    await until(async () => (await rtB.workspaces.get(workspaceId)).phase === "gone");
     srv = await serveRuntime(rtB, { port, authToken: "secret", now: fc.clock.now });
     const back = await WsClient.connect(port, { token: "secret" });
     const again = await createOverWire(back, "y", { golden: "snap_g" });
@@ -211,16 +215,16 @@ describe("events.subscribe replay", () => {
     for (const t of ["new 1", "new 2", "new 3"]) second.delta(t);
 
     const subB = await back.request("events.subscribe", { after: cursor, stream: streamA });
-    expect(subB).toEqual({ id: subB.id, ok: true, seq: 13, gap: true, stream: expect.any(String) });
+    expect(subB).toEqual({ id: subB.id, ok: true, seq: 16, gap: true, stream: expect.any(String) });
     expect(subB["stream"]).not.toBe(streamA);
     second.delta("live");
     const got = await received(back, 1);
     expect(texts(got)).toEqual(["live"]);
-    expect(seqs(got)).toEqual([14]);
+    expect(seqs(got)).toEqual([17]);
     // Without the stream the same cursor would have replayed 9 to 11 of a stream this client never saw.
     const naive = await WsClient.connect(port, { token: "secret" });
-    expect(await naive.request("events.subscribe", { after: cursor })).toEqual({ id: expect.any(Number), ok: true, seq: 14, stream: subB["stream"] });
-    expect(texts(await received(naive, 4))).toEqual(["new 1", "new 2", "new 3", "live"]);
+    expect(await naive.request("events.subscribe", { after: cursor })).toEqual({ id: expect.any(Number), ok: true, seq: 17, stream: subB["stream"] });
+    expect(texts((await received(naive, 7)).slice(3))).toEqual(["new 1", "new 2", "new 3", "live"]);
     back.close();
     naive.close();
   });

@@ -1351,7 +1351,7 @@ describe("gone machines and the meter", () => {
     backend.machines[0]!.killed = true;
     fc.advance(3_600_000);
     const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
-    expect((await second.workspaces.get(ws.id)).phase).toBe("gone");
+    await until(async () => (await second.workspaces.get(ws.id)).phase === "gone");
     const after: Cost[] = [];
     second.events.on("workspace.cost", e => after.push(e as Cost));
     stop = second.status.watch();
