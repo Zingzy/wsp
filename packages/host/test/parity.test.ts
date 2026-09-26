@@ -300,11 +300,8 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "agents signin",
       "doctor",
       "down",
-      "host connect",
-      "host default",
       "host devices",
       "host devices revoke",
-      "host forget",
       "host link",
       "host pair",
       "host unlink",
@@ -358,12 +355,12 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     // --host is one key in the shared parse, and the command line refuses it on a word that runs here. A line whose
     // flags were written out beside it advertised the flag anyway, and this table is what every skill example is
     // held to, so the example would pass the gate and fail at a terminal.
-    const refused = usageError(["wsp", "host", "default", "box", "--host", "box"], COMMAND_LINES) ?? "the usage table takes --host on wsp host default";
+    const refused = usageError(["wsp", "host", "unlink", "--host", "box"], COMMAND_LINES) ?? "the usage table takes --host on wsp host unlink";
     expect(refused).toContain("Unknown option '--host'");
     const errors: string[] = [];
     const io: CliIO = { log: () => {}, error: line => errors.push(line), ask: () => Promise.reject(new Error("no prompt")), askSecret: () => Promise.reject(new Error("no prompt")) };
-    expect(await cli(["host", "default", "box", "--host", "box"], io)).toBe(EXIT_CODES.usage);
-    expect(errors[0]).toContain("Unknown option '--host' for wsp host default");
+    expect(await cli(["host", "unlink", "--host", "box"], io)).toBe(EXIT_CODES.usage);
+    expect(errors[0]).toContain("Unknown option '--host' for wsp host unlink");
     // Every line the shared parse serves, one word or several, advertises exactly what its command answers. The
     // words that take the flag are the ones aimed at a host over there and the two that run at its own terminal:
     // only the ones that refuse it outright leave it out.

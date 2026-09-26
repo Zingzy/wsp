@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, isMissing, type RetryClock } from "../src/errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS } from "../src/exec-detached.js";
 import { EXEC_ENV } from "../src/golden-import.js";
+import { GONE_READS, killUntilGone } from "../src/golden.js";
 import {
   BACKSTOP_SLACK_MS,
   BOX_BASE_TEMPLATE,
@@ -939,6 +940,17 @@ describe("BoxBackend against a fake Box API", () => {
     await machineOn(gone, "bx_gone").machine.kill();
   });
 
+  it("a delete is done when GET reads the box gone on every read in a row: a 404 and then the box running asks for the delete again", async () => {
+    const deleting = { status: 202, body: { ok: true, type: "box.deleting", operation: { id: "bdop_1" } } };
+    const missing = { status: 404, body: ERROR(404, "not_found", "not_found") };
+    const api = new FakeBox().on("DELETE", "/boxes/bx_tumrjngm", deleting).on("GET", "/boxes/bx_tumrjngm", missing, INFO("bx_tumrjngm", "running"), missing);
+    const { backend, machine } = machineOn(api);
+    await killUntilGone(backend, machine, { graceMs: 50, pollMs: 1 });
+    const calls = api.calls();
+    expect(calls.filter(c => c.startsWith("DELETE"))).toHaveLength(2);
+    expect(calls.slice(calls.lastIndexOf("DELETE /boxes/bx_tumrjngm") + 1)).toEqual(Array(GONE_READS).fill("GET /boxes/bx_tumrjngm"));
+  });
+
   it("reads the provider's states onto the machine's four, a box it lost as gone", async () => {
     const api = new FakeBox();
     const { machine } = machineOn(api);
@@ -948,6 +960,18 @@ describe("BoxBackend against a fake Box API", () => {
     }
     api.on("GET", "/boxes/bx_tumrjngm", { status: 404, body: ERROR(404, "not_found", "not_found") });
     expect(await machine.state()).toBe("gone");
+  });
+
+  it("a state the table never learned reads running on the machine, its handle and the listing, so a delete never reads it gone", async () => {
+    const api = new FakeBox()
+      .on("GET", "/boxes/bx_tumrjngm", INFO("bx_tumrjngm", "deleting"))
+      .on("GET", "/boxes", seen => ({ status: 200, body: { ok: true, type: "box.list", boxes: seen.query.get("state") === "archived" ? [] : [BOX("bx_tumrjngm", "deleting", { name: "wsp" })], pageInfo: { nextCursor: null, hasMore: false, limit: 200 } } }))
+      .on("DELETE", "/boxes/bx_tumrjngm", { status: 202, body: { ok: true, operation: { id: "bdop_1" } } });
+    const { backend, machine } = machineOn(api);
+    expect(await machine.state()).toBe("running");
+    expect((await backend.get("bx_tumrjngm")).seen?.state).toBe("running");
+    expect((await backend.list()).map(m => m.state)).toEqual(["running"]);
+    await expect(killUntilGone(backend, machine, { graceMs: 5, pollMs: 1 })).rejects.toMatchObject({ kind: "machineAlive", state: "running" });
   });
 
   it("describes the class the box runs as, its disk the class floor, and its creation time", async () => {

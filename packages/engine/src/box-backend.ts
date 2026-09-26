@@ -121,7 +121,8 @@ const BOX_PROVIDER = "Box by ASCII";
 const LOADER_EMFILE = /^(bash|sudo): error while loading shared libraries: .*: Error 24/m;
 
 /** How a box's own state reads as a machine state. `error` is folded into gone: nothing runs on it again and the
- * runtime's road out of gone is a rebuild. */
+ * runtime's road out of gone is a rebuild. A state missing here reads running through stateOf: a delete that read a
+ * word the table never learned as gone would leave a box billing with nobody watching it. */
 const STATE_MAP: Record<string, MachineState> = {
   init: "starting",
   provisioning: "starting",
@@ -134,6 +135,8 @@ const STATE_MAP: Record<string, MachineState> = {
   archived: "paused",
   error: "gone",
 };
+
+const stateOf = (state: string): MachineState => STATE_MAP[state] ?? "running";
 
 // --- names ------------------------------------------------------------------
 
@@ -523,7 +526,7 @@ export class BoxBackend implements MachineBackend {
     // backend hands the runtime while the desktop is off, so the handle reads sandbox, the kind the runtime treats
     // a machine without a stream as. When the stream is on, the kind comes off the record that asked for it.
     return new BoxMachine(this, view.id, "sandbox", boxLabels(view.name), {
-      state: STATE_MAP[view.state] ?? "gone",
+      state: stateOf(view.state),
       ...(view.createdAt !== undefined && view.createdAt !== null ? { createdAt: view.createdAt } : {}),
     });
   }
@@ -558,7 +561,7 @@ export class BoxBackend implements MachineBackend {
       if (Object.entries(labels ?? {}).some(([k, v]) => carried[k] !== v)) continue;
       out.push({
         id: box.id,
-        state: STATE_MAP[box.state] ?? "gone",
+        state: stateOf(box.state),
         labels: carried,
         ...(box.vcpu !== undefined && box.memoryGB !== undefined ? { size: { cpu: box.vcpu, memMb: box.memoryGB * 1024 } } : {}),
       });
@@ -804,7 +807,7 @@ export class BoxMachine implements Machine {
 
   async state(): Promise<MachineState> {
     try {
-      return STATE_MAP[(await this.backend.view(this.id)).state] ?? "gone";
+      return stateOf((await this.backend.view(this.id)).state);
     } catch (e) {
       if (isMissing(e)) return "gone";
       throw e;

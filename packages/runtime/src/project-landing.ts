@@ -50,6 +50,8 @@ export interface LandingDeps {
    * whether this machine's disk becomes one, which keeps the computer's own logins out of it. Killed by the caller
    * whatever happens. */
   worker(o: { binds: readonly MachineBind[]; image: boolean; from: string }): Promise<Machine>;
+  /** Stops a worker once its work is done, resolving once the provider takes the ask; the read-back runs behind it. */
+  stop(machine: Machine): Promise<void>;
   land(machine: Machine, path: string, bytes: Uint8Array): Promise<void>;
   checkpoint(machine: Machine, name: string): Promise<string>;
   /** Where wsp writes its own working files on that machine. */
@@ -400,7 +402,7 @@ const boxLanding: ProjectLanding = {
       failed = e;
       throw e;
     } finally {
-      await machine.kill().catch((e: unknown) => console.warn(`the machine that added ${o.project.name} was not stopped: ${e instanceof Error ? e.message : String(e)}`));
+      await deps.stop(machine).catch((e: unknown) => console.warn(`the machine that added ${o.project.name} was not stopped: ${e instanceof Error ? e.message : String(e)}`));
       // Nothing of a project that was not recorded is left on the computer: the folder the bind made goes, so the
       // add can be run again under the same name and nothing of it sits on that disk unowned. After the machine is
       // stopped and never before: those folders are its binds' own sources while it runs, and what Linux makes of
@@ -446,7 +448,7 @@ const providerLanding: ProjectLanding = {
       const snapshotId = await deps.checkpoint(machine, `${o.project.name}-${o.project.id}`);
       return { ...landed, image: { snapshotId, builtAt: new Date(deps.now()).toISOString() } };
     } finally {
-      await machine.kill().catch((e: unknown) => console.warn(`the machine that built the image for ${o.project.name} was not stopped: ${e instanceof Error ? e.message : String(e)}`));
+      await deps.stop(machine).catch((e: unknown) => console.warn(`the machine that built the image for ${o.project.name} was not stopped: ${e instanceof Error ? e.message : String(e)}`));
     }
   },
   workspaceBinds: () => [],

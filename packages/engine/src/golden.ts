@@ -19,7 +19,7 @@ import { installBase } from "./golden-base.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState, TemplateRow } from "./machine.js";
-import { isMissing, NotFirstLifeError } from "./errors.js";
+import { isAccountRefusal, isMissing, NotFirstLifeError } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
 import { goldenName } from "./snapshot-names.js";
 import { recipeOwnedFiles } from "./recipe-owned.js";
@@ -32,7 +32,7 @@ export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifes
 export type StageListener = (stage: GoldenStage, detail?: string, step?: GoldenStep, left?: readonly string[]) => void;
 
 /** How long to wait for the provider to report a killed machine gone before
- * killing again; two rounds, then the caller fails. Tests shrink both. */
+ * killing again; KILL_ASKS rounds, then the caller fails. Tests shrink both. */
 export interface KillConfirm {
   graceMs?: number;
   pollMs?: number;
@@ -41,7 +41,7 @@ export interface KillConfirm {
 /** How long a delete is read back for when the caller names no window. */
 export const KILL_GRACE_MS = 30_000;
 
-/** A machine that answered two kills with a success status and is still there.
+/** A machine that answered KILL_ASKS kills with a success status and is still there.
  * Typed so the wizard can say "still billing, reap it" rather than "try again". */
 export class MachineAliveError extends Error {
   readonly kind = "machineAlive" as const;
@@ -49,7 +49,7 @@ export class MachineAliveError extends Error {
     readonly machineId: string,
     readonly state: MachineState,
   ) {
-    super(`machine ${machineId} is still ${state} after two kills; it bills until reap or a kill by hand takes`);
+    super(`machine ${machineId} is still ${state} after three kills; it bills until reap or a kill by hand takes`);
     this.name = "MachineAliveError";
   }
 }
@@ -105,28 +105,137 @@ const readState = async (machine: Machine): Promise<{ state: BuilderReading; rea
   }
 };
 
+/** How many reads in a row must answer gone before a kill is done, and how often the kill is asked. Measured
+ * 2026-09-26: the gateway's copies disagreed call to call, and seven of eleven machines wsp had read gone once kept
+ * running; at that skew twelve reads and three asks let fewer than one delete in sixty say gone wrongly. */
+export const GONE_READS = 12;
+export const KILL_ASKS = 3;
+
 /** The provider's kill acknowledges the request, not the machine's death: a live
  * wizard run reported its seal done and the builder was still running 25 minutes
- * later, so a kill is only done once get(id) reads the machine gone. */
+ * later, so a kill is only done once the machine reads gone GONE_READS times in a
+ * row. The copies disagree per call, not per second, so those reads follow each
+ * other straight away; one that reads the machine alive after a gone one means the
+ * ask went to a copy that never held it, and the kill is asked again at once. */
 export async function killUntilGone(backend: MachineBackend, machine: Machine, confirm: KillConfirm = {}): Promise<void> {
+  await readBackGone(backend, machine, confirm);
+}
+
+/** One background round: whether the first kill was sent already, and whether the watch is still open. */
+interface WatchRound {
+  asked: boolean;
+  live: () => boolean;
+}
+
+/** killUntilGone's rule. Under a watch's round it resolves false as soon as the watch closes, sends nothing after,
+ * and holds no timer that keeps the process open. */
+async function readBackGone(backend: MachineBackend, machine: Machine, confirm: KillConfirm, round?: WatchRound): Promise<boolean> {
+  const live = round?.live ?? (() => true);
   const graceMs = confirm.graceMs ?? KILL_GRACE_MS;
   const pollMs = confirm.pollMs ?? 1_000;
-  let state: MachineState = "running";
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let alive: MachineState = "running";
+  for (let attempt = 0; attempt < KILL_ASKS; attempt++) {
+    if (!live()) return false;
+    if (attempt > 0 || round?.asked !== true)
+      await machine.kill().catch((e: unknown) => {
+        if (!isMissing(e)) throw e;
+      });
+    const deadline = Date.now() + graceMs;
+    let gone = 0;
+    do {
+      if (!live()) return false;
+      // One call per read: a second call for the state can land on the other copy and read gone.
+      const state = await backend.get(machine.id).then(
+        m => m.seen?.state ?? m.state(),
+        (e: unknown) => (isMissing(e) ? "gone" : Promise.reject(e)),
+      );
+      if (state === "gone") {
+        if (++gone >= GONE_READS) return true;
+        continue;
+      }
+      alive = state;
+      if (gone > 0) break;
+      await new Promise(r => {
+        const timer = setTimeout(r, pollMs);
+        if (round !== undefined) timer.unref?.();
+      });
+    } while (Date.now() < deadline || gone > 0);
+  }
+  throw new MachineAliveError(machine.id, alive);
+}
+
+/** How long a background stop whose read-back ended with the machine still there waits before asking again. */
+export const GONE_RETRY_MS = 60_000;
+
+export interface GoneWatchOptions {
+  confirm?: KillConfirm;
+  retryMs?: number;
+  warn?: (line: string) => void;
+}
+
+/** Stops for the sweeps that never wait on a machine. A stop resolves once the provider takes the first ask, so a
+ * failure to ask still reaches the sweep; killUntilGone's rule reads it back behind that, and asks again every
+ * retryMs for as long as the machine is still there, until the watch closes or the provider refuses the account. */
+export class GoneWatch {
+  private readonly watching = new Map<string, Promise<void>>();
+  private readonly wakers = new Set<() => void>();
+  private closed = false;
+
+  constructor(private readonly opts: GoneWatchOptions = {}) {}
+
+  async stop(backend: MachineBackend, machine: Machine): Promise<void> {
     await machine.kill().catch((e: unknown) => {
       if (!isMissing(e)) throw e;
     });
-    const deadline = Date.now() + graceMs;
-    do {
-      state = await backend.get(machine.id).then(
-        m => m.state(),
-        (e: unknown) => (isMissing(e) ? "gone" : Promise.reject(e)),
-      );
-      if (state === "gone") return;
-      await new Promise(r => setTimeout(r, pollMs));
-    } while (Date.now() < deadline);
+    if (this.closed || this.watching.has(machine.id)) return;
+    this.watching.set(machine.id, this.untilGone(backend, machine).finally(() => this.watching.delete(machine.id)));
   }
-  throw new MachineAliveError(machine.id, state);
+
+  /** Machines asked to stop that have not yet read gone. */
+  ids(): string[] {
+    return [...this.watching.keys()];
+  }
+
+  /** Resolves once every machine watched now has read gone, been given up on, or had its round cut by close(); a
+   * request already sent when close() ran still lands. */
+  async settled(): Promise<void> {
+    await Promise.all([...this.watching.values()]);
+  }
+
+  close(): void {
+    this.closed = true;
+    for (const wake of this.wakers) wake();
+    this.wakers.clear();
+  }
+
+  private async untilGone(backend: MachineBackend, machine: Machine): Promise<void> {
+    const retryMs = this.opts.retryMs ?? GONE_RETRY_MS;
+    const warn = this.opts.warn ?? console.warn;
+    for (let asked = 0; !this.closed; asked++) {
+      try {
+        const gone = await readBackGone(backend, machine, this.opts.confirm ?? {}, { asked: asked === 0, live: () => !this.closed });
+        if (gone && asked > 0) warn(`machine ${machine.id} read gone after asking again`);
+        return;
+      } catch (e) {
+        if (isAccountRefusal(e)) {
+          warn(`${messageOf(e)}; not asked again, the next start's sweep stops machine ${machine.id}`);
+          return;
+        }
+        warn(`${messageOf(e)}; asking again in ${Math.round(retryMs / 1000)} s`);
+      }
+      if (this.closed) return;
+      await new Promise<void>(resolve => {
+        const wake = (): void => {
+          clearTimeout(timer);
+          this.wakers.delete(wake);
+          resolve();
+        };
+        const timer = setTimeout(wake, retryMs);
+        timer.unref?.();
+        this.wakers.add(wake);
+      });
+    }
+  }
 }
 
 /** What a snapshot's delete came to once read back: gone off the listing, already lost at the provider, or still

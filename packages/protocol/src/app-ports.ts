@@ -84,7 +84,7 @@ export function isWildcard(address: string): boolean {
 }
 
 /** Whether a word is an address rather than a name: a host is reached at an http, https, ws or wss address, and a
- * word with any of those schemes is one, wherever it is typed (a --host flag, wsp host connect, the app's connect sheet). */
+ * word with any of those schemes is one, wherever it is typed (a --host flag, WSP_HOST, a login address). */
 export function isUrl(word: string): boolean {
   return /^(https?|wss?):\/\//i.test(word);
 }

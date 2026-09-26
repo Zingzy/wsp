@@ -24,6 +24,9 @@ export interface WorkspaceHooks {
    * on its row what a typed failure means; the backend settles the move itself. Absent, the machine's own call is
    * awaited. */
   move?: (m: Machine, move: ProviderMove) => Promise<void>;
+  /** Stops a machine a replacement took over from, resolving once the provider takes the ask. Absent, the machine's
+   * own kill is awaited. */
+  retire?: (m: Machine) => Promise<void>;
 }
 
 /** The two provider calls a backend settles on its own budgets. */
@@ -192,9 +195,13 @@ export class Workspace {
     this.machine = await resurrect();
     this.firstLife = true;
     await this.hooks.restoreVault?.(this.machine);
-    await old.kill().catch((e: unknown) => {
+    await this.retire(old).catch((e: unknown) => {
       if (!isMissing(e)) throw e;
     });
+  }
+
+  private retire(m: Machine): Promise<void> {
+    return this.hooks.retire ? this.hooks.retire(m) : m.kill();
   }
 
   /** A snapshot of the running disk under `name`, with the life this workspace tracked; a backend that refuses one
@@ -208,7 +215,7 @@ export class Workspace {
   async upgrade(spec?: Partial<MachineSpec>, opts: { drop?: readonly string[] } = {}): Promise<void> {
     if (!this.hooks.resurrect) throw new Error("upgrade requires a resurrect hook");
     const payload = this.hooks.vaultExport ? await this.hooks.vaultExport(this.machine, opts.drop) : undefined;
-    await this.machine.kill();
+    await this.retire(this.machine);
     this.machine = await this.hooks.resurrect(spec);
     if (payload !== undefined && this.hooks.vaultImport) {
       await this.hooks.vaultImport(this.machine, payload);

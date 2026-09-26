@@ -21,6 +21,7 @@
     "@wsp/protocol": "workspace:*",
     "@wsp/runtime": "workspace:*",
     "@wsp/web": "workspace:*",
+    "@zingzy/wsp": "workspace:*",
     "electron": "43.5.1",
     "electron-builder": "26.15.7",
     "jsdom": "^25.0.1",

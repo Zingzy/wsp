@@ -1,7 +1,7 @@
 import { BUILDER_IDLE_MS } from "./golden.js";
 import { isMissing } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, OWNER_LABEL, SMOKE_LABEL, WSP_LABEL, isReserved } from "./labels.js";
-import type { MachineBackend } from "./machine.js";
+import type { Machine, MachineBackend } from "./machine.js";
 
 /** An own machine is claimed only once its create returns; a listing during
  * the create could show it unclaimed. Whether the provider lists a machine
@@ -20,6 +20,8 @@ export interface ReapOptions {
   knownIds: () => Iterable<string>;
   /** The sweeping state file's id; machines stamped with it are its to kill. */
   owner: string;
+  /** Stops one machine the sweep kills, resolving once the provider takes the ask; the read-back is the stop's own. */
+  stop: (machine: Machine) => Promise<void>;
   /** Age an unclaimed unowned non-builder must reach before it is killed; the unowned builder backstop is the idle window it was created with. */
   olderThanMs?: number;
   now?: () => number;
@@ -139,7 +141,7 @@ export async function reap(opts: ReapOptions): Promise<ReapResult> {
       continue;
     }
     try {
-      await (await opts.backend.get(m.id)).kill();
+      await opts.stop(await opts.backend.get(m.id));
     } catch (e) {
       // The listing lags a kill (measured): a row that is gone by the time it is fetched is no failure.
       if (isMissing(e)) continue;

@@ -7,7 +7,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { promisify } from "node:util";
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
-import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
@@ -32,7 +32,7 @@ afterEach(() => {
 });
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, backUrl, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, configHardLinkRefusal, backUrl, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
@@ -2752,6 +2752,27 @@ describe("the sweep a computer runs on itself", () => {
     // Their file keeps everything of theirs and loses the one line wsp put in it.
     expect(readFileSync(join(home, ".profile"), "utf8")).toBe("# theirs\nexport EDITOR=vi\n");
     expect(swept.removed).toContain(`. ${at.profileFile}; [ -f ${at.profileFile} ] && . ${at.profileFile} (out of ${join(home, ".profile")})`);
+  });
+
+  it("takes its line out of the login file by the one config write: a killed write's temp swept, a hard-linked file left whole and said", async () => {
+    const home = tmp("sweep-profile-write");
+    const at = placeDaemonPaths(home);
+    const line = `[ -f ${at.profileFile} ] && . ${at.profileFile}`;
+    writeFileSync(join(home, ".profile"), `# theirs\n${line}\n`);
+    const stale = join(home, ".wsp-config-tmp.dead01");
+    writeFileSync(stale, "half a file");
+    const aged = new Date(Date.now() - 11 * 60_000);
+    utimesSync(stale, aged, aged);
+    await sweepPlace({ home, manager: undefined, run: fakeRunner().run });
+    expect(readFileSync(join(home, ".profile"), "utf8")).toBe("# theirs\n");
+    expect(existsSync(stale)).toBe(false);
+
+    writeFileSync(join(home, ".profile"), `# theirs\n${line}\n`);
+    linkSync(join(home, ".profile"), join(home, "profile-twin"));
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run });
+    expect(readFileSync(join(home, "profile-twin"), "utf8")).toBe(`# theirs\n${line}\n`);
+    expect(readFileSync(join(home, ".profile"), "utf8")).toBe(`# theirs\n${line}\n`);
+    expect(swept.kept).toContain(`${line} stays in ${join(home, ".profile")}: ${configHardLinkRefusal(join(home, ".profile"))}`);
   });
 
   it("leaves a login file it never wrote to exactly as it was", async () => {

@@ -6,12 +6,12 @@
 // computer's own row.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, statfsSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, statfsSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir, arch as osArch, platform, release, type as osType, uptime as upSeconds, userInfo } from "node:os";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
-import { CATALOG_AGENTS } from "@wsp/catalog";
-import { LOGIN_READ, SSH_STORE_VARS, besideConfig, landedFilesScript, localShape, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
+import { CATALOG_AGENTS, configSum } from "@wsp/catalog";
+import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, writeConfigHere, localShape, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
 import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeKeptForLinkLine, placeOwnedPaths, workFolderIn, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { dirname, join, relative, sep } from "node:path";
 import { apparmorOffStep, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
@@ -341,9 +341,9 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
     sh(apparmorOffStep(profile).join("\n"));
     if (!there(profile)) removed.push(profile);
   }
-  const said = unsourced(sshDaemonPlace({ home, path: "" }));
-  if (said !== undefined) removed.push(said);
-  return { removed, kept: [placeKeptLine(workFolderIn(home))] };
+  const said = unsourced(sshDaemonPlace({ home, path: "" }), home);
+  if (said !== undefined && "removed" in said) removed.push(said.removed);
+  return { removed, kept: [placeKeptLine(workFolderIn(home)), ...(said !== undefined && "kept" in said ? [said.kept] : [])] };
 }
 
 /** The ownership read as this computer runs it: the one script the engine renders for the home, through a plain sh
@@ -360,9 +360,8 @@ const shStdout = (script: string): string => {
 const SH = "/bin/sh";
 
 /** The port the unmerge runs on when it runs on the computer it is taking wsp off: that computer's own sh for
- * the read of the list, and its own file system for the agents' files. The write goes beside the file and is
- * renamed over it, as the road that merged those servers in writes one back, so an agent launching in that
- * moment reads one whole copy of it or the other. */
+ * the read of the list, its own file system for the read of the agents' files, and the one config write for
+ * putting one back. */
 function hereServerPort(sh: (script: string) => string): ServerPort {
   return {
     run: script => Promise.resolve(sh(script)),
@@ -370,17 +369,15 @@ function hereServerPort(sh: (script: string) => string): ServerPort {
       Promise.resolve(
         files.flatMap(path => {
           try {
-            return [{ path, text: readFileSync(path, "utf8") }];
+            const bytes = readFileSync(path);
+            return [{ path, text: bytes.toString("utf8"), sum: configSum(bytes) }];
           } catch {
             return [];
           }
         })[0],
       ),
-    write: (path, text) => {
-      const beside = besideConfig(path);
-      copyFileSync(path, beside);
-      writeFileSync(beside, text);
-      renameSync(beside, path);
+    write: (file, text, home) => {
+      writeConfigHere(file.path, home, file.sum, text);
       return Promise.resolve();
     },
   };
@@ -438,21 +435,26 @@ function there(path: string): boolean {
 /** Takes wsp's own line back out of the person's own login file, which would otherwise print an error at every
  * login for a file that is gone. Every line naming wsp's profile file goes, whatever spelling it was written in,
  * since a computer joined before the line was guarded on that file carries the older one. Their file, so it is
- * opened only when wsp's file is named in it and written back through the same path rather than moved over: a
- * .profile symlinked into a dotfiles checkout stays a symlink. Answers the lines it took, or nothing when the
- * file named none. */
-function unsourced(place: DaemonPlace): string | undefined {
+ * opened only when wsp's file is named in it and written back by the one config write: a .profile symlinked into a
+ * dotfiles checkout under the home stays a symlink. Answers the lines it took, or the lines it left with the write's
+ * refusal, or nothing when the file named none. */
+function unsourced(place: DaemonPlace, home: string): { removed: string } | { kept: string } | undefined {
   const file = place.profileSource;
   if (file === undefined || !there(file)) return undefined;
-  let held: string;
+  let bytes: Buffer;
   try {
-    held = readFileSync(file, "utf8");
+    bytes = readFileSync(file);
   } catch {
     return undefined;
   }
-  const rows = held.split("\n");
+  const rows = bytes.toString("utf8").split("\n");
   const gone = rows.filter(row => row.includes(place.profileFile));
   if (gone.length === 0) return undefined;
-  writeFileSync(file, rows.filter(row => !row.includes(place.profileFile)).join("\n"));
-  return `${gone.map(row => row.trim()).join("; ")} (out of ${file})`;
+  const lines = gone.map(row => row.trim()).join("; ");
+  try {
+    writeConfigHere(file, home, configSum(bytes), rows.filter(row => !row.includes(place.profileFile)).join("\n"));
+  } catch (e) {
+    return { kept: `${lines} stays in ${file}: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  return { removed: `${lines} (out of ${file})` };
 }

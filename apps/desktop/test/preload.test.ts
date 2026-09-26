@@ -98,7 +98,7 @@ describe("the preload's bridge", () => {
 });
 
 describe("the hosts the window can move between", () => {
-  it("carries the token, the list, the switch, the connect and the disconnect on their own channels, and the menu's open", async () => {
+  it("carries the token, the list and the switch on their own channels", async () => {
     const wsp = await bridge();
     await wsp.hostToken();
     expect(invoke).toHaveBeenLastCalledWith("hosts:token");
@@ -106,16 +106,5 @@ describe("the hosts the window can move between", () => {
     expect(invoke).toHaveBeenLastCalledWith("hosts:list");
     await wsp.switchHost("box");
     expect(invoke).toHaveBeenLastCalledWith("hosts:switch", "box");
-    await wsp.connectHost({ road: "direct", url: "http://box:4400", code: "ABCDEFGH" });
-    expect(invoke).toHaveBeenLastCalledWith("hosts:connect", { road: "direct", url: "http://box:4400", code: "ABCDEFGH" });
-    await wsp.disconnectHost("box");
-    expect(invoke).toHaveBeenLastCalledWith("hosts:disconnect", "box");
-    let opened = 0;
-    const stop = wsp.onConnectHostOpen(() => (opened += 1));
-    expect(on).toHaveBeenLastCalledWith("hosts:connect-open", expect.any(Function));
-    (on.mock.calls.at(-1)![1] as () => void)();
-    expect(opened).toBe(1);
-    stop();
-    expect(off).toHaveBeenLastCalledWith("hosts:connect-open", expect.any(Function));
   });
 });

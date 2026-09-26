@@ -4,6 +4,8 @@
 // when the script cannot travel. One module per agent, registered on its
 // catalog entry: this module knows the file's shape and the command line's,
 // the host reads this computer's disk and says where a script lands.
+import { readJsonc } from "./jsonc.js";
+import { editJson, type JsonEdit } from "./mcp.js";
 
 /** Where a script a hook names lands on the guest, absolute; nothing when it cannot travel. */
 export type HookPlacer = (abs: string) => string | undefined;
@@ -128,46 +130,49 @@ export const CLAUDE_HOOKS: HookCarry = {
     const out: CarriedHooks = { text, carried: [], left: [] };
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      parsed = readJsonc(text).value;
     } catch {
       return out;
     }
     if (!isRecord(parsed) || !isRecord(parsed["hooks"])) return out;
     const hooks = parsed["hooks"];
     const seen = new Set<string>();
-    let changed = false;
+    // Rewrites first, then each removal from the last index back, so every edit's path still names what it did.
+    const rewrites: JsonEdit[] = [];
+    const removals: JsonEdit[] = [];
+    let eventsLeft = 0;
     for (const [event, groups] of Object.entries(hooks)) {
-      if (!Array.isArray(groups)) continue;
-      const kept = groups.filter(group => {
-        if (!isRecord(group) || !Array.isArray(group["hooks"])) return true;
-        const stay = group["hooks"].filter(hook => {
-          if (!isRecord(hook) || typeof hook["command"] !== "string") return true;
+      const gone: JsonEdit[] = [];
+      let groupsLeft = 0;
+      (Array.isArray(groups) ? groups : []).forEach((group, g) => {
+        const cut: JsonEdit[] = [];
+        let hooksLeft = 0;
+        (isRecord(group) && Array.isArray(group["hooks"]) ? group["hooks"] : []).forEach((hook, h) => {
+          if (!isRecord(hook) || typeof hook["command"] !== "string") return void hooksLeft++;
           const r = rewriteCommand(hook["command"], home, place);
           if ("left" in r) {
             out.left.push(r.left);
-            changed = true;
-            return false;
+            cut.unshift([["hooks", event, g, "hooks", h], undefined]);
+            return;
           }
-          if (r.command !== hook["command"]) {
-            hook["command"] = r.command;
-            changed = true;
-          }
+          hooksLeft++;
+          if (r.command !== hook["command"]) rewrites.push([["hooks", event, g, "hooks", h, "command"], r.command]);
           for (const c of r.carried) {
             if (seen.has(c.from)) continue;
             seen.add(c.from);
             out.carried.push(c);
           }
-          return true;
         });
-        if (stay.length === group["hooks"].length) return true;
-        group["hooks"] = stay;
-        return stay.length > 0;
+        const emptied = hooksLeft === 0 && cut.length > 0;
+        if (!emptied) groupsLeft++;
+        gone.unshift(...(emptied ? [[["hooks", event, g], undefined] as JsonEdit] : cut));
       });
-      if (kept.length === 0) delete hooks[event];
-      else if (kept.length !== groups.length) hooks[event] = kept;
+      const emptied = Array.isArray(groups) && groupsLeft === 0 && gone.length > 0;
+      if (!emptied) eventsLeft++;
+      removals.push(...(emptied ? [[["hooks", event], undefined] as JsonEdit] : gone));
     }
-    if (changed && Object.keys(hooks).length === 0) delete parsed["hooks"];
-    if (changed) out.text = `${JSON.stringify(parsed, null, 2)}\n`;
+    const edits = eventsLeft === 0 && removals.length > 0 ? [...rewrites, [["hooks"], undefined] as JsonEdit] : [...rewrites, ...removals];
+    if (edits.length > 0) out.text = editJson(text, edits);
     return out;
   },
 };

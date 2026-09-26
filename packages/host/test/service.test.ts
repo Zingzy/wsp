@@ -28,7 +28,7 @@ import {
   type ServicePlan,
   type ServiceRunner,
 } from "../src/service.js";
-import { setDefaultHost, stateIgnoredLine, writeHost } from "../src/hosts.js";
+import { stateIgnoredLine, writeHost } from "../src/hosts.js";
 import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -784,7 +784,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
 
   it("wsp status takes --host and reports the host it is aimed at, reading neither this computer's lock nor its manager", async () => {
     const hostsHome = join(home, ".wsp");
-    writeHost(hostsHome, "box", { url: "http://box.example:4400", deviceId: "d_7", deviceToken: "t_7", hostKey: HOST_KEY, pairedAt: "2026-09-11T00:00:00.000Z" });
+    writeHost(hostsHome, "box", { url: "http://box.example:4400", deviceId: "d_7", deviceToken: "t_7", hostKey: HOST_KEY, pairedAt: "2026-09-11T00:00:00.000Z", via: { kind: "account", hostId: "hbox" } });
     // The flag comes off the one shared parse every other flag of a command comes off, so there is no second
     // reading of --host beside the one the verbs take.
     expect(parseArgs({ args: ["status", "--host", "box"], options: SHARED_OPTIONS, allowPositionals: true }).values.host).toBe("box");
@@ -837,12 +837,11 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(off.at(-1)).toBe("latest      off");
   });
 
-  it("a bare wsp status answers for this computer even where a default alias would send every verb to a box", async () => {
+  it("a bare wsp status answers for this computer even where the account's one host would send every verb to a box", async () => {
     const hostsHome = join(home, ".wsp");
-    writeHost(hostsHome, "box", { url: "http://box.example:4400", deviceId: "d_7", deviceToken: "t_7", hostKey: HOST_KEY, pairedAt: "2026-09-11T00:00:00.000Z" });
-    setDefaultHost(hostsHome, "box");
+    writeHost(hostsHome, "box", { url: "http://box.example:4400", deviceId: "d_7", deviceToken: "t_7", hostKey: HOST_KEY, pairedAt: "2026-09-11T00:00:00.000Z", via: { kind: "account", hostId: "hbox" } });
     const here = { statePath, home: hostsHome, env: {} };
-    // Nothing serves this state file, which is the one moment a person runs this line; the default alias answering
+    // Nothing serves this state file, which is the one moment a person runs this line; the account's host answering
     // for the box would hide it. The fake dials nothing, so a line that left this computer fails here rather than
     // printing a row about the box.
     const lines: string[] = [];

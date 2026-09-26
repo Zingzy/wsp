@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The hosts this computer has been paired with, and the one rule that decides
-// which host a line runs against. A record is one file per alias under the wsp
-// home, mode 0600, holding the address and the device token a pairing code
-// bought; the default alias is one word in a file beside them. Every reader
-// of "which host" comes through aimedHost, so the command line and the tool
-// server cannot disagree about where a verb goes.
+// The hosts on the person's account this computer can reach, and the one rule
+// that decides which host a line runs against. A record is one file per alias
+// under the wsp home, mode 0600, written by wsp hosts off the account's listing
+// and holding the address, the pinned key and the device token the first dial
+// bought. Every reader of "which host" comes through aimedHost, so the command
+// line and the tool server cannot disagree about where a verb goes.
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative } from "node:path";
-import { authRefusal, hostNoKeyLine, LAUNCHED_WITH, WS_PATH, hostFromEnv, isLoopback, isUrl, runForTheList, servedHostname, usageRefusal, type HostRoad } from "@wsp/protocol";
+import { authRefusal, hostNoKeyLine, LAUNCHED_WITH, WS_PATH, hostFromEnv, isLoopback, isUrl, runForTheList, servedHostname, usageRefusal } from "@wsp/protocol";
 import { writeOwn } from "@wsp/own-file";
 import { readRelayRecord } from "./account.js";
 import { servingHost } from "./host-lock.js";
@@ -17,43 +17,26 @@ import { defaultHomeIn, homeNamed } from "./serving-home.js";
 /** The address predicate has one home in the protocol; the command line's callers read it from here. */
 export { isUrl };
 
-/** What this computer keeps about a host on another one: the address a person gave wsp host connect, the device the host
- * minted for this computer and the token that names it. The token opens the host, so the file is the person's own. */
+/** What this computer keeps about a host on its account: the address the account names, the device the host minted
+ * for this computer and the token that names it. The token opens the host, so the file is the person's own. */
 export interface HostRecord {
   url: string;
   deviceId: string;
   deviceToken: string;
   pairedAt: string;
-  /** The fingerprint of the key that host proved when this computer paired with it, which every later dial holds
-   * it to before it sends the token. A record written before wsp pinned keys carries none and is refused. */
+  /** The fingerprint of the key the account listed for that host when this computer first saw it, which every
+   * later dial holds it to before it sends the token. */
   hostKey?: string;
-  /** What the desktop shows for this host; the alias stands in when a record from the command line carries none. */
-  label?: string;
-  /** How the desktop reached it; a record the command line wrote carries none and is read as an address. */
-  road?: HostRoad;
-  /** The ssh login the desktop forwards through, and the port the host answers on over there. */
-  ssh?: SshLogin;
-  /** How this computer came to hold the host: absent for a pairing code, which is what every record written before
-   * accounts carries, and the account for a record wsp hosts wrote off its listing. The id is the host's own there,
-   * which is what says whether a record names the host on this computer. */
-  via?: { kind: "account"; hostId: string };
+  /** The account the record came off, with the host's own id there, which is what says whether a record names the
+   * host on this computer. A file without it was written by a road that is gone and is read as no record. */
+  via: { kind: "account"; hostId: string };
 }
 
-/** Where the desktop logs in: the address as ssh takes it and the port when it is not ssh's own. The port the host
- * answers on over there is not kept: the box's lock says it, and the road reads the lock on every connection. */
-export interface SshLogin {
-  address: string;
-  port?: number;
-}
-
-/** One host this computer holds, as wsp hosts prints it: never the token, which no listing has any use for. */
+/** One host this computer holds, as a listing reads it: never the token, which no listing has any use for. */
 export interface HostEntry {
   alias: string;
   url: string;
   deviceId: string;
-  default: boolean;
-  label?: string;
-  road?: HostRoad;
 }
 
 /** The home wsp keeps everything of a person's in when nobody names another. */
@@ -70,9 +53,6 @@ export function hostsDir(home: string): string {
   return join(home, "hosts");
 }
 
-/** The file naming the alias every line takes when none names one. */
-const defaultFile = (home: string): string => join(hostsDir(home), "default");
-
 /** An alias is one name, never a path: it becomes a file name under the hosts folder, so a word with a separator or
  * a dot-dot in it is refused before anything is written or read. The characters, the one an alias may open with
  * and the length live here alone, since the name a person types and the name an address is folded into are held to
@@ -84,9 +64,8 @@ const ALIAS = new RegExp(`^[${ALIAS_FIRST}][${ALIAS_CHARS}]{0,${ALIAS_MAX - 1}}$
 
 const aliasOk = (alias: string): boolean => ALIAS.test(alias) && !alias.includes("..");
 
-/** The alias itself, or the refusal for a word that could never be one. Every road that writes a name reads it
- * here, and `wsp host connect` reads it before the dial that spends a code, so a name it would refuse costs nothing. */
-export function checkedAlias(alias: string): string {
+/** The alias itself, or the refusal for a word that could never be one: every road that names a file reads it here. */
+function checkedAlias(alias: string): string {
   if (!aliasOk(alias)) throw usageRefusal(`${JSON.stringify(alias)} is not a host alias.`, `A name is letters, digits, dots, dashes and underscores, opens with a letter or a digit, and is at most ${ALIAS_MAX} characters.`);
   return alias;
 }
@@ -110,9 +89,11 @@ const isRecord = (v: unknown): v is HostRecord =>
   v !== null &&
   typeof (v as HostRecord).url === "string" &&
   typeof (v as HostRecord).deviceId === "string" &&
-  typeof (v as HostRecord).deviceToken === "string";
+  typeof (v as HostRecord).deviceToken === "string" &&
+  (v as HostRecord).via?.kind === "account" &&
+  typeof (v as HostRecord).via.hostId === "string";
 
-export function hostFile(home: string, alias: string): string {
+function hostFile(home: string, alias: string): string {
   return join(hostsDir(home), `${checkedAlias(alias)}.json`);
 }
 
@@ -136,54 +117,27 @@ export function writeHost(home: string, alias: string, record: HostRecord): void
 export function listHosts(home: string): HostEntry[] {
   const dir = hostsDir(home);
   if (!existsSync(dir)) return [];
-  const marked = defaultHost(home);
   return readdirSync(dir)
     .filter(name => name.endsWith(".json"))
     .map(name => ({ alias: name.slice(0, -".json".length), record: readHost(home, name.slice(0, -".json".length)) }))
     .filter((h): h is { alias: string; record: HostRecord } => h.record !== undefined)
     .sort((a, b) => a.alias.localeCompare(b.alias))
-    .map(h => ({
-      alias: h.alias,
-      url: h.record.url,
-      deviceId: h.record.deviceId,
-      default: h.alias === marked,
-      ...(h.record.label !== undefined ? { label: h.record.label } : {}),
-      ...(h.record.road !== undefined ? { road: h.record.road } : {}),
-    }));
+    .map(h => ({ alias: h.alias, url: h.record.url, deviceId: h.record.deviceId }));
 }
 
-/** Takes the record away, and the default with it when it named this one. True when there was one to take. */
+/** Takes the record away. True when there was one to take. */
 export function removeHost(home: string, alias: string): boolean {
   if (readHost(home, alias) === undefined) return false;
-  // Read which alias is marked before the record goes: the mark is only a mark while the record it names is there,
-  // so asking afterwards would leave the file behind pointing at a host this computer no longer holds.
-  const marked = defaultHost(home);
   rmSync(hostFile(home, alias), { force: true });
-  if (marked === alias) rmSync(defaultFile(home), { force: true });
   return true;
-}
-
-/** The alias every line takes when none names one, or nothing when the file is gone or names a host that is. */
-export function defaultHost(home: string): string | undefined {
-  let named: string;
-  try {
-    named = readFileSync(defaultFile(home), "utf8").trim();
-  } catch {
-    return undefined;
-  }
-  return named !== "" && readHost(home, named) !== undefined ? named : undefined;
-}
-
-export function setDefaultHost(home: string, alias: string): void {
-  writeOwn(home, relative(home, defaultFile(home)), `${checkedAlias(alias)}\n`);
 }
 
 // The rule now lives beside WS_PATH in the protocol, which a place's own agent reads too; the name stays here for
 // every caller that already had it from this module.
 export { wsUrlOf } from "@wsp/protocol";
 
-/** Which host a line runs against: the host on this computer, an alias this computer paired with, or an address
- * typed on the line, which carries no token and is only a road for wsp host connect. */
+/** Which host a line runs against: the host on this computer, an alias for a host on the account, or an address with
+ * the token a turn's launch carried for it. */
 export type HostAim = { kind: "here" } | { kind: "alias"; alias: string; record: HostRecord } | { kind: "url"; url: string; token?: string; hostKey?: string };
 
 /** An aim at a host on another computer: what a reading that takes the name a line gave hands back, since only the
@@ -198,27 +152,23 @@ export interface HostPick {
   home?: string;
 }
 
-/** What the person reads when a line names a host this computer never paired with. */
+/** What the person reads when a line names a host this computer holds no record for. */
 export function noSuchHostLine(alias: string, home: string): string {
   const known = listHosts(home).map(h => h.alias);
   const has = known.length === 0 ? "this computer holds none" : `this computer holds ${known.join(", ")}`;
-  return `no host named ${alias} is connected; ${has}, and wsp login puts the hosts on your account here while wsp host connect <url> --code <code> adds one outside it.`;
+  return `no host named ${alias} is connected; ${has}, and wsp login puts the hosts on your account here.`;
 }
 
-/** Where a person reads which hosts this computer can reach: the one listing, whichever road holds each. Written
- * once, since every refusal that names a host nobody holds points at it. */
+/** Where a person reads which hosts this computer can reach: the one listing. Written once, since every refusal
+ * that names a host nobody holds points at it. */
 export const READ_THE_HOSTS = runForTheList("wsp hosts");
 
-/** Which road this computer holds a host by, the one reading of it: the account both computers are signed in to,
- * or a code somebody carried. A record written before accounts names none and is read as a code. */
-export const hostRoadWord = (record: Pick<HostRecord, "via">): "account" | "code" => (record.via?.kind === "account" ? "account" : "code");
-
-/** Every record under the hosts folder that came off an account listing, with the alias it is under: what wsp
- * hosts rewrites, what a sign-out drops, and what the rule below falls to. */
+/** Every record under the hosts folder, with the alias it is under: what wsp hosts rewrites, what a sign-out drops,
+ * and what the rule below falls to. */
 export function accountRecords(home: string): { alias: string; record: HostRecord }[] {
   return listHosts(home).flatMap(entry => {
     const record = readHost(home, entry.alias);
-    return record !== undefined && hostRoadWord(record) === "account" ? [{ alias: entry.alias, record }] : [];
+    return record === undefined ? [] : [{ alias: entry.alias, record }];
   });
 }
 
@@ -228,7 +178,7 @@ export function accountRecords(home: string): { alias: string; record: HostRecor
  * and offline. */
 export function accountHosts(statePath: string, home: string): { alias: string; record: HostRecord }[] {
   const ownId = readRelayRecord(statePath)?.hostId;
-  return accountRecords(home).filter(held => held.record.via?.hostId !== ownId);
+  return accountRecords(home).filter(held => held.record.via.hostId !== ownId);
 }
 
 /** Which account host a line falls to when nothing else named one: the single one this computer can reach, the
@@ -243,29 +193,28 @@ export function accountAim(statePath: string, home: string): AccountAim {
   return held.length === 0 ? { kind: "none" } : { kind: "several", aliases: held.map(h => h.alias) };
 }
 
-/** What the person reads when this computer can reach several hosts on the account and has marked none: which one
- * every line takes is theirs to say, and naming them once is the whole of it. */
+/** What the person reads when this computer can reach several hosts on the account: which one a line takes is
+ * theirs to say, and naming them once is the whole of it. */
 export const severalAccountHostsLine = (aliases: readonly string[]): string =>
   `this computer can reach ${aliases.length} hosts on your account (${aliases.join(", ")}) and none of them is the one every line takes.`;
 
-/** The alias a line with nothing named on it takes: the one marked as the default, else the single account host
- * that is not this computer. Nothing where the rule names none, which is a line that stays on this computer. */
+/** The alias a line with nothing named on it takes: the single account host that is not this computer. Nothing where
+ * the rule names none, which is a line that stays on this computer. */
 export function aimedAlias(statePath: string, home: string): string | undefined {
-  const marked = defaultHost(home);
-  if (marked !== undefined) return marked;
   const account = accountAim(statePath, home);
   return account.kind === "one" ? account.alias : undefined;
 }
 
-/** What the person reads when a line names an address where an alias goes. An address carries no token, and only a
- * redeem or an account's admission can make one, so every other verb wants the name it holds the host under. */
+/** What the person reads when a line names an address where an alias goes. An address carries no token, and only an
+ * account's admission can make one, so a verb wants the name it holds the host under. */
 export function addressNotPairedLine(url: string): string {
-  return `--host takes the name of a host this computer is paired with; ${url} is an address, so run wsp host connect ${url} --code <code> with a code from wsp host pair on it first.`;
+  return `--host takes the name of a host on your account; ${url} is an address, and wsp hosts lists the names.`;
 }
 
-/** What the person reads when a host answered the socket and refused the token this computer holds. */
-export function deviceRefusedLine(alias: string, url: string): string {
-  return `the host ${alias} refused this computer's token, which it has taken away; run wsp host pair on ${url} and wsp host connect ${url} --code <code> --name ${alias} to pair again.`;
+/** What the person reads when a host answered the socket, refused the token this computer holds, and this computer
+ * had no key of its own to prove in its place. */
+export function deviceRefusedLine(alias: string): string {
+  return `the host ${alias} refused this computer's token, which it has taken away; run wsp logout, wsp login and wsp hosts to sign this computer in again.`;
 }
 
 /** What the person reads when a host did not answer at all. Private on purpose: the stamped refusal below is the
@@ -310,7 +259,7 @@ export const HOST_SIDE_ACCESS = "Handing out access is the one thing a paired co
 
 /** What the person reads when a line that runs at the host's own terminal is aimed at one on another computer: the
  * thing it does happens over there and nowhere else, so there is no road from here to there. Every way a line is
- * aimed reads the same, whether a --host flag, WSP_HOST or the default alias wsp host default marks did the aiming. */
+ * aimed reads the same, whether a --host flag, WSP_HOST or the account's one host did the aiming. */
 export function hostSideOnlyLine(word: string, where: string): string {
   return `wsp ${word} runs on the computer the host runs on, and this line is aimed at ${where}.`;
 }
@@ -336,7 +285,7 @@ export function namedHost(pick: HostPick = {}): AimElsewhere | undefined {
 }
 
 /** The one reading of which host a line runs against: the name it was given, then the pair a turn's launch left
- * in the environment, then the host on this computer serving the state file, then the default alias. The command
+ * in the environment, then the host on this computer serving the state file, then the account's one host. The command
  * line and the tool server both come here, so a verb and a tool started the same way go to the same host. */
 export function aimedHost(statePath: string, pick: HostPick = {}): HostAim {
   const env = pick.env ?? process.env;
@@ -349,20 +298,18 @@ export function aimedHost(statePath: string, pick: HostPick = {}): HostAim {
   const carried = hostFromEnv(env);
   if (carried !== undefined) return keyed({ kind: "url", url: carried.url, token: carried.token, ...(carried.hostKey === undefined ? {} : { hostKey: carried.hostKey }) }, LAUNCHED_WITH);
   if (servingHost(statePath) !== undefined) return { kind: "here" };
-  const fallback = defaultHost(home);
-  if (fallback !== undefined) return aimAt(fallback, home, env);
   // Nothing serves here and this computer is signed in: the one host on the account it can reach is where the line
-  // goes, which is what signing in was for, and no host is started here. Several of them and none marked is the
-  // person's to settle; none at all, or no sign-in, and a host starts here exactly as it did before.
+  // goes, which is what signing in was for, and no host is started here. Several of them is the person's to settle;
+  // none at all, or no sign-in, and a host starts here exactly as it did before.
   const account = accountAim(statePath, home);
   if (account.kind === "one") return keyed({ kind: "alias", alias: account.alias, record: account.record }, account.alias);
-  if (account.kind === "several") throw usageRefusal(severalAccountHostsLine(account.aliases), `Run wsp host default <name> to mark one, or name one on the line with --host <name>.\n\n${READ_THE_HOSTS}`);
+  if (account.kind === "several") throw usageRefusal(severalAccountHostsLine(account.aliases), `Name one on the line with --host <name>.\n\n${READ_THE_HOSTS}`);
   return { kind: "here" };
 }
 
 function aimAt(named: string, home: string, env: Readonly<Record<string, string | undefined>>): AimElsewhere {
-  // An address with a token beside it in this environment is a host this line may drive; one without is only the
-  // road wsp host connect takes, since nothing else on this computer holds a token for it.
+  // An address with a token beside it in this environment is a host this line may drive; one without is refused at
+  // the dial, since nothing on this computer holds a token for it.
   if (isUrl(named)) {
     const carried = hostFromEnv(env);
     const here = carried?.url === named ? carried : undefined;
@@ -376,7 +323,7 @@ function aimAt(named: string, home: string, env: Readonly<Record<string, string 
 /** The one rule for an aim that carries a token: this computer holds the fingerprint of the key that host proves
  * before it sends the token anywhere, so a relay that named the address, or anyone else on the road, is answered
  * by the host itself or by nobody. Every road an aim comes by is read here, the record a person named and the
- * launch a turn started with alike, and `where` names which so the person knows what to pair again. An address on
+ * launch a turn started with alike, and `where` names which so the person knows which one to look at. An address on
  * this computer's own loopback is what a line aimed at the host here is, and dials as one: there is no road
  * between two ports of one computer for anybody to stand on. */
 function keyed(aim: AimElsewhere, where: string): AimElsewhere {

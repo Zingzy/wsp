@@ -3,11 +3,11 @@
 // runs this same wsp against this state file, placed by the catalog entry's
 // own config module under the person's home, the skill beside it, and wsp's
 // own section in the instructions the folder the command ran in keeps.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CATALOG_AGENTS, parseJsonc } from "@wsp/catalog";
-import { mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
+import { configHardLinkRefusal, mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, JSON_COMMANDS, PROSE_COMMANDS, agentPage, cli, type CliIO } from "../src/cli.js";
 import { SECTION_BEGIN, sectionText } from "../src/agents-md.js";
@@ -158,6 +158,28 @@ describe("installing the MCP server for a local agent", () => {
     });
   });
 
+  it("writes the config by the one config write: its mode kept, a hard-linked file refused and left as it was, and a killed write's temp file swept", () => {
+    const spec = mcpServerSpec(statePath, PROC);
+    const file = join(home, ".claude.json");
+    writeFileSync(file, '{\n  // mine\n  "numStartups": 3\n}\n');
+    chmodSync(file, 0o640);
+    const stale = join(home, ".wsp-config-tmp.dead01");
+    writeFileSync(stale, "half a file");
+    const aged = new Date(Date.now() - 11 * 60_000);
+    utimesSync(stale, aged, aged);
+    installMcp("claude", spec, home);
+    expect(readFileSync(file, "utf8")).toContain("// mine\n");
+    expect(statSync(file).mode & 0o777).toBe(0o640);
+    expect(existsSync(stale)).toBe(false);
+
+    const codex = join(home, ".codex", "config.toml");
+    mkdirSync(dirname(codex));
+    writeFileSync(codex, 'model = "x" # mine\n');
+    linkSync(codex, join(home, "twin.toml"));
+    expect(() => installMcp("codex", spec, home)).toThrow(configHardLinkRefusal("~/.codex/config.toml"));
+    expect(readFileSync(codex, "utf8")).toBe('model = "x" # mine\n');
+  });
+
   it("the skill lands in the agent's skills folder under the home, the repo's file as it is, and a second install replaces an older copy", () => {
     const spec = mcpServerSpec(statePath, PROC);
     installMcp("claude", spec, home);
@@ -228,9 +250,6 @@ describe("installing the MCP server for a local agent", () => {
       "status",
       "host pair",
       "host devices",
-      "host connect",
-      "host default",
-      "host forget",
       "host link",
       "host unlink",
       "login",

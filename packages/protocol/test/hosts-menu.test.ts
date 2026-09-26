@@ -1,54 +1,39 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The Hosts menu as both halves of the desktop draw it from one list: the
-// app's own computer first, every saved host with the current one marked, the
-// connect row, and the disconnect row for the host the window is on.
+// app's own computer first, then every host on the account with the current
+// one marked.
 import { describe, expect, it } from "vitest";
-import { HOST_WORDS, absentComputer, awayMsOf, hereWord, hostMenuAction, hostsMenuItems, placeForksNowhereLine, placeSpendLine, placeWorkspacesCell, placeWorkspacesParts, placesSpendFoot, shellVersionNotice, type HostsView, type PlaceView } from "../src/index.js";
+import { absentComputer, awayMsOf, hereWord, hostMenuAction, hostsMenuItems, placeForksNowhereLine, placeSpendLine, placeWorkspacesCell, placeWorkspacesParts, placesSpendFoot, shellVersionNotice, type HostsView, type PlaceView } from "../src/index.js";
 
 const VIEW: HostsView = {
   here: "This Mac",
   current: "box",
   hosts: [
-    { alias: "attic", label: "attic.example", url: "https://attic.example", road: "direct" },
-    { alias: "box", label: "maya@box", url: "http://127.0.0.1:52001", road: "ssh" },
+    { alias: "attic", url: "https://hattic.boxes.example" },
+    { alias: "box", url: "https://hbox1.boxes.example" },
   ],
 };
 
 describe("hostsMenuItems", () => {
-  it("puts this computer first, marks the current host alone, and offers connect and a disconnect of the current one", () => {
+  it("puts this computer first and marks the current host alone, in one group", () => {
     const rows = hostsMenuItems(VIEW);
     expect(rows.map(r => [r.label, r.checked ?? null, r.enabled])).toEqual([
       ["This Mac", false, true],
-      ["attic.example", false, true],
-      ["maya@box", true, true],
-      [HOST_WORDS.connectMenu, null, true],
-      ["Disconnect maya@box", null, true],
+      ["attic", false, true],
+      ["box", true, true],
     ]);
-    // Three groups: the hosts, the connect row and the disconnect row part with separators.
-    expect(new Set(rows.map(r => r.group)).size).toBe(3);
-    expect(rows.at(-1)?.destructive).toBe(true);
+    expect(new Set(rows.map(r => r.group)).size).toBe(1);
+    const home = hostsMenuItems({ ...VIEW, current: null });
+    expect(home[0]).toMatchObject({ checked: true });
+    expect(home.filter(r => r.checked === true)).toHaveLength(1);
   });
 
-  it("on this computer the disconnect row stands dimmed with why, and this computer is the one marked", () => {
-    const rows = hostsMenuItems({ ...VIEW, current: null });
-    expect(rows[0]).toMatchObject({ checked: true });
-    expect(rows.filter(r => r.checked === true)).toHaveLength(1);
-    const forget = rows.at(-1)!;
-    expect(forget.enabled).toBe(false);
-    expect(forget.refusal).toBe(HOST_WORDS.hereStays("This Mac"));
-  });
-
-  it("names each row's action back from its id, and nothing for an id it never minted", () => {
+  it("names the host each row moves to back from its id, and nothing for an id it never minted", () => {
     const rows = hostsMenuItems(VIEW);
-    expect(rows.map(r => hostMenuAction(r.id))).toEqual([
-      { kind: "switch", alias: null },
-      { kind: "switch", alias: "attic" },
-      { kind: "switch", alias: "box" },
-      { kind: "connect" },
-      { kind: "disconnect", alias: "box" },
-    ]);
+    expect(rows.map(r => hostMenuAction(r.id))).toEqual([{ alias: null }, { alias: "attic" }, { alias: "box" }]);
     expect(hostMenuAction("open-terminal")).toBeUndefined();
-    expect(hostMenuAction("disconnect:")).toBeUndefined();
+    expect(hostMenuAction("disconnect:box")).toBeUndefined();
+    expect(hostMenuAction("connect")).toBeUndefined();
   });
 });
 

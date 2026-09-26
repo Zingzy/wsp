@@ -8,12 +8,10 @@
 // agent wrote between the read and the write is left as the agent left it. The
 // values a person typed go into that file and are never said anywhere else.
 import { posix } from "node:path";
-import { MCP_AGENTS, agentName, catalogEntry, type McpAgent, type McpTransport } from "@wsp/catalog";
+import { CONFIG_LINK_EXIT, MCP_AGENTS, agentName, catalogEntry, configRefusal, configWriteLine, insideBase, type McpAgent, type McpTransport } from "@wsp/catalog";
 import { expand, nodeHost, tilde, type Host } from "@wsp/collect";
-import type { ExecResult } from "@wsp/engine";
+import { configLanded } from "@wsp/engine";
 import {
-  configChangedRefusal,
-  configLinkRefusal,
   hasControlChar,
   noServerSwitchRefusal,
   noServersConfigRefusal,
@@ -28,11 +26,6 @@ import {
 } from "@wsp/protocol";
 import { projectOf, type AgentsOn, type ServersActs } from "@wsp/runtime";
 import { firstLine, roadOf, type Road } from "./target-road.js";
-
-/** The exit a line takes, with the file and where it points on stdout, when the file is a link out of its folder. */
-const LINK_EXIT = 4;
-/** The exit a write takes when the file is not what was read. */
-const CHANGED_EXIT = 5;
 
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
 
@@ -108,9 +101,6 @@ function configOf(road: Road, on: AgentsOn, agentId: string, scope: McpScope): C
   return { agent, files, base: project };
 }
 
-/** A shell check that the real path `$r` stands inside the base's real path `$b`, else says the path and exits. */
-const inside = (said: string): string => `case $r/ in "$b"/*) ;; *) printf '%s\\t%s\\n' ${said} "$r"; exit ${LINK_EXIT};; esac`;
-
 /** The config as it stands: the file it is, its text and the checksum a write compares, or no file yet. */
 interface Read {
   file: string;
@@ -124,8 +114,8 @@ async function readConfig(road: Road, config: Config): Promise<Read> {
     `b=$(realpath ${q(config.base)}) || exit 1`,
     `for f in ${config.files.map(q).join(" ")}; do`,
     '  if [ -e "$f" ] || [ -L "$f" ]; then',
-    `    r=$(realpath "$f" 2>/dev/null) || { printf '%s\\t%s\\n' "$f" "$(readlink "$f")"; exit ${LINK_EXIT}; }`,
-    `    ${inside('"$f"')}`,
+    `    r=$(realpath "$f" 2>/dev/null) || { printf '%s\\000%s\\000' "$f" "$(readlink "$f")"; exit ${CONFIG_LINK_EXIT}; }`,
+    `    ${insideBase('"$f"')}`,
     '    [ -f "$r" ] || exit 1',
     `    printf 'at\\t%s\\t%s\\t%s\\n' "$f" "$(wc -c < "$r" | tr -d ' ')" "$(cksum < "$r")"`,
     '    cat "$r"',
@@ -135,7 +125,7 @@ async function readConfig(road: Road, config: Config): Promise<Read> {
     "echo none",
   ].join("\n");
   const res = await road.run(line);
-  linkRefused(res, road.host);
+  if (res.exitCode === CONFIG_LINK_EXIT) throw usage(configRefusal(res, config.files[0]!, p => tilde(road.host.home, p))!);
   const cut = res.stdout.indexOf("\n");
   const head = cut < 0 ? res.stdout : res.stdout.slice(0, cut);
   if (res.exitCode !== 0) throw new Error(`${tilde(road.host.home, config.files[0]!)} could not be read: ${firstLine(res)}`);
@@ -146,50 +136,11 @@ async function readConfig(road: Road, config: Config): Promise<Read> {
   return { file, text, sum };
 }
 
-function linkRefused(res: ExecResult, host: Host): void {
-  if (res.exitCode !== LINK_EXIT) return;
-  const [file = "", to = ""] = res.stdout.trim().split("\n")[0]!.split("\t");
-  throw usage(configLinkRefusal(tilde(host.home, file), tilde(host.home, to)));
-}
-
-/** Writes the text over what was read, as the login: staged in a file beside the real one, carrying its mode, then
- * renamed over it, so the file is either what was read or the whole new text and a link inside the base stays a
- * link; a new file is made 0600 with its folder the same way. Nothing is written when the file is no longer what was
- * read, or when its folder reaches out of the base through a link. */
+/** Writes the text over what was read, as the login, by the one config write. */
 async function writeConfig(road: Road, config: Config, read: Read, text: string): Promise<void> {
-  const q = shellQuote;
   const bytes = new TextEncoder().encode(text);
-  const there = '{ [ -e "$r" ] || [ -L "$r" ]; }';
-  const line = [
-    "umask 077",
-    `b=$(realpath ${q(config.base)}) || exit 1`,
-    `f=${q(read.file)}`,
-    'if [ -e "$f" ] || [ -L "$f" ]; then',
-    `  ${read.sum === undefined ? `exit ${CHANGED_EXIT}` : ":"}`,
-    `  r=$(realpath "$f" 2>/dev/null) || exit ${LINK_EXIT}`,
-    `  ${inside('"$f"')}`,
-    "else",
-    `  ${read.sum === undefined ? ":" : `exit ${CHANGED_EXIT}`}`,
-    '  d=${f%/*}; a=$d',
-    '  while [ -n "$a" ] && [ ! -e "$a" ]; do a=${a%/*}; done',
-    '  r=$(realpath "${a:-/}") || exit 1',
-    `  ${inside('"$a"')}`,
-    '  mkdir -p "$d" || exit 1',
-    '  r=$f',
-    "fi",
-    'n=$(mktemp "${r%/*}/.wsp-XXXXXX") || exit 1',
-    "trap 'rm -f -- \"$n\"' EXIT",
-    `if ${there}; then cp -p "$r" "$n" || exit 1; fi`,
-    'cat > "$n" || exit 1',
-    `[ "$(wc -c < "$n" | tr -d ' ')" = ${bytes.length} ] || exit 1`,
-    read.sum === undefined ? `${there} && exit ${CHANGED_EXIT}` : `[ "$(cksum < "$r")" = ${q(read.sum)} ] || exit ${CHANGED_EXIT}`,
-    'mv -f "$n" "$r" || exit 1',
-  ].join("\n");
-  const res = await road.run(line, bytes);
-  const shown = tilde(road.host.home, read.file);
-  linkRefused(res, road.host);
-  if (res.exitCode === CHANGED_EXIT) throw usage(configChangedRefusal(shown));
-  if (res.exitCode !== 0) throw new Error(`${shown} stands as it was: the write did not finish (${firstLine(res)}).`);
+  const res = await road.run(configWriteLine({ file: read.file, base: config.base, bytes: bytes.length, ...(read.sum !== undefined ? { sum: read.sum } : {}) }), bytes);
+  configLanded(res, read.file, p => tilde(road.host.home, p));
 }
 
 /** The format's own words for text it could not take, named by the file. */

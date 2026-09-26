@@ -1028,7 +1028,7 @@ export interface PlaceOpts extends HostPick {
 }
 
 /** Where a line that works on this computer's own host dials and what brings one up if none does: the aim is this
- * computer, never a word in the environment or a default alias, the starter is the line's own, and the one line a
+ * computer, never a word in the environment or the account's one host, the starter is the line's own, and the one line a
  * start prints goes where everything else this line says goes. Written once, so no road out of here can dial
  * somewhere else by accident or dial without offering to start the host the others start. A caller that read the
  * aim already for its own refusal hands it back rather than reading it twice. */

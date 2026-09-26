@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AgentHere, InstallReport } from "@wsp/host";
-import type { BundleOutcome, ContextMenuItem, DesktopBridge, HostConnectAsk, HostOutcome, HostsView, InitNeedsYou, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
+import type { BundleOutcome, ContextMenuItem, DesktopBridge, HostOutcome, HostsView, InitNeedsYou, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { shellArgFrom } from "./shell-args.js";
 
@@ -23,13 +23,6 @@ const bridge: DesktopBridge & OnboardingBridge = {
   hostToken: (): Promise<string | undefined> => ipcRenderer.invoke("hosts:token"),
   hosts: (): Promise<HostsView> => ipcRenderer.invoke("hosts:list"),
   switchHost: (alias: string | null): Promise<HostOutcome> => ipcRenderer.invoke("hosts:switch", alias),
-  connectHost: (ask: HostConnectAsk): Promise<HostOutcome> => ipcRenderer.invoke("hosts:connect", ask),
-  disconnectHost: (alias: string): Promise<HostOutcome> => ipcRenderer.invoke("hosts:disconnect", alias),
-  onConnectHostOpen: (handler: () => void): (() => void) => {
-    const listen = (): void => handler();
-    ipcRenderer.on("hosts:connect-open", listen);
-    return () => ipcRenderer.off("hosts:connect-open", listen);
-  },
   getBundle: (ask: { version: string }): Promise<BundleOutcome> => ipcRenderer.invoke("bundle:get", ask),
   quitAndOpen: (): Promise<BundleOutcome> => ipcRenderer.invoke("bundle:open"),
   localFonts: (family: string): Promise<LocalFontFace[]> => ipcRenderer.invoke("fonts:local", family),

@@ -2052,16 +2052,11 @@ export interface ContextMenuItem {
 
 // --- hosts the desktop window can move between --------------------------------
 
-/** How this computer reached a host somewhere else: by an address it pairs with, or by an ssh login it forwards. */
-export type HostRoad = "direct" | "ssh";
-
-/** One saved host as the desktop lists it: never the token. The label is what the person reads in the menu and the
- * sidebar's foot; the alias is what wsp's command line names the same record by. */
+/** One host on the account as the desktop lists it, by the alias wsp's command line names the same record by: never
+ * the token. */
 export interface HostListing {
   alias: string;
-  label: string;
   url: string;
-  road: HostRoad;
 }
 
 /** The hosts as the window shows them: the word for the app's own computer, which host the window is on (null for
@@ -2072,13 +2067,8 @@ export interface HostsView {
   hosts: HostListing[];
 }
 
-/** What the connect sheet asks the shell for: an address with the code wsp host pair printed there, or an ssh login the
- * shell starts or finds a host behind and forwards. */
-export type HostConnectAsk = { road: "direct"; url: string; code: string } | { road: "ssh"; address: string; port?: number };
-
-/** How a host move or connect ended: done, or refused in the host's own words with the field the words are about, so
- * the sheet can put them under it. */
-export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" };
+/** How a host move ended: done, or refused in the host's own words. */
+export type HostOutcome = { ok: true } | { ok: false; error: string };
 
 /** How the shell's fetch or open of a release's bundle ended: done, or refused in one line the page shows as it is. */
 export type BundleOutcome = { ok: true } | { ok: false; error: string };
@@ -2138,12 +2128,6 @@ export interface DesktopBridge {
   hosts(): Promise<HostsView>;
   /** Puts the window on a saved host, or on the app's own computer for null. */
   switchHost(alias: string | null): Promise<HostOutcome>;
-  /** Pairs with a host by one of the two roads and puts the window on it. */
-  connectHost(ask: HostConnectAsk): Promise<HostOutcome>;
-  /** Hands the host's token back and forgets the host; the window returns to the app's own computer if it was there. */
-  disconnectHost(alias: string): Promise<HostOutcome>;
-  /** The shell's own menu asked for the connect sheet. Returns the unsubscribe. */
-  onConnectHostOpen(handler: () => void): () => void;
   /** Downloads this release's bundle for this computer from the repo's release and keeps it only where its sha256
    * matches the one GitHub publishes. The version is all the page hands over; the shell builds every URL itself. */
   getBundle(ask: { version: string }): Promise<BundleOutcome>;
@@ -4549,14 +4533,14 @@ export const DEVICE_REVOKED_REFUSAL = "this host took this computer's token away
 
 /** The refusal a device.auth gets from a host that is on no account: nothing there names the keys it would trust,
  * so pairing with a code is the whole road to it. */
-export const DEVICE_ACCOUNT_UNSERVED = "this host is on no account, so it admits no computer through one; run wsp host pair on the computer it runs on for a code";
+export const DEVICE_ACCOUNT_UNSERVED = "this host is on no account, so it admits no computer through one; run wsp host link on the computer it runs on to put it on yours";
 
 /** What a computer reads when the host it dialled answered device.auth with its own request schema's refusal: a
- * host of an older wsp, whose door knows no road in but a pairing code. Told apart from a refusal of this build by
+ * host of an older wsp, whose door knows no road in for a computer on the account. Told apart from a refusal of this build by
  * the kind on the frame, which an older host's schema refusal carries none of, so a token this computer never sent
  * is never read as one that was taken away. */
 export const deviceAuthOldHostLine = (where: string): string =>
-  `the host at ${where} runs an older wsp, whose door does not know how a computer on the account comes in; run wsp host pair on it and wsp host connect ${where} --code <code> to pair with a code instead`;
+  `the host at ${where} runs an older wsp, whose door does not know how a computer on the account comes in; update wsp on that computer and run wsp up there again`;
 
 /** The refusal wsp login gives a word that carries no key: every word wsp login prints carries the fingerprint of
  * the key being admitted, so a word without one was written by hand or cut in half, and nothing is posted. */
@@ -4852,19 +4836,15 @@ export const joinKeyRefusal = (url: string): string => `the host at ${url} prove
  * spends the code. `readJoinToken` reads both roads' tokens, since they are one shape. */
 export const pairToken = joinToken;
 
-/** The refusal a connect gets for a code that named no key: every code wsp host pair prints carries one, so a code
- * without one was written by hand or cut in half on its way over. Nothing is dialled and no code is spent. */
-export const PAIR_NO_KEY_REFUSAL = "that pairing code names no key for the host, so this computer cannot tell which host it would be pairing with; run wsp host pair on that computer again and copy the whole code it prints";
+/** The refusal a dial gets when whatever answered at that address did not prove the key this computer holds that
+ * host to, whether it proved another one or signed nothing this computer could verify: it is not that host,
+ * whichever check caught it, and no token of this computer's went to it. */
+export const pairKeyRefusal = (url: string): string => `the host at ${url} did not prove the key this computer holds for it, so it is not that host; nothing was sent to it`;
 
-/** The refusal a connect gets when whatever answered at that address did not prove the key the pairing code named,
- * whether it proved another one or signed nothing this computer could verify: it is not the host that printed the
- * code, whichever check caught it, and neither the code nor a token of this computer's went to it. */
-export const pairKeyRefusal = (url: string): string => `the host at ${url} did not prove the key the pairing code named, so it is not the host that printed that code; nothing was sent to it`;
-
-/** The refusal a line gets for aiming at a host it holds no key for: a record written before this wsp pinned keys,
- * or a turn launched by a host older than this one. `where` names which, since the two are fixed differently. */
+/** The refusal a line gets for aiming at a host it holds no key for: a record somebody edited by hand, or a turn
+ * launched by a host older than this one. `where` names which. */
 export const hostNoKeyLine = (where: string): string =>
-  `${where} names a host and no key for it, so this computer cannot tell which host it would be sending its token to; pair again with the code wsp host pair prints now`;
+  `${where} names a host and no key for it, so this computer cannot tell which host it would be sending its token to; run wsp hosts to read the account's hosts again`;
 
 /** What `hostNoKeyLine` names when the aim came out of the environment a turn was launched with rather than out of
  * a record a person named. */

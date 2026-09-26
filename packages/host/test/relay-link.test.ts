@@ -11,8 +11,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CliIO } from "../src/cli.js";
 import { addressLines } from "../src/host-lock.js";
-import { connectCommand } from "../src/connect.js";
-import { aimedHost, defaultHost, dialWindowMs, hostsDir, readHost, setDefaultHost, writeHost } from "../src/hosts.js";
+import { aimedHost, dialWindowMs, hostsDir, readHost, writeHost } from "../src/hosts.js";
 import { startConnector, type Connector } from "../src/connector.js";
 import {
   BEAT_FLOOR_MS,
@@ -693,8 +692,6 @@ describe("wsp logout", () => {
     const { statePath, home, dir } = box();
     await loginCommand(io(), { statePath, home }, relay.url, deps(dir));
     await hostsCommand(io(), { statePath, home }, deps(dir));
-    // A host this computer paired with a code, which the account has nothing to say about.
-    writeHost(home, "lan", { url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "t", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
     expect(readHost(home, "box")).toBeDefined();
     const key = readDeviceKeyPair(home)!.publicKey;
 
@@ -703,7 +700,6 @@ describe("wsp logout", () => {
     expect(relay.calls.some(c => c.line === "DELETE /clients/c1" && c.token === "client-token")).toBe(true);
     expect(readRelayClient(home)).toBeUndefined();
     expect(readHost(home, "box")).toBeUndefined();
-    expect(readHost(home, "lan")).toBeDefined();
     // The key opens nothing by itself and is the one the hosts already trust, so it stays.
     expect(readDeviceKeyPair(home)!.publicKey).toBe(key);
     expect(log.join("\n")).toContain("box");
@@ -752,18 +748,15 @@ describe("wsp hosts", () => {
     return { relay, statePath, home, dir };
   }
 
-  it("prints one table of both roads and writes a record per account host that has an address, with no token in it", async () => {
+  it("prints one table and writes a record per account host that has an address, with no token in it", async () => {
     const { relay, statePath, home, dir } = await signedIn();
-    writeHost(home, "lan", { url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "t", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
-    setDefaultHost(home, "lan");
     const log: string[] = [];
     expect(await hostsCommand(io(log), { statePath, home }, deps(dir))).toBe(0);
 
-    expect(log[0]).toMatch(/^HOST\s+ADDRESS\s+VIA\s+STATE\s+DEVICE\s+CONNECTOR\s+KEY$/);
+    expect(log[0]).toMatch(/^HOST\s+ADDRESS\s+STATE\s+DEVICE\s+CONNECTOR\s+KEY$/);
     const rows = log.slice(1).map(line => line.split(/\s\s+/));
-    expect(rows.find(r => r[0] === "box")).toEqual(["box", "https://hbox1.boxes.example", "account", expect.stringMatching(/^up /), "2026.8.1", HOST_KEY]);
+    expect(rows.find(r => r[0] === "box")).toEqual(["box", "https://hbox1.boxes.example", expect.stringMatching(/^up /), "2026.8.1", HOST_KEY, "default"]);
     expect(rows.find(r => r[0] === "attic")![1]).toBe(NOT_UP_YET);
-    expect(rows.find(r => r[0] === "lan")).toEqual(["lan", "http://192.168.1.9:4400", "code", "d_9", "SHA256:lan", "default"]);
 
     const record = readHost(home, "box")!;
     expect(record).toMatchObject({ url: "https://hbox1.boxes.example", hostKey: HOST_KEY, deviceId: "", deviceToken: "", via: { kind: "account", hostId: "hbox1" } });
@@ -799,7 +792,7 @@ describe("wsp hosts", () => {
     expect(log.find(line => line.startsWith("box"))).toContain("default");
   });
 
-  it("removes a record whose host the account no longer names, and leaves a code-paired record of the same name alone", async () => {
+  it("removes a record whose host the account no longer names", async () => {
     const { relay, statePath, home, dir } = await signedIn();
     await hostsCommand(io(), { statePath, home }, deps(dir));
     expect(readHost(home, "box")).toBeDefined();
@@ -809,14 +802,6 @@ describe("wsp hosts", () => {
     await hostsCommand(io([], err), { statePath, home }, deps(dir));
     expect(readHost(home, "box")).toBeUndefined();
     expect(err.join("\n")).toContain("box is no longer a host on your account");
-
-    // A code-paired record under the name an account host folds to: the paired one stands and the line says which
-    // command frees the name.
-    writeHost(home, "attic", { url: "http://10.0.0.5:4400", deviceId: "d_5", deviceToken: "t5", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
-    const second: string[] = [];
-    await hostsCommand(io([], second), { statePath, home }, deps(dir));
-    expect(readHost(home, "attic")).toMatchObject({ deviceToken: "t5", url: "http://10.0.0.5:4400" });
-    expect(second.join("\n")).toContain("wsp host forget attic");
   });
 
   it("refuses a host the account lists under another key, keeps the key it pinned and names the line that frees it", async () => {
@@ -828,7 +813,7 @@ describe("wsp hosts", () => {
 
     expect(err.join("\n")).toContain(HOST_KEY);
     expect(err.join("\n")).toContain("SHA256:another");
-    expect(err.join("\n")).toContain("wsp host forget box");
+    expect(err.join("\n")).toContain("wsp logout, wsp login and wsp hosts");
     // The record keeps the key and the address it pinned: nothing of this computer's goes to whatever answers there.
     expect(readHost(home, "box")).toMatchObject({ hostKey: HOST_KEY, url: "https://hbox1.boxes.example" });
   });
@@ -845,13 +830,13 @@ describe("wsp hosts", () => {
     expect(readHost(home, "box")).toBeDefined();
   });
 
-  it("says a computer signed in to nothing reaches only what it paired with a code", async () => {
+  it("says a computer signed in to nothing reaches no host but itself, and asks no relay", async () => {
     const { statePath, home, dir } = box();
     const err: string[] = [];
     const log: string[] = [];
     expect(await hostsCommand(io(log, err), { statePath, home }, deps(dir))).toBe(0);
-    expect(err.join("\n")).toContain("wsp login");
-    expect(log.join("\n")).toContain(NO_HOSTS_LINE);
+    expect(err).toEqual([]);
+    expect(log).toEqual([NO_HOSTS_LINE]);
   });
 });
 

@@ -19,7 +19,6 @@ import {
   PAIR_CODE_LENGTH,
   deviceAdmissionTranscript,
   fmtDuration,
-  hostAliasHeldLine,
   hostDroppedLine,
   hostKeyMovedLine,
   hostsTable,
@@ -56,7 +55,7 @@ import {
 import type { CliIO } from "./cli.js";
 import { CLOUDFLARED, connectorRunning, ensureCloudflared, startConnector, stopRecordedConnector, type Connector } from "./connector.js";
 import { publicAddressLine, stateLine } from "./host-lock.js";
-import { accountRecords, aimedAlias, aliasFrom, hostRoadWord, listHosts, readHost, removeHost, writeHost, type HostRecord } from "./hosts.js";
+import { accountRecords, aimedAlias, aliasFrom, readHost, removeHost, writeHost, type HostRecord } from "./hosts.js";
 import { hostKeyHere } from "./places.js";
 import { servingElsewhere } from "./serving-home.js";
 import { table } from "./verbs.js";
@@ -348,24 +347,23 @@ export async function logoutCommand(io: CliIO, opts: RelayCommandOpts, id: strin
   removeRelayClient(opts.home);
   const dropped = accountRecords(opts.home).filter(held => removeHost(opts.home, held.alias));
   io.log(`signed out of ${client.relayUrl}; this computer holds no token for it${dropped.length === 0 ? "" : ` and no record for ${dropped.map(held => held.alias).join(", ")}`}`);
-  io.log("The key this computer signs with stays, since it opens nothing on its own, and the hosts you paired with a code are untouched.");
+  io.log("The key this computer signs with stays, since it opens nothing on its own.");
   return 0;
 }
 
-/** wsp hosts: every host this computer can reach, the account's and the code-paired ones, in one table with the
- * road in a column of its own. The account's rows are written into the hosts folder as they are read, so the rule
- * that decides where a line goes, the Hosts menu and every verb read them off the same files, offline and without
- * asking the relay again. */
+/** wsp hosts: every host on the account this computer can reach, in one table. The rows are written into the hosts
+ * folder as they are read, so the rule that decides where a line goes, the Hosts menu and every verb read them off
+ * the same files, offline and without asking the relay again. */
 export async function hostsCommand(io: CliIO, opts: RelayCommandOpts, deps: RelayDeps = systemRelayDeps): Promise<number> {
   const client = readRelayClient(opts.home);
-  let listed: RelayHostView[] | undefined;
-  if (client === undefined) io.error("this computer is signed in to no account, so the rows below are the hosts it paired with a code; wsp login signs it in.");
-  else {
-    listed = await relayHosts(client, deps).catch((e: unknown) => {
-      io.error(relayQuietLine(e instanceof Error ? e.message : String(e)));
-      return undefined;
-    });
+  if (client === undefined) {
+    io.log(NO_HOSTS_LINE);
+    return 0;
   }
+  const listed = await relayHosts(client, deps).catch((e: unknown) => {
+    io.error(relayQuietLine(e instanceof Error ? e.message : String(e)));
+    return undefined;
+  });
   const rows = listed === undefined ? heldRows(opts.home) : accountRows(io, opts, listed, deps);
   if (rows.length === 0) {
     io.log(NO_HOSTS_LINE);
@@ -378,29 +376,20 @@ export async function hostsCommand(io: CliIO, opts: RelayCommandOpts, deps: Rela
   return 0;
 }
 
-/** The rows this computer holds on its own, for a relay that did not answer and for a computer that signed in to
- * none: whatever the hosts folder says, which is what every verb would dial. */
+/** The rows this computer holds on its own, for a relay that did not answer: whatever the hosts folder says, which
+ * is what every verb would dial. */
 function heldRows(home: string): HostsTableRow[] {
-  return listHosts(home).map(entry => {
-    const record = readHost(home, entry.alias);
-    return {
-      host: entry.alias,
-      address: entry.url,
-      via: record === undefined ? ("code" as const) : hostRoadWord(record),
-      ...(record?.deviceId === undefined || record.deviceId === "" ? {} : { deviceId: record.deviceId }),
-      ...(record?.hostKey === undefined ? {} : { hostKey: record.hostKey }),
-    };
-  });
-}
-
-/** Every host this computer paired with a code, as its own records say: one listing, whichever road holds a host. */
-function codeRows(home: string): HostsTableRow[] {
-  return heldRows(home).filter(row => row.via === "code");
+  return accountRecords(home).map(({ alias, record }) => ({
+    host: alias,
+    address: record.url,
+    ...(record.deviceId === "" ? {} : { deviceId: record.deviceId }),
+    ...(record.hostKey === undefined ? {} : { hostKey: record.hostKey }),
+  }));
 }
 
 /** The listing folded into the hosts folder, and the rows that come out of it: one record per account host that has
  * an address, the alias folded from its name, the key pinned at first sight and held to after it, and every record
- * the account no longer names taken away. A code-paired record under the same alias is left exactly as it is. */
+ * the account no longer names taken away. */
 function accountRows(io: CliIO, opts: RelayCommandOpts, listed: readonly RelayHostView[], deps: RelayDeps): HostsTableRow[] {
   const home = opts.home;
   const now = deps.now();
@@ -411,21 +400,19 @@ function accountRows(io: CliIO, opts: RelayCommandOpts, listed: readonly RelayHo
     const held = readHost(home, alias);
     const address = host.hostname === null || host.hostname === "" ? undefined : relayUrlOf(host.hostname);
     const listedKey = host.hostKey === null || host.hostKey === undefined ? undefined : host.hostKey;
-    const code = held !== undefined && hostRoadWord(held) === "code";
-    if (code) io.error(hostAliasHeldLine(alias));
     // The key is pinned the first time this computer sees it and held to on every dial after: a listing naming
     // another key for a host already pinned is another host, or a relay steering this computer at one.
     const pinned = held?.hostKey;
     let moved = false;
-    if (!code && pinned !== undefined && listedKey !== undefined && pinned !== listedKey) {
+    if (pinned !== undefined && listedKey !== undefined && pinned !== listedKey) {
       moved = true;
       io.error(hostKeyMovedLine(alias, pinned, listedKey));
     }
     const hostKey = pinned ?? listedKey;
     // A host that has not said which key it proves cannot be dialled: no record is written for it, so a line
-    // aimed at that name is refused with the sentence that names wsp hosts rather than the code road, and the
-    // row below reads as not up yet until a beat carries the key.
-    if (!code && !moved && address !== undefined && hostKey !== undefined) {
+    // aimed at that name is refused with the sentence that names wsp hosts, and the row below reads as not up yet
+    // until a beat carries the key.
+    if (!moved && address !== undefined && hostKey !== undefined) {
       const record: HostRecord = {
         url: address,
         deviceId: held?.deviceId ?? "",
@@ -444,7 +431,6 @@ function accountRows(io: CliIO, opts: RelayCommandOpts, listed: readonly RelayHo
     rows.push({
       host: alias,
       ...(shown === undefined ? {} : { address: shown }),
-      via: "account",
       awayMs: beat === null || Number.isNaN(beat) ? null : Math.max(0, now - beat),
       ...(held?.deviceId === undefined || held.deviceId === "" ? {} : { deviceId: held.deviceId }),
       ...(host.connectorVersion === null || host.connectorVersion === undefined ? {} : { connector: host.connectorVersion }),
@@ -457,8 +443,6 @@ function accountRows(io: CliIO, opts: RelayCommandOpts, listed: readonly RelayHo
     if (kept.has(held.alias)) continue;
     if (removeHost(home, held.alias)) io.error(hostDroppedLine(held.alias));
   }
-  // The code-paired records go under the account's rows: one listing, whichever road holds a host.
-  rows.push(...codeRows(home));
   return rows;
 }
 
