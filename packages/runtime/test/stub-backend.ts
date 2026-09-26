@@ -49,6 +49,17 @@ export interface StubMachine extends Machine {
   metrics(): Promise<void>;
 }
 
+/** The gateway's copy that never held the machine, as it answered on 2026-09-26: it takes the first delete with the
+ * same yes and does nothing, so the machine runs on until a delete reaches the copy that holds it. */
+export function missesFirstDelete(m: StubMachine): void {
+  const kill = m.kill.bind(m);
+  let missed = false;
+  m.kill = async () => {
+    if (missed) return kill();
+    missed = true;
+  };
+}
+
 /** The failure a call the caller's own signal cut off raises; the runtime reads it as neither of the two typed move
  * failures, which is what makes a stopped wake end as stopped rather than as a provider that did not answer. */
 export const abortedCall = (what: string): Error => Object.assign(new Error(`${what} was aborted`), { name: "AbortError" });

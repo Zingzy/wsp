@@ -5,6 +5,7 @@ import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEA
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
 import { GONE_READS, MachineAliveError, killUntilGone } from "../src/golden.js";
+import { splitGateway } from "./split-gateway.js";
 
 interface Reply {
   status: number;
@@ -923,31 +924,6 @@ describe("SolariBackend error bodies", () => {
     expect(refused.message).toContain("500");
   });
 });
-
-/** The gateway as it answered on 2026-09-26: two copies behind one address, one holding a running sandbox and one
- * that never heard of it, each call after the create landing on whichever copy `route` names. The empty copy
- * answers a delete with the same 200 and every read with a 404; only a delete that lands on the holder ends it. */
-function splitGateway(route: (call: number, method: string) => "holder" | "empty") {
-  const holder = new Map<string, string>();
-  let call = 0;
-  const f = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-    const method = init?.method ?? "GET";
-    if (method === "POST") {
-      holder.set("sb1", "running");
-      return new Response(JSON.stringify({ sandboxId: "sb1", kind: "sandbox" }), { status: 201 });
-    }
-    const id = decodeURIComponent(new URL(String(url)).pathname.split("/")[2] ?? "");
-    const known = route(call++, method) === "holder" && holder.has(id);
-    if (method === "DELETE") {
-      if (known) holder.delete(id);
-      return new Response(JSON.stringify({ ok: true }), { status: 200 });
-    }
-    return known
-      ? new Response(JSON.stringify({ sandboxId: id, kind: "sandbox", state: holder.get(id) }), { status: 200 })
-      : new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
-  });
-  return { f, holder };
-}
 
 describe("a delete read back through a gateway whose copies disagree", () => {
   const confirm = { graceMs: 50, pollMs: 1 };
