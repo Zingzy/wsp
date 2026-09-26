@@ -326,7 +326,7 @@ const clashLine = (name: string, by: string | readonly string[]): string => {
  * need a name to hold two values, or a value of more than one line, is taken out of the text with the reason, and so is
  * one that sets a variable a catalog row keeps its key under, which `rowOf` names; a provider's key is never a server's
  * value. A name servers.env holds with another value is a second value too, unless it is this server's alone, whose new
- * value is its rotation. */
+ * value is its rotation. A copy whose definitions still carry an OAuth client secret is refused whole. */
 export async function serversByName(format: McpFormat, text: string, held: Map<string, { value: string; by: string }>, rowOf: (name: string) => string | undefined, known: Readonly<Record<string, { value: string; by: readonly string[] }>> = {}): Promise<{ text: string; dropped: { name: string; reason: string }[] }> {
   const knownValues = Object.entries(known).map(([name, at]): KnownValue => [name, at.value]);
   const found = (await format.refer(text, undefined, knownValues)).servers;
@@ -352,6 +352,7 @@ export async function serversByName(format: McpFormat, text: string, held: Map<s
   if (found.length === 0) return { text, dropped: [] };
   const final = await format.refer(out, undefined, knownValues);
   stillStands(final.entries, found);
+  if (final.entries.some(e => isObject(e) && isObject(e["oauth"]) && e["oauth"]["client_secret"] !== undefined)) throw new Error("a server still carries an OAuth client secret after it was written by name, and no agent reads one by name, so the file stays on this computer");
   const result = final.text;
   for (const [name, at] of kept) held.set(name, at);
   return { text: result, dropped: dropped.map(({ name, reason }) => ({ name, reason })) };
@@ -1436,7 +1437,8 @@ function referCodexLines(text: string, only?: string): string {
 /** The reference writer for Codex: the file read whole by a TOML parser, so a server's headers and variables read the
  * same however the file spells them (a table, a sub-table, an inline table, a dotted key, a quoted name), and the tree
  * rewritten by name. The text the line editor makes is kept where it parses to that same tree, which keeps every
- * comment; any other spelling is written out from the tree. The parser is loaded on the first call: every host
+ * comment; any other spelling is written out from the tree. An OAuth client secret refuses the file, since Codex reads
+ * `oauth.client_secret` only as written and names no variable for it. The parser is loaded on the first call: every host
  * process carries this module and the host's memory has a budget, so nothing that never writes a Codex file pays it. */
 async function referCodex(text: string, only?: string, known: readonly KnownValue[] = []): Promise<McpReferred> {
   const { parse: parseToml, stringify: stringifyToml } = await import("smol-toml");
@@ -1459,7 +1461,10 @@ async function referCodex(text: string, only?: string, known: readonly KnownValu
       const held = raw[key];
       if (held !== undefined && (!isObject(held) || Object.values(held).some(v => typeof v !== "string"))) throw unread(`mcp_servers.${name}`);
     }
+    const oauth = raw["oauth"];
+    if (oauth !== undefined && !isObject(oauth)) throw unread(`mcp_servers.${name}`);
     if (only !== undefined && name !== only) continue;
+    if (oauth?.["client_secret"] !== undefined) throw new Error(`${name} keeps an OAuth client secret in mcp_servers.${name}.oauth.client_secret, and Codex reads no variable there, so the file stays on this computer`);
     const headers = dict(raw["http_headers"]);
     const env = dict(raw["env"]);
     const values: Record<string, string> = {};
