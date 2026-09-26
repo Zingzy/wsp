@@ -405,6 +405,8 @@ async fn an_exited_pty_holds_its_scrollback_and_no_thread_or_fd_until_it_is_kill
     let (_dir, mut child, port) = plain_daemon(None).await;
     let pid = child.id().unwrap();
     let mut c = Peer::connect(port).await;
+    // The startup sweep of copies a stop cut short runs on an unnamed thread beside main, holding fds while it lasts.
+    assert!(settles(|| own_threads(pid) == 1).await, "a resting daemon runs its main thread alone: {:?}", thread_names(pid));
     let (threads, fds) = (own_threads(pid), count(pid, "fd"));
     let mut ids = Vec::new();
     for _ in 0..10 {
