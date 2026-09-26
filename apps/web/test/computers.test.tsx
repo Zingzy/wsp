@@ -233,11 +233,18 @@ describe("the Computers list", () => {
     expect(stateOf("p_old")).toBe(placeDaemonBehind(behind));
   });
 
-  it("draws Add a computer on the page under the list, with no button to open it and no cloud to connect, and a row opens the computer's page", async () => {
-    useStore.setState({ places: [here, box] });
+  it("draws Add a computer and Add a cloud side by side under the one list, each opening the panel on its road, and a row opens the computer's page", async () => {
+    useStore.setState({ places: [here, box, solari] });
     await mountComputers(computersApi().api);
-    expect(screen.queryByRole("button", { name: PLACES_WORDS.addComputer })).toBeNull();
+    expect([...document.querySelectorAll("[data-settings-card='computers'] [data-place-row]")].map(r => r.getAttribute("data-place-row"))).toEqual(["here", "p_2", "solari"]);
+    expect([...document.querySelectorAll("[data-settings-card='computers'] [data-add-button]")].map(b => b.textContent)).toEqual([ADD_COMPUTER_WORDS.title, ADD_COMPUTER_WORDS.addCloud]);
+    expect(document.querySelector("[data-k='add-computer']")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.addCloud }));
+    expect(document.querySelector("[data-add-road='cloud']")?.getAttribute("aria-checked")).toBe("true");
+    expect(document.querySelector("[data-k='road-cloud']")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: ADD_COMPUTER_WORDS.title }));
     expect(document.querySelector("[data-k='add-computer'] [data-add-road='ssh']")).toBeTruthy();
+    expect(document.querySelector("[data-k^='road-']")).toBeNull();
     expect(document.querySelector("[data-k='connect-provider']")).toBeNull();
     openPage("p_2");
     expect(pageAt()).toBe("computer:p_2");

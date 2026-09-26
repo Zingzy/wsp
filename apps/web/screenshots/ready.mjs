@@ -28,6 +28,11 @@ export const APP_UP = "[data-shell-center]";
  * alert. A shot that shows one is not the shot it is named for, unless waiting for it is the point of the shot. */
 export const FAILED_ON_THE_PAGE = ['[data-notice][data-kind="error"]', '[data-testid="workspace-creation"][aria-busy="false"]', "[data-refused]", '[role="alert"]'];
 
+/** The marks a read still on its way wears: a skeleton bar (`components/ui/skeleton.tsx`) where a list has not come,
+ * and a status still `checking` (`StatusView`) where a connect has not answered. A shot showing either photographed
+ * the page before it was the page its surface is named for. */
+export const STILL_LOADING = ['[data-slot="skeleton"]', '[data-k="status"][data-state="checking"]'];
+
 /** The failures a shot must not show: every one but the one its surface waits for. */
 export const failuresToCheck = shot => FAILED_ON_THE_PAGE.filter(selector => selector !== shot.wait);
 
