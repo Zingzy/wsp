@@ -9,6 +9,7 @@ import {
   DIALOG_MOBILE_SHEET_CLASS,
   DIALOG_POPUP_CLASS,
 } from "./dialog-styles";
+import { Kbd } from "./kbd";
 
 const AlertDialogCreateHandle = AlertDialogPrimitive.createHandle;
 
@@ -62,7 +63,7 @@ function AlertDialogPopup({
         <AlertDialogPrimitive.Popup
           className={cn(
             DIALOG_POPUP_CLASS,
-            "row-start-2 max-h-full max-w-lg text-popover-foreground",
+            "row-start-2 max-h-full max-w-110 text-popover-foreground",
             bottomStickOnMobile && DIALOG_MOBILE_SHEET_CLASS,
             className,
           )}
@@ -77,38 +78,30 @@ function AlertDialogPopup({
 function AlertDialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
-      className={cn("flex flex-col gap-2 p-6 text-center max-sm:pb-4 sm:text-left", className)}
+      className={cn("flex flex-col gap-1 px-5 pt-4 pb-1", className)}
       data-slot="alert-dialog-header"
       {...props}
     />
   );
 }
 
-function AlertDialogFooter({
-  className,
-  variant = "default",
-  ...props
-}: React.ComponentProps<"div"> & {
-  variant?: "default" | "bare";
-}) {
+function AlertDialogFooter({ className, children, ...props }: React.ComponentProps<"div">) {
   return (
     <div
-      className={cn(
-        "flex flex-col-reverse gap-2 px-6 sm:flex-row sm:justify-end sm:rounded-b-[calc(var(--radius-2xl)-1px)]",
-        variant === "default" && "border-t bg-muted/72 py-4",
-        variant === "bare" && "pb-6",
-        className,
-      )}
+      className={cn("flex flex-col-reverse gap-2 px-5 pt-3 pb-4 sm:flex-row sm:items-center sm:justify-end", className)}
       data-slot="alert-dialog-footer"
       {...props}
-    />
+    >
+      <Kbd className="me-auto hidden sm:inline-flex">Esc</Kbd>
+      {children}
+    </div>
   );
 }
 
 function AlertDialogTitle({ className, ...props }: AlertDialogPrimitive.Title.Props) {
   return (
     <AlertDialogPrimitive.Title
-      className={cn("font-heading font-semibold text-xl leading-none", className)}
+      className={cn("font-medium text-[15px] leading-5", className)}
       data-slot="alert-dialog-title"
       {...props}
     />
@@ -118,7 +111,7 @@ function AlertDialogTitle({ className, ...props }: AlertDialogPrimitive.Title.Pr
 function AlertDialogDescription({ className, ...props }: AlertDialogPrimitive.Description.Props) {
   return (
     <AlertDialogPrimitive.Description
-      className={cn("text-muted-foreground text-sm", className)}
+      className={cn("text-[13px] leading-5 text-muted-foreground", className)}
       data-slot="alert-dialog-description"
       {...props}
     />

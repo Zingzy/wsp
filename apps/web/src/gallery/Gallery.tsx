@@ -34,7 +34,6 @@ import {
   AutocompleteList,
   AutocompletePopup,
 } from "../components/ui/autocomplete.js";
-import { Badge } from "../components/ui/badge.js";
 import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
 import {
@@ -42,14 +41,6 @@ import {
   CollapsiblePanel,
   CollapsibleTrigger,
 } from "../components/ui/collapsible.js";
-import {
-  Combobox,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-  ComboboxPopup,
-} from "../components/ui/combobox.js";
 import {
   Command,
   CommandCollection,
@@ -76,13 +67,10 @@ import {
 import { DraftInput } from "../components/ui/draft-input.js";
 import {
   Empty,
-  EmptyContent,
   EmptyDescription,
   EmptyHeader,
-  EmptyMedia,
   EmptyTitle,
 } from "../components/ui/empty.js";
-import { Group, GroupSeparator, GroupText } from "../components/ui/group.js";
 import {
   InputGroup,
   InputGroupAddon,
@@ -120,10 +108,7 @@ import {
 import { PanelTabCloseButton } from "../components/ui/panel-tab-close-button.js";
 import {
   Popover,
-  PopoverClose,
-  PopoverDescription,
   PopoverPopup,
-  PopoverTitle,
   PopoverTrigger,
 } from "../components/ui/popover.js";
 import { QRCodeSvg } from "../components/ui/qr-code.js";
@@ -137,17 +122,6 @@ import {
   SelectValue,
 } from "../components/ui/select.js";
 import { Separator } from "../components/ui/separator.js";
-import {
-  Sheet,
-  SheetClose,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetPanel,
-  SheetPopup,
-  SheetTitle,
-  SheetTrigger,
-} from "../components/ui/sheet.js";
 import {
   Sidebar,
   SidebarContent,
@@ -174,16 +148,6 @@ import {
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Spinner } from "../components/ui/spinner.js";
 import { Switch } from "../components/ui/switch.js";
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../components/ui/table.js";
 import { Textarea } from "../components/ui/textarea.js";
 import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group.js";
 import { Toggle } from "../components/ui/toggle.js";
@@ -203,7 +167,6 @@ const commands = [
     items: ["New task", "New terminal", "Toggle sidebar", "Open browser"],
   },
 ];
-const regions = ["singapore", "frankfurt", "oregon", "tokyo"];
 const models = ["claude-opus-4-1", "claude-sonnet-4-5", "claude-haiku-4-5"];
 const noop = () => {};
 
@@ -247,55 +210,22 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
     ),
   },
   {
-    id: "badge",
-    render: () => (
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge>running</Badge>
-        <Badge variant="secondary">napping</Badge>
-        <Badge variant="outline">golden</Badge>
-        <Badge variant="success">reachable</Badge>
-        <Badge variant="warning">$0.42/h</Badge>
-        <Badge variant="error">failed</Badge>
-        <Badge variant="info">upgrading</Badge>
-        <Badge size="sm">3</Badge>
-        <Badge size="lg">12</Badge>
-      </div>
-    ),
-  },
-  {
     id: "alert",
     render: () => (
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col">
         <Alert>
           <TerminalIcon />
-          <AlertTitle>Daemon reconnected</AlertTitle>
-          <AlertDescription>
-            Subscriptions were replayed after the idle sweep.
-          </AlertDescription>
+          <AlertTitle>wsp is not running, reconnecting.</AlertTitle>
+          <AlertDescription>Start wsp in a terminal and this page picks it up.</AlertDescription>
         </Alert>
-        <Alert variant="warning">
+        <Alert>
           <GlobeIcon />
-          <AlertTitle>Preview token expires in 8 minutes</AlertTitle>
-          <AlertDescription>
-            Open ports keep working; the link will be refreshed.
-          </AlertDescription>
+          <AlertTitle>A sign-in page is ready on api</AlertTitle>
           <AlertAction>
             <Button size="xs" variant="outline">
-              Refresh
+              Open
             </Button>
           </AlertAction>
-        </Alert>
-        <Alert variant="error">
-          <AlertTitle>Host unreachable</AlertTitle>
-          <AlertDescription>
-            The runtime socket closed without a farewell frame.
-          </AlertDescription>
-        </Alert>
-        <Alert variant="success">
-          <AlertTitle>Snapshot sealed</AlertTitle>
-        </Alert>
-        <Alert variant="info">
-          <AlertTitle>A newer image is ready</AlertTitle>
         </Alert>
       </div>
     ),
@@ -392,19 +322,6 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
             ))}
           </SelectPopup>
         </Select>
-        <Combobox items={regions} defaultValue="singapore">
-          <ComboboxInput placeholder="Region" aria-label="Region" />
-          <ComboboxPopup>
-            <ComboboxEmpty>No region</ComboboxEmpty>
-            <ComboboxList>
-              {(item: string) => (
-                <ComboboxItem key={item} value={item}>
-                  {item}
-                </ComboboxItem>
-              )}
-            </ComboboxList>
-          </ComboboxPopup>
-        </Combobox>
         <Autocomplete items={models}>
           <AutocompleteInput placeholder="Search models" aria-label="Model" />
           <AutocompletePopup>
@@ -504,37 +421,12 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
             </AlertDialogFooter>
           </AlertDialogPopup>
         </AlertDialog>
-        <Sheet>
-          <SheetTrigger render={<Button variant="outline" size="sm" />}>
-            Sheet
-          </SheetTrigger>
-          <SheetPopup side="right">
-            <SheetHeader>
-              <SheetTitle>Task</SheetTitle>
-              <SheetDescription>state, projects, live</SheetDescription>
-            </SheetHeader>
-            <SheetPanel>
-              <p className="text-sm">Panel body.</p>
-            </SheetPanel>
-            <SheetFooter>
-              <SheetClose render={<Button variant="outline" />}>
-                Close
-              </SheetClose>
-            </SheetFooter>
-          </SheetPopup>
-        </Sheet>
         <Popover>
           <PopoverTrigger render={<Button variant="outline" size="sm" />}>
             Popover
           </PopoverTrigger>
           <PopoverPopup>
-            <PopoverTitle>Usage</PopoverTitle>
-            <PopoverDescription>
-              2h 14m awake, $0.91 accrued.
-            </PopoverDescription>
-            <PopoverClose render={<Button size="xs" variant="ghost" />}>
-              Done
-            </PopoverClose>
+            <p className="text-sm">2h 14m awake, $0.91 accrued.</p>
           </PopoverPopup>
         </Popover>
         <Menu>
@@ -574,20 +466,9 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
     ),
   },
   {
-    id: "group",
+    id: "disclosure",
     render: () => (
       <div className="flex flex-col gap-3">
-        <Group>
-          <Button variant="outline" size="sm">
-            Fork
-          </Button>
-          <GroupSeparator />
-          <Button variant="outline" size="sm">
-            Pause
-          </Button>
-          <GroupSeparator />
-          <GroupText>3 running</GroupText>
-        </Group>
         <Collapsible defaultOpen>
           <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>
             <ChevronRightIcon /> versions
@@ -612,39 +493,6 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
     ),
   },
   {
-    id: "table",
-    render: () => (
-      <Table>
-        <TableCaption>Tasks on this host</TableCaption>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Phase</TableHead>
-            <TableHead className="text-right">Accrued</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          <TableRow>
-            <TableCell>api</TableCell>
-            <TableCell>running</TableCell>
-            <TableCell className="text-right">$0.91</TableCell>
-          </TableRow>
-          <TableRow>
-            <TableCell>web</TableCell>
-            <TableCell>napping</TableCell>
-            <TableCell className="text-right">$0.12</TableCell>
-          </TableRow>
-        </TableBody>
-        <TableFooter>
-          <TableRow>
-            <TableCell colSpan={2}>Total</TableCell>
-            <TableCell className="text-right">$1.03</TableCell>
-          </TableRow>
-        </TableFooter>
-      </Table>
-    ),
-  },
-  {
     id: "scroll-area",
     render: () => (
       <ScrollArea className="h-32 rounded-md border" scrollFade>
@@ -663,19 +511,9 @@ export const GALLERY_SECTIONS: ReadonlyArray<{
     render: () => (
       <Empty>
         <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <FolderIcon />
-          </EmptyMedia>
-          <EmptyTitle>No tasks</EmptyTitle>
-          <EmptyDescription>
-            Add a computer or connect a provider, then create one.
-          </EmptyDescription>
+          <EmptyTitle>No threads yet.</EmptyTitle>
+          <EmptyDescription>Start one from the composer.</EmptyDescription>
         </EmptyHeader>
-        <EmptyContent>
-          <Button size="sm">
-            <PlusIcon /> New task
-          </Button>
-        </EmptyContent>
       </Empty>
     ),
   },

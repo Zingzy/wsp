@@ -62,7 +62,7 @@ const NO_KEYS: ReadonlySet<string> = new Set();
 /** The git mark beside the crumbs: one box whether it names a branch or a word from the repo-state table. */
 const REPO_MARK_CLASS = "inline-flex h-6 shrink-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground";
 /** A sentence that fills an empty pane body, whatever it says: one muted mono line, centred. */
-const PANE_LINE_CLASS = "flex flex-1 items-center justify-center px-5 text-center font-mono text-[11px] text-muted-foreground";
+const PANE_LINE_CLASS = "flex flex-1 items-center justify-center px-5 text-center text-[13px] text-muted-foreground";
 
 function lastReply(state: LoadState): GitDiffReply | null {
   return state.kind === "ready" ? state.reply : state.last;
@@ -262,17 +262,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
               <FolderGitIcon className="size-3.5 shrink-0 opacity-70" />
               <span className="max-w-40 truncate">{shown.branch}</span>
             </span>
-          ) : REPO_STATE_WORDS[shown.kind].word === "" ? null : (
-            <span className={cn(REPO_MARK_CLASS, "hidden sm:inline-flex")} data-diff-repo-state={shown.kind}>
-              <FolderGitIcon className="size-3.5 shrink-0 opacity-40" />
-              <Tooltip>
-                <TooltipTrigger render={<span className="max-w-40 truncate" tabIndex={0} />}>{REPO_STATE_WORDS[shown.kind].word}</TooltipTrigger>
-                <TooltipPopup side="top" className="max-w-72">
-                  {REPO_STATE_WORDS[shown.kind].note}
-                </TooltipPopup>
-              </Tooltip>
-            </span>
-          )}
+          ) : null}
           <Tooltip>
             {/* The pin is about the folder in the crumbs beside it, and goes with them at the narrow width. */}
             <TooltipTrigger

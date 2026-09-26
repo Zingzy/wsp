@@ -58,7 +58,7 @@ export function CopyRow({ label, value, k, children }: { label?: string; value: 
     );
   };
   return (
-    <div data-copy-row={k} className="flex h-10 w-full items-center gap-3 rounded-md border border-border bg-card px-3">
+    <div data-copy-row={k} className="flex h-10 w-full items-center gap-3 rounded-md border border-border bg-(--input-fill) px-3">
       {label === undefined ? null : (
         <span className={cn(LABEL_WIDTH, MICRO_LABEL, "shrink-0 text-muted-foreground")}>{label}</span>
       )}
@@ -108,21 +108,19 @@ export function RoadLines({ lines, k = "lines" }: { lines: readonly RoadLine[]; 
   );
 }
 
-/** The slot under a field a refusal lands in: two lines at 12 px mono, standing at that height whether or not it
- * holds one. What happened is in the destructive ink; what to do about it follows in the foreground's. The same
- * slot carries, in the muted ink, why the keycap under it is held, so that reason is read before any click; a
- * refusal replaces it. Newlines in a refusal are kept: a computer that took the agent and did not dial back reads
- * its own log lines under the sentence, and HTML would otherwise run all eleven together. */
-export function RefusalSlot({ k, said, fix, waiting, children }: { k: string; said?: string; fix?: string; waiting?: string; children?: ReactNode }) {
+/** The slot under a field a refusal lands in: two lines at 13 px, standing at that height whether or not it holds
+ * one. What happened is in the error ink; what to do about it follows in the foreground's. The same slot carries, in
+ * the muted ink, why the keycap under it is held, so that reason is read before any click, and at rest the note that
+ * says what the act will do; a refusal replaces either. Newlines in a refusal are kept: a computer that took the
+ * agent and did not dial back reads its own log lines under the sentence, and HTML would otherwise run all eleven
+ * together. */
+export function RefusalSlot({ k, said, fix, waiting, note, children }: { k: string; said?: string; fix?: string; waiting?: string; note?: ReactNode; children?: ReactNode }) {
+  const quiet = said === undefined ? (waiting === undefined ? note : <span data-k="waiting">{waiting}</span>) : undefined;
   return (
-    <p data-k={k} className="min-h-9 whitespace-pre-line break-words font-mono text-xs leading-[18px] text-destructive-foreground">
+    <p data-k={k} className="min-h-9 whitespace-pre-line break-words text-[13px] leading-[18px] text-destructive-foreground">
       {said ?? ""}
       {fix === undefined ? null : <span className="text-foreground"> {fix}</span>}
-      {said === undefined && waiting !== undefined ? (
-        <span data-k="waiting" className="text-muted-foreground">
-          {waiting}
-        </span>
-      ) : null}
+      {quiet === undefined ? null : <span className="text-muted-foreground">{quiet}</span>}
       {children}
     </p>
   );
