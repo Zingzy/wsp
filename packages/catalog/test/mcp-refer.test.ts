@@ -251,3 +251,29 @@ describe("what a reference writer refuses rather than guess", () => {
     expect((await MCP_SERVERS_JSON.refer(JSON.stringify({ mcpServers: { s: { url: "https://s.example", headers: { Authorization: "Bearer ${X}", Y: "${Y:-d}" } } } }))).servers).toEqual([{ name: "s", values: {} }]);
   });
 });
+
+describe("a definition's references read back as the agent starts the server", () => {
+  const values: Record<string, string> = { LINEAR: TOKEN, NOTION_TOKEN: NOTION };
+  const value = (n: string): string | undefined => values[n];
+  const one = (format: McpFormat, text: string) => format.resolve(format.read(text, HOME)[0]!, value);
+
+  it("fills each format's own syntax in headers, command variables and the address, and leaves a command's arguments as written", () => {
+    expect(one(MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { l: { type: "http", url: "https://l.example/${LINEAR}", headers: { Authorization: "Bearer ${LINEAR}" } } } }))).toEqual({ transport: { kind: "http", url: `https://l.example/${TOKEN}`, headers: { Authorization: `Bearer ${TOKEN}` } }, values: [TOKEN, TOKEN] });
+    expect(one(MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { n: { command: "npx", args: ["--t", "${NOTION_TOKEN}"], env: { NOTION_TOKEN: "${NOTION_TOKEN}" } } } }))).toEqual({ transport: { kind: "stdio", command: "npx", args: ["--t", "${NOTION_TOKEN}"], env: { NOTION_TOKEN: NOTION } }, values: [NOTION] });
+    expect(one(GEMINI_SETTINGS_JSON, JSON.stringify({ mcpServers: { n: { command: "npx", env: { A: "$NOTION_TOKEN", B: "${LINEAR}" } } } }))).toMatchObject({ transport: { env: { A: NOTION, B: TOKEN } } });
+    expect(one(OPENCODE_JSON, JSON.stringify({ mcp: { l: { type: "remote", url: "https://l.example", headers: { Authorization: "Bearer {env:LINEAR}" } } } }))).toMatchObject({ transport: { headers: { Authorization: `Bearer ${TOKEN}` } } });
+  });
+
+  it("takes a written default for a variable with no value, and names the first one with neither", () => {
+    expect(one(MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { n: { command: "npx", env: { A: "${UNSET:-dflt}" } } } }))).toEqual({ transport: { kind: "stdio", command: "npx", args: [], env: { A: "dflt" } }, values: [] });
+    expect(one(MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { n: { command: "npx", env: { A: "${UNSET}", B: "${ALSO_UNSET}" } } } }))).toEqual({ missing: "UNSET" });
+    expect(one(OPENCODE_JSON, JSON.stringify({ mcp: { l: { type: "remote", url: "https://l.example", headers: { K: "{env:UNSET}" } } } }))).toEqual({ missing: "UNSET" });
+  });
+
+  it("gives a Codex command its env_vars that have a value, and sends env_http_headers and the bearer, refusing one with none", () => {
+    expect(one(CODEX_TOML, `[mcp_servers.n]\ncommand = "npx"\nenv_vars = ["NOTION_TOKEN", "UNSET"]\n`)).toEqual({ transport: { kind: "stdio", command: "npx", args: [], env: { NOTION_TOKEN: NOTION } }, values: [NOTION] });
+    expect(one(CODEX_TOML, `[mcp_servers.l]\nurl = "https://l.example"\nbearer_token_env_var = "LINEAR"\nenv_http_headers = { "X-Notion" = "NOTION_TOKEN" }\n`)).toEqual({ transport: { kind: "http", url: "https://l.example", headers: { "X-Notion": NOTION, Authorization: `Bearer ${TOKEN}` } }, values: [NOTION, TOKEN] });
+    expect(one(CODEX_TOML, `[mcp_servers.l]\nurl = "https://l.example"\nbearer_token_env_var = "UNSET"\n`)).toEqual({ missing: "UNSET" });
+    expect(one(CODEX_TOML, `[mcp_servers.l]\nurl = "https://l.example"\n\n[mcp_servers.l.env_http_headers]\nX-Notion = "UNSET"\n`)).toEqual({ missing: "UNSET" });
+  });
+});
