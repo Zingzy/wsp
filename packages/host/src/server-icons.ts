@@ -11,6 +11,7 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync
 import { lookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
 import { join } from "node:path";
+import { bareHost, hostUnder } from "@wsp/protocol";
 import type { ServerIcons } from "@wsp/runtime";
 import { z } from "zod";
 import { capped } from "./skills-sh.js";
@@ -65,11 +66,11 @@ const NAME = /^[a-z0-9.-]+$/;
 /** The name a server's host is asked of Google by, or nothing where it may not leave this computer: an address
  * literal, a single label, a private suffix, or any character a public name does not hold. */
 export function publicIconHost(host: string): string | null {
-  const bare = host.startsWith("[") ? null : host.replace(/:\d*$/, "").toLowerCase().replace(/\.$/, "");
+  const bare = host.startsWith("[") ? null : bareHost(host);
   if (bare === null || bare === "" || isIP(bare) !== 0 || !NAME.test(bare)) return null;
   const labels = bare.split(".");
   if (labels.length < 2 || labels.some(l => l === "")) return null;
-  if (PRIVATE_SUFFIXES.some(s => bare === s || bare.endsWith(`.${s}`))) return null;
+  if (PRIVATE_SUFFIXES.some(s => hostUnder(bare, s))) return null;
   return bare;
 }
 

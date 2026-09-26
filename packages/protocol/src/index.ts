@@ -4984,10 +4984,18 @@ export type SshHostSuggestion = z.infer<typeof SshHostSuggestion>;
  * every subdomain of each. */
 export const GIT_FORGE_HOSTS: readonly string[] = ["github.com", "gitlab.com", "bitbucket.org", "codeberg.org", "sr.ht", "ssh.dev.azure.com", "vs-ssh.visualstudio.com"];
 
+/** A url's host as a name: lowercase, without its port or a trailing root dot. */
+export const bareHost = (host: string): string => host.replace(/:\d*$/, "").toLowerCase().replace(/\.$/, "");
+
+/** Whether a host is the domain or a host under it, in any case, with a port or a root dot or neither. */
+export function hostUnder(host: string, domain: string): boolean {
+  const name = bareHost(host);
+  return name === domain || name.endsWith(`.${domain}`);
+}
+
 /** Whether a host name is one of GIT_FORGE_HOSTS or under one. */
 export function isGitForge(host: string): boolean {
-  const name = host.toLowerCase();
-  return GIT_FORGE_HOSTS.some(forge => name === forge || name.endsWith(`.${forge}`));
+  return GIT_FORGE_HOSTS.some(forge => hostUnder(host, forge));
 }
 
 /** The refusal a socket that is not the host's own gets for minting a join code: the code lets a computer in, so

@@ -8,7 +8,7 @@ import { useState } from "react";
 import { agentName } from "@wsp/catalog";
 import { cn } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
-import { HarnessMark } from "../chat/HarnessMark.js";
+import { HarnessMark, MarkSvg } from "../chat/HarnessMark.js";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../ui/alert-dialog.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../ui/button.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select.js";
@@ -89,7 +89,7 @@ export function ActButton({ act, className, k, tall = false, wordClassName }: { 
 const TILE = "flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-foreground/[0.04]";
 
 /** A row's or a head's lead: the agent's own mark in its own colours in a tile, installed or not; a server's
- * glyph in its bordered box; the kind's glyph. */
+ * brand mark, icon or glyph in its bordered box; the kind's glyph. */
 export function LeadMark({ lead, label, big = false }: { lead: Lead; label: string; big?: boolean }) {
   if (lead.kind === "agent") {
     return (
@@ -99,6 +99,13 @@ export function LeadMark({ lead, label, big = false }: { lead: Lead; label: stri
     );
   }
   const Icon = lead.icon;
+  if (lead.kind === "box" && lead.mark !== undefined) {
+    return (
+      <span data-k="lead-box" className={TILE}>
+        <MarkSvg mark={lead.mark} className="size-[18px]" data-brand-mark={lead.mark.id} />
+      </span>
+    );
+  }
   if (lead.kind === "box") return <BoxLead icon={Icon} host={lead.host} />;
   return <Icon aria-hidden className={cn("shrink-0 text-foreground/80", big ? "size-5" : "size-4")} />;
 }
