@@ -2,14 +2,17 @@
 // The workspace-level words for a daemon link, read from the one state table:
 // what a pane says over its frame, and the one line the main screen carries
 // while the link is down. Both come from the same pane state, so the sidebar
-// and a pane can never say two things about one link.
-import { useCallback, useMemo, useSyncExternalStore } from "react";
-import { isLocalWorkspace, type DaemonLinkStatus } from "@wsp/protocol";
+// and a pane can never say two things about one link. Beside them, the one
+// read of a folder's branch over the link, keyed on the link's word.
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { isLocalWorkspace, type DaemonLinkStatus, type RepoStateWord } from "@wsp/protocol";
 import { linkDownLine, terminalPaneHints, terminalPaneState, type TerminalPaneState } from "../adapt/index.js";
+import { repoAbsence } from "../adapt/git.js";
 import { useOutOfMemoryReading } from "../machine/live.js";
 import { useAbsentComputer, useCapabilities, useStatus, useStore, useWorkspace, useWorkspaceState } from "../protocol/store.js";
 import { useComputerName } from "../sidebar/workspaceRows.js";
-import { getTerminals, NOT_OPENED_YET, onTerminals } from "./link.js";
+import { gitStatus } from "./daemon-fs.js";
+import { getTerminals, NOT_OPENED_YET, onTerminals, type TerminalWire } from "./link.js";
 
 /** The pane's state from the workspace's one vocabulary plus this link's socket and its last memory reading, the
  * lines under it, and the wake every pane offers. */
@@ -55,6 +58,32 @@ export function useLinkSocket(workspaceId: string | null): { socket: DaemonLinkS
  * key their read on this. */
 export function useLinkWord(workspaceId: string | null): DaemonLinkStatus {
   return useLinkSocket(workspaceId).socket;
+}
+
+/** What git said about a folder: a branch, or one of the states a slot has a word (or none) for. */
+export type Branch = { readonly kind: RepoStateWord } | { readonly kind: "repo"; readonly head: string };
+
+/** The branch git names for a folder over a workspace's wire, asked while `ask` holds and again every time the link
+ * changes its word, the rule useLinkWord carries. The last answer for the same folder stands between asks. The
+ * composer's folder row and a workspace's tiles both read this. */
+export function useBranch(wire: TerminalWire | null, folder: string | null, ask: boolean, link: DaemonLinkStatus): Branch {
+  const [state, setState] = useState<{ folder: string | null; branch: Branch }>({ folder, branch: { kind: "unknown" } });
+  useEffect(() => {
+    if (!wire || folder === null || !ask) return;
+    let gone = false;
+    gitStatus(wire, folder).then(
+      status => {
+        if (!gone) setState({ folder, branch: { kind: "repo", head: status.branch.head } });
+      },
+      (e: unknown) => {
+        if (!gone) setState({ folder, branch: { kind: repoAbsence(e) } });
+      },
+    );
+    return () => {
+      gone = true;
+    };
+  }, [wire, folder, ask, link]);
+  return state.folder === folder ? state.branch : { kind: "unknown" };
 }
 
 /** The one line the main screen shows while this workspace's link is down, else null. */
