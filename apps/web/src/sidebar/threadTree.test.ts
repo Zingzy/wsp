@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
-import { forkedWorkspaces, nestedWorkspaces, projectGroups, threadTree } from "./threadTree";
+import { projectGroups, sidebarTiles, threadTree, type TileNode } from "./threadTree";
 
 const project = (id: string, name: string, computer = "here"): ProjectView => ({
   id,
@@ -17,15 +17,21 @@ const project = (id: string, name: string, computer = "here"): ProjectView => ({
   createdAt: "2026-09-17T00:00:00.000Z",
 });
 
-const thread = (id: string, workspaceId: string, parentThreadId: string | null = null): SidebarThreadSnapshot =>
-  ({ id, threadId: id, sessionId: `s_${id}`, workspaceId, title: id, status: "running", parentThreadId, asking: null }) as unknown as SidebarProjectSnapshot["threads"][number];
+const NOW = Date.parse("2026-09-26T12:00:00.000Z");
+const ago = (hours: number): string => new Date(NOW - hours * 3_600_000).toISOString();
+
+const thread = (id: string, workspaceId: string, parentThreadId: string | null = null, over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot =>
+  ({ id, threadId: id, sessionId: `s_${id}`, workspaceId, title: id, status: "running", startedAt: ago(1), endedAt: null, parentThreadId, asking: null, ...over }) as unknown as SidebarProjectSnapshot["threads"][number];
+/** A thread that finished `hours` ago. */
+const done = (id: string, workspaceId: string, hours: number, parentThreadId: string | null = null): SidebarThreadSnapshot =>
+  thread(id, workspaceId, parentThreadId, { status: "completed", startedAt: ago(hours + 0.1), endedAt: ago(hours) });
 
 const row = (id: string, projectId: string, threads: SidebarThreadSnapshot[] = [], parentThreadId?: string): SidebarProjectSnapshot =>
   ({
     id,
     displayName: id,
     threads,
-    workspace: { id, project: { id: projectId, name: projectId, path: "/root", computer: "here" }, ...(parentThreadId === undefined ? {} : { parentThreadId }) },
+    workspace: { id, createdAt: ago(2), project: { id: projectId, name: projectId, path: "/root", computer: "here" }, ...(parentThreadId === undefined ? {} : { parentThreadId }) },
   }) as unknown as SidebarProjectSnapshot;
 
 describe("the projects the sidebar draws", () => {
@@ -42,63 +48,6 @@ describe("the projects the sidebar draws", () => {
     expect(groups.map(g => [g.project.id, g.workspaces.map(w => w.id)])).toEqual([["pr_1", ["ws_a"]]]);
   });
 
-  it("leaves a workspace an agent forked out of the project's own list while the thread that forked it has a row", () => {
-    const rows = [row("ws_a", "pr_1", [thread("lead", "ws_a")]), row("ws_fork", "pr_1", [], "lead")];
-    const nested = nestedWorkspaces(rows, [{ workspace: "ws_a", threads: ["lead"] }, { workspace: "ws_fork", threads: [] }]);
-    expect([...nested]).toEqual(["ws_fork"]);
-    expect(projectGroups([project("pr_1", "spoo")], rows, nested).map(g => g.workspaces.map(w => w.id))).toEqual([["ws_a"]]);
-    expect(forkedWorkspaces(rows, "lead", nested).map(w => w.id)).toEqual(["ws_fork"]);
-    expect(forkedWorkspaces([row("ws_a", "pr_1")], "lead", nested)).toEqual([]);
-  });
-});
-
-describe("a workspace an agent forked has one row whatever is shut", () => {
-  const lead = () => row("ws_a", "pr_1", [thread("lead", "ws_a")]);
-  const fork = () => row("ws_fork", "pr_1", [thread("builder", "ws_fork", "lead")], "lead");
-  /** Where the rows stand: the project's own list, and the forks that nest under a thread. */
-  const stands = (shown: { workspace: string; threads: string[] }[]) => {
-    const rows = [lead(), fork()];
-    const nested = nestedWorkspaces(rows, shown);
-    return {
-      list: projectGroups([project("pr_1", "spoo")], rows, nested).flatMap(g => g.workspaces.map(w => w.id)),
-      under: forkedWorkspaces(rows, "lead", nested).map(w => w.id),
-    };
-  };
-
-  it("nests under its opener while that thread's row is drawn", () => {
-    expect(stands([{ workspace: "ws_a", threads: ["lead"] }, { workspace: "ws_fork", threads: ["builder"] }])).toEqual({ list: ["ws_a"], under: ["ws_fork"] });
-  });
-
-  it("stands in its project's list while the opener's shelf is shut over it", () => {
-    // The opener settled and the shelf holding it is shut: the body draws no row for it.
-    expect(stands([{ workspace: "ws_a", threads: [] }, { workspace: "ws_fork", threads: ["builder"] }])).toEqual({ list: ["ws_a", "ws_fork"], under: [] });
-  });
-
-  it("stands in the list while the opener sits in a shut archive", () => {
-    expect(stands([{ workspace: "ws_a", threads: [] }])).toEqual({ list: ["ws_a", "ws_fork"], under: [] });
-  });
-
-  it("stands in the list once the opener is forgotten, which leaves no thread to nest under", () => {
-    const rows = [row("ws_a", "pr_1", []), fork()];
-    const nested = nestedWorkspaces(rows, [{ workspace: "ws_a", threads: [] }, { workspace: "ws_fork", threads: ["builder"] }]);
-    expect(nested.size).toBe(0);
-    expect(projectGroups([project("pr_1", "spoo")], rows, nested).flatMap(g => g.workspaces.map(w => w.id))).toEqual(["ws_a", "ws_fork"]);
-  });
-
-  it("stands in the list while the opener's own workspace is collapsed", () => {
-    expect(stands([{ workspace: "ws_a", threads: [] }, { workspace: "ws_fork", threads: [] }])).toEqual({ list: ["ws_a", "ws_fork"], under: [] });
-  });
-
-  it("falls back with its own fork behind it: a fork of a fork whose chain is broken stands in the list too", () => {
-    const rows = [lead(), fork(), row("ws_deep", "pr_1", [], "builder")];
-    // Nothing of the lead's threads is drawn, so neither the fork nor the fork's own fork can nest.
-    const shut = nestedWorkspaces(rows, [{ workspace: "ws_a", threads: [] }, { workspace: "ws_fork", threads: ["builder"] }, { workspace: "ws_deep", threads: [] }]);
-    expect(projectGroups([project("pr_1", "spoo")], rows, shut).flatMap(g => g.workspaces.map(w => w.id))).toEqual(["ws_a", "ws_fork", "ws_deep"]);
-    // With the chain drawn, both nest: the fork under the lead's thread and the deep one under the fork's.
-    const open = nestedWorkspaces(rows, [{ workspace: "ws_a", threads: ["lead"] }, { workspace: "ws_fork", threads: ["builder"] }, { workspace: "ws_deep", threads: [] }]);
-    expect([...open].sort()).toEqual(["ws_deep", "ws_fork"]);
-    expect(projectGroups([project("pr_1", "spoo")], rows, open).flatMap(g => g.workspaces.map(w => w.id))).toEqual(["ws_a"]);
-  });
 });
 
 describe("the threads of a workspace an agent forked", () => {
@@ -118,5 +67,67 @@ describe("the threads of a workspace an agent forked", () => {
       ["ws_a", ["lead", "helper"]],
       ["ws_b", []],
     ]);
+  });
+});
+
+/** A tree as ids, each node its id or its id with its children. */
+const shape = (nodes: ReadonlyArray<TileNode>): unknown[] => nodes.map(({ thread: item, children }) => (children.length === 0 ? item.id : [item.id, shape(children)]));
+
+describe("the sidebar's tiles", () => {
+  it("lists every root thread across every workspace newest first, each with the threads its agents opened under it", () => {
+    const rows = [
+      row("ws_a", "pr_1", [thread("old", "ws_a", null, { startedAt: ago(5) }), thread("lead", "ws_a", null, { startedAt: ago(3) })]),
+      row("ws_b", "pr_2", [thread("helper", "ws_b", "lead", { startedAt: ago(2) }), thread("mine", "ws_b", null, { startedAt: ago(1) })]),
+    ];
+    expect(shape(sidebarTiles(rows, { picked: null, nowMs: NOW }).live)).toEqual(["mine", ["lead", ["helper"]], "old"]);
+  });
+
+  it("hangs a forked workspace's own threads, and a forked workspace with none, under the thread that forked it", () => {
+    const rows = [
+      row("ws_a", "pr_1", [thread("lead", "ws_a")]),
+      row("ws_fork", "pr_1", [thread("builder", "ws_fork")], "lead"),
+      row("ws_empty", "pr_1", [], "lead"),
+    ];
+    const [lead] = sidebarTiles(rows, { picked: null, nowMs: NOW }).live;
+    expect(lead!.thread.id).toBe("lead");
+    expect(lead!.children.map(child => [child.thread.id, child.thread.runs.id])).toEqual([
+      ["builder", "ws_fork"],
+      ["ws:ws_empty", "ws_empty"],
+    ]);
+  });
+
+  it("draws a workspace with no thread as a tile of its own, so no copy the host holds loses its place in the list", () => {
+    const rows = [row("ws_a", "pr_1", []), row("ws_b", "pr_1", [thread("t", "ws_b")])];
+    const live = sidebarTiles(rows, { picked: null, nowMs: NOW }).live;
+    expect(live.map(node => [node.thread.id, node.thread.thread?.id ?? null])).toEqual([
+      ["t", "t"],
+      ["ws:ws_a", null],
+    ]);
+  });
+
+  it("folds a root into Settled once its whole tree has been quiet a day, and keeps it out while any thread in it is not", () => {
+    const rows = [
+      row("ws_a", "pr_1", [done("quiet", "ws_a", 30), done("quiet-child", "ws_a", 26, "quiet"), done("recent", "ws_a", 2)]),
+      row("ws_b", "pr_1", [done("stale", "ws_b", 40), thread("busy-child", "ws_b", "stale"), done("failed", "ws_b", 50)]),
+    ];
+    const { live, settled } = sidebarTiles(rows, { picked: null, nowMs: NOW });
+    expect(shape(live)).toEqual(["recent", ["stale", ["busy-child"]]]);
+    expect(shape(settled)).toEqual([["quiet", ["quiet-child"]], "failed"]);
+  });
+
+  it("never folds a thread stopped on a question, however long it has waited", () => {
+    const rows = [row("ws_a", "pr_1", [thread("asks", "ws_a", null, { status: "completed", startedAt: ago(40), endedAt: ago(39), asking: "Permission for Bash" })])];
+    const { live, settled } = sidebarTiles(rows, { picked: null, nowMs: NOW });
+    expect(shape(live)).toEqual(["asks"]);
+    expect(settled).toEqual([]);
+  });
+
+  it("under a picked project lists that project's roots alone, each keeping its children on other projects", () => {
+    const rows = [
+      row("ws_a", "pr_1", [thread("lead", "ws_a")]),
+      row("ws_b", "pr_2", [thread("helper", "ws_b", "lead"), thread("other", "ws_b")]),
+    ];
+    expect(shape(sidebarTiles(rows, { picked: "pr_1", nowMs: NOW }).live)).toEqual([["lead", ["helper"]]]);
+    expect(shape(sidebarTiles(rows, { picked: "pr_2", nowMs: NOW }).live)).toEqual(["other"]);
   });
 });

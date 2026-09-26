@@ -75,7 +75,7 @@
       "name": "machine",
       "at": "/",
       "steps": [
-        "1440:row-id=ws:ws_api",
+        "1440:row-id=thread:redirect",
         "surface-launch=machine"
       ],
       "wait": "right-panel-tabbar"
@@ -84,7 +84,7 @@
       "name": "agents-here",
       "at": "/",
       "steps": [
-        "1440:row-id=ws:ws_api",
+        "1440:row-id=thread:redirect",
         "surface-launch=agents"
       ],
       "wait": "k=agents-computer"
@@ -141,7 +141,7 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=ws:ws_api",
+        "row-id=thread:redirect",
         "offline"
       ],
       "wait": "sidebar-asleep",
@@ -153,7 +153,7 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=ws:ws_api",
+        "row-id=thread:redirect",
         "390:key:Escape",
         "key:ControlOrMeta+n",
         "composer-folder"
@@ -167,7 +167,7 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=ws:ws_api",
+        "row-id=thread:redirect",
         "390:key:Escape",
         "key:ControlOrMeta+n",
         "composer-folder",
@@ -459,6 +459,57 @@
         1440
       ],
       "settleMs": 700
+    },
+    {
+      "name": "tiles",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "row-id=thread:cart"
+      ],
+      "wait": "row-id=thread:cart",
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "tiles-root",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "row-id=thread:flaky"
+      ],
+      "wait": "row-id=thread:flaky",
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "tiles-picker",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "row-id=thread:cart",
+        "k=project-switcher"
+      ],
+      "wait": "project-switcher-menu",
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "tiles-settled-open",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "row-id=thread:cart",
+        "row-id=settled"
+      ],
+      "wait": "row-id=thread:coupons",
+      "widths": [
+        1440
+      ],
+      "height": 1100
     }
   ]
 }
