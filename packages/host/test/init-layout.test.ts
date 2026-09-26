@@ -147,13 +147,13 @@ describe("init layout", () => {
     expect(helpLine([{ key: "esc", does: "back" }], 8)).toContain(muted("back", 8));
   });
 
-  it("helpLine joins keys and what they do with dot separators: plain at depth 1, keys plain and the rest dim under 256 colours, two greys from 256 colours up", () => {
+  it("helpLine sets keys and what they do three spaces apart: plain at depth 1, keys plain and the rest dim under 256 colours, two greys from 256 colours up", () => {
     const keys = [
       { key: "space", does: "tick" },
       { key: "← →", does: "fold" },
       { key: "esc", does: "back" },
     ];
-    const plain = unicode ? "space tick • ← → fold • esc back" : "space tick   ← → fold   esc back";
+    const plain = "space tick   ← → fold   esc back";
     expect(helpLine(keys, 1)).toBe(plain);
     const was = process.env["FORCE_COLOR"];
     process.env["FORCE_COLOR"] = "1";
@@ -172,7 +172,7 @@ describe("init layout", () => {
       expect(stripVTControlCharacters(coloured)).toBe(plain);
       expect(coloured).toContain("\x1b[38;5;247mspace\x1b[39m");
       expect(coloured).toContain("\x1b[38;5;243mtick\x1b[39m");
-      expect(coloured).toContain(unicode ? "\x1b[38;5;243m • \x1b[39m" : "\x1b[38;5;243m   \x1b[39m");
+      expect(coloured).toContain("\x1b[38;5;243m   \x1b[39m");
       expect(coloured).not.toContain("\x1b[38;5;247mtick");
     }
   });
@@ -180,8 +180,8 @@ describe("init layout", () => {
 
 const KEY = { left: "\x1b[D", right: "\x1b[C", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 const SECRET = "slr_live_fake_solari_key";
-const CONFIRM_HELP = unicode ? "← → change • y n answer • enter choose • esc cancel" : "← → change   y n answer   enter choose   esc cancel";
-const PASSWORD_HELP = unicode ? "enter next • esc cancel" : "enter next   esc cancel";
+const CONFIRM_HELP = "← → change   y n answer   enter choose   esc cancel";
+const PASSWORD_HELP = "enter next   esc cancel";
 
 function streams(columns?: number) {
   const input = new PassThrough();

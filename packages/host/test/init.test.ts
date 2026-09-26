@@ -627,7 +627,7 @@ describe("wsp init, interactive", () => {
     expect(ask).toMatch(/\$0\.11\/hr/);
     expect(ask).toMatch(/No\s+costs\s+nothing/);
     // Enter takes the defaults everywhere, so the marker opens on Yes; the help line is the screen being answered.
-    expect(ask).toContain(`\n┃  ${S_RADIO_ACTIVE} Yes / ${S_RADIO_INACTIVE} No\n┗  ← → change • y n answer • enter choose • esc cancel`);
+    expect(ask).toContain(`\n┃  ${S_RADIO_ACTIVE} Yes / ${S_RADIO_INACTIVE} No\n┗  ← → change   y n answer   enter choose   esc cancel`);
     await f.press("n");
     expect((await run).code).toBe(1);
     // The finished block opens on the summary line, the boot question under it, and ends on the answer.
@@ -1040,7 +1040,7 @@ describe("wsp init, the summary-first screens", () => {
     // This Mac's npm global the catalog does not carry is no row here: the catalog is the Tools screen, the Also screen is its.
     expect(two).toMatch(/▾ Installed here, never used\s+2 of 2\s+54 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40 MB\n┃\s+● yq\s+installed\s+installed here, never used\s+14 MB\n/);
     expect(two).not.toContain("tsx");
-    expect(two).toMatch(/On: 16 tools, 1\.1 GB\n┃ {2}on when used in 2 sessions and 5 commands; heavy rows 3 and 20\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
+    expect(two).toMatch(/On: 16 tools, 1\.1 GB\n┃ {2}on when used in 2 sessions and 5 commands; heavy rows 3 and 20\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off   ← → fold   enter next   esc back/);
     expect(two).not.toContain("adjust");
     expect(two).not.toContain("every row on this screen that can be ticked");
     // Typing narrows the rows to a match; space unticks yq and the totals follow it.
