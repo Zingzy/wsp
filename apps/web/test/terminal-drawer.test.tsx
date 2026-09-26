@@ -206,13 +206,11 @@ describe("terminal as a right-panel surface", () => {
     const card = (key: string) => document.querySelector<HTMLElement>(`[data-surface-launch="${key}"]`)!;
     await waitFor(() => expect(card("terminal").getAttribute("data-available")).toBe("false"));
     expect(within(card("terminal")).getByText(sentence)).toBeTruthy();
-    // The one sentence that says what happened reads at the muted ink's own alpha; the dimming that says the card
-    // is held sits on the title and the icon, which the person is not being asked to read.
-    for (const key of ["terminal"]) {
-      expect(card(key).className).not.toContain("opacity-40");
-      expect(within(card(key)).getByText(sentence).className).not.toContain("opacity");
-      expect(card(key).querySelector("[data-surface-card-head]")!.className).toContain("opacity-40");
-    }
+    // The one sentence that says what happened reads at the muted ink's own alpha; the dimming that says the row
+    // is held sits on the label, the icon and the key, which the person is not being asked to read.
+    expect(card("terminal").className).not.toContain("opacity");
+    expect(within(card("terminal")).getByText(sentence).className).not.toContain("opacity");
+    expect(within(card("terminal")).getByText("Terminal").className).toContain("opacity-64");
     fireEvent.click(card("terminal"));
     await new Promise(r => setTimeout(r, 50));
     expect(count("pty.create")).toBe(0);
