@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { EXIT_CODES, EXIT_WORDS, ExitClass, RuntimeResponse, VerbFailure, authRefusal, exitClassOf, keptSaid, notFoundRefusal, refusal, refusalLine, refusalParts, usageRefusal, verbFailure } from "../src/index.js";
+import { EXIT_CODES, EXIT_WORDS, ExitClass, RuntimeResponse, VerbFailure, authRefusal, escapeC1, exitClassOf, jsonLine, keptSaid, notFoundRefusal, refusal, refusalLine, refusalParts, usageRefusal, verbFailure } from "../src/index.js";
 
 describe("the exit code every wsp verb answers with", () => {
   it("is one table: ok 0, provider 1, auth 2, usage 3, each class with its words", () => {
@@ -66,5 +66,19 @@ describe("a refusal a host keeps for every client", () => {
     expect(kept.at(-2)).toBe("line 8");
     expect(kept.at(-1)).toBe("(cut 3 lines)");
     expect(keptSaid("short\nsaid")).toBe("short\nsaid");
+  });
+});
+
+describe("the JSON a verb prints", () => {
+  it("escapes DEL and every C1 control character as JSON.stringify escapes C0, and parses back to the same value", () => {
+    const value = { path: "/opt/s\x9b2J\x1b]0;x\x07\x85\x7f", n: 1 };
+    const line = jsonLine(value);
+    expect(line).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+    expect(line).toContain("\\u009b");
+    expect(JSON.parse(line)).toEqual(value);
+    const pretty = jsonLine(value, 2);
+    expect(pretty).not.toMatch(/[\x7f-\x9f]/);
+    expect(JSON.parse(pretty)).toEqual(value);
+    expect(escapeC1(JSON.stringify(value))).toBe(line);
   });
 });

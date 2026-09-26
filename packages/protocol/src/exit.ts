@@ -34,6 +34,13 @@ export function exitClassOf(e: unknown): Exclude<ExitClass, "ok"> {
   return (typeof kind === "string" ? KIND_CLASS[kind] : undefined) ?? "provider";
 }
 
+/** JSON text with DEL and the C1 controls escaped: JSON.stringify escapes C0 alone, and a terminal acts on a raw C1
+ * CSI or OSC byte as it does on ESC. Those characters only ever stand inside a string, so the value parses the same. */
+export const escapeC1 = (json: string): string => json.replace(/[\x7f-\x9f]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+
+/** Every JSON a verb prints, answer or failure. */
+export const jsonLine = (value: unknown, space?: number): string => escapeC1(JSON.stringify(value, null, space) ?? "null");
+
 export function verbFailure(e: unknown): VerbFailure {
   const cls = exitClassOf(e);
   return { error: e instanceof Error ? e.message : String(e), class: cls, exit: EXIT_CODES[cls] };
