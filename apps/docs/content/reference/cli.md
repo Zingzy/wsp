@@ -54,6 +54,73 @@ wsp --version
 ```text
 the verbs an agent on this computer reaches for, and the lines you type yourself:
 up and down for the host, recipe and image for what a workspace starts from.
+  wsp agents [<workspace>] [--on <computer>]
+      the coding agents on this computer, a box you added or a workspace: each
+      one's version and the newest out, whether it is signed in there, and
+      whether it carries the wsp tools
+  wsp skills [<workspace>] [--on <computer>]
+      the skills on this computer, a box you added or a workspace, each by name
+      with every folder it lives in and which agent loads it from there
+  wsp skills search <query> [--limit <n>]
+      searches skills.sh for skills by their words, each with how often it was
+      installed and the id wsp skills add takes
+  wsp skills show <skill> [<workspace>] [--on <computer>] [--project [<name>]]
+      prints a skill's SKILL.md: one on skills.sh by its <owner>/<repo>/<skill>
+      before it is installed, or one already on this computer, a box you added
+      or a workspace by its name
+  wsp skills add <skill> [<workspace>] [--on <computer>] [--agent <id>]...
+    [--project [<name>]]
+      installs a skill off skills.sh by its <owner>/<repo>/<skill> into the
+      shared skills folder, with a link or a copy for each agent named that does
+      not read that folder; every file is checked first and lands as a plain
+      file that runs nothing
+  wsp skills remove <name> [<workspace>] [--on <computer>] [--project [<name>]]
+      removes a skill by its name: every folder it lives in and every link to
+      it, where a link's own folder elsewhere stays
+  wsp skills disable <name> [<workspace>] [--on <computer>]
+      turns a skill off by its name, its SKILL.md renamed SKILL.md.off where it
+      lives, so no agent loads it until it is turned on
+  wsp skills enable <name> [<workspace>] [--on <computer>]
+      turns a skill that was turned off on again, its SKILL.md.off renamed back
+  wsp servers [<workspace>] [--on <computer>]
+      the MCP servers the agents on this computer, a box you added or a
+      workspace are set up with: how each is reached, the file it is defined in
+      and its sign-in as its config says it
+  wsp agents signin <agent> [<workspace>]
+      signs an agent in on this computer or in a workspace, its own sign-in run
+      there and shown in this terminal; a box you added takes wsp add <computer>
+      --sign-in <agent>
+  wsp agents key <agent>
+      puts an agent's token or API key into this host's vault, typed where
+      nothing echoes it; Claude Code's token is the one claude setup-token
+      prints
+  wsp agents addtools <agent>
+      writes the wsp server into an agent's own config on this computer, the
+      entry wsp mcp install writes, with the wsp skill beside it
+  wsp servers signin <name> --agent <id> [<workspace>] [--on <computer>]
+      signs one MCP server in by its agent's own command for it, run where the
+      server is set up and shown in this terminal
+  wsp servers tools <name> --agent <id> [<workspace>] [--on <computer>]
+    [--project <name>] [--refresh]
+      starts one MCP server once where it is set up and lists its tools with
+      their descriptions, and says whether it needs a sign-in
+  wsp servers add <name> [<workspace>] [--on <computer>] --agent <id> (--command
+    "<line>" [--env <NAME>]... | --url <address>
+    [--header <name>=<VARIABLE>]...) [--project [<name>]]
+      writes one MCP server into an agent's own config: a command with its
+      arguments and variables, or an address with its headers, each value read
+      off this terminal's environment and written into that file alone
+  wsp servers remove <name> [<workspace>] [--on <computer>] --agent <id>
+    [--scope <user|home|project>] [--project [<name>]]
+      takes one MCP server's entry out of an agent's own config, every other
+      line of the file as it was
+  wsp servers disable <name> [<workspace>] [--on <computer>] --agent <id>
+    [--scope <user|home|project>] [--project [<name>]]
+      turns one MCP server off by the switch its agent reads, so the agent
+      leaves it out until it is turned on
+  wsp servers enable <name> [<workspace>] [--on <computer>] --agent <id>
+    [--scope <user|home|project>] [--project [<name>]]
+      turns an MCP server that was turned off on again
   wsp projects remove <project>
       takes a project out of this wsp, with the folder wsp itself made for it on
       the computer holding it; a folder of yours on this computer is left where
@@ -180,8 +247,8 @@ every verb takes:
   --json         print the raw protocol values, one JSON object per line, with
                  everything else on stderr
   --state        the state file the host serves
-  --host         run the line against a host on another computer, by the name
-                 wsp host connect gave it; WSP_HOST names one for a whole shell
+  --host         run the line against a host on your account, by the name wsp
+                 hosts lists it under; WSP_HOST names one for a whole shell
 
 exit codes; every failure is one line on stderr, the failure object with --json:
   0 ok        it did what its line says; with --json stdout holds the answer
@@ -199,16 +266,8 @@ exit codes; every failure is one line on stderr, the failure object with --json:
       host listens beyond this computer
   wsp host devices [revoke <id>]
       the computers paired with a host and what each token is read as; revoke
-      takes one back out. --host reads a host on another computer this one is
-      paired with
-  wsp host connect <url> --code <code> [--name <alias>]
-      redeem a code from a host outside your account for a token of this
-      computer's own; --name is what every later line calls that host, and a
-      host on your account needs no code at all
-  wsp host default <alias>
-      move which host every line on this computer runs against
-  wsp host forget <alias>
-      hand that host its token back and forget it here
+      takes one back out. --host reads a host on your account from another
+      computer signed in to it
   wsp host link [<url>] [--name <name>]
       put the host on this computer onto your account, so it is reachable from
       anywhere with no port open to the world; on a computer that is signed in
@@ -221,13 +280,12 @@ exit codes; every failure is one line on stderr, the failure object with --json:
 
 You need these only for a host on a computer that is not the one you are sitting
 at: wsp login signs this computer in to your account and wsp hosts lists the
-hosts on it, which need no code at all. pair hands out the code that lets a
-computer outside your account drive a host, and it runs at that host's own
-terminal; devices lists the computers that hold a token for a host and takes one
-back out, from that terminal or from any computer paired with it; connect,
-default and forget hold the hosts this computer reaches by a code; link and
-unlink put the host on this computer onto your account, so it is reachable with
-no port open to the world.
+hosts on it, which need no code at all. pair hands out the code a browser on
+another computer types to open a host, and it runs at that host's own terminal;
+devices lists the computers that hold a token for a host and takes one back out,
+from that terminal or from any computer signed in to it; link and unlink put the
+host on this computer onto your account, so it is reachable with no port open to
+the world.
 ```
 
 ## wsp --help dev
@@ -368,8 +426,8 @@ usage: wsp computers
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp remove
@@ -413,9 +471,8 @@ usage: wsp new [<project>] "<what you are working on>" [--from <project image>]
   --json            print the raw protocol values, one JSON object per line,
                     with everything else on stderr
   --state           the state file the host serves
-  --host            run the line against a host on another computer, by the name
-                    wsp host connect gave it; WSP_HOST names one for a whole
-                    shell
+  --host            run the line against a host on your account, by the name wsp
+                    hosts lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp run
@@ -452,8 +509,8 @@ usage: wsp run [<workspace>] [--agent <id>] [--model, --effort, --access <word>]
   --json      print the raw protocol values, one JSON object per line, with
               everything else on stderr
   --state     the state file the host serves
-  --host      run the line against a host on another computer, by the name wsp
-              host connect gave it; WSP_HOST names one for a whole shell
+  --host      run the line against a host on your account, by the name wsp hosts
+              lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp pause
@@ -465,8 +522,8 @@ usage: wsp pause <workspace>
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp wake
@@ -479,8 +536,8 @@ usage: wsp wake <workspace>
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp delete
@@ -494,8 +551,8 @@ usage: wsp delete <workspace> [--yes]
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp workspaces
@@ -513,8 +570,8 @@ usage: wsp workspaces [--watch]
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp threads
@@ -532,8 +589,8 @@ usage: wsp threads [<workspace>] [--tree] [--watch]
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp send
@@ -555,8 +612,8 @@ usage: wsp send <thread> [--model, --effort <value>] [--image <path>] [--detach]
   --json      print the raw protocol values, one JSON object per line, with
               everything else on stderr
   --state     the state file the host serves
-  --host      run the line against a host on another computer, by the name wsp
-              host connect gave it; WSP_HOST names one for a whole shell
+  --host      run the line against a host on your account, by the name wsp hosts
+              lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp stop
@@ -568,8 +625,8 @@ usage: wsp stop <thread>
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp status
@@ -588,8 +645,8 @@ usage: wsp status [--watch]
   --watch    draw the same rows again every second where they stand, until
              Ctrl-C; it needs a terminal to redraw on, and reads nothing but
              this computer's own agent
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp mcp
@@ -602,8 +659,8 @@ usage: wsp mcp [--host <alias>]
   serve the verbs as tools over stdio to an agent on this computer
 
   --state    the state file the host serves
-  --host     write the server against a host on another computer, by the name
-             wsp host connect gave it, so the tools drive that host
+  --host     write the server against a host on your account, by the name wsp
+             hosts lists it under, so the tools drive that host
 ```
 
 ## wsp up
@@ -698,8 +755,8 @@ usage: wsp recipe [--tick used|installed|default] [--set <id>=on|off]
   --json         print the raw protocol values, one JSON object per line, with
                  everything else on stderr
   --state        the state file the host serves
-  --host         run the line against a host on another computer, by the name
-                 wsp host connect gave it; WSP_HOST names one for a whole shell
+  --host         run the line against a host on your account, by the name wsp
+                 hosts lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp fork
@@ -739,9 +796,8 @@ usage: wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>]
   --json            print the raw protocol values, one JSON object per line,
                     with everything else on stderr
   --state           the state file the host serves
-  --host            run the line against a host on another computer, by the name
-                    wsp host connect gave it; WSP_HOST names one for a whole
-                    shell
+  --host            run the line against a host on your account, by the name wsp
+                    hosts lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp snapshot
@@ -754,8 +810,8 @@ usage: wsp snapshot <workspace>
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp rename
@@ -768,8 +824,8 @@ usage: wsp rename <workspace> "<name>"
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp forget
@@ -783,8 +839,8 @@ usage: wsp forget <workspace> [--yes]
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp thread read
@@ -802,8 +858,8 @@ usage: wsp thread read <thread> [--last]
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp exec
@@ -818,24 +874,29 @@ usage: wsp exec <workspace> [--cwd <dir>] -- <command...>
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp folders
 
 ```text
-usage: wsp folders [<folder>] [--hidden]
-  the folders inside one folder on this computer, for naming one to import; the
-  home folder and every imported project are the roots and nothing outside them
-  is listed
+usage: wsp folders [<folder>] [--hidden] [--repos] [--on <computer>]
+  the folders inside one folder on this computer or on a box you added with
+  --on, or with --repos every git repo under the home folder, most recently used
+  first, for naming one to record
 
   --hidden    list the folders whose names start with a dot too
+  --repos     every git repo under the home folder instead of one level, most
+              recently used first
+  --on        the computer whose folders to list, by the name wsp computers
+              shows; a box you added answers from its own disk, and this
+              computer is listed without it
   --json      print the raw protocol values, one JSON object per line, with
               everything else on stderr
   --state     the state file the host serves
-  --host      run the line against a host on another computer, by the name wsp
-              host connect gave it; WSP_HOST names one for a whole shell
+  --host      run the line against a host on your account, by the name wsp hosts
+              lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp export
@@ -854,8 +915,8 @@ usage: wsp export <workspace> <folder> [--from <path on the machine>]
   --json       print the raw protocol values, one JSON object per line, with
                everything else on stderr
   --state      the state file the host serves
-  --host       run the line against a host on another computer, by the name wsp
-               host connect gave it; WSP_HOST names one for a whole shell
+  --host       run the line against a host on your account, by the name wsp
+               hosts lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp image
@@ -868,8 +929,8 @@ usage: wsp image
   --json     print the raw protocol values, one JSON object per line, with
              everything else on stderr
   --state    the state file the host serves
-  --host     run the line against a host on another computer, by the name wsp
-             host connect gave it; WSP_HOST names one for a whole shell
+  --host     run the line against a host on your account, by the name wsp hosts
+             lists it under; WSP_HOST names one for a whole shell
 ```
 
 ## wsp join
@@ -883,8 +944,7 @@ usage: wsp join <url>... --code <code> [--code-file <path>] [--name <name>]
   --state        the state file: this word first, else WSP_HOME's state.json,
                  else ./.wsp/state.json when the current directory is a checkout
                  of wsp, else state.json in the home the running host serves
-  --code         the code the other computer printed: wsp host pair for a host,
-                 wsp add for a place
+  --code         the code the other computer printed: wsp add on the host
   --code-file    read the code off this file and delete the file before dialing,
                  so a code never sits on a disk
   --name         the name to call the computer by here; what its address calls

@@ -831,10 +831,10 @@ describe("wsp verbs over the host", () => {
     // A host this computer really holds, so the answer is the sentence and not the refusal for a name nobody knows.
     // The aim reads the home off the run's own environment, which this file hands every verb.
     env["WSP_HOME"] = join(dir, "home");
-    writeHost(join(dir, "home"), "box", { url: "http://box.local:4400", deviceId: "d_box", deviceToken: "tok-box", hostKey: HOST_KEY, pairedAt: "2026-09-11T10:00:00.000Z" });
+    writeHost(join(dir, "home"), "box", { url: "http://box.local:4400", deviceId: "d_box", deviceToken: "tok-box", hostKey: HOST_KEY, pairedAt: "2026-09-11T10:00:00.000Z", via: { kind: "account", hostId: "hbox" } });
     const dest = join(dir, "elsewhere.wsp");
     const line = `${hostSideOnlyLine("image export", "box")} ${hostSideOnlyFix(HOST_SIDE_VAULT)}`;
-    // Every way a line is aimed reads the same: the flag, the variable, and the alias wsp host default marks.
+    // Every way a line is aimed reads the same: the flag and the variable.
     const flagged = await run("image", "export", dest, "--host", "box");
     expect(flagged.code).toBe(EXIT_CODES.usage);
     expect(flagged.io.errors.at(-1)).toBe(line);

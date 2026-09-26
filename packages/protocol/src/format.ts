@@ -7,7 +7,6 @@ import type { AgentSignInState, Capabilities, ContextMenuItem, CopyRoad, GoldenM
 import { namesPlace } from "./index.js";
 import { LOGIN_CHOICES, type LoginChoice } from "./init-job.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
-import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
 import { folderName, parentFolderName } from "./project-path.js";
 import { shellLine } from "./shell-quote.js";
@@ -3617,37 +3616,9 @@ export function shellVersionNotice(shell: string | undefined, host: string, labe
   return order < 0 ? { line: `${both}: get the new app`, update: true } : { line: `${both}: run the app's own host`, update: false };
 }
 
-/** The words of the desktop's hosts: the menu, the sidebar's foot and the connect sheet all read them here. */
+/** The words of the desktop's hosts: the menu and the sidebar's foot read them here. */
 export const HOST_WORDS = {
   hosts: "Hosts",
-  connectMenu: "Connect to a host…",
-  /** The fragment a page is loaded with to open on the connect sheet, which is how the shell asks for it on a page
-   * it is loading rather than one already up. */
-  connectHash: "#connect",
-  disconnect: (label: string): string => `Disconnect ${label}`,
-  /** Why the disconnect row is dimmed while the window is on the app's own computer. */
-  hereStays: (here: string): string => `${here} is the app's own host`,
-  sheet: {
-    headline: "Connect to a host",
-    top: "A wsp host on another computer, by its address or over ssh.",
-    direct: "Address and code",
-    ssh: "Over ssh",
-    address: "Address",
-    addressPlaceholder: `http://box:${DEFAULT_PORT}`,
-    code: "Code",
-    codePlaceholder: "XXXX-XXXX",
-    login: "Login",
-    loginPlaceholder: "user@host",
-    port: "Port",
-    portPlaceholder: "22",
-    keycap: "Connect",
-    cancel: "Cancel",
-    directNote: "The app pairs with the host at this address, with the code wsp host pair printed on that computer, and opens it.",
-    sshNote: "The app logs in over ssh, starts wsp there when nothing serves, forwards its port to this computer and pairs.",
-    /** Why Connect is held, as its tooltip. */
-    fillFirst: "type the address and the code first",
-    fillLoginFirst: "type the login first",
-  },
 } as const;
 
 /** How long a computer has been away, coarse on purpose: the figure is read once in a table, not watched. */
@@ -3848,57 +3819,36 @@ export function joinRoads(token: string, urls: readonly string[], relayUrl: stri
 export const hereWord = (mac: boolean): string => (mac ? "This Mac" : "This computer");
 
 const HOST_MENU_SWITCH = "switch:";
-const HOST_MENU_CONNECT = "connect";
-const HOST_MENU_DISCONNECT = "disconnect:";
 
 /** The Hosts menu as one list of rows, read by the shell's own menu bar and by the sidebar's foot alike: this computer
- * first, every saved host, the current one marked, then the connect row, then the disconnect of the host the window is
- * on, dimmed on this computer since its host is the app's own. */
+ * first, then every host on the account, the current one marked. */
 export function hostsMenuItems(view: HostsView): ContextMenuItem[] {
-  const current = view.hosts.find(h => h.alias === view.current);
   return [
     { id: HOST_MENU_SWITCH, label: view.here, group: "hosts", enabled: true, checked: view.current === null },
-    ...view.hosts.map((h): ContextMenuItem => ({ id: `${HOST_MENU_SWITCH}${h.alias}`, label: h.label, group: "hosts", enabled: true, checked: h.alias === view.current })),
-    { id: HOST_MENU_CONNECT, label: HOST_WORDS.connectMenu, group: "add", enabled: true },
-    current !== undefined
-      ? { id: `${HOST_MENU_DISCONNECT}${current.alias}`, label: HOST_WORDS.disconnect(current.label), group: "remove", enabled: true, destructive: true }
-      : { id: HOST_MENU_DISCONNECT, label: HOST_WORDS.disconnect(view.here), group: "remove", enabled: false, refusal: HOST_WORDS.hereStays(view.here), destructive: true },
+    ...view.hosts.map((h): ContextMenuItem => ({ id: `${HOST_MENU_SWITCH}${h.alias}`, label: h.alias, group: "hosts", enabled: true, checked: h.alias === view.current })),
   ];
 }
 
-/** What a row of the Hosts menu does, read back off its id; nothing for an id the list above never minted. */
-export type HostMenuAction =
-  | { kind: "switch"; alias: string | null }
-  | { kind: "connect" }
-  | { kind: "disconnect"; alias: string };
-
-export function hostMenuAction(id: string): HostMenuAction | undefined {
-  if (id === HOST_MENU_CONNECT) return { kind: "connect" };
-  if (id.startsWith(HOST_MENU_SWITCH)) {
-    const alias = id.slice(HOST_MENU_SWITCH.length);
-    return { kind: "switch", alias: alias === "" ? null : alias };
-  }
-  if (id.startsWith(HOST_MENU_DISCONNECT)) {
-    const alias = id.slice(HOST_MENU_DISCONNECT.length);
-    return alias === "" ? undefined : { kind: "disconnect", alias };
-  }
-  return undefined;
+/** The host a row of the Hosts menu moves the window to, null for this computer, read back off its id; nothing for an
+ * id the list above never minted. */
+export function hostMenuAction(id: string): { alias: string | null } | undefined {
+  if (!id.startsWith(HOST_MENU_SWITCH)) return undefined;
+  const alias = id.slice(HOST_MENU_SWITCH.length);
+  return { alias: alias === "" ? null : alias };
 }
 
 /** How often a linked host says where it is on its account, and so how fresh a listing of the account's hosts can
  * be. Read by the host that beats and by the table below that calls a host up or away, so the two cannot drift. */
 export const HOST_BEAT_MS = 60_000;
 
-/** One row of the one listing wsp hosts prints: a host on the person's account, or one this computer paired with a
- * code. The command line builds the rows off the relay's listing and the records under its hosts folder; the words
- * are here, beside every other table's. */
+/** One row of the one listing wsp hosts prints: a host on the person's account. The command line builds the rows off
+ * the relay's listing and the records under its hosts folder; the words are here, beside every other table's. */
 export interface HostsTableRow {
   host: string;
   /** Where it answers, and nothing for a host on the account that has not said where it is yet. */
   address?: string;
-  via: "account" | "code";
-  /** How long since its last beat, null for a host on the account that has never beaten, and nothing for one
-   * reached by a code, which says nothing about itself until it is dialled. */
+  /** How long since its last beat, null for a host that has never beaten, and nothing for a row read off this
+   * computer's own records while the relay did not answer. */
   awayMs?: number | null;
   /** The device this computer holds there, which the account road has none of until its first dial. */
   deviceId?: string;
@@ -3926,15 +3876,13 @@ export function hostBeatWord(awayMs: number | null): string {
   return `away ${offlineFor(awayMs)}`;
 }
 
-/** The cells of the one hosts table, the header first: every host this computer can reach, whichever road it holds
- * it by, with the road in a column of its own so a person reads why a host needs no code. */
+/** The cells of the one hosts table, the header first: every host on the account this computer can reach. */
 export function hostsTable(rows: readonly HostsTableRow[]): string[][] {
   return [
-    ["HOST", "ADDRESS", "VIA", "STATE", "DEVICE", "CONNECTOR", "KEY", ""],
+    ["HOST", "ADDRESS", "STATE", "DEVICE", "CONNECTOR", "KEY", ""],
     ...rows.map(row => [
       row.host,
       row.address ?? (row.awayMs === undefined || row.awayMs === null ? NOT_UP_YET : ADDRESS_NEXT_START),
-      row.via,
       row.awayMs === undefined ? "" : hostBeatWord(row.awayMs),
       row.deviceId ?? "",
       row.connector ?? "",
@@ -3944,8 +3892,8 @@ export function hostsTable(rows: readonly HostsTableRow[]): string[][] {
   ];
 }
 
-/** What wsp hosts prints for a person who can reach nothing: the two roads to a host, the account one first. */
-export const NO_HOSTS_LINE = "You can reach no host but this computer. Run wsp login to sign in to your account, or wsp host connect <url> --code <code> for a host outside it.";
+/** What wsp hosts prints for a person who can reach nothing: the road to a host on the account. */
+export const NO_HOSTS_LINE = "You can reach no host but this computer. Run wsp login to sign in to your account.";
 
 /** What wsp hosts prints when the relay did not answer: what this computer holds is still the truth about what it
  * can dial, so the rows are printed and the relay's own words go above them. */
@@ -3955,16 +3903,11 @@ export const relayQuietLine = (why: string): string => `${why}; the rows below a
  * record goes, since a name aimed at it would dial a host nobody on the account holds. */
 export const hostDroppedLine = (alias: string): string => `${alias} is no longer a host on your account, so this computer no longer holds a record for it`;
 
-/** What wsp hosts says about an alias already held by a host this computer paired with a code: the record stands
- * as it is, and the account's host of that name is left out of the folder until the person frees the name. */
-export const hostAliasHeldLine = (alias: string): string =>
-  `your account holds a host called ${alias} and this computer paired with another under that name; the paired one stands, and wsp host forget ${alias} frees the name for the account's`;
-
 /** What a listing that names another key for a host this computer already pinned is refused with: the key is
  * pinned at first sight and held to on every dial, so a second key is either another host or a relay steering this
  * computer at one. The record keeps the key it pinned. */
 export const hostKeyMovedLine = (alias: string, held: string, listed: string): string =>
-  `your account lists ${alias} under the key ${listed}, and this computer pinned ${held} when it first saw it; nothing was sent to it. Compare the key wsp host pair prints on that host, and run wsp host forget ${alias} if it is the one the account lists`;
+  `your account lists ${alias} under the key ${listed}, and this computer pinned ${held} when it first saw it; nothing was sent to it. Compare the key wsp host pair prints on that host, and if it is the one the account lists, wsp logout, wsp login and wsp hosts take the account's keys afresh`;
 
 /** A colour as CSS spells it, with its alpha as a percent where one is given. */
 export function fmtRgb(colour: Rgb, alpha?: number): string {

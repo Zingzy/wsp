@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, placeWiring, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, WS_PATH, hereWord, pairToken } from "@wsp/protocol";
+import { GET_THE_APP_WORD, HOST_WORDS, PLACES_WORDS, hereWord } from "@wsp/protocol";
 import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -89,11 +89,11 @@ async function seedProject(host: HostHandle): Promise<void> {
   await host.addProject("https://github.com/dev/first.git", "default");
 }
 
-/** A saved host record under the launch's own wsp home, as wsp host connect leaves one: the list the shell reads
- * has a host in it the window is not on, which is what a page on a host somewhere else may not learn. */
-function seedSavedHost(home: string, alias: string, label: string): void {
+/** A record of a host on the account under the launch's own wsp home, as wsp hosts leaves one: the list the shell
+ * reads has a host in it the window is not on, which is what a page on a host somewhere else may not learn. */
+function seedAccountHost(home: string, alias: string, url: string, token: string): void {
   mkdirSync(join(home, "hosts"), { recursive: true });
-  writeFileSync(join(home, "hosts", `${alias}.json`), JSON.stringify({ url: `http://${label}`, deviceId: "d_seed", deviceToken: "tok-seed", pairedAt: "2026-09-01T00:00:00.000Z", label, road: "direct" }));
+  writeFileSync(join(home, "hosts", `${alias}.json`), JSON.stringify({ url, deviceId: "d_seed", deviceToken: token, pairedAt: "2026-09-01T00:00:00.000Z", via: { kind: "account", hostId: `h${alias}` } }));
 }
 
 /** The lock and the token file a host serving this home left beside its state, which is what the window reads to
@@ -367,25 +367,6 @@ async function refused(url: string): Promise<boolean> {
   } catch {
     return true;
   }
-}
-
-/** The word wsp host pair prints off a host, the way it gets one: one socket with the host's own token, one
- * pair.issue. It is the code and the fingerprint of the key that host proves, which is what a person copies. */
-async function pairingCodeOf(host: HostHandle): Promise<string> {
-  const ws = new WebSocket(`ws://127.0.0.1:${host.port}${WS_PATH}`);
-  await new Promise<void>((done, fail) => {
-    ws.addEventListener("open", () => done());
-    ws.addEventListener("error", () => fail(new Error("the fixture host refused the socket")));
-  });
-  const ask = (frame: Record<string, unknown>): Promise<Record<string, unknown>> =>
-    new Promise(done => {
-      ws.addEventListener("message", e => done(JSON.parse(String((e as MessageEvent).data)) as Record<string, unknown>), { once: true });
-      ws.send(JSON.stringify(frame));
-    });
-  await ask({ id: 1, op: "auth", token: host.authToken });
-  const issued = await ask({ id: 2, op: "pair.issue" });
-  ws.close();
-  return pairToken(issued["code"] as string, issued["hostKey"] as string);
 }
 
 interface MenuRow {
@@ -820,40 +801,30 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await win.locator("[data-context-menu]").count()).toBe(0);
   });
 
-  it("connects to a second host by its address and a code, the Hosts menu lists both with the current one marked, and This Mac takes the window back", async () => {
+  it("moves to a host on the account from the Hosts menu, lists both with the current one marked, and This Mac takes the window back", async () => {
     existing = await fixtureHost();
+    const at = `http://127.0.0.1:${existing.port}`;
     launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, home => {
       seedGolden(home);
-      seedSavedHost(home, "attic", "attic.example:4400");
+      // Two hosts on the account, so the window opens here rather than on either; the one on loopback is dialled
+      // with no key pinned, since there is no road between two ports of one computer for anybody to stand on.
+      seedAccountHost(home, "box", at, existing!.authToken);
+      seedAccountHost(home, "attic", "http://attic.example:4400", "tok-seed");
     });
     const win = await windowAt(launched.app, APP_URL);
     const home = win.url();
     await win.waitForSelector("[data-host-foot]");
     const here = hereWord(process.platform === "darwin");
     expect(await win.locator("[data-host-label]").textContent()).toBe(here);
-    // The word wsp host pair prints, over the second host's own socket with its own token: the code and the
-    // fingerprint of the key that host proves, both of which the field carries through to the command line.
-    const code = await pairingCodeOf(existing);
-    // The menu bar's Hosts menu opens the sheet, the road a person takes.
-    await hostsMenu(launched.app, HOST_WORDS.connectMenu);
-    const dialog = win.getByRole("dialog");
-    await dialog.waitFor();
-    await dialog.locator("#connect-url").fill(`http://127.0.0.1:${existing.port}`);
-    // Typed as a person types a code, in lower case; the fingerprint is pasted as it was printed, since base64 is
-    // case sensitive and a shaped one would name a key no host proves.
-    await dialog.locator("#connect-code").fill(code.replace(/^[^.]*/, half => half.toLowerCase()));
-    expect(await dialog.locator("#connect-code").inputValue()).toBe(code);
-    await dialog.locator("[data-k=primary]").click();
-    await win.waitForURL(`http://127.0.0.1:${existing.port}/`);
-    // The shell's own menu lists every saved host, so the owner still moves from one to another while the window
-    // stands on a host somewhere else. It is rebuilt once the page is up, which is a beat after the window moved.
+    await hostsMenu(launched.app, "box");
+    await win.waitForURL(`${at}/`);
+    // The shell's own menu lists every host on the account, so the owner still moves from one to another while the
+    // window stands on a host somewhere else. It is rebuilt once the page is up, which is a beat after the window moved.
     await vi.waitFor(async () => {
       expect(await hostsMenuRows(launched!.app)).toEqual([
         { label: here, checked: false, enabled: true },
-        { label: `127.0.0.1:${existing!.port}`, checked: true, enabled: true },
-        { label: "attic.example:4400", checked: false, enabled: true },
-        { label: HOST_WORDS.connectMenu, checked: false, enabled: true },
-        { label: HOST_WORDS.disconnect(`127.0.0.1:${existing!.port}`), checked: false, enabled: true },
+        { label: "attic", checked: false, enabled: true },
+        { label: "box", checked: true, enabled: true },
       ]);
     }, { timeout: 30_000, interval: 100 });
     // The page that host serves is shown this computer and that host alone, and what it asks of this computer is
@@ -862,10 +833,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       const wsp = (
         window as unknown as {
           wsp: {
-            hosts(): Promise<{ here: string; current: string | null; hosts: { label: string }[] }>;
+            hosts(): Promise<{ here: string; current: string | null; hosts: { alias: string }[] }>;
             localFonts(family: string): Promise<unknown>;
-            connectHost(ask: unknown): Promise<unknown>;
-            disconnectHost(alias: string): Promise<unknown>;
             switchHost(alias: string | null): Promise<unknown>;
           };
         }
@@ -881,16 +850,12 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       return {
         hosts: await wsp.hosts(),
         fonts: await said(() => wsp.localFonts("Menlo")),
-        connect: await said(() => wsp.connectHost({ road: "direct", url: "http://127.0.0.1:1", code: "AAAAAAAA.k" })),
-        disconnect: await said(() => wsp.disconnectHost("attic")),
         elsewhere: await said(() => wsp.switchHost("attic")),
       };
     });
-    expect(asked.hosts.hosts.map(h => h.label)).toEqual([`127.0.0.1:${existing.port}`]);
+    expect(asked.hosts.hosts.map(h => h.alias)).toEqual(["box"]);
     expect(asked.hosts.here).toBe(here);
     expect(asked.fonts).toContain(notForThisPage("fonts:local"));
-    expect(asked.connect).toContain(notForThisPage("hosts:connect"));
-    expect(asked.disconnect).toContain(notForThisPage("hosts:disconnect"));
     expect(asked.elsewhere).toContain(notForThisPage("hosts:switch"));
     // The move home is the one move that page may ask for, and the record it could not read still stands after it.
     await win.evaluate(() => {
@@ -898,16 +863,12 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     });
     await win.waitForURL(home);
     expect(existsSync(join(launched.home, "hosts", "attic.json"))).toBe(true);
-    await hostsMenu(launched.app, `127.0.0.1:${existing.port}`);
-    await win.waitForURL(`http://127.0.0.1:${existing.port}/`);
-    // The record is the one wsp host connect writes, under the launch's own wsp home, with what the desktop adds.
-    const record = JSON.parse(readFileSync(join(launched.home, "hosts", "127.0.0.1.json"), "utf8")) as Record<string, unknown>;
-    expect(record).toMatchObject({ url: `http://127.0.0.1:${existing.port}`, label: `127.0.0.1:${existing.port}`, road: "direct" });
-    expect(typeof record["deviceToken"]).toBe("string");
+    await hostsMenu(launched.app, "box");
+    await win.waitForURL(`${at}/`);
     await hostsMenu(launched.app, here);
     await win.waitForURL(home);
     await vi.waitFor(async () => {
-      expect((await hostsMenuRows(launched!.app)).map(r => r.checked)).toEqual([true, false, false, false, false]);
+      expect((await hostsMenuRows(launched!.app)).map(r => r.checked)).toEqual([true, false, false]);
     }, { timeout: 30_000, interval: 100 });
     expect(await win.locator("[data-host-label]").textContent()).toBe(here);
     // The app's own host was never stopped by the move.
