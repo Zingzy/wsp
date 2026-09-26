@@ -58,7 +58,7 @@ const roots: string[] = [];
 const servers: Server[] = [];
 afterEach(async () => {
   for (const r of roots.splice(0)) {
-    const pids = existsSync(join(r, "home", "escaped.pid")) ? readFileSync(join(r, "home", "escaped.pid"), "utf8").trim().split("\n") : [];
+    const pids = ["escaped.pid", "family.pids"].flatMap(f => (existsSync(join(r, "home", f)) ? readFileSync(join(r, "home", f), "utf8").trim().split("\n") : []));
     for (const pid of pids) {
       try {
         process.kill(Number(pid), "SIGKILL");
@@ -194,8 +194,23 @@ function box(f: Fixture): { machine: Pick<Machine, "exec">; lines: string[] } {
 
 const starts = (f: Fixture): number => (existsSync(join(f.home, "starts")) ? readFileSync(join(f.home, "starts"), "utf8").trim().split("\n").length : 0);
 
+/** A command server with a family: it starts two children that outlive nothing on their own, keeps every pid it and
+ * they have, then answers as \`server\` does or, handed \`hang\`, never answers. */
+const FAMILY = `#!/bin/bash
+sleep 300 &
+echo $! >> "$HOME/family.pids"
+sleep 301 &
+echo $! >> "$HOME/family.pids"
+echo $$ >> "$HOME/family.pids"
+[ "$1" = hang ] && { sleep 300 & wait; }
+exec "$(dirname "$0")/server"
+`;
+
+/** Every process of a family still running. */
+const leftOver = (f: Fixture): number[] => (existsSync(join(f.home, "family.pids")) ? readFileSync(join(f.home, "family.pids"), "utf8").trim().split("\n").map(Number) : []).filter(alive);
+
 describe("one MCP server's tools, on the person's ask", () => {
-  it("starts a command server once with its own variables, sends tools/list only after initialize is answered, and keeps the answer an hour", async () => {
+  it("starts a command server once with its own variables, sends tools/list only after initialize is answered, and keeps the answer three minutes", async () => {
     const f = fixture();
     f.config({ airtable: { command: join(f.bin, "server"), args: ["--base", "app1"], env: { FAKE_TOKEN: SECRET } } });
     let now = Date.parse("2026-09-24T12:00:00Z");
@@ -205,21 +220,68 @@ describe("one MCP server's tools, on the person's ask", () => {
     const params = [{ name: "base", type: "string", required: true, description: "The base id" }, { name: "limit", type: "integer or null", required: false }, { name: "view", required: false }];
     expect(first).toEqual({ auth: "connected", tools: [{ name: "list_records", description: "List records in a base", params }, { name: `token_${SECRET.length}` }], readAt: "2026-09-24T12:00:00.000Z" });
     expect(starts(f)).toBe(1);
-    now += 59 * 60_000;
+    now += 2 * 60_000;
     expect(await reader.tools({ kind: "here" }, ask)).toEqual(first);
     expect(starts(f)).toBe(1);
-    expect((await reader.tools({ kind: "here" }, { ...ask, refresh: true })).readAt).toBe("2026-09-24T12:59:00.000Z");
+    expect((await reader.tools({ kind: "here" }, { ...ask, refresh: true })).readAt).toBe("2026-09-24T12:02:00.000Z");
     expect(starts(f)).toBe(2);
     // An edited entry is another definition and is started again.
     f.config({ airtable: { command: join(f.bin, "server"), args: ["--base", "app2"], env: { FAKE_TOKEN: SECRET } } });
     await reader.tools({ kind: "here" }, ask);
     expect(starts(f)).toBe(3);
-    now += 61 * 60_000;
+    now += 3 * 60_000;
     await reader.tools({ kind: "here" }, ask);
     expect(starts(f)).toBe(4);
   }, 30_000);
 
-  it("stops a server that has not answered when the time is up, with its process group, and asks it again on the next click", async () => {
+  it("connects once to a server every agent's file names, however many ask at once, and again once a sign-in there forgets it", async () => {
+    const f = fixture();
+    f.config({ airtable: { command: join(f.bin, "server"), args: [], env: { FAKE_TOKEN: SECRET } } });
+    mkdirSync(join(f.home, ".codex"));
+    writeFileSync(join(f.home, ".codex", "config.toml"), `[mcp_servers.airtable]\ncommand = "${join(f.bin, "server")}"\nargs = []\n\n[mcp_servers.airtable.env]\nFAKE_TOKEN = "${SECRET}"\n`);
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f) });
+    const answers = await Promise.all(["claude", "codex", "claude"].map(agent => reader.tools({ kind: "here" }, { key: "here", agent, name: "airtable" })));
+    expect(answers.map(a => a.auth)).toEqual(["connected", "connected", "connected"]);
+    expect(starts(f)).toBe(1);
+    await reader.tools({ kind: "here" }, { key: "there", agent: "claude", name: "airtable" });
+    expect(starts(f), "another target keeps its own answer").toBe(2);
+    reader.forget("here");
+    await reader.tools({ kind: "here" }, { key: "here", agent: "codex", name: "airtable" });
+    expect(starts(f)).toBe(3);
+  }, 30_000);
+
+  it("leaves no process a check started running, once its tools/list answered or its deadline passed", async () => {
+    const f = fixture();
+    writeFileSync(join(f.bin, "family"), FAMILY);
+    chmodSync(join(f.bin, "family"), 0o755);
+    f.config({ answers: { command: join(f.bin, "family"), args: [], env: { FAKE_TOKEN: SECRET } }, hangs: { command: join(f.bin, "family"), args: ["hang"] } });
+    // The answering one keeps the whole deadline, since a server that waits a second before its answer can pass two
+    // on a busy machine; the hanging one is cut at two.
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f), toolsMs: 2_000 });
+    expect((await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "answers" })).auth).toBe("connected");
+    const answered = readFileSync(join(f.home, "family.pids"), "utf8").trim().split("\n");
+    expect(answered, "the server and its two children").toHaveLength(3);
+    expect(leftOver(f), "left running after an answer").toEqual([]);
+    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "hangs" })).toMatchObject({ auth: "failed", refused: serverToolsLateRefusal(2_000) });
+    expect(readFileSync(join(f.home, "family.pids"), "utf8").trim().split("\n")).toHaveLength(6);
+    expect(leftOver(f), "left running after the deadline").toEqual([]);
+  }, 30_000);
+
+  it("starts at most four servers at once", async () => {
+    const f = fixture();
+    const names = ["s1", "s2", "s3", "s4", "s5", "s6"];
+    writeFileSync(join(f.bin, "counted"), `#!/bin/bash\ntouch "$HOME/in.$$"; ls "$HOME" | grep -c '^in\\.' >> "$HOME/peak"; sleep 0.3; rm -f "$HOME/in.$$"\nexec "$(dirname "$0")/server"\n`);
+    chmodSync(join(f.bin, "counted"), 0o755);
+    f.config(Object.fromEntries(names.map(n => [n, { command: join(f.bin, "counted"), args: [n], env: { FAKE_TOKEN: SECRET } }])));
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f) });
+    const answers = await Promise.all(names.map(name => reader.tools({ kind: "here" }, { key: "here", agent: "claude", name })));
+    expect(answers.map(a => a.auth)).toEqual(names.map(() => "connected"));
+    const peaks = readFileSync(join(f.home, "peak"), "utf8").trim().split("\n").map(Number);
+    expect(peaks).toHaveLength(6);
+    expect(Math.max(...peaks)).toBeLessThanOrEqual(4);
+  }, 30_000);
+
+  it("stops a server that has not answered when the time is up, with its process group, and starts it again on a refresh", async () => {
     const f = fixture();
     f.config({ mute: { command: join(f.bin, "mute"), args: [] }, crash: { command: join(f.bin, "crash"), args: [] } });
     const logged: string[] = [];
@@ -232,8 +294,10 @@ describe("one MCP server's tools, on the person's ask", () => {
     const pid = await pidIn(join(f.home, "mute.pid"));
     expect(() => process.kill(pid, 0), "the server outlived its deadline").toThrow();
     rmSync(join(f.home, "mute.pid"));
-    await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "mute" });
-    expect(await pidIn(join(f.home, "mute.pid")), "a refused answer was kept").toBeGreaterThan(0);
+    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "mute" }), "a failed answer is the state until a refresh").toEqual(late);
+    expect(existsSync(join(f.home, "mute.pid"))).toBe(false);
+    await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "mute", refresh: true });
+    expect(await pidIn(join(f.home, "mute.pid"))).toBeGreaterThan(0);
     // What a server said on stderr can carry its own key: it goes to the host's log, never onto the page.
     const crashed = await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "crash" });
     expect(crashed).toMatchObject({ auth: "failed", refused: "it exited with 1 before it answered" });
@@ -250,9 +314,8 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "notion" })).toMatchObject({ auth: "connected", tools: [{ name: "search", description: "Search the workspace" }] });
     expect(posts.slice(0, 3)).toEqual(["/mcp - initialize", "/mcp s-1 initialized", "/mcp s-1 list"]);
     expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "linear" })).toMatchObject({ auth: "needs-sign-in", holder: "claude" });
-    // The harness's word is not kept: the person may sign in there between two clicks.
-    await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "linear" });
-    expect(readFileSync(join(f.home, "claude-asks"), "utf8").trim().split("\n")).toHaveLength(2);
+    await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "linear", refresh: true });
+    expect(readFileSync(join(f.home, "claude-asks"), "utf8").trim().split("\n"), "the harness is asked once per ten minutes, a refresh too").toHaveLength(1);
     mkdirSync(join(f.home, ".codex"));
     writeFileSync(join(f.home, ".codex", "config.toml"), `[mcp_servers.linear]\nurl = "${url}/oauth"\n`);
     writeFileSync(join(f.bin, "codex"), `#!/bin/bash\necho asked >> "$HOME/codex-asks"\n`);
@@ -410,6 +473,39 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(logged.join("\n")).toContain(`bad key ${SECRET}`);
   }, 20_000);
 
+  it("strips control characters from every tool's name, description and parameters, keeping a description's lines", async () => {
+    const f = fixture();
+    const ESC = String.fromCharCode(27);
+    const tools = [{ name: `pay${ESC}[31m_out`, description: `Sends money.${ESC}]0;owned${String.fromCharCode(7)}\nSecond line.`, inputSchema: { type: "object", properties: { [`to${ESC}[2J`]: { type: "string", description: `who${ESC}[0m` } } } }];
+    writeFileSync(join(f.bin, "hostile"), `#!/bin/bash\nwhile IFS= read -r line; do case "$line" in *'"method":"initialize"'*) printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{}}' ;; *'"method":"tools/list"'*) cat "$HOME/tools.json" ;; esac; done\n`);
+    chmodSync(join(f.bin, "hostile"), 0o755);
+    writeFileSync(join(f.home, "tools.json"), `${JSON.stringify({ jsonrpc: "2.0", id: 2, result: { tools } })}\n`);
+    f.config({ hostile: { command: join(f.bin, "hostile"), args: [] } });
+    const answer = await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "hostile" });
+    expect(answer.tools).toEqual([{ name: "pay[31m_out", description: "Sends money.]0;owned\nSecond line.", params: [{ name: "to[2J", type: "string", required: false, description: "who[0m" }] }]);
+  }, 20_000);
+
+  it("runs a command server on this computer with the login shell's environment under the config's own", async () => {
+    const f = fixture();
+    f.config({ fromrc: { command: join(f.bin, "server"), args: [] }, own: { command: join(f.bin, "server"), args: [], env: { FAKE_TOKEN: "abc" } } });
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f), loginEnv: async () => ({ FAKE_TOKEN: "exported-in-zshrc" }) });
+    const names = async (name: string): Promise<string[]> => ((await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name })).tools ?? []).map(t => t.name);
+    expect(await names("fromrc")).toContain(`token_${"exported-in-zshrc".length}`);
+    expect(await names("own")).toContain("token_3");
+  }, 20_000);
+
+  it("keeps a newline in a header value inside that header's line of curl's config, so it names one address alone", async () => {
+    const f = fixture();
+    const { url } = await remote();
+    // curl as it is, keeping every config it was handed.
+    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\nprev=; for a; do [ "$prev" = -K ] && cat "$a" >> "$HOME/curl.k"; prev=$a; done\nexec /usr/bin/curl "$@"\n`);
+    chmodSync(join(f.bin, "curl"), 0o755);
+    f.config({ split: { type: "http", url: `${url}/mcp`, headers: { "X-Key": `${SECRET}\r\nurl = ${url}/stolen#` } } });
+    await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "split" });
+    const lines = readFileSync(join(f.home, "curl.k"), "utf8").split("\n").filter(l => l !== "");
+    expect(new Set(lines)).toEqual(new Set([`url = "${url}/mcp"`, `header = "X-Key: ${SECRET}\\r\\nurl = ${url}/stolen#"`]));
+  });
+
   it("hands the run's marker to no command's argument list", async () => {
     const f = fixture();
     writeFileSync(join(f.bin, "grep"), GREP);
@@ -419,4 +515,114 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(existsSync(join(f.home, "grep-args"))).toBe(true);
     expect(readFileSync(join(f.home, "grep-args"), "utf8")).not.toContain("WSP_TOOLS_RUN=");
   }, 20_000);
+});
+
+/** An MCP server that answers a plain GET the way a server offering no stream does, takes initialize, and asks for an
+ * OAuth sign-in only when its tools are listed: the answer a GET alone reads as needing none. */
+async function signInOnList(): Promise<{ url: string; seen: string[] }> {
+  const seen: string[] = [];
+  const srv = createServer((req, res) => {
+    let body = "";
+    req.on("data", c => (body += c));
+    req.on("end", () => {
+      const method = req.method === "GET" ? "GET" : body.includes("tools/list") ? "list" : body.includes("notifications/initialized") ? "initialized" : "initialize";
+      seen.push(method);
+      if (method === "GET") return void res.writeHead(405).end();
+      if (method === "initialize") return void res.writeHead(200, { "content-type": "application/json", "mcp-session-id": "s-1" }).end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }));
+      if (method === "initialized") return void res.writeHead(202).end();
+      res.writeHead(401, { "www-authenticate": 'Bearer resource_metadata="http://127.0.0.1/.well-known/oauth-protected-resource"' }).end();
+    });
+  });
+  servers.push(srv);
+  await new Promise<void>(resolve => srv.listen(0, "127.0.0.1", resolve));
+  return { url: `http://127.0.0.1:${(srv.address() as AddressInfo).port}/mcp`, seen };
+}
+
+/** How many times the stub harness was asked about a server. */
+const harnessAsks = (f: Fixture): number => (existsSync(join(f.home, "claude-asks")) ? readFileSync(join(f.home, "claude-asks"), "utf8").trim().split("\n").length : 0);
+
+/** A stub claude whose `mcp get` says Connected for a server named in the home's `signed` file and Needs
+ * authentication for any other, keeping each ask. */
+function harness(f: Fixture, extra = ""): void {
+  writeFileSync(
+    join(f.bin, "claude"),
+    `#!/bin/bash\n[ "$1 $2" = "mcp get" ] || exit 9\necho "$3" >> "$HOME/claude-asks"\n${extra}\nif grep -qxF "$3" "$HOME/signed" 2>/dev/null; then echo "  Status: ✓ Connected"; else echo "  Status: ! Needs authentication"; fi\n`,
+  );
+  chmodSync(join(f.bin, "claude"), 0o755);
+}
+
+describe("a server's state, off its tools connect alone", () => {
+  it("reads a server whose tools call asks for a sign-in as needing one, however it answers a plain GET, and the read claims nothing", async () => {
+    const f = fixture();
+    harness(f);
+    const { url, seen } = await signInOnList();
+    f.config({ zomato: { type: "http", url } });
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f) });
+    const read = await reader.read({ kind: "here" });
+    expect(read.servers.find(s => s.name === "zomato")?.auth).toBe("unknown");
+    expect(seen, "reading the report asked the server nothing").toEqual([]);
+    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "zomato" })).toEqual({ auth: "needs-sign-in", holder: "claude", readAt: expect.any(String) });
+    expect(seen).toEqual(["initialize", "initialized", "list"]);
+    writeFileSync(join(f.home, "signed"), "zomato\n");
+    reader.forget("here");
+    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "zomato" })).toMatchObject({ auth: "signed-in", holder: "claude" });
+  });
+
+  it("asks the harness once per server per sign-in or per ten minutes, however often the server is asked", async () => {
+    const f = fixture();
+    harness(f);
+    const { url } = await remote();
+    f.config({ linear: { type: "http", url: `${url}/oauth` } });
+    let now = 1_000_000;
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f), now: () => now });
+    const ask = { key: "a", agent: "claude", name: "linear" };
+    await Promise.all([reader.tools({ kind: "here" }, ask), reader.tools({ kind: "here" }, ask)]);
+    expect(harnessAsks(f)).toBe(1);
+    now += 4 * 60_000;
+    await reader.tools({ kind: "here" }, ask);
+    expect(harnessAsks(f)).toBe(1);
+    now += 6 * 60_000;
+    await reader.tools({ kind: "here" }, ask);
+    expect(harnessAsks(f)).toBe(2);
+    reader.forget("a");
+    await reader.tools({ kind: "here" }, ask);
+    expect(harnessAsks(f)).toBe(3);
+  });
+
+  it("runs at most two harness asks at once", async () => {
+    const f = fixture();
+    harness(f, `touch "$HOME/in.$$"; ls "$HOME" | grep -c '^in\\.' >> "$HOME/peak"; sleep 0.3; rm -f "$HOME/in.$$"`);
+    const { url } = await remote();
+    const names = ["a1", "a2", "a3", "a4", "a5"];
+    f.config(Object.fromEntries(names.map(n => [n, { type: "http", url: `${url}/oauth`, headers: { "X-Name": n } }])));
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f) });
+    const answers = await Promise.all(names.map(name => reader.tools({ kind: "here" }, { key: "k", agent: "claude", name })));
+    expect(answers.map(a => a.auth)).toEqual(names.map(() => "needs-sign-in"));
+    const peaks = readFileSync(join(f.home, "peak"), "utf8").trim().split("\n").map(Number);
+    expect(peaks).toHaveLength(5);
+    expect(Math.max(...peaks)).toBeLessThanOrEqual(2);
+  });
+
+  it("gives the harness five seconds to answer, then keeps the server's own needs sign-in", async () => {
+    const f = fixture();
+    harness(f, "sleep 8");
+    const { url } = await remote();
+    f.config({ slow: { type: "http", url: `${url}/oauth` } });
+    const started = Date.now();
+    const answer = await agentsReader({ vault: () => ({}), here: () => here(f) }).tools({ kind: "here" }, { key: "k", agent: "claude", name: "slow" });
+    expect(Date.now() - started).toBeLessThan(7_000);
+    expect(answer.auth).toBe("needs-sign-in");
+  }, 15_000);
+
+  it("asks no harness for a name set up in two scopes, since the harness picks which one it asks", async () => {
+    const f = fixture();
+    harness(f);
+    const { url } = await remote();
+    writeFileSync(join(f.home, ".claude.json"), JSON.stringify({ mcpServers: { twice: { type: "http", url: `${url}/oauth` }, once: { type: "http", url: `${url}/oauth` } }, projects: { [f.home]: { mcpServers: { twice: { command: "touch", args: ["started"] } } } } }));
+    writeFileSync(join(f.home, ".mcp.json"), JSON.stringify({ mcpServers: { once: { command: "touch", args: ["started-too"] } } }));
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f) });
+    for (const name of ["twice", "once"]) expect(await reader.tools({ kind: "here" }, { key: "k", agent: "claude", name }), name).toMatchObject({ auth: "unknown", holder: "claude" });
+    expect(harnessAsks(f)).toBe(0);
+    expect(existsSync(join(f.home, "started")) || existsSync(join(f.home, "started-too"))).toBe(false);
+  });
 });

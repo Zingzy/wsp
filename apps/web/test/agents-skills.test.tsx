@@ -138,14 +138,14 @@ describe("a skill's detail", () => {
     await act(async () => h.pending[0]!.resolve());
     const off: AgentsReport = { ...AGENTS_REPORT, skills: AGENTS_REPORT.skills.map(s => (s.name === "frontend-design" ? { ...s, paths: s.paths.map(p => ({ ...p, off: true as const })) } : s)) };
     rerender(<List report={off} />);
-    expect(detail().querySelector("[data-fact=status] [data-fact-value]")?.textContent).toBe("off");
+    expect(detail().querySelector("[data-fact=status] [data-status-word]")?.textContent).toBe("off");
     expect(acts()).toEqual([W.turnOn, W.remove]);
     fireEvent.click(actIn("turn-on"));
     expect(h.toggles.at(-1)).toEqual(["frontend-design", false, true]);
     await act(async () => h.pending[1]!.reject(new Error("mv: Permission denied")));
     expect(detail().querySelector("[data-k=detail-refused]")?.textContent).toContain("mv: Permission denied");
     fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
-    expect(rowEl("skill-user-frontend-design").querySelector("[data-row-word]")?.textContent).toBe("off");
+    expect(rowEl("skill-user-frontend-design").querySelector("[data-row-word] [data-status-word]")?.textContent).toBe("off");
     expect(rowEl("skill-user-frontend-design").querySelector("[data-row-title]")?.className).toContain("text-foreground/70");
   });
 
@@ -248,7 +248,7 @@ describe("Add a skill", () => {
     await settle();
     expect(h.gets).toEqual(["anthropics/skills/pdf"]);
     expect(detail().querySelector("[data-k=detail-title]")?.textContent).toBe("pdf");
-    expect([...detail().querySelectorAll<HTMLElement>("[data-fact]")].map(f => f.querySelector("[data-fact-value]")?.textContent)).toEqual([W.notInstalled, "anthropics/skills", "3.6M"]);
+    expect([...detail().querySelectorAll<HTMLElement>("[data-fact]")].map(f => (f.querySelector("[data-fact-value]") ?? f.querySelector("[data-status-word]"))?.textContent)).toEqual([W.notInstalled, "anthropics/skills", "3.6M"]);
     expect(detail().querySelector("[data-k=skill-preview-body] h1")?.textContent).toBe("pdf");
     expect(acts()).toEqual(["Install pdf"]);
     // Codex and OpenCode read the shared folder, so they stand ticked and held; Claude Code takes a link of its own.
@@ -277,7 +277,7 @@ describe("Add a skill", () => {
     expect(h.adds).toEqual([["anthropics/skills/pdf", ["claude"], true]]);
     fireEvent.click(detail().querySelector<HTMLButtonElement>("[data-k=agents-back]")!);
     fireEvent.click(document.querySelector<HTMLButtonElement>('[data-add-row="acme/kit/frontend-design"] [data-row-trigger]')!);
-    expect(detail().querySelector("[data-fact=status] [data-fact-value]")?.textContent).toBe(W.installed);
+    expect(detail().querySelector("[data-fact=status] [data-status-word]")?.textContent).toBe(W.installed);
     expect(actIn("install").disabled).toBe(true);
     expect(detail().querySelector("[data-act-hover=install]")?.getAttribute("title")).toBe("already on spoo");
   });

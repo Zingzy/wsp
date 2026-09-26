@@ -8,12 +8,46 @@
 // A lookup that fails is not kept, so an ask made offline is made again.
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
+import { BlockList, isIP } from "node:net";
 import { join } from "node:path";
 import type { ServerIcons } from "@wsp/runtime";
 import { z } from "zod";
-import { isInternalAddress, resolveAll, type Resolver } from "./server-check.js";
 import { capped } from "./skills-sh.js";
+
+/** One address a name resolves to. */
+export interface Pin {
+  address: string;
+  family: 4 | 6;
+}
+
+export type Resolver = (hostname: string) => Promise<readonly Pin[]>;
+
+/** Every address the name resolves to, as this computer's resolver answers it. */
+export const resolveAll: Resolver = async hostname => (await lookup(hostname, { all: true, verbatim: true })).map(a => ({ address: a.address, family: a.family === 6 ? 6 : 4 }));
+
+const INTERNAL = new BlockList();
+for (const [net, bits] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3]] as const) INTERNAL.addSubnet(net, bits, "ipv4");
+for (const [net, bits] of [["::", 96], ["64:ff9b:1::", 48], ["fc00::", 7], ["fe80::", 10], ["fec0::", 10], ["ff00::", 8], ["2002::", 16]] as const) INTERNAL.addSubnet(net, bits, "ipv6");
+
+/** The IPv4 address an IPv6 one carries, mapped (::ffff:a.b.c.d) or through NAT64 (64:ff9b::/96). */
+function carriedV4(address: string): string | undefined {
+  const tail = /^(?:::ffff:|64:ff9b::)(.+)$/i.exec(address)?.[1];
+  if (tail === undefined) return undefined;
+  if (isIP(tail) === 4) return tail;
+  const [hi, lo] = tail.split(":").map(h => parseInt(h, 16));
+  return hi === undefined || lo === undefined || Number.isNaN(hi) || Number.isNaN(lo) ? undefined : [hi >> 8, hi & 255, lo >> 8, lo & 255].join(".");
+}
+
+/** Loopback, private, link-local, shared, multicast or reserved: an address this computer reaches that the
+ * server's name must not lead an ask to. */
+export function isInternalAddress(address: string): boolean {
+  const family = isIP(address);
+  if (family === 4) return INTERNAL.check(address, "ipv4");
+  if (family !== 6) return true;
+  const v4 = carriedV4(address);
+  return v4 !== undefined ? INTERNAL.check(v4, "ipv4") : INTERNAL.check(address, "ipv6");
+}
 
 export type IconFetch = (url: string, init?: { signal?: AbortSignal; redirect?: RequestRedirect }) => Promise<Response>;
 

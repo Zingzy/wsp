@@ -8,7 +8,7 @@ import { createRuntime, jsonFileStore } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { up, type CliIO } from "../src/cli.js";
 import { stateWriterHere } from "../src/version.js";
-import { LAUNCHD_PATH, needsLoginPath, takeLoginPath } from "../src/login-path.js";
+import { LAUNCHD_PATH, loginEnvOf, needsLoginPath, takeLoginPath } from "../src/login-path.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
@@ -184,4 +184,34 @@ describe("the login shell PATH", () => {
     expect(shim, "the read waits on a shell before the command is written").toBeLessThan(read);
     expect(read, "the setup gate builds its runtime before the read").toBeLessThan(gate);
   });
+});
+
+describe("the login shell's environment", () => {
+  it("reads every variable env -0 printed, past a greeting an rc file printed first, a value's newlines kept", () => {
+    const out = ["Welcome back\nHOME=/Users/ada", "TOKEN=sk-x-fake", "MULTI=one\ntwo", "EMPTY=", ""].join("\0");
+    expect(loginEnvOf(out)).toEqual({ HOME: "/Users/ada", TOKEN: "sk-x-fake", MULTI: "one\ntwo", EMPTY: "" });
+    expect(loginEnvOf("")).toEqual({});
+  });
+});
+
+describe("the login shell's environment", () => {
+  it("is read even when an rc file waits on its input, since the shell's input is closed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-login-env-"));
+    const shell = join(dir, "sh");
+    writeFileSync(shell, `#!/bin/sh\nread answer\nprintf 'WSP_FROM_RC=yes\\0'\n`);
+    chmodSync(shell, 0o755);
+    const was = process.env["SHELL"];
+    process.env["SHELL"] = shell;
+    vi.resetModules();
+    try {
+      const { loginEnv } = await import("../src/login-path.js");
+      const started = Date.now();
+      expect(await loginEnv()).toMatchObject({ WSP_FROM_RC: "yes" });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      if (was === undefined) delete process.env["SHELL"];
+      else process.env["SHELL"] = was;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
