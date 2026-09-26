@@ -200,6 +200,19 @@
       "wait": "settings-at=computers"
     },
     {
+      "name": "settings-computers-mac",
+      "at": "/",
+      "steps": [
+        "k=settings-row",
+        "k=settings-computers"
+      ],
+      "wait": "settings-at=computers",
+      "mac": true,
+      "widths": [
+        1440
+      ]
+    },
+    {
       "name": "settings-account",
       "at": "/",
       "steps": [
@@ -305,6 +318,22 @@
       "fixture": "image-built",
       "wait": "k=image-holds",
       "settleMs": 700
+    },
+    {
+      "name": "settings-image-built-mac",
+      "at": "/",
+      "steps": [
+        "k=settings-row",
+        "k=settings-computers",
+        "place-row=p_hetzner"
+      ],
+      "fixture": "image-built",
+      "wait": "k=image-holds",
+      "settleMs": 700,
+      "mac": true,
+      "widths": [
+        1440
+      ]
     },
     {
       "name": "settings-image-recipe",
