@@ -19,6 +19,9 @@ use wsp_daemon::{Daemon, Options};
 use wsp_frames::{numbers, words};
 use wsp_guest::{session, Streams};
 
+#[path = "../../wsp-daemon/tests/held_port/mod.rs"]
+mod held_port;
+
 const TOKEN: &str = "guest-token-123";
 const WAIT: Duration = Duration::from_secs(5);
 
@@ -260,12 +263,9 @@ async fn nothing_answering_on_the_port_is_one_line_and_a_refusal() {
     let d = start().await;
     let dead = TcpStream::connect(d.addr).await.map(|_| ()).err();
     assert!(dead.is_none(), "the daemon under test is up, so the closed port below is the only one that is not");
-    let closed = {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let at = listener.local_addr().unwrap();
-        drop(listener);
-        at
-    };
+    let held = held_port::refused_port().await;
+    let closed = SocketAddr::from(([127, 0, 0, 1], held.port));
+    assert!(!held_port::squatter_binds(closed), "another test's listener could take the refused port");
     let run = ran(&["threads"], &[], closed, d.token.path(), silent).await;
     assert_eq!(run.code, 1);
     assert_eq!(run.err, format!("{}\n", words::guest_no_daemon_line(closed.port())));

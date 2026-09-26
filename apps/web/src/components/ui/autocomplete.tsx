@@ -4,6 +4,7 @@
 import { Autocomplete as AutocompletePrimitive } from "@base-ui/react/autocomplete";
 import { ChevronsUpDownIcon, XIcon } from "lucide-react";
 
+import { MICRO_LABEL } from "../../lib/microLabel";
 import { cn } from "../../lib/utils";
 import { Input } from "./input";
 import { ScrollArea } from "./scroll-area";
@@ -160,7 +161,7 @@ function AutocompleteGroup({ className, ...props }: AutocompletePrimitive.Group.
 function AutocompleteGroupLabel({ className, ...props }: AutocompletePrimitive.GroupLabel.Props) {
   return (
     <AutocompletePrimitive.GroupLabel
-      className={cn("px-2 py-1.5 font-medium text-muted-foreground text-xs", className)}
+      className={cn("px-2 py-1.5 text-muted-foreground", MICRO_LABEL, className)}
       data-slot="autocomplete-group-label"
       {...props}
     />

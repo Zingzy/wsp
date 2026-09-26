@@ -8,6 +8,7 @@
 // was. Mounted once by the shell.
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { ContextMenuItem } from "@wsp/protocol";
+import { MenuShortcut } from "../components/ui/menu.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
 import { useContextMenuStore, type OpenMenu } from "./contextMenu.js";
@@ -119,7 +120,7 @@ function MenuRow({ item, startsGroup, onFocus, onChoose }: { item: ContextMenuIt
       <span data-menu-label className="min-w-0 flex-1 truncate">
         {item.label}
       </span>
-      {item.shortcut !== undefined ? <kbd className="ms-auto font-sans text-[10px] tracking-wide text-muted-foreground">{item.shortcut}</kbd> : null}
+      {item.shortcut !== undefined ? <MenuShortcut>{item.shortcut}</MenuShortcut> : null}
     </button>
   );
   return (

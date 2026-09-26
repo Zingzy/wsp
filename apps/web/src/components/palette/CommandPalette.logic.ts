@@ -14,25 +14,15 @@ export const RECENT_THREAD_LIMIT = 12;
 export const ITEM_ICON_CLASS = "size-4 text-icon-muted";
 export const ADDON_ICON_CLASS = "size-4";
 
-export interface CommandPaletteThreadContentMatch {
-  readonly source: "user" | "assistant";
-  readonly snippet: string;
-  readonly query: string;
-}
-
 export interface CommandPaletteItem {
   readonly kind: "action" | "submenu";
   readonly value: string;
   readonly searchTerms: ReadonlyArray<string>;
   readonly title: ReactNode;
   readonly description?: ReactNode;
-  readonly threadContentMatch?: CommandPaletteThreadContentMatch;
-  readonly timestamp?: string;
   readonly icon: ReactNode;
   readonly disabled?: boolean;
-  /** Optional content rendered inline before the title text. */
-  readonly titleLeadingContent?: ReactNode;
-  /** Optional content rendered inline after the title text (before the timestamp). */
+  /** Content at the row's right end, before its shortcut. */
   readonly titleTrailingContent?: ReactNode;
   readonly shortcutCommand?: KeybindingCommand;
 }
@@ -195,7 +185,7 @@ export function buildRootGroups(input: {
   if (input.recentThreadItems.length > 0) {
     groups.push({
       value: "recent-threads",
-      label: "Recent Threads",
+      label: "Recent threads",
       items: input.recentThreadItems,
     });
   }

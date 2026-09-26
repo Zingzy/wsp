@@ -15,6 +15,9 @@ use tokio_tungstenite::WebSocketStream;
 use wsp_frames::words;
 use wsp_guest::{forward, Forwarded, Streams};
 
+#[path = "../../wsp-daemon/tests/held_port/mod.rs"]
+mod held_port;
+
 const TOKEN: &str = "host-token-abc";
 const WAIT: Duration = Duration::from_secs(5);
 
@@ -131,10 +134,9 @@ async fn a_tool_server_line_with_no_host_serving_it_is_left_to_the_wsp_after_one
     assert_eq!(wsp.ran(), ["door mcp --state /s/state.json"]);
 
     // A door nothing answers at is the same: the wsp serves the line itself and says what it finds.
-    let closed = {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        listener.local_addr().unwrap()
-    };
+    let held = held_port::refused_port().await;
+    let closed = held.addrs()[0];
+    assert!(!held_port::squatter_binds(closed), "another test's listener could take the door's port");
     let wsp = FakeWsp::new(Some(&door(closed)));
     assert_eq!(forwarded(&["mcp"], &wsp, &[], |_| async {}).await, Forwarded::Run);
 }

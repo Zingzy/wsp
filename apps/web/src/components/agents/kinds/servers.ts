@@ -11,7 +11,7 @@
 // Remove act on every agent the entry is set up for, and Add an MCP server is
 // a form in place of the list.
 import { ActivityIcon, PlugIcon, PowerIcon, PowerOffIcon, RefreshCwIcon, ServerIcon, Trash2Icon, WrenchIcon } from "lucide-react";
-import { agentName, mcpSwitch } from "@wsp/catalog";
+import { agentName, mcpSwitch, serverMark } from "@wsp/catalog";
 import type { AgentsProject, AgentsReport, McpRow, McpTool, McpToolParam, ServerToolsAnswer } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, holdAll, notYet, onImage, serverSignInStart, signInAct, waitingFlow, type FlowView, type RowAct, type RowsContext, type ToolsState } from "../agentsRows.js";
 import { AddServerForm } from "../AddServerForm.js";
@@ -35,8 +35,13 @@ export interface ServerEntry {
 
 const scopeOf = (row: McpRow): Scope => (row.scope === "project" ? "project" : "global");
 const reachOf = (row: McpRow): string => (row.transport.kind === "stdio" ? row.transport.line : row.transport.host);
-/** The box a server's row and detail lead with: its own icon where it is reached over an address. */
-const leadOf = (entry: ServerEntry): Lead => ({ kind: "box", icon: ServerIcon, ...(entry.stdio || entry.reach === "" ? {} : { host: entry.reach }) });
+/** The box a server's row and detail lead with: its company's registered mark, else its own icon where it is reached
+ * over an address. */
+const leadOf = (entry: ServerEntry): Lead => {
+  const mark = serverMark(entry.rows[0]!.transport);
+  if (mark !== undefined) return { kind: "box", icon: ServerIcon, mark };
+  return { kind: "box", icon: ServerIcon, ...(entry.stdio || entry.reach === "" ? {} : { host: entry.reach }) };
+};
 const rowId = (row: McpRow): string => rowKey(["server", row.agent, row.scope], row.project, row.name);
 
 /** One entry per server: the same name reached the same way in the same scope, and the same project, is one server

@@ -26,8 +26,6 @@ import { HERE_KEY } from "../terminal/computer.js";
 import { openPanelTerminal } from "./shellCommands.js";
 import { useTerminalSurfaces, WorkspaceTerminalPanel } from "../components/WorkspaceTerminalPanel.js";
 
-const NO_PENDING: ReadonlySet<string> = new Set();
-
 interface PaneView<K extends RightPanelKind> {
   Surface(props: { workspaceId: string; surface: Extract<RightPanelSurface, { kind: K }>; theme: "light" | "dark" }): ReactNode;
   /** How the pane opens when the store cannot open it alone. */
@@ -107,7 +105,6 @@ export function RightPanel({
       {...(layoutControls !== undefined ? { layoutControls } : {})}
       surfaces={state.surfaces}
       activeSurfaceId={state.activeSurfaceId}
-      pendingSurfaceIds={NO_PENDING}
       previewSessions={previewSessions}
       terminalLabelsById={terminalLabelsById}
       onActivate={surface => activateSurface(workspaceId, surface.id)}

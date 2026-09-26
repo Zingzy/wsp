@@ -224,7 +224,7 @@ export function Line({ id, label, value, valueClass = "value", keys, keysJoiner,
               {at > 0 && keysJoiner !== undefined ? <span className={FACT}>{keysJoiner}</span> : null}
               <KbdGroup>
                 {chord.map(key => (
-                  <Kbd key={key} className="font-mono">
+                  <Kbd key={key}>
                     {key}
                   </Kbd>
                 ))}

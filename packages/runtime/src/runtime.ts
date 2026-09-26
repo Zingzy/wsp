@@ -3289,12 +3289,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * whose doctor says it cannot run workspaces, in the sentence its row carries; a delete, a remove and an update
    * need no copy running and never ask. */
   const placeRefuses = async (placeId: string | undefined): Promise<void> => {
-    if (placeId === undefined || placeDoor === undefined) return;
-    const report = await placeDoor.reportOf(placeId);
-    const blocked = report === undefined ? undefined : placeBlocked(placeDoor.nameOf(placeId), report);
+    const blocked = await blockedLine(placeId);
     if (blocked !== undefined) throw new Error(blocked);
   };
+  const blockedLine = async (placeId: string | undefined): Promise<string | undefined> => {
+    if (placeId === undefined || placeDoor === undefined) return undefined;
+    const report = await placeDoor.reportOf(placeId);
+    return report === undefined ? undefined : placeBlocked(placeDoor.nameOf(placeId), report);
+  };
   const copyBlocked = (entry: LiveWorkspace): Promise<void> => placeRefuses(entry.record.place);
+  /** All a channel into a copy on such a computer carries: a stopped copy's git.status reads its files, and ping is the beat a pane's link opens on. */
+  const BLOCKED_READS: ReadonlySet<string> = new Set(["git.status", "ping"]);
+  const readsOnly = (channel: DaemonChannel, said: string): DaemonChannel => ({
+    send: frame => (BLOCKED_READS.has(frame.op) ? channel.send(frame) : Promise.resolve({ id: null, ok: false, code: "unsupported", error: said })),
+    close: () => channel.close(),
+    closed: channel.closed,
+  });
 
   /** The three frames a place daemon stamps with the workspace a session was opened inside, which is the listener
    * it arrived on and never anything the guest said. */
@@ -5914,9 +5924,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async daemonChannel(id, onEvent, origin) {
       const entry = await entryOf(id, origin);
-      await copyBlocked(entry);
+      const blocked = await blockedLine(entry.record.place);
       const served = servedByItsComputer(entry);
-      return served === undefined ? ownDaemonChannel(entry, onEvent) : servedChannel(entry, served, onEvent, WORKSPACE_FRAMES);
+      const channel = await (served === undefined ? ownDaemonChannel(entry, onEvent) : servedChannel(entry, served, onEvent, WORKSPACE_FRAMES));
+      return blocked === undefined ? channel : readsOnly(channel, blocked);
     },
 
     async guestChannel(id, onEvent) {

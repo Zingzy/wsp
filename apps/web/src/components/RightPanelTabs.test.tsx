@@ -2,13 +2,11 @@
 // The right panel's launcher and its tab strip: six panes and no others,
 // each with its own letter, and a pane the workspace cannot serve yet drawn
 // held with the one line that says why.
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RightPanelTabs } from "./RightPanelTabs";
 import type { RightPanelSurface } from "../rightPanelStore";
 import { PANE_KINDS, type RightPanelKind } from "../panes";
-
-const NONE: ReadonlySet<string> = new Set();
 
 function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string | null; diffAvailable?: boolean; processesAvailable?: boolean; onAdd?: (kind: RightPanelKind) => void } = {}) {
   return render(
@@ -16,7 +14,6 @@ function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string |
       mode="inline"
       surfaces={over.surfaces ?? []}
       activeSurfaceId={over.activeSurfaceId ?? null}
-      pendingSurfaceIds={NONE}
       previewSessions={{}}
       terminalLabelsById={new Map()}
       onActivate={vi.fn()}
@@ -62,6 +59,31 @@ describe("the right panel's launcher", () => {
     const procs = document.querySelector<HTMLElement>('[data-surface-launch="processes"]')!;
     expect(procs.dataset["available"]).toBe("false");
     expect(procs.textContent).toContain("Available while the task is running.");
+  });
+
+  it("draws each pane as a borderless row that fills with the accent on hover, its key in mono", () => {
+    draw();
+    const browser = document.querySelector<HTMLElement>('[data-surface-launch="preview"]')!;
+    expect(browser.className).not.toMatch(/\bborder\b|\bbg-card\b|inset-ring/);
+    expect(browser.className).toContain("hover:bg-accent");
+    expect(browser.querySelector("kbd")!.className).toContain("font-mono");
+  });
+
+  it("dims a held row's label, glyph and key at 0.64 and leaves its reason at full ink", () => {
+    draw({ diffAvailable: false });
+    const diff = document.querySelector<HTMLElement>('[data-surface-launch="diff"]')!;
+    expect(within(diff).getByText("Diff").className).toContain("opacity-64");
+    expect(diff.querySelector("kbd")!.className).toContain("opacity-64");
+    expect(diff.querySelector("svg")!.getAttribute("class")).toContain("opacity-64");
+    expect(within(diff).getByText("Review changes once the task is running.").className).not.toContain("opacity");
+  });
+
+  it("draws the open tab as a 6px chip and the add button as a 28px square", () => {
+    draw({ surfaces: [{ id: "diff", kind: "diff" }], activeSurfaceId: "diff" });
+    const chip = document.querySelector<HTMLElement>("[data-active-tab]")!;
+    expect(chip.className).toContain("rounded-sm");
+    expect(chip.className).toContain("h-6");
+    expect(screen.getByRole("button", { name: "Add a panel" }).className).toContain("size-7");
   });
 
   it("names the open panes on the tab strip", () => {

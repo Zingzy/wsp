@@ -471,6 +471,30 @@
       "settleMs": 700
     },
     {
+      "name": "palette-open",
+      "at": "/",
+      "fixture": "thread-states",
+      "steps": [
+        "key:ControlOrMeta+k"
+      ],
+      "wait": "command-palette=true",
+      "widths": [
+        1440
+      ],
+      "settleMs": 700
+    },
+    {
+      "name": "panel-launcher",
+      "at": "/",
+      "steps": [
+        "row-id=thread:redirect"
+      ],
+      "wait": "surface-launcher-keys",
+      "widths": [
+        1440
+      ]
+    },
+    {
       "name": "tiles",
       "at": "/",
       "fixture": "tiles",
