@@ -7,9 +7,10 @@
 // them), nor does a formula with no Linux bottle, nor anything the catalog
 // already carries: a brew node or python is the base row, not a second row.
 import { ROADS, asLinuxbrew, catalogToolFor, roadModule, type InstallRoad, type RoadName } from "@wsp/catalog";
-import { aptPackages, aptSizes, firstLine, linuxSupport, parseBrewfile, parseCargoInstalls, parseNpmGlobals, parsePipxList, parseUvToolList, type Host, type Pkg } from "@wsp/collect";
+import { aptPackages, aptSizes, firstLine, linuxSupport, nodeHost, parseBrewfile, parseCargoInstalls, parseNpmGlobals, parsePipxList, parseUvToolList, type Host, type Pkg } from "@wsp/collect";
 import { agentOwning, parseDu } from "@wsp/engine";
 import { shellQuote, toolRowId, type RecipeCustomRow } from "@wsp/protocol";
+import type { VerbDeps } from "./verbs.js";
 
 /** One tool this computer has, as the Also screen and `wsp recipe scan` draw it. */
 export interface ScanRow {
@@ -204,3 +205,7 @@ export async function scanTools(host: Host, recipe: readonly RecipeCustomRow[] =
   }
   return rows;
 }
+
+/** What else a package manager on this computer has, for the recipe verbs on both doors: the scanner reaches the
+ * engine, so the command line and the host hand it in rather than the verb table importing it. */
+export const alsoHere: VerbDeps["alsoHere"] = recipe => scanTools(nodeHost(), recipe);

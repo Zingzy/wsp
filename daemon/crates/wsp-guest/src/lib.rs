@@ -5,7 +5,10 @@
 //! crate knows a verb: the line goes over whole and the host runs the command line it already has.
 
 mod cli;
+mod here;
 mod mcp;
+
+pub use here::{forward, run_here, Forwarded};
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -99,6 +102,28 @@ async fn speak<S: AsyncRead + AsyncWrite + Unpin>(
     streams: &mut Streams<'_>,
 ) -> i32 {
     let kind = if line == [MCP_WORD] { GuestKind::Mcp } else { GuestKind::Cli };
+    if let Err(error) = open(&mut ws, kind, line, env, None).await {
+        let said = error.unwrap_or_else(|| words::guest_no_daemon_line(daemon.port()));
+        return refused(streams, &said).await;
+    }
+    match kind {
+        GuestKind::Mcp => match mcp::pump(&mut ws, streams, &mut mcp::Carry::default()).await {
+            mcp::End::Code(code) => code,
+            mcp::End::Lost => REFUSED,
+        },
+        GuestKind::Cli => cli::pump(ws, streams).await,
+    }
+}
+
+/// Sends the open frame and reads its reply. The error is the far end's own sentence where it refused the line,
+/// and nothing where the socket failed before it could say one, which each road words for itself.
+pub(crate) async fn open<S: AsyncRead + AsyncWrite + Unpin>(
+    ws: &mut Socket<S>,
+    kind: GuestKind,
+    line: &[String],
+    env: &dyn Fn(&str) -> Option<String>,
+    typed_in: Option<&[(String, String)]>,
+) -> Result<(), Option<String>> {
     let cwd = std::env::current_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
     let mut open = json!({
         "id": OPEN_ID,
@@ -113,17 +138,17 @@ async fn speak<S: AsyncRead + AsyncWrite + Unpin>(
     if let Some(turn) = env(TURN_TOKEN_ENV).filter(|t| !t.is_empty()) {
         open["turnToken"] = Value::String(turn);
     }
+    if let Some(vars) = typed_in {
+        open["env"] = Value::Object(vars.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect());
+    }
     if ws.send(Message::text(open.to_string())).await.is_err() {
-        return refused(streams, &words::guest_no_daemon_line(daemon.port())).await;
+        return Err(None);
     }
     // The open is answered before anything is pumped: a line the wire refuses (too many words, a token past its cap)
     // comes back as a reply and not an event, and a pump waiting on events alone would wait for good.
-    if let Some(error) = opened(&mut ws).await {
-        return refused(streams, &error).await;
-    }
-    match kind {
-        GuestKind::Mcp => mcp::pump(ws, streams).await,
-        GuestKind::Cli => cli::pump(ws, streams).await,
+    match opened(ws).await {
+        None => Ok(()),
+        Some(error) => Err(Some(error)),
     }
 }
 
@@ -151,8 +176,13 @@ const SOCKET_ENDED: &str = "this machine's wsp daemon ended the connection";
 /// take the token, which the caller says in one sentence.
 async fn dial(daemon: SocketAddr, token_path: &Path) -> Option<Socket<MaybeTlsStream<TcpStream>>> {
     let token = std::fs::read_to_string(token_path).ok()?;
-    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{daemon}/")).await.ok()?;
-    let auth = json!({ "id": 1, "op": "auth", "token": token.trim() });
+    authed(&format!("ws://{daemon}/"), token.trim()).await
+}
+
+/// A socket at that address with the token as its first frame, once the far end has taken it.
+pub(crate) async fn authed(url: &str, token: &str) -> Option<Socket<MaybeTlsStream<TcpStream>>> {
+    let (mut ws, _) = tokio_tungstenite::connect_async(url).await.ok()?;
+    let auth = json!({ "id": 1, "op": "auth", "token": token });
     ws.send(Message::text(auth.to_string())).await.ok()?;
     let reply = next_frame(&mut ws).await?;
     (reply.get("ok") == Some(&Value::Bool(true))).then_some(ws)
@@ -160,10 +190,15 @@ async fn dial(daemon: SocketAddr, token_path: &Path) -> Option<Socket<MaybeTlsSt
 
 /// The next text frame as JSON; nothing once the socket is done.
 pub(crate) async fn next_frame<S: AsyncRead + AsyncWrite + Unpin>(ws: &mut Socket<S>) -> Option<Value> {
+    serde_json::from_str(&next_text(ws).await?).ok()
+}
+
+/// The next frame's text as it came, for a reader that hands part of it on untouched.
+pub(crate) async fn next_text<S: AsyncRead + AsyncWrite + Unpin>(ws: &mut Socket<S>) -> Option<String> {
     loop {
         match ws.next().await {
-            Some(Ok(Message::Text(t))) => return serde_json::from_str(&t).ok(),
-            Some(Ok(Message::Binary(b))) => return serde_json::from_slice(&b).ok(),
+            Some(Ok(Message::Text(t))) => return Some(t.as_str().to_owned()),
+            Some(Ok(Message::Binary(b))) => return String::from_utf8(b.to_vec()).ok(),
             Some(Ok(_)) => continue,
             Some(Err(_)) | None => return None,
         }
