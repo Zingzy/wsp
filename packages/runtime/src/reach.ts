@@ -99,7 +99,7 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
     const id = nextId++;
     return new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
-      const text = JSON.stringify({ id, op, ...params });
+      const text = JSON.stringify({ ...params, id, op });
       sock.send(opts.seal === undefined ? text : opts.seal.seal(text));
     });
   }

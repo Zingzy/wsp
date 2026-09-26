@@ -46,7 +46,7 @@ export async function targetLink(client: HostClient, target: AgentsTarget): Prom
   void client.closed.then(() => gone?.());
   return {
     link: {
-      op: async (op, extra) => (await client.request<{ reply: Record<string, unknown> }>("daemon.send", { channel, frame: { op, ...extra } })).reply,
+      op: async (op, extra) => (await client.request<{ reply: Record<string, unknown> }>("daemon.send", { channel, frame: { ...extra, op } })).reply,
       onEvent: fn => {
         readers.add(fn);
         return () => readers.delete(fn);

@@ -597,3 +597,28 @@ describe("ProtocolClient event cursor", () => {
     client.close();
   });
 });
+
+describe("ProtocolClient request envelope", () => {
+  it("stamps its own id and op over any the caller's params carry, so a request cannot take another's reply", async () => {
+    ScriptedSocket.instances.length = 0;
+    ScriptedSocket.authOk = true;
+    ScriptedSocket.serverUp = true;
+    const held: Frame[] = [];
+    ScriptedSocket.reply = f => (f["op"] === "hold" ? void held.push(f) : { id: f["id"], ok: true, answered: f["op"] });
+    const client = new ProtocolClient({ url: "ws://test", token: "tok", WebSocketCtor: ScriptedSocket as unknown as typeof WebSocket });
+    await client.connect();
+    const sock = ScriptedSocket.instances[0]!;
+    const holding = client.request("hold");
+    const heldId = held[0]!["id"];
+    for (const params of [{ id: heldId }, { op: "workspaces.delete" }]) {
+      const asking = client.request("capabilities.get", params);
+      const sent = sock.sent.at(-1)!;
+      expect(sent["id"]).not.toBe(heldId);
+      expect(sent["op"]).toBe("capabilities.get");
+      expect(await asking).toMatchObject({ answered: "capabilities.get" });
+    }
+    sock.onmessage?.({ data: JSON.stringify({ id: heldId, ok: true, answered: "hold" }) });
+    expect(await holding).toMatchObject({ answered: "hold" });
+    client.close();
+  });
+});

@@ -1219,7 +1219,7 @@ export function connectDaemonSocket(opts: ConnectOptions): Promise<DaemonSocket>
       const id = nextId++;
       return new Promise((res, rej) => {
         pending.set(id, { resolve: res, reject: rej });
-        ws.send(JSON.stringify({ id, op: name, ...extra }));
+        ws.send(JSON.stringify({ ...extra, id, op: name }));
       });
     };
 

@@ -134,7 +134,7 @@ export class LinkMachine implements Machine {
   }
 
   private ask<T>(reply: { parse(v: unknown): T } | null, op: string, params: Record<string, unknown> = {}, opts?: LinkAsk): Promise<T> {
-    return askLink(this.link, reply, op, { machineId: this.id, ...params }, opts);
+    return askLink(this.link, reply, op, { ...params, machineId: this.id }, opts);
   }
 
   /** A command the caller says may be run twice carries its key down to the link, so a gap in the link is waited
