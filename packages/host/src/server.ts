@@ -20,8 +20,9 @@ import { hostFolders } from "./host-folders.js";
 import { projectBundler } from "./project-bundle.js";
 import { imageExporter } from "./image.js";
 import { projectLander } from "./project-export.js";
+import { alsoHere } from "./scan.js";
 import { guestCli } from "./guest-cli.js";
-import { guestMcp } from "./guest-mcp.js";
+import { guestMcp, hereMcp } from "./guest-mcp.js";
 import { guestDoor } from "./guest.js";
 import { runningWsp } from "./mcp-install.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
@@ -284,13 +285,13 @@ function kindOf(labels: Record<string, string> | undefined, builder: boolean): s
 
 function describeReaped(r: ReapedMachine): string {
   const kind = kindOf(r.labels, r.builder);
-  if (r.reason === "recorded") return `reap: stopped ${r.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`;
-  if (r.reason === "unfinished") return `reap: stopped ${r.id}: your earlier builder from this setup; its setup never finished`;
-  if (r.reason === "expired" && r.ageMs === undefined) return `reap: stopped ${r.id}: your earlier builder from this setup, age unknown; a kept builder with no readable age is stopped at once`;
-  if (r.reason === "expired") return `reap: stopped ${r.id}: your earlier builder from this setup, ${describeAge(r.ageMs)}; a kept builder is stopped at six hours`;
-  if (r.reason === "grace") return `reap: stopped ${r.id}: the builder kept after the save for one more change; its ten-minute window is over`;
+  if (r.reason === "recorded") return `reap: stopping ${r.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`;
+  if (r.reason === "unfinished") return `reap: stopping ${r.id}: your earlier builder from this setup; its setup never finished`;
+  if (r.reason === "expired" && r.ageMs === undefined) return `reap: stopping ${r.id}: your earlier builder from this setup, age unknown; a kept builder with no readable age is stopped at once`;
+  if (r.reason === "expired") return `reap: stopping ${r.id}: your earlier builder from this setup, ${describeAge(r.ageMs)}; a kept builder is stopped at six hours`;
+  if (r.reason === "grace") return `reap: stopping ${r.id}: the builder kept after the save for one more change; its ten-minute window is over`;
   const why = r.reason === "own" ? `${kind} from this setup that no record claims` : `${kind} with no owner`;
-  return `reap: stopped ${r.id}${describeLabels(r.labels)}: ${why}, ${describeAge(r.ageMs)}`;
+  return `reap: stopping ${r.id}${describeLabels(r.labels)}: ${why}, ${describeAge(r.ageMs)}`;
 }
 
 function describeSpared(m: SparedMachine): string {
@@ -320,11 +321,11 @@ function describeSealed(b: GoldenBuilderView, sealed: { at: string; version: num
   return `reap: left alone ${b.id}: your builder saved as image v${sealed.version}, kept ${since} since the save and holding one of the account's machine slots, ${describeCost(rateUsdPerHour, ageMs)}; wsp init updates your image on it, or it is stopped ten minutes after the save`;
 }
 
-/** Kills what this host owns and nothing claims, says which machines went and
+/** Kills what this host owns and nothing claims, says which machines it is stopping and
  * why, and on the first sweep names the running machines it left alone. */
 async function sweepOrphans(rt: Runtime, log: (line: string) => void, listSpared: boolean): Promise<void> {
   try {
-    const { reaped, spared, failed, adopted } = await rt.reap();
+    const { reaped, spared, failed, adopted } = await rt.reap(undefined, line => log(`reap: ${line}`));
     for (const a of adopted ?? []) log(recordRestoredLine(a.id, a.name, a.workspaceId));
     for (const r of reaped) log(describeReaped(r));
     if (listSpared) for (const m of spared) log(describeSpared(m));
@@ -706,6 +707,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       ...(opts.init !== undefined ? { init: opts.init } : {}),
       ...(doctor !== undefined ? { doctor } : {}),
       log,
+      ...(statePath !== undefined ? { here: hereMcp(statePath, alsoHere) } : {}),
       ...(opts.release !== undefined ? { release: opts.release } : {}),
       ...(opts.restart !== undefined ? { restart: opts.restart } : {}),
     });

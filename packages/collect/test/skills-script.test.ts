@@ -7,7 +7,7 @@ import { detectSkills, SKILL_HEAD_BYTES, type SkillRootAt } from "../src/detect/
 import type { Host } from "../src/host.js";
 import { nodeHost } from "../src/live-host.js";
 
-// The reader as it stood with one head and one awk per SKILL.md: the new one must print exactly what this printed.
+// The reader as it stood with one head and one awk per SKILL.md, less a line's trailing CR: the new one must print exactly what this prints.
 const PER_FILE_SCRIPT = [
   'for r in "$@"; do',
   '  [ -d "$r" ] || continue',
@@ -16,7 +16,7 @@ const PER_FILE_SCRIPT = [
   '    o=; case $f in *.off) [ -f "$d/SKILL.md" ] && continue; o=1;; esac',
   '    l=; [ -L "$d" ] && l=$(readlink "$d")',
   "    printf '\\036%s\\037%s\\037%s\\037%s\\037' \"$r\" \"$d\" \"$l\" \"$o\"",
-  `    head -c ${SKILL_HEAD_BYTES} "$f" | awk 'NR==1 && $0 != "---" {exit} NR>1 && $0 == "---" {exit} NR>1 {print}'`,
+  `    head -c ${SKILL_HEAD_BYTES} "$f" | awk '{sub(/\\r$/, "")} NR==1 && $0 != "---" {exit} NR>1 && $0 == "---" {exit} NR>1 {print}'`,
   "  done",
   "done",
   "printf '\\036END\\n'",

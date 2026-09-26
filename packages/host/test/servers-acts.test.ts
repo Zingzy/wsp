@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile, spawn } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CODEX_TOML, GEMINI_SETTINGS_JSON, OPENCODE_JSON } from "@wsp/catalog";
 import { nodeHost, type Host } from "@wsp/collect";
 import type { ExecResult, Machine } from "@wsp/engine";
-import { configChangedRefusal, noServerSwitchRefusal, noSuchServerRefusal, serverNameFormatRefusal, serverNameRefusal, serverThereRefusal } from "@wsp/protocol";
+import { configChangedRefusal, configHardLinkRefusal, noServerSwitchRefusal, noSuchServerRefusal, serverNameFormatRefusal, serverNameRefusal, serverThereRefusal } from "@wsp/protocol";
 import type { AgentsOn } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
@@ -224,6 +224,16 @@ describe("adding an MCP server", () => {
     expect(mode(file)).toBe(0o640);
     expect(readdirSync(dirname(file)).filter(n => n.startsWith(".wsp-"))).toEqual([]);
     expect(lines.at(-1)).not.toContain("$(mktemp)");
+  });
+
+  it("refuses a config with a second hard link, which the rename would split from it, and writes nothing", async () => {
+    const at = fixture();
+    const file = join(at.home, ".claude.json");
+    const before = readFileSync(file, "utf8");
+    linkSync(file, join(at.root, "twin.json"));
+    const { machine } = road(at);
+    await expect(serversActs().add(box(at, machine), { agent: "claude", name: "acme", command: "npx" })).rejects.toThrow(configHardLinkRefusal("~/.claude.json"));
+    expect(readFileSync(file, "utf8")).toBe(before);
   });
 
   it("keeps a jsonc file's comments through an add, a turn off and a remove", async () => {

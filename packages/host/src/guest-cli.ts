@@ -18,7 +18,7 @@
 // this line names is on its own machine.
 import { guestHostFlagLine, guestPersonsComputerLine } from "@wsp/protocol";
 import { cli, type CliIO } from "./cli.js";
-import type { GuestKindModule, GuestOpening } from "./guest.js";
+import type { GuestKindModule, GuestOpening } from "@wsp/runtime";
 import type { RunningWsp } from "./mcp-install.js";
 import { findVerb, hasTool, readsHere, takeCommon } from "./verbs.js";
 

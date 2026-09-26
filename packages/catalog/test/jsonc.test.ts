@@ -5,8 +5,8 @@ import { readJsonc } from "../src/jsonc.js";
 describe("reading JSON with comments", () => {
   it("drops comments and trailing commas outside strings and keeps everything inside them", () => {
     const text = '{\n  // a, b }\n  "a": "x // not a comment, /* nor this */",\n  "b": ["\\"q\\"", 1, /* c */ ],\n  "c": { "d": 2, // e\n  },\n}';
-    expect(readJsonc(text)).toEqual({ value: { a: "x // not a comment, /* nor this */", b: ['"q"', 1], c: { d: 2 } }, comments: true });
-    expect(readJsonc('{ "a": [1, 2] }')).toEqual({ value: { a: [1, 2] }, comments: false });
+    expect(readJsonc(text)).toEqual({ value: { a: "x // not a comment, /* nor this */", b: ['"q"', 1], c: { d: 2 } } });
+    expect(readJsonc('{ "a": [1, 2] }')).toEqual({ value: { a: [1, 2] } });
     expect(() => readJsonc('{ "a": 1 // no close')).toThrow();
     expect(() => readJsonc('{ "a": , }')).toThrow();
   });

@@ -92,7 +92,7 @@ import { writeOwn } from "@wsp/own-file";
 import { CATALOG_AGENTS, NO_SIGN_IN, agentName, hasLogin, keyEnvOf, loginSignIn, sharedAgentsOn, sharedOn } from "@wsp/catalog";
 import { ADD_TAKEN_LINE, DAEMON_GONE_LINE, PLACE_JOINED_LINE, PlaceAlreadyJoinedError, PlaceJoinedThenFailedError, WSP_READY_LINE, addFound, addFoundScript, addUndoScript, cappedLine, daemonFlags, deployDaemon, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, placeInstallFailedLine, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
-import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
+import { DAEMON_BIN, DAEMON_TARGETS, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, guestSystem, noGuestDaemonLine, noPlaceSystemLine, type DaemonTarget } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
 import { createHash, randomBytes } from "node:crypto";
 import WebSocket from "ws";
@@ -271,6 +271,15 @@ export const ADD_LOOPBACK_REFUSAL =
  * guessing it is how a binary for the wrong chip gets installed and dies on its first start. */
 export const UNSAID_CHIP_REFUSAL =
   "wsp add: that computer did not say what chip it runs on over ssh, and the daemon wsp would install there is built for one; check that uname -m answers on it and run this again.";
+
+/** The binary a box takes, off what it said over ssh, or the one refusal naming which of the two it cannot be: its
+ * system is read first, so a Mac's own chip words never reach the chip sentence. `joined` is the update's road. */
+function guestTargetSaid(system: string | undefined, arch: string | undefined, joined = false): DaemonTarget {
+  if (system !== undefined && !guestSystem(system)) throw new Error(noPlaceSystemLine(system, "that computer", joined));
+  const target = arch === undefined ? undefined : guestDaemonTarget(system, arch);
+  if (target === undefined) throw new Error(arch === undefined ? UNSAID_CHIP_REFUSAL : noGuestDaemonLine(arch));
+  return target;
+}
 
 /** The refusal for an install on another computer while this host advertises an address on its own loopback. The
  * word is the person's, so it is read back to them rather than left out: an install that quietly falls through to
@@ -615,7 +624,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       const adopted = await backend.adopt(reach).catch((e: unknown) => {
         throw new PlaceLoginRefusedError(e instanceof Error ? e.message : String(e));
       });
-      const { machine, login, arch, shell, hostKey } = adopted;
+      const { machine, login, system, arch, shell, hostKey } = adopted;
       // What answered is held against what the person pinned before anything else is asked of it. The read that has
       // already run sent nothing of the person's beyond the ssh identity every dial offers and printed the machine's
       // own facts; accept-new wrote its key here on the way in, so the refusal names that key, the file it went into
@@ -645,8 +654,7 @@ export function placeInstaller(deps: { backend?: SshBackend; sshWord?: SshWordRe
       // The binary that lands is picked off the word the box just said about its own chip, never off this computer's:
       // the two are different computers as often as they are alike, and a binary for the wrong one starts and dies.
       // Read before anything is sent, so a chip wsp builds no daemon for leaves the box exactly as it was found.
-      const target = arch === undefined ? undefined : guestDaemonTarget(arch);
-      if (target === undefined) throw new Error(arch === undefined ? UNSAID_CHIP_REFUSAL : noGuestDaemonLine(arch));
+      const target = guestTargetSaid(system, arch);
       // The join on the box refuses a computer that already holds a place file, and only after the bundle landed; read
       // by the same rule here so a box in another wsp is refused with nothing of this one's sent.
       const held = parsePlaceFile((await machine.run(heldPlaceScript(login.HOME), { deadlineMs: SSH_DIAL_MS })).stdout);
@@ -860,7 +868,7 @@ export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } 
     }
     if (req.ssh === undefined) throw new Error(placeNoUpdateRoadLine(req.name));
     const reach = parseSshAddress(req.ssh.ssh, req.ssh.keyPath === undefined ? {} : { keyPath: req.ssh.keyPath });
-    const { machine, login, arch } = await (deps.backend ?? new SshBackend()).adopt(reach);
+    const { machine, login, system, arch } = await (deps.backend ?? new SshBackend()).adopt(reach);
     // The login this road just read rather than the one the record kept, as the join builds its place from: a box
     // whose login moved takes wsp's files where it now is.
     const files = loginFiles({ home: login.HOME, path: login.PATH });
@@ -871,8 +879,7 @@ export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } 
     }
     // The chip the box says now rather than the one the record kept, read before a byte is sent: a computer that
     // was rebuilt on another chip since it joined takes the binary it can run or none at all.
-    const said = arch === undefined ? undefined : guestDaemonTarget(arch);
-    if (said === undefined) throw new Error(arch === undefined ? UNSAID_CHIP_REFUSAL : noGuestDaemonLine(arch));
+    const said = guestTargetSaid(system, arch, true);
     const landing = `${placeDaemonPaths(login.HOME).putDir}/${DAEMON_BIN}`;
     await landBytes(machine, landing, binaryFor(said));
     const res = await machine.run([files, placeUpdateScript(login.HOME, landing)].join("\n"), { deadlineMs: 180_000 });
@@ -1021,7 +1028,7 @@ export interface PlaceOpts extends HostPick {
 }
 
 /** Where a line that works on this computer's own host dials and what brings one up if none does: the aim is this
- * computer, never a word in the environment or a default alias, the starter is the line's own, and the one line a
+ * computer, never a word in the environment or the account's one host, the starter is the line's own, and the one line a
  * start prints goes where everything else this line says goes. Written once, so no road out of here can dial
  * somewhere else by accident or dial without offering to start the host the others start. A caller that read the
  * aim already for its own refusal hands it back rather than reading it twice. */
@@ -1802,6 +1809,8 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
   if (standing !== undefined) throw new Error(standing);
   // Before the handshake: a computer nothing would keep the daemon up on is refused with nothing written on it.
   const on = opts.platform ?? platform();
+  const row = DAEMON_TARGETS.find(t => t.platform === on);
+  if (row !== undefined && !guestSystem(row.system)) throw new Error(noPlaceSystemLine(row.system, "this computer"));
   const manager = "manager" in opts ? opts.manager : serviceManagerFor(on);
   if (manager === undefined) throw new Error(noPlaceManagerLine(on));
   // The agent here is the machine's own service, so a login that cannot write one reads the sentence and stops:

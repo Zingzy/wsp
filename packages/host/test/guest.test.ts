@@ -8,12 +8,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentsOffRefusal, EXIT_CODES, guestHostFlagLine, guestNamesWorkspaceLine, guestNoFileLine, guestNoKindLine, guestNoSessionLine, guestPersonsComputerLine, LOOPBACK, UNAUTHORIZED, type DaemonEvent } from "@wsp/protocol";
-import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import { copyKey, createRuntime, memoryStore, type GuestKindModule, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
 import { guestCli, guestRefusal } from "../src/guest-cli.js";
-import { guestMcp } from "../src/guest-mcp.js";
-import { guestDoor, type GuestDoor, type GuestKindModule, type GuestLink } from "../src/guest.js";
+import { guestMcp, hereMcp } from "../src/guest-mcp.js";
+import { guestDoor, type GuestDoor, type GuestLink } from "../src/guest.js";
 import { runningWsp } from "../src/mcp-install.js";
 import { placeWiring } from "../src/places.js";
 import type { HostHandle } from "../src/server.js";
@@ -215,6 +215,36 @@ describe("a guest session on the host", () => {
       const called = await call(token, { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "workspaces", arguments: {} } });
       const structured = (called["result"] as { structuredContent?: { workspaces?: { name: string }[] } }).structuredContent;
       expect(structured?.workspaces?.map(w => w.name)).toContain("alpha");
+    });
+  });
+
+  describe("the tool server the forwarder on this computer opens", () => {
+    it("serves every tool the stdio server has, and dials this host whatever the typed-in environment names", async () => {
+      const said: Record<string, unknown>[] = [];
+      const session = hereMcp(statePath).open({
+        argv: ["mcp", "--state", statePath],
+        cwd: dir,
+        // A line typed where the environment aims somewhere else: the socket's own token already said which host.
+        env: { WSP_HOST: "nowhere", WSP_HOST_URL: "http://127.0.0.1:1", WSP_HOST_TOKEN: "made-up" },
+        reply: message => void said.push(message as Record<string, unknown>),
+        close: () => undefined,
+      });
+      const ask = async (message: Record<string, unknown>): Promise<Record<string, unknown>> => {
+        const before = said.length;
+        session.message(message);
+        await settled(() => said.length > before);
+        return said[before]!;
+      };
+      try {
+        await ask({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } });
+        session.message({ jsonrpc: "2.0", method: "notifications/initialized" });
+        const listed = await ask({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+        expect((listed["result"] as { tools: { name: string }[] }).tools.map(t => t.name).sort()).toEqual(VERBS.filter(hasTool).map(v => toolName(v.name)).sort());
+        const called = await ask({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "workspaces", arguments: {} } });
+        expect((called["result"] as { structuredContent?: { workspaces?: { name: string }[] } }).structuredContent?.workspaces?.map(w => w.name)).toContain("alpha");
+      } finally {
+        session.close();
+      }
     });
   });
 

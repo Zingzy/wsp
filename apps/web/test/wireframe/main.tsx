@@ -615,7 +615,7 @@ const api = {
 // what draws the row naming the computer it is on. Every other screen is a browser tab and draws no foot row,
 // except the two settings screens that read the shell's half: the chords a tab keeps for itself and the app's version.
 if (screen === "sidebar-hosts") {
-  window.wsp = { hosts: async () => ({ here: hereWord(true), current: null, hosts: [{ alias: "spoo", label: "spoo", url: "wss://spoo.example/ws", road: "ssh" }] }) };
+  window.wsp = { hosts: async () => ({ here: hereWord(true), current: null, hosts: [{ alias: "spoo", url: "wss://spoo.example/ws" }] }) };
 }
 if (screen === "settings-keybindings" || screen === "settings-about" || screen === "settings-about-behind" || screen === "settings-about-restart") {
   window.wsp = { version: "0.2.0" };

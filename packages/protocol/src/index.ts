@@ -2053,16 +2053,11 @@ export interface ContextMenuItem {
 
 // --- hosts the desktop window can move between --------------------------------
 
-/** How this computer reached a host somewhere else: by an address it pairs with, or by an ssh login it forwards. */
-export type HostRoad = "direct" | "ssh";
-
-/** One saved host as the desktop lists it: never the token. The label is what the person reads in the menu and the
- * sidebar's foot; the alias is what wsp's command line names the same record by. */
+/** One host on the account as the desktop lists it, by the alias wsp's command line names the same record by: never
+ * the token. */
 export interface HostListing {
   alias: string;
-  label: string;
   url: string;
-  road: HostRoad;
 }
 
 /** The hosts as the window shows them: the word for the app's own computer, which host the window is on (null for
@@ -2073,13 +2068,8 @@ export interface HostsView {
   hosts: HostListing[];
 }
 
-/** What the connect sheet asks the shell for: an address with the code wsp host pair printed there, or an ssh login the
- * shell starts or finds a host behind and forwards. */
-export type HostConnectAsk = { road: "direct"; url: string; code: string } | { road: "ssh"; address: string; port?: number };
-
-/** How a host move or connect ended: done, or refused in the host's own words with the field the words are about, so
- * the sheet can put them under it. */
-export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" };
+/** How a host move ended: done, or refused in the host's own words. */
+export type HostOutcome = { ok: true } | { ok: false; error: string };
 
 /** How the shell's fetch or open of a release's bundle ended: done, or refused in one line the page shows as it is. */
 export type BundleOutcome = { ok: true } | { ok: false; error: string };
@@ -2139,12 +2129,6 @@ export interface DesktopBridge {
   hosts(): Promise<HostsView>;
   /** Puts the window on a saved host, or on the app's own computer for null. */
   switchHost(alias: string | null): Promise<HostOutcome>;
-  /** Pairs with a host by one of the two roads and puts the window on it. */
-  connectHost(ask: HostConnectAsk): Promise<HostOutcome>;
-  /** Hands the host's token back and forgets the host; the window returns to the app's own computer if it was there. */
-  disconnectHost(alias: string): Promise<HostOutcome>;
-  /** The shell's own menu asked for the connect sheet. Returns the unsubscribe. */
-  onConnectHostOpen(handler: () => void): () => void;
   /** Downloads this release's bundle for this computer from the repo's release and keeps it only where its sha256
    * matches the one GitHub publishes. The version is all the page hands over; the shell builds every URL itself. */
   getBundle(ask: { version: string }): Promise<BundleOutcome>;
@@ -3968,6 +3952,8 @@ const DAEMON_CONTENTS = [
   "ba2f7c6846cfc3d7ce66ff15f554d8b87dc20f5683931777d244e142709815dc",
   "de414be04f6f1b5142c2e5e718f4acd0a0526558dc96bed3a02b31f7acd924ba",
   "15f43fcf51b6d460b6e1acfa2ed0ce279a6645647834a10174bd9d249c2b2e6e",
+  "7a1d4e70b470d3f404c987c4300756615bfca9f904f0ef12e74f26497775d72d",
+  "c76e7e2a3b9a767beaa281b973a409e1bc8869969255fa6c9fdeb6211b38ce3d",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4176,7 +4162,9 @@ const DAEMON_CONTENTS = [
  * so a delete answers at once, sweeps any such sibling a stop cut short at start and on the next copy made or
  * removed beside that project, and refuses to remove a path that is not a copy of the project it names.
  * Version 75 takes back what a failed ssh add put on a box: before the add lands anything it asks which of its paths already exist, and after a failed deploy it removes only what this add wrote, stops a unit this add started, and leaves the box as it found it when another add took it meanwhile.
- * Version 76 answers as 75 does: a directory clone's removal takes the copy's own path off the shape check, and a test pins that a path with a trailing slash sets aside the link it names. */
+ * Version 76 answers as 75 does: a directory clone's removal takes the copy's own path off the shape check, and a test pins that a path with a trailing slash sets aside the link it names.
+ * Version 77 forwards a guest's `wsp mcp` to the running host over the daemon's link, so a thread's MCP server needs no host process of its own on the machine.
+ * Version 78 changes no behaviour: the pty broker's cases moved to a test binary of their own, and the file they left is hashed. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4552,14 +4540,14 @@ export const DEVICE_REVOKED_REFUSAL = "this host took this computer's token away
 
 /** The refusal a device.auth gets from a host that is on no account: nothing there names the keys it would trust,
  * so pairing with a code is the whole road to it. */
-export const DEVICE_ACCOUNT_UNSERVED = "this host is on no account, so it admits no computer through one; run wsp host pair on the computer it runs on for a code";
+export const DEVICE_ACCOUNT_UNSERVED = "this host is on no account, so it admits no computer through one; run wsp host link on the computer it runs on to put it on yours";
 
 /** What a computer reads when the host it dialled answered device.auth with its own request schema's refusal: a
- * host of an older wsp, whose door knows no road in but a pairing code. Told apart from a refusal of this build by
+ * host of an older wsp, whose door knows no road in for a computer on the account. Told apart from a refusal of this build by
  * the kind on the frame, which an older host's schema refusal carries none of, so a token this computer never sent
  * is never read as one that was taken away. */
 export const deviceAuthOldHostLine = (where: string): string =>
-  `the host at ${where} runs an older wsp, whose door does not know how a computer on the account comes in; run wsp host pair on it and wsp host connect ${where} --code <code> to pair with a code instead`;
+  `the host at ${where} runs an older wsp, whose door does not know how a computer on the account comes in; update wsp on that computer and run wsp up there again`;
 
 /** The refusal wsp login gives a word that carries no key: every word wsp login prints carries the fingerprint of
  * the key being admitted, so a word without one was written by hand or cut in half, and nothing is posted. */
@@ -4614,6 +4602,15 @@ export const DaemonChannelEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("daemon.closed"), channel: z.string(), code: z.number().int(), reason: z.string() }),
 ]);
 export type DaemonChannelEvent = z.infer<typeof DaemonChannelEvent>;
+
+/** What the host pushes to the one socket that opened a guest session on it: the session's messages, then its end,
+ * with the host's sentence when it ended the session for a reason. The same two frames a machine's daemon hands its
+ * guest, less the session id a socket holding one session has no use for, so one client reads both roads. */
+export const HereGuestEvent = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("guest.message"), message: z.unknown() }),
+  z.object({ type: z.literal("guest.closed"), error: z.string().optional() }),
+]);
+export type HereGuestEvent = z.infer<typeof HereGuestEvent>;
 
 // --- places: a computer you own, joined by dialling this host ---------------
 
@@ -4846,19 +4843,15 @@ export const joinKeyRefusal = (url: string): string => `the host at ${url} prove
  * spends the code. `readJoinToken` reads both roads' tokens, since they are one shape. */
 export const pairToken = joinToken;
 
-/** The refusal a connect gets for a code that named no key: every code wsp host pair prints carries one, so a code
- * without one was written by hand or cut in half on its way over. Nothing is dialled and no code is spent. */
-export const PAIR_NO_KEY_REFUSAL = "that pairing code names no key for the host, so this computer cannot tell which host it would be pairing with; run wsp host pair on that computer again and copy the whole code it prints";
+/** The refusal a dial gets when whatever answered at that address did not prove the key this computer holds that
+ * host to, whether it proved another one or signed nothing this computer could verify: it is not that host,
+ * whichever check caught it, and no token of this computer's went to it. */
+export const pairKeyRefusal = (url: string): string => `the host at ${url} did not prove the key this computer holds for it, so it is not that host; nothing was sent to it`;
 
-/** The refusal a connect gets when whatever answered at that address did not prove the key the pairing code named,
- * whether it proved another one or signed nothing this computer could verify: it is not the host that printed the
- * code, whichever check caught it, and neither the code nor a token of this computer's went to it. */
-export const pairKeyRefusal = (url: string): string => `the host at ${url} did not prove the key the pairing code named, so it is not the host that printed that code; nothing was sent to it`;
-
-/** The refusal a line gets for aiming at a host it holds no key for: a record written before this wsp pinned keys,
- * or a turn launched by a host older than this one. `where` names which, since the two are fixed differently. */
+/** The refusal a line gets for aiming at a host it holds no key for: a record somebody edited by hand, or a turn
+ * launched by a host older than this one. `where` names which. */
 export const hostNoKeyLine = (where: string): string =>
-  `${where} names a host and no key for it, so this computer cannot tell which host it would be sending its token to; pair again with the code wsp host pair prints now`;
+  `${where} names a host and no key for it, so this computer cannot tell which host it would be sending its token to; run wsp hosts to read the account's hosts again`;
 
 /** What `hostNoKeyLine` names when the aim came out of the environment a turn was launched with rather than out of
  * a record a person named. */
@@ -5259,6 +5252,23 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * link that computer is holding: nothing is dialled, and it is refused where that computer is not connected.
    * HERE_PLACE_ID names the computer the host runs on, whose own daemon is dialled. One of the two, never both. */
   z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string().optional(), placeId: z.string().optional() }),
+  /** The wsp command's forwarder on this computer opening a guest session on this host itself, one hop shorter
+   * than a machine's: the same frame a guest sends its daemon, plus the environment the line was typed in, which
+   * a tool reads values off by name. Served only on a socket the host's own token opened, which is who the session
+   * is, so the token the frame carries is not read; one session per socket, and only the tool server. Replies with
+   * a GuestOpenReply, then pushes HereGuestEvent frames on this socket. */
+  z.object({
+    id: reqId,
+    op: z.literal("guest.open"),
+    kind: GuestKind,
+    token: z.string().max(GUEST_TOKEN_MAX),
+    turnToken: z.string().max(GUEST_TOKEN_MAX).optional(),
+    argv: z.array(z.string()).max(GUEST_ARGV_MAX),
+    cwd: z.string().max(GUEST_CWD_MAX),
+    env: z.record(z.string()).optional(),
+  }),
+  /** One message on the guest session this socket opened. */
+  z.object({ id: reqId, op: z.literal("guest.send"), message: z.unknown() }),
   /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until the socket goes.
    * The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon; refused for
    * every other kind, which reads them over its own daemon link with sys.watch. Replies `{}`. */
@@ -6010,5 +6020,5 @@ export * from "./app-ports.js";
 export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
+export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

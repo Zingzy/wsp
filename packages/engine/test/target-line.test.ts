@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { noHomeRefusal, noRunuserRefusal } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExecResult, Machine } from "../src/machine.js";
+import { DAEMON_TARGETS, platformOfSystem } from "../src/daemon-targets.js";
 import { asLogin, landAsLogin, targetLogin, type TargetLogin } from "../src/target-line.js";
 
 /** A computer's road that answers the probe with the lines given and records every command. */
@@ -17,6 +18,13 @@ function probed(lines: string[]): { machine: Pick<Machine, "exec">; ran: string[
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+describe("the system word a computer names itself by", () => {
+  it("reads node's platform off the target table's own rows, and nothing for a system no row has", () => {
+    for (const row of DAEMON_TARGETS) expect(platformOfSystem(row.system)).toBe(row.platform);
+    expect(platformOfSystem("FreeBSD")).toBeUndefined();
+  });
 });
 
 describe("the line a computer runs as its login", () => {

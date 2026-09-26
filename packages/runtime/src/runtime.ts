@@ -53,6 +53,7 @@ import {
   projectInstalls,
   stateListing,
   killUntilGone,
+  GoneWatch,
   snapshotUntilGone,
   MachineAliveError,
   answerOf,
@@ -1635,8 +1636,9 @@ export interface Runtime {
    * another host standing on the same account. Minted on the first read when the state file has none. */
   owner(): Promise<string>;
   /** Records this state file's workspace machines that no record claims, kills its builders and smoke forks that none
-   * claims plus orphans past their backstop, and lists the running machines it left alone. */
-  reap(olderThanMs?: number): Promise<SweepResult>;
+   * claims plus orphans past their backstop, and lists the running machines it left alone. `say` is where every
+   * later line about a machine still being asked to stop goes, from this sweep on. */
+  reap(olderThanMs?: number, say?: (line: string) => void): Promise<SweepResult>;
   /** Writes every transcript still waiting on its debounce; the store is complete once this resolves. */
   close(): Promise<void>;
 }
@@ -2904,6 +2906,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * are known without a store read. */
   const projectsHeld = new Map<string, ProjectView>();
   const builders = new Map<string, LiveBuilder>();
+  /** Every machine a sweep, a landing or a replacement stops, read back behind the sweep and asked again while it stays. */
+  let sayStops: ((line: string) => void) | undefined;
+  const gone = new GoneWatch({ ...(opts.killConfirm !== undefined ? { confirm: opts.killConfirm } : {}), warn: line => (sayStops ?? console.warn)(line) });
   /** The prepare in flight per place and golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
   const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
   /** The copy build in flight per place and image name. A create landing there, a version cut and a person typing
@@ -4273,6 +4278,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         goldenSnapshot: record.golden,
         // A kind that declares no lifecycle has its nap and wake refused before the engine is asked, so it never wakes.
         wakeAttempts: at.lifecycle?.budgets.wakeAttempts ?? 0,
+        retire: m => gone.stop(at, m),
         resurrect: (override?: Partial<MachineSpec>) =>
           fork(record, m => {
             entry.machine = watched(entry, m);
@@ -7413,12 +7419,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     for (const b of [...builders.values()]) {
       if (b.record.sealed === undefined || !(b.life === "own" || b.life === "reusable") || inWindow(b.record.sealed.at)) continue;
       try {
-        await b.builder.machine.kill();
+        await gone.stop(backend, b.builder.machine);
       } catch (e) {
-        if (!isMissing(e)) {
-          failed.push({ id: b.record.id, message: `could not stop: ${e instanceof Error ? e.message : String(e)}; stays recorded, retried next sweep` });
-          continue;
-        }
+        failed.push({ id: b.record.id, message: `could not stop: ${e instanceof Error ? e.message : String(e)}; stays recorded, retried next sweep` });
+        continue;
       }
       graceTimers.get(b.record.id)?.();
       graceTimers.delete(b.record.id);
@@ -8631,6 +8635,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         };
         return forking.create(spec);
       },
+      stop: async machine => gone.stop(await landingBackend(placeId), machine),
       land: async (machine, path, bytes) => void (await landBytes(machine, path, bytes)),
       // A first-life fork of the image: the one snapshot road, the same the project goldens take.
       checkpoint: async (machine, name) => {
@@ -9165,7 +9170,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       return owner;
     },
-    reap: async olderThanMs => {
+    reap: async (olderThanMs, say) => {
+      if (say !== undefined) sayStops = say;
       await ready();
       await refreshBuilders();
       // A stale record can never seal; stopping it is the only thing that ends its bill. A reusable one no
@@ -9188,12 +9194,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const expired = b.life === "reusable" && (ageMs === undefined || ageMs >= BUILDER_IDLE_MS);
         if (b.life !== "stale" && !expired) continue;
         try {
-          await b.builder.machine.kill();
+          await gone.stop(backend, b.builder.machine);
         } catch (e) {
-          if (!isMissing(e)) {
-            failed.push({ id: b.record.id, message: `could not stop: ${messageOf(e)}; stays recorded, retried next sweep` });
-            continue;
-          }
+          failed.push({ id: b.record.id, message: `could not stop: ${messageOf(e)}; stays recorded, retried next sweep` });
+          continue;
         }
         await forgetBuilder(b.record.id);
         reaped.push(
@@ -9202,7 +9206,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             : { id: b.record.id, builder: true, reason: "expired", ...(ageMs !== undefined ? { ageMs } : {}) },
         );
       }
-      const knownIds = (): string[] => [...live.values()].flatMap(e => [e.record.machineId, e.machine.id]).concat([...builders.keys()], [...inflight], reaped.map(r => r.id));
+      const knownIds = (): string[] => [...live.values()].flatMap(e => [e.record.machineId, e.machine.id]).concat([...builders.keys()], [...inflight], reaped.map(r => r.id), gone.ids());
       const result = (swept: ReapResult, adopted: AdoptedMachine[]): SweepResult => {
         const allFailed = failed.concat(swept.failed ?? []);
         return { reaped: reaped.concat(swept.reaped), spared: swept.spared, ...(allFailed.length > 0 ? { failed: allFailed } : {}), ...(adopted.length > 0 ? { adopted } : {}) };
@@ -9238,7 +9242,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const claimed = new Set(knownIds());
       const adopted = await adoptLost(listing, claimed, failed);
       try {
-        return result(await reap({ backend, owner, listing, knownIds: () => [...knownIds(), ...claimed], ...(olderThanMs !== undefined ? { olderThanMs } : {}) }), adopted);
+        return result(await reap({ backend, owner, listing, stop: m => gone.stop(backend, m), knownIds: () => [...knownIds(), ...claimed], ...(olderThanMs !== undefined ? { olderThanMs } : {}) }), adopted);
       } catch (e) {
         failed.push({ message: messageOf(e) });
         return result({ reaped: [], spared: [] }, adopted);
@@ -9262,6 +9266,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       beat = undefined;
       for (const cancel of graceTimers.values()) cancel();
       graceTimers.clear();
+      gone.close();
       await ticking;
       // A clean exit frees its builders at once; a crash leaves the heartbeat to age and the pid to die.
       for (const b of [...builders.values()].filter(b => b.life === "own" && b.record.heldBy !== undefined)) {

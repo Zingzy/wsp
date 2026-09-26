@@ -30,7 +30,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authRefusal, jsonLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authRefusal, FORWARD_ENV, jsonLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -52,7 +52,7 @@ import { exitCodeOf, runInit, type InitIO, type InitPricing, type InitResult } f
 import { runMintHere } from "./init-vault.js";
 import { recipePath } from "./init-recipe.js";
 import { historyCache } from "./recipe-file.js";
-import { scanTools } from "./scan.js";
+import { alsoHere } from "./scan.js";
 import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, widthOf, wrap, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, builtOn, opening } from "./init-opening.js";
 import { runLocalInit } from "./init-local.js";
@@ -89,10 +89,9 @@ import {
 } from "./service.js";
 import { serviceServesState, starterFor, type HostStarter } from "./host-start.js";
 import { restartRoads, type RestartingHost, type RestartRoad } from "./restart.js";
-import { connectCommand, disconnectCommand, hostDefaultCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { admittedDevices, hostsCommand, loginCommand, logoutCommand, publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
-import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
+import { aimAddress, aimedHost, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
@@ -106,7 +105,7 @@ import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } fr
 import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, hereDoor, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { installedVersion, stateWriterHere, VERSION } from "./version.js";
 import { latestWords, releaseReading, releaseWatch } from "./release.js";
 
@@ -663,7 +662,7 @@ export interface SharedOpts extends ServeAsked {
 }
 
 /** The environment the caller runs in decides the home, the same reading the verbs take, so a run with its own
- * environment cannot send wsp host connect to one folder and --host to another. It is also what the provider words
+ * environment cannot send wsp hosts to one folder and --host to another. It is also what the provider words
  * stand in front of, so one run picks its folder and its provider out of the same environment. */
 export function optsFor(
   values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "advertise" | "state" | "provider" | "no-relay">,
@@ -868,7 +867,7 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
         return exists ? scanProject(nodeHost(), path) : undefined;
       },
       brew: () => readBrewTable(nodeHost()),
-      scan: recipe => scanTools(nodeHost(), recipe),
+      scan: alsoHere,
     },
     build: {
       secrets: keychainReader(),
@@ -1036,7 +1035,7 @@ async function besideHost(lock: HostLock, opts: SharedOpts, upCommand: string, o
   const refuse = (why: string): Error => Object.assign(new Error(initRefusal(lock, statePath, why)), { kind: "conflict" });
   let client: HostClient;
   try {
-    // The host holding this state file's lock and no other: WSP_HOST and the default alias aim a verb at another
+    // The host holding this state file's lock and no other: WSP_HOST and the account's one host aim a verb at another
     // computer, and the build belongs to the process that writes this file.
     // No starter is handed in: the lock was read before this call, and an init that started a host under itself
     // would be building through a host it is about to replace.
@@ -1223,7 +1222,7 @@ async function init(
         secrets: keychainReader(),
         platform: hostPlatform(),
         brew: () => readBrewTable(nodeHost()),
-        scan: recipe => scanTools(nodeHost(), recipe),
+        scan: alsoHere,
         runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }, providerEnv, agentsReachOf(opts), undefined, links),
         bundleFile: () => missingBundleFile(),
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
@@ -1825,7 +1824,7 @@ interface SharedFlags {
 /** What a word of the shared parse does with --host. `aimed`: the line runs against the host it names. `refused`:
  * the line reads this computer's own files, so the parse refuses the flag rather than take it and aim nowhere.
  * `hostSide`: the line runs at the host's own terminal, so it takes the flag and answers the one sentence that says
- * so, which is the same answer WSP_HOST and the default alias already get. */
+ * so, which is the same answer WSP_HOST and the account's one host already get. */
 export type HostFlag = "aimed" | "refused" | "hostSide";
 
 interface Command {
@@ -1997,38 +1996,11 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   "host devices": {
     page: "host",
     usage: "wsp host devices [revoke <id>]",
-    about: "the computers paired with a host and what each token is read as; revoke takes one back out. --host reads a host on another computer this one is paired with",
+    about: "the computers paired with a host and what each token is read as; revoke takes one back out. --host reads a host on your account from another computer signed in to it",
     json: false,
     host: "aimed",
     cliOnly: "lists and takes away the computers that may drive a host, from that host's terminal or from a computer paired with it; which computers hold a token is the person's to read and cut, never a thread's",
     run: (io, opts, values, args) => devicesCommand(io, aimPick(opts, values), args),
-  },
-  "host connect": {
-    page: "host",
-    usage: "wsp host connect <url> --code <code> [--name <alias>]",
-    about: "redeem a code from a host outside your account for a token of this computer's own; --name is what every later line calls that host, and a host on your account needs no code at all",
-    json: false,
-    host: "refused",
-    cliOnly: "spends a pairing code and keeps the token it buys in this person's own files; where their wsp points is theirs to say",
-    run: (io, opts, values, args) => connectCommand(io, opts, values, args),
-  },
-  "host default": {
-    page: "host",
-    usage: "wsp host default <alias>",
-    about: "move which host every line on this computer runs against",
-    json: false,
-    host: "refused",
-    cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person",
-    run: (io, opts, _values, args) => hostDefaultCommand(io, opts, args),
-  },
-  "host forget": {
-    page: "host",
-    usage: "wsp host forget <alias>",
-    about: "hand that host its token back and forget it here",
-    json: false,
-    host: "refused",
-    cliOnly: "hands a host back the token this computer drives it by, which belongs with the terminal that took it",
-    run: (io, opts, _values, args) => disconnectCommand(io, opts, args),
   },
   "host link": {
     page: "host",
@@ -2060,7 +2032,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   logout: {
     page: "front",
     usage: "wsp logout [<id>]",
-    about: "sign this computer out of your account, which drops the hosts it reached through it and keeps the ones it paired with a code; with an id it signs another of your computers out, and every host drops what it admitted for that one",
+    about: "sign this computer out of your account, which drops the hosts it reached through it; with an id it signs another of your computers out, and every host drops what it admitted for that one",
     json: false,
     host: "refused",
     cliOnly: "takes away a token of this person's and the access it bought, which belongs with the person whose account it is",
@@ -2069,7 +2041,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   hosts: {
     page: "front",
     usage: "wsp hosts",
-    about: "every host this computer can reach, the ones on your account and the ones it paired with a code, with a live beat for the account's and the one every line takes marked",
+    about: "every host on your account this computer can reach, with a live beat for each and the one every line takes marked",
     json: false,
     host: "refused",
     cliOnly: "reads which hosts this computer can reach and writes the account's into its own files, which no thread decides for the person",
@@ -2133,7 +2105,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   join: {
     page: "agent",
     usage: "wsp join <url>... --code <code> [--code-file <path>] [--name <name>]",
-    about: "on the computer you are sitting at: join it to the wsp at that address, then install the daemon under this computer's own service manager, which dials again at every login",
+    about: "on the computer you are sitting at: join it to the wsp at that address, then install the daemon as a systemd system unit, which dials again at every boot. A place is a Linux computer; a Mac refuses",
     json: false,
     host: "refused",
     cliOnly: "joins the computer it is typed on to somebody's wsp and keeps the key it proves itself with in this person's own files; where their computer belongs is theirs to say",
@@ -2223,7 +2195,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
           handles(computer?.kind === "provider" ? "the cloud road" : "the local road");
         }
       };
-      // This computer's own host and no other: the word in the environment and the default alias name hosts that
+      // This computer's own host and no other: the word in the environment and the account's one host name hosts that
       // hold no link to the computers this line proves, and --host is refused on this line for the same reason.
       const dialling = dialHere(io, opts);
       // With no word: this computer first, on a runtime of this terminal's own and closed before anything else,
@@ -2292,10 +2264,6 @@ export const JSON_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w =
 export const PROSE_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w => !COMMANDS[w]!.json);
 
 type Options = NonNullable<ParseArgsConfig["options"]>;
-
-/** What else a package manager on this computer has, for the recipe verbs on both doors: the scanner reaches the
- * engine, so the command line hands it in rather than the verb table importing it. */
-const alsoHere: VerbDeps["alsoHere"] = recipe => scanTools(nodeHost(), recipe);
 
 /** The word `mcp` opens the command, as a verb's words open a verb: its flags are its own, so it is dispatched on
  * that word before the shared parse ever sees them. */
@@ -2379,6 +2347,37 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     if (next !== undefined) io.log(next);
   }
   return report.failures.length > 0 ? 1 : 0;
+}
+
+/** What the forwarder asks before it serves `wsp mcp` itself: the host this line would serve against, as one JSON
+ * line on stdout, when that is the host on this computer and it is serving, brought up first when the ask says
+ * start. Anything else prints nothing and serves nothing: at the start of a session the forwarder runs the same line
+ * as a wsp of its own next, which says whatever this one would have. The one thing said is why a host could not be
+ * brought up, since the ask to start comes mid-session and nothing runs after it to say so. */
+async function forwardDoor(io: CliIO, argv: string[], env: Readonly<Record<string, string | undefined>>, starts: { start?: HostStarter }): Promise<number> {
+  // The token is the host's; it goes down a pipe to the forwarder and never onto a terminal.
+  if (io.redraw !== undefined) return 0;
+  let values: { host?: string; state?: string; help?: boolean };
+  let words: string[];
+  try {
+    ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
+  } catch {
+    return 0;
+  }
+  if (values.help === true || words.length > 0) return 0;
+  const notes: string[] = [];
+  try {
+    const statePath = statePathFrom(values.state, env, line => notes.push(line));
+    const pick = { env, ...(values.host !== undefined ? { host: values.host } : {}) };
+    if (starts.start !== undefined && aimedHost(statePath, pick).kind === "here" && servingHost(statePath) === undefined) await starts.start(statePath, line => io.error(line));
+    const door = hereDoor(statePath, pick);
+    if (door === undefined) return 0;
+    for (const note of notes) io.error(note);
+    io.log(JSON.stringify(door));
+  } catch (e) {
+    if (starts.start !== undefined) io.error(e instanceof Error ? e.message : String(e));
+  }
+  return 0;
 }
 
 /** The flags the shared parse reads for up, init and doctor. The ones that shape a serving host come from the table
@@ -2485,7 +2484,7 @@ export function hostPage(): string {
     pageLines("host"),
     "",
     ...wrap(
-      "You need these only for a host on a computer that is not the one you are sitting at: wsp login signs this computer in to your account and wsp hosts lists the hosts on it, which need no code at all. pair hands out the code that lets a computer outside your account drive a host, and it runs at that host's own terminal; devices lists the computers that hold a token for a host and takes one back out, from that terminal or from any computer paired with it; connect, default and forget hold the hosts this computer reaches by a code; link and unlink put the host on this computer onto your account, so it is reachable with no port open to the world.",
+      "You need these only for a host on a computer that is not the one you are sitting at: wsp login signs this computer in to your account and wsp hosts lists the hosts on it, which need no code at all. pair hands out the code a browser on another computer types to open a host, and it runs at that host's own terminal; devices lists the computers that hold a token for a host and takes one back out, from that terminal or from any computer signed in to it; link and unlink put the host on this computer onto your account, so it is reachable with no port open to the world.",
       HELP_WIDTH,
       "",
     ),
@@ -2527,10 +2526,10 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "no-relay", on: ["up"], says: "serve without the tunnel, on a computer that is linked to a relay" },
   { name: "service", on: ["up"], says: "install the host as a launchd agent on a Mac or a systemd user unit on Linux, which serves now and again at every login. The keys are not written into it: it reads the same .env a terminal run reads, so they have to be in a file" },
   { name: "provider", on: ["up", "init"], says: "which machine provider this computer forks on; without it, a key saved under a provider's own variable wires that provider" },
-  { name: "code", on: ["host connect", "join"], says: "the code the other computer printed: wsp host pair for a host, wsp add for a place" },
+  { name: "code", on: ["join"], says: "the code the other computer printed: wsp add on the host" },
   { name: "code-file", on: ["join"], says: "read the code off this file and delete the file before dialing, so a code never sits on a disk" },
   { name: "watch", on: ["status"], says: "draw the same rows again every second where they stand, until Ctrl-C; it needs a terminal to redraw on, and reads nothing but this computer's own agent" },
-  { name: "name", on: ["host connect", "host link", "add", "join"], says: "the name to call the computer by here; what its address calls it without one" },
+  { name: "name", on: ["host link", "add", "join"], says: "the name to call the computer by here; what its address calls it without one" },
   { name: "ssh-port", on: ["add"], says: "the port ssh dials that computer on (default 22)" },
   { name: "ssh-key", on: ["add"], says: "the key file ssh logs in with; whatever your own ssh config and agent already use without it" },
   { name: "host-key", on: ["add"], says: "the host key of a computer this one has never dialled, as you read it on that computer; without it the add shows you the key that computer answers with and asks, and off a terminal it refuses rather than trusting whatever answers" },
@@ -2578,7 +2577,7 @@ const MCP_FLAG_WORDS: Readonly<Record<string, string>> = {
   remove: "take the server, the skill and that section back out of those agents instead",
   json: "print what each agent took as one JSON object",
   state: COMMON_FLAG_WORDS.state,
-  host: "write the server against a host on another computer, by the name wsp host connect gave it, so the tools drive that host",
+  host: "write the server against a host on your account, by the name wsp hosts lists it under, so the tools drive that host",
 };
 
 /** The tool server's own two pages, each with the flags it reads. `wsp mcp` alone serves; `wsp mcp install` writes
@@ -2601,12 +2600,17 @@ export async function cli(
   argv: string[],
   io: CliIO = terminalIO(),
   run: RunningWsp = runningWsp(),
-  env: Readonly<Record<string, string | undefined>> = process.env,
-  start: HostStarter | false = starterFor(run, env),
+  given: Readonly<Record<string, string | undefined>> = process.env,
+  start?: HostStarter | false,
   caller: { cwd?: string; elsewhere?: boolean } = {},
   deps: CommandDeps = SYSTEM_COMMAND_DEPS,
 ): Promise<number> {
-  const starts = start === false ? {} : { start };
+  // The forwarder's ask is this line's alone: nothing it starts or runs carries it, or the host a line brings up
+  // would hand it to every wsp its turns run.
+  const forward = given[FORWARD_ENV];
+  const env = forward === undefined ? given : Object.fromEntries(Object.entries(given).filter(([name]) => name !== FORWARD_ENV));
+  const starter = start ?? starterFor(run, env);
+  const starts = starter === false ? {} : { start: starter };
   // One reading for every road out of this process, and the sentence about it said once: a verb, a command and the
   // tool server all pick their state here, so none of them can run against a state another of them named.
   const chooseState = (flag?: string): string => statePathFrom(flag, env, line => io.error(line));
@@ -2618,7 +2622,10 @@ export async function cli(
     const words = verb.name.split(" ");
     return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: caller.cwd ?? process.cwd(), env, open: systemOpener(), ...starts, ...(caller.elsewhere === true ? { elsewhere: true } : {}) });
   }
-  if (rest[0] === MCP_COMMAND) return mcp(io, [...common, ...rest.slice(1)], chooseState, run, env, starts);
+  if (rest[0] === MCP_COMMAND) {
+    const argv = [...common, ...rest.slice(1)];
+    return forward === undefined ? mcp(io, argv, chooseState, run, env, starts) : forwardDoor(io, argv, env, forward === "start" ? starts : {});
+  }
   let values: SharedFlags;
   let positionals: string[];
   try {

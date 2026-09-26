@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mergeScript } from "./merge.js";
 import { pyData } from "./py.js";
+import { configSum } from "@wsp/catalog";
 import { underProject } from "@wsp/protocol";
+import { writeConfigHere } from "../config-here.js";
 import { filesUnder, movedPath, underHome, type MovedState, type ProjectStateResolver } from "./resolver.js";
 
 /** The registry maps each resolved project path to the slug naming its tmp and history directories. */
@@ -28,8 +30,9 @@ export const geminiResolver: ProjectStateResolver = {
   roots: ROOTS,
   async move(home, from, to) {
     const file = join(home, REGISTRY);
-    const registry = readRegistry(file);
-    if (registry === undefined) return [];
+    if (!existsSync(file)) return [];
+    const read = readFileSync(file);
+    const registry = JSON.parse(read.toString("utf8")) as Registry;
     const renamed = new Map<string, { slug: string; path: string }>();
     for (const [path, slug] of Object.entries(registry.projects)) {
       const target = movedPath(path, from, to);
@@ -39,16 +42,17 @@ export const geminiResolver: ProjectStateResolver = {
     }
     if (renamed.size === 0) return [];
     registry.projects = Object.fromEntries(Object.entries(registry.projects).map(([k, v]) => [renamed.get(k)?.path ?? k, v]));
-    writeFileSync(file, JSON.stringify(registry, null, 2) + "\n");
+    writeConfigHere(file, home, configSum(read), JSON.stringify(registry, null, 2) + "\n");
     const moved: MovedState[] = [{ state: "project registry", files: [file], changed: renamed.size }];
     for (const [state, dir] of SLUG_DIRS) {
       const files: string[] = [];
       for (const [path, { slug, path: target }] of renamed) {
         const marker = join(home, dir, slug, ".project_root");
         if (!existsSync(marker)) continue;
-        const text = readFileSync(marker, "utf8");
+        const bytes = readFileSync(marker);
+        const text = bytes.toString("utf8");
         if (text.trimEnd() !== path) continue;
-        writeFileSync(marker, text.replace(path, () => target));
+        writeConfigHere(marker, home, configSum(bytes), text.replace(path, () => target));
         files.push(marker);
       }
       if (files.length > 0) moved.push({ state, files, changed: files.length });

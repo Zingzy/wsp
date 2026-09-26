@@ -27,6 +27,7 @@ import {
   EMPTY_TASK_LINE,
   EXIT_CODES,
   HOST_STOPPING_CLOSE,
+  HOST_CLOSED_LINE,
   HOST_STOPPING_LINE,
   HostFolderListing,
   AgentRow,
@@ -289,7 +290,7 @@ export interface HostClient {
   /** Why the socket is gone, in the words the person reads: a host that let it go as it stopped says the turn goes
    * on, since the run is the machine's; anything else is a host that went. */
   closeWords(): string;
-  /** The device this socket bought with a pairing code, on the one dial that redeems one; absent on every other. */
+  /** The device token a host on the account answered this computer's key with, on the dial that proved it. */
   readonly paired?: { deviceId: string; deviceToken: string };
   close(): void;
   /** Drops the socket without waiting for the host to answer the close. A graceful close on a road that is carrying
@@ -304,19 +305,15 @@ const UNAUTHORIZED_CLOSE = 4401;
 /** How long a refused auth waits for the close that follows its frame before the frame's own class stands. */
 const CLOSE_GRACE_MS = 500;
 
-/** What a dial takes beside the state file: which host, how long to wait, and on the one dial that pairs, the code
- * to spend instead of a token this computer does not have yet. */
+/** What a dial takes beside the state file: which host, how long to wait, and on a dial to a host on the account,
+ * the key to prove instead of a token this computer does not have yet. */
 export interface DialOpts extends HostPick {
   /** How long the socket and the first frame's answer may take; the road's own window when no caller names one. */
   deadlineMs?: number;
   /** Resolved already by a caller that had to read it anyway, so the hosts file is read once per line. */
   aim?: HostAim;
-  /** Spends a pairing code as the first frame inside the seal, and holds the device token the host answers with.
-   * The fingerprint is the half of that code the person copied beside it, which the host proves before the code
-   * itself crosses. */
-  redeem?: { code: string; name: string; hostKey: string };
   /** Proves this computer's own device key as the first frame inside the seal, for a host on the account that
-   * admitted it: no code is spent, and the host answers a device token of its own exactly as a redeem is answered.
+   * admitted it: no code is spent, and the host answers a device token of its own.
    * The name is what the host's listing calls this computer. */
   admit?: { name: string; hostKey: string; key: PlaceKeyPair };
   /** What brings a host up when none serves this state file here. A line that hands none in starts nothing and
@@ -335,8 +332,8 @@ export const noHostServingLine = (statePath: string): string => `no wsp host is 
 
 /** Where a line dials and what it presents there: a host on this computer is the address its lock records (one
  * bound to a single address answers only there) and the token it wrote beside its state file, a host somewhere
- * else is its own address on the runtime's path and the device token this computer was paired with, and an address
- * typed on the line carries no token, which only a redeem can make up for. */
+ * else is its own address on the runtime's path and the device token this computer holds for it, and an address
+ * carries the token a turn's launch left for it or none. */
 export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim } = {}): { url: string; token: string } {
   const aim = pick.aim ?? aimedHost(statePath, pick);
   if (aim.kind === "url") return { url: wsUrlOf(aim.url), token: aim.token ?? "" };
@@ -348,6 +345,14 @@ export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim 
   return { url: `ws://${authority(dialAddress(lock), lock.wsPort)}`, token };
 }
 
+/** Where the wsp command's forwarder dials for a line aimed at the host serving this state file on this computer:
+ * the address and the token a line's own dial reads for it. Nothing for every other aim, since each of them pins a
+ * key or spends a token the forwarder holds no road for, and nothing where no host serves the file. */
+export function hereDoor(statePath: string, pick: HostPick = {}): { url: string; token: string } | undefined {
+  if (aimedHost(statePath, pick).kind !== "here" || servingHost(statePath) === undefined) return undefined;
+  return hostAddress(statePath, { aim: { kind: "here" } });
+}
+
 /** One socket to the host, and for a host on the account the one re-admission it may need on the way: a record
  * whose token that host no longer takes is a computer the account still trusts, so this computer proves its device
  * key once, writes the token the host answers into the record and carries on. The dial itself is below. */
@@ -356,15 +361,15 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
   const home = opts.home ?? wspHome(opts.env ?? process.env);
   // A record written off the account's listing holds no token until its first dial, so the first line aimed at it
   // is admitted rather than refused: the key this computer signs with is the one the host was told to trust.
-  const account = aim.kind === "alias" && aim.record.via?.kind === "account" ? aim : undefined;
+  const account = aim.kind === "alias" ? aim : undefined;
   const admitting = (): DialOpts["admit"] => {
-    if (account === undefined || opts.redeem !== undefined || account.record.hostKey === undefined) return undefined;
+    if (account === undefined || account.record.hostKey === undefined) return undefined;
     const key = readDeviceKeyPair(home);
     return key === undefined ? undefined : { name: hostname(), hostKey: account.record.hostKey, key };
   };
   const admit = account !== undefined && account.record.deviceToken === "" ? admitting() : undefined;
   // Which road this dial ended up taking, so a token is written into the record only where this computer proved
-  // its key for it: the frame a redeem answers belongs to wsp host connect, which holds no record yet.
+  // its key for it.
   let proved = admit;
   const client = await dialOnce(statePath, { ...opts, aim, ...(admit === undefined ? {} : { admit }) }, refused => {
     // The token this computer holds was taken away over there while the account still names it: one more dial,
@@ -390,9 +395,8 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
   if (aim.kind === "here" && opts.start !== undefined && servingHost(statePath) === undefined) {
     await opts.start(statePath, opts.say ?? (line => void process.stderr.write(`${line}\n`)));
   }
-  // An address is the road wsp host connect takes and no other: every other line needs the token a redeem bought, and
-  // this computer holds one only under a name.
-  if (aim.kind === "url" && aim.token === undefined && opts.redeem === undefined && opts.admit === undefined) throw usageRefusal(addressNotPairedLine(aim.url), READ_THE_HOSTS);
+  // An address with no token beside it opens nothing: this computer holds a token only under a name.
+  if (aim.kind === "url" && aim.token === undefined && opts.admit === undefined) throw usageRefusal(addressNotPairedLine(aim.url), READ_THE_HOSTS);
   const { url, token } = hostAddress(statePath, { aim });
   const deadlineMs = opts.deadlineMs ?? dialWindowMs(aim);
   const ws = new WebSocket(url);
@@ -432,7 +436,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
     }
     for (const fn of listeners) fn(frame);
   });
-  const closeWords = (): string => (closeCode === HOST_STOPPING_CLOSE ? HOST_STOPPING_LINE : "the host closed the connection");
+  const closeWords = (): string => (closeCode === HOST_STOPPING_CLOSE ? HOST_STOPPING_LINE : HOST_CLOSED_LINE);
   ws.on("close", () => {
     for (const w of pending.values()) w.fail(new Error(closeWords()));
     pending.clear();
@@ -496,16 +500,15 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
       await Promise.race([closed, new Promise(r => setTimeout(r, CLOSE_GRACE_MS))]);
       if (closeCode !== UNAUTHORIZED_CLOSE) throw e;
       // A frame with no kind behind an unauthorized close, where this computer sent device.auth: the host's own
-      // door does not know that frame, so it is an older wsp and the code road is the way in.
+      // door does not know that frame, so it is an older wsp.
       if (opts.admit !== undefined) throw authRefusal(deviceAuthOldHostLine(where));
     } else if (kind !== "auth") throw e;
     // A host that refused an admission said why in its own sentence, and there is no token of this computer's to
     // pair again for: the sentence is printed as it came.
     if (opts.admit !== undefined) throw authRefusal(e instanceof Error ? e.message : String(e));
-    // A host that refused an alias's token has revoked this computer, whatever words it used: the line names the
-    // alias and the connect that pairs again, which is the only way back in.
-    if (aim.kind !== "alias" || opts.redeem !== undefined) throw authRefusal(e instanceof Error ? e.message : String(e));
-    throw authRefusal(deviceRefusedLine(aim.alias, aim.record.url));
+    // A host that refused an alias's token has revoked this computer, whatever words it used.
+    if (aim.kind !== "alias") throw authRefusal(e instanceof Error ? e.message : String(e));
+    throw authRefusal(deviceRefusedLine(aim.alias));
   };
   const authed = opened
     .catch((e: unknown) => {
@@ -515,7 +518,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
       // Before the token or the code: the host proves the key this computer pinned, and everything after that
       // reply rides inside the seal both ends agreed. A host on this computer is reached over its own loopback,
       // where there is no road for anybody to stand on, and dials as it always did.
-      const pinned = opts.redeem?.hostKey ?? opts.admit?.hostKey ?? (aim.kind === "here" ? undefined : aimHolds(aim).hostKey);
+      const pinned = opts.admit?.hostKey ?? (aim.kind === "here" ? undefined : aimHolds(aim).hostKey);
       const expect = pinned === undefined ? undefined : await openSeal(pinned);
       if (opts.admit !== undefined) {
         // A computer the account admitted: it proves the key that host was told to trust over this socket's own
@@ -529,9 +532,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
         paired = { deviceId: admitted.deviceId, deviceToken: admitted.deviceToken };
         return;
       }
-      if (opts.redeem === undefined) return void (await request("auth", { token }).catch(tokenRefused));
-      const reply = await request<{ deviceId: string; deviceToken: string }>("pair.redeem", { code: opts.redeem.code, name: opts.redeem.name }).catch(tokenRefused);
-      paired = { deviceId: reply.deviceId, deviceToken: reply.deviceToken };
+      await request("auth", { token }).catch(tokenRefused);
     });
   try {
     await Promise.race([authed, deadline]);
@@ -826,7 +827,7 @@ export interface ToolOnlyVerb {
 export interface CliOnlyVerb extends Omit<CliVerb, "tool"> {
   cliOnly: string;
   /** Why this line runs at its own host's terminal and nowhere else. The flag is still parsed, so a typed --host
-   * reads this sentence rather than the parser's unknown option, and so does WSP_HOST and the default alias. */
+   * reads this sentence rather than the parser's unknown option, and so does WSP_HOST and the account's one host. */
   hostSide?: string;
 }
 
@@ -4627,7 +4628,7 @@ export const ownFlagsOf = (verb: CliVerb | CliOnlyVerb): string[] => Object.keys
 export const COMMON_FLAG_WORDS = {
   json: "print the raw protocol values, one JSON object per line, with everything else on stderr",
   state: "the state file the host serves",
-  host: "run the line against a host on another computer, by the name wsp host connect gave it; WSP_HOST names one for a whole shell",
+  host: "run the line against a host on your account, by the name wsp hosts lists it under; WSP_HOST names one for a whole shell",
   hostSide: "read to say this line runs at its own host's terminal; it dials no other",
 } as const;
 

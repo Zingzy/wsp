@@ -12,7 +12,6 @@ import type { McpEditLib, McpMergeResult } from "@wsp/catalog";
 import {
   READ_MS,
   absentCommands,
-  commentsDroppedLine,
   landConfigs,
   mcpOpening,
   mcpRowId,
@@ -95,8 +94,6 @@ interface Merged {
   records: Map<string, string>;
   /** Row ids this round planned in a scope it merged and left no entry of wsp's under. */
   tombstones: string[];
-  /** The files whose merge could not keep the comments they held. */
-  commentsDropped: Set<string>;
   /** Row ids whose entry the merge found already as the copy that travelled has it. */
   same: Set<string>;
   /** Row ids an agent's own definition stands under, with the file it stands in. */
@@ -159,7 +156,6 @@ export async function provisionMcp(
     const theirs = new Map<string, string>();
     const noCopy = new Map<string, string>();
     const where = new Map<string, string>();
-    const commentsDropped = new Set<string>();
     const wrote: { id: string; name: string; scope: McpScope; path: string }[] = [];
     /** Every row id this round planned where it had both the file there and a copy of this computer's to merge:
      * a scope with neither knows nothing about those names and says nothing about them. */
@@ -201,7 +197,6 @@ export async function provisionMcp(
         try {
           const merged = scope.format.merge(lib, { keep: scope.keep, drop: scope.drop.map(d => d.name), replace, ...(scope.project !== undefined ? { project: scope.project } : {}) }, standing, arrived);
           if (merged.text !== (standing ?? "")) texts.set(path, merged.text);
-          if (merged.commentsDropped) commentsDropped.add(path);
           planned.push(...names.map(id));
           for (const r of merged.results) {
             if (r.outcome === "same") same.add(id(r.name));
@@ -222,7 +217,7 @@ export async function provisionMcp(
         return digest === undefined ? [] : [[w.id, digest] as const];
       }),
     );
-    return { outcomes, texts, records, tombstones: planned.filter(id => !records.has(id)), same, theirs, noCopy, where, commentsDropped };
+    return { outcomes, texts, records, tombstones: planned.filter(id => !records.has(id)), same, theirs, noCopy, where };
   };
 
   const missing = new Set<string>();
@@ -250,18 +245,13 @@ export async function provisionMcp(
     for (const command of await absentCommands(machine, plan, first.outcomes, o.path)) missing.add(command);
     agents = withoutAbsent(plan, agents, first.outcomes, missing, o.tools);
     merged = mergeAll(agents);
-    failure = await landConfigs(machine, own, merged.texts);
+    failure = await landConfigs(machine, o.home, own, merged.texts);
   }
   // A server is present where its entry was already the one that travelled and the file it sits in did not arrive
   // whole with this run: it was there as the recipe asks, so a second run installs nothing and says so. Read before
   // the rows are built, since the words the round closes with say what the rows say; nothing is present on a round
   // whose configs did not land, where every kept server is skipped with that reason instead.
   const present = new Set(failure !== undefined || merged === undefined ? [] : [...merged.same].filter(id => !arrivedWhole(merged?.where.get(id))));
-  // A merge that could not keep a file's comments is said on every row of that file and once here as the round
-  // goes: a row of a server that installed reads as installed and no more on the screen, and the person whose
-  // comments those were is reading this terminal.
-  const commentsAt = failure !== undefined || merged === undefined ? new Set<string>() : merged.commentsDropped;
-  for (const path of commentsAt) o.stage("installing-mcp", commentsDroppedLine(path));
   const results = await mcpRows(machine, plan, {
     agents,
     missing,
@@ -275,8 +265,6 @@ export async function provisionMcp(
   }
   return results.map(r => {
     const outcome = r.outcome === "skipped" ? "skipped" : present.has(r.id) ? "present" : "installed";
-    const at = merged?.where.get(r.id);
-    const notes = [...(r.note !== undefined && outcome !== "present" ? [r.note] : []), ...(at !== undefined && commentsAt.has(at) ? [commentsDroppedLine(at)] : [])];
-    return { id: r.id, label: `${r.agent} ${r.name}`, outcome, kind: "server" as const, ...(notes.length > 0 ? { note: notes.join("; ") } : {}) };
+    return { id: r.id, label: `${r.agent} ${r.name}`, outcome, kind: "server" as const, ...(r.note !== undefined && outcome !== "present" ? { note: r.note } : {}) };
   });
 }

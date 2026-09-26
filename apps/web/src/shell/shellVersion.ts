@@ -45,7 +45,7 @@ export function useShellVersionEffect(): void {
       say();
       return;
     }
-    hosts().then(view => say(view.hosts.find(h => h.alias === view.current)?.label), () => say());
+    hosts().then(view => say(view.hosts.find(h => h.alias === view.current)?.alias), () => say());
     return () => {
       live = false;
     };
