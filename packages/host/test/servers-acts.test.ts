@@ -219,6 +219,22 @@ describe("adding an MCP server", () => {
       await expect(acts.add(HERE, { agent: "opencode", name: "first", command: "npx", env: { TOKEN: "sk_TESTONLY_new" } })).rejects.toThrow("TOKEN already holds the value second was added with");
     });
 
+    it("on another computer leaves a header naming a variable servers.env holds by name, sends a default or a literal as a value, and refuses one naming a variable nobody holds", async () => {
+      const { at, vault, acts } = setup();
+      await acts.add(HERE, { agent: "claude", name: "first", command: "npx", env: { TOKEN: "sk_TESTONLY_first" } });
+      const other = box(at, road(at).machine);
+      await acts.add(other, { agent: "gemini", name: "named", url: "https://n.example/mcp", headers: { Authorization: "Bearer ${TOKEN}" } });
+      await acts.add(other, { agent: "gemini", name: "lit", url: "https://l.example/mcp", headers: { Authorization: "Bearer ${notheld:-tok_TESTONLY}", "X-Key": "k$" } });
+      const settings = join(at.home, ".gemini/settings.json");
+      const before = readFileSync(settings, "utf8");
+      await expect(acts.add(other, { agent: "gemini", name: "gone", url: "https://g.example/mcp", headers: { Authorization: "$ecret123" } })).rejects.toThrow("gone reads a variable servers.env does not hold in mcpServers.gone.headers.Authorization, so it could not start there. Nothing was written.");
+      expect(readFileSync(settings, "utf8")).toBe(before);
+      const servers = json(settings).mcpServers as Record<string, { headers: Record<string, string> }>;
+      expect(servers.named!.headers).toEqual({ Authorization: "Bearer ${TOKEN}" });
+      expect(servers.lit!.headers).toEqual({ Authorization: "Bearer ${WSP_MCP_LIT_AUTHORIZATION}", "X-Key": "${WSP_MCP_LIT_X_KEY}" });
+      expect(vault.held()).toEqual({ TOKEN: "sk_TESTONLY_first", WSP_MCP_LIT_AUTHORIZATION: "tok_TESTONLY", WSP_MCP_LIT_X_KEY: "k$" });
+    });
+
     it("takes a new value from the same server as its rotation, on this computer and on another", async () => {
       const { at, vault, acts } = setup();
       await acts.add(HERE, { agent: "claude", name: "acme", command: "npx", args: ["--token=${TOKEN}"], env: { TOKEN: "sk_TESTONLY_old" } });

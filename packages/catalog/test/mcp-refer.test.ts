@@ -33,11 +33,12 @@ describe("Claude Code's reference writer", () => {
     2,
   );
 
-  it("writes ${NAME} in headers and env, the bearer's token alone in the vault, and leaves a name the person already wrote as they wrote it", async () => {
-    const out = await MCP_SERVERS_JSON.refer(file);
+  it("writes ${NAME} in headers and env, the bearer's token alone in the vault, and leaves a name servers.env holds as the person wrote it", async () => {
+    const out = await MCP_SERVERS_JSON.refer(file, undefined, [], new Set(["LOG_LEVEL", "MY_TOKEN"]));
     const root = parseJsonc(out.text) as { mcpServers: Record<string, { headers?: Record<string, string>; env?: Record<string, string> }>; projects: Record<string, { mcpServers: Record<string, { headers: Record<string, string> }> }> };
     expect(root.mcpServers.linear!.headers).toEqual({ Authorization: "Bearer ${WSP_MCP_LINEAR_AUTHORIZATION}", "X-Team": "${WSP_MCP_LINEAR_X_TEAM}" });
-    expect(root.mcpServers.notion!.env).toEqual({ NOTION_TOKEN: "${NOTION_TOKEN}", LOG: "${LOG_LEVEL:-info}" });
+    // A held name's default goes: the value is servers.env's.
+    expect(root.mcpServers.notion!.env).toEqual({ NOTION_TOKEN: "${NOTION_TOKEN}", LOG: "${LOG_LEVEL}" });
     expect(root.mcpServers.mine!.headers).toEqual({ Authorization: "Bearer ${MY_TOKEN}" });
     expect(root.projects[HOME]!.mcpServers.zomato!.headers).toEqual({ "X-Key": "${WSP_MCP_ZOMATO_X_KEY}" });
     expect(out.servers).toEqual([
@@ -135,7 +136,7 @@ describe("Codex's reference writer", () => {
 
   it("adds to the names a table already reads rather than writing a key twice", async () => {
     const text = ["[mcp_servers.a]", 'url = "https://a.example"', 'bearer_token_env_var = "A_TOKEN"', 'env_http_headers = { "X-One" = "ONE" }', 'http_headers = { "Authorization" = "Bearer x1", "X-Two" = "two" }', ""].join("\n");
-    const out = await CODEX_TOML.refer(text);
+    const out = await CODEX_TOML.refer(text, undefined, [], new Set(["A_TOKEN", "ONE"]));
     expect(out.text).toBe(["[mcp_servers.a]", 'url = "https://a.example"', 'bearer_token_env_var = "A_TOKEN"', 'env_http_headers = { "X-One" = "ONE", "Authorization" = "WSP_MCP_A_AUTHORIZATION", "X-Two" = "WSP_MCP_A_X_TWO" }', ""].join("\n"));
     expect(out.servers[0]!.values).toEqual({ WSP_MCP_A_AUTHORIZATION: "Bearer x1", WSP_MCP_A_X_TWO: "two" });
     const stdio = ["[mcp_servers.b]", 'command = "b"', 'env_vars = ["HOME_DIR"]', 'env = { K = "v" }', ""].join("\n");
@@ -297,8 +298,8 @@ describe("what a reference writer refuses rather than guess", () => {
   it("a value that mixes a literal with a variable, which cannot travel whole by name", async () => {
     await expect(MCP_SERVERS_JSON.refer(JSON.stringify({ mcpServers: { s: { url: "https://s.example", headers: { Authorization: "Bearer lit_${X}" } } } }))).rejects.toThrow("s's Authorization mixes a value with a variable, so it cannot travel by name; make it one or the other");
     await expect(GEMINI_SETTINGS_JSON.refer(JSON.stringify({ mcpServers: { s: { command: "x", env: { K: "ab$cd" } } } }))).rejects.toThrow("s's K mixes a value with a variable, so it cannot travel by name; make it one or the other");
-    // A whole reference, a bearer's included, stands as written.
-    expect((await MCP_SERVERS_JSON.refer(JSON.stringify({ mcpServers: { s: { url: "https://s.example", headers: { Authorization: "Bearer ${X}", Y: "${Y:-d}" } } } }))).servers).toEqual([{ name: "s", values: {} }]);
+    // A whole reference to a name servers.env holds, a bearer's included, hands nothing to the vault.
+    expect((await MCP_SERVERS_JSON.refer(JSON.stringify({ mcpServers: { s: { url: "https://s.example", headers: { Authorization: "Bearer ${X}", Y: "${Y:-d}" } } } }), undefined, [], new Set(["X", "Y"]))).servers).toEqual([{ name: "s", values: {} }]);
   });
 });
 
@@ -351,7 +352,7 @@ describe("an MCP server's OAuth secrets", () => {
 
   it("leaves a secret that already names a variable as written, and another server's secret alone when one server is asked for", async () => {
     const named = JSON.stringify({ mcpServers: { linear: { type: "http", url: "https://l.example", oauth: { clientSecret: "${LINEAR_SECRET}" } } } });
-    expect((await serversByName(MCP_SERVERS_JSON, named, new Map(), () => undefined)).text).toBe(named);
+    expect((await serversByName(MCP_SERVERS_JSON, named, new Map(), () => undefined, { LINEAR_SECRET: { value: CS, by: ["linear"] } })).text).toBe(named);
     const beside = JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: { refreshToken: CS } }, other: { command: "o", env: { K: "k_TESTONLY" } } } });
     expect((await GEMINI_SETTINGS_JSON.refer(beside, "other")).servers).toEqual([{ name: "other", values: { K: "k_TESTONLY" } }]);
   });
@@ -376,8 +377,9 @@ describe("an MCP server's OAuth secrets", () => {
       }
       expect((await serversByName(lax(format, [{ oauth: { clientId: "cid", clientSecret: "" } }]), "{}", new Map(), () => undefined)).dropped).toEqual([]);
     }
-    expect((await serversByName(lax(GEMINI_SETTINGS_JSON, [{ oauth: { clientSecret: "${X}" } }]), "{}", new Map(), () => undefined)).dropped).toEqual([]);
-    expect((await serversByName(lax(OPENCODE_JSON, [{ oauth: { client_secret: "{env:X}" } }]), "{}", new Map(), () => undefined)).dropped).toEqual([]);
+    const x = { X: { value: CS, by: ["s"] } };
+    expect((await serversByName(lax(GEMINI_SETTINGS_JSON, [{ oauth: { clientSecret: "${X}" } }]), "{}", new Map(), () => undefined, x)).dropped).toEqual([]);
+    expect((await serversByName(lax(OPENCODE_JSON, [{ oauth: { client_secret: "{env:X}" } }]), "{}", new Map(), () => undefined, x)).dropped).toEqual([]);
     await expect(serversByName(lax(OPENCODE_JSON, [{ oauth: { clientSecret: "${X}" } }]), "{}", new Map(), () => undefined)).rejects.toThrow("oauth.clientSecret");
     await expect(serversByName(lax(CODEX_TOML, [{ oauth: { client_secret: "${X}" } }]), "{}", new Map(), () => undefined)).rejects.toThrow("oauth.client_secret");
   });
@@ -511,5 +513,186 @@ describe("a value servers.env holds, written back as its reference on the copy",
     await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\ncommand = "x"\nargs = ["--token=${V}"]\nenv = { ACME_TOKEN = "${V}" }\n`, new Map(), rows, vault)).rejects.toThrow(said("the --token argument"));
     await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\nurl = "${ADDRESS}"\n`, new Map(), rows, vault)).rejects.toThrow(said("the key parameter of an address"));
     await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\ncommand = "x"\nargs = ["${V}"]\n`, new Map(), rows, vault)).rejects.toThrow(said("an argument"));
+  });
+});
+
+describe("a literal that reads like a reference", () => {
+  const rows = (): undefined => undefined;
+  const HELD = "sk_TESTONLY_held";
+  const vault = { ACME_TOKEN: { value: HELD, by: ["s"] } };
+  const D = "sk_TESTONLY_default";
+  type Where = "header" | "env" | "oauth";
+  /** What a value comes to: moved to servers.env as `moved`, the server dropped, or the file refused. */
+  type Outcome = { moved: string } | "dropped" | "refused" | "mixed";
+  const claudeFile = (where: Where, v: string) => JSON.stringify({ mcpServers: { s: where === "env" ? { command: "x", env: { K: v } } : { type: "http", url: "https://s.example", ...(where === "header" ? { headers: { Authorization: v } } : { oauth: { clientSecret: v } }) } } });
+  const geminiFile = (where: Where, v: string) => JSON.stringify({ mcpServers: { s: where === "env" ? { command: "x", env: { K: v } } : { httpUrl: "https://s.example", ...(where === "header" ? { headers: { Authorization: v } } : { oauth: { clientSecret: v } }) } } });
+  const opencodeFile = (where: Where, v: string) => JSON.stringify({ mcp: { s: where === "env" ? { type: "local", command: ["x"], environment: { K: v } } : { type: "remote", url: "https://s.example", ...(where === "header" ? { headers: { Authorization: v } } : { oauth: { clientSecret: v } }) } } });
+  const keyPath = (root: string, where: Where, envKey: string): string => `${root}.s.${where === "header" ? "headers.Authorization" : where === "env" ? `${envKey}.K` : "oauth.clientSecret"}`;
+  const agents: [string, McpFormat, (where: Where, v: string) => string, string, string, [string, (where: Where) => Outcome][], string][] = [
+    ["Claude Code", MCP_SERVERS_JSON, claudeFile, "mcpServers", "env", [
+      ["$ecret123", w => (w === "oauth" ? "refused" : { moved: "$ecret123" })],
+      ["${notheld}", () => "dropped"],
+      ["Bearer ${notheld}", w => (w === "oauth" ? "mixed" : "dropped")],
+      [`\${notheld:-${D}}`, w => (w === "oauth" ? "refused" : { moved: D })],
+      [`Bearer \${notheld:-${D}}`, w => (w === "oauth" ? "mixed" : { moved: w === "header" ? D : `Bearer ${D}` })],
+    ], "${ACME_TOKEN}"],
+    ["Gemini CLI", GEMINI_SETTINGS_JSON, geminiFile, "mcpServers", "env", [
+      ["$ecret123", () => "dropped"],
+      ["${notheld}", () => "dropped"],
+      [`\${notheld:-${D}}`, () => ({ moved: D })],
+    ], "$ACME_TOKEN"],
+    ["OpenCode", OPENCODE_JSON, opencodeFile, "mcp", "environment", [
+      ["$ecret123", () => ({ moved: "$ecret123" })],
+      ["${notheld}", () => ({ moved: "${notheld}" })],
+      ["{env:notheld}", () => "dropped"],
+    ], "{env:ACME_TOKEN}"],
+  ];
+
+  for (const [agent, format, file, root, envKey, cases, ref] of agents) {
+    it(`${agent}: a reference to a name nobody holds drops its server, its default travels as a value, and a literal never travels whole`, async () => {
+      for (const where of ["header", "env", "oauth"] as const) {
+        for (const [v, outcomeOf] of cases) {
+          const outcome = outcomeOf(where);
+          const text = file(where, v);
+          const label = `${where} ${v}`;
+          if (outcome === "mixed") {
+            await expect(serversByName(format, text, new Map(), rows, vault), label).rejects.toThrow("s's oauth.clientSecret mixes a value with a variable, so it cannot travel by name");
+            continue;
+          }
+          if (outcome === "refused") {
+            await expect(serversByName(format, text, new Map(), rows, vault), label).rejects.toThrow(`s keeps an OAuth secret in ${keyPath(root, where, envKey)}, and its agent reads no variable there, so the file stays on this computer`);
+            continue;
+          }
+          const held = new Map<string, { value: string; by: string }>();
+          const out = await serversByName(format, text, held, rows, vault);
+          expect(out.text, label).not.toContain(v);
+          if (outcome === "dropped") {
+            expect(out.dropped, label).toEqual([{ name: "s", reason: `reads a variable servers.env does not hold in ${keyPath(root, where, envKey)}, so it could not start there` }]);
+            expect(held.size, label).toBe(0);
+          } else {
+            expect(out.dropped, label).toEqual([]);
+            expect(out.text, label).not.toContain(outcome.moved);
+            expect([...held.values()].map(h => h.value), label).toEqual([outcome.moved]);
+          }
+        }
+      }
+    });
+
+    it(`${agent}: a reference to a name servers.env holds stands as written`, async () => {
+      for (const where of ["header", "env", "oauth"] as const) {
+        if (where === "oauth" && format === MCP_SERVERS_JSON) continue;
+        const text = file(where, ref);
+        const held = new Map<string, { value: string; by: string }>();
+        expect((await serversByName(format, text, held, rows, vault)).text, where).toBe(text);
+        expect(held.size, where).toBe(0);
+      }
+    });
+  }
+
+  it("a variable that names itself, which servers.env does not hold, drops its server; with a default the default travels", async () => {
+    for (const [, format, file, root, envKey, , ref] of agents) {
+      const self = ref.replace("ACME_TOKEN", "K");
+      const out = await serversByName(format, file("env", self), new Map(), rows, vault);
+      expect(out.dropped, self).toEqual([{ name: "s", reason: `reads a variable servers.env does not hold in ${root}.s.${envKey}.K, so it could not start there` }]);
+      expect((await serversByName(format, file("env", self), new Map(), rows, { K: { value: HELD, by: ["s"] } })).text, self).toBe(file("env", self));
+    }
+    const held = new Map<string, { value: string; by: string }>();
+    const out = await serversByName(MCP_SERVERS_JSON, claudeFile("env", "${K:-info}"), held, rows);
+    expect(JSON.parse(out.text)).toEqual({ mcpServers: { s: { command: "x", env: { K: "${K}" } } } });
+    expect(held.get("K")?.value).toBe("info");
+  });
+
+  it("the copy's last check lets an OAuth secret through only as a reference to a name servers.env holds or the copy writes", async () => {
+    const lax = (format: McpFormat, secret: string, values: Record<string, string> = {}): McpFormat => ({ ...format, refer: async text => ({ text, servers: [{ name: "s", values }], entries: [{ oauth: { clientSecret: secret } }] }) });
+    const said = "a server still carries an OAuth secret in oauth.clientSecret after it was written by name, so the file stays on this computer";
+    for (const [format, unheld, own] of [
+      [GEMINI_SETTINGS_JSON, ["$ecret123", "${notheld}"], "${WSP_MCP_S_OAUTH_CLIENTSECRET}"],
+      [OPENCODE_JSON, ["{env:notheld}"], "{env:WSP_MCP_S_OAUTH_CLIENTSECRET}"],
+    ] as const) {
+      for (const v of unheld) await expect(serversByName(lax(format, v), "{}", new Map(), rows, vault), v).rejects.toThrow(said);
+      expect((await serversByName(lax(format, own, { WSP_MCP_S_OAUTH_CLIENTSECRET: "cs_TESTONLY" }), "{}", new Map(), rows)).dropped).toEqual([]);
+      expect((await serversByName(lax(format, format === OPENCODE_JSON ? "{env:ACME_TOKEN}" : "${ACME_TOKEN}"), "{}", new Map(), rows, vault)).dropped).toEqual([]);
+    }
+  });
+});
+
+describe("a reference with a default, in an address, or by name in Codex", () => {
+  const rows = (): undefined => undefined;
+  const vault = { ACME_TOKEN: { value: "sk_TESTONLY_held", by: ["s"] } };
+  const DFLT = "sk_TESTONLY_dflt";
+  const dropped = (path: string) => [{ name: "s", reason: `reads a variable servers.env does not hold in ${path}, so it could not start there` }];
+
+  it("a held name's default never travels: the reference is written bare, the value coming from servers.env", async () => {
+    const cases: [McpFormat, unknown, unknown][] = [
+      [MCP_SERVERS_JSON, { mcpServers: { s: { type: "http", url: "https://s.example", headers: { Authorization: `Bearer \${ACME_TOKEN:-${DFLT}}`, X: `\${ACME_TOKEN:-${DFLT}}` } } } }, { mcpServers: { s: { type: "http", url: "https://s.example", headers: { Authorization: "Bearer ${ACME_TOKEN}", X: "${ACME_TOKEN}" } } } }],
+      [MCP_SERVERS_JSON, { mcpServers: { s: { command: "x", env: { K: `\${ACME_TOKEN:-${DFLT}}` } } } }, { mcpServers: { s: { command: "x", env: { K: "${ACME_TOKEN}" } } } }],
+      [GEMINI_SETTINGS_JSON, { mcpServers: { s: { httpUrl: "https://s.example", headers: { X: `\${ACME_TOKEN:-${DFLT}}` }, oauth: { clientSecret: `\${ACME_TOKEN:-${DFLT}}` } } } }, { mcpServers: { s: { httpUrl: "https://s.example", headers: { X: "${ACME_TOKEN}" }, oauth: { clientSecret: "${ACME_TOKEN}" } } } }],
+      [GEMINI_SETTINGS_JSON, { mcpServers: { s: { command: "x", env: { K: `\${ACME_TOKEN:-${DFLT}}` } } } }, { mcpServers: { s: { command: "x", env: { K: "${ACME_TOKEN}" } } } }],
+      [MCP_SERVERS_JSON, { mcpServers: { s: { type: "http", url: `https://s.example/?k=\${ACME_TOKEN:-${DFLT}}` } } }, { mcpServers: { s: { type: "http", url: "https://s.example/?k=${ACME_TOKEN}" } } }],
+    ];
+    for (const [format, from, to] of cases) {
+      const held = new Map<string, { value: string; by: string }>();
+      const out = await serversByName(format, JSON.stringify(from), held, rows, vault);
+      expect(out.text).not.toContain(DFLT);
+      expect(JSON.parse(out.text)).toEqual(to);
+      expect(out.dropped).toEqual([]);
+      expect(held.size).toBe(0);
+    }
+    // OpenCode's {env:X} carries no default, so the same text is a value and moves.
+    const opencode = await serversByName(OPENCODE_JSON, JSON.stringify({ mcp: { s: { type: "remote", url: "https://s.example", oauth: { clientSecret: `{env:ACME_TOKEN:-${DFLT}}` } } } }), new Map(), rows, vault);
+    expect(opencode.text).not.toContain(DFLT);
+  });
+
+  it("the copy's last check refuses a held name's reference that still carries its default", async () => {
+    const lax = (secret: string): McpFormat => ({ ...GEMINI_SETTINGS_JSON, refer: async text => ({ text, servers: [{ name: "s", values: {} }], entries: [{ oauth: { clientSecret: secret } }] }) });
+    await expect(serversByName(lax(`\${ACME_TOKEN:-${DFLT}}`), "{}", new Map(), rows, vault)).rejects.toThrow("a server still carries an OAuth secret in oauth.clientSecret");
+  });
+
+  it("a reference in an address to a name nobody holds drops its server", async () => {
+    for (const [format, text, path] of [
+      [MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { s: { type: "http", url: "https://s.example/?token=${NOTHELD}" } } }), "mcpServers.s.url"],
+      [MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { s: { type: "http", url: `https://s.example/?token=\${NOTHELD:-${DFLT}}` } } }), "mcpServers.s.url"],
+      [GEMINI_SETTINGS_JSON, JSON.stringify({ mcpServers: { s: { httpUrl: "https://s.example/$ecret123" } } }), "mcpServers.s.httpUrl"],
+      [OPENCODE_JSON, JSON.stringify({ mcp: { s: { type: "remote", url: "https://s.example/?t={env:NOTHELD}" } } }), "mcp.s.url"],
+    ] as const) {
+      const out = await serversByName(format, text, new Map(), rows, vault);
+      expect(out.dropped, text).toEqual(dropped(path));
+      expect(out.text, text).not.toContain("NOTHELD");
+      expect(out.text, text).not.toContain("ecret123");
+    }
+    const kept = JSON.stringify({ mcpServers: { s: { type: "http", url: "https://s.example/?token=${ACME_TOKEN}" } } });
+    expect((await serversByName(MCP_SERVERS_JSON, kept, new Map(), rows, vault)).text).toBe(kept);
+  });
+
+  it("Codex: a bearer or header variable by name that nobody holds drops its server, one servers.env holds stands", async () => {
+    for (const [text, path] of [
+      ['[mcp_servers.s]\nurl = "https://s.example"\nbearer_token_env_var = "NOTHELD"\n', "mcp_servers.s.bearer_token_env_var"],
+      ['[mcp_servers.s]\nurl = "https://s.example"\nenv_http_headers = { "X-Key" = "NOTHELD" }\n', "mcp_servers.s.env_http_headers.X-Key"],
+    ]) {
+      const out = await serversByName(CODEX_TOML, text!, new Map(), rows, vault);
+      expect(out.dropped, text).toEqual(dropped(path!));
+      expect(out.text, text).not.toContain("NOTHELD");
+    }
+    const kept = '[mcp_servers.s]\nurl = "https://s.example"\nbearer_token_env_var = "ACME_TOKEN"\nenv_http_headers = { "X-Key" = "ACME_TOKEN" }\n';
+    expect((await serversByName(CODEX_TOML, kept, new Map(), rows, vault)).text).toBe(kept);
+    // A header the copy itself moves names what it writes.
+    const moved = await serversByName(CODEX_TOML, '[mcp_servers.s]\nurl = "https://s.example"\nhttp_headers = { Authorization = "Bearer tok_TESTONLY" }\n', new Map(), rows);
+    expect(moved.dropped).toEqual([]);
+  });
+
+  it("whether a reference names what the file writes does not rest on the order of its keys or servers", async () => {
+    for (const env of [{ K: "${TOKEN}", TOKEN: "sk_TESTONLY_x" }, { TOKEN: "sk_TESTONLY_x", K: "${TOKEN}" }]) {
+      const held = new Map<string, { value: string; by: string }>();
+      const out = await serversByName(MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { s: { command: "x", env } } }), held, rows);
+      expect(out.dropped, JSON.stringify(env)).toEqual([]);
+      expect(JSON.parse(out.text).mcpServers.s.env.K).toBe("${TOKEN}");
+      expect(held.get("TOKEN")?.value).toBe("sk_TESTONLY_x");
+    }
+    // A reference to what a dropped server wrote reads nothing, so its server goes too, never the whole file.
+    const after = await serversByName(MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { a: { command: "x", env: { K: "${TOKEN}", L: "sk_TESTONLY_a" } }, b: { command: "y", env: { TOKEN: "sk_TESTONLY_b" } } } }), new Map(), n => (n === "TOKEN" ? "Acme" : undefined));
+    expect(after.dropped.map(d => d.name)).toEqual(["b", "a"]);
+    expect(after.text).not.toContain("sk_TESTONLY");
+    const early = await serversByName(MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { a: { command: "x", env: { K: "${WSP_MCP_B_AUTHORIZATION}" } }, b: { type: "http", url: "https://b.example", headers: { Authorization: "tok_TESTONLY" } } } }), new Map(), rows);
+    expect(early.dropped).toEqual([]);
   });
 });
