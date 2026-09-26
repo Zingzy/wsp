@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1351,7 +1351,6 @@ describe("callback relay end to end through a real daemon", () => {
     });
     const script = join(dir, "wsp-open");
     writeFileSync(script, openShimScript(CLOUD_PLACE).replace("/root/.wsp/open.sock", sockPath));
-    chmodSync(script, 0o755);
     const url = AUTH(port);
     // The link dials in the background; a post before it is up reaches no socket, so post until one lands.
     for (let i = 0; i < 50 && opened.length === 0; i++) {

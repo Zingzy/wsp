@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { ASSET_KINDS, DAEMON_TARGETS, daemonArtifactName, workspaceAsset } from "@wsp/host";
 import { bundleEnv, bundleNames, STABLE_NAMES } from "../scripts/bundles.mjs";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const workflow = readFileSync(join(repo, ".github", "workflows", "release.yml"), "utf8");
@@ -56,8 +57,7 @@ function stubGh(answer: string): string {
 function runStep(script: string, gh: string): { status: number; said: string; edits: string } {
   const dir = mkdtempSync(join(tmpdir(), "wsp-publish-"));
   made.push(dir);
-  writeFileSync(join(dir, "gh"), gh);
-  chmodSync(join(dir, "gh"), 0o755);
+  writeStub(join(dir, "gh"), gh);
   cpSync(join(repo, "packages", "wspx", "scripts"), join(dir, "packages", "wspx", "scripts"), { recursive: true });
   mkdirSync(join(dir, "packages", "protocol", "src"), { recursive: true });
   cpSync(join(repo, "packages", "protocol", "src", "semver.mjs"), join(dir, "packages", "protocol", "src", "semver.mjs"));

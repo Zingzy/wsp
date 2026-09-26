@@ -5,7 +5,7 @@ import { HERE_PLACE_ID } from "@wsp/protocol";
 // the flags it was handed. What is under test is the whole road: the wiring
 // this computer's workspace is built from, the adapter the runtime picks for
 // its kind, and the line that reaches the shell.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HARNESS_ADAPTERS, createRuntime, memoryStore, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring } from "../src/cli.js";
 import { stubBackend } from "./stub-backend.js";
 import { copyingFake, createOn, fakeDaemonStart, projectOn } from "./verbs-fixture.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const SESSION = "44444444-4444-4444-8444-444444444444";
 const MADE = "Named through the store a shell reads";
@@ -67,11 +68,10 @@ describe("the title a thread on this computer gets", () => {
     writeFileSync(record, "");
     // Nothing here reads stdin: the shell that launches it holds a pipe nobody closes, and a read would wait on it
     // for ever. The prompt is small enough that the write into that pipe never blocks either.
-    writeFileSync(
+    writeStub(
       join(bin, "claude"),
       `#!/bin/sh\nprintf '%s|%s|%s\\n' "$CLAUDE_CONFIG_DIR" "$IS_SANDBOX" "$*" >> ${JSON.stringify(record)}\nprintf '%s' '{"type":"result","is_error":false,"result":"${MADE}"}'\n`,
     );
-    chmodSync(join(bin, "claude"), 0o755);
   });
   afterEach(async () => {
     for (const rt of runtimes.splice(0)) await rt.close();

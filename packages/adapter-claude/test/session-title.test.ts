@@ -3,13 +3,14 @@
 // CLAUDE_CONFIG_DIR/projects/, with the ordering measured on 2.1.263: the last
 // ai-title line of a renamed session sits AFTER its last custom-title.
 import { execFile } from "node:child_process";
-import { chmodSync, mkdtempSync, mkdirSync, copyFileSync, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, copyFileSync, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
 import type { SessionRenameWrite } from "@wsp/protocol";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "../src/session-title.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const SESSION = "5b3d3ddb-86d6-47ba-b216-0a510284d8b6";
 const FIXTURE = new URL("./fixtures/session-titles.jsonl", import.meta.url);
@@ -79,8 +80,7 @@ function fakeClaude(script: string): string {
   const root = mkdtempSync(join(tmpdir(), "wsp-claude-bin-"));
   roots.push(root);
   const bin = join(root, "claude");
-  writeFileSync(bin, `#!/bin/sh\n${script}\n`);
-  chmodSync(bin, 0o755);
+  writeStub(bin, `#!/bin/sh\n${script}\n`);
   return root;
 }
 

@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
 import { serverVault, type ServerVault } from "../src/env-keys.js";
 import { serverTransport, serversActs } from "../src/servers-acts.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -22,8 +23,7 @@ function fixture(): AgentHome & { root: string } {
   const root = mkdtempSync(join(tmpdir(), "wsp-servers-acts-"));
   roots.push(root);
   const at = agentHome(root);
-  writeFileSync(join(at.bin, "runuser"), `#!/bin/bash\n[ "$1" = -u ] && [ "$2" = ada ] && [ "$3" = -- ] || exit 9\nshift 3\nexec "$@"\n`);
-  chmodSync(join(at.bin, "runuser"), 0o755);
+  writeStub(join(at.bin, "runuser"), `#!/bin/bash\n[ "$1" = -u ] && [ "$2" = ada ] && [ "$3" = -- ] || exit 9\nshift 3\nexec "$@"\n`);
   chmodSync(join(at.home, ".claude.json"), 0o600);
   return { ...at, root };
 }
@@ -383,8 +383,7 @@ describe("adding an MCP server", () => {
     // Every cat that writes a file stops after its first bytes for a while, which is where the write is killed.
     const slow = join(at.root, "slow-bin");
     mkdirSync(slow);
-    writeFileSync(join(slow, "cat"), '#!/bin/bash\n[ -p /dev/stdout ] && exec /bin/cat "$@"\n/bin/cat "$@" | { dd bs=1 count=16 2>/dev/null; sleep 2; /bin/cat; }\n');
-    chmodSync(join(slow, "cat"), 0o755);
+    writeStub(join(slow, "cat"), '#!/bin/bash\n[ -p /dev/stdout ] && exec /bin/cat "$@"\n/bin/cat "$@" | { dd bs=1 count=16 2>/dev/null; sleep 2; /bin/cat; }\n');
     const halfway = (): boolean => readFileSync(file, "utf8") !== before || readdirSync(at.home).some(n => n.startsWith(".wsp-"));
     const machine = {
       exec: (cmd: string, opts?: { stdin?: Uint8Array }): Promise<ExecResult> =>

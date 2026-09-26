@@ -9,7 +9,7 @@ import { HERE_PLACE_ID } from "@wsp/protocol";
 // Its own file: the shell is read once per process, so a case sharing a file
 // with another host start would read the PATH that start already took.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +18,7 @@ import { cli, localWiring, makeRuntime, serve } from "../src/cli.js";
 import { LAUNCHD_PATH, takeLoginPath } from "../src/login-path.js";
 import type { HostHandle } from "../src/server.js";
 import { PAGE, captured, copyingFake, createOn, fakeDaemonStart, projectOn } from "./verbs-fixture.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 describe("the login shell PATH and the runtime built over it", () => {
   let dir: string;
@@ -40,8 +41,7 @@ describe("the login shell PATH and the runtime built over it", () => {
     // What the person's shell prints: their own folder in front of the four launchd gave this launch.
     shellPath = `${join(dir, "their-bin")}:${LAUNCHD_PATH.join(":")}`;
     const shell = join(dir, "login-shell");
-    writeFileSync(shell, `#!/bin/sh\nprintf %s ${JSON.stringify(shellPath)}\n`);
-    chmodSync(shell, 0o755);
+    writeStub(shell, `#!/bin/sh\nprintf %s ${JSON.stringify(shellPath)}\n`);
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
     vi.stubEnv("HOME", home);

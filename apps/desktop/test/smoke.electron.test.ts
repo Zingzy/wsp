@@ -2,7 +2,7 @@
 // Drives the packaged app (pnpm --filter @wsp/desktop build first). Gated on
 // WSP_DESKTOP_SMOKE=1 so the unit suite stays free of a 200 MB binary.
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
@@ -22,6 +22,7 @@ import { VERSION } from "../../../packages/host/src/version.js";
 import { builtExecutableHere } from "./packaged.js";
 import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
 import { notForThisPage } from "../src/origin.js";
+import { writeStub } from "../../../packages/protocol/test/stub-script.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
@@ -173,8 +174,7 @@ function loginShellIn(home: string): string {
   const bin = join(home, "bin");
   mkdirSync(bin);
   const shell = join(home, "login-shell");
-  writeFileSync(shell, `#!/bin/sh\nprintf %s ${JSON.stringify(`${bin}:${LAUNCHD_PATH.join(":")}`)}\n`);
-  chmodSync(shell, 0o755);
+  writeStub(shell, `#!/bin/sh\nprintf %s ${JSON.stringify(`${bin}:${LAUNCHD_PATH.join(":")}`)}\n`);
   return shell;
 }
 

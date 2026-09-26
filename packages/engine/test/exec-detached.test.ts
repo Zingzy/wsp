@@ -4,7 +4,7 @@
 // naps mid-run. The last block runs the real guest commands under this
 // machine's bash with setsid shimmed, since macOS has none.
 import { execFile } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,6 +13,7 @@ import { GuestUnusableError } from "../src/errors.js";
 import { DEADLINE_EXIT, INLINE_EXEC_MS, execDetached, putFiles } from "../src/exec-detached.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { EXEC_ENV } from "../src/golden-import.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 interface Step {
   out?: string;
@@ -473,8 +474,7 @@ function localGuest(): { machine: Machine; runDir: string } {
       base64: '#!/bin/sh\nargs=""\nfor a in "$@"; do [ "$a" = "-w0" ] || args="$args $a"; done\nexec /usr/bin/base64 $args\n',
     };
     for (const [name, body] of Object.entries(shims)) {
-      writeFileSync(join(shimDir, name), body);
-      chmodSync(join(shimDir, name), 0o755);
+      writeStub(join(shimDir, name), body);
     }
   }
   const machine = {

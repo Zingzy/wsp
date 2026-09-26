@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -58,6 +58,7 @@ import {
 } from "../src/golden-import.js";
 import { BREW, BREW_PREFIX, BREW_REAL, BREW_REPO, KUBECTL, LINUXBREW_HOME, LINUXBREW_SHIM, MAC_ONLY, catalogEntry } from "@wsp/catalog";
 import { HOMEBREW_PREFIX, shellQuote } from "@wsp/protocol";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): RecipeEntry => ({
   label: over.id,
@@ -985,13 +986,12 @@ exec "$0" "$@"' -- ${BREW_REAL}`);
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
     const stub = join(dir, "stub");
     mkdirSync(stub);
-    writeFileSync(
+    writeStub(
       join(stub, "git"),
       `#!/bin/sh\ncase " $* " in\n  *" clone "*) mkdir -p ${shellQuote(`${dir}/Homebrew/bin`)} && printf '%s\\n' '#!/bin/sh' 'echo Homebrew' > ${shellQuote(`${dir}/Homebrew/bin/brew`)} && chmod 0755 ${shellQuote(`${dir}/Homebrew/bin/brew`)} ;;\n  *"rev-parse HEAD"*) echo ${HOMEBREW.commit} ;;\n  *" fetch "*) echo "fatal: unable to access github.com" >&2; exit 128 ;;\nesac\nexit 0\n`,
-      { mode: 0o755 },
     );
-    for (const name of ["apt-get", "useradd", "chown"]) writeFileSync(join(stub, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-    writeFileSync(join(stub, "su"), '#!/bin/sh\nshell=/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -s) shell="$2"; shift 2 ;; -c) script="$2"; shift 2 ;; --) shift; break ;; *) shift ;; esac; done\nexec "$shell" -c "$script" "$@"\n', { mode: 0o755 });
+    for (const name of ["apt-get", "useradd", "chown"]) writeStub(join(stub, name), "#!/bin/sh\nexit 0\n");
+    writeStub(join(stub, "su"), '#!/bin/sh\nshell=/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -s) shell="$2"; shift 2 ;; -c) script="$2"; shift 2 ;; --) shift; break ;; *) shift ;; esac; done\nexec "$shell" -c "$script" "$@"\n');
     const script = homebrewStep().replaceAll(BREW_PREFIX, dir).replace("export PATH=", `export PATH=${stub}:`);
     // The chown line names /home/linuxbrew whatever the prefix is, so the stub PATH is what keeps this run off it.
     expect(script).toContain(`export PATH=${stub}:`);
@@ -1376,8 +1376,8 @@ describe("the node a recipe's own rows bring", () => {
   it("keeps a node the machine already has: the script prints NODE_KEPT and downloads nothing", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-node-step-"));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
-    writeFileSync(join(dir, "node"), "#!/bin/sh\necho v22.23.2\n", { mode: 0o755 });
-    writeFileSync(join(dir, "curl"), '#!/bin/sh\necho "curl ran" >&2\nexit 1\n', { mode: 0o755 });
+    writeStub(join(dir, "node"), "#!/bin/sh\necho v22.23.2\n");
+    writeStub(join(dir, "curl"), '#!/bin/sh\necho "curl ran" >&2\nexit 1\n');
     const script = [...ROAD_STEPS.script.env, nodeInstallScript(22, NODE_RELEASES[22])].join("\n");
     const res = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { HOME: dir, PATH: `${dir}:/usr/bin:/bin` } });
     expect(res.status).toBe(0);

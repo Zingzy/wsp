@@ -7,9 +7,10 @@
 // newline and leaves the path as it is, `--` ends the flags, a path that is
 // not there is said on stderr and the rest are still read, and the exit is
 // non-zero once any of them was missing.
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const READ = [
   'const {createHash}=require("crypto");const fs=require("fs");',
@@ -34,7 +35,6 @@ const SHA256SUM = ["#!/bin/sh", `exec ${JSON.stringify(process.execPath)} -e '${
 /** A fresh directory holding that one program, for a PATH a script under test is run with. The caller removes it. */
 export function sha256sumBin(): string {
   const bin = mkdtempSync(join(tmpdir(), "wsp-sha256sum-"));
-  writeFileSync(join(bin, "sha256sum"), SHA256SUM);
-  chmodSync(join(bin, "sha256sum"), 0o755);
+  writeStub(join(bin, "sha256sum"), SHA256SUM);
   return bin;
 }
