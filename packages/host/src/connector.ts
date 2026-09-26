@@ -124,7 +124,6 @@ export interface ConnectorOptions {
   /** Told the name a start of a quick tunnel printed, whenever it is not the name last told: cloudflared hands out
    * a fresh one every time the child runs, and only the caller knows where that name is written down and reported. */
   onHostname?(hostname: string): void;
-  spawnChild?: typeof spawn;
 }
 
 export interface Connector {
@@ -141,7 +140,6 @@ const MAX_RESTART_MS = 30_000;
  * here signals: a connector found by name or by port could be somebody else's. */
 export function startConnector(opts: ConnectorOptions): Connector {
   const pidPath = join(opts.stateDir, "connector.pid");
-  const spawnChild = opts.spawnChild ?? spawn;
   const args = connectorArgs({ ...(opts.token !== undefined ? { token: opts.token } : {}), port: opts.port });
   let child: ChildProcess | undefined;
   let stopping = false;
@@ -169,7 +167,7 @@ export function startConnector(opts: ConnectorOptions): Connector {
       opts.onHostname?.(name);
       tellHostname?.(name);
     };
-    const started = spawnChild(opts.bin, args, {
+    const started = spawn(opts.bin, args, {
       stdio: ["ignore", "pipe", "pipe"],
       // Three things and no more: this process holds the person's provider and model keys, and a connector has no
       // use for any of them.

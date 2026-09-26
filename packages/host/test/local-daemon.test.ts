@@ -16,6 +16,7 @@ import { connectDaemon } from "@wsp/runtime";
 import { daemonBinaryHere } from "../src/assets.js";
 import { choosePorts } from "../src/ports.js";
 import { LocalDaemon, type LocalDaemonOptions } from "../src/local-daemon.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 async function waitForEvent(events: DaemonEvent[], type: string, ms = 10_000): Promise<DaemonEvent> {
   const deadline = Date.now() + ms;
@@ -68,7 +69,7 @@ function fakeDaemon(root: string, version?: number, noise: readonly string[] = [
     { mode: 0o644 },
   );
   const sh = join(root, "fake-daemon.sh");
-  writeFileSync(sh, `#!/bin/sh\nexec ${process.execPath} ${bin} "$@"\n`, { mode: 0o755 });
+  writeStub(sh, `#!/bin/sh\nexec ${process.execPath} ${bin} "$@"\n`);
   return sh;
 }
 
@@ -301,7 +302,7 @@ describe("local daemon", () => {
 
   it("names the binary and what it said when it does not start, and leaves no child behind", async () => {
     const bin = join(root, "not-a-daemon.sh");
-    writeFileSync(bin, "#!/bin/sh\necho refusing >&2\nexit 3\n", { mode: 0o755 });
+    writeStub(bin, "#!/bin/sh\necho refusing >&2\nexit 3\n");
     await expect(startLocal({ binary: bin })).rejects.toThrow(/exited with 3 before it listened: refusing/);
   });
 
@@ -338,7 +339,7 @@ describe("local daemon", () => {
 
   it("a start that fails still carries what the binary said in its own sentence, whichever sink the lines went to", async () => {
     const bin = join(root, "noisy-refusal.sh");
-    writeFileSync(bin, "#!/bin/sh\necho refusing >&2\nexit 3\n", { mode: 0o755 });
+    writeStub(bin, "#!/bin/sh\necho refusing >&2\nexit 3\n");
     const said: string[] = [];
     await expect(startLocal({ binary: bin, say: line => void said.push(line) })).rejects.toThrow(/exited with 3 before it listened: refusing/);
     expect(said).toEqual(["refusing"]);

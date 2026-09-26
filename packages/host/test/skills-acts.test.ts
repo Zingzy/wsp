@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { detectSkills, nodeHost, skillRoots, type Host } from "@wsp/collect";
@@ -11,6 +11,7 @@ import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
 import type { SkillsFetch } from "../src/skills-sh.js";
 import { skillsActs } from "../src/skills-acts.js";
 import { runHere } from "../src/target-road.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -21,8 +22,7 @@ function fixture(): AgentHome & { root: string } {
   const root = mkdtempSync(join(tmpdir(), "wsp-skills-acts-"));
   roots.push(root);
   const at = agentHome(root);
-  writeFileSync(join(at.bin, "runuser"), `#!/bin/bash\n[ "$1" = -u ] && [ "$2" = ada ] && [ "$3" = -- ] || exit 9\nshift 3\nexec "$@"\n`);
-  chmodSync(join(at.bin, "runuser"), 0o755);
+  writeStub(join(at.bin, "runuser"), `#!/bin/bash\n[ "$1" = -u ] && [ "$2" = ada ] && [ "$3" = -- ] || exit 9\nshift 3\nexec "$@"\n`);
   return { ...at, root };
 }
 

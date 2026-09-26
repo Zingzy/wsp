@@ -17,6 +17,7 @@ import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
 import { serverVault, type ServerVault } from "../src/env-keys.js";
 import { serversActs } from "../src/servers-acts.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
 
@@ -598,7 +599,7 @@ describe("packPlan", () => {
     dirs.push(shim);
     const record = join(shim, "modes");
     const real = execFileSync("sh", ["-c", "command -v tar"], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } }).trim();
-    writeFileSync(join(shim, "tar"), `#!/bin/sh\nfor a in "$@"; do case "$a" in *.tgz) "${process.execPath}" -e 'process.stdout.write((require("fs").statSync(process.argv[1]).mode & 0o777).toString(8) + "\\n")' "$a" >> "${record}" ;; esac; done\nexec "${real}" "$@"\n`, { mode: 0o755 });
+    writeStub(join(shim, "tar"), `#!/bin/sh\nfor a in "$@"; do case "$a" in *.tgz) "${process.execPath}" -e 'process.stdout.write((require("fs").statSync(process.argv[1]).mode & 0o777).toString(8) + "\\n")' "$a" >> "${record}" ;; esac; done\nexec "${real}" "$@"\n`);
     const home = laptop();
     const plan = planFiles([row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" })], { home, stat: statOf, platform: "darwin" });
     const path = process.env["PATH"];
@@ -663,9 +664,39 @@ describe("packPlan: Codex's OAuth client secret", () => {
     const vaulted: Record<string, string>[] = [];
     const packed = await packPlan(plan, { secrets: new Map(), home, vault: pushVault(vaulted) });
     expect(listTar(packed.tar).map(e => e.path)).not.toContain(".codex/config.toml");
-    expect(packed.skipped).toContainEqual({ id: "agents/codex", path: "~/.codex/config.toml", note: "left out of the copy: its MCP servers could not be written by name (linear keeps an OAuth client secret in mcp_servers.linear.oauth.client_secret, and Codex reads no variable there, so the file stays on this computer)" });
+    expect(packed.skipped).toContainEqual({ id: "agents/codex", path: "~/.codex/config.toml", note: "left out of the copy: its MCP servers could not be written by name (linear keeps an OAuth secret in mcp_servers.linear.oauth.client_secret, and Codex reads no variable there, so the file stays on this computer)" });
     expect(vaulted).toEqual([]);
     expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toBe(codex);
+  });
+});
+
+describe("packPlan: an MCP server's OAuth client secret", () => {
+  it("copies Gemini CLI's and OpenCode's with a reference and the value in the vault, and keeps Claude Code's file here naming the key", async () => {
+    const home = laptop();
+    const gemini = JSON.stringify({ mcpServers: { linear: { httpUrl: "https://mcp.linear.app/mcp", oauth: { clientId: "cid", clientSecret: "cs_TESTONLY_gemini" } } } }, null, 2);
+    const opencode = JSON.stringify({ mcp: { notion: { type: "remote", url: "https://mcp.notion.com/mcp", oauth: { clientId: "cid", clientSecret: "cs_TESTONLY_opencode" } } } }, null, 2);
+    const claude = JSON.stringify({ mcpServers: { asana: { type: "http", url: "https://mcp.asana.com/mcp", oauth: { clientId: "cid", clientSecret: "cs_TESTONLY_claude" } } } }, null, 2);
+    mkdirSync(join(home, ".gemini"));
+    writeFileSync(join(home, ".gemini", "settings.json"), gemini);
+    mkdirSync(join(home, ".config", "opencode"), { recursive: true });
+    writeFileSync(join(home, ".config", "opencode", "opencode.json"), opencode);
+    writeFileSync(join(home, ".claude.json"), claude);
+    const plan = planFiles(
+      [row({ rung: "agents", id: "agents/gemini", paths: ["~/.gemini/settings.json"] }), row({ rung: "agents", id: "agents/opencode", paths: ["~/.config/opencode/opencode.json"] }), row({ rung: "agents", id: "agents/claude", paths: ["~/.claude.json"] })],
+      { home, stat: statOf, platform: "darwin" },
+    );
+    const vaulted: Record<string, string>[] = [];
+    const packed = await packPlan(plan, { secrets: new Map(), home, vault: pushVault(vaulted) });
+    const at = extract(packed.tar);
+    const g = readFileSync(join(at, ".gemini", "settings.json"), "utf8");
+    const o = readFileSync(join(at, ".config", "opencode", "opencode.json"), "utf8");
+    expect((JSON.parse(g) as { mcpServers: { linear: { oauth: unknown } } }).mcpServers.linear.oauth).toEqual({ clientId: "cid", clientSecret: "${WSP_MCP_LINEAR_OAUTH_CLIENTSECRET}" });
+    expect((JSON.parse(o) as { mcp: { notion: { oauth: unknown } } }).mcp.notion.oauth).toEqual({ clientId: "cid", clientSecret: "{env:WSP_MCP_NOTION_OAUTH_CLIENTSECRET}" });
+    expect(vaulted).toEqual([{ WSP_MCP_LINEAR_OAUTH_CLIENTSECRET: "cs_TESTONLY_gemini" }, { WSP_MCP_NOTION_OAUTH_CLIENTSECRET: "cs_TESTONLY_opencode" }]);
+    expect(listTar(packed.tar).map(e => e.path)).not.toContain(".claude.json");
+    expect(packed.skipped).toContainEqual({ id: "agents/claude", path: "~/.claude.json", note: "left out of the copy: its MCP servers could not be written by name (asana keeps an OAuth secret in mcpServers.asana.oauth.clientSecret, and its agent reads no variable there, so the file stays on this computer)" });
+    expect(readFileSync(join(home, ".gemini", "settings.json"), "utf8")).toBe(gemini);
+    expect(readFileSync(join(home, ".config", "opencode", "opencode.json"), "utf8")).toBe(opencode);
   });
 });
 

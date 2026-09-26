@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CLOUDFLARED, connectorArgs, ensureCloudflared, fetchPinned, pinnedCloudflared, quickHostname, startConnector, stopRecordedConnector, type PinnedBinary } from "../src/connector.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 let dirs: string[] = [];
 const stops: (() => Promise<void>)[] = [];
@@ -36,10 +37,9 @@ function pinFor(bytes: Uint8Array, extra: Partial<PinnedBinary> = {}): PinnedBin
  * cloudflared says and then waits to be stopped. */
 function fakeConnector(dir: string, banner: string, sleepSeconds = 30): string {
   const bin = join(dir, "fake-cloudflared");
-  writeFileSync(
+  writeStub(
     bin,
-    `#!/bin/sh\necho "$@" > "${join(dir, "argv")}"\necho "$TUNNEL_TOKEN" > "${join(dir, "token")}"\nenv > "${join(dir, "env")}"\n>&2 echo '${banner}'\nsleep ${sleepSeconds}\n`,
-    { mode: 0o755 },
+    `#!/bin/sh\necho "$@" > "${join(dir, "argv")}"\necho "$TUNNEL_TOKEN" > "${join(dir, "token")}"\nenv > "${join(dir, "env")}"\n>&2 echo '${banner}'\nexec sleep ${sleepSeconds}\n`,
   );
   return bin;
 }
@@ -176,7 +176,7 @@ describe("the connector child", () => {
   it("leaves it gone when the caller says there is nothing left to carry", async () => {
     const dir = tempDir("connector");
     const bin = join(dir, "one-shot");
-    writeFileSync(bin, `#!/bin/sh\necho run >> "${join(dir, "runs")}"\nexit 1\n`, { mode: 0o755 });
+    writeStub(bin, `#!/bin/sh\necho run >> "${join(dir, "runs")}"\nexit 1\n`);
     const lines: string[] = [];
     const connector = startConnector({ bin, stateDir: dir, port: 4400, log: line => lines.push(line), restartMs: 20, keepRunning: () => false });
     stops.push(() => connector.stop());
@@ -189,7 +189,7 @@ describe("the connector child", () => {
   it("starts it again when it goes, until it is stopped", async () => {
     const dir = tempDir("connector");
     const bin = join(dir, "one-shot");
-    writeFileSync(bin, `#!/bin/sh\necho run >> "${join(dir, "runs")}"\nexit 1\n`, { mode: 0o755 });
+    writeStub(bin, `#!/bin/sh\necho run >> "${join(dir, "runs")}"\nexit 1\n`);
     const lines: string[] = [];
     const connector = startConnector({ bin, stateDir: dir, port: 4400, log: line => lines.push(line), restartMs: 20 });
     stops.push(() => connector.stop());
@@ -209,10 +209,9 @@ describe("the connector child", () => {
     const runs = join(dir, "runs");
     // cloudflared is handed a fresh quick tunnel name every time it runs, and there is nothing to stop it handing
     // out the same one twice; this stand-in repeats itself once before it moves on and stays up.
-    writeFileSync(
+    writeStub(
       bin,
-      `#!/bin/sh\nn=$(cat "${runs}" 2>/dev/null || echo 0)\nn=$((n+1))\necho "$n" > "${runs}"\nif [ "$n" -ge 3 ]; then\n  >&2 echo 'INF |  https://next-name.trycloudflare.com  |'\n  sleep 30\nelse\n  >&2 echo 'INF |  https://same-name.trycloudflare.com  |'\n  exit 1\nfi\n`,
-      { mode: 0o755 },
+      `#!/bin/sh\nn=$(cat "${runs}" 2>/dev/null || echo 0)\nn=$((n+1))\necho "$n" > "${runs}"\nif [ "$n" -ge 3 ]; then\n  >&2 echo 'INF |  https://next-name.trycloudflare.com  |'\n  exec sleep 30\nelse\n  >&2 echo 'INF |  https://same-name.trycloudflare.com  |'\n  exit 1\nfi\n`,
     );
     const names: string[] = [];
     const connector = startConnector({ bin, stateDir: dir, port: 4400, log: () => {}, restartMs: 20, onHostname: name => names.push(name) });
