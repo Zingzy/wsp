@@ -755,7 +755,8 @@ const copyOn = (name, branch) => ({ road: "clonefile", path: join(HOME, "wsp-wor
 /** The sidebar the locked tile screens draw: a root on this computer stopped on a question, with three threads its
  * agent opened under it, one working beside it here and two on a Solari fork of the same project, one working and one
  * resting; then a working, a resting and a failed thread on the joined computer spoo, and three that went quiet days
- * ago and fold into Settled. A fork carries no copy record, so its tiles show the agent's mark with no branch. One
+ * ago and fold into Settled. A fork carries no copy record and reads its branch off its own daemon, which no
+ * stand-in machine answers for the project's folder, so its tiles show the agent's mark with no branch. One
  * workspace stands on this computer, for macInUse's reason, and each project wears a look, as a person picks one. */
 const tiles = () => {
   const tree = { parent: "flaky", root: "flaky", startedBy: "agent" };

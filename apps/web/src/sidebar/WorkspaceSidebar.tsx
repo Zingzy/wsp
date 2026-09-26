@@ -16,7 +16,7 @@
 // shell's sidebar-glass: nothing here paints a background.
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, PlusIcon, SquarePenIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, computerOffline, creationAwaits, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED, rebuildRefusedLine } from "../actions/format.js";
@@ -52,7 +52,8 @@ import { SettingsRow } from "./SettingsRow.js";
 import { HostFoot } from "../hosts/HostFoot.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
-import { NEW_THREAD_TITLE, branchLine, computerName, copyName, placeNames } from "./workspaceRows.js";
+import { NEW_THREAD_TITLE, computerName, copyName, placeNames } from "./workspaceRows.js";
+import { BranchReader, readsBranch, workspaceBranch } from "./WorkspaceBranch.js";
 import { restingAge } from "../components/status/restingAge.js";
 import { PROJECT_WORDS } from "./words.js";
 
@@ -173,6 +174,8 @@ export function WorkspaceSidebar() {
   // A pick for a project this host no longer holds reads as every project.
   const picked = pickStored === null ? null : groups.find(group => group.project.id === pickStored) ?? null;
   const tiles = useMemo(() => sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs }), [projects, picked, nowMs]);
+  const [readBranches, setReadBranches] = useState<Record<string, string>>({});
+  const branchRead = useCallback((workspaceId: string, branch: string) => setReadBranches(held => (held[workspaceId] === branch ? held : { ...held, [workspaceId]: branch })), []);
   // One landing per project, for the pause mode a copy's phase verb reads. Asked here, where the tiles are drawn,
   // so no tile asks for itself.
   useEffect(() => {
@@ -258,7 +261,7 @@ export function WorkspaceSidebar() {
     const { runs, thread } = item;
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
     const place = placeOf(runs);
-    const branch = branchLine(runs);
+    const branch = workspaceBranch(runs, readBranches);
     let tile: ReactNode;
     if (thread === null) {
       tile = (
@@ -333,7 +336,7 @@ export function WorkspaceSidebar() {
     if (launch === undefined || (picked !== null && runs.workspace.project.id !== picked.project.id)) return [];
     return [
       <li key={`launch:${runs.id}`} data-thread-selection-safe>
-        <ThreadLaunchTile launch={launch} place={placeOf(runs)} branch={branchLine(runs)} />
+        <ThreadLaunchTile launch={launch} place={placeOf(runs)} branch={workspaceBranch(runs, readBranches)} />
       </li>,
     ];
   });
@@ -429,6 +432,9 @@ export function WorkspaceSidebar() {
   return (
     <>
       <SidebarChromeHeader />
+      {projects.filter(readsBranch).map(runs => (
+        <BranchReader key={runs.id} project={runs} onBranch={branchRead} />
+      ))}
       <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
         <SidebarContent fixedHeader={header}>
           <ul data-sidebar-tree className="flex w-full min-w-0 flex-col px-[var(--sidebar-content-inset)]">

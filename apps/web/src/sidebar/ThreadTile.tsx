@@ -38,8 +38,8 @@ const whereWords = (place: TilePlace): string => [place.project, place.computer]
 export const tileHover = (title: string, place: TilePlace, harness: string | null, reason: string | null): string =>
   [title, whereWords(place), harness === null ? null : agentName(harness), reason].filter(part => part !== null && part !== "").join("\n");
 
-/** The three rows every tile draws. Row three is the agent's mark and the branch; a copy with no branch shows the
- * mark alone, and a row three with neither is an empty line that keeps the tile's height. */
+/** The three rows every tile draws. Row three is the agent's mark and the branch; a workspace with no branch known
+ * shows the mark alone, and a row three with neither is an empty line that keeps the tile's height. */
 function TileRows({ place, status, title, harness, third, crab }: { place: TilePlace; status: ReactNode; title: ReactNode; harness: string | null; third: ReactNode; crab: boolean }) {
   return (
     <>
@@ -60,7 +60,7 @@ function TileRows({ place, status, title, harness, third, crab }: { place: TileP
   );
 }
 
-/** The branch a tile's copy is on, with its glyph; nothing where the copy carries none. */
+/** The branch a tile's workspace is on, with its glyph; nothing where none is known. */
 export function TileBranch({ branch }: { branch: string }) {
   if (branch === "") return null;
   return (
@@ -107,7 +107,7 @@ export function ThreadTile({
 }: {
   thread: SidebarThreadSnapshot;
   place: TilePlace;
-  /** The branch the thread's copy is on; empty on a copy that carries none. */
+  /** The branch the thread's workspace is on; empty where none is known. */
   branch: string;
   /** How long ago a resting thread last moved, as the sidebar words it. */
   time: string;
