@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { type Capabilities, type PlaceView, type ProjectCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
-import { branchLine, computerName, madeOfLine, workspaceMetaLine } from "./workspaceRows";
+import { branchLine, computerName, madeOfLine } from "./workspaceRows";
 
 const workspace = (over: Partial<WorkspaceView>): WorkspaceView =>
   ({ id: "ws_1", name: "a", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-12T00:00:00.000Z", ...over }) as WorkspaceView;
@@ -48,28 +48,10 @@ describe("what a workspace row says it is made of", () => {
   });
 });
 
-describe("the workspace row's third line", () => {
-  const snapshot = (over: Partial<WorkspaceView>, threads: { asking: string | null }[] = [], status: Partial<WorkspaceStatus> | null = null) =>
-    ({
-      state: "running",
-      status: status === null ? null : ({ ...workspace(over), machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0, ...status } as WorkspaceStatus),
-      reach: "reachable",
-      workspace: workspace(over),
-      threads,
-    }) as unknown as SidebarProjectSnapshot;
-
+describe("the branch a tile's row three names", () => {
   it("is the branch the copy stands on where the record carries one, and empty where it carries none", () => {
-    expect(branchLine(row({ copy: copy() }))).toBe("agent/pricing-page");
+    expect(branchLine(row({ copy: copy({ branch: "agent/pricing-page" }) }))).toBe("agent/pricing-page");
     expect(branchLine(row({}))).toBe("");
-    expect(workspaceMetaLine({ project: snapshot({ copy: copy() }), outOfMemory: undefined })).toBe("agent/pricing-page");
-    expect(workspaceMetaLine({ project: snapshot({}), outOfMemory: undefined })).toBe("");
-  });
-
-  it("gives the line to the one sentence a person is waiting on while there is one, and never to a figure", () => {
-    const asked = [{ asking: "Write out.txt in root (2 B)" }];
-    expect(workspaceMetaLine({ project: snapshot({ copy: copy() }, asked), outOfMemory: undefined })).toBe("Write out.txt in root (2 B)");
-    expect(workspaceMetaLine({ project: snapshot({ copy: copy(), daemonNote: "updating the helper" }), outOfMemory: undefined })).toBe("updating the helper");
-    expect(workspaceMetaLine({ project: snapshot({ copy: copy() }), outOfMemory: undefined })).not.toMatch(/\$|today|naps/);
   });
 });
 

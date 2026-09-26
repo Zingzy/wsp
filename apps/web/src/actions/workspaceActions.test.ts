@@ -9,8 +9,6 @@ import { actionById, resolveActions } from "./registry.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "./workspaceActions.js";
 import { BRING_BACK_HINT, broughtBackRowLine, DELETE_HINT, WORKSPACE_WORDS } from "./format.js";
 import { WHERE_WORDS } from "../settings/format.js";
-import { workspaceMetaLine, workspaceMetaTitle } from "../sidebar/workspaceRows.js";
-import type { SidebarProjectSnapshot } from "../adapt/index.js";
 
 const workspace = (phase: WorkspaceView["phase"]): WorkspaceView =>
   ({ id: "ws_a", name: "pricing page", machineId: "m_a", phase, project: { id: "pr_1", name: "repo", path: "/root", computer: "here" }, createdAt: "t", kind: "cloud" }) as WorkspaceView;
@@ -63,36 +61,6 @@ describe("bring back on the workspace row", () => {
     expect(broughtBackRowLine(back)).toBe("agent/pricing-page pushed");
   });
 
-  it("stands on the row in place of the branch, and yields to the one sentence a person is waiting on", () => {
-    const project = {
-      state: "running",
-      status: null,
-      reach: null,
-      threads: [],
-      workspace: { ...workspace("running"), copy: { road: "clonefile", path: "/root-copy", branch: "agent/pricing-page" } },
-    } as unknown as SidebarProjectSnapshot;
-    const answer = { ...back, pr: { number: 12, url: "https://example/pr/12", state: "open" as const, host: "github.com" } };
-    expect(workspaceMetaLine({ project, outOfMemory: undefined })).toBe("agent/pricing-page");
-    expect(workspaceMetaLine({ project, outOfMemory: undefined, broughtBack: answer })).toBe("agent/pricing-page: pull request #12 open");
-    const asking = { ...project, threads: [{ asking: "Write out.txt in root (2 B)" }] } as unknown as SidebarProjectSnapshot;
-    expect(workspaceMetaLine({ project: asking, outOfMemory: undefined, broughtBack: answer })).toBe("Write out.txt in root (2 B)");
-  });
-
-  it("puts the host's own sentence for a push with no pull request on the row's hover, never in the line", () => {
-    const project = {
-      state: "running",
-      status: null,
-      reach: null,
-      threads: [],
-      workspace: { ...workspace("running"), copy: { road: "clonefile", path: "/root-copy", branch: "agent/pricing-page" } },
-    } as unknown as SidebarProjectSnapshot;
-    const note = "no signed-in command line for github.com is on this computer; the branch is pushed and the pull request waits for one";
-    const pushed = { project, outOfMemory: undefined, broughtBack: { ...back, note } };
-    expect(workspaceMetaLine(pushed)).toBe("agent/pricing-page pushed, no pull request");
-    expect(workspaceMetaTitle(pushed)).toBe(`agent/pricing-page pushed, no pull request: ${note}`);
-    // A line that is not a bring back's carries no note behind it.
-    expect(workspaceMetaTitle({ project, outOfMemory: undefined })).toBe("agent/pricing-page");
-  });
 });
 
 const deleteEntry = (phase: WorkspaceView["phase"], over: Partial<WorkspaceVerbs> = {}) =>

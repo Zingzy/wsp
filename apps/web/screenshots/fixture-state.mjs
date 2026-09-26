@@ -114,7 +114,7 @@ const project = (name, computer, minutes, path = computer === HERE ? projectDest
 const turn = (thread, minutes, workspaceId = "ws_api") => ({
   id: sessionId(thread.id),
   workspaceId,
-  harness: "claude",
+  harness: thread.agent ?? "claude",
   status: thread.status ?? "completed",
   startedBy: thread.startedBy ?? "person",
   threadId: threadId(thread.id),
@@ -280,7 +280,7 @@ const MIGRATION = {
 
 /** One store as the JSON file holds it: one object per collection, keyed the way the runtime keys it. Every
  * fixture below builds one. */
-const store = ({ projects, workspaces, sessions = {}, transcripts = {}, goldens, images, places, meters }) => ({
+const store = ({ projects, workspaces, sessions = {}, transcripts = {}, goldens, images, places, meters, preferences }) => ({
   projects: Object.fromEntries(projects.map(p => [p.id, p])),
   workspaces: Object.fromEntries(workspaces.map(w => [w.id, w])),
   sessions,
@@ -288,6 +288,7 @@ const store = ({ projects, workspaces, sessions = {}, transcripts = {}, goldens,
   ...(goldens !== undefined ? { goldens } : {}),
   ...(meters === undefined ? {} : { "cost-histories": meters }),
   ...(images !== undefined ? { images } : {}),
+  ...(preferences === undefined ? {} : { preferences: { default: preferences } }),
   ...(places === undefined
     ? {}
     : {
@@ -699,6 +700,80 @@ const imageBuilt = () =>
     },
   });
 
+/** One thread of the tiles fixture: a title that is its prompt, and a turn that reads it, since only the selected
+ * thread's transcript is read in a shot. */
+const tileThread = (id, title, over = {}) => ({
+  id,
+  prompt: title,
+  title,
+  thought: "Read the failing test before touching the code.",
+  tool: { name: "Read", input: '{"file_path":"src/cart/total.ts"}', result: "export function total(lines) { return lines.reduce((sum, l) => sum + round(l.price), 0); }" },
+  reply: "Done, and the branch is pushed.",
+  costUsd: 0.2,
+  ...over,
+});
+
+/** A copy on a branch, as the record keeps the copy it was made of. */
+const copyOn = (name, branch) => ({ road: "clonefile", path: join(HOME, "wsp-work", name), source: projectDest("spoo-landing"), base: "abc1234", branch, carried: "deps-and-config" });
+
+/** The sidebar the locked tile screens draw: a root on this computer stopped on a question, with three threads its
+ * agent opened under it, one working beside it here and two on a Solari fork of the same project, one working and one
+ * resting; then a working, a resting and a failed thread on the joined computer spoo, and three that went quiet days
+ * ago and fold into Settled. A fork carries no copy record, so its tiles show the agent's mark with no branch. One
+ * workspace stands on this computer, for macInUse's reason, and each project wears a look, as a person picks one. */
+const tiles = () => {
+  const tree = { parent: "flaky", root: "flaky", startedBy: "agent" };
+  const forkTree = { parentThreadId: threadId("flaky"), rootThreadId: threadId("flaky") };
+  const spooPlace = place("p_spoo", "spoo", 1, { platform: "linux", os: "Ubuntu 24.04", runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, true);
+  const onSpoo = (id, name, projectId, branch) => ({ ...onPlace(id, name, "p_spoo", { cpu: 4, memMb: 8192 }, projectId), copy: copyOn(`${name}-${id}`, branch) });
+  const landing = { icon: "folder", hue: "orange" };
+  return store({
+    projects: [
+      project("spoo-landing", HERE, 60 * 30),
+      { ...project("spoo-landing", CLOUD, 60 * 30), id: "pr_spoo-landing-cloud" },
+      { ...project("spoo-landing", "p_spoo", 60 * 30), id: "pr_spoo-landing-spoo" },
+      project("wsp", "p_spoo", 60 * 30),
+    ],
+    workspaces: [
+      workspace("ws_flaky", THIS_COMPUTER, { project: "pr_spoo-landing", copy: copyOn("spoo-landing-flaky", "fix/checkout-flakes") }),
+      fork("ws_solari", "spoo-landing", "fk_tile_1", { ...forkTree, project: "pr_spoo-landing-cloud" }),
+      onSpoo("ws_relay", "relay", "pr_wsp", "relay-one-helper"),
+      onSpoo("ws_release", "release", "pr_wsp", "release-0.9"),
+      onSpoo("ws_dark", "dark-contrast", "pr_spoo-landing-spoo", "fix/dark-contrast"),
+      onSpoo("ws_coupons", "coupons", "pr_spoo-landing-spoo", "feat/coupons"),
+      onSpoo("ws_pty", "pty", "pr_wsp", "fix/pty-leak"),
+      onSpoo("ws_diff", "diff-viewer", "pr_spoo-landing-spoo", "spike/diff-viewer"),
+    ],
+    ...merge(
+      threadsOn("ws_flaky", [
+        [tileThread("flaky", "Fix the three flaky checkout tests", { status: "running", asking: "Permission for Bash: pnpm test cart" }), 40],
+        [{ ...tileThread("address", "Address form race", { status: "running", agent: "codex" }), ...tree }, 6],
+      ]),
+      threadsOn("ws_solari", [
+        [{ ...tileThread("coupon", "Coupon expiry test"), ...tree }, 35],
+        [
+          {
+            ...tileThread("cart", "Cart total rounding", { status: "running" }),
+            ...tree,
+            prompt: "Find why the cart total test is flaky and fix it. Push a branch and tell me.",
+            reply: "Found it: the total rounds per line instead of once at the end. The test's fixture has three lines at 0.335, so the per line rounding lands on 1.00 or 1.01 depending on the order the cart iterates.\n\nMoved the rounding to the end in cart/total.ts, added a fixture that pins the order, and pushed fix/cart-rounding, 2 files. Telling the lead.",
+          },
+          14,
+        ],
+      ]),
+      threadsOn("ws_relay", [[tileThread("relay", "Move the relay to one callback helper", { status: "running" }), 45]]),
+      threadsOn("ws_dark", [[tileThread("dark", "Dark mode contrast pass", { agent: "codex" }), 183]]),
+      threadsOn("ws_release", [[tileThread("release", "Release notes for 0.9", { status: "failed" }), 240]]),
+      threadsOn("ws_coupons", [[tileThread("coupons", "Coupon codes at checkout"), 60 * 30]]),
+      threadsOn("ws_pty", [[tileThread("pty", "Stop the daemon leaking ptys"), 60 * 50]]),
+      threadsOn("ws_diff", [[tileThread("diff", "Try the new diff viewer", { agent: "codex" }), 60 * 24 * 6]]),
+    ),
+    goldens: sealed(),
+    places: { p_spoo: spooPlace },
+    preferences: { projectLook: { "pr_spoo-landing": landing, "pr_spoo-landing-cloud": landing, "pr_spoo-landing-spoo": landing, pr_wsp: { icon: "terminal", hue: "teal" } } },
+  });
+};
+
 /** Every setup a lab can serve, by the word `--fixture` takes. One row per kind of person: what builds its store,
  * the cloud its machines are meant to be at, which the stand-in provider then wears as its own word, and the
  * repositories that person already keeps at the top of their home, which wsp has imported nowhere. Without the
@@ -717,6 +792,7 @@ const FIXTURES = {
   "mac-and-boxes": { build: macAndBoxes },
   orchestrator: { build: orchestrator, cloud: "box" },
   "thread-states": { build: threadStates, cloud: "box" },
+  tiles: { build: tiles, cloud: "solari" },
   "image-built": { build: imageBuilt },
 };
 

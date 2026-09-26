@@ -396,7 +396,7 @@ describe("the header row", () => {
     expect(banner().textContent).not.toContain("/");
   });
 
-  it("collapsed: the page's row takes the toggle in front of the breadcrumb, which is the workspace, a slash and the open thread's title with no glyph before them", async () => {
+  it("collapsed: the page's row takes the toggle in front of the breadcrumb, which is the open thread.s title alone with no glyph before it", async () => {
     await mountShell();
     act(() => useStore.setState({ sessions: { ws_a: [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "make me a simple server", threadId: "thr_1" }, { id: "s2", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "add a health route", threadId: "thr_2" }] } }));
     await collapse();
@@ -408,9 +408,9 @@ describe("the header row", () => {
     // The crumb names the thread the centre is on, which is the one the address names, and the workspace alone until one is.
     expect(crumb.textContent).toBe("api");
     act(() => useStore.getState().select("ws_a", "thr_2"));
-    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("api/add a health route");
+    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("add a health route");
     act(() => useStore.getState().select("ws_a", "thr_1"));
-    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("api/make me a simple server");
+    expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("make me a simple server");
     act(() => useStore.getState().select(null));
     expect(banner().querySelector("[data-thread-breadcrumb]")!.textContent).toBe("No task selected");
   });
@@ -425,13 +425,13 @@ describe("the header row", () => {
     // The crumb names the thread the centre is on, so the thread is opened before its state is read off the header.
     act(() => useStore.getState().select("ws_a", "thr_1"));
     const crumb = () => banner().querySelector("[data-thread-breadcrumb]")!;
-    expect(crumb().textContent).toBe("api/add a health route");
+    expect(crumb().textContent).toBe("add a health route");
     act(() => useStore.setState({ sessions: rows("Run: wsp --version") }));
-    expect(crumb().textContent).toBe("api/add a health routeNeeds you");
+    expect(crumb().textContent).toBe("add a health routeNeeds you");
     // The whole sentence is the hover text; the header shows the word alone.
     expect(crumb().querySelector("[title]")!.getAttribute("title")).toBe("Run: wsp --version");
     act(() => useStore.setState({ sessions: rows() }));
-    expect(crumb().textContent).toBe("api/add a health route");
+    expect(crumb().textContent).toBe("add a health route");
   });
 
   it("the compose glyph sits in the search row, raises the request for the selected workspace, and is held rather than gone without one", async () => {
@@ -470,12 +470,12 @@ describe("the breadcrumb of a thread an agent opened", () => {
 
   const crumb = () => banner().querySelector("[data-thread-breadcrumb]")!;
 
-  it("names the thread that opened it before its own workspace, and a thread nobody opened names no opener", async () => {
+  it("names the thread that opened it before its own title, and a thread nobody opened names no opener", async () => {
     await mountTwo();
     act(() => useStore.getState().select("ws_b", "thr_child"));
-    await waitFor(() => expect(crumb().textContent).toBe("queue migration across three services/box/double redirect on short links"));
+    await waitFor(() => expect(crumb().textContent).toBe("queue migration across three services/double redirect on short links"));
     act(() => useStore.getState().select("ws_a", LEAD));
-    expect(crumb().textContent).toBe("api/queue migration across three services");
+    expect(crumb().textContent).toBe("queue migration across three services");
     expect(crumb().querySelector("[data-breadcrumb-opener]")).toBeNull();
   });
 
@@ -503,7 +503,7 @@ describe("the breadcrumb of a thread an agent opened", () => {
     expect(opener.getAttribute("href")).toBe(`${window.location.origin}${window.location.pathname}#w/ws_a/t/${LEAD}`);
     fireEvent.click(opener);
     await waitFor(() => expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_a", LEAD]));
-    expect(crumb().textContent).toBe("api/queue migration across three services");
+    expect(crumb().textContent).toBe("queue migration across three services");
   });
 });
 
