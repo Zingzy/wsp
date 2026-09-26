@@ -48,6 +48,9 @@ importers:
       '@wsp/web':
         specifier: workspace:*
         version: link:../web
+      '@zingzy/wsp':
+        specifier: workspace:*
+        version: link:../../packages/wspx
       electron:
         specifier: 43.5.1
         version: 43.5.1

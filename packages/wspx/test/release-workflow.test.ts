@@ -2,15 +2,16 @@
 import { spawnSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { DAEMON_TARGETS, daemonArtifactName } from "@wsp/host";
+import { ASSET_KINDS, DAEMON_TARGETS, daemonArtifactName, workspaceAsset } from "@wsp/host";
 import { bundleEnv, bundleNames, STABLE_NAMES } from "../scripts/bundles.mjs";
 
 const repo = fileURLToPath(new URL("../../..", import.meta.url));
 const workflow = readFileSync(join(repo, ".github", "workflows", "release.yml"), "utf8");
-const desktopScripts = JSON.parse(readFileSync(join(repo, "apps", "desktop", "package.json"), "utf8")).scripts as Record<string, string>;
+const desktopPackage = JSON.parse(readFileSync(join(repo, "apps", "desktop", "package.json"), "utf8")) as { scripts: Record<string, string>; devDependencies: Record<string, string> };
+const desktopScripts = desktopPackage.scripts;
 const builderConfig = readFileSync(join(repo, "apps", "desktop", "electron-builder.yml"), "utf8");
 const macJob = workflow.slice(workflow.indexOf("\n  mac:\n"), workflow.indexOf("\n  linux:\n"));
 const linuxJob = workflow.slice(workflow.indexOf("\n  linux:\n"), workflow.indexOf("\n  npm:\n"));
@@ -193,6 +194,19 @@ describe("the release workflow", () => {
     expect(desktopScripts["build:linux"]).toContain("--linux");
     // The plain build packages the machine it runs on and the workflow's two jobs are what make both platforms.
     expect(desktopScripts["build"]).toBe("pnpm run build:deps && pnpm run build:app && electron-builder --config electron-builder.yml --publish never");
+  });
+
+  it("builds every package the app's staging copies from in build:deps, the only build the release runs first", () => {
+    expect(desktopScripts["build:deps"]).toBe('pnpm --filter "@wsp/desktop^..." build');
+    for (const kind of ASSET_KINDS) {
+      let dir = workspaceAsset(kind);
+      while (!existsSync(join(dir, "package.json"))) {
+        if (dirname(dir) === dir) throw new Error(`staged asset ${kind} sits in no package`);
+        dir = dirname(dir);
+      }
+      const { name } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { name: string };
+      expect(desktopPackage.devDependencies[name], `${kind} asset from ${name}`).toBe("workspace:*");
+    }
   });
 
   it("makes one mac bundle for both chips, so no download depends on reading the chip", () => {
