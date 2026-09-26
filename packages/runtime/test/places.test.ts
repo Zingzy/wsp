@@ -435,32 +435,6 @@ describe("a computer joining", () => {
     expect(await runtime!.places!.placeFor(second.placeId)).toEqual({ placeId: second.placeId });
   });
 
-  it("turns a linked box down the moment it says its kernel no longer boots the image, and keeps the sentence on the row", async () => {
-    const { hostKey } = await serving();
-    const joined = await join(hostKey, { code: await code(), answers: c => forks(c) });
-    sockets.push(joined.client.ws);
-    await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
-    const BLOCKED = "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through";
-    const absences: Record<string, unknown>[] = [];
-    runtime!.events.on("place.absent", e => absences.push(e as Record<string, unknown>));
-    const again = await relink(hostKey, joined.placeId, joined.pair, report("old-macbook", { runsWorkspaces: false, workspacesBlocked: BLOCKED }));
-    // The same sentence the join would have refused with: one gate, read on the join and on every link after it.
-    expect(again.proved).toMatchObject({ ok: false });
-    expect(String(again.proved["error"])).toBe(placeCannotBootLine("old-macbook", BLOCKED));
-    expect(await again.client.closed()).toBe(4401);
-    // The link is cut and the row says why, where every other refusal of a dial is kept; no forks-nowhere row and
-    // no place that reads present while nothing can be asked of it.
-    await until(async () => {
-      const at = (await placesOf()).find(p => p.id === joined.placeId)!;
-      return at.present === false && at.dialled !== undefined;
-    });
-    const row = (await placesOf()).find(p => p.id === joined.placeId)!;
-    expect(row.dialled).toMatchObject({ answered: false, said: placeCannotBootLine("old-macbook", BLOCKED) });
-    expect(row.takesForks).toBe(true);
-    // The absence carries the same sentence, so a client says why rather than that the box stopped answering.
-    expect(absences).toContainEqual(expect.objectContaining({ placeId: joined.placeId, said: placeCannotBootLine("old-macbook", BLOCKED) }));
-  });
-
   it("keeps a report's PATH and store folders only where they are plain paths, as the ssh read does", async () => {
     const { hostKey } = await serving();
     const sent = report("old-macbook", {
@@ -5056,5 +5030,164 @@ describe("the forward a computer dials back through", () => {
     await c.request("places.add", { address: "root@spoo" });
     c.close();
     expect(handed).toMatchObject({ hostUrls: [...DOOR, relay], doorPort: 4640, relay });
+  });
+});
+
+describe("a computer that turns unable to run workspaces keeps its link, and refuses only what runs inside a copy", () => {
+  const BLOCKED = "this computer mounts cgroup v1 at /sys/fs/cgroup, and wsp runs workspaces on cgroup v2 alone: boot it with systemd.unified_cgroup_hierarchy=1";
+  const blocked = (): PlaceReport => report("srv", { daemonVersion: DAEMON_VERSION, runsWorkspaces: false, workspacesBlocked: BLOCKED });
+  const SAID = placeCannotBootLine("srv", BLOCKED);
+
+  /** A workspace forked on srv while it ran workspaces, then srv dialling back with its doctor saying it no longer
+   * can, as it does after a reboot into a kernel line without cgroup v2. */
+  const blockedFork = async (
+    opts: { update?: PlaceUpdater; before?: (id: string) => Promise<void> } = {},
+  ): Promise<{ place: () => ForkingPlace; placeId: string; made: { id: string; machineId: string }; turns: string[]; renamed: string[] }> => {
+    const turns: string[] = [];
+    const renamed: string[] = [];
+    const factory: HarnessAdapterFactory = () => ({
+      steers: false,
+      renameSession: async (_id, title) => (renamed.push(title), { kind: "written" }),
+      start: ({ onEvent }) => {
+        turns.push("started");
+        const sessionId = randomUUID();
+        const result: TurnResult = { status: "completed", text: "ok" };
+        onEvent({ type: "session.start", sessionId });
+        onEvent({ type: "turn.done", sessionId, result });
+        onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+        return { localId: sessionId, finished: Promise.resolve(result), interrupt: async () => {} };
+      },
+    });
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }, opts.update), placeRelinkWaitMs: 50, killConfirm: { graceMs: 40, pollMs: 1 } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client, placeId, pair } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { daemonVersion: DAEMON_VERSION }), answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
+    await opts.before?.(made.id);
+    const again = await relink(hostKey, placeId, pair, blocked(), c => (place = forks(c)));
+    sockets.push(again.client.ws);
+    expect(again.proved, String(again.proved["error"])).toMatchObject({ ok: true });
+    await until(async () => (await placesOf()).find(p => p.id === placeId)?.present === true);
+    return { place: () => place, placeId, made: { id: made.id, machineId: made.machineId }, turns, renamed };
+  };
+
+  it("holds the link, moves the last seen stamp, and carries the doctor's sentence on the row rather than as a refused dial", async () => {
+    const { hostKey } = await serving();
+    const joined = await join(hostKey, { code: await code(), name: "srv" });
+    sockets.push(joined.client.ws);
+    const before = (await placesOf()).find(p => p.id === joined.placeId)!.lastSeenAt!;
+    const absences: Record<string, unknown>[] = [];
+    runtime!.events.on("place.absent", e => absences.push(e as Record<string, unknown>));
+    await new Promise(r => setTimeout(r, 5));
+    const again = await relink(hostKey, joined.placeId, joined.pair, report("srv", { runsWorkspaces: false, workspacesBlocked: BLOCKED }));
+    sockets.push(again.client.ws);
+    expect(again.proved, String(again.proved["error"])).toMatchObject({ ok: true });
+    await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
+    const row = (await placesOf()).find(p => p.id === joined.placeId)!;
+    expect(row.blocked).toBe(SAID);
+    expect(row.dialled).toBeUndefined();
+    expect(Date.parse(row.lastSeenAt!)).toBeGreaterThan(Date.parse(before));
+    expect(absences.filter(e => e["said"] !== undefined)).toEqual([]);
+  });
+
+  it("refuses a send into a thread there in the doctor's sentence, and starts no turn", async () => {
+    const { made, turns, place } = await blockedFork();
+    const execs = place().asked["machine.exec"] ?? 0;
+    await expect(runtime!.sessions.start(made.id, { prompt: "one", harness: "claude" })).rejects.toThrow(SAID);
+    expect(turns).toEqual([]);
+    expect(place().asked["machine.exec"] ?? 0).toBe(execs);
+  });
+
+  it("refuses the panes' road, Terminal, Files and Diff, in the doctor's sentence, before a frame reaches that computer", async () => {
+    const { made, place } = await blockedFork();
+    await expect(runtime!.workspaces.daemonChannel(made.id, () => {})).rejects.toThrow(SAID);
+    expect(place().frames).toEqual([]);
+  });
+
+  it("refuses the Browser's road to a port inside the copy in the doctor's sentence", async () => {
+    const { made, place } = await blockedFork();
+    await expect(runtime!.workspaces.portReach(made.id, 3000)).rejects.toThrow(SAID);
+    await expect(runtime!.workspaces.portProbe(made.id, 3000)).rejects.toThrow(SAID);
+    expect(place().asked["machine.previewUrl"] ?? 0).toBe(0);
+  });
+
+  it("refuses a new workspace there, the road New thread and run --on take, in the doctor's sentence, and forks nothing", async () => {
+    const { place } = await blockedFork();
+    const made = place().created.length;
+    await expect(runtime!.workspaces.create({ project: (await projectOn(runtime!, "srv")).id, golden: "snap_g", name: "more" })).rejects.toThrow(SAID);
+    expect(place().created).toHaveLength(made);
+  });
+
+  it("refuses a command inside the copy, on both of exec's roads, in the doctor's sentence", async () => {
+    const { made, place } = await blockedFork();
+    const execs = place().asked["machine.exec"] ?? 0;
+    await expect(runtime!.workspaces.exec(made.id, "true")).rejects.toThrow(SAID);
+    await expect(runtime!.workspaces.execStream(made.id, ["true"])).rejects.toThrow(SAID);
+    expect(place().asked["machine.exec"] ?? 0).toBe(execs);
+  });
+
+  it("refuses the bring back in the doctor's sentence, before a git frame leaves", async () => {
+    const { made, place } = await blockedFork();
+    await expect(runtime!.workspaces.bringBack({ workspaceId: made.id })).rejects.toThrow(SAID);
+    expect(place().frames).toEqual([]);
+  });
+
+  it("refuses a wake of a stopped copy there in the row's sentence, not the boot's words, and resumes nothing", async () => {
+    const { made, place } = await blockedFork({ before: id => runtime!.workspaces.nap(id).then(() => undefined) });
+    await expect(runtime!.workspaces.wake(made.id)).rejects.toThrow(SAID);
+    expect(place().resumed).toBe(0);
+    expect(place().asked["machine.resume"] ?? 0).toBe(0);
+  });
+
+  it("refuses naming a thread there, which writes inside the copy, in the doctor's sentence", async () => {
+    let session = "";
+    const { renamed } = await blockedFork({
+      before: async id => {
+        const started = await runtime!.sessions.start(id, { prompt: "one", harness: "claude" });
+        await started.finished;
+        session = started.id;
+      },
+    });
+    await expect(runtime!.sessions.rename(session, "a name")).rejects.toThrow(SAID);
+    expect(renamed).toEqual([]);
+  });
+
+  it("refuses carrying a folder into the copy or out of it in the doctor's sentence, before the bundler or the lander is asked", async () => {
+    const { made } = await blockedFork();
+    await expect(runtime!.projects.import({ workspaceId: made.id, source: "/s", dest: "/d", bundler: {} as never })).rejects.toThrow(SAID);
+    await expect(runtime!.projects.export({ workspaceId: made.id, source: "/s", dest: "/d", lander: {} as never })).rejects.toThrow(SAID);
+  });
+
+  it("deletes a workspace there over the link", async () => {
+    const { made, place } = await blockedFork();
+    await runtime!.workspaces.delete(made.id);
+    expect(place().killed).toContain(made.machineId);
+    expect(await runtime!.workspaces.list()).toEqual([]);
+  });
+
+  it("takes the computer out over the link, asking it to sweep itself", async () => {
+    const { hostKey } = await serving();
+    const joined = await join(hostKey, { code: await code(), name: "srv" });
+    sockets.push(joined.client.ws);
+    const asked: string[] = [];
+    const again = await relink(hostKey, joined.placeId, joined.pair, blocked(), c => answersLeave(c, ["/root/.wsp/place.json"], asked));
+    sockets.push(again.client.ws);
+    expect(again.proved, String(again.proved["error"])).toMatchObject({ ok: true });
+    const answer = await remove(joined.placeId);
+    expect(answer["removed"]).toBe(true);
+    expect(asked).toEqual(["place.leave"]);
+  });
+
+  it("hands the update pass the link", async () => {
+    const asked: PlaceUpdateRequest[] = [];
+    const { placeId } = await blockedFork({ update: async req => void asked.push(req) });
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const answer = await c.request("places.update", { placeId });
+    c.close();
+    expect(answer.ok, String(answer["error"])).toBe(true);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.link).toBeDefined();
   });
 });

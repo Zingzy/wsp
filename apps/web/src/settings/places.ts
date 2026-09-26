@@ -8,7 +8,7 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, provisionWord, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, provisionWord, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { PROVISION_OUTCOME_WORDS, WHERE_WORDS } from "./format.js";
 import { CLOUD_NAMES } from "./providers.js";
 
@@ -160,12 +160,12 @@ export function absentOf(place: PlaceView, now: number | null, here = false): Ab
   return placeIsOffline(place) ? absentComputer(placeName(place, here), now === null ? null : awayMsOf(place, now)) : null;
 }
 
-/** The one word the slot beside a row's name carries. A computer that is not answering says that first: it is the
- * more urgent of the two and nothing can be put on a computer that is off. A computer that is answering and runs an
+/** The one word the slot beside a row's name carries, in the order a waiting thread reads its computer: can't run
+ * threads first, since only a person fixes it, then not answering, since nothing can be put on a computer that is off. A computer that is answering and runs an
  * older daemon than this wsp deploys says so in the protocol's own word, the same one `wsp places` prints in its
  * BEHIND column, so the app and the command line cannot word it twice. */
 export function placeStateWord(place: PlaceView, absent: AbsentComputer | null): string {
-  return absent?.away ?? (provisionWord(place.provision) || undefined) ?? placeDaemonBehind(place) ?? "";
+  return (place.blocked === undefined ? undefined : PLACE_BLOCKED_WORD) ?? absent?.away ?? (provisionWord(place.provision) || undefined) ?? placeDaemonBehind(place) ?? "";
 }
 
 /** How many workspaces stand on each row, by the id of the row: every workspace the app holds goes to exactly one
