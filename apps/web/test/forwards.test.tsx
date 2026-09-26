@@ -186,12 +186,12 @@ describe("ForwardsList", () => {
 });
 
 describe("in the sidebar", () => {
-  it("the group sits under the workspaces and its rows join keyboard traversal", async () => {
+  it("the group sits under the tiles and its rows join keyboard traversal", async () => {
     const { api } = fakeApi([WS_A], [fwd("ws_a", 8123)]);
     await act(async () => useStore.getState().bind(api));
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
     await screen.findByText("localhost:8123");
     const ids = Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-row]")).map(r => r.dataset["rowId"]);
-    expect(ids).toEqual(["project:pr_1", "ws:ws_a", "fwd:ws_a:8123"]);
+    expect(ids).toEqual(["ws:ws_a", "fwd:ws_a:8123"]);
   });
 });

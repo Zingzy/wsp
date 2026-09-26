@@ -3,7 +3,7 @@ import type { SidebarThreadSnapshot } from "../../adapt/index.js";
 import { resolveSettledTimestamp } from "../../sidebar/Sidebar.logic.js";
 import { compactTimeLabel } from "../../sidebar/workspaceRows.js";
 
-/** How long ago a thread last settled, the age a resting thread's status slot shows outside the sidebar. */
+/** How long ago a thread last settled, the age a resting thread's status slot shows. */
 export function restingAge(thread: Pick<SidebarThreadSnapshot, "startedAt" | "endedAt">): string {
   return compactTimeLabel(resolveSettledTimestamp(thread));
 }
