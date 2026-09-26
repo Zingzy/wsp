@@ -290,10 +290,19 @@ pub struct GitStatusEntry {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
+#[serde(rename_all = "camelCase")]
 pub struct GitStatusReply {
     pub branch: GitBranch,
     pub entries: Vec<GitStatusEntry>,
     pub root: String,
+    /// The entries were not read: a stopped workspace's branch is read off its git directory alone, so an empty
+    /// list here says nothing about edits never committed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub edits_unread: bool,
+    /// Ahead and behind were not counted: the history of a stopped workspace's copy was too long or too slow to walk
+    /// within the daemon's budget, so the zeros say nothing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub counts_unknown: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
