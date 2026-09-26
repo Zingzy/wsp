@@ -77,7 +77,7 @@ export function MaterialTuner() {
       <div className="mb-4 flex items-center gap-2">
         <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
         <span className="font-medium text-sm">Material</span>
-        <span className="font-mono text-[11px] text-muted-foreground">dark · ⌘⇧M</span>
+        <span className="flex gap-3 font-mono text-[11px] text-muted-foreground"><span>dark</span><span>⌘⇧M</span></span>
         <button type="button" aria-label="Close" onClick={() => setOpen(false)} className="ms-auto rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground">
           <XIcon className="size-4" />
         </button>

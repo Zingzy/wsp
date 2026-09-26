@@ -332,7 +332,7 @@ export function absentComputer(name: string, awayMs: number | null): AbsentCompu
   const said = `${name} is not answering`;
   const will = "it connects on its own when it is on";
   const dated = awayMs === null ? away : `${away} ${offlineFor(awayMs)}`;
-  return { word: workspaceWord("unreachable"), away, line: `${dated} · is it on?`, said, will, sentence: `${said}; ${will}` };
+  return { word: workspaceWord("unreachable"), away, line: `${dated}, is it on?`, said, will, sentence: `${said}; ${will}` };
 }
 
 /** The word on the button under every pane that needs the daemon this host started. */
@@ -347,7 +347,7 @@ export function ownDaemonDown(name: string): AbsentComputer {
   const said = `${name}'s daemon is not running`;
   // The row leaves thirty characters, which the sentence itself does not fit in, so the line says the same fact
   // without the computer's name: the row already names the workspace, and the whole sentence rides its title.
-  return { word: "No daemon", away: "no daemon", line: "daemon not running · start it", said, sentence: said, start: START_DAEMON_WORD };
+  return { word: "No daemon", away: "no daemon", line: "daemon not running, start it", said, sentence: said, start: START_DAEMON_WORD };
 }
 
 /** What the slot above the composer says while the workspace's computer is not answering. The box stays open and
@@ -371,7 +371,7 @@ export function awayMsOf(place: { readonly lastSeenAt?: string | undefined }, no
  * change is dated by the silence (`last seen`), and one that grows while the computer is up is dated by the
  * report it was read in (`reported`), which can be hours older than the last frame. */
 export function lastKnown(value: string, agoMs: number | null, word = "last seen"): string {
-  return agoMs === null ? value : `${value} · ${word} ${offlineFor(agoMs)} ago`;
+  return agoMs === null ? value : `${value}, ${word} ${offlineFor(agoMs)} ago`;
 }
 
 /** The mark on a figure that was true when the computer last reported and has grown since: its uptime. */
@@ -437,7 +437,7 @@ export function absentRoad(input: AbsentRoadInput): AbsentRoad {
   const dialsBack = back === undefined ? null : dialsBackWord(back.boxPort, input.name);
   // A link through the forward comes from this computer's own loopback, which is no address of that computer's.
   const from = back === undefined ? input.road?.from : undefined;
-  const address = ssh !== undefined ? `${ssh} · ${OVER_SSH_WORD}` : from !== undefined && from !== "" ? `${from} · ${DIALS_IN}` : null;
+  const address = ssh !== undefined ? `${ssh} over ${OVER_SSH_WORD}` : from !== undefined && from !== "" ? `${from} ${DIALS_IN}` : null;
   const answered = input.awayMs === null ? "not since it joined" : `${offlineFor(input.awayMs)} ago`;
   const refused = input.dialled !== undefined && !input.dialled.answered && input.dialled.said !== undefined ? input.dialled.said : null;
   const where =

@@ -8,6 +8,7 @@
 import { XIcon } from "lucide-react";
 import { useState } from "react";
 import { loopbackUrl } from "../browser/url.js";
+import { Spaced } from "../components/ui/spaced.js";
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from "../components/ui/sidebar.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { useForwards, useStore } from "../protocol/store.js";
@@ -35,7 +36,7 @@ export function ForwardsList() {
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
                         <span className="truncate text-sidebar-foreground">sign-in callback for {f.name}</span>
                         <span className="truncate text-[11px] font-normal text-sidebar-muted-foreground tabular-nums">
-                          localhost:{f.port} · {compactTimeLabel(f.startedAt)}
+                          <Spaced parts={[`localhost:${f.port}`, compactTimeLabel(f.startedAt)]} />
                         </span>
                       </span>
                     </div>
@@ -49,7 +50,7 @@ export function ForwardsList() {
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
                         <span className="truncate text-sidebar-foreground tabular-nums">localhost:{f.port}</span>
                         <span className="truncate text-[11px] font-normal text-sidebar-muted-foreground">
-                          {f.name} · {compactTimeLabel(f.startedAt)}
+                          <Spaced parts={[f.name, compactTimeLabel(f.startedAt)]} />
                         </span>
                       </span>
                     </SidebarMenuButton>

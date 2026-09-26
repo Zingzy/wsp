@@ -222,7 +222,7 @@ describe("workspace row labels", () => {
     // The row's slot and its third line then read that one reading, where they read nothing and free before.
     const row = project({ reach: { state: "unreachable" } }, { kind: "local" });
     expect(stateSlotWord({ ...row, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, reading)).toBe("No daemon");
-    expect(workspaceMetaLine({ project: row, absent: reading, outOfMemory: undefined })).toBe("daemon not running · start it");
+    expect(workspaceMetaLine({ project: row, absent: reading, outOfMemory: undefined })).toBe("daemon not running, start it");
   });
 
   it("a fork whose daemon died says so too: Unreachable alone reads as a lost machine, and this one is fine", () => {
@@ -284,7 +284,7 @@ describe("workspace row labels", () => {
     // Line three is the silence and what to do about it, and it takes the line ahead of everything else on the
     // row: nothing else there is known while that computer is not connected.
     const line = workspaceMetaLine({ project: on, absent, outOfMemory: undefined });
-    expect(line).toBe("no answer 38 min · is it on?");
+    expect(line).toBe("no answer 38 min, is it on?");
     expect(metaSentences({ project: on, absent, outOfMemory: undefined })[0]).toBe(line);
     // The whole sentence is one string every surface reads, and it never names the machine's id.
     expect(absent.sentence).toBe("old-laptop is not answering; it connects on its own when it is on");

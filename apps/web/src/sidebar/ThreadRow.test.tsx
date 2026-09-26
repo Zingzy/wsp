@@ -65,19 +65,19 @@ describe("a thread row's one line", () => {
   it("is the mark, the title and the slot, nothing else on its face: the project, the agent and who opened it ride the hover text", () => {
     mount();
     expect(row().textContent).toBe("fix the port listWorking");
-    expect(row().getAttribute("title")).toBe("Claude Code · spoo · you");
+    expect(row().getAttribute("title")).toBe("Claude Code, spoo, you");
     expect(row().dataset["depth"]).toBe("2");
     const lead = row().firstElementChild!;
     expect(lead.getAttribute("aria-hidden")).toBe("true");
     expect(lead.querySelector("[data-harness-mark=claude]")).not.toBeNull();
     expect(lead.nextElementSibling!.hasAttribute("data-thread-title")).toBe(true);
-    expect(screen.getByTitle("Claude Code · spoo · you")).toBe(row());
+    expect(screen.getByTitle("Claude Code, spoo, you")).toBe(row());
   });
 
   it("a row an agent opened says Working too, and its hover text names the workspace it runs in and where", () => {
     mount({ parentThreadId: "th_lead", startedBy: "agent", workspaceId: "ws_b" });
     expect(state()).toBe("Working");
-    expect(row().getAttribute("title")).toBe("Claude Code · this Mac");
+    expect(row().getAttribute("title")).toBe("Claude Code, this Mac");
   });
 
   it("the state word reads at the prose tier and the time at the whisper, both in the row's mono", () => {

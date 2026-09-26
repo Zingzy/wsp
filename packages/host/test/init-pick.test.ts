@@ -228,7 +228,7 @@ describe("the sign-ins screen", () => {
     mkdirSync(join(dir, ".config", "gh"), { recursive: true });
     writeFileSync(join(dir, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        other:\n        Zingzy:\n    user: Zingzy\n");
     const gh = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", dir).items.find(i => i.id === "logins/gh")!;
-    expect(gh.choices!.find(c => c.value === "copy")!.label).toBe("copy from this Mac · Zingzy");
+    expect(gh.choices!.find(c => c.value === "copy")!.label).toBe("copy from this Mac (Zingzy)");
     expect(gh.detail).toContain("signed in here as Zingzy; other stays on this computer");
     // Nothing to pick between: the row says which login it is without naming anyone it leaves.
     writeFileSync(join(dir, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        Zingzy:\n    user: Zingzy\n");

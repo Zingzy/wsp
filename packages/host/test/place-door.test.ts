@@ -298,7 +298,7 @@ describe("a request that arrives on the door", () => {
     await joinFrom(port, { "cf-connecting-ip": "2001:db8::7" });
     // A reverse forward from a box lands on the door from the loopback, and the box writes every header it sends.
     await joinFrom(port + PLACE_PORT_OFFSET, { "cf-connecting-ip": "203.0.113.9" });
-    await joinFrom(port, { "cf-connecting-ip": "evil.example · dials in" });
+    await joinFrom(port, { "cf-connecting-ip": "evil.example dials in" });
     expect(seen).toEqual(["203.0.113.7", "2001:db8::7", "127.0.0.1", "127.0.0.1"]);
   });
 

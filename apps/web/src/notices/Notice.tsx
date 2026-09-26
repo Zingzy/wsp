@@ -40,8 +40,8 @@ function Notice({ toast }: { toast: Toast.Root.ToastObject<{ notice: NoticeRecor
         <span className={cn("w-12 shrink-0 font-mono text-[11px] leading-5", notice.kind === "error" ? "text-destructive-foreground" : "text-muted-foreground")}>{notice.kind}</span>
         <div className="min-w-0 flex-1">
           <Toast.Title className="line-clamp-2 break-words text-[13px] leading-5 font-normal text-foreground">{notice.text}</Toast.Title>
-          <Toast.Description data-notice-when="" className="flex min-w-0 gap-1 font-mono text-[11px] leading-4 text-muted-foreground tabular-nums">
-            {notice.where === undefined ? null : <span className="truncate">{notice.where} ·</span>}
+          <Toast.Description data-notice-when="" className="flex min-w-0 gap-3 font-mono text-[11px] leading-4 text-muted-foreground tabular-nums">
+            {notice.where === undefined ? null : <span className="truncate">{notice.where}</span>}{" "}
             <span className="shrink-0">{clock(notice.at)}</span>
           </Toast.Description>
         </div>

@@ -18,6 +18,7 @@ import { fmtDuration, subagentAskerLine } from "@wsp/protocol";
 import type { PermissionPrompt, SubagentRun, SubagentState } from "../../adapt";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { PermissionPromptRow } from "./PermissionPromptRow";
+import { Spaced } from "../ui/spaced";
 
 /** Running holds nothing: the row's own presence says it, which is the rule every state slot here follows. */
 const STATE_WORDS: Record<SubagentState, string> = { running: "", done: "Done", failed: "Failed", stopped: "Stopped" };
@@ -55,7 +56,7 @@ export function SubagentFoldRow({
             {subagent.title}
           </span>
           <span className="shrink-0 font-mono text-[11px] leading-4 text-muted-foreground tabular-nums" data-subagent-slot="">
-            {[state, elapsed].filter(part => part !== null && part !== "").join(" · ")}
+            <Spaced parts={[state, elapsed].filter(part => part !== null && part !== "")} />
           </span>
         </CollapsibleTrigger>
         <CollapsiblePanel>

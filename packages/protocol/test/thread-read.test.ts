@@ -163,7 +163,7 @@ describe("a thread's messages", () => {
     expect(rows).toEqual([
       { who: "person", at: AT, text: "build it" },
       { who: "agent", at: AT + 1_000, text: "built it" },
-      { who: "turn", at: AT + 1_000, text: "completed · Worked for 12m 4s · $0.41" },
+      { who: "turn", at: AT + 1_000, text: "completed  Worked for 12m 4s  $0.41" },
     ]);
   });
 
@@ -235,7 +235,7 @@ describe("a thread's latest turn and its final reply", () => {
   it("never hands a footer or an error back under the agent's name: a completed turn that left no text is the turn's own row", () => {
     // The Claude CLI answers a completed turn with an empty message where it spent its tokens and said nothing.
     const quiet = turn("build it", "", { status: "completed", text: "", durationMs: 724_000, costUsd: 0.41 });
-    expect(threadReplyRows(quiet, "t1")).toEqual([{ who: "turn", at: AT + 4_000, text: "completed · Worked for 12m 4s · $0.41" }]);
+    expect(threadReplyRows(quiet, "t1")).toEqual([{ who: "turn", at: AT + 4_000, text: "completed  Worked for 12m 4s  $0.41" }]);
     // The words of a turn that did not complete are the agent's where the harness left any and the runtime's error
     // where it did not, and each row says which.
     const cut = turn("build it", "", { status: "interrupted", text: "got half of it" });
@@ -309,7 +309,7 @@ describe("the printout a reader sees", () => {
   });
 
   it("ends a turn's row on the footer the chat shows, with the reason where it did not complete", () => {
-    expect(turnEndLine({ status: "completed", durationMs: 724_000, costUsd: 0.41 })).toBe("completed · Worked for 12m 4s · $0.41");
+    expect(turnEndLine({ status: "completed", durationMs: 724_000, costUsd: 0.41 })).toBe("completed  Worked for 12m 4s  $0.41");
     expect(turnEndLine({ status: "interrupted" })).toBe("interrupted");
     expect(turnEndLine({ status: "failed", error: "the harness died" })).toBe("failed: the harness died");
   });

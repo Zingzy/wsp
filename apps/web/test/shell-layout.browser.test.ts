@@ -292,7 +292,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       );
       console.info(`thread rows at ${theme}: ${JSON.stringify(rows)}`);
       // The agent, the project and who opened it ride the hover text; the face is the title and the slot alone.
-      expect(rows.map(r => r?.hover)).toEqual(["Claude Code · the-project · you", "Claude Code · the-project · cli", "Codex · the-project · cli", "Claude Code · the-project · you"]);
+      expect(rows.map(r => r?.hover)).toEqual(["Claude Code, the-project, you", "Claude Code, the-project, cli", "Codex, the-project, cli", "Claude Code, the-project, you"]);
       expect(rows[0]!.slot).toBe("Working");
       for (const row of rows.slice(1)) expect(row!.slot).toMatch(/^(now|\d+[mhd])$/);
       for (const row of rows) {

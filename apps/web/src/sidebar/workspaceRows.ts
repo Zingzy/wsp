@@ -71,15 +71,13 @@ export interface WorkspaceMetaInput {
  * protocol's table, so this line and the command line's two cells cannot say two things about one workspace. A
  * workspace with no copy of a folder is a fork, whose line is its network alone; a caller with no landing for the
  * project has no flags to read the network off and says the copy and the computer.  */
-export function madeOfLine({ project, landing, computer }: { project: Pick<SidebarProjectSnapshot, "workspace">; landing: Pick<Capabilities, "copies" | "ownNetwork"> | null; computer: string | null }): string {
+export function madeOfLine({ project, landing, computer }: { project: Pick<SidebarProjectSnapshot, "workspace">; landing: Pick<Capabilities, "copies" | "ownNetwork"> | null; computer: string | null }): string[] {
   const copy = project.workspace.copy;
   return [
     copy === undefined ? undefined : madeOfWord(copy.road),
     computer ?? undefined,
     landing === null ? undefined : portsWord(landing, project.workspace.portBase, APP_PLATFORM) || undefined,
-  ]
-    .filter((part): part is string => part !== undefined)
-    .join(" · ");
+  ].filter((part): part is string => part !== undefined);
 }
 
 /** The branch the agent is working on, off the record the copy was made with; empty where the record carries
@@ -157,7 +155,7 @@ export function whereRuns(places: readonly PlaceView[], project: Pick<SidebarPro
   const at = placeOf(places, project.workspace);
   if (at === undefined) return whereWord(project);
   const name = nameOfPlace(places, at);
-  return at === places[0] ? name : `${name} · ${PLACE_KIND_WORDS[at.kind]}`;
+  return at === places[0] ? name : `${name} (${PLACE_KIND_WORDS[at.kind]})`;
 }
 
 /** What one row of the places list is called inside a sentence: the computer the host runs on says so in the words
@@ -217,7 +215,7 @@ export function openerWord(startedBy: SessionOrigin): string {
 /** The agent inside the thread and the words beside its mark, as the row's hover text reads them and in the order
  * the row draws them, so what a screen reader is given is the line a person sees. */
 export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness">, words: ReadonlyArray<string>): string {
-  return [agentName(thread.harness), ...words].join(" · ");
+  return [agentName(thread.harness), ...words].join(", ");
 }
 
 /** The word a thread row's state slot carries, off the adapter's own reading: a thread waiting on the person, one

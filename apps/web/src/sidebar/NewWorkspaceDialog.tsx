@@ -24,6 +24,7 @@ import {
 } from "../components/ui/dialog.js";
 import { Input } from "../components/ui/input.js";
 import { Label } from "../components/ui/label.js";
+import { Spaced } from "../components/ui/spaced.js";
 import { Select, SelectButton, SelectItem, SelectPopup, SelectValue } from "../components/ui/select.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
 import { cn } from "../lib/utils.js";
@@ -112,7 +113,7 @@ export function NewWorkspaceDialog({
                   <ProjectPick projects={projects} checked={project} onPick={setPickedProject} />
                   {/* The slot is there from the first paint, so the line arriving moves nothing under it. */}
                   <span className={cn(FACT, "min-h-4")} data-k="landing">
-                    {landing === null ? "" : landsLine(places, landing)}
+                    {landing === null ? "" : <Spaced parts={landsLine(places, landing)} />}
                   </span>
                 </>
               )}
@@ -135,8 +136,8 @@ export function NewWorkspaceDialog({
 /** Where the work lands: the computer, and what a copy there has for a network, both in the protocol's own words.
  * No road word: which road the next workspace of this project takes is the runtime's own rule, and the row reads
  * it off the record the create answers with. */
-export function landsLine(places: readonly PlaceView[], landing: WorkspaceLanding): string {
-  return [landingName(places, landing), portsWord(landing.capabilities, undefined, APP_PLATFORM)].filter(part => part !== "").join(" · ");
+export function landsLine(places: readonly PlaceView[], landing: WorkspaceLanding): string[] {
+  return [landingName(places, landing), portsWord(landing.capabilities, undefined, APP_PLATFORM)].filter(part => part !== "");
 }
 
 /** The projects themselves: the one there is reads as its own name and takes no pick, since a control offering one

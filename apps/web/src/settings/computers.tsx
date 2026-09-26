@@ -89,7 +89,7 @@ export function computerRowData(place: PlaceView, o: { here: boolean; count: num
       </span>
     ),
     ...(place.default ? { mark: WHERE_WORDS.default } : {}),
-    description: chips.map(chip => chip.text).join(" · "),
+    description: chips.map(chip => chip.text),
     chips,
     mono: true,
     ...(state === "" ? {} : { word: state, wordClass: "fact" }),
@@ -230,7 +230,13 @@ function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean;
 /** What a computer has cost, as its own line: the month's figure and the hourly rate, both the protocol's. The
  * count of workspaces the rate is spread over is not said, since the rate already is what is running there and a
  * line that ends "now across 0 workspaces" wraps at a phone's width to say nothing. */
-const spendLine = (spend: PlaceSpend): string => `${spentThisMonth(spend.monthUsd)} · ${fmtRate(spend.rateUsdPerHour)}`;
+/** A copy of the image as one comma list: the version with how it stands beside it, its size, and when it was built. */
+const copyLineValue = (image: Parameters<typeof copyStanding>[0], copy: SealedImageView["copies"][number], now: number): string => {
+  const standing = copyStanding(image, copy);
+  return [`v${copy.version}${standing === undefined ? "" : ` (${standing})`}`, ...(copy.sizeBytes === undefined ? [] : [fmtBytes(copy.sizeBytes)]), builtWhen(copy.builtAt, now)].join(", ");
+};
+
+const spendLine = (spend: PlaceSpend): string[] => [spentThisMonth(spend.monthUsd), fmtRate(spend.rateUsdPerHour)];
 
 /** Where a workspace of a project on this computer would land, for the Ports row: the first project the host holds
  * on it, since every workspace there reads the same two flags. */
@@ -257,7 +263,7 @@ function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageVie
           kind: "line" as const,
           id: `copy-${copy.place}`,
           label: copy.place,
-          value: [`v${copy.version}`, copyStanding(image, copy), copy.sizeBytes === undefined ? undefined : fmtBytes(copy.sizeBytes), builtWhen(copy.builtAt, ctx.now)].filter((word): word is string => word !== undefined).join(" · "),
+          value: copyLineValue(image, copy, ctx.now),
           attrs: { "data-k": "image-copy", "data-place": copy.place },
         }));
   // A cloud keeps no computer to read: its agents are the image's, and the image is what every act there edits.
@@ -305,7 +311,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
   // A cloud is no computer this host reaches, and this computer is reached by being here: the road reading is a
   // joined computer's alone, and the Connection card stands or goes with it.
   const road = here ? null : absentRoad({ name: place.name, road: place.road, awayMs: awayMsOf(place, ctx.now), dialled: place.dialled });
-  const took = place.dialled?.answered === true && place.dialled.roundTripMs !== undefined ? ` · ${place.dialled.roundTripMs} ms` : "";
+  const took = place.dialled?.answered === true && place.dialled.roundTripMs !== undefined ? `, ${place.dialled.roundTripMs} ms` : "";
   const copies = copiesWord(place, here);
   const landing = landingOn(ctx, place);
   const ports = landing === null ? "" : portsWord(landing.capabilities, undefined, APP_PLATFORM);
@@ -314,7 +320,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
   const facts: SettingsItem[] = [
     // Marked while the computer is not answering, the way the pane's OS row is: a person who cannot tell which of
     // two screens is stale is the whole of what this line was reported for.
-    ...(place.os === undefined ? [] : [{ kind: "line" as const, id: "system", label: WHERE_WORDS.system, value: lastKnown(place.engine !== undefined && place.engine !== "none" ? `${place.os} · ${place.engine}` : place.os, away), hover: WHERE_WORDS.systemHover, attrs: { "data-k": "system" } }]),
+    ...(place.os === undefined ? [] : [{ kind: "line" as const, id: "system", label: WHERE_WORDS.system, value: lastKnown(place.engine !== undefined && place.engine !== "none" ? `${place.os}, ${place.engine}` : place.os, away), hover: WHERE_WORDS.systemHover, attrs: { "data-k": "system" } }]),
     ...(place.shape === undefined ? [] : [{ kind: "line" as const, id: "size", label: WHERE_WORDS.size, value: fmtSize(place.shape, placeCpuWord(place)), attrs: { "data-k": "size" } }]),
     ...(place.diskFreeBytes === undefined ? [] : [{ kind: "line" as const, id: "disk-free", label: WHERE_WORDS.diskFree, value: fmtBytes(place.diskFreeBytes), attrs: { "data-k": "disk-free" } }]),
     ...(here || place.joinedAt === undefined ? [] : [{ kind: "line" as const, id: "joined", label: WHERE_WORDS.joined, value: WHERE_WORDS.ago(offlineFor(ctx.now - Date.parse(place.joinedAt))), attrs: { "data-k": "joined" } }]),
@@ -342,7 +348,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
     ...(copies === "" ? [] : [{ kind: "row" as const, id: "copies", title: WHERE_WORDS.copies, description: WHERE_WORDS.copiesDescription, word: copies, attrs: { "data-k": "copies" } }]),
     ...(ports === "" ? [] : [{ kind: "row" as const, id: "ports", title: WHERE_WORDS.ports, description: WHERE_WORDS.portsDescription, word: ports, attrs: { "data-k": "ports" } }]),
   ];
-  const workspaces = holding.workspaces.map((w, at) => ({ kind: "line" as const, id: `workspace-${at}`, label: w.name, value: `${w.state} · ${threadWord(w.threads)}`, valueClass: "fact" as const, attrs: { "data-k": "workspace-line" } }));
+  const workspaces = holding.workspaces.map((w, at) => ({ kind: "line" as const, id: `workspace-${at}`, label: w.name, value: [w.state, threadWord(w.threads)], valueClass: "fact" as const, attrs: { "data-k": "workspace-line" } }));
   const imageBytes = ctx.reads.image === null ? undefined : copyOn(ctx.reads.image.copies, place)?.sizeBytes;
   const cards: SettingsCardData[] = [
     { id: "look", items: [{ kind: "row", id: "icon", title: WHERE_WORDS.icon, description: WHERE_WORDS.iconDescription, control: <ComputerIconSelect place={place} onChange={icon => ctx.setPreferences({ computerLook: { [place.id]: { icon } } })} /> }] },

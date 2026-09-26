@@ -240,9 +240,9 @@ describe("fmtBytes and fmtMemGb", () => {
 describe("a computer of the person's own in one line", () => {
   it("names its cores, its memory and the room left where its threads work, as one unbreakable phrase", () => {
     const line = placeFactsLine({ cpu: 4, memMb: 8192 }, 97_710_505_984);
-    expect(line).toBe("4 cores · 8 GB · 91 GB free".replace(/ /g, "\u00a0"));
+    expect(line).toBe("4 cores, 8 GB, 91 GB free".replace(/ /g, "\u00a0"));
     // A computer that would not say how much room it has says the rest.
-    expect(placeFactsLine({ cpu: 8, memMb: 16384 })).toBe("8 cores · 16 GB".replace(/ /g, "\u00a0"));
+    expect(placeFactsLine({ cpu: 8, memMb: 16384 })).toBe("8 cores, 16 GB".replace(/ /g, "\u00a0"));
     // Cores, never vCPU: a computer somebody owns has the cores it has.
     expect(line).not.toContain("vCPU");
   });
@@ -296,11 +296,11 @@ describe("a machine that stopped answering with its memory near full", () => {
   });
 
   it("the size line names the smallest offer with more memory and its rate, or that there is none", () => {
-    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, offers)).toBe("A task on 2 vCPU · 8 GB ($0.15/hr) fits more; pick it when you make the next one");
-    expect(biggerSizeLine({ cpu: 2, memMb: 8192 }, offers)).toBe("A task on 4 vCPU · 16 GB ($0.30/hr) fits more; pick it when you make the next one");
+    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, offers)).toBe("A task on 2 vCPU, 8 GB ($0.15/hr) fits more; pick it when you make the next one");
+    expect(biggerSizeLine({ cpu: 2, memMb: 8192 }, offers)).toBe("A task on 4 vCPU, 16 GB ($0.30/hr) fits more; pick it when you make the next one");
     expect(biggerSizeLine({ cpu: 4, memMb: 16384 }, offers)).toBe("No size with more memory is offered; run less in the task at once");
     // Order in the table does not pick the offer; memory does.
-    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, [...offers].reverse())).toContain("2 vCPU · 8 GB");
+    expect(biggerSizeLine({ cpu: 2, memMb: 4096 }, [...offers].reverse())).toContain("2 vCPU, 8 GB");
   });
 });
 
@@ -382,15 +382,15 @@ describe("where the composer's model lists came from, in one line", () => {
   };
 
   it("names the agent's own binary and its own pin when its table stood in, never another agent's", () => {
-    expect(catalogSourceLine(TABLE, THIS_COMPUTER)).toBe("codex table · app-server 0.153.0, 2026-09-07");
-    expect(catalogSourceLine({ ...TABLE, harness: "claude", label: "Claude Code", version: "--help 2.1.257, 2026-09-05" }, THIS_COMPUTER)).toBe("claude table · --help 2.1.257, 2026-09-05");
+    expect(catalogSourceLine(TABLE, THIS_COMPUTER)).toBe("codex table, app-server 0.153.0, 2026-09-07");
+    expect(catalogSourceLine({ ...TABLE, harness: "claude", label: "Claude Code", version: "--help 2.1.257, 2026-09-05" }, THIS_COMPUTER)).toBe("claude table, --help 2.1.257, 2026-09-05");
     // One line at the popup's width: 48 characters of the 10px mono the footer draws in, measured in Chromium.
     expect(catalogSourceLine(TABLE, THIS_COMPUTER).length).toBeLessThanOrEqual(48);
   });
 
   it("says the adapter's own reason where the binary answered and named one, in place of naming the table", () => {
     expect(catalogSourceLine({ ...TABLE, refusal: codexNotSignedInLine("codex login") }, THIS_COMPUTER)).toBe(
-      "Codex is not signed in where this workspace runs; run codex login there · app-server 0.153.0, 2026-09-07",
+      "Codex is not signed in where this workspace runs; run codex login there, app-server 0.153.0, 2026-09-07",
     );
   });
 
@@ -589,9 +589,9 @@ describe("a turn's activity in one line each", () => {
   });
 
   it("ends a turn on the same words the app's footer shows, in the app's order, and leaves out what the harness did not report", () => {
-    expect(turnSettledLine({ status: "completed", durationMs: 72_000, costUsd: 0.22 })).toBe("completed · Worked for 1m 12s · $0.22");
+    expect(turnSettledLine({ status: "completed", durationMs: 72_000, costUsd: 0.22 })).toBe("completed  Worked for 1m 12s  $0.22");
     expect(turnSettledLine({ status: "failed" })).toBe("failed");
-    expect(turnSettledLine({ status: "interrupted", durationMs: 1_500 })).toBe("interrupted · Worked for 1.5s");
+    expect(turnSettledLine({ status: "interrupted", durationMs: 1_500 })).toBe("interrupted  Worked for 1.5s");
     expect(turnSettledParts({ durationMs: null, costUsd: null })).toEqual([]);
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 0.22 })).toEqual(["Worked for 1m 12s", "$0.22"]);
   });
@@ -624,7 +624,7 @@ describe("a turn's activity in one line each", () => {
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 0.13 }, null, LIST_PRICE_WORD)).toEqual(["Worked for 1m 12s", "$0.13 list price"]);
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 }, 2.3, LIST_PRICE_WORD)).toEqual(["Worked for 1m 12s", "$1.14 list price this turn", "$2.30 in threads it opened"]);
     // The line a stream with no footer prints never carries a second figure, so it is untouched.
-    expect(turnSettledLine({ status: "completed", durationMs: 72_000, costUsd: 1.14 })).toBe("completed · Worked for 1m 12s · $1.14");
+    expect(turnSettledLine({ status: "completed", durationMs: 72_000, costUsd: 1.14 })).toBe("completed  Worked for 1m 12s  $1.14");
   });
 });
 
@@ -759,18 +759,18 @@ describe("openingTitle", () => {
 
 describe("cutLine", () => {
   it("leaves a line inside the room whole and cuts a longer one at a word boundary, the ellipsis counted inside the room", () => {
-    expect(cutLine("no answer 2 h · threads go on", 30)).toBe("no answer 2 h · threads go on");
+    expect(cutLine("no answer 2 h, threads go on", 30)).toBe("no answer 2 h, threads go on");
     expect(cutLine("putting the helper back on this machine", 30)).toBe("putting the helper back on…");
     expect(cutLine("putting the helper back on this machine", 30).length).toBeLessThanOrEqual(30);
     // One word longer than the room is cut inside itself rather than dropped.
     expect(cutLine("a".repeat(40), 10)).toBe(`${"a".repeat(9)}…`);
   });
 
-  it("takes the separator the cut broke on off the edge, the middle dot a row's line parts its facts with included", () => {
-    expect(cutLine("$0.00 today · edge slow · naps in 14m", 30)).toBe("$0.00 today · edge slow…");
+  it("takes the separator the cut broke on off the edge", () => {
+    expect(cutLine("$0.00 today, edge slow, naps in 14m", 24)).toBe("$0.00 today, edge slow…");
     expect(cutLine("one, two, three, four, five, six", 20)).toBe("one, two, three…");
-    // A thread title cut on a middle dot reads the same rule, since both lines read this one cut.
-    expect(openingTitle("Ship the sidebar row and the composer line · then the word cut")).toBe("Ship the sidebar row and the composer line…");
+    // A thread title cut on a comma reads the same rule, since both lines read this one cut.
+    expect(openingTitle("Ship the sidebar row and the composer line, then the word cut")).toBe("Ship the sidebar row and the composer line…");
   });
 });
 
@@ -881,7 +881,7 @@ describe("refusedTurn", () => {
       error: "Not logged in · Please run /login; sign in from a terminal on this computer, then send again",
       refusal: "sign-in",
     });
-    expect(turnEndLine(refused)).toBe(`failed · Worked for 88ms · $0.00: ${refused.error!}`);
+    expect(turnEndLine(refused)).toBe(`failed  Worked for 88ms  $0.00: ${refused.error!}`);
     expect(notifyTail(refused)).toBe(refused.error);
   });
 
@@ -997,10 +997,10 @@ describe("machine size words", () => {
   ];
 
   it("fmtSize is the one line for a size in the app: the cpus in the kind's word, a dot, the GB", () => {
-    expect([{ cpu: 2, memMb: 4096 }, { cpu: 4, memMb: 1536 }].map(size => fmtSize(size))).toEqual(["2 vCPU · 4 GB", "4 vCPU · 1.5 GB"]);
+    expect([{ cpu: 2, memMb: 4096 }, { cpu: 4, memMb: 1536 }].map(size => fmtSize(size))).toEqual(["2 vCPU, 4 GB", "4 vCPU, 1.5 GB"]);
     // A provider's cpus are virtual and this computer's are not: the same line, the kind's own word for them.
-    expect(fmtSize({ cpu: 10, memMb: 16384 }, kindWords("local").cpu)).toBe("10 cores · 16 GB");
-    expect(fmtSize({ cpu: 2, memMb: 4096 }, kindWords("cloud").cpu)).toBe("2 vCPU · 4 GB");
+    expect(fmtSize({ cpu: 10, memMb: 16384 }, kindWords("local").cpu)).toBe("10 cores, 16 GB");
+    expect(fmtSize({ cpu: 2, memMb: 4096 }, kindWords("cloud").cpu)).toBe("2 vCPU, 4 GB");
   });
 
   it("sizeWord spells vCPUs, an x and the GB the size table names, and sizeFromWord reads the same word back", () => {
@@ -1528,10 +1528,10 @@ describe("a pinned release that moved", () => {
     expect(pinWords({ tag: "v2.86.0", sha256: "b".repeat(64) })).toBe("v2.86.0");
     expect(pinWords({ tag: "3.3a-3", latest: true })).toBe("3.3a-3, installs latest");
     // The record's line: the row by name, the version, the checksum where the road hashed one, the latest mark in the road's words.
-    expect(sealedPinLine("GitHub CLI", { tag: "v2.86.0", sha256: "b".repeat(64) })).toBe("GitHub CLI · v2.86.0 · checksum bbbbbbbbbbbb");
-    expect(sealedPinLine("tmux", { tag: "3.3a-3", latest: true }, "by apt")).toBe("tmux · 3.3a-3 · installs latest by apt");
-    expect(sealedPinLine("Claude Code", { tag: "2.1.3", latest: true })).toBe("Claude Code · 2.1.3 · installs latest");
-    expect(sealedPinLine("wrangler", { tag: "4.1.0" })).toBe("wrangler · 4.1.0");
+    expect(sealedPinLine("GitHub CLI", { tag: "v2.86.0", sha256: "b".repeat(64) })).toBe("GitHub CLI  v2.86.0  checksum bbbbbbbbbbbb");
+    expect(sealedPinLine("tmux", { tag: "3.3a-3", latest: true }, "by apt")).toBe("tmux  3.3a-3  installs latest by apt");
+    expect(sealedPinLine("Claude Code", { tag: "2.1.3", latest: true })).toBe("Claude Code  2.1.3  installs latest");
+    expect(sealedPinLine("wrangler", { tag: "4.1.0" })).toBe("wrangler  4.1.0");
     // The stage's one line: the pinned rows, then once the rows that install latest with the version this build got; nothing when nothing was read.
     expect(pinsReadLine([{ name: "wrangler", tag: "4.1.0" }, { name: "GitHub CLI", tag: "v2.86.0" }], [{ name: "tmux", tag: "3.3a-3", words: "by apt" }, { name: "Go", tag: "1.22.1", words: "with Homebrew" }])).toBe(
       "pinned: wrangler 4.1.0, GitHub CLI v2.86.0; installs latest on every place: tmux 3.3a-3 by apt, Go 1.22.1 with Homebrew",
@@ -1781,10 +1781,10 @@ describe("the words a relayed permission prompt shows", () => {
     expect(permissionPromptWords("Skill", JSON.stringify({ skill: "agent-browser" }), "Browser automation CLI").rest).toBe("");
     // What the lead does not carry still shows, each field apart from the next: this is the row consent is given on.
     expect(permissionPromptWords("Bash", JSON.stringify({ command: "ls", timeout: 5_000 })).rest).toBe("timeout: 5000");
-    expect(permissionPromptWords("mcp__wsp__send", JSON.stringify({ threadId: "thr_1", message: "go" })).rest).toBe("threadId: thr_1 · message: go");
+    expect(permissionPromptWords("mcp__wsp__send", JSON.stringify({ threadId: "thr_1", message: "go" })).rest).toBe("threadId: thr_1\nmessage: go");
     // A field a tool really calls description is the call's own, not the harness's paragraph, so it shows like any other.
     expect(permissionPromptWords("mcp__linear__create_issue", JSON.stringify({ title: "Fix login", description: "The button does\n\nnothing on Safari." })).rest).toBe(
-      "title: Fix login · description: The button does nothing on Safari.",
+      "title: Fix login\ndescription: The button does nothing on Safari.",
     );
     // A tool that carries no file body folds nothing away, and input that is not an object is shown as it stands.
     expect(permissionPromptWords("Bash", JSON.stringify({ command: "ls" })).body).toBeUndefined();
@@ -1902,7 +1902,7 @@ describe("the words a relayed permission prompt shows", () => {
     expect(subagentAskerLine("count alpha files")).toBe("count alpha files asks");
     // A prompt drawn in a thread that did not raise it names the thread that did, in the row grammar's two parts
     // under a middle dot, so it reads as one line of the same family as the asker line above it.
-    expect(waitingAskerLine("read the file")).toBe("read the file asks · this thread waits on the answer");
+    expect(waitingAskerLine("read the file")).toBe("read the file asks; this thread waits on the answer");
   });
 
   it("has one deny line, the person's own, and it points the agent at no other access mode", () => {

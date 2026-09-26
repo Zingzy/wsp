@@ -7,11 +7,14 @@
 // machine rows, fold, Retry, code and stopped states as the job carries them.
 import { act, cleanup, fireEvent, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CLOUD_SETUP_WORDS, DEFAULT_PREFERENCES, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, MCP_ADDED_WORD, SIGN_IN_ANSWERS, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, initSignInLine, initSignInOutcome, initStageCount, initStepCounter, initStoppedAt, initTallyLine, keyUncheckedLine, signInChoices, snapshotStageLine, type InitJob, type InitRow, type InitScreen, type InitSetup, type PlaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, DEFAULT_PREFERENCES, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, MCP_ADDED_WORD, SIGN_IN_ANSWERS, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, initSignInLine, initSignInOutcome, initStageCount, initStepCounter, initStoppedAt, fmtBytesOfTotal, initTallyCount, keyUncheckedLine, signInChoices, snapshotStageLine, type InitJob, type InitRow, type InitScreen, type InitSetup, type PlaceView } from "@wsp/protocol";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./fixtures/keyRefusedJob.js";
 import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
+
+/** The tally as its text reads: the count, then the estimate beside it with only space between. */
+const tallyText = (count: number, noun: string, used: number, total?: number): string => `${initTallyCount(count, noun)} ${fmtBytesOfTotal(used, total)}`;
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -219,13 +222,13 @@ describe("the recipe's rows", () => {
     expect(row("claude").querySelector("[data-k=size]")!.textContent).toBe("208 MB");
     expect(row("claude").querySelector("[data-k=why]")!.textContent).toBe("used here, 12 sessions");
     expect(row("claude").querySelector("[data-row-mark=claude]")).not.toBeNull();
-    expect(k("tally")?.textContent).toBe(initTallyLine(1, "agents", DISK.fixed + 208 * MIB + 72 * MIB, DISK.total));
+    expect(k("tally")?.textContent).toBe(tallyText(1, "agents", DISK.fixed + 208 * MIB + 72 * MIB, DISK.total));
     expect(k("disk")?.getAttribute("data-used")).toBe(String(DISK.fixed + 280 * MIB));
     expect(k("disk")?.getAttribute("aria-label")).toContain(initDiskLine(DISK.fixed + 280 * MIB, DISK.total));
     fireEvent.click(tick("hermes"));
     await settle();
     expect(tick("hermes").getAttribute("aria-checked")).toBe("true");
-    expect(k("tally")?.textContent).toBe(initTallyLine(2, "agents", DISK.fixed + 692 * MIB + 72 * MIB, DISK.total));
+    expect(k("tally")?.textContent).toBe(tallyText(2, "agents", DISK.fixed + 692 * MIB + 72 * MIB, DISK.total));
     expect(k("disk")?.getAttribute("data-used")).toBe(String(DISK.fixed + 692 * MIB + 72 * MIB));
     expect(fake.ops()).not.toContain("answer");
     fireEvent.click(tick("codex"));
@@ -242,7 +245,7 @@ describe("the recipe's rows", () => {
     expect(row("swift").querySelector("[data-k=why]")).toBeNull();
     fireEvent.click(tick("swift"));
     await settle();
-    expect(k("tally")?.textContent).toBe(initTallyLine(3, "tools", DISK.fixed + 1147 * MIB + 72 * MIB + 3 * GIB, DISK.total));
+    expect(k("tally")?.textContent).toBe(tallyText(3, "tools", DISK.fixed + 1147 * MIB + 72 * MIB + 3 * GIB, DISK.total));
     expect(k("disk")?.getAttribute("data-tone")).toBe("muted");
   });
 
@@ -253,7 +256,7 @@ describe("the recipe's rows", () => {
     await open(host({ job }), job);
     expect(stepAt()).toBe("screen-tools");
     const soFar = 663 * MIB + 300 * MIB + 4 * GIB;
-    expect(k("tally")?.textContent).toBe(initTallyLine(2, "tools", soFar, 20 * GIB));
+    expect(k("tally")?.textContent).toBe(tallyText(2, "tools", soFar, 20 * GIB));
     expect(k("tally-size")?.getAttribute("data-tone")).toBe("muted");
     expect(row("rust").querySelector("[data-k=size]")!.getAttribute("data-tone")).toBe("danger");
     expect(row("node").querySelector("[data-k=size]")!.getAttribute("data-tone")).toBe("warning");
@@ -261,14 +264,14 @@ describe("the recipe's rows", () => {
     expect(stepAt()).toBe("screen-agents");
     const sizes = [...card().querySelectorAll<HTMLElement>("[data-k='recipe'] [data-k=size]")];
     expect(sizes.map(s => s.getAttribute("data-tone"))).toEqual(["muted", "muted", "muted"]);
-    expect(k("tally")?.textContent).toBe(initTallyLine(2, "agents", soFar, 20 * GIB));
+    expect(k("tally")?.textContent).toBe(tallyText(2, "agents", soFar, 20 * GIB));
     await press("recipe-primary");
     expect(stepAt()).toBe("screen-tools");
     fireEvent.click(tick("swift"));
     await settle();
     await press("recipe-primary");
     expect(stepAt()).toBe("screen-also");
-    expect(k("tally")?.textContent).toBe(initTallyLine(0, "more", soFar + 3 * GIB, 20 * GIB));
+    expect(k("tally")?.textContent).toBe(tallyText(0, "more", soFar + 3 * GIB, 20 * GIB));
   });
 
   it("wears the meter's own table on the tally's estimate: the warning tone from 70 percent of the disk, the danger tone from 90", async () => {
@@ -359,7 +362,7 @@ describe("the recipe's rows", () => {
     await open(host({ job: fake.held() }), fake.held());
     expect(stepAt()).toBe("screen-tools");
     expect([...card().querySelectorAll<HTMLElement>("[data-k='recipe'] [data-k=row]")].map(r => within(r).getByRole("checkbox").getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
-    expect(k("tally")?.textContent).toBe(initTallyLine(1, "tools", DISK.fixed + 208 * MIB + 60 * MIB, DISK.total));
+    expect(k("tally")?.textContent).toBe(tallyText(1, "tools", DISK.fixed + 208 * MIB + 60 * MIB, DISK.total));
   });
 
   it("says a refusal on a screen in the host's words in the slot, and the screen stays", async () => {

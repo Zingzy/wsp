@@ -125,16 +125,16 @@ describe("workspace creation layout", () => {
       workspaceId: "ws_fix",
       failed: null,
       lines: [
-        { stage: "image", message: "building your image on hetzner · installing agents", at: at(6), elapsedMs: 108_000 },
-        { stage: "image", message: "building your image on hetzner · taking the snapshot", notice: "about 4.2 GB", at: at(54), elapsedMs: 130_000 },
+        { stage: "image", message: "building your image on hetzner: installing agents", at: at(6), elapsedMs: 108_000 },
+        { stage: "image", message: "building your image on hetzner: taking the snapshot", notice: "about 4.2 GB", at: at(54), elapsedMs: 130_000 },
         { stage: "fork-requested", message: "starting spoo-fix on hetzner", at: at(58), elapsedMs: 190_000 },
         { stage: "ready", message: "ready", at: at(59), elapsedMs: 210_000 },
       ],
     });
     const rows = within(within(view).getByRole("list", { name: "Creation log" })).getAllByRole("listitem");
     expect(rows.map(row => row.querySelector("span")!.firstChild!.textContent)).toEqual([
-      "building your image on hetzner · installing agents",
-      "building your image on hetzner · taking the snapshot",
+      "building your image on hetzner: installing agents",
+      "building your image on hetzner: taking the snapshot",
       "starting spoo-fix on hetzner",
       "ready",
     ]);
@@ -212,12 +212,12 @@ describe("the view's own last line", () => {
     const view = await mount(answered());
     // The protocol's word table, the same one the row it becomes reads: this screen writes no road of its own and
     // the runtime's stage words end on ready with nothing about the copy.
-    expect(within(view).getByText("a copy · shares this Mac's ports, PORT 3100")).toBeTruthy();
+    expect(view.querySelector("[data-k=made-of]")?.textContent).toBe("a copy shares this Mac's ports, PORT 3100");
   });
 
   it("says a copy by either road as that, and names the computer only where the work did not land here", async () => {
     const view = await mount(answered({ copy: { road: "worktree", path: "/Users/dev/spoo-qr-codes", source: "/Users/dev/spoo", base: "", branch: "main", carried: "config-only" }, portBase: undefined }));
-    expect(within(view).getByText("a copy · shares this Mac's ports")).toBeTruthy();
+    expect(view.querySelector("[data-k=made-of]")?.textContent).toBe("a copy shares this Mac's ports");
     expect(view.textContent).not.toContain("zingzy-mbp");
   });
 

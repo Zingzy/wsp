@@ -23,11 +23,17 @@ import { Chips, type ChipItem } from "../components/ui/chips.js";
 import { ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Kbd, KbdGroup } from "../components/ui/kbd.js";
+import { Spaced } from "../components/ui/spaced.js";
 import { cn } from "../lib/utils.js";
 import { FACT, VALUE } from "./format.js";
 
 /** Which mono a word in a slot wears: the foreground for a value a person reads, the muted for a state. */
 export type WordClass = "value" | "fact";
+
+/** Words for one slot: a phrase, or facts drawn apart by space and read as one line by a search or a hover. */
+export type Words = string | ReadonlyArray<string>;
+const wordsLine = (words: Words): string => (typeof words === "string" ? words : words.join(", "));
+const WordsSlot = ({ words }: { words: Words }) => (typeof words === "string" ? words : <Spaced parts={words} />);
 const WORD_CLASS: Record<WordClass, string> = { value: VALUE, fact: FACT };
 
 /** The height every row stands, whatever its words, and the two it takes below 640 px: the shorter where its slot
@@ -47,8 +53,8 @@ export interface SettingsRowData {
   readonly lead?: ReactNode;
   /** One mono word after the title, in the fact class: the default mark on a computer. */
   readonly mark?: string;
-  /** One sentence, or machine words in the mono fact class where `mono` is set. */
-  readonly description: string;
+  /** One sentence, or machine words in the mono fact class where `mono` is set; a list is facts held apart by space. */
+  readonly description: Words;
   /** The facts as chips in place of the description line, which stays the words a search reads. */
   readonly chips?: readonly ChipItem[];
   readonly mono?: boolean;
@@ -69,7 +75,7 @@ export interface SettingsLineData {
   readonly kind: "line";
   readonly id: string;
   readonly label: string;
-  readonly value?: string;
+  readonly value?: Words;
   readonly valueClass?: WordClass;
   /** Keycaps at the right, one group per chord. */
   readonly keys?: ReadonlyArray<ReadonlyArray<string>>;
@@ -95,7 +101,7 @@ export interface SettingsCardData {
 
 /** The words a search reads on an item: its title or label, its description and its hover sentence. */
 export function itemWords(item: SettingsItem): string[] {
-  return item.kind === "row" ? [item.title, item.description] : [item.label, ...(item.hover === undefined ? [] : [item.hover])];
+  return item.kind === "row" ? [item.title, wordsLine(item.description)] : [item.label, ...(item.hover === undefined ? [] : [item.hover])];
 }
 
 /** Two lines of the words' own line height below 640 px, held whether they take one line or two, wrapped on a
@@ -165,8 +171,8 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
           )}
         </span>
         {chips === undefined ? (
-          <span data-settings-description className={cn(mono ? FACT : DESCRIPTION_CLASS, "truncate", drops ? TWO_LINES_NARROW : THREE_LINES_NARROW)} title={description}>
-            {description}
+          <span data-settings-description className={cn(mono ? FACT : DESCRIPTION_CLASS, "truncate", drops ? TWO_LINES_NARROW : THREE_LINES_NARROW)} title={wordsLine(description)}>
+            <WordsSlot words={description} />
           </span>
         ) : (
           <Chips items={chips} className="mt-1.5" />
@@ -207,8 +213,8 @@ export function Line({ id, label, value, valueClass = "value", keys, keysJoiner,
         {label}
       </span>
       {value === undefined ? null : (
-        <span data-settings-word className={cn(WORD_CLASS[valueClass], "min-w-0 max-w-[60%] truncate text-right", TWO_LINES_NARROW, "max-sm:max-w-full max-sm:text-left")} title={value}>
-          {value}
+        <span data-settings-word className={cn(WORD_CLASS[valueClass], "min-w-0 max-w-[60%] truncate text-right", TWO_LINES_NARROW, "max-sm:max-w-full max-sm:text-left")} title={wordsLine(value)}>
+          <WordsSlot words={value} />
         </span>
       )}
       {keys === undefined ? null : (
@@ -241,7 +247,7 @@ const NARROW_DESCRIPTION_BUDGET = 56;
  * one height: a row holding a value, whose length is not bounded, or a description with more to say than the
  * narrower box beside a slot holds. */
 export const cardDrops = (items: ReadonlyArray<SettingsItem>): boolean =>
-  items.some(item => item.kind === "row" && (item.word !== undefined || item.description.length > NARROW_DESCRIPTION_BUDGET));
+  items.some(item => item.kind === "row" && (item.word !== undefined || wordsLine(item.description).length > NARROW_DESCRIPTION_BUDGET));
 
 /** A card's items drawn from their data: the one renderer every page and the search page share. */
 export function Cards({ cards }: { cards: ReadonlyArray<SettingsCardData> }) {

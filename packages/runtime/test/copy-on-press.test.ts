@@ -109,7 +109,7 @@ describe("a copy of the image is built on a press", () => {
     const release = held(solari);
     const building = rt.image.build({ place: "solari" });
     await until(() => frames.some(f => f.place === "solari"));
-    expect((await row("solari")).build).toBe("copying your image · creating the machine");
+    expect((await row("solari")).build).toBe("copying your image: creating the machine");
     // The create and a second keep both arrive while the builder is still being made.
     const creating = createOn(rt, { golden: await head(), name: "x", on: "solari" });
     void rt.image.keepCurrent("solari");

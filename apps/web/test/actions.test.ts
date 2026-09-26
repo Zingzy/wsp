@@ -126,7 +126,7 @@ describe("workspace actions", () => {
   });
 
   it("the start of a daemon is drawn only where this host holds the process that is missing", () => {
-    const reading = { word: "No daemon", said: "this Mac's daemon is not running", sentence: "this Mac's daemon is not running", line: "daemon not running · start it", start: "Start it" } as WorkspaceTarget["absent"];
+    const reading = { word: "No daemon", said: "this Mac's daemon is not running", sentence: "this Mac's daemon is not running", line: "daemon not running, start it", start: "Start it" } as WorkspaceTarget["absent"];
     const down = resolveActions(workspaceActions, workspace("running", { kind: "local", absent: reading }), workspaceVerbs());
     expect(actionById(down, "start-daemon").refusal).toBeNull();
     expect(actionById(resolveActions(workspaceActions, workspace("running", { kind: "local", absent: reading }), workspaceVerbs({ restartDaemon: undefined })), "start-daemon").refusal).toBe("This client cannot start a daemon");

@@ -216,25 +216,13 @@ function Content({ className, ...props }: ComponentProps<"span">) {
     <span
       data-slot="composer-banner-content"
       className={cn(
-        "col-start-2 row-start-1 flex min-w-0 items-center gap-1 *:data-[slot=composer-banner-separator]:mx-0",
+        "col-start-2 row-start-1 flex min-w-0 items-center gap-1",
         "group-not-has-[>[data-slot=composer-banner-icon]]/banner-row:col-[1/3] group-not-has-[>[data-slot=composer-banner-icon]]/banner-row:ps-2 sm:group-not-has-[>[data-slot=composer-banner-icon]]/banner-row:ps-1.5",
         "group-not-has-[>[data-slot=composer-banner-icon],>[data-slot=composer-banner-actions]]/banner-row:pe-2 sm:group-not-has-[>[data-slot=composer-banner-icon],>[data-slot=composer-banner-actions]]/banner-row:pe-1.5",
         className,
       )}
       {...props}
     />
-  );
-}
-
-function Separator() {
-  return (
-    <span
-      aria-hidden
-      data-slot="composer-banner-separator"
-      className="mx-1 inline-block flex-none text-muted-foreground/40"
-    >
-      ·
-    </span>
   );
 }
 
@@ -341,7 +329,6 @@ export const ComposerBanner = {
   Row,
   Icon,
   Content,
-  Separator,
   Actions,
   Children,
   Scroll,

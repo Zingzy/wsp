@@ -174,7 +174,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       searchTerms: ["add a computer", "join", "box", "another mac", "laptop", "linux", "ssh"],
       icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
       title: PLACES_WORDS.addComputer,
-      description: `${SETTINGS_WORDS.title} · ${PLACES_WORDS.section}`,
+      description: `${PLACES_WORDS.section} in ${SETTINGS_WORDS.title}`,
       run: sync(handlers.openAddComputer),
     },
     {
@@ -218,8 +218,7 @@ function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     // computer it is on, never by the id wsp holds the machine under. The state word is the row's own, which on a
     // computer that is not answering is that computer's word and not the wire's.
     const absent = absenceOf(input.places, project.workspace, project.status, null);
-    const parts = [absent?.word ?? project.indicator.label, whereWord(project)];
-    if (project.id === input.selectedId) parts.push("Current task");
+    const current = project.id === input.selectedId;
     // The projects arrive in sidebar order, so a row's index is the slot its chord jumps to.
     const slot = WORKSPACE_SELECT_SLOTS[index];
     return {
@@ -233,7 +232,8 @@ function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
         />
       ),
       title: project.displayName,
-      description: parts.join(" · "),
+      description: `${absent?.word ?? project.indicator.label} on ${whereWord(project)}`,
+      ...(current ? { titleTrailingContent: <span className="shrink-0 text-muted-foreground/70 text-xs">Current task</span> } : {}),
       ...(slot === undefined ? {} : { shortcutCommand: workspaceSelectCommand(slot) }),
       run: sync(() => input.handlers.selectWorkspace(project.id)),
     };
@@ -249,7 +249,7 @@ function threadItem(thread: SidebarThreadSnapshot, project: SidebarProjectSnapsh
     title: thread.title,
     // The workspace it runs on and where that runs, the pair the sidebar's own row carries: a thread an agent
     // opened somewhere else is told apart from its opener by these two words and nothing else.
-    description: [project.displayName, whereWord(project)].join(" · "),
+    description: `${project.displayName} on ${whereWord(project)}`,
     timestamp: compactTimeLabel(thread.startedAt),
     run: sync(() => handlers.selectThread(thread.workspaceId, thread.threadId)),
   };

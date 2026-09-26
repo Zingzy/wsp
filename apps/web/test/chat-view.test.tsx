@@ -286,7 +286,7 @@ describe("ChatView", () => {
     const row = line.closest<HTMLElement>("[data-machine-wait]")!;
     expect(row.className).toContain("font-mono");
     expect(row.className).toContain("text-[11px]");
-    expect(row.textContent).toMatch(/^waking api on solari·\d+s$/);
+    expect(row.textContent).toMatch(/^waking api on solari \d+s$/);
     expect(row.querySelector("[role=alert], [data-slot=alert]")).toBeNull();
   });
 
@@ -478,7 +478,7 @@ describe("ChatView", () => {
     });
     expect(row.getAttribute("data-permission-open")).toBe("true");
     // Whose question it is, said above it, since the thread being read did not raise it.
-    expect(row.querySelector("[data-permission-asker]")!.textContent).toBe("read the file asks · this thread waits on the answer");
+    expect(row.querySelector("[data-permission-asker]")!.textContent).toBe("read the file asks; this thread waits on the answer");
     expect(within(row).getByText("Write hello.txt in root (2 B)")).toBeDefined();
     expect([...row.querySelectorAll("[data-permission-option]")].map(b => b.textContent)).toEqual(["Allow", "Deny"]);
     // The count says the thread is stopped on a question rather than working.
@@ -849,8 +849,8 @@ describe("the threads a thread opened", () => {
       return found;
     });
     expect(opened.map(row => row.textContent)).toEqual([
-      "openedbenchmark the new index · spoo-bench · ascii · Working",
-      "openedrewrite the web client · api · solari · Failed",
+      "openedbenchmark the new index spoo-bench on ascii Working",
+      "openedrewrite the web client api on solari Failed",
     ]);
     const link = opened[0]!.querySelector<HTMLAnchorElement>("a")!;
     expect(link.textContent).toBe("benchmark the new index");
@@ -876,7 +876,7 @@ describe("the threads a thread opened", () => {
       expect(found.textContent).toContain("in threads it opened");
       return found;
     });
-    expect(footer.textContent).toBe("·Worked for 2m 58s·$1.14 this turn·$2.30 in threads it opened");
+    expect(footer.textContent).toBe("Worked for 2m 58s $1.14 this turn $2.30 in threads it opened");
     // The facts sit on the reply's row beside its time, in the time's own type.
     expect(footer.className).toContain("text-xs");
     // A narrow window breaks the line between facts, never inside one.
@@ -917,7 +917,7 @@ describe("the threads a thread opened", () => {
     await setup(api);
     await screen.findByText("Three workspaces are up.");
     const footer = screen.getByTestId("settled-footer");
-    expect(footer.textContent).toBe("·Worked for 2m 58s·$1.14");
+    expect(footer.textContent).toBe("Worked for 2m 58s $1.14");
     expect(footer.textContent).not.toContain("in threads it opened");
     expect(footer.textContent).not.toContain("this turn");
   });

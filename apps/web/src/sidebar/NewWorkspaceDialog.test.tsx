@@ -60,10 +60,10 @@ describe("New workspace asks one thing", () => {
   it("reads where the work lands off the landing the host answered, and says nothing until it has", () => {
     mount([project("pr_1", "spoo")], { pr_1: HERE });
     // The computer the host runs on is named the way every other surface names it, never by the id the wire carries.
-    expect(document.querySelector("[data-k=landing]")!.textContent).toBe("This Mac · shares this Mac's ports");
+    expect(document.querySelector("[data-k=landing]")!.textContent).toBe("This Mac shares this Mac's ports");
     cleanup();
     mount([project("pr_2", "wsp", "p_1")], { pr_2: BOX });
-    expect(document.querySelector("[data-k=landing]")!.textContent).toBe("spoo · own network");
+    expect(document.querySelector("[data-k=landing]")!.textContent).toBe("spoo own network");
     cleanup();
     // The slot is in the tree from the first paint, so the line arriving moves nothing under it.
     mount([project("pr_1", "spoo")], {});

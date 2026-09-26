@@ -302,10 +302,10 @@ describe("wsp status on a computer joined as a place", () => {
     // The name and the record the host stamped on the machine, so this listing and wsp workspaces on that host name
     // the same workspaces; then what it was given, what it holds of it, its processor time, its uptime and where it
     // answers.
-    expect(io.lines[7]?.split(/\s{2,}/).filter(Boolean)).toEqual(["alpha", "ws_9f1c", "Running", "2\u00a0cores\u00a0·\u00a02\u00a0GB", "700 MB of 2 GB", "41m", "1h 30m", "37", "10.65.0.6"]);
+    expect(io.lines[7]?.split(/\s{2,}/).filter(Boolean)).toEqual(["alpha", "ws_9f1c", "Running", "2\u00a0cores,\u00a02\u00a0GB", "700 MB of 2 GB", "41m", "1h 30m", "37", "10.65.0.6"]);
     // A workspace that is stopped keeps its sizes and its paths and has no live figures to give. A box stops rather
     // than pausing, which is the word the row reads with no pause mode behind it.
-    expect(io.lines[8]?.split(/\s{2,}/).filter(Boolean)).toEqual(["beta", "ws_2b7d", "Stopped", "1\u00a0cores\u00a0·\u00a01\u00a0GB", "10.65.0.10"]);
+    expect(io.lines[8]?.split(/\s{2,}/).filter(Boolean)).toEqual(["beta", "ws_2b7d", "Stopped", "1\u00a0cores,\u00a01\u00a0GB", "10.65.0.10"]);
     // And one killed between the listing and its reading keeps the row the listing gave it.
     expect(io.lines[9]?.split(/\s{2,}/).filter(Boolean)).toEqual(["gamma", "ws_44ae", "Gone"]);
     // A machine wearing none of the host's marks is named by the id this computer knows it as.
@@ -360,7 +360,7 @@ describe("wsp status on a computer joined as a place", () => {
     expect(await statusCommand(io, { statePath: join(home, "state.json"), home }, deps(fakeDaemon(READINGS, { boxes: () => bad }).deps))).toBe(0);
     expect(io.lines[5]).toBe("workspaces  2 on this computer:");
     expect(io.lines[7]?.split(/\s{2,}/).filter(Boolean)).toEqual(["alpha", "ws_9f1c", "Running"]);
-    expect(io.lines[8]?.split(/\s{2,}/).filter(Boolean)).toEqual(["beta", "ws_2b7d", "Stopped", "1\u00a0cores\u00a0·\u00a01\u00a0GB", "10.65.0.10"]);
+    expect(io.lines[8]?.split(/\s{2,}/).filter(Boolean)).toEqual(["beta", "ws_2b7d", "Stopped", "1\u00a0cores,\u00a01\u00a0GB", "10.65.0.10"]);
   });
 
   it("says so in one sentence where the daemon would not list the workspaces at all", async () => {
