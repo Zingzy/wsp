@@ -663,7 +663,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(Object.keys(state.workspaces ?? {})).toEqual([]);
     expect(Object.keys(state.projects ?? {})).toEqual([]);
     expect(existsSync(join(home, ".env"))).toBe(false);
-    expect(await win.locator("[data-workspace-name]").count()).toBe(0);
+    expect(await win.locator("[data-row-id^='ws:']").count()).toBe(0);
     // The tick was live, so both agents found here carry the wsp server and its skill, with the shim as the command.
     expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { wsp: { command: shim, args: ["mcp", "--state", join(home, "state.json")] } } });
     expect(existsSync(join(home, ".claude", "skills", "wsp", "SKILL.md"))).toBe(true);
@@ -752,11 +752,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(boot.tokenHash).toMatch(DIGEST);
     const row = win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`);
     await row.waitFor();
-    expect(await row.locator("[data-workspace-name]").textContent()).toBe(LOCAL_WORKSPACE.name);
-    // Line two is the branch the seeded copy stands on.
-    expect(await row.locator("[data-workspace-meta]").textContent()).toBe("main");
+    expect(await row.locator("[data-thread-title]").textContent()).toBe(LOCAL_WORKSPACE.name);
+    // Row three is the branch the seeded copy stands on.
+    expect(await row.locator("[data-tile-branch]").textContent()).toBe("main");
     // The seeded record is the whole list: nothing was recorded on the way in.
-    expect(await win.locator("[data-workspace-name]").count()).toBe(1);
+    expect(await win.locator("[data-row-id^='ws:']").count()).toBe(1);
     expect(appWindows(launched.app).filter(w => ONBOARDING_URL.test(w.url()))).toHaveLength(0);
     expect(existsSync(join(launched.home, ".env"))).toBe(false);
   });
