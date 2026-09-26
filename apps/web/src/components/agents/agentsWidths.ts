@@ -18,6 +18,3 @@ export const TABS = {
   /** The toolbar's Add keeps its glyph alone while the count stands beside the search, so the search keeps its word. */
   addWordHidden: "@max-[422px]:hidden",
 } as const;
-
-/** The panel's Manage all is its glyph on the title line under 480, where its words would crowd the title. */
-export const HEAD = { linkHidden: "@max-[480px]:hidden", glyphShown: "@max-[480px]:inline-flex" } as const;

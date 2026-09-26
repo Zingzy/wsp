@@ -17,6 +17,7 @@ import { getProcs } from "../machine/procs.js";
 import type { Api } from "../protocol/client.js";
 import type { useStore } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
+import { paneOf } from "../panes.js";
 import { useSignInStore } from "../shell/signInStore.js";
 import { connectDaemonLink, type DaemonLink, type DaemonLinkOptions } from "./daemon-link.js";
 import { HERE_KEY } from "./computer.js";
@@ -59,7 +60,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
   const syncHere = (api: Api, hostUp: boolean): void => {
     hereWanted ||=
       selectTerminalUiState(useTerminalDrawerStore.getState().byWorkspaceId, HERE_KEY).terminalOpen ||
-      ((panel => panel?.isOpen === true && panel.surfaces.some(s => s.id === panel.activeSurfaceId && (s.kind === "machine" || s.kind === "processes")))(useRightPanelStore.getState().byWorkspaceId[HERE_KEY]));
+      ((panel => panel?.isOpen === true && panel.surfaces.some(s => s.id === panel.activeSurfaceId && paneOf(s.kind).readsHere === true))(useRightPanelStore.getState().byWorkspaceId[HERE_KEY]));
     if (hostUp && hereWanted && !here.link) {
       const link = connectDaemonLink({
         ...linkOpts,

@@ -2848,7 +2848,7 @@ const SERVER_CHANGE_WORDS =
   "Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.";
 
 const SERVER_TOOLS_WORDS =
-  "Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer stands for an hour unless refreshed, and an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.";
+  "Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.";
 
 /** The wsp tools into one agent's config on this computer. */
 async function addTools(client: HostClient, agent: string): Promise<{ file: string }> {
@@ -3134,7 +3134,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "servers",
     usage: "wsp servers [<workspace>] [--on <computer>]",
-    about: "the MCP servers the agents on this computer, a box you added or a workspace are set up with: how each is reached, the file it is defined in and whether it needs a sign-in",
+    about: "the MCP servers the agents on this computer, a box you added or a workspace are set up with: how each is reached, the file it is defined in and its sign-in as its config says it",
     page: "agent",
     options: { on: { type: "string" } },
     run: async ctx => {
@@ -3255,7 +3255,7 @@ export const VERBS: readonly Verb[] = [
         workspace: AgentsWorkspaceIn,
         on: AgentsOnIn,
         project: z.string().optional().describe("the project on that computer whose server it is, by the name projects lists, with on; a workspace finds its own project's servers"),
-        refresh: z.boolean().optional().describe("start it again even where an answer from the last hour stands"),
+        refresh: z.boolean().optional().describe("start it again even where an answer from the last three minutes stands"),
       },
       output: ServerToolsAnswer.shape,
       call: async ({ name, agent, workspace, on, project, refresh }, deps) => {
@@ -4519,7 +4519,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "servers signin on": AGENTS_ON_WORDS,
   "servers signin agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
   "servers tools agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
-  "servers tools refresh": "start the server again even where an answer from the last hour stands",
+  "servers tools refresh": "start the server again even where an answer from the last three minutes stands",
   "servers tools project": "the project on the computer --on names whose server it is, by name; a workspace finds its own project's servers",
   "servers add on": AGENTS_ON_WORDS,
   "servers add agent": "the agent whose config takes the server, by its catalog id",

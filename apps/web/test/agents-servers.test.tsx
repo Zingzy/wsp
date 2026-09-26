@@ -22,7 +22,7 @@ const SERVER = { airtable: "server-global-airtable-stdio-npx -y airtable-mcp-ser
 
 function List({ report = AGENTS_REPORT, ctx = {} }: { report?: AgentsReport; ctx?: Partial<RowsContext> }) {
   const servers = useServerActs(report.target);
-  return <AgentsManager shell="panel" head={{ title: "On spoo" }} report={report} reading={false} on="spoo" ctx={{ where: "box", heldWhy: null, ...ctx, ...(servers === undefined ? {} : { servers }) }} onRefresh={() => {}} now={NOW} />;
+  return <AgentsManager shell="panel" head={{ computer: "spoo" }} report={report} reading={false} on="spoo" ctx={{ where: "box", heldWhy: null, ...ctx, ...(servers === undefined ? {} : { servers }) }} onRefresh={() => {}} now={NOW} />;
 }
 
 type Settle = { resolve(v: { file: string }): void; reject(e: Error): void };
