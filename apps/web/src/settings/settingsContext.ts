@@ -12,7 +12,8 @@ import type { Failure } from "../protocol/failure.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
 import { shellVersions } from "../shell/shellVersion.js";
-import { resolveAt, useSettingsStore, type SettingsAt, type SettingsReads } from "./settingsStore.js";
+import type { AddRoad } from "./AddComputer.js";
+import { resolveAt, useSettingsStore, type SettingsAt, type SettingsReads, type SettingsState } from "./settingsStore.js";
 
 export interface SettingsContext {
   readonly preferences: Preferences;
@@ -37,6 +38,9 @@ export interface SettingsContext {
   readonly go: (at: SettingsAt) => void;
   readonly setPreferences: (patch: PreferencesPatch) => void;
   readonly openAddComputer: () => void;
+  /** The Add a computer panel's ask off the Computers page's own buttons, and the press that makes one. */
+  readonly addAsked: SettingsState["addAsked"];
+  readonly askAdd: (road: AddRoad | null) => void;
   readonly openAddProject: () => void;
   readonly rereadDevices: () => void;
   /** A rejection the page's act met, as an error notice in the host's words with its fix; a lost socket says nothing. */
@@ -61,6 +65,7 @@ export function useSettingsContext(): SettingsContext {
   const api = useStore(s => s.api);
   const release = useStore(s => s.release);
   const reads = useSettingsStore(s => s.reads);
+  const addAsked = useSettingsStore(s => s.addAsked);
   // The minute clock every countdown in the app reads, as a stamp.
   const now = Date.parse(`${useNowMinute()}:00Z`);
   return {
@@ -83,6 +88,8 @@ export function useSettingsContext(): SettingsContext {
     go: at => useSettingsStore.getState().go(at),
     setPreferences: patch => void useStore.getState().setPreferences(patch),
     openAddComputer: () => useStore.getState().openAddComputer(),
+    addAsked,
+    askAdd: road => useSettingsStore.getState().askAdd(road),
     openAddProject: () => useSettingsStore.getState().openAddProject(),
     rereadDevices: () => useSettingsStore.getState().rereadDevices(),
     failed: e => noticeFailure(e),

@@ -28,7 +28,10 @@ export function useSettingsReads(): void {
   // The Add a computer door moves the page rather than standing over it: the sheet is asked for from the first run
   // and from the palette as well as from the list, and closing it on whatever page was remembered hid the new row.
   useEffect(() => {
-    if (addComputerOpen) useSettingsStore.getState().go({ kind: "group", group: "computers" });
+    if (!addComputerOpen) return;
+    const settings = useSettingsStore.getState();
+    settings.go({ kind: "group", group: "computers" });
+    settings.askAdd(null);
   }, [addComputerOpen]);
 
   useEffect(() => {

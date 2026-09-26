@@ -8,6 +8,7 @@
 // page serves the sidebar's search as well.
 import type { AccountView, DeviceView, InitSetup, PlaceSpend, PlaceView, ProjectView, SealedImageView, TerminalConfig } from "@wsp/protocol";
 import { create } from "zustand";
+import type { AddRoad } from "./AddComputer.js";
 import { isSettingsGroupId, type SettingsGroupId } from "./groupIds.js";
 
 /** A page of Settings: a group, a computer's own page or a project's. */
@@ -64,7 +65,7 @@ export interface SettingsReads {
 
 export const NO_READS: SettingsReads = { setup: null, file: null, account: null, devices: null, devicesRefused: false, image: null, spend: [] };
 
-interface SettingsState {
+export interface SettingsState {
   readonly at: SettingsAt;
   readonly search: string;
   readonly reads: SettingsReads;
@@ -77,6 +78,9 @@ interface SettingsState {
   /** The computer whose Image card opens its recipe when it is drawn: an Edit image pressed outside that card. Moving
    * to another page drops it, so an ask no card took never opens a recipe later. */
   readonly recipeAsked: string | null;
+  /** The Add a computer panel asked for from the Computers page, on the road its button names or on the picker, keyed
+   * by the ask so a second press is a fresh panel. Moving to another page shuts it. */
+  readonly addAsked: { readonly road: AddRoad | null; readonly n: number } | null;
   go(at: SettingsAt): void;
   setSearch(search: string): void;
   setReads(patch: Partial<SettingsReads>): void;
@@ -86,6 +90,7 @@ interface SettingsState {
   showBuild(placeId: string): void;
   hideBuild(placeId: string): void;
   askRecipe(placeId: string | null): void;
+  askAdd(road: AddRoad | null): void;
 }
 
 export const useSettingsStore = create<SettingsState>(set => ({
@@ -96,8 +101,9 @@ export const useSettingsStore = create<SettingsState>(set => ({
   devicesAsked: 0,
   buildShown: null,
   recipeAsked: null,
+  addAsked: null,
   go(at) {
-    set({ at, search: "", recipeAsked: null });
+    set({ at, search: "", recipeAsked: null, addAsked: null });
     try {
       window.localStorage.setItem(AT_KEY, atId(at));
     } catch {
@@ -127,5 +133,8 @@ export const useSettingsStore = create<SettingsState>(set => ({
   },
   askRecipe(placeId) {
     set({ recipeAsked: placeId });
+  },
+  askAdd(road) {
+    set(s => ({ addAsked: { road, n: (s.addAsked?.n ?? 0) + 1 } }));
   },
 }));
