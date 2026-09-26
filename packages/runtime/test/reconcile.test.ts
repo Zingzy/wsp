@@ -86,6 +86,22 @@ describe("the sweep records a machine of this setup that no record claims", () =
     expect(await rt.workspaces.list()).toEqual([]);
   });
 
+  it("reports a machine it cannot name off the listing alone, sweep after sweep, since each read of a machine resets the provider's idle timer", async () => {
+    const { backend, store, rt, ws, machine: stamped } = await lostRecord();
+    await store.delete("workspace-names", ws.id);
+    const { id: owner } = (await store.get("owner", "id")) as { id: string };
+    const unstamped = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-host": "1", "wsp-owner": owner, createdAt: ago(2 * 60_000) } });
+    const read: string[] = [];
+    const realGet = backend.get.bind(backend);
+    backend.get = async id => (read.push(id), realGet(id));
+
+    for (const _ of [1, 2]) expect((await rt.reap()).failed?.map(f => f.id).sort()).toEqual([stamped.id, unstamped.id].sort());
+
+    expect(read).toEqual([]);
+    expect(backend.machines.map(m => m.killed)).toEqual([false, false]);
+    await rt.close();
+  });
+
   it("leaves a machine inside its create minute for the next sweep, and one the provider no longer knows to the listing's lag", async () => {
     const { backend, rt, ws, machine } = await lostRecord();
     machine.spec.labels!["createdAt"] = ago(30_000);
@@ -489,6 +505,44 @@ describe("a create that fails after its fork", () => {
     await expect(createOn(rt, { golden: "snap_g", name: "first" })).rejects.toThrow("ENOSPC");
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await rt.workspaces.list()).toEqual([]);
+  });
+
+  it("marks the machine as a delete does, so one that comes back is killed by the next sweep, not reported and left billing", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const first = createRuntime({ backend, store: refusingOnce(store), adapters: {}, killConfirm: { graceMs: 50, pollMs: 1 } });
+    await expect(createOn(first, { golden: "snap_g", name: "first" })).rejects.toThrow("ENOSPC");
+    await first.close();
+    const machine = backend.machines[0]!;
+    machine.killed = false;
+    machine.spec.labels!["createdAt"] = ago(60 * 60_000);
+    const rt = createRuntime({ backend, store, adapters: {}, killConfirm: { graceMs: 50, pollMs: 1 } });
+
+    const result = await rt.reap();
+
+    expect(result.failed).toBeUndefined();
+    expect(result.adopted).toBeUndefined();
+    expect(result.reaped).toMatchObject([{ id: machine.id, reason: "own" }]);
+    expect(machine.killed).toBe(true);
+    await rt.close();
+  });
+
+  it("a mark the store will not take is said in its own words, and the machine that went goes with its record", async () => {
+    const backend = stubBackend();
+    const inner = refusingOnce(memoryStore());
+    const store: Store = { ...inner, put: async (collection, id, value) => (collection === "dropped-machines" ? Promise.reject(new Error("EIO: i/o error, write")) : inner.put(collection, id, value)) };
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const rt = createRuntime({ backend, store, adapters: {}, killConfirm: { graceMs: 50, pollMs: 1 } });
+      await expect(createOn(rt, { golden: "snap_g", name: "first" })).rejects.toThrow("ENOSPC");
+      expect(backend.machines[0]!.killed).toBe(true);
+      expect(await rt.workspaces.list()).toEqual([]);
+      const lines = warned.mock.calls.map(c => String(c[0]));
+      expect(lines.filter(l => l.includes("would not stop"))).toEqual([]);
+      expect(lines.filter(l => l.includes("m1") && l.includes("EIO: i/o error"))).toHaveLength(1);
+    } finally {
+      warned.mockRestore();
+    }
   });
 
   it("keeps the record, listed and deletable, when the machine will not die", async () => {
