@@ -3,7 +3,7 @@
 // target runs, the watched pty over a scripted link, the vault and the wsp
 // tools. Nothing here reaches a real agent, a box or a vendor.
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,7 @@ import { openerCommand } from "../src/relay.js";
 import { CLI_VERBS, runVerb, type HostClient } from "../src/verbs.js";
 import { fakePtyLink, type FakePty } from "./fake-pty-link.js";
 import { captured } from "./verbs-fixture.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 /** A box whose daemon runs as root and whose home belongs to ada, answering the one probe of who its lines run as. */
 const rootBox = (): AgentsOn => ({
@@ -253,8 +254,7 @@ describe("a watched sign-in", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-pages-"));
     const opened = join(dir, "opened");
     const shim = join(dir, "shim");
-    writeFileSync(shim, `#!/bin/sh\nprintf '%s' "$1" > ${JSON.stringify(opened)}\n`);
-    chmodSync(shim, 0o755);
+    writeStub(shim, `#!/bin/sh\nprintf '%s' "$1" > ${JSON.stringify(opened)}\n`);
     const page = "https://mcp.test/authorize?state=x&redirect_uri=http%3A%2F%2Flocalhost%3A43117%2Fcallback";
     // The tool hands the page to its browser with no terminal of its own, as a detached opener does.
     const line = pagesOnPty(`"$BROWSER" '${page}' < /dev/null > /dev/null 2>&1; echo done`);
@@ -268,8 +268,7 @@ describe("a watched sign-in", () => {
   it("takes the escape bytes out of a page before it reaches the sign-in's terminal", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-pages-"));
     const shim = join(dir, "shim");
-    writeFileSync(shim, "#!/bin/sh\nexit 0\n");
-    chmodSync(shim, 0o755);
+    writeStub(shim, "#!/bin/sh\nexit 0\n");
     const line = pagesOnPty(`"$BROWSER" "$(printf 'https://mcp.test/a\\033]0;x\\007b\\033[2Jc')" < /dev/null > /dev/null 2>&1; echo done`);
     const args = process.platform === "darwin" ? ["-q", "/dev/null", "bash", "-c", line] : ["-qec", `bash -c ${shellQuote(line)}`, "/dev/null"];
     const out = execFileSync("script", args, { env: { PATH: "/usr/bin:/bin", BROWSER: shim }, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });

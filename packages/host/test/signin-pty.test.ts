@@ -3,7 +3,7 @@
 // the pty and an interactive bash takes the line, as on any computer. Every
 // tool here is a stub script, the daemon starts with an emptied environment
 // whose PATH holds none of them, and every home is a scratch folder.
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -14,6 +14,7 @@ import { planSignIn, watchSignIn, type SignInPlan } from "../src/agents-signin.j
 import { daemonBinaryHere } from "../src/assets.js";
 import { LocalDaemon } from "../src/local-daemon.js";
 import { watchPty, type PtyLink } from "../src/signin-relay.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 let root: string;
 let stubs: string;
@@ -22,8 +23,7 @@ let link: PtyLink;
 let close: () => void = () => {};
 
 const stub = (name: string, body: string): void => {
-  writeFileSync(join(stubs, name), `#!/bin/sh\n${body}\n`);
-  chmodSync(join(stubs, name), 0o755);
+  writeStub(join(stubs, name), `#!/bin/sh\n${body}\n`);
 };
 
 beforeAll(async () => {
@@ -37,8 +37,7 @@ beforeAll(async () => {
   stub("claude", `pwd > "$HOME/claude-cwd"; printf '%s\\n' "$@" > "$HOME/claude-argv"; if [ "$CLAUDE_HANG" = 1 ]; then echo "Waiting for the page."; exec sleep 30; fi; if [ "$CLAUDE_FAIL" = 1 ]; then echo "Error: that page expired"; exit 1; fi; echo "Signed in to the server."; exit 0`);
   stub("../sbin/runuser", `echo "$2" > "${join(root, "runuser-as")}"; while [ "$1" != "--" ]; do shift; done; shift; exec "$@"`);
   const wrapper = join(root, "daemon.sh");
-  writeFileSync(wrapper, `#!/bin/sh\nexec /usr/bin/env -i PATH=${shellQuote(join(root, "sbin"))}:/usr/bin:/bin HOME=${shellQuote(join(root, "daemon-home"))} ${shellQuote(daemonBinaryHere())} "$@"\n`);
-  chmodSync(wrapper, 0o755);
+  writeStub(wrapper, `#!/bin/sh\nexec /usr/bin/env -i PATH=${shellQuote(join(root, "sbin"))}:/usr/bin:/bin HOME=${shellQuote(join(root, "daemon-home"))} ${shellQuote(daemonBinaryHere())} "$@"\n`);
   daemon = await LocalDaemon.start({ root, workFolder: root, rootsPath: join(root, "roots"), inboxDir: join(root, "inbox"), binary: wrapper, say: () => {} });
   const listeners = new Set<(e: Record<string, unknown>) => void>();
   const reach = daemon.link(e => listeners.forEach(fn => fn(e as unknown as Record<string, unknown>)));
