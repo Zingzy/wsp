@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -32,7 +32,7 @@ done
 
 /** A server that takes its lines and never answers, keeping its pid where the test can look. */
 const MUTE = `#!/bin/bash\necho $$ > "$HOME/mute.pid"\nsleep 60 & wait\n`;
-const CRASH = `#!/bin/bash\necho "airtable: AIRTABLE_API_KEY is not set" >&2\nexit 1\n`;
+const CRASH = `#!/bin/bash\necho $$ >> "$HOME/crash.starts"\necho "airtable: AIRTABLE_API_KEY is not set" >&2\nexit 1\n`;
 /** Starts a grandchild in a session of its own, out of the server's process group, then runs as \`server\` or \`mute\`. */
 const ESCAPE = `#!/bin/bash
 ${JSON.stringify(process.execPath)} -e 'const c = require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { detached: true, stdio: "ignore" }); require("fs").appendFileSync(process.env.HOME + "/escaped.pid", c.pid + "\\n"); c.unref()'
@@ -157,9 +157,9 @@ const alive = (pid: number): boolean => {
     return false;
   }
 };
-/** The pid a server wrote to that file, waited for up to five seconds. */
-async function pidIn(path: string): Promise<number> {
-  for (let i = 0; i < 50; i++) {
+/** The pid a server wrote to that file, waited for up to five seconds by default, and never past its fixture. */
+async function pidIn(path: string, tries = 50): Promise<number> {
+  for (let i = 0; i < tries && existsSync(dirname(path)); i++) {
     const pid = existsSync(path) ? Number(readFileSync(path, "utf8").trim()) : 0;
     if (Number.isInteger(pid) && pid > 0) return pid;
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -205,6 +205,27 @@ echo $$ >> "$HOME/family.pids"
 [ "$1" = hang ] && { sleep 300 & wait; }
 exec "$(dirname "$0")/server"
 `;
+
+/** Whether a process is running, a zombie not yet reaped counting as gone. */
+const running = (pid: number): boolean => {
+  try {
+    return !execFileSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).includes("Z");
+  } catch {
+    return false;
+  }
+};
+
+/** The deadline's timer is the script's sleep: this one runs until the test writes \`up\`, which the returned call does
+ * and waits for the answer. */
+function heldTimer(f: Fixture): <T>(asked: Promise<T>) => Promise<T> {
+  writeFileSync(join(f.bin, "sleep"), `#!/bin/bash\n[ "$1" = 30.0 ] || exec /bin/sleep "$@"\necho $$ > "$HOME/timer.pid"\nuntil [ -e "$HOME/up" ] || [ ! -d "$HOME" ]; do /bin/sleep 0.05; done\n`);
+  chmodSync(join(f.bin, "sleep"), 0o755);
+  return async asked => {
+    await pidIn(join(f.home, "timer.pid"), Infinity);
+    writeFileSync(join(f.home, "up"), "");
+    return asked;
+  };
+}
 
 /** Every process of a family still running. */
 const leftOver = (f: Fixture): number[] => (existsSync(join(f.home, "family.pids")) ? readFileSync(join(f.home, "family.pids"), "utf8").trim().split("\n").map(Number) : []).filter(alive);
@@ -281,28 +302,71 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(Math.max(...peaks)).toBeLessThanOrEqual(4);
   }, 30_000);
 
-  it("stops a server that has not answered when the time is up, with its process group, and starts it again on a refresh", async () => {
+  it("stops a server that has not answered when the time is up, with its process group", async () => {
     const f = fixture();
-    f.config({ mute: { command: join(f.bin, "mute"), args: [] }, crash: { command: join(f.bin, "crash"), args: [] } });
-    const logged: string[] = [];
-    const reader = agentsReader({ vault: () => ({}), here: () => here(f), toolsMs: 2_000, log: line => logged.push(line) });
-    const began = Date.now();
-    const late = await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "mute" });
-    expect(Date.now() - began, "the server was stopped before its time was up").toBeGreaterThanOrEqual(1_950);
-    expect(late).toMatchObject({ auth: "failed", refused: serverToolsLateRefusal(2_000) });
+    const timeUp = heldTimer(f);
+    f.config({ mute: { command: join(f.bin, "mute"), args: [] } });
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f), toolsMs: 30_000 });
+    let settled = false;
+    const asked = reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "mute" }).finally(() => (settled = true));
+    const pid = await pidIn(join(f.home, "mute.pid"), Infinity);
+    await Promise.race([pidIn(join(f.home, "timer.pid"), Infinity), asked]);
+    expect(settled, "the server was stopped before its time was up").toBe(false);
+    expect(running(pid), "the server was stopped before its time was up").toBe(true);
+    const late = await timeUp(asked);
+    expect(late).toMatchObject({ auth: "failed", refused: serverToolsLateRefusal(30_000) });
     expect(late.tools).toBeUndefined();
-    const pid = await pidIn(join(f.home, "mute.pid"));
-    expect(() => process.kill(pid, 0), "the server outlived its deadline").toThrow();
-    rmSync(join(f.home, "mute.pid"));
-    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "mute" }), "a failed answer is the state until a refresh").toEqual(late);
-    expect(existsSync(join(f.home, "mute.pid"))).toBe(false);
-    await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "mute", refresh: true });
-    expect(await pidIn(join(f.home, "mute.pid"))).toBeGreaterThan(0);
+    expect(running(pid), "the server outlived its deadline").toBe(false);
+  }, 20_000);
+
+  it("stops the server's whole process group when the host's own bound on the run ends it first, and says its time ran out", async () => {
+    const f = fixture();
+    writeFileSync(join(f.bin, "family"), FAMILY);
+    chmodSync(join(f.bin, "family"), 0o755);
+    heldTimer(f);
+    f.config({ hangs: { command: join(f.bin, "family"), args: ["hang"] } });
+    let now = Date.parse("2026-09-24T12:00:00Z");
+    let bound: (() => void) | undefined;
+    // The host's bound on a run, fired when the test says: the clock moves past it and the run's group is sent TERM, as the live host does.
+    const host: Host = {
+      ...here(f),
+      exec: {
+        ...here(f).exec,
+        run: (cmd, args, o) =>
+          new Promise(resolve => {
+            const child = spawn(cmd, [...args], { stdio: ["ignore", "ignore", "ignore"], detached: true, env: { PATH: `${f.bin}:/usr/bin:/bin`, HOME: f.home, TMPDIR: join(f.root, "tmp"), ...o?.env } });
+            bound = () => {
+              now += o?.timeoutMs ?? 0;
+              process.kill(-child.pid!, "SIGTERM");
+            };
+            child.on("exit", () => resolve(undefined));
+          }),
+      },
+    };
+    const reader = agentsReader({ vault: () => ({}), here: () => host, toolsMs: 30_000, now: () => now });
+    const asked = reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "hangs" });
+    await pidIn(join(f.home, "timer.pid"), Infinity);
+    while (existsSync(f.home) && leftOver(f).length < 3) await new Promise(resolve => setTimeout(resolve, 50));
+    bound!();
+    expect(await asked).toMatchObject({ auth: "failed", refused: serverToolsLateRefusal(30_000) });
+    expect(readFileSync(join(f.home, "family.pids"), "utf8").trim().split("\n").map(Number).filter(running), "left running after the host's bound").toEqual([]);
+  }, 20_000);
+
+  it("says a server exited before it answered, with what it said on stderr in the host's log alone, keeps that until a refresh, and refuses a name no config has", async () => {
+    const f = fixture();
+    f.config({ crash: { command: join(f.bin, "crash"), args: [] } });
+    const logged: string[] = [];
+    const reader = agentsReader({ vault: () => ({}), here: () => here(f), log: line => logged.push(line) });
+    const starts = (): number => readFileSync(join(f.home, "crash.starts"), "utf8").trim().split("\n").length;
     // What a server said on stderr can carry its own key: it goes to the host's log, never onto the page.
     const crashed = await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "crash" });
     expect(crashed).toMatchObject({ auth: "failed", refused: "it exited with 1 before it answered" });
     expect(JSON.stringify(crashed)).not.toContain("AIRTABLE_API_KEY");
     expect(logged.join("\n")).toContain("airtable: AIRTABLE_API_KEY is not set");
+    expect(await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "crash" }), "a failed answer is the state until a refresh").toEqual(crashed);
+    expect(starts()).toBe(1);
+    await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "crash", refresh: true });
+    expect(starts()).toBe(2);
     await expect(reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "nobody" })).rejects.toThrow(noSuchServerRefusal("nobody", "Claude Code"));
   }, 20_000);
 

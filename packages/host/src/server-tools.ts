@@ -63,6 +63,8 @@ const stdioScript = (seconds: string): string =>
     // Apple's own binaries show no environment to a Mac's ps, so there only the group kill covers them.
     'sweep() { local l; if [ -d /proc/self ]; then l=$(grep -lzxF -f "$d/m" /proc/[0-9]*/environ 2>/dev/null | cut -d/ -f3); ' +
       'else l=$(ps eww -U "$(id -u)" -o pid=,command= | M="WSP_TOOLS_RUN=$m" awk \'index($0 " ", " " ENVIRON["M"] " ") { print $1 }\'); fi; [ -n "$l" ] && kill "-$1" $l 2>/dev/null; }',
+    // The host's bound on the run sends TERM to this shell's group alone, and set -m puts every job in its own.
+    'trap \'kill "$t" 2>/dev/null; kill -KILL -- "-$p" "-$ro" "-$re" 2>/dev/null; sweep KILL; exit 143\' TERM',
     "set -m",
     `{ dd bs=1 count=${OUT_CAP} of="$d/out" 2>/dev/null; cat > /dev/null; } < "$d/o" &`,
     "ro=$!",
@@ -184,10 +186,13 @@ const RUN_MARGIN_MS = 10_000;
 const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 export const variableNameRefusal = (name: string): string => `its variable ${JSON.stringify(name)} is not a name a shell takes, so it was not started`;
 
-async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>, cwd: string, deadlineMs: number, log: (said: string) => void, env: Readonly<Record<string, string>> = {}): Promise<Asked> {
+async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>, cwd: string, deadlineMs: number, now: () => number, log: (said: string) => void, env: Readonly<Record<string, string>> = {}): Promise<Asked> {
   const bad = Object.keys(t.env).find(k => !SHELL_NAME.test(k));
   if (bad !== undefined) return { auth: "failed", refused: variableNameRefusal(bad) };
-  const out = await host.exec.run("bash", ["-c", stdioScript((Math.max(100, deadlineMs) / 1000).toFixed(1)), "bash", cwd, t.command, ...t.args], { env: { ...env, ...t.env }, timeoutMs: deadlineMs + RUN_MARGIN_MS });
+  const began = now();
+  const bound = deadlineMs + RUN_MARGIN_MS;
+  const out = await host.exec.run("bash", ["-c", stdioScript((Math.max(100, deadlineMs) / 1000).toFixed(1)), "bash", cwd, t.command, ...t.args], { env: { ...env, ...t.env }, timeoutMs: bound });
+  if (out === undefined && now() - began >= bound) return { auth: "failed", refused: serverToolsLateRefusal(deadlineMs) };
   const [, head = "", err = ""] = (out ?? "").split("\x1e");
   const [status = "", ...rest] = head.split("\n");
   const [outcome, exit] = status.trim().split(" ");
@@ -340,7 +345,7 @@ export function serverTools(o: { now: () => number; deadlineMs?: number; log: (l
       let held = connects.get(key);
       if (ask.refresh === true || held === undefined) {
         const log = (said: string): void => o.log(`servers tools: ${agent.id} ${ask.name} on ${ask.key}: ${said}`);
-        const mine: { at: number; asked: Promise<HttpAsked> } = { at: now, asked: asking(() => (t.kind === "stdio" ? askStdio(host, t, runIn, deadlineMs, log, at.env) : askHttp(host, t, deadlineMs, log))) };
+        const mine: { at: number; asked: Promise<HttpAsked> } = { at: now, asked: asking(() => (t.kind === "stdio" ? askStdio(host, t, runIn, deadlineMs, o.now, log, at.env) : askHttp(host, t, deadlineMs, log))) };
         // A connect that threw is not an answer, so the next ask makes its own.
         mine.asked.catch(() => connects.get(key) === mine && connects.delete(key));
         connects.set(key, mine);
