@@ -121,22 +121,31 @@ export async function killUntilGone(backend: MachineBackend, machine: Machine, c
   await readBackGone(backend, machine, confirm);
 }
 
+/** One read of a machine: the state it answered, and the handle it came on when the provider found it. */
+export interface Sighting {
+  state: MachineState;
+  machine?: Machine;
+}
+
 /** One call per read: a second call for the state can land on the other copy and read gone. */
-const readOnce = (backend: MachineBackend, id: string): Promise<MachineState> =>
-  backend.get(id).then(
-    m => m.seen?.state ?? m.state(),
-    (e: unknown) => (isMissing(e) ? "gone" : Promise.reject(e)),
-  );
+const readOnce = (backend: MachineBackend, id: string): Promise<Sighting> =>
+  backend
+    .get(id)
+    .then(async machine => ({ state: machine.seen?.state ?? (await machine.state()), machine }))
+    .catch((e: unknown) => (isMissing(e) ? { state: "gone" as const } : Promise.reject(e)));
 
 /** Whether the provider still has a machine, asking nothing of it: gone once GONE_READS reads in a row answer gone,
- * else the state the first read that found it answered. A failed read that is not a 404 rejects. */
-export async function readGone(backend: MachineBackend, id: string): Promise<MachineState> {
+ * else the first read that found it, with its handle. A failed read that is not a 404 rejects. */
+export async function sightMachine(backend: MachineBackend, id: string): Promise<Sighting> {
   for (let gone = 0; gone < GONE_READS; gone++) {
-    const state = await readOnce(backend, id);
-    if (state !== "gone") return state;
+    const seen = await readOnce(backend, id);
+    if (seen.state !== "gone") return seen;
   }
-  return "gone";
+  return { state: "gone" };
 }
+
+/** The state sightMachine answers, for a caller that needs no handle. */
+export const readGone = async (backend: MachineBackend, id: string): Promise<MachineState> => (await sightMachine(backend, id)).state;
 
 /** One background round: whether the first kill was sent already, and whether the watch is still open. */
 interface WatchRound {
@@ -161,7 +170,7 @@ async function readBackGone(backend: MachineBackend, machine: Machine, confirm: 
     let gone = 0;
     do {
       if (!live()) return false;
-      const state = await readOnce(backend, machine.id);
+      const { state } = await readOnce(backend, machine.id);
       if (state === "gone") {
         if (++gone >= GONE_READS) return true;
         continue;

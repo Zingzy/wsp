@@ -1960,6 +1960,7 @@ describe("runtime session index", () => {
     backend.machines[0]!.killed = true;
 
     const rt2 = createRuntime({ backend, store, adapters: {} });
+    await until(async () => (await rt2.workspaces.get(a.id)).phase === "gone");
     expect((await rt2.sessions.list(a.id)).map(s => s.prompt)).toEqual(["on a"]);
     expect((await rt2.status.list()).find(w => w.id === a.id)?.machineState).toBe("gone");
     await rt2.workspaces.delete(b.id);
@@ -7989,6 +7990,8 @@ describe("gone machines", () => {
     await rt1.close();
     for (const m of backend.machines) m.killed = true;
     const rt = createRuntime({ backend, store, adapters: {} });
+    // The load holds each record on its one 404 and confirms it once the host serves.
+    await until(async () => (await rt.workspaces.list()).every(w => w.phase === "gone"));
     return { backend, store, rt, a, b };
   };
 
@@ -8001,7 +8004,7 @@ describe("gone machines", () => {
       ["a", "gone", expect.stringMatching(loadSaw("m1"))],
       ["b", "gone", expect.stringMatching(loadSaw("m2"))],
     ]);
-    // Written back before anything lists it: a second host over the store reads gone without asking the provider.
+    // Written back once confirmed: a second host over the store reads gone without asking the provider.
     expect(await store.get("workspaces", a.id)).toMatchObject({ phase: "gone", gone: expect.stringMatching(loadSaw("m1")) });
     expect(await store.get("workspaces", b.id)).toMatchObject({ phase: "gone" });
     const statuses = await rt.status.list();

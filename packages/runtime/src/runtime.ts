@@ -54,6 +54,8 @@ import {
   stateListing,
   killUntilGone,
   readGone,
+  sightMachine,
+  type Sighting,
   GoneWatch,
   snapshotUntilGone,
   MachineAliveError,
@@ -224,7 +226,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -1015,9 +1017,14 @@ const PROVIDER_READ_MS = 30_000;
  * their unpushed work with them, and the provider answered one call 404 over a machine a direct read found running
  * two minutes later (2026-09-08), so the verdict is worth a second read. */
 const GONE_CONFIRM_MS = 5_000;
-/** What a gone sighting came to: the record settled gone, the state read found the machine there after all, or the
- * record moved out from under the read (a rebuild, or another road settled it first) and the sighting is stale. */
-type GoneOutcome = "settled" | "not-gone" | "moot";
+/** What a gone sighting came to: the record settled gone, the state read found the machine there after all, the
+ * reads that were to confirm it failed, or the record moved out from under the read (a rebuild, or another road
+ * settled it first) and the sighting is stale. */
+type GoneOutcome = "settled" | "not-gone" | "unchecked" | "moot";
+/** A read that found the machine, handed to the load in place of its own get. */
+type FoundMachine = Sighting & { machine: Machine };
+/** Whether the record is gone after the sighting, by this one or by the road that settled it first. */
+const settled = (o: GoneOutcome): boolean => o === "settled" || o === "moot";
 /** A resume the runtime stopped waiting on can still land: one read this long after a wake gave up finds it. */
 const WAKE_LATE_READ_MS = 3 * 60_000;
 /** A daemon that is up answers the hello on connect; a machine whose daemon is gone costs this once on each side of an update. */
@@ -2908,6 +2915,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // This road runs after ready, so every session row is already in and the sync can wait out a running turn.
           const entry = await hydrateWorkspace(raw);
           if (entry !== undefined) void syncDaemon(entry);
+          else await rereadHeld(stored.id, "record load");
         }
       })().catch((err: unknown) => console.warn(`the records on ${placeDoor!.nameOf(e.placeId)} were not read again: ${err instanceof Error ? err.message : String(err)}`));
     });
@@ -4445,7 +4453,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         } catch (e) {
           // A 404 the pause answered with is a sighting like any other: it settles only where the state read agrees,
           // and a machine still running takes the road any other refused pause takes.
-          if (isMissing(e) && (await settleGone(entry, goneWords(entry.record.machineId, { by: "pause", at: clock.now(), answer: providerSaid(e) }))) !== "not-gone") throw e;
+          if (isMissing(e) && settled(await settleGone(entry, goneWords(entry.record.machineId, { by: "pause", at: clock.now(), answer: providerSaid(e) })))) throw e;
           entry.record.phase = entry.ws.currentPhase;
           await persist(entry.record);
           if (e instanceof NapRefusedError) {
@@ -4517,25 +4525,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     })();
     return entry.adopting;
   };
-  /** The state read a gone verdict is checked against, a short wait after the call that made it: a read that answers
-   * with a state the machine is still in unmakes the verdict, and a 404 or a read nothing answered leaves it, since
-   * only a live answer is news. */
-  const goneUnmadeBy = async (machine: Machine): Promise<MachineState | undefined> => {
+  /** What a gone verdict is checked against, a short wait after the call that made it: the provider read until
+   * GONE_READS reads in a row answer gone, since a gateway copy that never held the machine answers 404 while the
+   * other bills on. A read that fails another way confirms nothing and answers its error. */
+  const goneConfirmed = async (backend: MachineBackend, machineId: string): Promise<MachineState | Error> => {
     if (goneConfirmMs > 0) await new Promise<void>(resolve => void clock.schedule(() => resolve(), goneConfirmMs, { unref: true }));
-    const read = await machine.state().catch(() => undefined);
-    return read === undefined || read === "gone" ? undefined : read;
+    return readGone(backend, machineId).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
   };
   /** The one road to gone, whichever call found the provider no longer knew the machine (deleted behind wsp, or
-   * expired): the state read is asked once more, and where it agrees the record follows the fact and stays there.
-   * The gone event closes the awake stretch with a cost tick at this instant, drops the idle window and ends the
-   * sessions; the row and the one log line carry the words; rebuild and delete are the roads out. */
+   * expired): the verdict is confirmed, and where it holds the record follows the fact and stays there. Until then
+   * the record keeps the phase it had, so the row and the meter go on reading the machine as billing and the sweep
+   * spares it as claimed. The gone event closes the awake stretch with a cost tick at this instant, drops the idle
+   * window and ends the sessions; the row and the one log line carry the words; rebuild and delete are the roads out. */
   const settleGone = async (entry: LiveWorkspace, reason: string): Promise<GoneOutcome> => {
     const machineId = entry.record.machineId;
-    const alive = await goneUnmadeBy(entry.machine);
-    if (alive !== undefined) {
-      console.warn(`workspace ${entry.record.id} is not gone: ${reason}, and the state read that followed said ${alive}`);
-      return "not-gone";
+    const read = await goneConfirmed(backendFor(entry.record), machineId);
+    if (read !== "gone") {
+      const followed = read instanceof Error ? `the reads that followed failed: ${read.message}` : `the state read that followed said ${read}`;
+      console.warn(`workspace ${entry.record.id} is not gone: ${reason}, and ${followed}`);
+      return read instanceof Error ? "unchecked" : "not-gone";
     }
+    return markGone(entry, machineId, reason);
+  };
+  /** A verdict already confirmed, written: the record, the sessions, the event and the row move together. */
+  const markGone = async (entry: LiveWorkspace, machineId: string, reason: string): Promise<GoneOutcome> => {
     if (entry.record.phase === "gone" || entry.record.machineId !== machineId) return "moot";
     entry.record.phase = "gone";
     entry.record.gone = reason;
@@ -4552,7 +4565,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (entry.record.phase === "gone" || entry.napping || entry.waking) return;
     // The poll pushed a gone row before the confirming read answered; a verdict that did not hold corrects it here
     // rather than leaving the screen wrong until the next poll.
-    if ((await settleGone(entry, reason)) === "not-gone") await emitStatus(entry, reachOf(entry), NOT_GONE);
+    const outcome = await settleGone(entry, reason);
+    if (outcome === "not-gone" || outcome === "unchecked") await emitStatus(entry, reachOf(entry), outcome === "not-gone" ? NOT_GONE : GONE_UNCHECKED);
   };
   /** A record marked gone over a machine the provider still holds: the state read by id is the word on gone, so the
    * record follows it back rather than leaving a rebuild to abandon a healthy machine that would bill on unrecorded.
@@ -4760,11 +4774,42 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return entry === undefined || isAbsentMachine(entry.machine);
   };
 
+  const rereading = new Set<string>();
+  /** What the provider said to the load's one read of a record now held, quoted when the record settles gone. */
+  const heldAnswers = new Map<string, string>();
+  /** A record the load held by a stand-in, read again the way a gone verdict is confirmed: a machine the provider
+   * finds is loaded onto, one it answers gone for GONE_READS reads in a row settles gone through markGone, and a
+   * read that fails leaves the record held for the next sweep. */
+  const rereadHeld = async (id: string, by: GoneSeenBy): Promise<void> => {
+    const entry = live.get(id);
+    if (entry === undefined || !isAbsentMachine(entry.machine) || rereading.has(id)) return;
+    rereading.add(id);
+    try {
+      const machineId = entry.record.machineId;
+      const seen = await Promise.resolve()
+        .then(() => sightMachine(backendFor(entry.record), machineId))
+        .catch(() => undefined);
+      if (seen === undefined || closed || live.get(id) !== entry) return;
+      if (seen.machine !== undefined) {
+        const raw = await store.get(WORKSPACES, id);
+        const again = raw === undefined ? undefined : await hydrateWorkspace(raw, seen as FoundMachine);
+        if (again !== undefined) void syncDaemon(again);
+        return;
+      }
+      const answer = heldAnswers.get(id);
+      // The stand-in refuses every call with the held line; a gone record stands on the machine every gone load gets.
+      await markGone(attach(entry.record, deadMachine(machineId)), machineId, goneWords(machineId, { by, at: clock.now(), ...(answer !== undefined ? { answer } : {}) }));
+    } finally {
+      if (!isHeldAway(id)) heldAnswers.delete(id);
+      rereading.delete(id);
+    }
+  };
+
   /** One stored workspace read into a live one: what the provider says about its machine decides the phase, and
    * the record follows. Read once for every record at hydration, and again for a record on a place the moment that
    * place dials in, since until then nothing could be asked about its machine. Answers the entry whose daemon wants
    * syncing, since the sync waits out a running turn and only the caller knows when its session rows are in. */
-  const hydrateWorkspace = async (raw: unknown): Promise<LiveWorkspace | undefined> => {
+  const hydrateWorkspace = async (raw: unknown, seen?: FoundMachine): Promise<LiveWorkspace | undefined> => {
     const stored = raw as Omit<WorkspaceRecord, "size" | "kind"> & { size?: WorkspaceSize; kind?: WorkspaceKind };
     const kind: WorkspaceKind = stored.kind ?? "cloud";
     const rest = stored;
@@ -4791,28 +4836,37 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // The store is the fleet's truth and get(id) the provider's: a record whose machine the provider lost is
     // gone and one whose machine it holds paused is napping, whatever phase either was left at, and both say so
     // before anything lists it or meters it. A machine nothing can be asked about is neither: a place that is not
-    // connected and a host started without its provider key both leave the record on the word it was left with,
-    // and the host serves the rest rather than failing on the first record it cannot read.
+    // connected, a host started without its provider key and a provider read that failed all leave the record on
+    // the word it was left with, and the host serves the rest rather than failing on the first record it cannot read.
     const goldenKind = (await imageOf(stored.golden).catch(() => undefined))?.version?.kind ?? "sandbox";
     let missing: string | undefined;
     let absent = false;
-    const machine = await at.get(stored.machineId).catch((e: unknown) => {
-      if (isPlaceAbsent(e) || isNoProvider(e)) {
-        absent = true;
-        // The kind is the golden's, which the record names: a desktop fork on a computer that is away is a desktop
-        // fork, and nothing about it is guessed while nothing can be asked. The stand-in refuses with the error
-        // that came back, so every road on the row says the one true thing about why it cannot be read.
-        const refusal = e instanceof Error ? e : new Error(String(e));
-        return absentMachine(stored.machineId, goldenKind, () => {
-          throw refusal;
-        });
-      }
-      if (!isMissing(e)) throw e;
-      missing = providerSaid(e);
-      return deadMachine(stored.machineId);
-    });
+    // The kind is the golden's, which the record names: a desktop fork on a computer that is away is a desktop
+    // fork, and nothing about it is guessed while nothing can be asked. The stand-in refuses with the error that
+    // came back, so every road on the row says the one true thing about why it cannot be read.
+    const heldAway = (e: unknown): Machine => {
+      absent = true;
+      const refusal = e instanceof Error ? e : new Error(String(e));
+      return absentMachine(stored.machineId, goldenKind, () => {
+        throw refusal;
+      });
+    };
+    const machine =
+      seen?.machine ??
+      (await at.get(stored.machineId).catch((e: unknown) => {
+        if (!isMissing(e)) return heldAway(e);
+        // One 404 is not gone: a gateway copy that never held the machine answers it while the other bills on. A live
+        // record is held as it was and confirmed once the host serves (rereadHeld), since the reads that confirm a
+        // gone machine take seconds each and a fleet the provider expired overnight answers 404 for every record.
+        if (stored.phase !== "gone") {
+          heldAnswers.set(stored.id, providerSaid(e));
+          return heldAway(new Error(goneUnconfirmedLine(stored.machineId, providerSaid(e))));
+        }
+        missing = providerSaid(e);
+        return deadMachine(stored.machineId);
+      }));
     // The state rides on the view get() just fetched; a second read would reset the provider's idle timer.
-    const atProvider = missing !== undefined ? "gone" : absent ? undefined : (machine.seen?.state ?? (await machine.state()));
+    const atProvider = missing !== undefined ? "gone" : absent ? undefined : (seen?.state ?? machine.seen?.state ?? (await machine.state().catch(() => undefined)));
     // A record left gone leaves it on the one predicate every road out of gone reads, and on nothing else. Any
     // other record follows the provider whatever word it was left with: paused means the pause landed or the
     // resume never did, running means the pause never took or the resume landed with nobody left to write it.
@@ -4949,6 +5003,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const workspaceId of new Set(left.map(s => s.view.workspaceId))) void persistSessions(workspaceId);
       // The re-attach above has settled the rows the machines no longer hold, so a sync waiting out a running turn reads rows that are in.
       for (const entry of toSync) void syncDaemon(entry);
+      void Promise.all([...live.keys()].map(id => rereadHeld(id, "record load").catch((e: unknown) => console.warn(`workspace ${id} was not read again: ${e instanceof Error ? e.message : String(e)}`))));
       // Every run left over from a host that never came back to read it, now that this host knows which ones it does
       // hold: a harness whose reader is gone answers nobody and holds the machine's memory for its life.
       await Promise.all([...live.values()].map(entry => sweepRuns(entry)));
@@ -5486,7 +5541,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           answer = providerSaid(e);
           return "gone";
         });
-        if (read === "gone" && (await settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), ...(answer !== undefined ? { answer } : {}) }))) !== "not-gone") {
+        if (read === "gone" && settled(await settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), ...(answer !== undefined ? { answer } : {}) })))) {
           throw new Error(goneRefusal("wake", entry.record.gone));
         }
         if (read === "paused") await adoptPause(entry);
@@ -9275,6 +9330,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const listed = new Set(listing.map(row => row.id));
       for (const entry of [...live.values()]) {
         if (entry.creating || entry.napping || entry.waking || entry.deleting) continue;
+        if (isAbsentMachine(entry.machine)) {
+          await rereadHeld(entry.record.id, "sweep").catch((e: unknown) => void failed.push({ message: messageOf(e) }));
+          continue;
+        }
         // A machine the listing still carries under a record marked gone is read once: the read is what decides,
         // and one that says running gives the record its machine back.
         if (listed.has(entry.record.machineId)) {

@@ -118,4 +118,28 @@ describe("reading whether the provider still has a machine, through a gateway wh
     expect(await readGone(b, machine.id)).toBe("gone");
     expect(gets(f)).toBe(GONE_READS);
   });
+
+  /** A backend whose get hands back a bare handle with no state on it, as a linked computer's does: only its
+   * state() asks the provider, so that is where the 404 comes from. */
+  const bareHandles = (b: MachineBackend): MachineBackend =>
+    Object.assign(Object.create(b) as MachineBackend, {
+      get: async (id: string) => ({ id, state: async () => (await b.get(id)).seen!.state }) as unknown as Machine,
+    });
+
+  it("a 404 from a bare handle's state read counts as a gone read, not a failure", async () => {
+    const { f, holder } = splitGateway(() => "holder");
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const machine = await b.create({ kind: "sandbox" });
+    holder.clear();
+    expect(await readGone(bareHandles(b), machine.id)).toBe("gone");
+    expect(gets(f)).toBe(GONE_READS);
+  });
+
+  it("a bare handle's state read that lands on the empty copy once is followed by one that finds the machine", async () => {
+    const { f } = splitGateway((call, method) => (method === "GET" && call === 0 ? "empty" : "holder"));
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const machine = await b.create({ kind: "sandbox" });
+    expect(await readGone(bareHandles(b), machine.id)).toBe("running");
+    expect(gets(f)).toBe(2);
+  });
 });
