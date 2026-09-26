@@ -32,6 +32,16 @@ pub(crate) enum Verb {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         line: Vec<String>,
     },
+    /// The wsp command on the computer the host runs on: a `wsp mcp` line is served by the host already serving it
+    /// rather than by a process of its own, and every other line runs as the wsp the words after --wsp-argv name,
+    /// which is also what is asked where the host is. The line follows `--`, whole.
+    #[command(disable_help_flag = true)]
+    Forward {
+        #[arg(long = "wsp-argv", value_name = "word", required = true, action = clap::ArgAction::Append, allow_hyphen_values = true)]
+        wsp_argv: Vec<String>,
+        #[arg(last = true)]
+        line: Vec<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -188,6 +198,7 @@ pub(crate) fn run(verb: Verb) -> i32 {
                 Path::new(numbers::GUEST_DAEMON_SOCKET_PATH),
             )
         }
+        Verb::Forward { wsp_argv, line } => wsp_guest::run_here(&line, &wsp_argv),
     }
 }
 

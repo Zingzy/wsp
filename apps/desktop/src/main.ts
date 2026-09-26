@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, assetDir, installEach, mcpServerSpec, NO_PROJECT_YET, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentsHere, assetDir, daemonBinaryHere, installEach, mcpServerSpec, NO_PROJECT_YET, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
 import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hereWord, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
@@ -373,9 +373,19 @@ app.on("window-all-closed", () => app.quit());
 function installCommand(): void {
   const shim = shimPath(wspHome());
   try {
-    io.log(`wsp command ${installShim(shim, shimText({ execPath: process.execPath, script: CLI_SCRIPT }))} at ${shim}`);
+    io.log(`wsp command ${installShim(shim, shimText({ execPath: process.execPath, script: CLI_SCRIPT, ...forwarderHere() }))} at ${shim}`);
   } catch (e) {
     io.error(`wsp command not written at ${shim}: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/** The forwarder the shim puts in front of the bundled command, where this bundle carries a daemon for this
+ * computer; a build without one keeps the command the shim ran before, which serves every line itself. */
+function forwarderHere(): { daemon?: string } {
+  try {
+    return { daemon: daemonBinaryHere() };
+  } catch {
+    return {};
   }
 }
 

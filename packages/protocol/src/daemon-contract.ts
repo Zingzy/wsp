@@ -223,6 +223,9 @@ export const GUEST_UNWATCHED = "the host stopped watching; run it again";
  * workspace on a computer somebody owns writes in that home, so following it would take the computer's own file of
  * that name. Said on both roads a leave runs on, and pinned to one text by the contract fixture. */
 export const placeKeptForLinkLine = (path: string): string => `nothing was removed at ${path}: a folder on the way to it is a link`;
+/** What a line reads when the host's socket went while it was waiting on an answer, and what the wsp command's
+ * forwarder answers each request still waiting then. */
+export const HOST_CLOSED_LINE = "the host closed the connection";
 /** What a guest process prints when nothing answers on its own machine's daemon port. */
 export const guestNoDaemonLine = (port: number | string): string => `this machine's wsp daemon is not answering on 127.0.0.1:${port}`;
 
