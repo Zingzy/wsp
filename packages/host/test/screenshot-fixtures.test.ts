@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { nodeHost, type Host } from "@wsp/collect";
+import { workspacePlaceId } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { readAgents } from "../src/agents-reader.js";
@@ -51,6 +52,22 @@ describe("the screenshot harness's fixtures", () => {
     const listed = await rt.workspaces.list();
     expect(listed.map(w => [w.id, w.project.id]).sort()).toEqual(Object.values(state.workspaces).map(w => [w.id, w.project]).sort());
     expect((await rt.projects.list()).map(p => p.id).sort()).toEqual(Object.keys(state.projects).sort());
+  });
+
+  it.each(fixtures.FIXTURE_NAMES)("%s answers the spend of every computer a workspace stands on at the first read, before any tick", async name => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-fixture-spend-"));
+    dirs.push(home);
+    const state = fixtures.fixtureState(name, { home });
+    const statePath = join(home, ".wsp", "state.json");
+    mkdirSync(join(home, ".wsp"), { recursive: true });
+    writeFileSync(statePath, JSON.stringify(state));
+    const cloud = fixtures.fixtureCloud(name);
+    const env = hostEnv({ home, state, ...(cloud === undefined ? {} : { cloud }), records: writeStandIn(home, fixtures.fixtureFleet(state)) });
+    const rt = makeRuntime({}, statePath, undefined, env, undefined, localWiring(home, env, fakeDaemonStart, statePath, copyingFake()));
+    runtimes.push(rt);
+    const places = (await rt.places?.list(Date.now())) ?? [];
+    const stood = new Set((await rt.workspaces.list()).flatMap(w => workspacePlaceId(w, places) ?? []));
+    expect(new Set((await rt.status.spend(places)).map(row => row.place))).toEqual(stood);
   });
 });
 

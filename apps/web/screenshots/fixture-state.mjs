@@ -300,6 +300,20 @@ const MIGRATION = {
   costUsd: 0.21,
 };
 
+/** Every workspace's meter as a host that has ticked keeps it, with where the workspace stands: the fixture's own
+ * meter where it names one, and a first tick at nothing spent where it does not. A host meters a workspace from its
+ * first tick, five seconds into a watch, and counts it against a computer only once it knows where it stands, so a
+ * state without these read no spend until then, and a run whose earlier shots were quick drew the Spend line in the
+ * later theme's shots alone. */
+const metered = (workspaces, meters = {}) =>
+  Object.fromEntries(
+    workspaces.map(w => {
+      const [, doc] = meters[w.id] === undefined ? meter(w.id, { rateUsdPerHour: 0, hours: 0, phase: w.phase }) : [w.id, meters[w.id]];
+      const where = { kind: w.kind, machineId: w.machineId, ...(w.place === undefined ? {} : { place: w.place }), ...(w.provider === undefined ? {} : { provider: w.provider }) };
+      return [w.id, { ...doc, where }];
+    }),
+  );
+
 /** One store as the JSON file holds it: one object per collection, keyed the way the runtime keys it. Every
  * fixture below builds one. */
 const store = ({ projects, workspaces, sessions = {}, transcripts = {}, goldens, images, places, meters, preferences }) => ({
@@ -308,7 +322,7 @@ const store = ({ projects, workspaces, sessions = {}, transcripts = {}, goldens,
   sessions,
   transcripts,
   ...(goldens !== undefined ? { goldens } : {}),
-  ...(meters === undefined ? {} : { "cost-histories": meters }),
+  "cost-histories": metered(workspaces, meters),
   ...(images !== undefined ? { images } : {}),
   ...(preferences === undefined ? {} : { preferences: { default: preferences } }),
   ...(places === undefined
