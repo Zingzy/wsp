@@ -143,7 +143,7 @@ describe("the header and the body through a settle", () => {
     ];
     const { center, container } = await mount(fixtureApi(transcript, ROWS), "Adding GET /ready.");
     const crumb = () => container.querySelector("[data-shell-center] [data-thread-breadcrumb]")!.textContent;
-    await waitFor(() => expect(crumb()).toBe("api/make me a simple server"));
+    await waitFor(() => expect(crumb()).toBe("make me a simple server"));
     expect(center().queryByText("Checking the keychain.")).toBeNull();
     expect(useStore.getState().selectedThreadId).toBe("thr_a");
     expect(window.location.hash).toBe(`#w/${WS}/t/thr_a`);
@@ -227,7 +227,7 @@ describe("switching threads while a turn runs", () => {
   });
 
   it("a send from an older thread makes it the latest; the latest view then keeps the still running thread's deltas out", async () => {
-    const { emit, started, center, sidebar, threadRow, editor } = await mount();
+    const { emit, started, center, threadRow, editor } = await mount();
     fireEvent.click(threadRow("make me a simple server"));
     await center().findByText("Added GET /health.");
     await typeInto(editor(), "add a readiness route too");
@@ -237,7 +237,7 @@ describe("switching threads while a turn runs", () => {
     emit({ type: "session.start", ...A2, at: T0 + 90_000, prompt: "add a readiness route too" });
     emit({ type: "session.delta", ...A2, at: T0 + 90_300, kind: "text", text: "Adding GET /ready." });
     await center().findByText("Adding GET /ready.");
-    fireEvent.click(sidebar().getByText("api").closest<HTMLElement>("[data-sidebar-row]")!);
+    act(() => useStore.getState().select(WS));
     expect(useStore.getState()).toMatchObject({ selectedId: WS, selectedThreadId: null });
     expect(threadRow("make me a simple server").getAttribute("data-active")).toBe("false");
     await center().findByText("Adding GET /ready.");
