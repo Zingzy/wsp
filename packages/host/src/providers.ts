@@ -7,8 +7,9 @@
 // row here and its backend in the engine; nothing above this file compares a
 // provider by name.
 
+import { agentName, vaultVariableRow } from "@wsp/catalog";
 import { BoxBackend, FakeBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
-import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PROVIDER_KEY_WORDS, standInRecordsPath } from "@wsp/protocol";
+import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PROVIDER_KEY_WORDS, providerKeyName, standInRecordsPath } from "@wsp/protocol";
 import type { PlaceBackends } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import { fakeGuestAt } from "./fake-guest.js";
@@ -132,6 +133,15 @@ export function addedBy(m: ProviderModule): "key" | undefined {
  * Read off the table, so a provider added tomorrow is on `wsp add`'s line without anyone editing that line. */
 export function addedProviders(modules: readonly ProviderModule[] = PROVIDER_MODULES): ProviderModule[] {
   return modules.filter(m => addedBy(m) !== undefined);
+}
+
+/** Whose key a variable is, as a refusal names it: a catalog row's or a provider's; nothing for any other. A server's
+ * value never goes under one of these, since the vault hands every server's value to every turn. */
+export function keyOwner(variable: string, modules: readonly ProviderModule[] = PROVIDER_MODULES): string | undefined {
+  const row = vaultVariableRow(variable);
+  if (row !== undefined) return agentName(row);
+  const provider = modules.find(m => m.keyEnv === variable);
+  return provider === undefined ? undefined : providerKeyName(provider.id);
 }
 
 /** Every variable a row reads its key from, each once: what the layers a key is read through fill. */

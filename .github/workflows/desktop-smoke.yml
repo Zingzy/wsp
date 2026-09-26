@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: desktop smoke
+
+# The packaged desktop app, driven through Electron by the smoke, every night on
+# main: the smoke needs a 200 MB bundle and a Mac, so no pull request's gate runs
+# it, and a smoke nothing runs goes stale unseen. The tree is one chip's, this
+# runner's, packaged from the release's config with the daemon built from the
+# same commit. A pull request that changes this file or the smoke runs it too,
+# and so does a run started by hand.
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/desktop-smoke.yml"
+      - "apps/desktop/test/smoke.electron.test.ts"
+      - "apps/desktop/test/packaged.ts"
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "11.9.0"
+
+concurrency:
+  group: desktop-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Package the Mac app and drive it
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Toolchain from rust-toolchain.toml
+        working-directory: daemon
+        run: |
+          rustup toolchain install
+          rustup show
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            daemon/target
+          key: daemon-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
+          restore-keys: |
+            daemon-rust-${{ runner.os }}-${{ runner.arch }}-
+      - name: The daemon this runner runs
+        working-directory: daemon
+        run: cargo build --locked --release -p wsp-daemon-bin
+      - run: node packages/wspx/scripts/daemon-binary.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: Build what the desktop app depends on
+        run: pnpm --filter @wsp/desktop run build:deps
+      - name: Stage the desktop app, with the daemon required
+        env:
+          WSP_REQUIRE_DAEMON: "1"
+        run: pnpm --filter @wsp/desktop run build:app
+      - name: Package this chip's tree
+        run: pnpm --filter @wsp/desktop exec electron-builder --config electron-builder.yml --mac --dir --publish never
+      - name: Drive the packaged app with the smoke
+        run: pnpm --filter @wsp/desktop smoke

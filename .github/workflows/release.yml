@@ -171,14 +171,17 @@ jobs:
         run: |
           if [ -z "$CSC_LINK" ]; then unset CSC_LINK; fi
           pnpm --filter @wsp/desktop run build:mac
-      # The screen smoke measures a real Mac's window and fails on a hosted runner's display; it runs in the merge
-      # gate on a Mac. Here each bundle's signature and the packaged tree are checked without a screen, and with a
-      # certificate the check insists on a notarized, stapled bundle. It reads whether one signed from WSP_SIGNED, so
-      # the certificate's bytes stay in the environment of the build step and reach no test.
+      # Each bundle's signature and the packaged tree, and with a certificate the check insists on a notarized,
+      # stapled bundle. It reads whether one signed from WSP_SIGNED, so the certificate's bytes stay in the
+      # environment of the build step and reach no test.
       - name: Check the packaged trees
         env:
           WSP_SIGNED: ${{ secrets.CSC_LINK != '' && '1' || '' }}
         run: pnpm --filter @wsp/desktop exec vitest run --minWorkers=1 --maxWorkers=1 test/signing.test.ts
+      # The universal tree this job will ship, launched and driven through Electron; the nightly desktop smoke runs
+      # the same cases on one chip's tree from main.
+      - name: Drive the packaged app with the smoke
+        run: pnpm --filter @wsp/desktop smoke
       - name: Name the disk image after the release, and copy it to the name that never moves
         run: |
           shopt -s nullglob

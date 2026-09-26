@@ -839,19 +839,21 @@ describe("the threads a thread opened", () => {
     { id: "sess_web", workspaceId: WS, harness: "claude", status: "failed", startedBy: "agent", threadId: "thr_web", parentThreadId: PARENT, prompt: "rewrite the web client", costUsd: 0.3 },
   ];
 
-  it("each get a row in the opener's transcript naming the thread, its workspace, where it runs and its state, with the page's own address for it", async () => {
+  it("each get a line under a Threads head in the opener's transcript: the title as the page's own address, where it runs and its status", async () => {
     const { api } = fixtureApi([workspace, BENCH], { [WS]: lead }, rows);
     await setup(api);
     await screen.findByText("Three workspaces are up.");
     const opened = await waitFor(() => {
-      const found = Array.from(document.querySelectorAll<HTMLElement>("[data-opened-thread]"));
+      const found = Array.from(document.querySelectorAll<HTMLElement>("[data-thread-row]"));
       expect(found).toHaveLength(2);
       return found;
     });
-    expect(opened.map(row => row.textContent)).toEqual([
-      "openedbenchmark the new index spoo-bench on ascii Working",
-      "openedrewrite the web client api on solari Failed",
+    expect(document.querySelector("[data-thread-rows-head]")!.textContent).toBe("Threads");
+    expect(opened.map(row => [row.querySelector("a")!.textContent, row.querySelector("[data-thread-place]")!.textContent, row.querySelector<HTMLElement>("[data-thread-status]")!.dataset.threadStatus])).toEqual([
+      ["benchmark the new index", "ascii", "working"],
+      ["rewrite the web client", "solari", "failed"],
     ]);
+    expect(document.querySelector("[data-thread-rows]")!.textContent).not.toMatch(/·|opened| on /);
     const link = opened[0]!.querySelector<HTMLAnchorElement>("a")!;
     expect(link.textContent).toBe("benchmark the new index");
     expect(link.getAttribute("href")).toBe(`${window.location.origin}${window.location.pathname}#w/ws_bench/t/thr_bench`);
@@ -864,7 +866,7 @@ describe("the threads a thread opened", () => {
     const { api } = fixtureApi([workspace], { [WS]: lead });
     await setup(api);
     await screen.findByText("Three workspaces are up.");
-    expect(document.querySelectorAll("[data-opened-thread]")).toHaveLength(0);
+    expect(document.querySelectorAll("[data-thread-rows]")).toHaveLength(0);
   });
 
   it("are totalled beside the turn's own figure in the footer, each figure saying what it counts", async () => {
@@ -877,8 +879,11 @@ describe("the threads a thread opened", () => {
       return found;
     });
     expect(footer.textContent).toBe("Worked for 2m 58s $1.14 this turn $2.30 in threads it opened");
-    // The facts sit on the reply's row beside its time, in the time's own type.
-    expect(footer.className).toContain("text-xs");
+    // The facts sit on the reply's row beside its time, in the time's own type, one gap between every piece of it.
+    expect(footer.className).toContain("text-[13px]");
+    expect(footer.className).toContain("gap-x-3.5");
+    expect(footer.parentElement!.className).toContain("gap-3.5");
+    expect(footer.parentElement!.className).toContain("text-[13px]");
     // A narrow window breaks the line between facts, never inside one.
     expect(footer.className).toContain("flex-wrap");
     for (const part of footer.querySelectorAll("span")) {

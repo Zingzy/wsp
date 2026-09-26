@@ -8,6 +8,7 @@
 // SWITCHER_PAINT_DELAY_MS while the state does not, so a tap switches without
 // ever dimming the app.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { agentName } from "@wsp/catalog";
 import { deriveSidebarProjects } from "../../adapt/index.js";
 import { cn } from "../../lib/utils.js";
 import { desktopBridge } from "../../lib/desktopShell.js";
@@ -15,7 +16,10 @@ import { useStore } from "../../protocol/store.js";
 import { ROW_META_CLASS } from "../../sidebar/rowGrammar.js";
 import { capturePagePreview, loadPagePreviews, useWorkspacePreviews } from "../../shell/workspacePreviews.js";
 import { highlightedTarget, SWITCHER_PAINT_DELAY_MS, targetKey, useWorkspaceSwitcher } from "../../shell/workspaceSwitcher.js";
-import { buildSwitcherCards, type SwitcherCard } from "./switcherCards.js";
+import { HarnessMark } from "../chat/HarnessMark.js";
+import { restingAge } from "../status/restingAge.js";
+import { ThreadStatus } from "../status/ThreadStatus.js";
+import { buildSwitcherCards, type SwitcherCard, type WorkspaceCard } from "./switcherCards.js";
 
 export function WorkspaceSwitcher() {
   const open = useWorkspaceSwitcher(s => s.open);
@@ -109,9 +113,17 @@ function SwitcherCardView({ card, highlighted }: { card: SwitcherCard; highlight
       <span className="truncate text-foreground text-sm" data-card-name>
         {card.name}
       </span>
-      <span className={cn(ROW_META_CLASS, "truncate")} data-card-thread>
-        {card.threadTitle ?? "No threads yet"}
-      </span>
+      {card.threadId === null ? (
+        <span className={cn(ROW_META_CLASS, "truncate")} data-card-thread>
+          {card.threadTitle ?? "No threads yet"}
+        </span>
+      ) : (
+        <span className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs" data-card-thread>
+          <HarnessMark harness={card.thread.harness} label={agentName(card.thread.harness)} className="size-3 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{card.place}</span>
+          <ThreadStatus thread={card.thread} age={restingAge(card.thread)} crab />
+        </span>
+      )}
     </div>
   );
 }
@@ -120,7 +132,7 @@ function SwitcherCardView({ card, highlighted }: { card: SwitcherCard; highlight
  * A picture draws its own edge; an empty well is a fill, and a fill cannot hold an edge on a light card, where
  * the muted tint lands two parts in 255 of the white under it. So the empty well wears a hairline instead,
  * which reads on both surfaces, and the ring is drawn inside the box so it moves nothing when the picture lands. */
-function CardPreview({ card }: { card: SwitcherCard }) {
+function CardPreview({ card }: { card: WorkspaceCard }) {
   const empty = card.image === null;
   return (
     <div className={cn("mb-1 flex h-[5.5rem] items-center justify-center overflow-hidden rounded-sm bg-muted/40", empty && "ring-1 ring-border ring-inset")} data-card-preview data-card-preview-empty={empty ? "" : undefined}>

@@ -15,6 +15,7 @@ import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
+import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { rootsPathIn } from "./project-path.js";
 import { ReleaseChangedEvent } from "./release.js";
 import { shellQuote } from "./shell-quote.js";
@@ -2923,9 +2924,7 @@ export const PlaceUpdateReply = z.object({
 });
 export type PlaceUpdateReply = z.infer<typeof PlaceUpdateReply>;
 
-/** The id the computer the host runs on carries in that list. It is a place like every other, and the one nothing
- * was installed on, so both sides of the wire read the same word for it. */
-export const HERE_PLACE_ID = "here";
+export { HERE_PLACE_ID, namesPlace };
 
 /** Which computer a workspace stands on, by place id: a workspace forked on a joined computer carries that
  * computer's id on its record. Undefined for everything on this computer or at a provider. Written once because
@@ -3789,9 +3788,6 @@ export const PLACE_NEEDS_ROOT_LINE = "joining a Linux computer needs root, since
 /** What a word that names no place this host holds is refused with, naming the ones it does. */
 export const noSuchPlaceRefusal = (word: string, held: readonly string[]): string => `no place named ${word}; you have ${held.join(", ")}`;
 
-/** Whether a word names this place: the id the wire keys it by, or the name a person types. The one reading every
- * road that takes a place word makes, so a list, a frame and a typed word cannot disagree about which place. */
-export const namesPlace = (place: { id: string; name: string }, word: string): boolean => word === place.id || word === place.name;
 
 /** Whether a row is a computer somebody joined to this wsp: a computer, and not the one the host runs on, whose
  * files and threads are that host's own. The one reading, so the road that runs on the link, the road at the

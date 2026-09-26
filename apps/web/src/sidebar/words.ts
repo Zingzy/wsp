@@ -41,7 +41,18 @@ export const PROJECT_WORDS = {
 export const SWITCHER_WORDS = {
   all: "All projects",
   search: "Search projects",
+  add: PROJECT_WORDS.add,
+  list: "Projects",
   settingsOf: (name: string) => `${name} settings`,
+} as const;
+
+/** The computer filter under the project filter, in its words. */
+export const COMPUTER_SWITCHER_WORDS = {
+  all: "All computers",
+  search: "Search computers",
+  add: "Add a computer",
+  list: "Computers",
+  settingsOf: SWITCHER_WORDS.settingsOf,
 } as const;
 
 /** Why Create waits on the one question the dialog asks. */
@@ -57,7 +68,7 @@ export const ADD_PROJECT_WORDS = {
   choose: "Choose",
   add: "Add",
   computers: "Computers",
-  addComputer: "Add a computer",
+  addComputer: COMPUTER_SWITCHER_WORDS.add,
   look: "Look",
   navigate: "Navigate",
   open: "Open",

@@ -9,7 +9,7 @@ import { exitClassOf, keyRefusedLine, LOOPBACK, savedKeyRefusedLine } from "@wsp
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SERVE_FLAGS, SHARED_FLAGS, cli, forkCommandFor, jsonCliIO, keySources, loadKeys, optsFor, providerBesideRefusal, saveQuestion, terminalIO, upCommandFor, type CliIO, type KeySources, type LoadedKeys, type NoProviderKey } from "../src/cli.js";
 import { BOX_API_URL, BoxBackend, type KeyCheck } from "@wsp/engine";
-import { keysOf, savedEnv, vaultOf, writeEnvFile } from "../src/env-keys.js";
+import { keysOf, savedEnv, serverVault, vaultOf, writeEnvFile } from "../src/env-keys.js";
 import { vaultNow } from "../src/cli.js";
 import { BOX_KEY_ENV, PROVIDER_ENV, SOLARI_KEY_ENV, providerBackendFor, wiredProviderId } from "../src/providers.js";
 
@@ -171,6 +171,8 @@ describe("a host's own keys, the ones the app's setup reads", () => {
       // row's own variable there never outranks the row's.
       writeFileSync(join(home, "servers.env"), "WSP_MCP_CONTEXT7_AUTHORIZATION=c7_TESTONLY\nnotion_token=ntn_TESTONLY\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TESTONLYstale\n");
       expect(vaultNow(state)).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-TESTONLYfromthefile", WSP_MCP_CONTEXT7_AUTHORIZATION: "c7_TESTONLY", notion_token: "ntn_TESTONLY" });
+      // What a copy may write back as a server's reference is the servers' own values, never a row's variable.
+      expect(serverVault(state).held()).toEqual({ WSP_MCP_CONTEXT7_AUTHORIZATION: "c7_TESTONLY", notion_token: "ntn_TESTONLY" });
       writeFileSync(join(home, ".env"), `SOLARI_API_KEY=${SOLARI}\n`);
       expect(vaultNow(state)).toEqual({ WSP_MCP_CONTEXT7_AUTHORIZATION: "c7_TESTONLY", notion_token: "ntn_TESTONLY" });
     } finally {

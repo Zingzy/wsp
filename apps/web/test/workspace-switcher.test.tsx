@@ -9,11 +9,12 @@
 // shows them, letting go lands on the highlighted one, a tap is the thread
 // before this one.
 import { act, cleanup, configure, fireEvent, render, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type PlaceView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { deriveSidebarProjects } from "../src/adapt/index.js";
 import { buildPaletteItems } from "../src/components/palette/paletteItems.js";
-import { buildSwitcherCards } from "../src/components/switcher/switcherCards.js";
+import { buildSwitcherCards, type SwitcherCard } from "../src/components/switcher/switcherCards.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
@@ -540,7 +541,11 @@ describe("the thread switcher", () => {
       expect(document.querySelectorAll("[data-card-preview]")).toHaveLength(0);
       expect(highlightedThread()).toBe("thr_2");
       expect(document.querySelector("[data-thread-card='thr_2'] [data-card-name]")?.textContent).toBe("thread 2");
-      expect(document.querySelector("[data-thread-card='thr_2'] [data-card-thread]")?.textContent).toBe("Claude Code, the-project, you");
+      // Under the title the agent's mark, the computer by its name and the one status slot, nothing joined.
+      const second = document.querySelector("[data-thread-card='thr_2'] [data-card-thread]")!;
+      expect(second.querySelector("[data-harness-mark='claude']")).not.toBeNull();
+      expect(second.querySelector("[data-thread-status]")).not.toBeNull();
+      expect(second.textContent).not.toMatch(/,|·|Claude Code/);
       // Nothing moves until the hold is let go.
       expect(useStore.getState().selectedThreadId).toBe("thr_1");
       threadStep();
@@ -669,6 +674,7 @@ describe("releasesSwitchHold", () => {
 });
 
 describe("buildSwitcherCards", () => {
+  const titleOn = (card: SwitcherCard | undefined): string | null | undefined => (card?.threadId === null ? card.threadTitle : undefined);
   const projects = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_b: SESSIONS } });
 
   it("keeps the order it is given, drops an id the snapshot no longer holds, and carries the three parts alone", () => {
@@ -682,7 +688,7 @@ describe("buildSwitcherCards", () => {
     const working = { ...session("s_new", "ws_a", "The working thread.", Date.parse("2026-09-01T02:00:00Z")), status: "running" as const, endedAt: undefined };
     const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [older, working] } });
     const cards = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: null, pinnedThreadId: null });
-    expect(cards[0]?.threadTitle).toBe("The working thread.");
+    expect(titleOn(cards[0])).toBe("The working thread.");
   });
 
   it("takes the thread the sidebar pins over the top one, for the workspace the pin belongs to", () => {
@@ -690,9 +696,9 @@ describe("buildSwitcherCards", () => {
     const newer = session("s_new", "ws_a", "The newest thread.", Date.parse("2026-09-01T02:00:00Z"));
     const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [older, newer] } });
     const pinned = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: "ws_a", pinnedThreadId: "s_old" });
-    expect(pinned[0]?.threadTitle).toBe("The oldest thread.");
+    expect(titleOn(pinned[0])).toBe("The oldest thread.");
     const elsewhere = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: "ws_b", pinnedThreadId: "s_old" });
-    expect(elsewhere[0]?.threadTitle).toBe("The newest thread.");
+    expect(titleOn(elsewhere[0])).toBe("The newest thread.");
   });
 
   it("says where a thread on this computer runs only once the name is known, never leaving a line on a dangling on", () => {
@@ -702,17 +708,39 @@ describe("buildSwitcherCards", () => {
     const projects = deriveSidebarProjects({ workspaces: [here], sessions: { ws_a: [lead, child] } });
     const MAC: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true };
     const palette = (places: PlaceView[]) => buildPaletteItems({ projects, selectedId: null, query: "", canCreate: false, handlers: {} as never, verbs: {} as never, places });
-    const card = (places: PlaceView[]) => buildSwitcherCards({ places, projects, targets: [{ workspaceId: "ws_a", threadId: "thr_kid" }], images: {}, currentId: null, pinnedThreadId: null })[0]?.threadTitle;
-    for (const said of [...palette([]).workspaceItems, ...palette([]).recentThreadItems].map(item => item.description ?? "")) expect(said).not.toMatch(/ on\s*$|this computer/);
-    expect(card([])).toBe("Claude Code");
-    expect(palette([MAC]).recentThreadItems.map(item => item.description)).toContain("api on zingzy's MacBook Pro");
-    expect(card([MAC])).toBe("Claude Code, zingzy's MacBook Pro");
+    const card = (places: PlaceView[]) => {
+      const found = buildSwitcherCards({ places, projects, targets: [{ workspaceId: "ws_a", threadId: "thr_kid" }], images: {}, currentId: null, pinnedThreadId: null })[0]!;
+      return found.threadId === null ? null : found.place;
+    };
+    const said = (node: ReactNode): HTMLElement => render(<>{node}</>).container;
+    for (const item of [...palette([]).workspaceItems, ...palette([]).recentThreadItems]) expect(said(item.description).textContent).not.toMatch(/ on\s*$|this computer/);
+    expect(card([])).toBe("");
+    // The workspace and the computer are two facts a gap apart, each its own span, never a sentence joining them.
+    const facts = said(palette([MAC]).recentThreadItems.find(item => item.title === "The child.")!.description);
+    expect([...facts.querySelectorAll("[data-fact]")].map(fact => fact.textContent)).toEqual(["api", "zingzy's MacBook Pro"]);
+    expect(card([MAC])).toBe("zingzy's MacBook Pro");
+  });
+
+  it("a thread in the palette wears the agent's mark and the one status slot, and a workspace no dot for its state", () => {
+    const running = { ...session("s_run", "ws_a", "The running one.", Date.now() - 125_000), status: "running" as const, endedAt: undefined };
+    const projects = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [running] } });
+    const items = buildPaletteItems({ projects, selectedId: null, query: "", canCreate: false, handlers: {} as never, verbs: {} as never, places: [] });
+    const item = items.recentThreadItems.find(found => found.title === "The running one.")!;
+    expect(render(<>{item.icon}</>).container.querySelector("[data-harness-mark='claude']")).not.toBeNull();
+    const slot = render(<>{item.titleTrailingContent}</>).container.querySelector<HTMLElement>("[data-thread-status]")!;
+    expect(slot.dataset.threadStatus).toBe("working");
+    expect(slot.className).toContain("w-22");
+    expect(item.timestamp).toBeUndefined();
+    for (const workspace of items.workspaceItems) expect(render(<>{workspace.icon}</>).container.querySelector(".rounded-full")).toBeNull();
   });
 
   it("a thread target is a card of the thread's title over where it came from, with no picture well, and a thread that has gone leaves none", () => {
     const thread = { ...session("s_t", "ws_a", "The thread.", Date.parse("2026-09-01T02:00:00Z")), threadId: "thr_t", startedBy: "cli" as const };
     const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [thread] } });
     const cards = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: "thr_t" }, { workspaceId: "ws_a", threadId: "thr_gone" }], images: { ws_a: "data:image/png;base64,AAA" }, currentId: "ws_a", pinnedThreadId: null });
-    expect(cards).toEqual([{ workspaceId: "ws_a", threadId: "thr_t", name: "The thread.", threadTitle: "Claude Code, the-project, cli", image: null }]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]).toMatchObject({ workspaceId: "ws_a", threadId: "thr_t", name: "The thread." });
+    expect(Object.keys(cards[0]!)).toEqual(["workspaceId", "threadId", "name", "thread", "place"]);
+    expect(cards[0]!.threadId === null ? null : cards[0]!.thread.threadId).toBe("thr_t");
   });
 });

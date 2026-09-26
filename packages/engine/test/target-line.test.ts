@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { DAEMON_TARGETS, platformOfSystem } from "../src/daemon-targets.js";
 import { asLogin, landAsLogin, targetLogin, type TargetLogin } from "../src/target-line.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 /** A computer's road that answers the probe with the lines given and records every command. */
 function probed(lines: string[]): { machine: Pick<Machine, "exec">; ran: string[] } {
@@ -60,9 +61,8 @@ describe("the line a computer runs as its login", () => {
     const bin = join(root, "bin");
     mkdirSync(bin);
     // A root daemon on Linux, as the probe asks it; stat is the real one, GNU on Linux and BSD on a Mac.
-    writeFileSync(join(bin, "uname"), "#!/bin/sh\necho Linux\n");
-    writeFileSync(join(bin, "id"), '#!/bin/sh\ncase "$1" in -u) echo 0;; -un) echo root;; esac\n');
-    for (const f of ["uname", "id"]) chmodSync(join(bin, f), 0o755);
+    writeStub(join(bin, "uname"), "#!/bin/sh\necho Linux\n");
+    writeStub(join(bin, "id"), '#!/bin/sh\ncase "$1" in -u) echo 0;; -un) echo root;; esac\n');
     // The link is this test's own; the folder behind it is root's.
     const home = join(root, "home-link");
     symlinkSync("/", home);
@@ -94,8 +94,7 @@ describe("the line a computer runs as its login", () => {
     const home = join(root, "it's home");
     mkdirSync(home);
     // runuser as a script: checks the words it is handed and runs what follows them, as the real one does.
-    writeFileSync(join(bin, "runuser"), `#!/bin/bash\n[ "$1" = -u ] && [ "$2" = ada ] && [ "$3" = -- ] || exit 9\nshift 3\nexec "$@"\n`);
-    chmodSync(join(bin, "runuser"), 0o755);
+    writeStub(join(bin, "runuser"), `#!/bin/bash\n[ "$1" = -u ] && [ "$2" = ada ] && [ "$3" = -- ] || exit 9\nshift 3\nexec "$@"\n`);
     const login: TargetLogin = { platform: "linux", home, path: `${bin}:/usr/bin:/bin`, user: "ada", runAs: "ada" };
     const out = execFileSync("/bin/bash", ["-c", asLogin(login, `printf '%s|%s' "$HOME" "$(pwd -P)"`)], { env: { PATH: `${bin}:/usr/bin:/bin` }, encoding: "utf8" });
     const [said, where] = out.split("|");

@@ -13,7 +13,7 @@ import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 /** A seam between a join's key and its place file, where another process's leave or a crash would land. */
 const fsHooks = vi.hoisted(() => ({ beforeLink: undefined as (() => void) | undefined }));
@@ -41,6 +41,7 @@ import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemL
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { computerLines, hostPlatform, placeLines } from "../src/verbs.js";
+import { refusedPort } from "../../runtime/test/held-port.js";
 import {
   ADD_FLAGS_REFUSAL,
   NOTHING_TO_LEAVE_LINE,
@@ -109,6 +110,7 @@ import { SERVICE_MANAGERS, type RunResult, type ServiceAddress, type ServiceMana
 import { addedBy, addedProviders } from "../src/providers.js";
 import { sha256sumBin } from "../../engine/test/sha256sum-bin.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 runsFromItsOwnFolder();
 
@@ -2600,11 +2602,8 @@ describe("what a failed add takes back off a box, run by a real shell", () => {
     const state = tmp("undo-fresh-unit-state");
     // A systemctl that keeps active and enabled as files, and refuses disable --now.
     const systemctl = join(tmp("undo-fresh-unit-bin"), "systemctl");
-    writeFileSync(
-      systemctl,
-      `#!/bin/sh\nS=${shellQuote(state)}\ncase "$1" in\n  is-active) [ -f "$S/active-$3" ];;\n  is-enabled) [ -f "$S/enabled-$3" ];;\n  stop) rm -f "$S/active-$2";;\n  disable) [ "$2" = --now ] && exit 1; rm -f "$S/enabled-$2";;\n  *) exit 0;;\nesac\n`,
-      { mode: 0o755 },
-    );
+    const refusing = `#!/bin/sh\nS=${shellQuote(state)}\ncase "$1" in\n  is-active) [ -f "$S/active-$3" ];;\n  is-enabled) [ -f "$S/enabled-$3" ];;\n  stop) rm -f "$S/active-$2";;\n  disable) [ "$2" = --now ] && exit 1; rm -f "$S/enabled-$2";;\n  *) exit 0;;\nesac\n`;
+    writeStub(systemctl, refusing);
     const place = joinedPlace({ home, path: "/usr/bin:/bin" }, { hostUrls: [], codeFile: `${placeDaemonPaths(home).wsp}/join-code`, name: "box" });
     const unitPath = join(home, ".config/systemd/user/wsp-place.service");
     const writes = joinedAddWrites(place, unitPath).filter(w => w.path.startsWith(`${home}/`));
@@ -2619,7 +2618,7 @@ describe("what a failed add takes back off a box, run by a real shell", () => {
     expect(existsSync(unitPath)).toBe(false);
     expect(existsSync(join(state, "active-wsp-place.service"))).toBe(true);
     // The same box where disable --now works: the unit stops and the undo says it finished.
-    writeFileSync(systemctl, readFileSync(systemctl, "utf8").replace('[ "$2" = --now ] && exit 1;', '[ "$2" = --now ] && rm -f "$S/active-$3";'));
+    writeStub(systemctl, refusing.replace('[ "$2" = --now ] && exit 1;', '[ "$2" = --now ] && rm -f "$S/active-$3";'));
     wroteTheAdd(home);
     writeFileSync(unitPath, "[Service]\n");
     expect(bash(addUndoScript(place, writes, found, systemctl, true))).toContain(DAEMON_GONE_LINE);
@@ -2677,18 +2676,16 @@ describe("the check a box runs for whether it can reach this host", () => {
     const dir = tmp(name);
     symlinkSync("/bin/bash", join(dir, "bash"));
     if (tools.curl === true) symlinkSync("/usr/bin/curl", join(dir, "curl"));
-    if (tools.timeout === true) writeFileSync(join(dir, "timeout"), '#!/bin/bash\nshift\nexec "$@"\n', { mode: 0o755 });
+    if (tools.timeout === true) writeStub(join(dir, "timeout"), '#!/bin/bash\nshift\nexec "$@"\n');
     return dir;
   }
 
   it("reaches an address that answers and not one nobody listens on, by curl, by bash under timeout, and by neither", async () => {
     const listening = createHttpServer((_req, res) => res.end("ok"));
     await new Promise<void>(done => listening.listen(0, "127.0.0.1", done));
-    const quiet = createHttpServer();
-    await new Promise<void>(done => quiet.listen(0, "127.0.0.1", done));
-    const closedPort = (quiet.address() as { port: number }).port;
-    await new Promise<void>(done => quiet.close(() => done()));
-    const urls = [`http://127.0.0.1:${closedPort}`, `http://127.0.0.1:${(listening.address() as { port: number }).port}`];
+    const refused = await refusedPort();
+    onTestFinished(refused.close);
+    const urls = [`http://127.0.0.1:${refused.port}`, `http://127.0.0.1:${(listening.address() as { port: number }).port}`];
     const run = async (PATH: string): Promise<string> => (await promisify(execFile)("/bin/bash", ["-c", reachScript(urls)], { env: { PATH }, timeout: 20_000 })).stdout;
     try {
       expect(reachedUrls(await run(boxPath("reach-curl", { curl: true })), urls)).toEqual([urls[1]]);

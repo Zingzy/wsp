@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const SCRIPT = join(ROOT, "scripts", "hooks-path.mjs");
@@ -165,8 +166,7 @@ describe("what the prepare script wires", () => {
     // privileges are.
     const bin = temporary("wsp-hooks-bin-");
     const real = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).trim();
-    writeFileSync(join(bin, "git"), `#!/bin/sh\ncase "$1" in config) exit 1 ;; esac\nexec ${real} "$@"\n`);
-    chmodSync(join(bin, "git"), 0o755);
+    writeStub(join(bin, "git"), `#!/bin/sh\ncase "$1" in config) exit 1 ;; esac\nexec ${real} "$@"\n`);
     const said = wire(dir, { ...process.env, PATH: `${bin}:${process.env["PATH"] ?? ""}` });
     expect(said).toBe(`hooks: git would not take core.hooksPath, so the hooks in ${folderOf(dir)} are not wired`);
     expect(() => git(dir, "config", "--get", "core.hooksPath")).toThrow();

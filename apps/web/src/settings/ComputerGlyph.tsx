@@ -33,7 +33,7 @@ export function useComputerIcon(place: Pick<PlaceView, "id" | "kind" | "label" |
 
 export function ComputerGlyph({ place, className }: { place: Pick<PlaceView, "id" | "kind" | "label" | "name">; className?: string }) {
   const Glyph = COMPUTER_GLYPHS[useComputerIcon(place)];
-  return <Glyph aria-hidden data-computer-glyph className={cn("size-4 shrink-0 text-muted-foreground", className)} />;
+  return <Glyph aria-hidden data-computer-glyph className={cn("size-4 shrink-0", className)} />;
 }
 
 const word = (name: string): string => name.charAt(0).toUpperCase() + name.slice(1);

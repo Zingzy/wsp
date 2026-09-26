@@ -3,23 +3,12 @@
 // is the machine's own stop, nothing of that computer's home is read or
 // stored, and a wake puts nothing back. The kinds that keep an image nap
 // exactly as they did.
-import { createServer } from "node:net";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { droppingPort } from "./held-port.js";
 import { createOn, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
-
-/** A port nothing listens on, so the wake's read of the daemon fails and the wake runs out its attempts. */
-async function deadPort(): Promise<number> {
-  return new Promise(resolve => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-  });
-}
 
 /** A stub whose guest answers what the vault road asks of it: the listing of the home it would archive and the
  * size of the archive it wrote. Every tar and untar is recorded by machine, so a nap that took the vault road is
@@ -113,7 +102,8 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
 
   it("resurrects a fresh copy when the wake runs out its attempts, carrying nothing onto it", async () => {
     const { backend, untars, store } = imageless();
-    const port = await deadPort();
+    const { port, close: closePort } = await droppingPort();
+    onTestFinished(closePort);
     const rt = createRuntime({ backend, store, adapters: {} });
     try {
       backend.lifecycle.budgets.daemonAnswersMs = 300;
@@ -137,7 +127,8 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
   it("leaves a computer that keeps an image exactly as it was: every nap stashes the vault and the wake reads it", async () => {
     const { backend, tars, untars } = guestBackend();
     const store = memoryStore();
-    const port = await deadPort();
+    const { port, close: closePort } = await droppingPort();
+    onTestFinished(closePort);
     const rt = createRuntime({ backend, store, adapters: {} });
     try {
       backend.lifecycle.budgets.daemonAnswersMs = 300;

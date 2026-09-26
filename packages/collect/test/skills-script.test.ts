@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { detectSkills, SKILL_HEAD_BYTES, type SkillRootAt } from "../src/detect/skills.js";
 import type { Host } from "../src/host.js";
 import { nodeHost } from "../src/live-host.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 // The reader as it stood with one head and one awk per SKILL.md, less a line's trailing CR: the new one must print exactly what this prints.
 const PER_FILE_SCRIPT = [
@@ -118,8 +119,7 @@ describe("the skills script", () => {
       const stubs = join(base, "stubs");
       mkdirSync(stubs);
       const real = ["/usr/bin/awk", "/bin/awk"].find(p => existsSync(p))!;
-      writeFileSync(join(stubs, "awk"), `#!/bin/sh\n${real} "$@"\nexit 2\n`);
-      chmodSync(join(stubs, "awk"), 0o755);
+      writeStub(join(stubs, "awk"), `#!/bin/sh\n${real} "$@"\nexit 2\n`);
       const { host } = recording(shell, { PATH: `${stubs}:/usr/bin:/bin` });
       expect(await detectSkills(host, roots)).toEqual({ skills: [], refused: ["skills: the folders could not be read"] });
     });
@@ -135,8 +135,7 @@ describe("the skills script", () => {
         for (const bin of ["head", "awk", "readlink", "ls", "find", "cat", "stat"]) {
           const real = ["/usr/bin", "/bin"].map(d => join(d, bin)).find(p => existsSync(p));
           if (real === undefined) continue;
-          writeFileSync(join(stubs, bin), `#!/bin/sh\necho ${bin} >> '${log}'\nexec ${real} "$@"\n`);
-          chmodSync(join(stubs, bin), 0o755);
+          writeStub(join(stubs, bin), `#!/bin/sh\necho ${bin} >> '${log}'\nexec ${real} "$@"\n`);
         }
         const { host } = recording(shell, { PATH: `${stubs}:/usr/bin:/bin` });
         const read = await detectSkills(host, roots);

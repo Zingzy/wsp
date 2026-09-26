@@ -8,6 +8,12 @@ export function openProjectSettings(projectId: string): void {
   useStore.getState().openSettings();
 }
 
+/** One computer's page in Settings: the gear on its row in the sidebar's computer filter. */
+export function openComputerSettings(placeId: string): void {
+  useSettingsStore.getState().go({ kind: "computer", id: placeId });
+  useStore.getState().openSettings();
+}
+
 /** A computer's page in Settings with its Image card's recipe open: every Edit image outside that card. */
 export function openImageRecipe(placeId: string): void {
   useSettingsStore.getState().go({ kind: "computer", id: placeId });

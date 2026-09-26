@@ -5,7 +5,7 @@
 // vault. What the agent reads back is the same server with only names in it.
 import { parse as parseToml } from "smol-toml";
 import { describe, expect, it } from "vitest";
-import { CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_SERVERS_JSON, OPENCODE_JSON, mcpHeaderVariable, parseJsonc, serversByName, type McpFormat } from "../src/index.js";
+import { CATALOG_AGENTS, CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_SERVERS_JSON, OPENCODE_JSON, mcpHeaderVariable, parseJsonc, serversByName, type McpFormat } from "../src/index.js";
 
 const HOME = "/Users/dev";
 const TOKEN = "lin_api_TESTONLY";
@@ -208,6 +208,33 @@ describe("what a reference writer refuses rather than guess", () => {
     for (const [text, where] of shapes) await expect(CODEX_TOML.refer(text), text).rejects.toThrow(`${where} is written in a shape wsp does not read, so its values cannot be written by name`);
   });
 
+  it("Codex: reads no variable for an OAuth client secret, so the file stays on this computer and the refusal names the key", async () => {
+    const said = "linear keeps an OAuth secret in mcp_servers.linear.oauth.client_secret, and Codex reads no variable there, so the file stays on this computer";
+    const spellings = [
+      '[mcp_servers.linear]\nurl = "https://l.example"\n\n[mcp_servers.linear.oauth]\nclient_id = "cid"\nclient_secret = "cs_TESTONLY_table"\n',
+      '[mcp_servers.linear]\nurl = "https://l.example"\noauth = { client_id = "cid", client_secret = "cs_TESTONLY_inline" }\n',
+      '[mcp_servers.linear]\nurl = "https://l.example"\noauth.client_id = "cid"\noauth.client_secret = "cs_TESTONLY_dotted"\nhttp_headers = { Authorization = "Bearer tok_TESTONLY" }\n',
+      'mcp_servers.linear = { url = "https://l.example", oauth = { client_id = "cid", client_secret = "cs_TESTONLY_root" } }\n',
+    ];
+    for (const text of spellings) {
+      await expect(CODEX_TOML.refer(text), text).rejects.toThrow(said);
+      await expect(serversByName(CODEX_TOML, text, new Map(), () => undefined), text).rejects.toThrow(said);
+    }
+    await expect(CODEX_TOML.refer('[mcp_servers.linear]\nurl = "https://l.example"\noauth = "cs_TESTONLY_string"\n')).rejects.toThrow("mcp_servers.linear is written in a shape wsp does not read, so its values cannot be written by name");
+    const clientOnly = '[mcp_servers.linear]\nurl = "https://l.example"\noauth = { client_id = "cid", callback_port = 5555 }\n';
+    expect((await serversByName(CODEX_TOML, clientOnly, new Map(), () => undefined)).text).toBe(clientOnly);
+    const beside = `${spellings[0]}\n[mcp_servers.other]\ncommand = "o"\nenv = { K = "k_TESTONLY" }\n`;
+    const one = await CODEX_TOML.refer(beside, "other");
+    expect(one.servers).toEqual([{ name: "other", values: { K: "k_TESTONLY" } }]);
+  });
+
+  it("the copy's last check refuses a server definition that still carries an OAuth client secret, whatever the format's writer let through", async () => {
+    const lax: McpFormat = { ...CODEX_TOML, refer: async text => ({ text, servers: [{ name: "s", values: {} }], entries: [{ url: "https://s.example", oauth: { client_id: "cid", client_secret: "cs_TESTONLY" } }] }) };
+    await expect(serversByName(lax, "[mcp_servers.s]\n", new Map(), () => undefined)).rejects.toThrow("a server still carries an OAuth secret in oauth.client_secret after it was written by name, so the file stays on this computer");
+    const clean: McpFormat = { ...lax, refer: async text => ({ text, servers: [{ name: "s", values: {} }], entries: [{ url: "https://s.example", oauth: { client_id: "cid" } }] }) };
+    expect((await serversByName(clean, "[mcp_servers.s]\n", new Map(), () => undefined)).dropped).toEqual([]);
+  });
+
   it("copies an ordinary config whose unrelated keys and history hold the same short words as a server's values", async () => {
     const claude = JSON.stringify(
       {
@@ -275,6 +302,105 @@ describe("what a reference writer refuses rather than guess", () => {
   });
 });
 
+describe("an MCP server's OAuth secrets", () => {
+  const CS = "cs_TESTONLY_oauth";
+  type Oauthy = { oauth?: Record<string, unknown> };
+
+  it("Gemini CLI: writes ${NAME} for oauth.clientSecret, which it expands, and hands the value to the vault", async () => {
+    const text = JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example/mcp", oauth: { enabled: true, clientId: "cid", clientSecret: CS } } } }, null, 2);
+    const out = await GEMINI_SETTINGS_JSON.refer(text);
+    expect((parseJsonc(out.text) as { mcpServers: Record<string, Oauthy> }).mcpServers.linear!.oauth).toEqual({ enabled: true, clientId: "cid", clientSecret: "${WSP_MCP_LINEAR_OAUTH_CLIENTSECRET}" });
+    expect(out.servers).toEqual([{ name: "linear", values: { WSP_MCP_LINEAR_OAUTH_CLIENTSECRET: CS } }]);
+    const copied = await serversByName(GEMINI_SETTINGS_JSON, text, new Map(), () => undefined);
+    expect(copied.text).not.toContain(CS);
+    expect(copied.text).toContain("${WSP_MCP_LINEAR_OAUTH_CLIENTSECRET}");
+  });
+
+  it("OpenCode: writes {env:NAME} for oauth.clientSecret and for the snake_case client_secret it also reads", async () => {
+    for (const key of ["clientSecret", "client_secret"]) {
+      const n = mcpHeaderVariable("linear", `oauth.${key}`);
+      const text = JSON.stringify({ mcp: { linear: { type: "remote", url: "https://l.example/mcp", oauth: { clientId: "cid", [key]: CS } } } }, null, 2);
+      const out = await OPENCODE_JSON.refer(text);
+      expect((parseJsonc(out.text) as { mcp: Record<string, Oauthy> }).mcp.linear!.oauth, key).toEqual({ clientId: "cid", [key]: `{env:${n}}` });
+      expect(out.servers, key).toEqual([{ name: "linear", values: { [n]: CS } }]);
+      expect((await serversByName(OPENCODE_JSON, text, new Map(), () => undefined)).text, key).not.toContain(CS);
+    }
+    expect(mcpHeaderVariable("linear", "oauth.client_secret")).toBe("WSP_MCP_LINEAR_OAUTH_CLIENT_SECRET");
+    const off = JSON.stringify({ mcp: { linear: { type: "remote", url: "https://l.example/mcp", oauth: false } } });
+    expect((await serversByName(OPENCODE_JSON, off, new Map(), () => undefined)).text).toBe(off);
+  });
+
+  it("refuses an OAuth secret the agent reads no variable for, naming the key, so the file stays on this computer", async () => {
+    const cases: [McpFormat, string, string][] = [
+      [MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { linear: { type: "http", url: "https://l.example", oauth: { clientId: "cid", clientSecret: CS } } } }), "mcpServers.linear.oauth.clientSecret"],
+      [MCP_SERVERS_JSON, JSON.stringify({ projects: { [HOME]: { mcpServers: { linear: { type: "http", url: "https://l.example", oauth: { client_secret: CS } } } } } }), `projects.${HOME}.mcpServers.linear.oauth.client_secret`],
+      [GEMINI_SETTINGS_JSON, JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: { clientSecret: "${OK}", refreshToken: CS } } } }), "mcpServers.linear.oauth.refreshToken"],
+      [GEMINI_SETTINGS_JSON, JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: { client_secret: CS } } } }), "mcpServers.linear.oauth.client_secret"],
+      [OPENCODE_JSON, JSON.stringify({ mcp: { linear: { type: "remote", url: "https://l.example", oauth: { access_token: CS } } } }), "mcp.linear.oauth.access_token"],
+    ];
+    for (const [format, text, where] of cases) {
+      const said = `linear keeps an OAuth secret in ${where}, and its agent reads no variable there, so the file stays on this computer`;
+      await expect(format.refer(text), where).rejects.toThrow(said);
+      await expect(serversByName(format, text, new Map(), () => undefined), where).rejects.toThrow(said);
+    }
+    await expect(GEMINI_SETTINGS_JSON.refer(JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: { clientSecret: 7 } } } }))).rejects.toThrow("linear keeps an OAuth secret in mcpServers.linear.oauth.clientSecret");
+    await expect(GEMINI_SETTINGS_JSON.refer(JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: CS } } }))).rejects.toThrow("mcpServers.linear is written in a shape wsp does not read, so its values cannot be written by name");
+    await expect(GEMINI_SETTINGS_JSON.refer(JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: { clientSecret: `x_\${Y}` } } } }))).rejects.toThrow("linear's oauth.clientSecret mixes a value with a variable");
+    await expect(CODEX_TOML.refer(`[mcp_servers.linear]\nurl = "https://l.example"\noauth = { refresh_token = "${CS}" }\n`)).rejects.toThrow("linear keeps an OAuth secret in mcp_servers.linear.oauth.refresh_token, and Codex reads no variable there, so the file stays on this computer");
+  });
+
+  it("leaves a secret that already names a variable as written, and another server's secret alone when one server is asked for", async () => {
+    const named = JSON.stringify({ mcpServers: { linear: { type: "http", url: "https://l.example", oauth: { clientSecret: "${LINEAR_SECRET}" } } } });
+    expect((await serversByName(MCP_SERVERS_JSON, named, new Map(), () => undefined)).text).toBe(named);
+    const beside = JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: { refreshToken: CS } }, other: { command: "o", env: { K: "k_TESTONLY" } } } });
+    expect((await GEMINI_SETTINGS_JSON.refer(beside, "other")).servers).toEqual([{ name: "other", values: { K: "k_TESTONLY" } }]);
+  });
+
+  it("the copy's last check reads every spelling of an OAuth secret at any depth of a definition, and lets through only a reference the agent expands", async () => {
+    const lax = (format: McpFormat, entries: unknown[]): McpFormat => ({ ...format, refer: async text => ({ text, servers: [{ name: "s", values: {} }], entries }) });
+    const spellings: [unknown, string][] = [
+      [{ oauth: { clientSecret: CS } }, "oauth.clientSecret"],
+      [{ oauth: { client_secret: CS } }, "oauth.client_secret"],
+      [{ oauth: { "Client-Secret": CS } }, "oauth.Client-Secret"],
+      [{ OAuth: { CLIENTSECRET: CS } }, "OAuth.CLIENTSECRET"],
+      [{ oauth: { refresh_token: CS } }, "oauth.refresh_token"],
+      [{ oauth: { refreshToken: CS } }, "oauth.refreshToken"],
+      [{ oauth: { accessToken: CS } }, "oauth.accessToken"],
+      [{ oauth: { id_token: CS } }, "oauth.id_token"],
+      [{ servers: { x: { oauth: { client_secret: CS } } } }, "servers.x.oauth.client_secret"],
+      [{ list: [{ oauth: { clientSecret: 7 } }] }, "list.0.oauth.clientSecret"],
+    ];
+    for (const format of [MCP_SERVERS_JSON, GEMINI_SETTINGS_JSON, OPENCODE_JSON, CODEX_TOML]) {
+      for (const [entry, where] of spellings) {
+        await expect(serversByName(lax(format, [entry]), "{}", new Map(), () => undefined), where).rejects.toThrow(`a server still carries an OAuth secret in ${where} after it was written by name, so the file stays on this computer`);
+      }
+      expect((await serversByName(lax(format, [{ oauth: { clientId: "cid", clientSecret: "" } }]), "{}", new Map(), () => undefined)).dropped).toEqual([]);
+    }
+    expect((await serversByName(lax(GEMINI_SETTINGS_JSON, [{ oauth: { clientSecret: "${X}" } }]), "{}", new Map(), () => undefined)).dropped).toEqual([]);
+    expect((await serversByName(lax(OPENCODE_JSON, [{ oauth: { client_secret: "{env:X}" } }]), "{}", new Map(), () => undefined)).dropped).toEqual([]);
+    await expect(serversByName(lax(OPENCODE_JSON, [{ oauth: { clientSecret: "${X}" } }]), "{}", new Map(), () => undefined)).rejects.toThrow("oauth.clientSecret");
+    await expect(serversByName(lax(CODEX_TOML, [{ oauth: { client_secret: "${X}" } }]), "{}", new Map(), () => undefined)).rejects.toThrow("oauth.client_secret");
+  });
+
+  it("OpenCode: a secret under the mcp.servers envelope it also reads keeps the file on this computer", async () => {
+    const text = JSON.stringify({ mcp: { servers: { linear: { type: "remote", url: "https://l.example", oauth: { client_secret: CS } } } } });
+    await expect(serversByName(OPENCODE_JSON, text, new Map(), () => undefined)).rejects.toThrow("a server still carries an OAuth secret in linear.oauth.client_secret after it was written by name, so the file stays on this computer");
+  });
+
+  it("OpenCode: a secret in an oauth written as a list keeps the file on this computer", async () => {
+    const text = JSON.stringify({ mcp: { servers: { linear: { type: "remote", url: "https://l.example", oauth: [{ client_secret: CS }] } } } });
+    await expect(serversByName(OPENCODE_JSON, text, new Map(), () => undefined)).rejects.toThrow("linear.oauth.0.client_secret");
+  });
+
+  it("no agent row copies the file Gemini CLI or OpenCode keeps its MCP sign-in tokens in", () => {
+    const stores: Record<string, string> = { gemini: "~/.gemini/gemini-credentials.json", opencode: "~/.local/share/opencode/mcp-auth.json" };
+    for (const [id, store] of Object.entries(stores)) {
+      const a = CATALOG_AGENTS.find(x => x.id === id)!;
+      for (const p of [...a.configPaths, ...(a.mcp?.files ?? [])]) expect(store === p || store.startsWith(`${p.replace(/\/+$/, "")}/`), `${id}: ${p}`).toBe(false);
+    }
+  });
+});
+
 describe("a definition's references read back as the agent starts the server", () => {
   const values: Record<string, string> = { LINEAR: TOKEN, NOTION_TOKEN: NOTION };
   const value = (n: string): string | undefined => values[n];
@@ -298,5 +424,92 @@ describe("a definition's references read back as the agent starts the server", (
     expect(one(CODEX_TOML, `[mcp_servers.l]\nurl = "https://l.example"\nbearer_token_env_var = "LINEAR"\nenv_http_headers = { "X-Notion" = "NOTION_TOKEN" }\n`)).toEqual({ transport: { kind: "http", url: "https://l.example", headers: { "X-Notion": NOTION, Authorization: `Bearer ${TOKEN}` } }, values: [NOTION, TOKEN] });
     expect(one(CODEX_TOML, `[mcp_servers.l]\nurl = "https://l.example"\nbearer_token_env_var = "UNSET"\n`)).toEqual({ missing: "UNSET" });
     expect(one(CODEX_TOML, `[mcp_servers.l]\nurl = "https://l.example"\n\n[mcp_servers.l.env_http_headers]\nX-Notion = "UNSET"\n`)).toEqual({ missing: "UNSET" });
+  });
+});
+
+describe("a value servers.env holds, written back as its reference on the copy", () => {
+  const V = "sk_TESTONLY_local";
+  const known = (values: Record<string, string>, by: string[] = []): Record<string, { value: string; by: string[] }> => Object.fromEntries(Object.entries(values).map(([n, value]) => [n, { value, by }]));
+  const vault = known({ ACME_TOKEN: V });
+  const rows = (): undefined => undefined;
+  const ADDRESS = `https://s.example/mcp?team=eng&key=${V}`;
+  type Local = { args?: string[]; env?: Record<string, string>; url?: string };
+  const agents: Record<string, [McpFormat, (l: Local) => string, string]> = {
+    "Claude Code": [MCP_SERVERS_JSON, l => JSON.stringify({ mcpServers: { s: l.url !== undefined ? { type: "http", url: l.url } : { command: "x", args: l.args, ...(l.env !== undefined ? { env: l.env } : {}) } } }), "${ACME_TOKEN}"],
+    "Gemini CLI": [GEMINI_SETTINGS_JSON, l => JSON.stringify({ mcpServers: { s: l.url !== undefined ? { httpUrl: l.url } : { command: "x", args: l.args, ...(l.env !== undefined ? { env: l.env } : {}) } } }), "${ACME_TOKEN}"],
+    OpenCode: [OPENCODE_JSON, l => JSON.stringify({ mcp: { s: l.url !== undefined ? { type: "remote", url: l.url } : { type: "local", command: ["x", ...l.args!], ...(l.env !== undefined ? { environment: l.env } : {}) } } }), "{env:ACME_TOKEN}"],
+  };
+
+  for (const [agent, [format, file, ref]] of Object.entries(agents)) {
+    it(`${agent}: a value an argument or the address holds as servers.env does travels as that variable's reference, and reads back as the value`, async () => {
+      for (const local of [{ args: [`--token=${V}`] }, { args: [`--token=${V}`], env: { ACME_TOKEN: V } }, { url: ADDRESS }] as Local[]) {
+        const held = new Map<string, { value: string; by: string }>();
+        const out = await serversByName(format, file(local), held, rows, vault);
+        expect(out.text, JSON.stringify(local)).not.toContain(V);
+        expect(out.text).toContain(local.url !== undefined ? `key=${ref}` : `--token=${ref}`);
+        expect(out.dropped).toEqual([]);
+        expect([...held]).toEqual([["ACME_TOKEN", { value: V, by: "s" }]]);
+        const server = format.read(out.text, HOME)[0]!;
+        if (local.url !== undefined) expect(format.resolve(server, n => vault[n]?.value)).toMatchObject({ transport: { url: ADDRESS } });
+      }
+    });
+
+    it(`${agent}: a value servers.env does not hold still refuses the copy where it stands, and a value standing in no whole place is left alone`, async () => {
+      await expect(serversByName(format, file({ args: [`--token=${V}`], env: { ACME_TOKEN: V } }), new Map(), rows, {})).rejects.toThrow("s's value still stands in the --token argument after it was written by name, so the file stays on this computer");
+      await expect(serversByName(format, file({ args: [`--token=${V}`], env: { ACME_TOKEN: V } }), new Map(), rows, known({ OTHER: "sk_TESTONLY_other" }))).rejects.toThrow("s's value still stands in the --token argument");
+      const plain = await serversByName(format, file({ args: ["--workers=10", "run1"] }), new Map(), rows, known({ N: "1" }));
+      expect(plain.text).toBe(file({ args: ["--workers=10", "run1"] }));
+    });
+
+    it(`${agent}: refuses where the file sets the variable servers.env holds the value under to another value, since the reference would read that one`, async () => {
+      await expect(serversByName(format, file({ args: [`--token=${V}`], env: { ACME_TOKEN: "sk_TESTONLY_other" } }), new Map(), rows, vault)).rejects.toThrow("s passes the value servers.env holds as ACME_TOKEN in the --token argument, which s sets to another value, so the file stays on this computer");
+    });
+
+    it(`${agent}: the final guard still runs after the rewrite, so a value left standing as base64 keeps the file here`, async () => {
+      await expect(serversByName(format, file({ args: [`--token=${V}`, "--header", `Authorization: Basic ${btoa(V)}`] }), new Map(), rows, vault)).rejects.toThrow("s's value still stands in the Authorization header, as base64 after it was written by name");
+    });
+  }
+
+  it("writes the outer place where two known values nest, so a header line's whole credential takes one reference", async () => {
+    const out = await serversByName(MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { s: { command: "x", args: ["-H", "Authorization: Basic cred_TESTONLY"] } } }), new Map(), rows, known({ WHOLE: "Basic cred_TESTONLY", PART: "cred_TESTONLY" }));
+    expect((parseJsonc(out.text) as { mcpServers: { s: { args: string[] } } }).mcpServers.s.args).toEqual(["-H", "Authorization: ${WHOLE}"]);
+  });
+
+  it("refuses a value servers.env holds that stands only percent-encoded or as base64, which cannot be written by name, for every agent", async () => {
+    const odd = "sk TESTONLY/plus+";
+    const encoded = `https://s.example/mcp?key=${encodeURIComponent(odd)}`;
+    const said = "s's value still stands in the key parameter of an address after it was written by name, so the file stays on this computer";
+    for (const [agent, [format, file]] of Object.entries(agents)) await expect(serversByName(format, file({ url: encoded }), new Map(), rows, known({ ODD: odd })), agent).rejects.toThrow(said);
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\nurl = "${encoded}"\n`, new Map(), rows, known({ ODD: odd }))).rejects.toThrow(said);
+    for (const [agent, [format, file]] of Object.entries(agents)) await expect(serversByName(format, file({ args: ["--auth", btoa(V)] }), new Map(), rows, vault), agent).rejects.toThrow("s's value still stands in the file, as base64");
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\ncommand = "x"\nargs = ["${btoa(V)}"]\n`, new Map(), rows, vault)).rejects.toThrow("s's value still stands in the file, as base64");
+  });
+
+  it("writes the name the server itself sets where servers.env holds its value under two", async () => {
+    const out = await serversByName(MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { s: { command: "x", args: [`--token=${V}`], env: { MINE: V } } } }), new Map(), rows, known({ OTHER: V, MINE: V }));
+    expect((parseJsonc(out.text) as { mcpServers: { s: { args: string[] } } }).mcpServers.s.args).toEqual(["--token=${MINE}"]);
+  });
+
+  it("refuses a name servers.env holds with another value for another server, or for none, and takes a new value from the server it belongs to alone as its rotation", async () => {
+    const file = (value: string): string => JSON.stringify({ mcpServers: { s: { command: "x", env: { TOKEN: value } } } });
+    const other = await serversByName(MCP_SERVERS_JSON, file("sk_TESTONLY_second"), new Map(), rows, known({ TOKEN: "sk_TESTONLY_first" }, ["a"]));
+    expect(other.dropped).toEqual([{ name: "s", reason: "sets TOKEN, which a already sets to another value" }]);
+    expect(other.text).not.toContain("sk_TESTONLY_second");
+    const nobody = await serversByName(MCP_SERVERS_JSON, file("sk_TESTONLY_second"), new Map(), rows, known({ TOKEN: "sk_TESTONLY_first" }));
+    expect(nobody.dropped).toEqual([{ name: "s", reason: "sets TOKEN, which servers.env already holds with another value and no server recorded for it" }]);
+    const shared = await serversByName(MCP_SERVERS_JSON, file("sk_TESTONLY_second"), new Map(), rows, known({ TOKEN: "sk_TESTONLY_first" }, ["s", "a"]));
+    expect(shared.dropped).toEqual([{ name: "s", reason: "sets TOKEN, which a already sets to another value" }]);
+    const held = new Map<string, { value: string; by: string }>();
+    const rotated = await serversByName(MCP_SERVERS_JSON, file("sk_TESTONLY_second"), held, rows, known({ TOKEN: "sk_TESTONLY_first" }, ["s"]));
+    expect(rotated.dropped).toEqual([]);
+    expect([...held]).toEqual([["TOKEN", { value: "sk_TESTONLY_second", by: "s" }]]);
+  });
+
+  it("Codex: reads no variable in an argument or an address, so the copy refuses and names where the value stands", async () => {
+    const said = (where: string): string => `s passes the value of ACME_TOKEN in ${where}, and Codex reads no variable there, so the file stays on this computer`;
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\ncommand = "x"\nargs = ["--token=${V}"]\n`, new Map(), rows, vault)).rejects.toThrow(said("the --token argument"));
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\ncommand = "x"\nargs = ["--token=${V}"]\nenv = { ACME_TOKEN = "${V}" }\n`, new Map(), rows, vault)).rejects.toThrow(said("the --token argument"));
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\nurl = "${ADDRESS}"\n`, new Map(), rows, vault)).rejects.toThrow(said("the key parameter of an address"));
+    await expect(serversByName(CODEX_TOML, `[mcp_servers.s]\ncommand = "x"\nargs = ["${V}"]\n`, new Map(), rows, vault)).rejects.toThrow(said("an argument"));
   });
 });

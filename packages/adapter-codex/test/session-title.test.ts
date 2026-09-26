@@ -4,13 +4,14 @@
 // NULL and carries the thread's opening words, name is null until the person
 // names the thread.
 import { execFile } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
 import type { SessionRenameWrite } from "@wsp/protocol";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "../src/session-title.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const THREAD = "01a079b6-6f04-7f73-84d6-40e9e6885ffd";
 const SCHEMA = "create table threads (id text primary key, rollout_path text not null, cwd text not null, title text not null, name text);";
@@ -80,8 +81,7 @@ function fakeCodex(script: string): string {
   const root = mkdtempSync(join(tmpdir(), "wsp-codex-bin-"));
   homes.push(root);
   const bin = join(root, "codex");
-  writeFileSync(bin, `#!/bin/sh\n${script}\n`);
-  chmodSync(bin, 0o755);
+  writeStub(bin, `#!/bin/sh\n${script}\n`);
   return root;
 }
 

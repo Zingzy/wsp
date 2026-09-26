@@ -9,6 +9,9 @@ import type { ThreadStatusInput } from "./kinds/index.js";
 import { threadStatusOf } from "./threadStatusOf.js";
 import { WorkingSince } from "./WorkingSince.js";
 
+/** The slot in a one-line row: 88px, right-aligned, 12px, so times and words line up down a list. */
+export const LINE_SLOT_CLASS = "w-22 justify-end text-muted-foreground text-xs";
+
 export function ThreadStatus({
   thread,
   age,

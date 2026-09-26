@@ -96,3 +96,7 @@ jobs:
         run: pnpm --filter @wsp/desktop run build:deps
       - name: Stage the desktop app
         run: pnpm --filter @wsp/desktop run build:app
+      # A module that reads a value its import cycle has not set yet throws only when the bundle loads, which
+      # building it never does; the command bundle shares its chunks with the window's main.
+      - name: The staged bundle loads
+        run: node apps/desktop/build/app/main/cli.mjs --version

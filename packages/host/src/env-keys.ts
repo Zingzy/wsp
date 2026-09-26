@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { writeOwn } from "@wsp/own-file";
-import { VAULT_VARIABLES, agentName, crossesLines, vaultVariableRow } from "@wsp/catalog";
+import { VAULT_VARIABLES, crossesLines, serverValuesOf } from "@wsp/catalog";
 
 export const ANTHROPIC_KEY = "ANTHROPIC_API_KEY";
 
@@ -42,17 +42,69 @@ export const envFileFor = (statePath: string): string => join(dirname(statePath)
  * WSP_MCP_ name, a command's variable under its own. Every name in it is handed to every turn. */
 export const serverEnvFileFor = (statePath: string): string => join(dirname(statePath), "servers.env");
 
-/** The name of the catalog row that keeps its key under `variable`, as a refusal names it; nothing for any other. */
-export const rowOwning = (variable: string): string | undefined => {
-  const id = vaultVariableRow(variable);
-  return id === undefined ? undefined : agentName(id);
-};
+/** Beside it, the servers each of its names belongs to, by server name: what tells a second server claiming a name
+ * from the same server rotating its value, and what a server's removal frees. */
+export const serverOwnersFileFor = (statePath: string): string => join(dirname(statePath), "servers.owners.json");
 
-/** The one writer of that file for the host serving `statePath`, which every road that takes a server's value hands. */
-export const serverVault =
-  (statePath: string) =>
-  (values: Readonly<Record<string, string>>): void =>
-    writeEnvFile(serverEnvFileFor(statePath), { ...values });
+/** That file for the host serving `statePath`: what it holds, less every catalog row's variable, the servers each name
+ * belongs to, and its one writer, which every road that takes a server's value hands. */
+export interface ServerVault {
+  /** The file, as a sentence names it. */
+  file: string;
+  held(): Record<string, string>;
+  owners(): Record<string, string[]>;
+  /** Keeps the values as `server`'s, over whatever the names held. */
+  hold(values: Readonly<Record<string, string>>, server: string): void;
+  /** Takes `server` off every name; a name no server is left holding leaves the file. */
+  release(server: string): void;
+}
+
+/** The owners as the file holds them; a file that is not that shape reads as none, so every name reads as nobody's
+ * and is refused rather than written over. */
+function readOwners(path: string): Record<string, string[]> {
+  if (!existsSync(path)) return {};
+  try {
+    const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+    return Object.fromEntries(Object.entries(raw).filter((e): e is [string, string[]] => Array.isArray(e[1]) && e[1].every(s => typeof s === "string")));
+  } catch {
+    return {};
+  }
+}
+
+export function serverVault(statePath: string): ServerVault {
+  const file = serverEnvFileFor(statePath);
+  const ownersFile = serverOwnersFileFor(statePath);
+  const writeOwners = (owners: Record<string, string[]>): void => writeOwn(dirname(ownersFile), basename(ownersFile), `${JSON.stringify(owners, null, 2)}\n`);
+  return {
+    file,
+    held: () => serverValuesOf(parseEnvFile(file)),
+    owners: () => readOwners(ownersFile),
+    hold: (values, server) => {
+      const owners = readOwners(ownersFile);
+      for (const name of Object.keys(values)) owners[name] = [...new Set([...(owners[name] ?? []), server])];
+      // The owners first: a stop between the two writes leaves a name owned and unset, never set and nobody's.
+      writeOwners(owners);
+      writeEnvFile(file, { ...values });
+    },
+    release: server => {
+      const owners = readOwners(ownersFile);
+      const mine = Object.keys(owners).filter(name => owners[name]!.includes(server));
+      if (mine.length === 0) return;
+      const freed: string[] = [];
+      for (const name of mine) {
+        const left = owners[name]!.filter(s => s !== server);
+        if (left.length > 0) owners[name] = left;
+        else {
+          delete owners[name];
+          freed.push(name);
+        }
+      }
+      writeEnvFile(file, Object.fromEntries(freed.map(name => [name, undefined])));
+      writeOwners(owners);
+    },
+  };
+}
 
 /** That file as it stands. */
 export function savedEnv(statePath: string): Record<string, string> {
@@ -78,28 +130,28 @@ export function vaultOf(env: Readonly<Record<string, string | undefined>>): Reco
   return Object.fromEntries([...VAULT_VARIABLES].flatMap(name => (keyIn(env, name) !== undefined ? [[name, env[name]!]] : [])));
 }
 
-/** The one writer of the wsp home's .env: a key line it knows is rewritten in place and the rest appended, through
- * the owner's writer. One variable is one line here and one line in the reader above, so a value carrying a line
+/** The one writer of the wsp home's .env: a key line it knows is rewritten in place, or taken out for a name set to
+ * nothing, and the rest appended, through the owner's writer. One variable is one line here and one line in the reader above, so a value carrying a line
  * break is refused before anything is written rather than becoming a second variable of its own. */
-export function writeEnvFile(path: string, set: Record<string, string>): void {
+export function writeEnvFile(path: string, set: Readonly<Record<string, string | undefined>>): void {
   for (const [name, value] of Object.entries(set)) {
-    if (crossesLines(value)) throw new Error(`the value for ${name} carries a line break, and one variable is one line`);
+    if (value !== undefined && crossesLines(value)) throw new Error(`the value for ${name} carries a line break, and one variable is one line`);
   }
   const pending = new Map(Object.entries(set));
   const lines: string[] = [];
   if (existsSync(path)) {
     for (const line of readFileSync(path, "utf8").split("\n")) {
       const key = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=/)?.[1];
-      const value = key === undefined ? undefined : pending.get(key);
-      if (key === undefined || value === undefined) {
+      if (key === undefined || !pending.has(key)) {
         lines.push(line);
         continue;
       }
-      lines.push(`${key}=${value}`);
+      const value = pending.get(key);
+      if (value !== undefined) lines.push(`${key}=${value}`);
       pending.delete(key);
     }
     while (lines.at(-1) === "") lines.pop();
   }
-  for (const [k, v] of pending) lines.push(`${k}=${v}`);
+  for (const [k, v] of pending) if (v !== undefined) lines.push(`${k}=${v}`);
   writeOwn(dirname(path), basename(path), `${lines.join("\n")}\n`);
 }

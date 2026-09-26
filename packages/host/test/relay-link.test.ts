@@ -37,6 +37,7 @@ import type { DialOpts, HostClient } from "../src/verbs.js";
 import { keyFingerprint, verifyPlaceBytes } from "@wsp/keys";
 import { makeDevices, memoryStore } from "@wsp/runtime";
 import { ADDRESS_NEXT_START, DEFAULT_RELAY, LOGIN_NO_KEY_REFUSAL, NOT_UP_YET, NO_HOSTS_LINE, deviceAdmissionTranscript, exitClassOf, type DeviceView } from "@wsp/protocol";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const io = (log: string[] = [], err: string[] = []): CliIO => ({ log: l => log.push(l), error: l => err.push(l), ask: noPrompt, askSecret: noPrompt });
@@ -200,8 +201,7 @@ async function fakeRelay(): Promise<FakeRelay> {
 /** A script that says what a quick tunnel says and then waits, so the connector under test is a real child. */
 function fakeConnector(dir: string, hostname = "blue-sky-1234.trycloudflare.com"): string {
   const bin = join(dir, "fake-cloudflared");
-  writeFileSync(bin, `#!/bin/sh\necho "$@" > "${join(dir, "argv")}"\n>&2 echo 'INF |  https://${hostname}  |'\nsleep 30\n`, { mode: 0o755 });
-  return bin;
+  return writeStub(bin, `#!/bin/sh\necho "$@" > "${join(dir, "argv")}"\n>&2 echo 'INF |  https://${hostname}  |'\nexec sleep 30\n`);
 }
 
 /** A connector handed a fresh quick tunnel name every time it runs, as cloudflared is: the first child prints one
@@ -209,12 +209,10 @@ function fakeConnector(dir: string, hostname = "blue-sky-1234.trycloudflare.com"
 function restartingConnector(dir: string): string {
   const bin = join(dir, "restarting-cloudflared");
   const runs = join(dir, "runs");
-  writeFileSync(
+  return writeStub(
     bin,
-    `#!/bin/sh\nn=$(cat "${runs}" 2>/dev/null || echo 0)\nn=$((n+1))\necho "$n" > "${runs}"\n>&2 echo "INF |  https://name-$n.trycloudflare.com  |"\nif [ "$n" -ge 2 ]; then sleep 30; else exit 1; fi\n`,
-    { mode: 0o755 },
+    `#!/bin/sh\nn=$(cat "${runs}" 2>/dev/null || echo 0)\nn=$((n+1))\necho "$n" > "${runs}"\n>&2 echo "INF |  https://name-$n.trycloudflare.com  |"\nif [ "$n" -ge 2 ]; then exec sleep 30; else exit 1; fi\n`,
   );
-  return bin;
 }
 
 /** The connector, restarted fast enough for a test: the two seconds a real box waits are the box's constraint. */

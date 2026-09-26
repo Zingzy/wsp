@@ -26,7 +26,9 @@ import {
   type ServerAsk,
 } from "@wsp/protocol";
 import { projectOf, type AgentsOn, type ServersActs } from "@wsp/runtime";
-import { rowOwning } from "./env-keys.js";
+import type { ServerVault } from "./env-keys.js";
+import { serverListedHere } from "./agents-here.js";
+import { keyOwner } from "./providers.js";
 import { firstLine, roadOf, type Road } from "./target-road.js";
 
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
@@ -172,15 +174,42 @@ const defines = (config: Config, text: string, home: string, ask: ServerAsk): { 
   return found === undefined ? undefined : { disabled: found.disabled === true };
 };
 
+/** Why a value is refused under a name another server's value is already kept by: `holders` are those servers, and
+ * none where the vault recorded nobody for it, in `file`. */
+export const serverVariableHeldLine = (name: string, holders: readonly string[], file: string): string =>
+  holders.length > 0
+    ? `${name} already holds the value ${holders.join(" and ")} ${holders.length > 1 ? "were" : "was"} added with, so nothing was written; give this server's variable another name, or free it by removing ${holders.join(" and ")} with wsp servers remove.`
+    : `${name} already holds another value in ${file}, and no server is recorded for it, so nothing was written; give this server's variable another name, or take that line out of the file.`;
+
 export interface ServersActsOptions {
   /** This computer's Host; the node one, over this login's home, unless a test names another. */
   here?: () => Host;
-  /** Where a value typed for another computer is kept, by the variable its file names instead. */
-  vault?: (values: Readonly<Record<string, string>>) => void;
+  /** The place of record for every value passed: a value typed for another computer is kept there alone, by the
+   * variable its file names instead. */
+  vault?: ServerVault;
 }
 
 export function serversActs(o: ServersActsOptions = {}): ServersActs {
   const here = o.here ?? nodeHost;
+  /** Hands the values to the vault as the server's, refusing before anything is written a name that is a key's, or
+   * one the vault holds with another value for any server but this one alone: the reference every copy writes would
+   * then read that other value. The same server again with a new value is its rotation. */
+  const record = (values: Readonly<Record<string, string>>, server: string): void => {
+    for (const name of Object.keys(values)) {
+      const owner = keyOwner(name);
+      if (owner !== undefined) throw usage(`${rowVariableLine(name, owner)}.`);
+    }
+    const vault = o.vault;
+    if (vault === undefined || Object.keys(values).length === 0) return;
+    const held = vault.held();
+    const owners = vault.owners();
+    for (const name of Object.keys(values)) {
+      const by = owners[name] ?? [];
+      const rotation = by.length === 1 && by[0] === server;
+      if (held[name] !== undefined && held[name] !== values[name] && !rotation) throw usage(serverVariableHeldLine(name, by.filter(s => s !== server), tilde(here().home, vault.file)));
+    }
+    vault.hold(values, server);
+  };
   /** The server's file read, the change made to its text, and the text written back. */
   const change = async (on: AgentsOn, ask: ServerAsk, edit: (config: Config, text: string, shown: string, standing: { disabled: boolean }) => string): Promise<{ file: string }> => {
     checkName(ask.name);
@@ -206,9 +235,12 @@ export function serversActs(o: ServersActsOptions = {}): ServersActs {
       if (read.text !== undefined && defines(config, read.text, road.host.home, { agent: ask.agent, name: ask.name }) !== undefined) throw usage(serverThereRefusal(ask.name, shown));
       const given = ask.env ?? {};
       const format = config.agent.mcp.format;
-      // This computer's own file is the person's and holds the value as they typed it; every other holds names.
+      // This computer's own file is the person's and holds the value as they typed it, for agents started outside
+      // wsp; the vault is still the place of record, so a copy of that file can write the value back by name.
       if (on.kind === "here") {
         const placed = formatted(shown, () => format.place(read.text, ask.name, withVariables(transport, given, name => given[name]!)));
+        const recorded = Object.fromEntries(Object.entries(given).filter(([, value]) => value !== ""));
+        record(recorded, ask.name);
         await writeConfig(road, config, read, placed.text);
         return { file: shown };
       }
@@ -225,18 +257,16 @@ export function serversActs(o: ServersActsOptions = {}): ServersActs {
       formatted(shown, () => stillStands(named.entries, [{ name: ask.name, values: given }]));
       // An address's variables live in no entry of the file, so only the vault carries them.
       const values: Record<string, string> = { ...given, ...Object.fromEntries(named.servers.flatMap(sv => Object.entries(sv.values))) };
-      for (const name of Object.keys(values)) {
-        const row = rowOwning(name);
-        if (row !== undefined) throw usage(`${rowVariableLine(name, row)}.`);
-      }
-      if (Object.keys(values).length > 0) {
-        if (o.vault === undefined) throw new Error("There is no vault here to hold the server's values, so nothing was written.");
-        o.vault(values);
-      }
+      if (Object.keys(values).length > 0 && o.vault === undefined) throw new Error("There is no vault here to hold the server's values, so nothing was written.");
+      record(values, ask.name);
       await writeConfig(road, config, read, named.text);
       return { file: shown };
     },
-    remove: (on, ask) => change(on, ask, (config, text, shown) => formatted(shown, () => config.agent.mcp.format.remove(text, [ask.name], config.folder)).text),
+    remove: async (on, ask) => {
+      const removed = await change(on, ask, (config, text, shown) => formatted(shown, () => config.agent.mcp.format.remove(text, [ask.name], config.folder)).text);
+      if (o.vault !== undefined && !(await serverListedHere(here(), ask.name))) o.vault.release(ask.name);
+      return removed;
+    },
     toggle: (on, ask) =>
       change(on, ask, (config, text, shown, standing) => {
         const enable = config.agent.mcp.format.enable;
