@@ -4,6 +4,7 @@
 // ops a person's own socket reaches. The signatures here are real ed25519
 // ones, so what the door verifies is what a place would send.
 import { createHash, createPrivateKey, randomBytes, randomUUID, sign } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { connect as netConnect } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
@@ -28,6 +29,8 @@ import {
   agentsCell,
   placeDaemonBehind,
   placeWatchesItselfLine,
+  forkProcsUnreadLine,
+  forkOpRefusedLine,
   placeServesDaemonLine,
   noHostCliLine,
   THREAD_OPS,
@@ -2528,6 +2531,22 @@ function forks(
       case "pty.list":
         seen.frames.push(frame);
         return say({ ptys: [] });
+      case "proc.watch":
+      case "proc.unwatch":
+      case "proc.kill":
+        return say({});
+      case "proc.inspect":
+        return say({ pid: frame["pid"] });
+      case "ping":
+      case "fs.list":
+      case "fs.read":
+      case "git.diff":
+      case "git.prState":
+      case "guest.watch":
+      case "guest.reply":
+      case "guest.close":
+        seen.frames.push(frame);
+        return say({});
       case "git.push":
         seen.frames.push(frame);
         return say({ branch: "work", base: String(frame["base"] ?? ""), remote: "origin", ahead: 1, uncommitted: 0, stat: [" README.md | 2 +-"] });
@@ -2952,6 +2971,136 @@ describe("a fork on a computer you joined", () => {
     channel.close();
     await until(() => place.frames.some(f => f["op"] === "pty.detach"));
     expect(place.frames.filter(f => f["op"] === "pty.detach")).toEqual([expect.objectContaining({ ptyId, machineId: made.machineId })]);
+  });
+
+  /** A workspace forked on a computer this host holds a link to, whose daemon answers that workspace's frames. */
+  const servedFork = async (): Promise<{ place: ForkingPlace; placeId: string; machineId: string; id: string }> => {
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client, placeId } = await join(hostKey, {
+      code: await code(),
+      name: "srv",
+      report: report("srv", { daemonVersion: DAEMON_VERSION }),
+      answers: c => (place = forks(c)),
+    });
+    sockets.push(client.ws);
+    const made = await runtime.workspaces.create({ project: (await projectOn(runtime, "srv")).id, golden: "snap_g", name: "work" });
+    return { place, placeId, machineId: made.machineId, id: made.id };
+  };
+
+  it("refuses a command on a fork's channel before anything reaches its computer, and that computer's own channel still runs it", async () => {
+    const { place, placeId, id } = await servedFork();
+    const channel = await runtime!.workspaces.daemonChannel(id, () => {});
+    // The daemon runs exec on the computer itself, as its own user, whatever workspace the frame names.
+    expect(await channel.send({ op: "exec", cmd: "kill -9 1" })).toMatchObject({ ok: false, code: "unsupported", error: forkOpRefusedLine("exec", "work", "srv") });
+    expect(place.asked["exec"] ?? 0).toBe(0);
+    channel.close();
+    const own = runtime!.places!.channel(placeId, () => {})!;
+    expect(await own.send({ op: "exec", cmd: "uptime" })).toMatchObject({ ok: true });
+    expect(place.asked["exec"]).toBe(1);
+    own.close();
+  });
+
+  it("refuses a fork's process watch, reads and kills before anything reaches its computer, and that computer's own channel still carries them", async () => {
+    const { place, placeId, id } = await servedFork();
+    const channel = await runtime!.workspaces.daemonChannel(id, () => {});
+    // The daemon there acts on any pid it is handed, so a pid of the computer's own or of another workspace's is
+    // refused here with nothing sent up the link.
+    const frames = [
+      { op: "proc.kill", pid: 1, signal: "KILL" },
+      { op: "proc.inspect", pid: 1 },
+      { op: "proc.watch" },
+      { op: "proc.unwatch" },
+    ];
+    for (const frame of frames) {
+      expect(await channel.send(frame)).toMatchObject({ ok: false, code: "unsupported", error: forkProcsUnreadLine("work", "srv") });
+      expect(place.asked[frame.op] ?? 0).toBe(0);
+    }
+    channel.close();
+
+    // The computer's own page reads and signals its own processes over the same link, as it did.
+    const own = runtime!.places!.channel(placeId, () => {})!;
+    for (const frame of frames) expect(await own.send(frame)).toMatchObject({ ok: true });
+    expect(frames.map(f => place.asked[f.op])).toEqual([1, 1, 1, 1]);
+    own.close();
+  });
+
+  it("keeps the readings the computer's own page watches over the shared link off a fork's channel", async () => {
+    const { place, id } = await servedFork();
+    const heard: Record<string, unknown>[] = [];
+    const channel = await runtime!.workspaces.daemonChannel(id, e => heard.push(e));
+    const ptyId = String(((await channel.send({ op: "pty.create", cols: 80, rows: 24 })) as Record<string, unknown>)["ptyId"]);
+    await channel.send({ op: "pty.attach", ptyId });
+    place.push({ type: "proc.snapshot", at: 1, procs: [{ pid: 1, ppid: 0, comm: "init" }] });
+    place.push({ type: "sys.sample", at: 1 });
+    place.push({ type: "ports.changed", ports: [22] });
+    place.push({ type: "pty.data", ptyId, data: "after" });
+    await until(() => heard.some(e => e["type"] === "pty.data"));
+    expect(heard.map(e => e["type"])).toEqual(["daemon.hello", "pty.data"]);
+    channel.close();
+  });
+
+  /** Every op the computer's daemon serves, off the frames crate itself, with whether its request names the
+   * workspace it is for: a new op there fails this table until it is placed on one side. */
+  const daemonOps = (): { op: string; scoped: boolean }[] => {
+    const crate = (file: string): string => readFileSync(new URL(`../../../daemon/crates/wsp-frames/src/${file}`, import.meta.url), "utf8");
+    const listed = (text: string, name: string): string[] => [...text.match(new RegExp(`pub const ${name}: \\[&str; \\d+\\] = \\[([^\\]]*)\\]`))![1]!.matchAll(/"([^"]+)"/g)].map(m => m[1]!);
+    const request = crate("request.rs");
+    const body = request.slice(request.indexOf("pub enum DaemonOp"), request.indexOf("pub const DAEMON_OPS"));
+    const variants = new Map(body.split(/#\[serde\(rename = "/).slice(1).map(part => [part.slice(0, part.indexOf('"')), part.includes("machine_id")] as const));
+    return [...listed(request, "DAEMON_OPS"), ...listed(crate("machine.rs"), "MACHINE_OPS")].map(op => ({ op, scoped: variants.get(op) ?? false }));
+  };
+  const PTY = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list"];
+  const FILES_AND_GIT = ["fs.list", "fs.read", "git.status", "git.diff", "git.push", "git.pr", "git.prState"];
+  const HOST_GUESTS = ["guest.watch", "guest.reply", "guest.close"];
+  const REFUSED = [
+    "ports.watch",
+    "sys.watch",
+    "proc.watch",
+    "proc.unwatch",
+    "proc.inspect",
+    "proc.kill",
+    "manifest.get",
+    "manifest.record",
+    "manifest.restartScript",
+    "inbox.watch",
+    "inbox.rescan",
+    "fs.folders",
+    "tunnel.open",
+    "tunnel.write",
+    "tunnel.close",
+    "exec",
+    "place.leave",
+    "place.update",
+    "guest.open",
+    "guest.send",
+  ];
+
+  it.each([
+    { road: "a client's", open: (id: string) => runtime!.workspaces.daemonChannel(id, () => {}), carried: [...PTY, ...FILES_AND_GIT, "ping"] },
+    { road: "the host's guest road's", open: (id: string) => runtime!.workspaces.guestChannel(id, () => {}), carried: [...PTY, ...FILES_AND_GIT, "ping", ...HOST_GUESTS] },
+  ])("places every op the computer's daemon serves on $road channel into a fork: carried naming that fork, or refused before it leaves", async ({ open, carried }) => {
+    const ops = daemonOps();
+    const machineOps = ops.filter(o => o.op.startsWith("machine.")).map(o => o.op);
+    expect(ops.map(o => o.op).sort()).toEqual([...PTY, ...FILES_AND_GIT, "ping", ...HOST_GUESTS, ...REFUSED, ...machineOps].sort());
+    const { place, machineId, id } = await servedFork();
+    const channel = await open(id);
+    for (const { op, scoped } of ops) {
+      const before = place.asked[op] ?? 0;
+      const reply = await channel.send({ op, ptyId: "p1", path: "/root/work", cwd: "/root/work", session: "g1", message: {} });
+      if (carried.includes(op)) {
+        // ping reads nothing of any workspace's; the guest road's three answer a session by the id the computer gave it.
+        expect(scoped || op === "ping" || HOST_GUESTS.includes(op), op).toBe(true);
+        expect(reply, op).toMatchObject({ ok: true });
+        expect(place.frames.filter(f => f["op"] === op).at(-1), op).toMatchObject({ machineId });
+      } else {
+        expect(reply, op).toMatchObject({ ok: false, code: "unsupported" });
+        expect(place.asked[op] ?? 0, op).toBe(before);
+      }
+    }
+    channel.close();
   });
 
   it("opens no channel at all on a computer whose daemon is older than the one this wsp deploys", async () => {

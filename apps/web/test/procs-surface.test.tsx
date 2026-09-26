@@ -6,7 +6,7 @@
 // on this computer's own panel the whole list.
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProcEntry, ProcSnapshot, SessionView } from "@wsp/protocol";
+import { forkProcsUnreadLine, type ProcEntry, type ProcSnapshot, type SessionView } from "@wsp/protocol";
 import { ProcessesSurface, ROW_PX } from "../src/components/procs/ProcessesSurface.js";
 import { provideDaemonWire } from "../src/files/wire.js";
 import { getProcs, resetProcs } from "../src/machine/procs.js";
@@ -148,6 +148,16 @@ describe("processes surface", () => {
     await feed(PROCS);
     expect(document.querySelector("[data-procs-unavailable]")).toBeNull();
     expect(document.querySelector("[data-procs-count]")!.textContent).toBe("6 processes");
+  });
+
+  it("a workspace whose computer refuses its processes draws that sentence in the pane instead of waiting", async () => {
+    const said = forkProcsUnreadLine("work", "spoo");
+    wire.replies["proc.watch"] = () => new Error(said);
+    render(<ProcessesSurface workspaceId={WS} />);
+    await flush();
+    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("unavailable");
+    expect(screen.queryByText("pending")).toBeNull();
+    expect(document.querySelector("[data-procs-unavailable]")!.textContent).toBe(said);
   });
 
   it("a workspace with only the daemon running shows the daemon", async () => {
