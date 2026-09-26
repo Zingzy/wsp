@@ -251,7 +251,8 @@ describe("git.status", () => {
     const branch = res["branch"] as Record<string, unknown>;
     expect(branch["head"]).toBe("feature");
     expect(branch["oid"]).toMatch(/^[0-9a-f]{40}$/);
-    expect(branch).toMatchObject({ ahead: 0, behind: 0 });
+    // No upstream: counted against the default branch, main, which feature is one commit past.
+    expect(branch).toMatchObject({ ahead: 1, behind: 0 });
     expect(branch["upstream"]).toBeUndefined();
     const entries = res["entries"] as Record<string, unknown>[];
     expect(entries).toContainEqual({ xy: ".M", path: "src/index.ts" });
