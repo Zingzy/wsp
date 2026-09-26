@@ -15,6 +15,7 @@ import { placeName } from "../settings/places.js";
 import { useSettingsStore } from "../settings/settingsStore.js";
 import { needsYouRoad, type NeedsYouRoad } from "../shell/needsYou.js";
 import { releaseAhead, shellVersions } from "../shell/shellVersion.js";
+import { copyName } from "../sidebar/workspaceRows.js";
 import { addNotice, useNotices, type NoticeAction } from "./store.js";
 
 /** How long a computer stays quiet before it is said: a box that relinks inside this was a blip, not news. */
@@ -46,7 +47,11 @@ const NEED_KEY = "needs-you";
 const askKey = (workspaceId: string, threadId: string | undefined, askId: string): string => `${askPrefix(workspaceId, threadId)}${askId}`;
 const askPrefix = (workspaceId: string, threadId: string | undefined): string => `ask:${workspaceId}:${threadId ?? workspaceId}:`;
 
-const workspaceNamed = (id: string): string | undefined => useStore.getState().workspaces.find(w => w.id === id)?.name;
+function workspaceNamed(id: string): string | undefined {
+  const { workspaces, statuses, places } = useStore.getState();
+  const workspace = workspaces.find(w => w.id === id);
+  return workspace === undefined ? undefined : copyName(places, { workspace, status: statuses[id] ?? null, displayName: workspace.name });
+}
 
 function threadTitle(workspaceId: string, threadId: string | undefined): string {
   const threads = foldThreads(useStore.getState().sessions[workspaceId] ?? []);
