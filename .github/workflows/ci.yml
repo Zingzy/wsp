@@ -67,8 +67,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
+      - name: Stage the desktop app
+        # Bundled and laid out, not packaged: a web change once deleted a folder the staging copied and nothing ran it.
+        run: pnpm --filter @wsp/desktop run build:app
       - name: Tests
-        # The step above staged this runner's daemon binary, so the case that reads its version against the
+        # The Build step staged this runner's daemon binary, so the case that reads its version against the
         # protocol's runs here rather than skipping: a checkout with no binary staged is a developer's machine.
         env:
           WSP_REQUIRE_DAEMON: "1"
