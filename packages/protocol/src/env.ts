@@ -20,6 +20,12 @@ export const HOST_URL_ENV = "WSP_HOST_URL";
  * taken away when the turn's process exits. It never reaches a config file or an argument, only the environment. */
 export const HOST_TOKEN_ENV = "WSP_HOST_TOKEN";
 
+/** Set by the wsp command's forwarder on the one wsp it runs to ask where the host serving this line is: `door`
+ * answers a host already serving and `start` brings one up first, as a verb would. That run prints the address and
+ * the token the forwarder dials as one JSON line on a stdout that is not a terminal and serves nothing; a line with
+ * no such host prints nothing and is left to the wsp the forwarder runs next. */
+export const FORWARD_ENV = "WSP_FORWARD";
+
 /** The fingerprint of the key that host proves, beside the two above: the turn pins it before it sends the token,
  * so a relay that carries the bytes or names another host at that address gets nothing. A launch that carries the
  * address and the token without it is refused rather than dialled, since nothing there says which host it is. */

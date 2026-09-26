@@ -94,6 +94,12 @@ import {
   type ThreadScope,
   type WorkspaceOrigin,
   type WorkspaceView,
+  guestNoKindLine,
+  guestNoSessionLine,
+  guestSessionHeldLine,
+  hereGuestRefusal,
+  type HereGuestEvent,
+  TURN_TOKEN_ENV,
 } from "@wsp/protocol";
 import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, type DeviceDoor } from "./devices.js";
@@ -180,8 +186,37 @@ export interface ServeOptions {
   /** How an export of the image is sealed and written on this computer; without it image.export is refused. The
    * runtime hands over the record and the vault's bytes and never touches a file or a passphrase itself. */
   imageExport?: ImageExporter;
+  /** The tool server the wsp command's forwarder on this computer opens on this host, as guest.open; without it
+   * that op is refused, which is what a runtime served with no host in front of it answers. */
+  here?: GuestKindModule;
   /** Takes one line per refused frame: the op, the kind and the sentence's first line, never the request itself. */
   log?: (line: string) => void;
+}
+
+/** What a kind's module is handed when a guest session opens: what the guest asked for, the environment its verbs
+ * run under, and the two ways back to it. The host's guest door hands one for a process inside a machine, and this
+ * socket for the wsp command's forwarder on this computer. */
+export interface GuestOpening {
+  argv: readonly string[];
+  cwd: string;
+  /** The pair a verb reads its host and its token off, as a turn's own launch leaves them, plus the turn's token;
+   * on a session this computer's forwarder opened, the environment its line was typed in as well. */
+  env: Record<string, string>;
+  reply(message: unknown): void;
+  close(error?: string): void;
+}
+
+/** One open session, as the door talks to it. */
+export interface GuestSession {
+  message(message: unknown): void;
+  /** The guest's end went, or the workspace did: whatever this session holds open is dropped. A link that drops
+   * and redials is neither, and the session stands across it. */
+  close(): void;
+}
+
+/** A kind of guest session: the tool server, or one command line. */
+export interface GuestKindModule {
+  open(opening: GuestOpening): GuestSession;
 }
 
 /** How the runtime asks the host who this wsp is signed in to. The host owns the records; the runtime owns who may
@@ -263,6 +298,9 @@ interface Ticket {
    * socket that asked for it, since a second socket is no way around what the first one's road may do. */
   paired: boolean;
 }
+
+/** The name the one guest session a socket may hold goes by in its open's reply. */
+const HERE_GUEST_SESSION = "here";
 
 /** How long a stopping host waits for a client to answer its close frame before the socket is cut. A client that is
  * inside a synchronous stretch answers only when its loop turns: measured on a 2 vCPU box with a test run beside it,
@@ -522,6 +560,13 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     detaches.push(() => {
       for (const ch of channels.values()) ch.close();
       channels.clear();
+    });
+    /** The guest session this socket opened on the host itself, while it stands. */
+    let guest: GuestSession | undefined;
+    detaches.push(() => {
+      const held = guest;
+      guest = undefined;
+      held?.close();
     });
     let bound: { deviceId: string; cut: () => void } | undefined;
     ws.on("close", () => {
@@ -1227,6 +1272,43 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               if (ch === undefined) throw new Error("no such daemon channel on this socket");
               channels.delete(msg.channel);
               ch.close();
+              send({ id: msg.id, ok: true });
+              return;
+            }
+            case "guest.open": {
+              // The session's tools dial this host as whoever it names, so it is the owner's own socket or nothing:
+              // a paired computer and a thread each have their own road to the tools, under their own token.
+              if (me?.kind !== "host" || !ownRoad()) {
+                send({ id: msg.id, ok: false, error: hereGuestRefusal, kind: "auth" });
+                return;
+              }
+              if (opts.here === undefined) throw new Error(guestNoKindLine(msg.kind));
+              if (guest !== undefined) throw new Error(guestSessionHeldLine);
+              if (msg.kind !== "mcp") throw new Error(guestNoKindLine(msg.kind));
+              // The reply goes first: the client reads nothing until its open is answered.
+              send({ id: msg.id, ok: true, session: HERE_GUEST_SESSION });
+              let ended = false;
+              const session = opts.here.open({
+                argv: msg.argv,
+                cwd: msg.cwd,
+                env: { ...msg.env, ...(msg.turnToken !== undefined ? { [TURN_TOKEN_ENV]: msg.turnToken } : {}) },
+                reply: message => {
+                  if (!ended) send({ type: "guest.message", message } satisfies HereGuestEvent);
+                },
+                close: error => {
+                  if (ended) return;
+                  ended = true;
+                  guest = undefined;
+                  send({ type: "guest.closed", ...(error !== undefined ? { error } : {}) } satisfies HereGuestEvent);
+                },
+              });
+              if (ended) session.close();
+              else guest = session;
+              return;
+            }
+            case "guest.send": {
+              if (guest === undefined) throw new Error(guestNoSessionLine);
+              guest.message(msg.message);
               send({ id: msg.id, ok: true });
               return;
             }

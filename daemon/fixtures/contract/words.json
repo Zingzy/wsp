@@ -18,6 +18,7 @@
   "guestWorkspaceFull": "this workspace already holds as many guest sessions as it may; end one and run it again",
   "guestUnwatched": "the host stopped watching; run it again",
   "guestNoDaemon": "this machine's wsp daemon is not answering on 127.0.0.1:{port}",
+  "hostClosed": "the host closed the connection",
   "placeKeptForLink": "nothing was removed at {path}: a folder on the way to it is a link",
   "onBase": "this workspace is on {base}, the branch it started from; move the commits onto a branch of their own and bring back again",
   "notOnABranch": "this workspace is not on a branch, so there is nothing to bring back yet",

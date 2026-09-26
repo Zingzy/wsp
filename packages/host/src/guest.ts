@@ -10,36 +10,12 @@
 // link serves and picks the kind; each kind is one module, and adding a kind is
 // one module and one row in the table below.
 import { agentsOffRefusal, type DaemonEvent, guestNoKindLine, guestNoSessionLine, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV, UNAUTHORIZED, type GuestKind } from "@wsp/protocol";
-import type { Authed } from "@wsp/runtime";
+import type { Authed, GuestKindModule, GuestSession } from "@wsp/runtime";
 
 /** The road back down to one machine's daemon, and which workspace that machine is. */
 export interface GuestLink {
   workspaceId: string;
   request(op: string, params: Record<string, unknown>): Promise<unknown>;
-}
-
-/** What a kind's module is handed when a session opens: what the guest asked for, the environment its verbs run
- * under, and the two ways back to it. */
-export interface GuestOpening {
-  argv: readonly string[];
-  cwd: string;
-  /** The pair a verb reads its host and its token off, as a turn's own launch leaves them, plus the turn's token. */
-  env: Record<string, string>;
-  reply(message: unknown): void;
-  close(error?: string): void;
-}
-
-/** One open session, as the door talks to it. */
-export interface GuestSession {
-  message(message: unknown): void;
-  /** The guest's end went, or the workspace did: whatever this session holds open is dropped. A link that drops
-   * and redials is neither, and the session stands across it. */
-  close(): void;
-}
-
-/** A kind of guest session: the tool server, or one command line. */
-export interface GuestKindModule {
-  open(opening: GuestOpening): GuestSession;
 }
 
 export interface GuestDoor {

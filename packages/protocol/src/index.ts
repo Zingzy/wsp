@@ -3961,6 +3961,7 @@ const DAEMON_CONTENTS = [
   "ba2f7c6846cfc3d7ce66ff15f554d8b87dc20f5683931777d244e142709815dc",
   "de414be04f6f1b5142c2e5e718f4acd0a0526558dc96bed3a02b31f7acd924ba",
   "15f43fcf51b6d460b6e1acfa2ed0ce279a6645647834a10174bd9d249c2b2e6e",
+  "7a1d4e70b470d3f404c987c4300756615bfca9f904f0ef12e74f26497775d72d",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4169,7 +4170,8 @@ const DAEMON_CONTENTS = [
  * so a delete answers at once, sweeps any such sibling a stop cut short at start and on the next copy made or
  * removed beside that project, and refuses to remove a path that is not a copy of the project it names.
  * Version 75 takes back what a failed ssh add put on a box: before the add lands anything it asks which of its paths already exist, and after a failed deploy it removes only what this add wrote, stops a unit this add started, and leaves the box as it found it when another add took it meanwhile.
- * Version 76 answers as 75 does: a directory clone's removal takes the copy's own path off the shape check, and a test pins that a path with a trailing slash sets aside the link it names. */
+ * Version 76 answers as 75 does: a directory clone's removal takes the copy's own path off the shape check, and a test pins that a path with a trailing slash sets aside the link it names.
+ * Version 77 forwards a guest's `wsp mcp` to the running host over the daemon's link, so a thread's MCP server needs no host process of its own on the machine. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4607,6 +4609,15 @@ export const DaemonChannelEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("daemon.closed"), channel: z.string(), code: z.number().int(), reason: z.string() }),
 ]);
 export type DaemonChannelEvent = z.infer<typeof DaemonChannelEvent>;
+
+/** What the host pushes to the one socket that opened a guest session on it: the session's messages, then its end,
+ * with the host's sentence when it ended the session for a reason. The same two frames a machine's daemon hands its
+ * guest, less the session id a socket holding one session has no use for, so one client reads both roads. */
+export const HereGuestEvent = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("guest.message"), message: z.unknown() }),
+  z.object({ type: z.literal("guest.closed"), error: z.string().optional() }),
+]);
+export type HereGuestEvent = z.infer<typeof HereGuestEvent>;
 
 // --- places: a computer you own, joined by dialling this host ---------------
 
@@ -5252,6 +5263,23 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * link that computer is holding: nothing is dialled, and it is refused where that computer is not connected.
    * HERE_PLACE_ID names the computer the host runs on, whose own daemon is dialled. One of the two, never both. */
   z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string().optional(), placeId: z.string().optional() }),
+  /** The wsp command's forwarder on this computer opening a guest session on this host itself, one hop shorter
+   * than a machine's: the same frame a guest sends its daemon, plus the environment the line was typed in, which
+   * a tool reads values off by name. Served only on a socket the host's own token opened, which is who the session
+   * is, so the token the frame carries is not read; one session per socket, and only the tool server. Replies with
+   * a GuestOpenReply, then pushes HereGuestEvent frames on this socket. */
+  z.object({
+    id: reqId,
+    op: z.literal("guest.open"),
+    kind: GuestKind,
+    token: z.string().max(GUEST_TOKEN_MAX),
+    turnToken: z.string().max(GUEST_TOKEN_MAX).optional(),
+    argv: z.array(z.string()).max(GUEST_ARGV_MAX),
+    cwd: z.string().max(GUEST_CWD_MAX),
+    env: z.record(z.string()).optional(),
+  }),
+  /** One message on the guest session this socket opened. */
+  z.object({ id: reqId, op: z.literal("guest.send"), message: z.unknown() }),
   /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until the socket goes.
    * The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon; refused for
    * every other kind, which reads them over its own daemon link with sys.watch. Replies `{}`. */
@@ -6003,5 +6031,5 @@ export * from "./app-ports.js";
 export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
+export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";
