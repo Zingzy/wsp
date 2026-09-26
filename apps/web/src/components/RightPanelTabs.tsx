@@ -40,16 +40,14 @@ interface RightPanelTabsProps {
   layoutControls?: ReactNode;
   surfaces: readonly RightPanelSurface[];
   activeSurfaceId: string | null;
-  pendingSurfaceIds: ReadonlySet<string>;
   previewSessions: Readonly<Record<string, PreviewTabSnapshot>>;
   terminalLabelsById: ReadonlyMap<string, string>;
   onActivate: (surface: RightPanelSurface) => void;
   onCloseSurface: (surface: RightPanelSurface) => void;
   onAdd: (kind: RightPanelKind) => void;
   available: Readonly<Record<RightPanelKind, boolean>>;
-  /** Why each unavailable surface is greyed out; shown on its card and menu item. */
+  /** Why each unavailable surface is greyed out; shown on its launcher row and menu item. */
   unavailableReasons?: Partial<Record<RightPanelKind, string>>;
-  /** Set when every panel waits on one thing: the launcher says it once, in this line, and its cards carry no reason. */
   children: ReactNode;
 }
 
@@ -236,18 +234,20 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
   const isHighlighted = (action: SurfaceAction) =>
     highlightIndex !== -1 && availableActions[highlightIndex] === action;
 
-  const actionIcon = (action: SurfaceAction, iconClassName = "size-4") => {
+  const rowClass = "flex w-full items-center gap-3 rounded-md px-2 py-2 text-left";
+  const rowText = (action: SurfaceAction, line: string, head?: string) => {
     const Icon = action.icon;
     return (
-      <span className="relative inline-flex shrink-0">
-        <Icon className={iconClassName} />
-      </span>
+      <>
+        <Icon className={cn("size-4 shrink-0 text-foreground/80", head)} />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className={cn("text-foreground text-sm", head)}>{action.label}</span>
+          <span className="text-muted-foreground text-xs">{line}</span>
+        </span>
+        <Kbd className={head}>{action.shortcut}</Kbd>
+      </>
     );
   };
-
-  const cardShellClass =
-    "rounded-lg border border-border/80 bg-card dark:border-transparent dark:shadow-none dark:inset-ring-1 dark:inset-ring-white/5";
-  const highlightedCardClass = "bg-accent/60 dark:inset-ring-white/20";
 
   return (
     <div
@@ -259,18 +259,18 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
       className={cn(
         "flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-6 pt-6 outline-none",
         // The panel topbar sits above this container; matching bottom padding
-        // keeps the cards centered against the full panel, not the leftover.
+        // keeps the rows centered against the full panel, not the leftover.
         "pb-[calc(var(--workspace-topbar-height)+--spacing(6))]",
       )}
     >
-      <div className="relative w-full max-w-lg">
+      <div className="relative w-full max-w-sm">
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
           <h3 className="font-medium text-foreground text-sm">Open a panel</h3>
           <p className="mt-1 text-muted-foreground text-xs">
             A browser, a terminal, the diff, the task or what runs on it.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-col gap-0.5">
           {actions.map((action) =>
             action.available ? (
               <button
@@ -285,38 +285,23 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
                   )
                 }
                 className={cn(
-                  "relative flex w-full cursor-pointer flex-col items-start p-4 text-left transition hover:border-border hover:bg-accent/60",
-                  cardShellClass,
-                  isHighlighted(action) && highlightedCardClass,
+                  rowClass,
+                  "cursor-pointer transition-colors duration-150 hover:bg-accent",
+                  isHighlighted(action) && "bg-accent",
                 )}
               >
-                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
-                <span className="flex items-center gap-2 pe-8">
-                  {actionIcon(action)}
-                  <span className="font-medium text-sm">{action.label}</span>
-                </span>
-                <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
-                  {action.description}
-                </span>
+                {rowText(action, action.description)}
               </button>
             ) : (
               <div
                 key={action.label}
                 data-surface-launch={action.key}
                 data-available="false"
-                className={cn("relative flex w-full flex-col items-start p-4", cardShellClass)}
+                className={rowClass}
               >
-                {/* The dimming that says the card is held sits on the keycap, the icon and the label, which are
-                    the part a person is not being asked to read. The reason under them is the one sentence that
-                    says what happened and it reads at the muted ink's own alpha. */}
-                <Kbd className="absolute top-3 right-3 opacity-40">{action.shortcut}</Kbd>
-                <span className="flex items-center gap-2 pe-8 opacity-40" data-surface-card-head>
-                  {actionIcon(action)}
-                  <span className="font-medium text-sm">{action.label}</span>
-                </span>
-                <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
-                  {action.disabledReason}
-                </span>
+                {/* The dimming sits on the glyph, the label and the key, never on the reason, which is the one
+                    sentence a person is asked to read. */}
+                {rowText(action, action.disabledReason, "opacity-64")}
               </div>
             ),
           )}
@@ -392,7 +377,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           <div className="flex h-full w-max min-w-full items-center gap-1">
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
-              const pending = props.pendingSurfaceIds.has(surface.id);
               const title = paneTitle(surface, props);
               return (
                 <div
@@ -401,7 +385,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   onMouseDown={handleTabMouseDown}
                   onAuxClick={(event) => handleTabAuxClick(event, surface)}
                   className={cn(
-                    "cursor-pointer group/tab flex h-6 max-w-36 shrink-0 items-center gap-0.5 rounded-md pr-2 pl-1.5 text-xs",
+                    "cursor-pointer group/tab flex h-6 max-w-36 shrink-0 items-center gap-0.5 rounded-sm pr-2 pl-1.5 text-xs",
                     active
                       ? "bg-accent text-foreground"
                       : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -412,12 +396,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     onClick={() => props.onCloseSurface(surface)}
                   >
                     <SurfaceIcon surface={surface} />
-                    {pending ? (
-                      <span
-                        className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
-                        aria-hidden
-                      />
-                    ) : null}
                   </PanelTabCloseButton>
                   <Tooltip>
                     <TooltipTrigger
@@ -442,9 +420,9 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                   render={
                     <Button
                       aria-label="Add a panel"
-                      className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-                      size="icon-xs"
-                      variant="ghost"
+                      className="size-7"
+                      size="icon-sm"
+                      variant="ghost-muted"
                     />
                   }
                 >
