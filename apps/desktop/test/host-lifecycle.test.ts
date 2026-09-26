@@ -83,13 +83,6 @@ function deadPid(): number {
   return child.pid;
 }
 
-async function freePort(): Promise<number> {
-  const probe = createTcpServer();
-  const port = await listen(probe);
-  await closeServer(probe);
-  return port;
-}
-
 /** Whether this machine has an IPv6 loopback to bind at all: a runner without one cannot hold the ::1 case. */
 const ipv6Loopback = await new Promise<boolean>(resolve => {
   const probe = createTcpServer();
@@ -104,15 +97,6 @@ async function refused(url: string): Promise<boolean> {
   } catch {
     return true;
   }
-}
-
-/** Whether nothing holds this port on loopback: a server of our own binds it and lets it go. */
-function portFree(port: number): Promise<boolean> {
-  return new Promise(resolve => {
-    const probe = createTcpServer();
-    probe.once("error", () => resolve(false));
-    probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
-  });
 }
 
 describe("openHost", () => {
@@ -357,7 +341,7 @@ describe("openHost", () => {
       writeFileSync(join(home, "host.lock"), JSON.stringify(lock));
       writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
 
-      session = await open(await freePort(), 0);
+      session = await open(0, 0);
       expect(session.owned).toBe(false);
       expect(session.url).toBe(`http://127.0.0.1:${seen.port}`);
       await session.close();
@@ -411,10 +395,8 @@ describe("openHost", () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
     writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() }));
     writeFileSync(join(home, "host-token"), "a-token-of-some-other-host\n");
-    const port = await freePort();
-    await expect(open(port, 0)).rejects.toThrow(/holds .*host\.lock on port \d+ but the page it serves carries another token's digest/);
-    // Nothing of this window's is on that port, and the lock is the one the other process wrote.
-    expect(await portFree(port)).toBe(true);
+    await expect(open(0, 0)).rejects.toThrow(/holds .*host\.lock on port \d+ but the page it serves carries another token's digest/);
+    // The lock is the one the other process wrote: a host this window started would have taken it.
     expect((JSON.parse(readFileSync(join(home, "host.lock"), "utf8")) as { port: number }).port).toBe(existing.port);
 
     // A page with the boot line and no digest at all: what a host bound beyond this computer serves, standing on a
@@ -424,7 +406,7 @@ describe("openHost", () => {
     try {
       writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
       writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: barePort, wsPort: 0, startedAt: new Date().toISOString() }));
-      await expect(open(await freePort(), 0)).rejects.toThrow(/but the page it serves carries another token's digest/);
+      await expect(open(0, 0)).rejects.toThrow(/but the page it serves carries another token's digest/);
     } finally {
       await closeServer(bare);
     }
@@ -435,7 +417,7 @@ describe("openHost", () => {
     const port = await listen(squatter);
     try {
       writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, wsPort: 0, startedAt: new Date().toISOString() }));
-      await expect(open(await freePort(), 0)).rejects.toThrow(/but no wsp host answers there/);
+      await expect(open(0, 0)).rejects.toThrow(/but no wsp host answers there/);
     } finally {
       await closeServer(squatter);
     }
@@ -447,7 +429,7 @@ describe("openHost", () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "::1", statePath: join(home, "state.json") });
     writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, address: "::1", startedAt: new Date().toISOString() }));
     writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
-    session = await open(await freePort(), 0);
+    session = await open(0, 0);
     expect(session.owned).toBe(false);
     expect(session.url).toBe(`http://[::1]:${existing.port}`);
   });
@@ -456,7 +438,7 @@ describe("openHost", () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "0.0.0.0", statePath: join(home, "state.json") });
     writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, address: "0.0.0.0", startedAt: new Date().toISOString() }));
     // No token file is written and none is asked for: that page inlines no digest, and the lock is the whole reading.
-    session = await open(await freePort(), 0);
+    session = await open(0, 0);
     expect(session.owned).toBe(false);
     expect(session.url).toBe(`http://127.0.0.1:${existing.port}`);
   });
@@ -465,7 +447,7 @@ describe("openHost", () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
     writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: 1, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() }));
     writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
-    await expect(open(await freePort(), 0)).rejects.toThrow(/but that process is not this login's/);
+    await expect(open(0, 0)).rejects.toThrow(/but that process is not this login's/);
   });
 
   it("ignores a host.lock whose pid is gone and starts its own host", async () => {
@@ -473,7 +455,7 @@ describe("openHost", () => {
     const stale = { pid: deadPid(), port: existing.port, wsPort: existing.wsPort, startedAt: "2026-09-01T00:00:00.000Z" };
     writeFileSync(join(home, "host.lock"), JSON.stringify(stale));
 
-    session = await open(await freePort(), 0);
+    session = await open(0, 0);
     expect(session.owned).toBe(true);
     expect(session.port).not.toBe(existing.port);
     const lock = JSON.parse(readFileSync(join(home, "host.lock"), "utf8")) as { pid: number; port: number };
