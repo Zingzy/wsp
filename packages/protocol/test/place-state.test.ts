@@ -1,0 +1,136 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { describe, expect, it } from "vitest";
+import {
+  CLOUD_CAP_DEFAULT,
+  DAEMON_VERSION,
+  HERE_PLACE_ID,
+  PLACE_BLOCKED_WORD,
+  PlaceView,
+  absentComputer,
+  placeCapOf,
+  placeCapRefusal,
+  placeRoom,
+  placeStateOf,
+  runningOn,
+  threadsAtOnce,
+  type PlaceProvision,
+} from "@wsp/protocol";
+
+const spoo: PlaceView = { id: "p_1", kind: "computer", name: "spoo", default: false, shape: { cpu: 2, memMb: 7885 }, daemonVersion: DAEMON_VERSION, cap: { threads: 2 }, running: 0 };
+const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, cap: { machines: 3, spendPerDayUsd: 10 }, running: 0 };
+
+describe("threads at once", () => {
+  it("reads one thread per 2.5 GB, rounded to the nearest, at least one and never more than the cores", () => {
+    expect(threadsAtOnce({ cpu: 2, memMb: 4096 })).toBe(2);
+    expect(threadsAtOnce({ cpu: 4, memMb: 8192 })).toBe(3);
+    expect(threadsAtOnce({ cpu: 10, memMb: 16384 })).toBe(6);
+    expect(threadsAtOnce({ cpu: 2, memMb: 8192 })).toBe(2);
+    expect(threadsAtOnce({ cpu: 2, memMb: 7885 })).toBe(2);
+    expect(threadsAtOnce({ cpu: 1, memMb: 1024 })).toBe(1);
+  });
+
+  it("gives a computer its rule's default off its shape, a cloud 3 machines and $10 a day, and a set number over either", () => {
+    expect(placeCapOf({ kind: "computer", shape: { cpu: 10, memMb: 16384 } })).toEqual({ threads: 6 });
+    expect(placeCapOf({ kind: "computer" })).toBeUndefined();
+    expect(placeCapOf({ kind: "computer" }, { threads: 1 })).toEqual({ threads: 1 });
+    expect(placeCapOf({ kind: "computer", shape: { cpu: 2, memMb: 7885 } }, { threads: 1 })).toEqual({ threads: 1 });
+    expect(CLOUD_CAP_DEFAULT).toEqual({ machines: 3, spendPerDayUsd: 10 });
+    expect(placeCapOf({ kind: "provider" })).toEqual({ machines: 3, spendPerDayUsd: 10 });
+    expect(placeCapOf({ kind: "provider" }, { machines: 5 })).toEqual({ machines: 5, spendPerDayUsd: 10 });
+    expect(placeCapOf({ kind: "provider" }, { spendPerDayUsd: 0 })).toEqual({ machines: 3, spendPerDayUsd: 0 });
+  });
+
+  it("refuses a number the row's kind does not take, a set with no number, and counts below one", () => {
+    expect(placeCapRefusal({ kind: "computer", name: "spoo" }, { machines: 2 })).toBe("spoo takes threads at once, not machines at once");
+    expect(placeCapRefusal({ kind: "provider", name: "solari" }, { threads: 2 })).toBe("solari takes machines at once and spend per day, not threads at once");
+    expect(placeCapRefusal({ kind: "computer", name: "spoo" }, { threads: 1 })).toBeUndefined();
+    expect(placeCapRefusal({ kind: "provider", name: "solari" }, { spendPerDayUsd: 0 })).toBeUndefined();
+    expect(placeCapRefusal({ kind: "computer", name: "spoo" }, {})).toBe("nothing to set on spoo: it takes threads at once");
+    expect(placeCapRefusal({ kind: "provider", name: "solari" }, { machines: undefined })).toBe("nothing to set on solari: it takes machines at once and spend per day");
+    expect(() => PlaceView.shape.cap.parse({ threads: 0 })).toThrow();
+    expect(() => PlaceView.shape.cap.parse({ machines: 0, spendPerDayUsd: 10 })).toThrow();
+    expect(PlaceView.shape.cap.parse({ machines: 1, spendPerDayUsd: 0 })).toEqual({ machines: 1, spendPerDayUsd: 0 });
+  });
+});
+
+describe("what runs on a place", () => {
+  const places = [
+    { id: HERE_PLACE_ID, kind: "computer" as const },
+    { id: "p_1", kind: "computer" as const },
+    { id: "solari", kind: "provider" as const },
+  ];
+  const workspaces = [
+    { id: "w_mac", kind: "local" as const, machineId: "local", phase: "running" as const },
+    { id: "w_box", kind: "cloud" as const, machineId: "m_1", place: "p_1", phase: "running" as const },
+    { id: "w_s1", kind: "cloud" as const, machineId: "s_1", provider: "solari", phase: "running" as const },
+    { id: "w_s2", kind: "cloud" as const, machineId: "s_2", provider: "solari", phase: "napping" as const },
+    { id: "w_s3", kind: "cloud" as const, machineId: "s_3", provider: "solari", phase: "gone" as const },
+    { id: "w_s4", kind: "cloud" as const, machineId: "s_4", provider: "solari", phase: "waking" as const },
+  ];
+  const threads = [
+    { workspaceId: "w_mac", status: "running" as const },
+    { workspaceId: "w_mac", status: "running" as const },
+    { workspaceId: "w_mac", status: "completed" as const },
+    { workspaceId: "w_box", status: "running" as const },
+    { workspaceId: "w_box", status: "failed" as const },
+    { workspaceId: "w_s1", status: "running" as const },
+  ];
+
+  it("counts running threads on a computer and machines holding a slot on a cloud", () => {
+    expect(runningOn(HERE_PLACE_ID, places, workspaces, threads)).toBe(2);
+    expect(runningOn("p_1", places, workspaces, threads)).toBe(1);
+    // A napping machine and a gone one hold no slot; a waking one does.
+    expect(runningOn("solari", places, workspaces, threads)).toBe(2);
+    expect(runningOn("nowhere", places, workspaces, threads)).toBe(0);
+  });
+
+  it("reads the room left under the cap, never below none", () => {
+    expect(placeRoom({ ...spoo, running: 1 })).toEqual({ running: 1, atOnce: 2, room: 1, noun: "thread" });
+    expect(placeRoom({ ...spoo, running: 3 })).toEqual({ running: 3, atOnce: 2, room: 0, noun: "thread" });
+    expect(placeRoom({ ...solari, running: 2 })).toEqual({ running: 2, atOnce: 3, room: 1, noun: "machine" });
+    expect(placeRoom({ ...spoo, cap: undefined })).toBeUndefined();
+  });
+});
+
+describe("the word a place's row says", () => {
+  const running: PlaceProvision = { state: "running", addId: "a_1", recipeAt: "2026-09-17T10:00:00.000Z", startedAt: "2026-09-17T10:01:00.000Z", rows: [], at: { label: "Codex", index: 3, of: 7 } };
+
+  it("reads Ready when nothing stands in the way", () => {
+    expect(placeStateOf(spoo, null)).toEqual({ word: "Ready" });
+    expect(placeStateOf(solari, null)).toEqual({ word: "Ready" });
+  });
+
+  it("reads Full once the count meets the cap, with the count in the sentence", () => {
+    expect(placeStateOf({ ...spoo, running: 2 }, null)).toEqual({ word: "Full", tone: "warning", sentence: "full: 2 of 2 threads running" });
+    expect(placeStateOf({ ...solari, running: 3 }, null)).toEqual({ word: "Full", tone: "warning", sentence: "full: 3 of 3 machines running" });
+    expect(placeStateOf({ ...spoo, cap: { threads: 1 }, running: 1 }, null).sentence).toBe("full: 1 of 1 thread running");
+  });
+
+  it("reads Full for a computer with no room under its cap, and keeps no room in the sentence", () => {
+    expect(placeStateOf({ ...spoo, running: 1, forks: { running: 1, room: 0 } }, null)).toEqual({ word: "Full", tone: "warning", sentence: "no room on spoo" });
+  });
+
+  it("reads At limit only with a spend figure, and never answers it without one", () => {
+    const spent = { ...solari, cap: { machines: 3, spendPerDayUsd: 10 } };
+    expect(placeStateOf(spent, null).word).toBe("Ready");
+    expect(placeStateOf(spent, null, 9.99).word).toBe("Ready");
+    expect(placeStateOf(spent, null, 10)).toEqual({ word: "At limit", tone: "warning", sentence: "spend limit reached today" });
+    // A $0 limit is a cloud that starts nothing today.
+    expect(placeStateOf({ ...solari, cap: { machines: 3, spendPerDayUsd: 0 } }, null, 0).word).toBe("At limit");
+    // A computer has no spend limit whatever figure is handed in.
+    expect(placeStateOf(spoo, null, 100).word).toBe("Ready");
+  });
+
+  it("puts blocked, then not answering, then At limit, then Full, then the recipe, then behind", () => {
+    const all: PlaceView = { ...solari, blocked: "no overlay", running: 3, provision: running, daemonVersion: DAEMON_VERSION - 1 };
+    const away = absentComputer("solari", null);
+    expect(placeStateOf(all, away, 20)).toEqual({ word: PLACE_BLOCKED_WORD, sentence: "no overlay" });
+    const { blocked: _b, ...unblocked } = all;
+    expect(placeStateOf(unblocked, away, 20)).toEqual({ word: away.away, sentence: away.sentence });
+    expect(placeStateOf(unblocked, null, 20).word).toBe("At limit");
+    expect(placeStateOf(unblocked, null).word).toBe("Full");
+    expect(placeStateOf({ ...unblocked, running: 0 }, null).word).toBe("setting up 3/7: Codex");
+    const { provision: _p, ...settled } = unblocked;
+    expect(placeStateOf({ ...settled, running: 0 }, null).word).toBe(`daemon ${DAEMON_VERSION - 1}, host ${DAEMON_VERSION}`);
+  });
+});

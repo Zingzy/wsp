@@ -16,11 +16,12 @@ import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTi
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
+import { placeAtLimitLine, placeFullLine } from "./place-state.js";
+import type { AbsentComputer } from "./workspace-state.js";
 import { rootsPathIn } from "./project-path.js";
 import { ReleaseChangedEvent } from "./release.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
-import { isLocalWorkspace } from "./workspace-state.js";
 
 /** The one rule for a URL a guest may hand to the laptop: http or https in any
  * case, no whitespace or control characters, at most HTTP_URL_MAX bytes, and
@@ -2816,6 +2817,18 @@ export const PlaceProvision = z.object({
 });
 export type PlaceProvision = z.infer<typeof PlaceProvision>;
 
+/** Threads at once on a computer: how many threads may run there together, root or child. */
+export const ComputerCap = z.object({ threads: z.number().int().min(1) });
+export type ComputerCap = z.infer<typeof ComputerCap>;
+/** Machines at once and spend per day on a cloud. */
+export const CloudCap = z.object({ machines: z.number().int().min(1), spendPerDayUsd: z.number().min(0) });
+export type CloudCap = z.infer<typeof CloudCap>;
+export const PlaceCap = z.union([ComputerCap, CloudCap]);
+export type PlaceCap = z.infer<typeof PlaceCap>;
+/** The numbers a person set on one place, each key absent until they set it. */
+export const PlaceCapSet = ComputerCap.merge(CloudCap).partial();
+export type PlaceCapSet = z.infer<typeof PlaceCapSet>;
+
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -2891,6 +2904,10 @@ export const PlaceView = z.object({
   /** The recipe on this computer: what is being put on it, then what stands and what failed. Absent on a provider,
    * on this computer itself, and on a computer nothing has provisioned yet. */
   provision: PlaceProvision.optional(),
+  /** The number set on this place, else its kind's default; absent only on a computer that has not said its shape. */
+  cap: PlaceCap.optional(),
+  /** What its cap counts, at list time: threads running on a computer, machines holding a slot on a cloud. */
+  running: z.number().int().nonnegative().optional(),
 });
 export type PlaceView = z.infer<typeof PlaceView>;
 
@@ -2926,36 +2943,11 @@ export type PlaceUpdateReply = z.infer<typeof PlaceUpdateReply>;
 
 export { HERE_PLACE_ID, namesPlace };
 
-/** Which computer a workspace stands on, by place id: a workspace forked on a joined computer carries that
- * computer's id on its record. Undefined for everything on this computer or at a provider. Written once because
- * the host asks it to know whether anything can be asked of the machine, and the app asks it to know which row of
- * the places table a workspace belongs to. */
-export function workspacePlace(view: Pick<WorkspaceView, "place">): string | undefined {
-  return view.place;
-}
-
 /** What one row of the places list holds of the person's money: the spend it has taken since the first of the
  * month, over every workspace that stood on it in that month, deleted ones included, and what it is burning right
  * now over the ones still there. How many workspaces that is, the caller counts off its own list. */
 export const PlaceSpend = z.object({ place: z.string(), monthUsd: z.number(), rateUsdPerHour: z.number() });
 export type PlaceSpend = z.infer<typeof PlaceSpend>;
-
-/** Which row of the places list a workspace stands on, by id: the computer its record names, this computer for a
- * workspace that is this computer, and for a fork the provider its record was stamped with. A fork written before
- * records carried that word stands at the first provider row, which is where a host that forks at one provider put
- * it. Nothing for a workspace whose row this list does not hold, a stamped fork included: a provider that has been
- * removed takes its money off the list with it, and standing its workspaces on whatever provider is left would put
- * one provider's spend on another's row.
- *
- * The one reading, so the settings table, the sidebar's rows and the host's own spend fold cannot disagree about
- * which row a workspace belongs to. */
-export function workspacePlaceId(view: Pick<WorkspaceView, "kind" | "machineId" | "place" | "provider">, places: readonly Pick<PlaceView, "id" | "kind">[]): string | undefined {
-  const named = workspacePlace(view);
-  if (named !== undefined) return places.find(p => p.id === named)?.id;
-  if (isLocalWorkspace(view)) return places.find(p => p.id === HERE_PLACE_ID)?.id ?? places[0]?.id;
-  const providers = places.filter(p => p.kind === "provider");
-  return view.provider === undefined ? providers[0]?.id : providers.find(p => p.id === view.provider)?.id;
-}
 
 /** A computer you own finished its join, with the address it dialled from as `ws` reported it. The view carries
  * what it said about itself, so the sheet fills its row off this one event. */
@@ -4285,6 +4277,30 @@ export function provisionWord(p: PlaceProvision | undefined): string {
   return failed.length === 0 ? `${provisionCountWord(provisionCounts(p.rows))} ready` : `${failed.length} of ${p.rows.length} failed: ${nameList(failed.map(r => r.label))}`;
 }
 
+/** What a place's row reads as: the word beside its name, the tone the two cap words take, and the sentence that
+ * says why. Blocked first, since only a person fixes it; then not answering, since nothing reaches a computer that
+ * is off; then the day's spend and the cap, which stop new work; then the recipe running and a daemon behind.
+ * `spentTodayUsd` is the cloud's spend since this computer's midnight, and At limit is never read without it. The
+ * command line's STATE column and the app's row both read this, so the two cannot word one place two ways. */
+export interface PlaceState {
+  word: string;
+  tone?: "warning";
+  sentence?: string;
+}
+
+export function placeStateOf(place: PlaceView, absent: AbsentComputer | null, spentTodayUsd?: number): PlaceState {
+  if (place.blocked !== undefined) return { word: PLACE_BLOCKED_WORD, sentence: place.blocked };
+  if (absent !== null) return { word: absent.away, sentence: absent.sentence };
+  const limit = placeAtLimitLine(place, spentTodayUsd);
+  if (limit !== undefined) return { word: "At limit", tone: "warning", sentence: limit };
+  const full = placeFullLine(place);
+  if (full !== undefined) return { word: "Full", tone: "warning", sentence: full };
+  const recipe = provisionWord(place.provision);
+  if (recipe !== "") return { word: recipe };
+  const behind = placeDaemonBehind(place);
+  return behind === undefined ? { word: "Ready" } : { word: behind };
+}
+
 /** The lines a terminal prints once a job is over: what installed by name, how many rows were already there, then
  * every row that failed or was set aside with its reason, and what stopped the job where one did. */
 export function provisionLines(name: string, p: PlaceProvision): string[] {
@@ -5135,6 +5151,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * written on it, so a window opened later reads the same thing. Nothing is installed and nothing is left
    * running either way. */
   z.object({ id: reqId, op: z.literal("places.dial"), placeId: z.string() }),
+  /** Sets the numbers on one place's cap: threads at once on a computer, machines at once and spend per day on a
+   * cloud. A key left out keeps what stands, and a key the place's kind does not take is refused. Answers
+   * `{ place: PlaceView }`, the row as it now reads. The person's own road only, as every other place op is. */
+  z.object({ id: reqId, op: z.literal("places.cap"), placeId: z.string() }).merge(PlaceCapSet),
   /** A sign-in run at a terminal on one computer landed, as the tool's own status there said: the host notes the
    * file that agent's shared login writes, as the app's own sign-in does, so the listing says signed in before
    * that computer next reports. Answers `{}`. The person's own road only, as every other place op is. */
@@ -5991,6 +6011,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
+export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeCapRefusal, placeFullLine, placeRoom, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";

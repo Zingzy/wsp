@@ -928,6 +928,15 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await places().dial(msg.placeId, now())) });
               return;
             }
+            case "places.cap": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              const { id: _id, op: _op, placeId, ...set } = msg;
+              send({ id: msg.id, ok: true, ...(await places().cap(placeId, set)) });
+              return;
+            }
             case "places.loginLanded": {
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
