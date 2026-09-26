@@ -33,6 +33,16 @@ export function treeHere(): PackagedTree | undefined {
   return PACKAGED_TREES.find(tree => tree.targets.includes(hostTarget()));
 }
 
+/** The executable a build left for this machine: the tree this machine runs, or on a Mac the one-chip tree a plain
+ * `electron-builder --mac --dir` writes instead, which electron-builder names mac on Intel and mac-arm64 on Apple
+ * silicon. The first of them on disk, else the tree's own path. */
+export function builtExecutableHere(): string | undefined {
+  const tree = treeHere();
+  if (tree === undefined) return undefined;
+  const oneChip = process.platform === "darwin" ? [process.arch === "x64" ? "mac" : `mac-${process.arch}`] : [];
+  return [tree.dir, ...oneChip].map(dir => join(dist, dir, tree.executable)).find(path => existsSync(path)) ?? executableIn(tree);
+}
+
 export function executableIn(tree: PackagedTree): string {
   return join(dist, tree.dir, tree.executable);
 }
