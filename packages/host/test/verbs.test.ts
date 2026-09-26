@@ -309,11 +309,11 @@ describe("wsp verbs over the host", () => {
     const shape = { id: "ws_1", name: "qr codes", machineId: "local", phase: "running" as const, kind: "local" as const, golden: "", createdAt: "2026-09-17T00:00:00.000Z", machineState: "running" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, reach: { state: "reachable" as const }, project: { id: "pr_1", name: "wsp", path: "/Users/dev/wsp", computer: "here" } };
     const shares = { copies: true, ownNetwork: false };
     const cloned = { ...shape, portBase: 3100, copy: { road: "clonefile" as const, path: "/Users/dev/wsp-qr-codes", source: "/Users/dev/wsp", base: "abc", branch: "main", carried: "deps-and-config" as const } };
-    expect(workspaceLine(cloned, new Map(), shares).slice(4, 6)).toEqual([madeOfWord("clonefile"), portsWord(shares, 3100, hostPlatform())]);
+    expect(workspaceLine(cloned, new Map(), shares).slice(4, 6)).toEqual([madeOfWord("clonefile"), portsWord(shares, 3100, thisComputer(hostPlatform()))]);
     expect(workspaceLine({ ...cloned, copy: { ...cloned.copy, road: "worktree" } }, new Map(), shares)[4]).toBe(madeOfWord("worktree"));
     // A copy whose record carries no port base says the ports alone.
     const { portBase: _none, ...noBase } = cloned;
-    expect(workspaceLine(noBase, new Map(), shares).slice(4, 6)).toEqual([madeOfWord("clonefile"), portsWord(shares, undefined, hostPlatform())]);
+    expect(workspaceLine(noBase, new Map(), shares).slice(4, 6)).toEqual([madeOfWord("clonefile"), portsWord(shares, undefined, thisComputer(hostPlatform()))]);
     // A computer whose copies each get a network of their own says that instead.
     expect(workspaceLine(cloned, new Map(), { copies: true, ownNetwork: true }).slice(4, 6)).toEqual([madeOfWord("clonefile"), "own network"]);
     // A fork has no copy of a folder on this computer, so both cells are empty.

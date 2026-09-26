@@ -81,6 +81,15 @@
       "wait": "right-panel-tabbar"
     },
     {
+      "name": "agents-here",
+      "at": "/",
+      "steps": [
+        "1440:row-id=ws:ws_api",
+        "surface-launch=agents"
+      ],
+      "wait": "k=agents-computer"
+    },
+    {
       "name": "spawned-thread",
       "at": "/",
       "steps": [
@@ -426,6 +435,15 @@
         1440
       ],
       "fresh": true
+    },
+    {
+      "name": "thread-status",
+      "at": "/",
+      "fixture": "thread-states",
+      "wait": "thread-status=working",
+      "widths": [
+        1440
+      ]
     }
   ]
 }

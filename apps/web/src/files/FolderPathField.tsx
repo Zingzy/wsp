@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The one field a folder is typed or pasted into, wherever the app asks a
 // person for one: the composer's folder picker, and the import of a folder on
-// this Mac. Enter reads the folder where the caller reads folders, and one
+// the host's computer. Enter reads the folder where the caller reads folders, and one
 // that is not there is refused in the slot under the field, which stands at
 // its two lines whether or not it holds a sentence, so nothing below it moves
 // when a refusal arrives. The same slot holds the reason the keycap beside the

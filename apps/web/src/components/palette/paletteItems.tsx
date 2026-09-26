@@ -11,14 +11,14 @@ import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../ac
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
 import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
 import { cn } from "../../lib/utils.js";
-import { SETTINGS_WORDS } from "../../settings/format.js";
+import { SETTINGS_WORDS, onName } from "../../settings/format.js";
 import { groupNames } from "../../settings/groups.js";
 import { absenceOf } from "../../settings/places.js";
 import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
 import { currentWorkspaceId } from "../../adapt/workspaces.js";
 import { threadTree, workspaceOf } from "../../sidebar/threadTree.js";
-import { compactTimeLabel, dotClassForTone, whereWord } from "../../sidebar/workspaceRows.js";
+import { compactTimeLabel, computerName, dotClassForTone } from "../../sidebar/workspaceRows.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "../../sidebar/words.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
 
@@ -232,7 +232,7 @@ function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
         />
       ),
       title: project.displayName,
-      description: `${absent?.word ?? project.indicator.label} on ${whereWord(project)}`,
+      description: `${absent?.word ?? project.indicator.label}${onName(computerName(input.places, project))}`,
       ...(current ? { titleTrailingContent: <span className="shrink-0 text-muted-foreground/70 text-xs">Current task</span> } : {}),
       ...(slot === undefined ? {} : { shortcutCommand: workspaceSelectCommand(slot) }),
       run: sync(() => input.handlers.selectWorkspace(project.id)),
@@ -240,7 +240,7 @@ function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
   });
 }
 
-function threadItem(thread: SidebarThreadSnapshot, project: SidebarProjectSnapshot, handlers: PaletteHandlers): CommandPaletteActionItem {
+function threadItem(thread: SidebarThreadSnapshot, project: SidebarProjectSnapshot, places: readonly PlaceView[], handlers: PaletteHandlers): CommandPaletteActionItem {
   return {
     kind: "action",
     value: `thread:${thread.id}`,
@@ -249,7 +249,7 @@ function threadItem(thread: SidebarThreadSnapshot, project: SidebarProjectSnapsh
     title: thread.title,
     // The workspace it runs on and where that runs, the pair the sidebar's own row carries: a thread an agent
     // opened somewhere else is told apart from its opener by these two words and nothing else.
-    description: `${project.displayName} on ${whereWord(project)}`,
+    description: `${project.displayName}${onName(computerName(places, project))}`,
     timestamp: compactTimeLabel(thread.startedAt),
     run: sync(() => handlers.selectThread(thread.workspaceId, thread.threadId)),
   };
@@ -261,7 +261,7 @@ export function buildPaletteItems(input: PaletteItemsInput): PaletteItems {
   const threads = threadTree(input.projects).flatMap(group =>
     group.threads.map(thread => ({ ...thread, workspace: workspaceOf(input.projects, thread) ?? group.project })),
   );
-  const item = (thread: (typeof threads)[number]) => threadItem(thread, thread.workspace, input.handlers);
+  const item = (thread: (typeof threads)[number]) => threadItem(thread, thread.workspace, input.places, input.handlers);
   const latest = [...threads].sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
   return {
     actionItems: actionItems(input),

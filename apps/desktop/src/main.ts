@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, assetDir, daemonBinaryHere, installEach, mcpServerSpec, NO_PROJECT_YET, runningWsp, shimPath, wspHome, type CliIO, type HereAt } from "@wsp/host";
-import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hereWord, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
+import { adoptLoginPath, agentsHere, assetDir, computerNameHere, daemonBinaryHere, installEach, mcpServerSpec, NO_PROJECT_YET, runningWsp, shimPath, wspHome, type CliIO, type HereAt } from "@wsp/host";
+import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
@@ -250,7 +250,7 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
     local,
     home: wspHome(),
     statePath,
-    here: hereWord(process.platform === "darwin"),
+    here: computerNameHere(),
     load: async (next, hash) => {
       session = next;
       await loadHostPage(page, `${next.url}${hash ?? ""}`, { log: io.error });

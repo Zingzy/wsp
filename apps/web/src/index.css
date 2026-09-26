@@ -161,6 +161,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --color-update-surface: var(--update-surface);
   --color-success-foreground: var(--success-foreground);
   --color-success: var(--success);
+  --color-status-input: var(--status-input);
+  --color-status-working: var(--status-working);
+  --color-status-failed: var(--status-failed);
+  --color-status-done: var(--status-done);
   --color-info-foreground: var(--info-foreground);
   --color-info: var(--info);
   --color-destructive-foreground: var(--destructive-foreground);

@@ -5,10 +5,13 @@
 // tenth; a workspace is its own step after it.
 import { Mark } from "../brand/Brand.js";
 import { AddButton } from "../components/ui/add-button.js";
+import { usePlaces } from "../protocol/store.js";
+import { hereName } from "../settings/places.js";
 import { FIRST_RUN_WORDS } from "../sidebar/words.js";
 import { requestAddProject } from "./shellRequests.js";
 
 export function FirstRun() {
+  const places = usePlaces();
   return (
     <div data-k="first-run" className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-12 text-center">
       <Mark aria-hidden className="size-12 text-muted-foreground/40" />
@@ -16,7 +19,7 @@ export function FirstRun() {
         {FIRST_RUN_WORDS.title}
       </h1>
       <p className="mt-1.5 max-w-xs text-sm text-muted-foreground" data-k="sentence">
-        {FIRST_RUN_WORDS.sentence}
+        {FIRST_RUN_WORDS.sentence(hereName(places))}
       </p>
       <AddButton primary data-k="add-project" className="mt-6" onClick={requestAddProject}>
         {FIRST_RUN_WORDS.add}

@@ -49,14 +49,20 @@ describe("terminalPaneState", () => {
     }
   });
 
+  it("names the person's own computer by the name it is handed while its link opens, never by a word for it", () => {
+    const pane = terminalPaneState({ state: "running", reach: "reachable", socket: "opening", local: true, where: "zingzy's MacBook Pro" });
+    expect(pane).toEqual({ kind: "starting", local: true, where: "zingzy's MacBook Pro" });
+    expect(terminalPaneTitle(pane)).toBe("Starting a terminal on zingzy's MacBook Pro");
+  });
+
   it("this computer's own daemon refuses in the one sentence the pane already shows, with no second line to fill the button's place", () => {
-    const absent = ownDaemonDown("this Mac");
+    const absent = ownDaemonDown("zingzy's MacBook Pro");
     const pane = { kind: "absent", absent } as const;
-    expect(terminalPaneTitle(pane)).toBe("this Mac's daemon is not running");
+    expect(terminalPaneTitle(pane)).toBe("zingzy's MacBook Pro's daemon is not running");
     // The button is what happens next, so nothing under the title says it in words the button already says.
     expect(terminalPaneHints(pane, null, null)).toEqual([]);
-    expect(terminalEmptyLine(pane)).toBe("this Mac's daemon is not running");
-    expect(terminalInputRefusal(pane)).toBe("Typing is refused: this Mac's daemon is not running");
+    expect(terminalEmptyLine(pane)).toBe("zingzy's MacBook Pro's daemon is not running");
+    expect(terminalInputRefusal(pane)).toBe("Typing is refused: zingzy's MacBook Pro's daemon is not running");
     for (const line of [terminalPaneTitle(pane), terminalEmptyLine(pane), terminalInputRefusal(pane)]) {
       expect(line).not.toContain("Unreachable");
       expect(line).not.toContain("terminal:");

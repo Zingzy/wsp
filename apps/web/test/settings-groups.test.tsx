@@ -22,7 +22,7 @@ import { useNotices } from "../src/notices/store.js";
 import { pickOption } from "./select.js";
 
 const AT = "2026-09-12T09:14:00.000Z";
-const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, takesForks: false };
+const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true, present: true, takesForks: false };
 const box: PlaceView = { id: "p_spoo", kind: "computer", name: "spoo", default: false, present: true, takesForks: true };
 const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.11, takesForks: true };
 const project = (id: string, name: string, computer = "here", over: Partial<ProjectView> = {}): ProjectView => ({ id, name, computer, source: { kind: "folder", path: `/Users/dev/${name}` }, path: `/Users/dev/${name}`, remote: `https://github.com/dev/${name}.git`, defaultBranch: "main", memoryKey: `-Users-dev-${name}`, memoryDir: `/Users/dev/.claude-cfg/projects/-Users-dev-${name}/memory`, createdAt: AT, ...over });
@@ -78,7 +78,7 @@ describe("Projects", () => {
     useStore.setState({ places: [here, box], projects: [project("pr_spoo", "spoo"), project("pr_landing", "landing", "p_spoo", { source: { kind: "github", repo: "dev/landing" } })], workspaces: [view("ws_a", "pricing page", "pr_spoo"), view("ws_b", "webhook retries", "pr_spoo")] });
     await mount({}, "projects");
     expect(rowTitles()).toEqual(["spoo", "landing"]);
-    expect(descriptionOf("pr_spoo")).toBe(`${placeName(here, true)} /Users/dev/spoo`);
+    expect(descriptionOf("pr_spoo")).toBe(`${placeName(here)} /Users/dev/spoo`);
     expect(rowOf("pr_spoo")!.querySelector("svg")).not.toBeNull();
     expect(wordOf("pr_spoo")).toBe("2");
     expect(descriptionOf("pr_landing")).toBe("spoo dev/landing");
@@ -112,7 +112,7 @@ describe("Projects", () => {
     expect(crumb()).toBe("Settings/Projects/spoo");
     expect(lineLabels()).toEqual([PROJECTS_WORDS.source, PROJECTS_WORDS.computer, PROJECTS_WORDS.remote, PROJECTS_WORDS.added, PROJECTS_WORDS.seeded]);
     expect(wordOf("source")).toBe("/Users/dev/spoo");
-    expect(wordOf("computer")).toBe("This Mac");
+    expect(wordOf("computer")).toBe("zingzy's MacBook Pro");
     expect(wordOf("remote")).toBe("https://github.com/dev/spoo.git");
     expect(lineOf("remote")?.getAttribute("title")).toBe(PROJECTS_WORDS.remoteHover);
     expect(wordOf("added")).toMatch(/^Sep 12 \d\d:\d\d$/);

@@ -105,7 +105,7 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
       return els.map(el => {
         const id = el.dataset["rowId"] ?? el.dataset["k"] ?? (el.hasAttribute("data-search-row") ? "search" : el.hasAttribute("data-thread-launch") ? "launch" : "?");
         const box = el.getBoundingClientRect();
-        const slot = el.querySelector<HTMLElement>("[data-thread-state], [data-thread-time], [data-workspace-state], [data-project-slot], [data-creation-state]");
+        const slot = el.querySelector<HTMLElement>("[data-thread-status], [data-workspace-state], [data-project-slot], [data-creation-state]");
         // A row says how many lines it has: a workspace on a branch or a creation is two, everything else one.
         return { id, kind: el.dataset["lines"] === "2" ? "two" : el.querySelector("[data-group-word]") !== null ? "fold" : "one", height: box.height, left: box.left, right: box.right, slotRight: slot === null ? null : slot.getBoundingClientRect().right } as const;
       });
@@ -341,12 +341,12 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of the four nouns laid
   it("the state words read at 4.5 to 1 or better on a flat row and on the lifted row, in both themes", async () => {
     for (const theme of THEMES) {
       await open("sidebar", theme);
-      const flat = await textContrast(page!, "[data-slot=sidebar] [data-thread-state]");
+      const flat = await textContrast(page!, "[data-slot=sidebar] [data-thread-status][data-tone]");
       expect(flat.length).toBeGreaterThan(1);
       for (const ratio of flat) expect(ratio, `a state word on a flat row reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
       await open("sidebar-picked", theme, "&pick=pr_spoo", "[data-sidebar-row][data-active=true]");
       await page!.waitForTimeout(400);
-      const lifted = await textContrast(page!, "[data-sidebar-row][data-active=true] [data-thread-state]");
+      const lifted = await textContrast(page!, "[data-sidebar-row][data-active=true] [data-thread-status][data-tone]");
       expect(lifted).toHaveLength(1);
       expect(lifted[0], `the lifted row's word reads at ${lifted[0]} in ${theme}`).toBeGreaterThanOrEqual(4.5);
       await open("bring-back-paused", theme);

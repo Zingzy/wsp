@@ -112,7 +112,27 @@ const CUT = {
   Reach: /(?<![\w-])Reach(?![\w-])/,
   upgrade: /(?<![\w-])upgrades?(?![\w-])/i,
   machine: /(?<![\w-])machines?(?![\w-])/i,
+  thisMac: /(?<![\w-])[Tt]his Mac(?![\w-])/,
 } as const;
+
+/** The protocol's words for the computer the host runs on in place of its name. The command line says them; the app
+ * names that computer by the name its owner gave it, off the places list. */
+const HERE_WORDS = new Set(["hereWord", "thisComputer", "computerWord", "computerNamed"]);
+
+/** Every import of one of those words into a file, as `file:line` and the name. */
+function hereWordsIn(file: string): string[] {
+  const source = ts.createSourceFile(file, readFileSync(join(ROOT, file), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const out: string[] = [];
+  source.forEachChild(node => {
+    if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier) || node.moduleSpecifier.text !== "@wsp/protocol") return;
+    const named = node.importClause?.namedBindings;
+    if (named === undefined || !ts.isNamedImports(named)) return;
+    for (const element of named.elements) {
+      if (HERE_WORDS.has((element.propertyName ?? element.name).text)) out.push(`${file}:${source.getLineAndCharacterOfPosition(element.getStart(source)).line + 1} ${element.getText(source)}`);
+    }
+  });
+  return out;
+}
 
 /** Every file's said strings that spell one of these words, as `file:line` and the string, so a failure names the
  * string rather than a count. */
@@ -140,6 +160,13 @@ describe("the words a person reads", () => {
   // the spec cut everywhere is the image's own vocabulary, and that is what these tables are read for.
   it("the format tables say none of the image words", () => {
     expect(spelling(tables, ["golden", "vault", "lineage", "volatile", "head", "Reach"])).toEqual([]);
+  });
+
+  it("the app and the desktop shell call the computer the host runs on by its name and never read a word for it in place of that name", () => {
+    const desktop = under("apps/desktop/src");
+    expect(desktop.length).toBeGreaterThan(5);
+    expect([...app, ...desktop].flatMap(hereWordsIn)).toEqual([]);
+    expect(spelling(desktop, ["thisMac"])).toEqual([]);
   });
 
   it("no record's id goes into a sentence the app shows", () => {

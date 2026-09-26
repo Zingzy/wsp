@@ -30,7 +30,7 @@ import { ComputerGlyph, ComputerIconSelect } from "./ComputerGlyph.js";
 import { builtWhen, copyOn, IMAGE_WORDS } from "./image.js";
 import { useImageCard } from "./ImageCard.js";
 import { openImageRecipe } from "./openAt.js";
-import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, projectOn, threadWord, type PlaceHolding } from "./places.js";
+import { NOTHING_HELD, absenceOf, hereName, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, projectOn, threadWord, type PlaceHolding } from "./places.js";
 import { keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 import { RefusalSlot } from "./sheetParts.js";
@@ -77,13 +77,13 @@ export function computerChips(place: PlaceView, count: number, spend: PlaceSpend
 
 /** One computer's row: the name a person reads it as with the default mark, the facts it has reported, and the
  * state word while there is one, then the chevron where the row opens a page. */
-export function computerRowData(place: PlaceView, o: { here: boolean; count: number; spend?: PlaceSpend | undefined; now: number; state?: string | undefined; open?: (() => void) | undefined }): SettingsRowData {
-  const state = o.state ?? placeStateWord(place, absentOf(place, o.now, o.here));
+export function computerRowData(place: PlaceView, o: { count: number; spend?: PlaceSpend | undefined; now: number; state?: string | undefined; open?: (() => void) | undefined }): SettingsRowData {
+  const state = o.state ?? placeStateWord(place, absentOf(place, o.now));
   const chips = computerChips(place, o.count, o.spend);
   return {
     kind: "row",
     id: place.id,
-    title: placeName(place, o.here),
+    title: placeName(place),
     lead: (
       <span className="flex size-11 items-center justify-center rounded-xl border border-border bg-foreground/[0.04]">
         <ComputerGlyph place={place} className="size-5 text-foreground/80" />
@@ -111,7 +111,7 @@ function ownStateWord(ctx: SettingsContext): string {
 /** The pages under Computers in the sidebar: one per computer the list draws, this one first, off the same list so a
  * row and its sidebar row cannot disagree about which computers there are. */
 export function computerSubPages(ctx: SettingsContext): { at: SettingsAt; name: string }[] {
-  return ctx.places.map(place => ({ at: { kind: "computer", id: place.id }, name: placeName(place, place.id === HERE_PLACE_ID) }));
+  return ctx.places.map(place => ({ at: { kind: "computer", id: place.id }, name: placeName(place) }));
 }
 
 export function computersCards(ctx: SettingsContext): SettingsCardData[] {
@@ -119,7 +119,6 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
   const row = (place: PlaceView): SettingsRowData => {
     const here = place.id === HERE_PLACE_ID;
     return computerRowData(place, {
-      here,
       count: counts[place.id] ?? 0,
       spend: ctx.reads.spend.find(spent => spent.place === place.id),
       now: ctx.now,
@@ -147,7 +146,7 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
 
 /** The one computer row on its own, for the Add a computer sheet's joined screen. */
 export function ComputerRow({ place, now }: { place: PlaceView; now: number }) {
-  const data = computerRowData(place, { here: false, count: 0, now });
+  const data = computerRowData(place, { count: 0, now });
   const { kind: _row, ...row } = data;
   return (
     <Card id="joined">
@@ -216,8 +215,8 @@ function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean;
   const acts = useAgentActs({ placeId: place.id });
   const skills = useSkillActs({ placeId: place.id });
   const servers = useServerActs({ placeId: place.id });
-  const away = absentOf(place, ctx.now, here)?.away ?? null;
-  const name = here ? THIS_COMPUTER_WORD : placeName(place);
+  const away = absentOf(place, ctx.now)?.away ?? null;
+  const name = placeName(place);
   return (
     <AgentsManager
       shell="page"
@@ -226,7 +225,7 @@ function ComputerAgents({ place, here, ctx }: { place: PlaceView; here: boolean;
       reading={reading}
       error={error}
       on={name}
-      ctx={{ where: here ? "here" : "box", ...(here ? {} : { computer: placeName(place) }), heldWhy: away, ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }), ...(skills === undefined ? {} : { skills }), ...(servers === undefined ? {} : { servers }) }}
+      ctx={{ where: here ? "here" : "box", ...(here ? {} : { computer: name }), heldWhy: away, ...(tools === undefined ? {} : { tools }), ...(acts === undefined ? {} : { acts }), ...(skills === undefined ? {} : { skills }), ...(servers === undefined ? {} : { servers }) }}
       onRefresh={refresh}
       now={ctx.now}
       misses={recipeMissLines(place.provision?.rows ?? [])}
@@ -289,7 +288,7 @@ function cloudCards(ctx: SettingsContext, place: PlaceView, view: SealedImageVie
           kind: "row" as const,
           id: "remove",
           title: WHERE_WORDS.removeTitle(placeName(place)),
-          description: WHERE_WORDS.removeCloudDescription,
+          description: WHERE_WORDS.removeCloudDescription(hereName(ctx.places)),
           control: <RemoveControl place={place} holding={holding} imageBytes={undefined} onRemoved={onRemoved} />,
         },
       ],
@@ -321,7 +320,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
   const took = place.dialled?.answered === true && place.dialled.roundTripMs !== undefined ? `, ${place.dialled.roundTripMs} ms` : "";
   const copies = copiesWord(place, here);
   const landing = landingOn(ctx, place);
-  const ports = landing === null ? "" : portsWord(landing.capabilities, undefined, APP_PLATFORM);
+  const ports = landing === null ? "" : portsWord(landing.capabilities, undefined, placeName(place));
   const spend = ctx.reads.spend.find(row => row.place === place.id);
 
   const facts: SettingsItem[] = [
@@ -385,7 +384,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
                 kind: "row" as const,
                 id: "remove",
                 title: WHERE_WORDS.removeTitle(placeName(place)),
-                description: WHERE_WORDS.removeDescription(placeName(place)),
+                description: WHERE_WORDS.removeDescription(placeName(place), hereName(ctx.places)),
                 control: <RemoveControl place={place} holding={holding} imageBytes={imageBytes} onRemoved={onRemoved} />,
               },
             ],

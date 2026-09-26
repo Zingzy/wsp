@@ -9,7 +9,7 @@
 // values a person typed go into this computer's own file as typed; another
 // computer's file names a variable for each, and the value goes to the vault.
 import { posix } from "node:path";
-import { CONFIG_LINK_EXIT, MCP_AGENTS, agentName, rowVariableLine, catalogEntry, configRefusal, configWriteLine, insideBase, type McpAgent, type McpTransport } from "@wsp/catalog";
+import { CONFIG_LINK_EXIT, MCP_AGENTS, agentName, rowVariableLine, catalogEntry, configRefusal, configWriteLine, insideBase, stillStands, type McpAgent, type McpTransport } from "@wsp/catalog";
 import { expand, nodeHost, tilde, type Host } from "@wsp/collect";
 import { configLanded } from "@wsp/engine";
 import {
@@ -33,8 +33,17 @@ const usage = (sentence: string): Error => Object.assign(new Error(sentence), { 
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+const VARIABLE_REF = /\$\{([^}]*)\}/g;
 
-/** The server a person typed, as the format modules place it; refused in a sentence that never repeats a value. */
+/** The server with every `${NAME}` its arguments or address hold for a variable the person gave written as `to`
+ * says; `at` is the argument or the address it stands in. Any other `${...}` stands as typed. */
+function withVariables(t: McpTransport, given: Readonly<Record<string, string>>, to: (name: string, at: string) => string): McpTransport {
+  const put = (at: string): string => at.replace(VARIABLE_REF, (ref, name: string) => (Object.hasOwn(given, name) ? to(name, at) : ref));
+  return t.kind === "stdio" ? { ...t, args: t.args.map(put) } : { ...t, url: put(t.url) };
+}
+
+/** The server a person typed, as the format modules place it, each variable an argument or the address names still
+ * named there; refused in a sentence that never repeats a value. */
 export function serverTransport(ask: Omit<ServerAdd, "agent" | "name" | "project">): McpTransport {
   const command = ask.command?.trim() ?? "";
   const url = ask.url?.trim() ?? "";
@@ -42,16 +51,18 @@ export function serverTransport(ask: Omit<ServerAdd, "agent" | "name" | "project
   const headers = ask.headers ?? {};
   if (command !== "" && url !== "") throw usage("A server is a command or an address, not both.");
   if (command === "" && url === "") throw usage("A server needs a command to run or an address to reach.");
+  for (const [name, value] of Object.entries(env)) {
+    if (!ENV_NAME.test(name)) throw usage("A variable's name is letters, digits and underscores, not starting with a digit, so nothing was written.");
+    if (hasControlChar(value)) throw usage("A variable's value holds a control character, so nothing was written.");
+  }
   if (command !== "") {
     if (Object.keys(headers).length > 0) throw usage("Headers go with an address; a command takes variables.");
     if (hasControlChar(command) || (ask.args ?? []).some(hasControlChar)) throw usage("The command holds a control character, so nothing was written.");
-    for (const [name, value] of Object.entries(env)) {
-      if (!ENV_NAME.test(name)) throw usage("A variable's name is letters, digits and underscores, not starting with a digit, so nothing was written.");
-      if (hasControlChar(value)) throw usage("A variable's value holds a control character, so nothing was written.");
-    }
     return { kind: "stdio", command, args: [...(ask.args ?? [])], env: { ...env } };
   }
-  if (Object.keys(env).length > 0) throw usage("Variables go with a command; an address takes headers.");
+  const named = [...url.matchAll(VARIABLE_REF)].map(m => m[1]);
+  const stray = Object.keys(env).find(name => !named.includes(name));
+  if (stray !== undefined) throw usage(`An address takes headers, and a variable only where it names it, so ${stray} goes in the address as \${${stray}} or not at all.`);
   let parsed: URL | undefined;
   try {
     parsed = hasControlChar(url) ? undefined : new URL(url);
@@ -193,18 +204,27 @@ export function serversActs(o: ServersActsOptions = {}): ServersActs {
       const read = await readConfig(road, config);
       const shown = tilde(road.host.home, read.file);
       if (read.text !== undefined && defines(config, read.text, road.host.home, { agent: ask.agent, name: ask.name }) !== undefined) throw usage(serverThereRefusal(ask.name, shown));
-      const placed = formatted(shown, () => config.agent.mcp.format.place(read.text, ask.name, transport));
+      const given = ask.env ?? {};
+      const format = config.agent.mcp.format;
       // This computer's own file is the person's and holds the value as they typed it; every other holds names.
       if (on.kind === "here") {
+        const placed = formatted(shown, () => format.place(read.text, ask.name, withVariables(transport, given, name => given[name]!)));
         await writeConfig(road, config, read, placed.text);
         return { file: shown };
       }
-      const named = await config.agent.mcp.format.refer(placed.text, ask.name).catch((e: unknown) =>
+      const byName = withVariables(transport, given, (name, at) => {
+        if (format.argRef === undefined) throw usage(`${agentName(ask.agent)} reads no variable inside a server's ${transport.kind === "stdio" ? "arguments" : "address"}, so ${at} cannot travel without its value and nothing was written.`);
+        return format.argRef(name);
+      });
+      const placed = formatted(shown, () => format.place(read.text, ask.name, byName));
+      const named = await format.refer(placed.text, ask.name).catch((e: unknown) =>
         formatted(shown, () => {
           throw e;
         }),
       );
-      const values = Object.fromEntries(named.servers.flatMap(sv => Object.entries(sv.values)));
+      formatted(shown, () => stillStands(named.entries, [{ name: ask.name, values: given }]));
+      // An address's variables live in no entry of the file, so only the vault carries them.
+      const values: Record<string, string> = { ...given, ...Object.fromEntries(named.servers.flatMap(sv => Object.entries(sv.values))) };
       for (const name of Object.keys(values)) {
         const row = rowOwning(name);
         if (row !== undefined) throw usage(`${rowVariableLine(name, row)}.`);

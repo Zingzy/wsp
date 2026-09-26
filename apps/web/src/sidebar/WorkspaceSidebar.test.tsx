@@ -2,12 +2,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type Capabilities, type ProjectView, type WorkspaceView , type WorkspaceLanding } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type Capabilities, type PlaceView, type ProjectView, type WorkspaceView , type WorkspaceLanding } from "@wsp/protocol";
 import { workspaceActions } from "../actions/workspaceActions.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
 import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
-import { hereWord } from "@wsp/protocol";
 import { WorkspaceSidebar } from "./WorkspaceSidebar.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "./words.js";
 
@@ -59,7 +58,8 @@ const workspace = (id: string, name: string, projectId: string): WorkspaceView =
 });
 
 const SHARES = { copies: true, ownNetwork: false } as unknown as Capabilities;
-const landing: WorkspaceLanding = { name: "This Mac", capabilities: SHARES };
+const landing: WorkspaceLanding = { name: "here", capabilities: SHARES };
+const MAC_ROW: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true };
 
 function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: WorkspaceView[] }) {
   const create = vi.fn(async (_project: string, name: string) => ({ ...workspace("ws_new", name, "pr_1") }));
@@ -70,7 +70,7 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
     watchStatuses: async () => [],
     capabilities: async () => SHARES,
     getGolden: async () => ({ head: null, versions: [] }),
-    placesList: async () => ({ places: [], adds: [] }),
+    placesList: async () => ({ places: [MAC_ROW], adds: [] }),
     projectsList: async () => projects,
     projectsAdd: async () => project("pr_new", "new"),
     projectsRemove: async () => {},
@@ -89,7 +89,7 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
     sessions: {},
     launches: {},
     creations: [],
-    places: [],
+    places: [MAC_ROW],
     landings: Object.fromEntries(projects.map(p => [p.id, landing])),
     selectedId: null,
     selectedThreadId: null,
@@ -128,7 +128,7 @@ describe("the sidebar under the four nouns", () => {
     expect(depthOf("pricing page")).toBe(1);
     // A project row is two lines, its computer over its name, sentence case, no caps and no letter-spacing.
     expect(rowOf("spoo").className).toContain("h-13");
-    expect(rowOf("spoo").querySelector("[data-project-computer]")!.textContent).toBe(hereWord(true));
+    expect(rowOf("spoo").querySelector("[data-project-computer]")!.textContent).toBe("zingzy's MacBook Pro");
     expect(rowOf("spoo").className).not.toMatch(/uppercase|tracking-/);
     expect(rowOf("spoo").querySelector("[data-project-name]")!.className).not.toMatch(/uppercase|tracking-/);
     // The count rides the row while its children are shut, so a shut project still says how much it holds.

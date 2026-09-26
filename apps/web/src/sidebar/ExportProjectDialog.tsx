@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Exporting a folder from a workspace's machine to this Mac, the reverse of
+// Exporting a folder from a workspace's machine to the host's computer, the reverse of
 // the import: one container of quiet sections, the folder on the machine,
 // which opens as the thread's own, the folder here, which mirrors it until the
 // person edits or picks one, the agents with threads on the workspace as
@@ -9,7 +9,7 @@
 // before the destination is checked, so an existing folder comes back as the
 // runtime's refusal naming it and its file count, the one loud line, and the
 // action becomes Replace and export. The desktop shell gives the folder here
-// as a picker row; a browser tab browses this Mac's own folders under the
+// as a picker row; a browser tab browses the host's own folders under the
 // path input, and the folder lands inside a browsed one as it would inside a
 // picked one.
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -22,6 +22,8 @@ import { useWorkingFolder } from "../files/root.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
+import { onceNamed } from "../settings/format.js";
+import { hereName } from "../settings/places.js";
 import { agentRows, agentsRequest, exportLandedLine, exportProgress, isExportOf, pickedDest } from "./exportProject.js";
 import { FolderBrowser } from "./FolderBrowser.js";
 import { useLastFolderParent } from "./lastFolderStore.js";
@@ -34,6 +36,7 @@ const DEST_PLACEHOLDER = "/Users/you/code/project";
 
 export function ExportProjectDialog({ workspace, onClose }: { workspace: WorkspaceView; onClose: () => void }) {
   const api = useStore(s => s.api);
+  const here = useStore(s => hereName(s.places));
   const sessions = useStore(s => s.sessions[workspace.id]);
   const rows = useMemo(() => agentRows(sessions), [sessions]);
   const folder = useWorkingFolder(workspace.id);
@@ -101,8 +104,8 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
   const settled = busy || phase === "done";
   const ready = source.trim() !== "" && dest.trim() !== "";
   const primary = phase === "done" ? "Done" : refusal?.exists ? "Replace and export" : "Export";
-  const progress = phase === "idle" ? null : exportProgress(events);
-  const said = slotWords({ refusal, landed: result === null ? null : exportLandedLine(result, sent.current.source), progress, idle: "" });
+  const progress = phase === "idle" ? null : exportProgress(events, here);
+  const said = slotWords({ refusal, landed: result === null ? null : onceNamed(here, h => exportLandedLine(result, sent.current.source, h)), progress, idle: "" });
   const outcomeOf = (agent: string): ProjectAgentResult | undefined => result?.agents.find(a => a.agent === agent);
 
   return (
@@ -111,7 +114,7 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
         <div className="flex min-h-0 flex-col">
           <DialogHeader>
             <DialogTitle>Export a project</DialogTitle>
-            <DialogDescription>{exportFromLine(workspace.name)}</DialogDescription>
+            <DialogDescription>{onceNamed(here, h => exportFromLine(workspace.name, h))}</DialogDescription>
           </DialogHeader>
           <DialogPanel className="flex flex-col">
             <TripSection k="source" label="Folder on the task" htmlFor="export-source">
@@ -127,7 +130,7 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
                 }}
               />
             </TripSection>
-            <TripSection k="dest" label="Folder on this Mac" {...(bridge === undefined ? { htmlFor: "export-dest" } : {})}>
+            <TripSection k="dest" label={onceNamed(here, h => `Folder on ${h}`)} {...(bridge === undefined ? { htmlFor: "export-dest" } : {})}>
               {bridge === undefined ? (
                 <>
                   <FolderField

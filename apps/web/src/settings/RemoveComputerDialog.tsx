@@ -13,7 +13,7 @@ import { Button, NEUTRAL_RING } from "../components/ui/button.js";
 import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
 import { WHERE_WORDS } from "./format.js";
-import { placeIsOffline, removeSentence, removeTitle, type PlaceHolding } from "./places.js";
+import { hereName, placeIsOffline, removeSentence, removeTitle, type PlaceHolding } from "./places.js";
 import { CopyRow, RefusalSlot } from "./sheetParts.js";
 
 /** What the app says when its own client carries no remove road: the same shape the forget dialog's refusal has. */
@@ -21,6 +21,7 @@ export const CANNOT_REMOVE = "this wsp cannot take a computer back out from here
 
 export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenChange, onRemoved }: { place: PlaceView; holding: PlaceHolding; imageBytes?: number; open: boolean; onOpenChange: (open: boolean) => void; onRemoved?: () => void }) {
   const api = useStore(s => s.api);
+  const places = useStore(s => s.places);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<{ said: string; fix?: string } | null>(null);
 
@@ -57,7 +58,7 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
       <AlertDialogPopup data-remove-place-dialog>
         <AlertDialogHeader>
           <AlertDialogTitle data-k="remove-title">{removeTitle(place)}</AlertDialogTitle>
-          <AlertDialogDescription data-k="remove-sentence">{removeSentence(place, holding, imageBytes)}</AlertDialogDescription>
+          <AlertDialogDescription data-k="remove-sentence">{removeSentence(place, holding, hereName(places), imageBytes)}</AlertDialogDescription>
         </AlertDialogHeader>
         {placeIsOffline(place) ? (
           <div className="flex flex-col gap-3 px-6 pt-1 pb-6">

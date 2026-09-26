@@ -16,17 +16,20 @@ import { baseName } from "../files/entries.js";
 import { FolderCrumbRow } from "../files/FolderBreadcrumbs.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
+import { onceNamed } from "../settings/format.js";
+import { hereName } from "../settings/places.js";
 
 const ROW = "flex h-7 w-full min-w-0 items-center gap-2 rounded-sm px-1 text-left text-xs outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
 
 /** What the list has to say about itself: the level in the protocol's own words, or why there is nothing to show. */
-function stateWords(listing: HostFolderListing | null, error: string | null): string {
+function stateWords(listing: HostFolderListing | null, error: string | null, here: string): string {
   if (error !== null) return folderRefusalLine(error);
-  return listing === null ? "Reading the folders on this Mac." : folderLevelLine(listing);
+  return listing === null ? onceNamed(here, h => `Reading the folders on ${h}.`) : folderLevelLine(listing);
 }
 
 export function FolderBrowser({ disabled, start, onPick }: { disabled: boolean; start?: string; onPick: (dir: string) => void }) {
   const browse = useStore(s => s.api?.hostFolders);
+  const here = useStore(s => hereName(s.places));
   const [asked, setAsked] = useState<string | undefined>(start);
   // Only the start the memory gave is fallen back on without a word; every level after it was asked for by hand.
   const [remembered, setRemembered] = useState(start !== undefined);
@@ -96,8 +99,8 @@ export function FolderBrowser({ disabled, start, onPick }: { disabled: boolean; 
         ))}
       </ul>
       <p className="flex h-7 min-w-0 items-center gap-2 font-mono text-[11px] text-muted-foreground">
-        <span data-k="browse-state" className="min-w-0 truncate" title={stateWords(listing, error)}>
-          {stateWords(listing, error)}
+        <span data-k="browse-state" className="min-w-0 truncate" title={stateWords(listing, error, here)}>
+          {stateWords(listing, error, here)}
         </span>
         {listing !== null && listing.hidden > 0 ? (
           <button type="button" className="ml-auto shrink-0 rounded-sm px-1 underline decoration-dotted outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" data-k="browse-hidden" onClick={() => setHidden(!hidden)}>

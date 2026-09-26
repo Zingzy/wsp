@@ -13,7 +13,7 @@
 // would start another build is held with where it is building.
 import { PencilIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { HERE_PLACE_ID, copyAsksSignIns, initAgentStep, initJobBuilding, initJobOver, initSignInWaitedOn, signInWaitLine, type PlaceView, type SealedImageView } from "@wsp/protocol";
+import { copyAsksSignIns, initAgentStep, initJobBuilding, initJobOver, initSignInWaitedOn, signInWaitLine, type PlaceView, type SealedImageView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import type { ChipItem } from "../components/ui/chips.js";
 import { Spinner } from "../components/ui/spinner.js";
@@ -48,7 +48,7 @@ export function useImageStanding(place: PlaceView, ctx: SettingsContext): { name
   const view = ctx.reads.image;
   const state = view === null ? undefined : imageState(place, { view, job, frames });
   if (view === null || state === undefined) return undefined;
-  return { name: placeName(place, place.id === HERE_PLACE_ID), state, view, title: standingTitle(state, view.image !== null) };
+  return { name: placeName(place), state, view, title: standingTitle(state, view.image !== null) };
 }
 
 /** The title a state stands under: with no image anywhere, nothing here is a copy yet. */
@@ -87,7 +87,7 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
   const [putAway, setPutAway] = useState<string | null>(null);
   const buildHere = !open && job !== null && job.place?.id === place.id && !initAgentStep(job) && (building || job.phase === "failed" || job.phase === "cancelled") && putAway !== job.id;
   const buildingAt = building ? ctx.places.find(p => p.id === job.place?.id) : undefined;
-  const buildHeld = building ? IMAGE_WORDS.buildingOn(buildingAt === undefined ? (job.place?.name ?? name) : placeName(buildingAt, buildingAt.id === HERE_PLACE_ID)) : ctx.api?.initStart === undefined ? WHERE_WORDS.notYet : undefined;
+  const buildHeld = building ? IMAGE_WORDS.buildingOn(buildingAt === undefined ? (job.place?.name ?? name) : placeName(buildingAt)) : ctx.api?.initStart === undefined ? WHERE_WORDS.notYet : undefined;
   const openRecipe = (): void => setRecipeOpen(true);
   const asked = useSettingsStore(s => s.recipeAsked === place.id);
   const heldNow = buildHeld !== undefined;

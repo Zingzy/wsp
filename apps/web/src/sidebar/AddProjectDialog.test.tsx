@@ -8,7 +8,7 @@ import { AddProjectDialog } from "./AddProjectDialog.js";
 import { ADD_PROJECT_WORDS } from "./words.js";
 import { pickOption } from "../../test/select.js";
 
-const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true, takesForks: false } as PlaceView;
+const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", label: "zingzy's MacBook Pro", default: false, present: true, takesForks: false } as PlaceView;
 const BOX: PlaceView = { id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true } as PlaceView;
 const CLOUD: PlaceView = { id: "p_2", kind: "provider", name: "ascii", default: false, present: true, takesForks: true } as PlaceView;
 const IDLE: PlaceView = { id: "p_3", kind: "computer", name: "idle", default: false, present: true, takesForks: false } as PlaceView;
@@ -131,7 +131,7 @@ describe("Add a project", () => {
     await settle();
     fireEvent.change(t.field(), { target: { value: "https://github.com/dev/spoo.git" } });
     expect(t.rows()).toHaveLength(0);
-    expect(t.dialog().textContent).toContain(ADD_PROJECT_WORDS.noCloneHere);
+    expect(t.dialog().textContent).toContain("A repository address is cloned on a box, Solari or ASCII. Projects on zingzy's MacBook Pro are folders you already have.");
     expect(t.addButton().disabled).toBe(true);
   });
 

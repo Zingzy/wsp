@@ -44,4 +44,8 @@
   --sidebar-hover-ink: oklch(21% 0.006 285.885);
   --sidebar-quiet: oklch(53.5% 0.016 285.938);
   --sidebar-input: oklch(87.1% 0.006 286.286);
+  --status-input: #4f39f6;
+  --status-working: #be185d;
+  --status-failed: #c10007;
+  --status-done: #007a55;
 }

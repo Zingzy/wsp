@@ -126,7 +126,7 @@ describe("workspace actions", () => {
   });
 
   it("the start of a daemon is drawn only where this host holds the process that is missing", () => {
-    const reading = { word: "No daemon", said: "this Mac's daemon is not running", sentence: "this Mac's daemon is not running", line: "daemon not running, start it", start: "Start it" } as WorkspaceTarget["absent"];
+    const reading = { word: "No daemon", said: "zingzy's MacBook Pro's daemon is not running", sentence: "zingzy's MacBook Pro's daemon is not running", line: "daemon not running, start it", start: "Start it" } as WorkspaceTarget["absent"];
     const down = resolveActions(workspaceActions, workspace("running", { kind: "local", absent: reading }), workspaceVerbs());
     expect(actionById(down, "start-daemon").refusal).toBeNull();
     expect(actionById(resolveActions(workspaceActions, workspace("running", { kind: "local", absent: reading }), workspaceVerbs({ restartDaemon: undefined })), "start-daemon").refusal).toBe("This client cannot start a daemon");
@@ -218,7 +218,8 @@ describe("workspace actions", () => {
     // The computer the host runs on carries the one reading of its own daemon, so a verb refused on it names the
     // part that is down; every other kind's silence is its computer's link and is read off the places list.
     const here = { ...view, kind: "local" as const };
-    expect(workspaceTarget(here, { ...status, kind: "local", phase: "running", machineState: "running", reach: { state: "unreachable" } }, []).absent?.said).toBe("this Mac's daemon is not running");
+    const MAC_ROW: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true };
+    expect(workspaceTarget(here, { ...status, kind: "local", phase: "running", machineState: "running", reach: { state: "unreachable" } }, [MAC_ROW]).absent?.said).toBe("zingzy's MacBook Pro's daemon is not running");
     expect(workspaceTarget(here, { ...status, kind: "local", phase: "running", machineState: "running", reach: { state: "reachable" } }, []).absent).toBeNull();
     // A fork at a provider whose computer has stopped answering reads that computer's own sentence off the list,
     // which is the same door and not a second rule: the reading is null while nothing on the list is away.
@@ -231,9 +232,9 @@ describe("workspace actions", () => {
   });
 
   it("refuses a preview on this computer in the computer's own sentence, never by calling it unreachable", () => {
-    const here = workspace("unreachable", { kind: "local", absent: ownDaemonDown("this Mac") });
+    const here = workspace("unreachable", { kind: "local", absent: ownDaemonDown("zingzy's MacBook Pro") });
     const actions = resolveActions(workspaceActions, here, workspaceVerbs({ forget: vi.fn() }));
-    expect(actionById(actions, "open-browser").refusal).toBe("this Mac's daemon is not running");
+    expect(actionById(actions, "open-browser").refusal).toBe("zingzy's MacBook Pro's daemon is not running");
     for (const action of actions) expect(action.refusal ?? "").not.toMatch(/unreachable/i);
     // Neither road out of gone is drawn on a machine that is merely not answering: it is still there.
     expect(actionIfAny(actions, "forget")).toBeUndefined();

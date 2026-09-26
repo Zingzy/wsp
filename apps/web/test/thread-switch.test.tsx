@@ -193,8 +193,8 @@ describe("switching threads while a turn runs", () => {
     emit({ type: "session.delta", ...B, at: T0 + 61_000, kind: "text", text: " Found it in the keychain." });
     expect(center().queryByText(/Found it in the keychain/)).toBeNull();
     expect(center().queryByText(/Working for/)).toBeNull();
-    expect(threadRow("do you have access").querySelector("[data-thread-state]")!.textContent).toBe("Working");
-    expect(threadRow("make me a simple server").querySelector("[data-thread-state]")).toBeNull();
+    expect(threadRow("do you have access").querySelector("[data-thread-status]")!.getAttribute("data-thread-status")).toBe("working");
+    expect(threadRow("make me a simple server").querySelector("[data-thread-status]")!.getAttribute("data-thread-status")).toBe("resting");
   });
 
   it("switching back shows the progress streamed meanwhile and keeps streaming", async () => {
@@ -246,7 +246,7 @@ describe("switching threads while a turn runs", () => {
     expect(center().queryByText(/Found it in the keychain/)).toBeNull();
     emit({ type: "session.delta", ...A2, at: T0 + 91_300, kind: "text", text: " Wiring it in." });
     await center().findByText(/Adding GET \/ready\. Wiring it in\./);
-    expect(threadRow("do you have access").querySelector("[data-thread-state]")!.textContent).toBe("Working");
+    expect(threadRow("do you have access").querySelector("[data-thread-status]")!.getAttribute("data-thread-status")).toBe("working");
   });
 
   it("after a reload with two threads running, the latest view shows the last started one and drops the other's deltas", async () => {

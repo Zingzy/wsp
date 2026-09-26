@@ -45,7 +45,8 @@ const box: PlaceView = {
   lastSeenAt: "2026-09-12T11:59:00.000Z",
 };
 
-const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, takesForks: false, engine: "none", shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 210 * 1024 ** 3 };
+const MAC = "zingzy's MacBook Pro";
+const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: MAC, default: true, present: true, takesForks: false, engine: "none", shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 210 * 1024 ** 3 };
 const laptop: PlaceView = {
   id: "p_1",
   kind: "computer",
@@ -119,7 +120,7 @@ describe("the Computers list", () => {
     useStore.setState({ places: [here, laptop], workspaces: [mine, onLaptop] });
     await mountComputers(computersApi().api);
     expect(listIds()).toEqual(["here", "p_1"]);
-    expect(listRow("here").querySelector("[data-settings-title]")?.textContent).toBe("This Mac");
+    expect(listRow("here").querySelector("[data-settings-title]")?.textContent).toBe(MAC);
     expect(listRow("here").textContent).not.toContain("zingzy-mbp");
     expect(listRow("here").querySelector("[data-settings-mark]")?.textContent).toBe("default");
     expect(factsOf("here")).toBe(`${here.shape!.cpu} cores · 16 GB · 210 GB free · 1 task`);
@@ -313,7 +314,7 @@ describe("a computer's own page", () => {
     expect(page).not.toContain("127.0.0.1 dials in");
   });
 
-  it("this Mac's page has no Connection card and no acts, and reads its agents, skills and servers off this computer", async () => {
+  it("the Mac's page has no Connection card and no acts, and reads its agents, skills and servers off this computer", async () => {
     const asked: AgentsTarget[] = [];
     useStore.setState({ places: [here] });
     await mountComputers(computersApi({ agentsRead: async (target: AgentsTarget) => (asked.push(target), AGENTS_REPORT) }).api, { kind: "computer", id: "here" });
@@ -322,7 +323,7 @@ describe("a computer's own page", () => {
     expect(agentTitles()).toEqual(["Claude Code", "Codex", "OpenCode", "Pi"]);
     // The manager stands where the Agents card stood, the section named for all three kinds.
     expect(document.querySelector("[data-settings-card='agents'] section")?.getAttribute("aria-label")).toBe("Agents, MCP servers and skills");
-    expect(document.querySelector("[data-settings-card='agents'] [data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on this Mac and in its projects.");
+    expect(document.querySelector("[data-settings-card='agents'] [data-k=agents-line]")?.textContent).toBe(`Agents, MCP servers and skills on ${MAC} and in its projects.`);
     expect(document.querySelector("[data-settings-card='agents'] [data-settings-head]")).toBeNull();
   });
 
@@ -330,14 +331,14 @@ describe("a computer's own page", () => {
     useStore.setState({ places: [here] });
     const projects = [{ id: "pr_app", name: "app", path: "~/code/app" }];
     await mountComputers(computersApi({ agentsRead: async () => ({ ...AGENTS_REPORT, projects }) }).api, { kind: "computer", id: "here" });
-    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on this Mac and in its projects.");
+    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe(`Agents, MCP servers and skills on ${MAC} and in its projects.`);
   });
 
   it("says so when a computer reported no agent at all, the head naming that computer", async () => {
     useStore.setState({ places: [here, { ...laptop, present: true, agents: [] }] });
     await mountComputers(computersApi({ agentsRead: async () => EMPTY_REPORT }).api, { kind: "computer", id: "here" });
     expect(document.querySelector("[data-k='agents-empty'] .border-dashed")?.textContent).toBe("no agents");
-    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe("Agents, MCP servers and skills on this Mac.");
+    expect(document.querySelector("[data-k=agents-line]")?.textContent).toBe(`Agents, MCP servers and skills on ${MAC}.`);
     act(() => useSettingsStore.getState().go({ kind: "computer", id: "p_1" }));
     await settle();
     expect(document.querySelector("[data-k='agents-empty'] .border-dashed")?.textContent).toBe("no agents");
@@ -410,7 +411,7 @@ describe("a computer's own page", () => {
     expect(wordOf("ports")).toBe("own network");
     act(() => useSettingsStore.getState().go({ kind: "computer", id: "here" }));
     await settle();
-    expect(wordOf("ports")).toBe("shares this Mac's ports");
+    expect(wordOf("ports")).toBe(`shares ${MAC}'s ports`);
     expect(rowOf("copies")).toBeNull();
   });
 
@@ -536,10 +537,10 @@ describe("a computer's own page", () => {
     withWorkspaces();
     await mountComputers(computersApi({ removePlace: async (id: string) => (removed.push(id), { removed: true, swept: [] }) } as unknown as Partial<Api>).api, { kind: "computer", id: "p_1" });
     expect(rowOf("remove")?.querySelector("[data-settings-title]")?.textContent).toBe("Remove old-macbook");
-    expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeDescription("old-macbook"));
+    expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeDescription("old-macbook", MAC));
     fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
     expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
-    expect(document.querySelector("[data-k='remove-sentence']")?.textContent).toBe("wsp and its task come off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. The task's record and 2 threads leave this Mac. It is offline; what is on it is swept the next time it connects.");
+    expect(document.querySelector("[data-k='remove-sentence']")?.textContent).toBe("wsp and its task come off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. The task's record and 2 threads leave zingzy's MacBook Pro. It is offline; what is on it is swept the next time it connects.");
     expect(document.querySelector("[data-k='leave-line']")?.textContent).toBe(PLACES_WORDS.remove.leaveLine);
     expect(document.querySelector("[data-remove-place-dialog]")?.textContent).toContain(imageCopyStaysLine());
     fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
@@ -590,7 +591,7 @@ describe("a computer's icon", () => {
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false, computerLook: { p_2: { icon: "home" } } } });
     await mountComputers(computersApi().api);
     expect(listRow("p_2").querySelector("[data-computer-glyph]")?.classList.contains("lucide-house")).toBe(true);
-    expect(listRow("here").querySelector("[data-computer-glyph]")?.classList.contains("lucide-monitor")).toBe(true);
+    expect(listRow("here").querySelector("[data-computer-glyph]")?.classList.contains("lucide-laptop")).toBe(true);
   });
 });
 
@@ -623,7 +624,7 @@ describe("the cloud's page", () => {
     expect(document.querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("none");
     expect(document.querySelector("[data-k='edit-recipe']")?.textContent).toBe(IMAGE_WORDS.holdsEdit);
     expect([...document.querySelectorAll("[data-k='image-copy']")].map(row => [row.getAttribute("data-place"), row.querySelector("[data-settings-word]")?.textContent])).toEqual([["hetzner", expect.stringMatching(new RegExp(`^v1 \\(${COPY_CURRENT}\\), 4\\.2 GB, `))]]);
-    expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeCloudDescription);
+    expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeCloudDescription(MAC));
     fireEvent.click(document.querySelector("[data-k='edit-recipe']")!);
     await settle();
     // The recipe opens in the card.

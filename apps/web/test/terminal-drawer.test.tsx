@@ -520,13 +520,14 @@ describe("panes on a workspace that is not running", () => {
     const here = { ...PANE_WS, kind: "local" as const, machineId: "local" };
     act(() =>
       useStore.setState({
+        places: [{ id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true }],
         workspaces: [here],
         statuses: { [WS]: { ...paneStatus({ reach: { state: "unreachable" } }), kind: "local" as const, machineId: "local" } },
       }),
     );
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
-    await screen.findByText("this Mac's daemon is not running");
+    await screen.findByText("zingzy's MacBook Pro's daemon is not running");
     await act(() => openPanelTerminal(WS));
     expect(lastNotice()).toBeNull();
   });
@@ -539,13 +540,14 @@ describe("panes on a workspace that is not running", () => {
     act(() =>
       useStore.setState({
         api,
+        places: [{ id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true }],
         workspaces: [here],
         statuses: { [WS]: { ...paneStatus({ reach: { state: "unreachable" } }), kind: "local" as const, machineId: "local" } },
       }),
     );
     useTerminalDrawerStore.getState().setOpen(WS, true);
     render(<WorkspaceTerminalDrawer workspaceId={WS} />);
-    await screen.findByText("this Mac's daemon is not running");
+    await screen.findByText("zingzy's MacBook Pro's daemon is not running");
     // One line and one button: no second sentence saying in words what the button already says.
     expect(document.body.textContent).not.toContain("Unreachable");
     expect(document.body.textContent).not.toContain("wake it");

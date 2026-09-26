@@ -8,17 +8,27 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, provisionWord, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, HERE_PLACE_ID, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, provisionWord, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { PROVISION_OUTCOME_WORDS, WHERE_WORDS } from "./format.js";
 import { CLOUD_NAMES } from "./providers.js";
 
-/** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
- * its hostname; a provider carries the name its own row in the provider table gives it, since the host words it by
+/** What a person reads a row as: the name its owner gave the computer where it keeps one, a Mac's own "zingzy's
+ * MacBook Pro"; a provider carries the name its own row in the provider table gives it, since the host words it by
  * the id WSP_PROVIDER holds and nobody types that; every other computer carries the name it reported. */
-export function placeName(place: PlaceView, here = false): string {
-  if (here) return place.label ?? hereWord(true);
+export function placeName(place: PlaceView): string {
+  if (place.label !== undefined) return place.label;
   if (!isProviderPlace(place)) return place.name;
   return CLOUD_NAMES.find(row => row.id === place.name)?.name ?? place.name;
+}
+
+/** Whether this row is the computer the host runs on: the one predicate, read by id and never by position. */
+export const isHere = (place: PlaceView | undefined): boolean => place?.id === HERE_PLACE_ID;
+
+/** The computer the host runs on, by its own name, for every sentence that says where something is here; empty until
+ * the places list holds that row, and every sentence that needs it waits with it (onceNamed). */
+export function hereName(places: readonly PlaceView[]): string {
+  const here = places.find(isHere);
+  return here === undefined ? "" : placeName(here);
 }
 
 /** Whether this row is the provider this host forks on rather than a computer somebody owns. The one reading, so a
@@ -50,24 +60,25 @@ export const threadWord = (n: number): string => `${n} ${n === 1 ? "thread" : "t
 
 /** What a remove takes, computed from what the computer holds. A computer keeps its own files and is left as it
  * was; a provider's workspaces are deleted where they stand and its key is forgotten here. The second sentence is
- * about this Mac alone, so a computer holding nothing gets no second sentence.
+ * about the computer the host runs on alone, so a computer holding nothing gets no second sentence.
  *
  * The copy of the image is one of the things left as they are: it sits in that computer's own workspace store,
  * which no sweep walks, and only a computer that runs workspaces ever held one. The clause is the protocol's, the
  * same one the Add sheet says before any of this. */
-export function removeSentence(place: PlaceView, holding: PlaceHolding, imageBytes?: number): string {
+export function removeSentence(place: PlaceView, holding: PlaceHolding, here: string, imageBytes?: number): string {
+  if (here === "") return "";
   const count = holding.workspaces.length;
   const threads = heldThreads(holding);
   const held = count === 1 ? "its task" : `its ${count} tasks`;
   const name = placeName(place);
   const lines: string[] = [];
   if (isProviderPlace(place)) {
-    lines.push(count === 0 ? `The key for ${name} is forgotten on this Mac.` : `Its ${count === 1 ? "task is" : `${count} tasks are`} deleted at ${name} and the key is forgotten on this Mac.`);
-    if (count > 0) lines.push(`${count === 1 ? "Its record" : "Their records"} and ${threadWord(threads)} leave this Mac.`);
+    lines.push(count === 0 ? `The key for ${name} is forgotten on ${here}.` : `Its ${count === 1 ? "task is" : `${count} tasks are`} deleted at ${name} and the key is forgotten on ${here}.`);
+    if (count > 0) lines.push(`${count === 1 ? "Its record" : "Their records"} and ${threadWord(threads)} leave ${here}.`);
   } else {
     const stays = `, and ${imageCopyStaysLine(imageBytes === undefined ? undefined : fmtBytes(imageBytes))}`;
     lines.push(count === 0 ? `wsp comes off ${name}, which is otherwise left as it is${stays}.` : `wsp and ${held} come off ${name}, which is otherwise left as it is${stays}.`);
-    if (count > 0) lines.push(`${count === 1 ? "The task's record" : "The tasks' records"} and ${threadWord(threads)} leave this Mac.`);
+    if (count > 0) lines.push(`${count === 1 ? "The task's record" : "The tasks' records"} and ${threadWord(threads)} leave ${here}.`);
   }
   // A computer that is not answering cannot be swept now, and the sentence says when it will be.
   if (placeIsOffline(place)) lines.push("It is offline; what is on it is swept the next time it connects.");
@@ -76,18 +87,6 @@ export function removeSentence(place: PlaceView, holding: PlaceHolding, imageByt
 
 /** The dialog's own title. */
 export const removeTitle = (place: PlaceView): string => `Remove ${placeName(place)}?`;
-
-/** Which platform every word the app writes about this computer is worded for, and the one home of that answer:
- * the day the app is told which platform it runs on, this line reads it and every word follows. The row's copy
- * words, the dialog's landing line and the sentences about this computer all take it from here rather than
- * spelling it again.
- *
- * What this computer is called inside a sentence. One home for the word, so the day the app is told which
- * platform it runs on, the Mac's word becomes the platform's in one edit rather than in every sentence that says
- * it. The places table's first column says it capitalised, as a name in a column (hereWord); everything that says
- * it mid-sentence reads this. */
-export const APP_PLATFORM = "darwin" as const;
-export const THIS_COMPUTER_WORD = thisComputer(APP_PLATFORM);
 
 /** What one row of the places list is, in the words the pane's Where row says after its name. One entry per kind
  * of row, so a third kind is a row here and nowhere else. A computer of the person's own is the protocol's own
@@ -100,7 +99,7 @@ export const PLACE_KIND_WORDS: Record<PlaceKind, string> = { computer: JOINED_CO
 export function landingName(places: readonly PlaceView[], landing: { readonly place?: string; readonly name: string }): string {
   const word = landing.place ?? landing.name;
   const row = places.find(place => place.id === word || namesPlace(place, word));
-  return row === undefined ? landing.name : placeName(row, row === places[0]);
+  return row === undefined ? landing.name : placeName(row);
 }
 
 /** Whether this row is the place a word names, read the one way every reader of a place word reads it: the id the
@@ -135,12 +134,12 @@ export function placeOf(places: readonly PlaceView[], workspace: Pick<WorkspaceV
  * this computer's silence can be, and it reads as this computer's own absence in this computer's own words. */
 export function absenceOf(
   places: readonly PlaceView[],
-  workspace: Pick<WorkspaceView, "kind" | "machineId" | "place"> | null,
+  workspace: Pick<WorkspaceView, "kind" | "machineId" | "name" | "place"> | null,
   status: Pick<WorkspaceStatus, "reach"> | null,
   now: number | null,
 ): AbsentComputer | null {
   if (workspace === null) return null;
-  if (isLocalWorkspace(workspace)) return ownDaemonAbsence(status);
+  if (isLocalWorkspace(workspace)) return ownDaemonAbsence(hereName(places) || workspace.name, status);
   const at = placeOf(places, workspace);
   return at === undefined ? null : absentOf(at, now);
 }
@@ -148,16 +147,16 @@ export function absenceOf(
 /** The reading for the workspace that is this computer, off the reach its status carries: null before a status has
  * arrived and while the daemon answers. Behind absenceOf, which is the one door: a caller that picked this by the
  * kind itself was the third copy of one dispatch. */
-function ownDaemonAbsence(status: Pick<WorkspaceStatus, "reach"> | null): AbsentComputer | null {
-  return daemonSilent(status?.reach.state) ? ownDaemonDown(THIS_COMPUTER_WORD) : null;
+function ownDaemonAbsence(here: string, status: Pick<WorkspaceStatus, "reach"> | null): AbsentComputer | null {
+  return daemonSilent(status?.reach.state) ? ownDaemonDown(here) : null;
 }
 
 /** The same reading off one row of the places list, for the table that draws that row: null while the computer
  * holds its link. The one door to it, so the table and every surface that asks by workspace read one predicate
  * and compose the words once. A caller with no clock passes none and gets a reading with no figure in its line,
  * which is every caller that shows the sentence alone. */
-export function absentOf(place: PlaceView, now: number | null, here = false): AbsentComputer | null {
-  return placeIsOffline(place) ? absentComputer(placeName(place, here), now === null ? null : awayMsOf(place, now)) : null;
+export function absentOf(place: PlaceView, now: number | null): AbsentComputer | null {
+  return placeIsOffline(place) ? absentComputer(placeName(place), now === null ? null : awayMsOf(place, now)) : null;
 }
 
 /** The one word the slot beside a row's name carries, in the order a waiting thread reads its computer: can't run

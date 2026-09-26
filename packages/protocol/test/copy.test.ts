@@ -19,10 +19,9 @@ import {
   inPlaceRecordLine,
   madeOfWord,
   portsWord,
-  thisComputer,
 } from "../src/index.js";
 
-/** A computer that copies and shares its ports, which is what this Mac is. */
+/** A computer that copies and shares its ports, which is what a Mac is. */
 const here = { copies: true, ownNetwork: false } as const;
 
 const flags = {
@@ -68,16 +67,16 @@ describe("the two flags a computer declares about copies", () => {
 
 describe("what a row says about a copy's network", () => {
   it("is its own network, the computer's ports with the copy's port base, or those ports alone, and nothing where the computer copies nothing", () => {
-    for (const platform of ["darwin", "linux"] as const) {
-      expect(portsWord({ copies: false, ownNetwork: true }, undefined, platform)).toBe("own network");
-      expect(portsWord(here, 3100, platform)).toBe(`shares ${thisComputer(platform)}'s ports, PORT 3100`);
-      expect(portsWord(here, undefined, platform)).toBe(`shares ${thisComputer(platform)}'s ports`);
-      expect(portsWord({ copies: false, ownNetwork: false }, undefined, platform)).toBe("");
+    for (const computer of ["zingzy's MacBook Pro", "spoo"]) {
+      expect(portsWord({ copies: false, ownNetwork: true }, undefined, computer)).toBe("own network");
+      expect(portsWord(here, 3100, computer)).toBe(`shares ${computer}'s ports, PORT 3100`);
+      expect(portsWord(here, undefined, computer)).toBe(`shares ${computer}'s ports`);
+      expect(portsWord({ copies: false, ownNetwork: false }, undefined, computer)).toBe("");
     }
   });
 
   it("gives a copy with its own network that word whatever road made it, since the ports inside one are its own", () => {
-    expect(portsWord({ copies: true, ownNetwork: true }, 3100, "darwin")).toBe("own network");
+    expect(portsWord({ copies: true, ownNetwork: true }, 3100, "spoo")).toBe("own network");
   });
 });
 

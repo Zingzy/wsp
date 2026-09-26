@@ -337,6 +337,7 @@ describe("processes surface", () => {
     act(() =>
       useStore.setState({
         api: { subscribe: () => () => {}, restartDaemon: async (id: string) => void asked.push(id) } as never,
+        places: [{ id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true }],
         workspaces: [{ ...view, kind: "local", machineId: "local" }],
         statuses: { [WS]: { ...view, kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, machineState: "running", reach: { state: "no-daemon" }, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0 } as never },
       }),
@@ -344,7 +345,7 @@ describe("processes surface", () => {
     render(<ProcessesSurface workspaceId={WS} />);
     await flush();
     const said = document.querySelector("[data-procs-unavailable]")!;
-    expect(said.textContent).toContain("this Mac's daemon is not running");
+    expect(said.textContent).toContain("zingzy's MacBook Pro's daemon is not running");
     expect(said.textContent).not.toContain("Unreachable");
     // The slot beside the filter reads the same reading, so the header and the sentence under it agree.
     expect(document.querySelector("[data-procs-count]")!.textContent).toBe("no daemon");

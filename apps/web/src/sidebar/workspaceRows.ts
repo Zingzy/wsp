@@ -7,10 +7,10 @@
 // workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
 import { broughtBackRowLine } from "../actions/format.js";
-import { HERE_PLACE_ID, computerNamed, kindWords, madeOfWord, portsWord, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, workspaceKind, type AbsentComputer, type BringBackResult, type Capabilities, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords } from "@wsp/protocol";
+import { HERE_PLACE_ID, isLocalWorkspace, kindWords, madeOfWord, portsWord, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, workspaceKind, type AbsentComputer, type BringBackResult, type Capabilities, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import type { ProjectRef } from "./threadTree.js";
-import { APP_PLATFORM, PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
+import { PLACE_KIND_WORDS, hereName, isHere, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
@@ -67,16 +67,18 @@ export interface WorkspaceMetaInput {
 }
 
 /** What a workspace is made of, the row's second line: the word for its copy, the computer it stands on where
- * that is not the computer this window runs on, and what the copy has for a network. Every word is the
- * protocol's table, so this line and the command line's two cells cannot say two things about one workspace. A
- * workspace with no copy of a folder is a fork, whose line is its network alone; a caller with no landing for the
- * project has no flags to read the network off and says the copy and the computer.  */
-export function madeOfLine({ project, landing, computer }: { project: Pick<SidebarProjectSnapshot, "workspace">; landing: Pick<Capabilities, "copies" | "ownNetwork"> | null; computer: string | null }): string[] {
+ * that is not the computer this window runs on (`here` names that one, whose ports a copy there shares), and what
+ * the copy has for a network. Every word is the protocol's table, so this line and the command line's two cells
+ * cannot say two things about one workspace. A workspace with no copy of a folder is a fork, whose line is its
+ * network alone; a caller with no landing for the project has no flags to read the network off and says the copy
+ * and the computer.  */
+export function madeOfLine({ project, landing, computer, here }: { project: Pick<SidebarProjectSnapshot, "workspace">; landing: Pick<Capabilities, "copies" | "ownNetwork"> | null; computer: string | null; here: string }): string[] {
   const copy = project.workspace.copy;
+  const on = computer ?? here;
   return [
     copy === undefined ? undefined : madeOfWord(copy.road),
     computer ?? undefined,
-    landing === null ? undefined : portsWord(landing, project.workspace.portBase, APP_PLATFORM) || undefined,
+    landing === null || on === "" ? undefined : portsWord(landing, project.workspace.portBase, on) || undefined,
   ].filter((part): part is string => part !== undefined);
 }
 
@@ -137,51 +139,32 @@ export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "i
   return project.state === "running" ? "" : project.indicator.label;
 }
 
-/** The computer or the provider a workspace runs on, as a row names it: the live record once a status has arrived,
- * read through the protocol's one reading of that question, so this row, the command line's table and the pane
- * cannot name one machine three ways. */
-export function whereWord(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
-  return whereOf({ ...(project.status ?? project.workspace), kind: workspaceKind(project.workspace) });
-}
-
-/** The fuller reading of the same question, for the pane that has a whole row for it: the computer or provider the
- * workspace stands on by the name its own row carries, and what that row is. The computer the host runs on says so
- * in the words a sentence says it in, and nothing more, being the one row a person needs no word for. A workspace this host holds no row for falls back
- * to the row's own short word, which is what a browser tab on a host without places has.
- *
- * Built on placeOf and placeName, the readings the places list already holds, so the pane and the table name a
- * computer alike. */
+/** The fuller reading of computerName, for the pane that has a whole row for it: the name, then what that row is.
+ * The computer the host runs on gets its name alone, being the one row a person needs no kind word for. */
 export function whereRuns(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
-  const at = placeOf(places, project.workspace);
-  if (at === undefined) return whereWord(project);
-  const name = nameOfPlace(places, at);
-  return at === places[0] ? name : `${name} (${PLACE_KIND_WORDS[at.kind]})`;
+  const at = placeOf(places, liveRecord(project));
+  const name = computerName(places, project);
+  return at === undefined || isHere(at) ? name : `${name} (${PLACE_KIND_WORDS[at.kind]})`;
 }
 
-/** What one row of the places list is called inside a sentence: the computer the host runs on says so in the words
- * a sentence says it in, and every other row carries the name it reported. */
-const nameOfPlace = (places: readonly PlaceView[], at: PlaceView): string => (at === places[0] ? THIS_COMPUTER_WORD : placeName(at));
+/** The workspace's record as the live status has it once one has arrived, kind read off the record. */
+const liveRecord = (project: Pick<SidebarProjectSnapshot, "status" | "workspace">) => ({ ...(project.status ?? project.workspace), kind: workspaceKind(project.workspace) });
 
-/** The same name with nothing after it, for a sentence that has to call the computer something and has no room to
- * say what kind of row it is: a person waiting on a machine is waiting on the name their own list shows, never on
- * a machine id or on the kind's word. */
+/** The computer or the provider a workspace runs on, by the name its own row in the places list carries, the
+ * computer the host runs on included: a person waiting on a machine is waiting on the name their own list shows,
+ * never on a machine id or on the kind's word. A workspace this host holds no row for is named through the
+ * protocol's one reading of the question, off the live record once a status has arrived, so this row, the command
+ * line's table and the pane cannot name one machine three ways. */
 export function computerName(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
-  const at = placeOf(places, project.workspace);
-  return at === undefined ? whereWord(project) : nameOfPlace(places, at);
+  const live = liveRecord(project);
+  const at = placeOf(places, live);
+  if (at !== undefined) return placeName(at);
+  if (isLocalWorkspace(live)) return hereName(places);
+  return whereOf(live);
 }
 
-/** The same word for a surface that holds the workspace's id and no snapshot: the record and its status off the
- * store, and the id itself until the record has arrived, which is what a window opened straight onto a workspace
- * has for the first frames. Written once because two surfaces ask it, and a second copy of the fallback would be a
- * second answer to give a person. */
-export function useWhereWord(workspaceId: string): string {
-  const workspace = useWorkspace(workspaceId);
-  const status = useStatus(workspaceId);
-  return workspace === null ? workspaceId : whereWord({ workspace, status });
-}
-
-/** The computer's name off the store for the same kind of surface, so the sentence a composer holds names the
- * machine the row beside it names. */
+/** The same name off the store for a surface that holds the workspace's id and no snapshot, and the id itself
+ * until the record has arrived, which is what a window opened straight onto a workspace has for the first frames. */
 export function useComputerName(workspaceId: string): string {
   const places = usePlaces();
   const workspace = useWorkspace(workspaceId);
@@ -202,7 +185,7 @@ export function threadMetaWords(
   if (thread.parentThreadId === null) {
     return [...(thread.project !== null ? [thread.project] : []), openerWord(thread.startedBy)];
   }
-  return [...(runs.workspace === under ? [] : [runs.workspace]), runs.where];
+  return [...(runs.workspace === under ? [] : [runs.workspace]), ...(runs.where === "" ? [] : [runs.where])];
 }
 
 const OPENER_WORD: Record<SessionOrigin, string> = { person: "you", cli: "cli", agent: "agent" };
@@ -218,33 +201,12 @@ export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness">, 
   return [agentName(thread.harness), ...words].join(", ");
 }
 
-/** The word a thread row's state slot carries, off the adapter's own reading: a thread waiting on the person, one
- * that is working and one that did not settle each say so, and the resting states say nothing, since a row nobody
- * is waiting on is what every other row is. No dot for any state: a state is a word here, and the row beside it
- * says the rest. */
-export function threadStateWord(thread: Pick<SidebarThreadSnapshot, "status" | "indicator" | "asking">): string | null {
-  if (!thread.indicator) return null;
-  if (thread.asking !== null) return thread.indicator.label;
-  switch (thread.status) {
-    case "running":
-    case "failed":
-      return thread.indicator.label;
-    case "completed":
-    case "interrupted":
-      return null;
-    default: {
-      const _exhaustive: never = thread.status;
-      return null;
-    }
-  }
-}
-
 /** The computer a project lives on, as the switcher and a project row name it: nothing for a project on the
  * computer this window runs on, which every row would otherwise carry, and the name this host has for the computer
  * otherwise, through the protocol's one rule for the question. */
 export function projectComputerWord(project: Pick<ProjectRef, "computer">, named: ReadonlyMap<string, string>): string | null {
   if (project.computer === undefined || project.computer === HERE_PLACE_ID) return null;
-  return computerNamed(project.computer, named, APP_PLATFORM);
+  return named.get(project.computer) ?? project.computer;
 }
 
 /** Every computer this host holds by the name a person reads it as, keyed by its id, which is what a project record

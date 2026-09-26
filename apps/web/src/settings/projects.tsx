@@ -9,7 +9,7 @@ import { HueSelect, IconSelect } from "../projects/LookPicker.js";
 import { ProjectGlyph } from "../projects/look.js";
 import { useState } from "react";
 import { agentName } from "@wsp/catalog";
-import { HERE_PLACE_ID, fmtBytes, hereWord, plural, projectInUseRefusal, type ProjectLook, type ProjectSource, type ProjectView } from "@wsp/protocol";
+import { HERE_PLACE_ID, fmtBytes, plural, projectInUseRefusal, type ProjectLook, type ProjectSource, type ProjectView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../components/ui/button.js";
 import { AddButton } from "../components/ui/add-button.js";
@@ -19,7 +19,7 @@ import { PROJECT_WORDS } from "../sidebar/words.js";
 import { RefusalSlot } from "./sheetParts.js";
 import { PROJECTS_WORDS, WHERE_WORDS } from "./format.js";
 import { builtWhen } from "./image.js";
-import { isProviderPlace, placeName } from "./places.js";
+import { hereName, isProviderPlace, placeName } from "./places.js";
 import { Cards, type SettingsCardData, type SettingsItem } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import type { SettingsAt } from "./settingsStore.js";
@@ -71,8 +71,7 @@ export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
     {
       id: "projects",
       items: ctx.projects.map(project => {
-        const here = ctx.places[0];
-        const computer = projectComputerWord(project, named) ?? (here === undefined ? hereWord(true) : placeName(here, true));
+        const computer = projectComputerWord(project, named) ?? hereName(ctx.places);
         const count = workspacesOn(ctx, project).length;
         return {
           kind: "row" as const,
@@ -140,7 +139,7 @@ function RemoveProjectControl({ project, refusal, line, api, onRemoved, failed, 
 /** One project's own page. */
 export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: SettingsContext }) {
   const place = ctx.places.find(p => p.id === project.computer);
-  const computer = project.computer === HERE_PLACE_ID ? hereWord(true) : place === undefined ? project.computer : placeName(place);
+  const computer = project.computer === HERE_PLACE_ID ? hereName(ctx.places) : place === undefined ? project.computer : placeName(place);
   const standing = workspacesOn(ctx, project);
   const refusal = standing.length === 0 ? null : projectInUseRefusal(project.name, standing);
   const line = removeLine(ctx, project);
@@ -151,7 +150,7 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
     { kind: "line", id: "added", label: PROJECTS_WORDS.added, value: builtWhen(project.createdAt, ctx.now), hover: PROJECTS_WORDS.addedHover, attrs: { "data-k": "added" } },
     ...(project.seeded === undefined
       ? []
-      : [{ kind: "line" as const, id: "seeded", label: PROJECTS_WORDS.seeded, value: [plural(project.seeded.files, "file"), fmtBytes(project.seeded.bytes), `memory ${project.seeded.memory}`], hover: PROJECTS_WORDS.seededHover, attrs: { "data-k": "seeded" } }]),
+      : [{ kind: "line" as const, id: "seeded", label: PROJECTS_WORDS.seeded, value: [plural(project.seeded.files, "file"), fmtBytes(project.seeded.bytes), `memory ${project.seeded.memory}`], hover: PROJECTS_WORDS.seededHover(hereName(ctx.places)), attrs: { "data-k": "seeded" } }]),
   ];
   const starts: SettingsItem[] = [
     { kind: "row", id: "branch", title: PROJECTS_WORDS.branch, description: PROJECTS_WORDS.branchDescription, word: project.base ?? project.defaultBranch, attrs: { "data-k": "branch" } },
