@@ -18,15 +18,15 @@
 // same run: one state file cannot hold both a person whose image is built and
 // one whose image never was.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
-import { fixtureCloud, fixtureFleet, fixtureState } from "./fixture-state.mjs";
+import { fixtureCloud, fixtureFleet, fixtureFolders, fixtureRepos, fixtureState } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
-import { writeStandIn } from "./lab-home.mjs";
+import { writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
-import { APP_UP } from "./ready.mjs";
+import { APP_UP, failuresToCheck } from "./ready.mjs";
 
 function usage(why) {
   console.error(`${why}\n\nusage: pnpm --filter @wsp/web screenshots -- --out <folder> [--surfaces <file.json>]`);
@@ -65,38 +65,37 @@ function treeFacts() {
  * app's TypeScript, and a rename there is a rename here. */
 const DEVICE_TOKEN_KEY = "wsp:device-token";
 
-/** The host's own token, read out of the boot object it inlines into the page it serves. */
-async function bootToken(base) {
-  const html = await fetch(base).then(r => r.text());
-  const boot = /window\.__WSP__ = (\{.*?\});/.exec(html);
-  if (boot === null) throw new Error("the page the host served carries no boot object");
-  const token = JSON.parse(boot[1]).token;
-  if (typeof token !== "string") throw new Error("the host inlined no token, so no window can stand in for one on another computer");
+/** The host's own token, off the file it writes beside its state: no page it serves carries it. */
+function hostToken(host) {
+  const token = host.token();
+  if (token === undefined) throw new Error("the host wrote no token beside its state, so no window can be let in");
   return token;
 }
 
-/** A context that reads as a window on another computer: the boot object the page is handed loses the host's own
- * token, which is what a page served beyond loopback carries, and the token is in this browser's store instead,
- * where a paired device keeps it. The boot object is taken as the page's own inline script sets it rather than by
- * rewriting the page: a fulfilled response puts the page in another address space and Chromium then blocks its
- * socket to loopback outright (measured 2026-09-12). Nothing in the app is told which window this is; it reads the
- * same boot object a real window on another computer reads. */
-async function asAnotherComputer(context, token) {
-  await context.addInitScript(
-    ([key, held]) => {
-      window.localStorage.setItem(key, held);
-      let boot;
-      Object.defineProperty(window, "__WSP__", {
-        configurable: true,
-        get: () => boot,
-        set: value => {
-          const { token: _own, ...rest } = value ?? {};
-          boot = rest;
-        },
-      });
-    },
-    [DEVICE_TOKEN_KEY, token],
-  );
+/** A browser that holds a token for the host, in the store a paired device keeps one in: no page carries the host's
+ * token, so a browser on this computer that was never let in reads the pairing screen. */
+async function letIn(context, token) {
+  await context.addInitScript(([key, held]) => window.localStorage.setItem(key, held), [DEVICE_TOKEN_KEY, token]);
+}
+
+/** A context that reads as a window on another computer: the boot object the page is handed loses what only the
+ * loopback page carries (the port, the token's digest, the state file) and reads unpaired, as a page served beyond
+ * loopback does. The boot object is taken as the page's own inline script sets it rather than by rewriting the page:
+ * a fulfilled response puts the page in another address space and Chromium then blocks its socket to loopback
+ * outright (measured 2026-09-12). Nothing in the app is told which window this is; it reads the same boot object a
+ * real window on another computer reads. */
+async function asAnotherComputer(context) {
+  await context.addInitScript(() => {
+    let boot;
+    Object.defineProperty(window, "__WSP__", {
+      configurable: true,
+      get: () => boot,
+      set: value => {
+        const { wsPort: _port, tokenHash: _digest, statePath: _state, ...rest } = value ?? {};
+        boot = { ...rest, paired: false };
+      },
+    });
+  });
 }
 
 /** The page's socket to the host, in this run's hands. It connects as it would until the function this returns is
@@ -121,7 +120,8 @@ async function holdSocket(page) {
  * before left behind. Sharing one context per width and theme is what hid the machine surface at 390,
  * where an earlier shot's remembered panel meant the launcher was never drawn. */
 async function shoot(context, shot, base, out, token) {
-  if (shot.remote) await asAnotherComputer(context, token);
+  await letIn(context, token);
+  if (shot.remote) await asAnotherComputer(context);
   const page = await context.newPage();
   const fallAsleep = shot.steps.some(step => step.offline === true) ? await holdSocket(page) : undefined;
   await page.goto(`${base}${shot.at}`, { waitUntil: "domcontentloaded" });
@@ -142,6 +142,28 @@ async function shoot(context, shot, base, out, token) {
   // A click leaves its control focused and the ring would be the one thing the eye goes to.
   await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
   await page.screenshot({ path: join(out, shot.file) });
+  const failures = await unmeantFailures(page, shot);
+  if (failures.length > 0) throw new Error(`the page shows a failure it was not meant to: ${failures.join("; ")}`);
+}
+
+/** One fixture's state with every folder in it under the throwaway home its host runs in, and those folders made
+ * there as small repositories: a project folder under the person's own home is one the host would act on. The home
+ * is named by its real path, since the host holds a project folder to the path git answers with, and the temp
+ * folder on a Mac is reached through a link. */
+function fixtureOn(home, fixture = "mac-in-use") {
+  const state = fixtureState(fixture, { home: realpathSync(home) });
+  writeWorkFolder(home, fixtureFolders(state), fixtureRepos(fixture, { home }));
+  return state;
+}
+
+/** Why a shot is not what it is named for: every failure the page shows that the surface did not wait for. */
+async function unmeantFailures(page, shot) {
+  const shown = [];
+  for (const selector of failuresToCheck(shot)) {
+    const found = page.locator(selector);
+    if ((await found.count()) > 0) shown.push(`${selector}: ${((await found.first().innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim().slice(0, 160)}`);
+  }
+  return shown;
 }
 
 async function main() {
@@ -164,14 +186,16 @@ async function main() {
   // One host per fixture a surface names, started the first time a shot asks for it and stopped with the rest. Each
   // carries its own token, since a window standing in for another computer reads the token of the host it dials.
   const others = new Map();
-  const served = async fixture => {
-    if (fixture === undefined) return host;
-    const held = others.get(fixture);
+  // A shot that changes what its host holds takes a host of its own, stopped after it: the next shot on that fixture
+  // would otherwise meet what this one made, and the same shot in the other theme would be refused as made already.
+  const served = async (fixture, fresh = false) => {
+    if (fixture === undefined && !fresh) return host;
+    const held = fresh ? undefined : others.get(fixture);
     if (held !== undefined) return held;
     const own = mkdtempSync(join(tmpdir(), "wsp-shots-"));
     // The cloud the fixture's machines are meant to be at rides with it: without that word the stand-in stands in
     // for nothing, and the provider a fixture is about is on no row of the places table.
-    const state = fixtureState(fixture);
+    const state = fixtureOn(own, fixture);
     const started = await startHost({
       home: own,
       state,
@@ -180,23 +204,33 @@ async function main() {
       cloud: fixtureCloud(fixture),
       records: writeStandIn(own, fixtureFleet(state)),
     });
-    others.set(fixture, { ...started, home: own, token: await bootToken(started.base) });
-    return others.get(fixture);
+    const made = { ...started, home: own, token: hostToken(started) };
+    if (!fresh) others.set(fixture, made);
+    return made;
   };
   try {
-    const state = fixtureState();
+    const state = fixtureOn(home);
     // The stand-in's records, seeded and named: a fixture's sleeping fork is asleep because its provider says so,
     // and this run names no folder for the machines, so nothing runs on any of them. The cloud those machines are
     // meant to be at rides with them, or the stand-in stands in for nothing and no provider is on the places table.
     host = await startHost({ home, state, port: await freePort(), wsPort: await freePort(), cloud: fixtureCloud(), records: writeStandIn(home, fixtureFleet(state)) });
-    host.token = await bootToken(host.base);
+    host.token = hostToken(host);
     browser = await chromium.launch({ args: BROWSER_ARGS });
     for (const shot of shotPlan(list)) {
       let context;
       try {
         context = await browser.newContext({ viewport: { width: shot.width, height: shot.height }, colorScheme: shot.theme, deviceScaleFactor: 2, reducedMotion: "reduce" });
-        const on = await served(shot.fixture);
-        await shoot(context, shot, on.base, args.out, on.token);
+        const on = await served(shot.fixture, shot.fresh);
+        try {
+          await shoot(context, shot, on.base, args.out, on.token);
+        } finally {
+          if (shot.fresh) {
+            await context.close();
+            context = undefined;
+            await stopHost(on);
+            rmSync(on.home, { recursive: true, force: true });
+          }
+        }
         written.push(shot.file);
         console.log(`wrote ${shot.file}`);
       } catch (e) {
