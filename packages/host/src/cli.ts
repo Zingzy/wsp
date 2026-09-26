@@ -30,7 +30,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authRefusal, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authRefusal, FORWARD_ENV, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -52,7 +52,7 @@ import { exitCodeOf, runInit, type InitIO, type InitPricing, type InitResult } f
 import { runMintHere } from "./init-vault.js";
 import { recipePath } from "./init-recipe.js";
 import { historyCache } from "./recipe-file.js";
-import { scanTools } from "./scan.js";
+import { alsoHere } from "./scan.js";
 import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, widthOf, wrap, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, builtOn, opening } from "./init-opening.js";
 import { runLocalInit } from "./init-local.js";
@@ -92,7 +92,7 @@ import { restartRoads, type RestartingHost, type RestartRoad } from "./restart.j
 import { connectCommand, disconnectCommand, hostDefaultCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { admittedDevices, hostsCommand, loginCommand, logoutCommand, publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
-import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
+import { aimAddress, aimedHost, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
@@ -107,7 +107,7 @@ import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } fr
 import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, hereDoor, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { installedVersion, stateWriterHere, VERSION } from "./version.js";
 import { latestWords, releaseReading, releaseWatch } from "./release.js";
 
@@ -869,7 +869,7 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
         return exists ? scanProject(nodeHost(), path) : undefined;
       },
       brew: () => readBrewTable(nodeHost()),
-      scan: recipe => scanTools(nodeHost(), recipe),
+      scan: alsoHere,
     },
     build: {
       secrets: keychainReader(),
@@ -1224,7 +1224,7 @@ async function init(
         secrets: keychainReader(),
         platform: hostPlatform(),
         brew: () => readBrewTable(nodeHost()),
-        scan: recipe => scanTools(nodeHost(), recipe),
+        scan: alsoHere,
         runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }, providerEnv, agentsReachOf(opts), undefined, links),
         bundleFile: () => missingBundleFile(),
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
@@ -2294,10 +2294,6 @@ export const PROSE_COMMANDS: readonly string[] = Object.keys(COMMANDS).filter(w 
 
 type Options = NonNullable<ParseArgsConfig["options"]>;
 
-/** What else a package manager on this computer has, for the recipe verbs on both doors: the scanner reaches the
- * engine, so the command line hands it in rather than the verb table importing it. */
-const alsoHere: VerbDeps["alsoHere"] = recipe => scanTools(nodeHost(), recipe);
-
 /** The word `mcp` opens the command, as a verb's words open a verb: its flags are its own, so it is dispatched on
  * that word before the shared parse ever sees them. */
 const MCP_COMMAND = "mcp";
@@ -2380,6 +2376,37 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     if (next !== undefined) io.log(next);
   }
   return report.failures.length > 0 ? 1 : 0;
+}
+
+/** What the forwarder asks before it serves `wsp mcp` itself: the host this line would serve against, as one JSON
+ * line on stdout, when that is the host on this computer and it is serving, brought up first when the ask says
+ * start. Anything else prints nothing and serves nothing: at the start of a session the forwarder runs the same line
+ * as a wsp of its own next, which says whatever this one would have. The one thing said is why a host could not be
+ * brought up, since the ask to start comes mid-session and nothing runs after it to say so. */
+async function forwardDoor(io: CliIO, argv: string[], env: Readonly<Record<string, string | undefined>>, starts: { start?: HostStarter }): Promise<number> {
+  // The token is the host's; it goes down a pipe to the forwarder and never onto a terminal.
+  if (io.redraw !== undefined) return 0;
+  let values: { host?: string; state?: string; help?: boolean };
+  let words: string[];
+  try {
+    ({ values, positionals: words } = parseArgs({ args: argv, options: MCP_OPTIONS, allowPositionals: true }));
+  } catch {
+    return 0;
+  }
+  if (values.help === true || words.length > 0) return 0;
+  const notes: string[] = [];
+  try {
+    const statePath = statePathFrom(values.state, env, line => notes.push(line));
+    const pick = { env, ...(values.host !== undefined ? { host: values.host } : {}) };
+    if (starts.start !== undefined && aimedHost(statePath, pick).kind === "here" && servingHost(statePath) === undefined) await starts.start(statePath, line => io.error(line));
+    const door = hereDoor(statePath, pick);
+    if (door === undefined) return 0;
+    for (const note of notes) io.error(note);
+    io.log(JSON.stringify(door));
+  } catch (e) {
+    if (starts.start !== undefined) io.error(e instanceof Error ? e.message : String(e));
+  }
+  return 0;
 }
 
 /** The flags the shared parse reads for up, init and doctor. The ones that shape a serving host come from the table
@@ -2602,12 +2629,17 @@ export async function cli(
   argv: string[],
   io: CliIO = terminalIO(),
   run: RunningWsp = runningWsp(),
-  env: Readonly<Record<string, string | undefined>> = process.env,
-  start: HostStarter | false = starterFor(run, env),
+  given: Readonly<Record<string, string | undefined>> = process.env,
+  start?: HostStarter | false,
   caller: { cwd?: string; elsewhere?: boolean } = {},
   deps: CommandDeps = SYSTEM_COMMAND_DEPS,
 ): Promise<number> {
-  const starts = start === false ? {} : { start };
+  // The forwarder's ask is this line's alone: nothing it starts or runs carries it, or the host a line brings up
+  // would hand it to every wsp its turns run.
+  const forward = given[FORWARD_ENV];
+  const env = forward === undefined ? given : Object.fromEntries(Object.entries(given).filter(([name]) => name !== FORWARD_ENV));
+  const starter = start ?? starterFor(run, env);
+  const starts = starter === false ? {} : { start: starter };
   // One reading for every road out of this process, and the sentence about it said once: a verb, a command and the
   // tool server all pick their state here, so none of them can run against a state another of them named.
   const chooseState = (flag?: string): string => statePathFrom(flag, env, line => io.error(line));
@@ -2619,7 +2651,10 @@ export async function cli(
     const words = verb.name.split(" ");
     return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: caller.cwd ?? process.cwd(), env, open: systemOpener(), ...starts, ...(caller.elsewhere === true ? { elsewhere: true } : {}) });
   }
-  if (rest[0] === MCP_COMMAND) return mcp(io, [...common, ...rest.slice(1)], chooseState, run, env, starts);
+  if (rest[0] === MCP_COMMAND) {
+    const argv = [...common, ...rest.slice(1)];
+    return forward === undefined ? mcp(io, argv, chooseState, run, env, starts) : forwardDoor(io, argv, env, forward === "start" ? starts : {});
+  }
   let values: SharedFlags;
   let positionals: string[];
   try {

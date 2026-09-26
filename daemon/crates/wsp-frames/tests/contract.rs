@@ -276,6 +276,7 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("guestWorkspaceFull", words::GUEST_WORKSPACE_FULL.to_owned());
     m.insert("guestUnwatched", words::GUEST_UNWATCHED.to_owned());
     m.insert("guestNoDaemon", words::guest_no_daemon_line("{port}"));
+    m.insert("hostClosed", words::HOST_CLOSED.to_owned());
     m.insert("placeKeptForLink", words::place_kept_for_link("{path}"));
     m.insert("onBase", words::on_base_refusal("{base}"));
     m.insert("notOnABranch", words::NOT_ON_A_BRANCH.to_owned());

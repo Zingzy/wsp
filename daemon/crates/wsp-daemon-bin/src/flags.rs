@@ -275,6 +275,24 @@ mod tests {
     }
 
     #[test]
+    fn the_forward_verb_takes_the_wsp_it_runs_and_the_whole_line_after_the_cut() {
+        let read = |args: &[&str]| match parse(args).unwrap().verb {
+            Some(Verb::Forward { wsp_argv, line }) => (wsp_argv, line),
+            other => panic!("expected the forward verb, got {other:?}"),
+        };
+        let (wsp, line) =
+            read(&["forward", "--wsp-argv", "/app/wsp", "--wsp-argv", "/app/cli.mjs", "--", "mcp", "--state", "/s", "--wsp-argv", "x"]);
+        assert_eq!(wsp, ["/app/wsp", "/app/cli.mjs"]);
+        assert_eq!(line, ["mcp", "--state", "/s", "--wsp-argv", "x"]);
+        // A word of node's own flags is a word of the wsp it runs, not one of this verb's.
+        let (wsp, line) = read(&["forward", "--wsp-argv", "node", "--wsp-argv", "--no-warnings", "--wsp-argv", "bin.js", "--", "--help"]);
+        assert_eq!(wsp, ["node", "--no-warnings", "bin.js"]);
+        assert_eq!(line, ["--help"]);
+        assert_eq!(read(&["forward", "--wsp-argv", "wsp", "--"]).1, Vec::<String>::new());
+        assert!(parse(&["forward", "--", "mcp"]).is_err(), "a forwarder with no wsp to run has nothing to hand a line to");
+    }
+
+    #[test]
     fn refuses_a_missing_value_a_bad_port_and_an_unknown_flag() {
         assert!(parse(&["--host"]).is_err());
         assert!(parse(&["--port", "abc"]).is_err());

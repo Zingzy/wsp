@@ -20,8 +20,9 @@ import { hostFolders } from "./host-folders.js";
 import { projectBundler } from "./project-bundle.js";
 import { imageExporter } from "./image.js";
 import { projectLander } from "./project-export.js";
+import { alsoHere } from "./scan.js";
 import { guestCli } from "./guest-cli.js";
-import { guestMcp } from "./guest-mcp.js";
+import { guestMcp, hereMcp } from "./guest-mcp.js";
 import { guestDoor } from "./guest.js";
 import { runningWsp } from "./mcp-install.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
@@ -688,6 +689,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       ...(opts.init !== undefined ? { init: opts.init } : {}),
       ...(doctor !== undefined ? { doctor } : {}),
       log,
+      ...(statePath !== undefined ? { here: hereMcp(statePath, alsoHere) } : {}),
       ...(opts.release !== undefined ? { release: opts.release } : {}),
       ...(opts.restart !== undefined ? { restart: opts.restart } : {}),
     });

@@ -65,6 +65,10 @@ pub fn guest_no_daemon_line(port: impl std::fmt::Display) -> String {
     format!("this machine's wsp daemon is not answering on 127.0.0.1:{port}")
 }
 
+/// What a request is answered with when the host's socket went before the host answered it, the words the command
+/// line's own dial says a host that went in.
+pub const HOST_CLOSED: &str = "the host closed the connection";
+
 /// The close reasons the link puts on a socket it ends. Not in the shared set: no client matches on a close reason.
 pub const LINK_CLOSE_STOPPING: &str = "place agent stopping";
 pub const LINK_CLOSE_UPDATING: &str = "place agent restarting on the daemon the host sent";

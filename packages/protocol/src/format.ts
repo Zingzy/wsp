@@ -2558,6 +2558,13 @@ export function guestNoKindLine(kind: string): string {
   return `this host serves no ${kind} guest session`;
 }
 
+/** Why guest.open is refused on a socket this host's own token did not open: the session runs this host's tools as
+ * whoever opened it, so it is the wsp command's on this computer and no road a paired computer or a thread holds. */
+export const hereGuestRefusal = "a guest session on this host is the wsp command's on this computer, on a socket this host's own token opened";
+
+/** Why a second guest.open is refused on a socket that holds one: one session per socket, so its frames need no id. */
+export const guestSessionHeldLine = "this socket already holds a guest session";
+
 /** What the guest's next frame is answered with once the host no longer holds its session: a host that restarted, or
  * a link that ended, leaves the machine's daemon holding a session nothing on this side can answer. */
 export const guestNoSessionLine = "the host holds no such session";

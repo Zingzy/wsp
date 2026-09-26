@@ -25,6 +25,7 @@ import {
   EMPTY_TASK_LINE,
   EXIT_CODES,
   HOST_STOPPING_CLOSE,
+  HOST_CLOSED_LINE,
   HOST_STOPPING_LINE,
   HostFolderListing,
   AgentRow,
@@ -343,6 +344,14 @@ export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim 
   return { url: `ws://${authority(dialAddress(lock), lock.wsPort)}`, token };
 }
 
+/** Where the wsp command's forwarder dials for a line aimed at the host serving this state file on this computer:
+ * the address and the token a line's own dial reads for it. Nothing for every other aim, since each of them pins a
+ * key or spends a token the forwarder holds no road for, and nothing where no host serves the file. */
+export function hereDoor(statePath: string, pick: HostPick = {}): { url: string; token: string } | undefined {
+  if (aimedHost(statePath, pick).kind !== "here" || servingHost(statePath) === undefined) return undefined;
+  return hostAddress(statePath, { aim: { kind: "here" } });
+}
+
 /** One socket to the host, and for a host on the account the one re-admission it may need on the way: a record
  * whose token that host no longer takes is a computer the account still trusts, so this computer proves its device
  * key once, writes the token the host answers into the record and carries on. The dial itself is below. */
@@ -427,7 +436,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
     }
     for (const fn of listeners) fn(frame);
   });
-  const closeWords = (): string => (closeCode === HOST_STOPPING_CLOSE ? HOST_STOPPING_LINE : "the host closed the connection");
+  const closeWords = (): string => (closeCode === HOST_STOPPING_CLOSE ? HOST_STOPPING_LINE : HOST_CLOSED_LINE);
   ws.on("close", () => {
     for (const w of pending.values()) w.fail(new Error(closeWords()));
     pending.clear();
