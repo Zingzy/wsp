@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { catalogProbeCommand, parseCatalogProbe } from "../src/catalog.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 // Claude Code 2.1.257 on 2026-09-05: `claude --version`, `claude --help` and the initialize control response of a
 // stream-json session that was sent no prompt, joined by the probe's separator; the commands and agents lists are cut
@@ -48,8 +49,7 @@ describe("catalogProbeCommand", () => {
     dirs.push(dir);
     const bin = join(dir, "bin");
     execFileSync("mkdir", [bin]);
-    writeFileSync(join(bin, "claude"), "#!/bin/sh\ncat >/dev/null; echo CALL; env\n");
-    chmodSync(join(bin, "claude"), 0o755);
+    writeStub(join(bin, "claude"), "#!/bin/sh\ncat >/dev/null; echo CALL; env\n");
     const out = execFileSync("bash", ["-c", catalogProbeCommand({ baseEnv: { CLAUDE_CONFIG_DIR: "/root/.claude-cfg" } })], {
       encoding: "utf8",
       env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir, CLAUDECODE: "1", CLAUDE_CODE_ENTRYPOINT: "cli", FORCE_CODE_TERMINAL: "1" },

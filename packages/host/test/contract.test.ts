@@ -46,6 +46,7 @@ const skillsSh: SkillsFetch = async url => {
   return new Response("{}", { status: 404 });
 };
 import { nodeHost, type Host } from "@wsp/collect";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 /** This computer's own Host over a fixture home, with the fixture's agents on its PATH. */
 function fixtureHost(at: AgentHome): Host {
@@ -714,7 +715,7 @@ describe("the agent contract on the command line and the tool door", () => {
     // The wsp the forwarder runs, writing down every time it ran and what it was asked.
     const log = join(dir, "ran.log");
     const wrapper = join(dir, "wsp.sh");
-    writeFileSync(wrapper, `#!/bin/sh\necho "\${${FORWARD_ENV}:-run} $*" >> ${shellQuote(log)}\nexec ${shellQuote(process.execPath)} ${shellQuote(BIN)} "$@"\n`, { mode: 0o755 });
+    writeStub(wrapper, `#!/bin/sh\necho "\${${FORWARD_ENV}:-run} $*" >> ${shellQuote(log)}\nexec ${shellQuote(process.execPath)} ${shellQuote(BIN)} "$@"\n`);
     const lines = [
       { jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "contract", version: "0" } } },
       { jsonrpc: "2.0", method: "notifications/initialized" },

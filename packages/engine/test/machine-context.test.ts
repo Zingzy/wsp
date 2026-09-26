@@ -41,6 +41,7 @@ import type { ImportResult } from "../src/golden.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { EXEC_ENV, TOOLS_PATH } from "../src/golden-import.js";
 import { dfKbCmd } from "../src/golden-tools.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const bash = promisify(execFile);
 
@@ -567,7 +568,7 @@ describe("the guest scripts on a local bash", () => {
     const roots = fakeGuest();
     const bin = join(roots.home, "bin");
     mkdirSync(bin, { recursive: true });
-    for (const cmd of ["git", "ls"]) writeFileSync(join(bin, cmd), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    for (const cmd of ["git", "ls"]) writeStub(join(bin, cmd), "#!/bin/sh\nexit 0\n");
     // The listing arrives as a variable and PATH holds only the two commands the fixture calls present, so neither
     // the answer nor fish's startup reads anything of this machine's.
     const script = `function alias; string split \\n -- $WSP_FISH_ALIASES; end\n${ALIAS_PROBES.fish!}`;
