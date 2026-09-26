@@ -37,7 +37,7 @@ import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
-import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
+import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemLine } from "../src/daemon-binary.js";
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { computerLines, hostPlatform, placeLines } from "../src/verbs.js";
@@ -2145,18 +2145,31 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     }
   });
 
-  it("refuses a Mac's own chip word and a chip with no row of its own, off the same read", async () => {
-    // uname on a Mac says arm64, which names a row wsp builds for and no row a guest can be: the join installs a
-    // login's systemd unit, so a Mac reached over ssh is refused here rather than halfway through its deploy.
-    for (const said of ["arm64", "riscv64"]) {
-      const transport: SshTransport = async (_reach, script) =>
-        script === SSH_READ_SCRIPT
-          ? { exitCode: 0, stdout: `home /home/maya\narch ${said}\nuser maya\npath /usr/bin:/bin\ncpu 2\nmemkb 4194304\n`, stderr: "" }
+  it("reads the system before the chip, so a Mac of either chip is told it is a Mac and any other system its own name", async () => {
+    // An Apple silicon Mac says arm64, which reads as a chip wsp builds nothing for, and an Intel Mac says x86_64,
+    // which matches the Linux row and meets the systemd sentence halfway through its deploy. Neither says Mac.
+    const cases: Array<[string, string, string]> = [
+      ["Darwin", "arm64", noPlaceSystemLine("Darwin")],
+      ["Darwin", "x86_64", noPlaceSystemLine("Darwin")],
+      ["FreeBSD", "amd64", noPlaceSystemLine("FreeBSD")],
+      ["Linux", "riscv64", noGuestDaemonLine("riscv64")],
+    ];
+    for (const [system, arch, line] of cases) {
+      const ran: string[] = [];
+      const transport: SshTransport = async (_reach, script) => {
+        ran.push(script);
+        return script === SSH_READ_SCRIPT
+          ? { exitCode: 0, stdout: `home /home/maya\nsystem ${system}\narch ${arch}\nuser maya\npath /usr/bin:/bin\ncpu 2\nmemkb 4194304\n`, stderr: "" }
           : { exitCode: 0, stdout: "", stderr: "" };
+      };
       const backend = new SshBackend({ transport, hostKey: async () => BOX_KEY, knownHosts: async () => ({}), hostName: async reach => reach.host });
-      const install = placeInstaller({ backend, ...assets(tmp(`road-${said}`)) });
-      await expect(install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).rejects.toThrow(noGuestDaemonLine(said));
+      const install = placeInstaller({ backend, ...assets(tmp(`road-${system}-${arch}`)) });
+      await expect(install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).rejects.toThrow(line);
+      expect(ran).toEqual([SSH_READ_SCRIPT]);
     }
+    expect(noPlaceSystemLine("Darwin")).toBe("that computer is a Mac, and wsp joins only a Linux computer as a place; a Mac cannot join yet");
+    expect(noPlaceSystemLine("FreeBSD")).toBe("that computer runs FreeBSD, and wsp joins only a Linux computer as a place");
+    expect(noPlaceSystemLine("Darwin", "that computer", true)).toBe("that computer is a Mac, and wsp keeps only a Linux computer as a place; a Mac cannot be updated as one");
   });
 
   it("refuses a chip wsp builds no daemon for, and a box that would not say, before a byte of wsp's lands", async () => {
@@ -3281,7 +3294,7 @@ describe("wsp's own login files on a computer already joined, written by every u
   };
 
   /** One box over ssh, as the update's road sees it: what it was asked to run and what landed on it. */
-  const fakeBox = (answer = { exitCode: 0, stdout: `${PLACE_UPDATED_LINE} /usr/local/bin/wsp-daemon\n`, stderr: "" }, home = HOME) => {
+  const fakeBox = (answer = { exitCode: 0, stdout: `${PLACE_UPDATED_LINE} /usr/local/bin/wsp-daemon\n`, stderr: "" }, home = HOME, system = "Linux") => {
     const ran: string[] = [];
     const landed: string[] = [];
     const machine = {
@@ -3297,7 +3310,7 @@ describe("wsp's own login files on a computer already joined, written by every u
         return answer;
       },
     };
-    return { ran, landed, backend: { adopt: async () => ({ machine, login: { HOME: home, PATH: "/usr/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }) } };
+    return { ran, landed, backend: { adopt: async () => ({ machine, login: { HOME: home, PATH: "/usr/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, system, arch: "x86_64" }) } };
   };
 
   it("sends them over the link as one exec ahead of the first frame of the swap, in the text the deploy writes", async () => {
@@ -3357,6 +3370,15 @@ describe("wsp's own login files on a computer already joined, written by every u
     expect(box.ran).toHaveLength(1);
     expect(box.ran[0]).toContain(FILES);
     expect(box.ran[0]!.indexOf(FILES)).toBeLessThan(box.ran[0]!.indexOf("systemctl restart"));
+  });
+
+  it("refuses a box that now says it is a Mac before a byte lands, though its chip matches a Linux row", async () => {
+    const box = fakeBox(undefined, HOME, "Darwin");
+    await expect(
+      placeUpdater({ daemonDir: daemonDir(), backend: box.backend as never })({ placeId: "p_1", name: "spoo", report: reportOf(), daemon: true, ssh: { ssh: "maya@box" } }),
+    ).rejects.toThrow(noPlaceSystemLine("Darwin", "that computer", true));
+    expect(box.landed).toEqual([]);
+    expect(box.ran).toEqual([]);
   });
 
   it("runs them alone over ssh where no binary goes, and lands nothing", async () => {
@@ -3672,6 +3694,7 @@ describe("a join as the app's shell runs it", () => {
       name: "old-macbook",
       client: true,
       wsp: { execPath: "/usr/bin/node", execArgv: [], argv: ["/usr/bin/node", "/opt/wsp/bin.js"], version: "9.9.9", PATH: "", shim: `${home}/.wsp/bin/wsp` },
+      platform: "linux",
       manager: unitsUnder(home),
       uid: 0,
       run: runner.run,
@@ -3772,6 +3795,20 @@ describe("the sweep a joined computer runs on itself", () => {
     expect(existsSync(placeKeyPath(home))).toBe(false);
     expect(readFileSync(join(work, "a-thread-wrote-this"), "utf8")).toBe("mine");
     expect(removed.some(line => line.includes("wsp-place-"))).toBe(true);
+  });
+});
+
+describe("a join typed on a Mac", () => {
+  it("refuses in the Mac sentence before it writes or dials anything, though a Mac has a manager", async () => {
+    const host = await fakeHost();
+    const home = tmp("join-mac");
+    const runner = fakeRunner();
+    await expect(
+      joinPlace(captured(), { home, addresses: [host.url], code: "A", hostKey: keyFingerprint(host.publicKey), platform: "darwin", uid: 501, run: runner.run, dial: url => new WebSocket(wsUrlOf(url)) }),
+    ).rejects.toThrow(noPlaceSystemLine("Darwin", "this computer"));
+    expect(existsSync(placeFilePath(home))).toBe(false);
+    expect(host.frames.filter(f => f["op"] === "place.join")).toEqual([]);
+    expect(runner.ran).toEqual([]);
   });
 });
 

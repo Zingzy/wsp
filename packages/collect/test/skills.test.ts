@@ -76,6 +76,16 @@ describe("the skills on a computer", () => {
     expect(again.paths.every(p => p.off === undefined)).toBe(true);
   });
 
+  it("reads a SKILL.md saved with CRLF line ends as the node reader reads it", async () => {
+    const { host, home } = fixture();
+    const text = "---\r\nname: memo\r\ndescription: Keep notes\r\n---\r\nbody\r\n";
+    mkdirSync(join(home, ".agents/skills/memo"), { recursive: true });
+    writeFileSync(join(home, ".agents/skills/memo/SKILL.md"), text);
+    const memo = (await detectSkills(host, await skillRoots(host))).skills.find(s => s.name === "memo")!;
+    expect(memo.description).toBe("Keep notes");
+    expect(memo.description).toBe(skillMdFrontmatter(text).description);
+  });
+
   it("keys a skill by its folder's name, so a SKILL.md naming another skill stands as its own row", async () => {
     const { host, home } = fixture();
     mkdirSync(join(home, ".agents/skills/cool-tool"), { recursive: true });

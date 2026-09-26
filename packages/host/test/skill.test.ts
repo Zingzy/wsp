@@ -9,6 +9,7 @@ import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
 import { INSTRUCTIONS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, WSP_SKILL, agentsLine, instructionsOf } from "../src/skill.js";
 import { hasTool, CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
+import { SERVICE_MANAGERS } from "../src/service.js";
 
 describe("the wsp skill", () => {
   it("is the repo's skills/wsp/SKILL.md, with the frontmatter name and a one-line description without a colon or a quote", () => {
@@ -157,6 +158,16 @@ describe("the wsp skill", () => {
     expect(section).toContain("A workspace holds one project, so nothing names which: the thread starts in that project's folder");
     // No constant path stands in for that folder: the host decides it, and a line naming one would go stale.
     expect(section).not.toContain("~/wsp-work");
+  });
+
+  it("names the unit wsp join writes as the manager itself names a place's unit, and says a Mac refuses", () => {
+    const start = WSP_SKILL.indexOf("`wsp join <address>...");
+    const sentence = WSP_SKILL.slice(start, WSP_SKILL.indexOf("`--code-file", start));
+    const place = { role: "place" as const, statePath: "/root/.wsp/place.json", home: "/root", uid: 0 };
+    expect(sentence).toContain(SERVICE_MANAGERS.systemd.held(place)[0]!.words);
+    expect(sentence).not.toContain(SERVICE_MANAGERS.launchd.held(place)[0]!.words);
+    expect(sentence).not.toContain("systemd user unit");
+    expect(sentence).toContain("a Mac refuses to join");
   });
 
   it("carries no em dash", () => {
