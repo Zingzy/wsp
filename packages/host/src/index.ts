@@ -40,6 +40,7 @@ export { type ProviderEnv } from "./providers.js";
 export { shimPath } from "./shim.js";
 export { agentsHere, type AgentHere } from "./agents-here.js";
 export { installEach, mcpServerSpec, runningWsp, thisComputersPath, type InstallReport, type RunningWsp } from "./mcp-install.js";
+export { writeKeptLatest } from "./agent-latest.js";
 export { dialAddress, hostLogPath, hostTokenFor, lockPathFor, ownPid, servingHost, type HostLock } from "./host-lock.js";
 export { JoinRefused, joinCommand, placeHere, type JoinRefusalAbout } from "./places.js";
 export { SERVING_HOME_SH, defaultHomeIn, homeNamed, servingHome } from "./serving-home.js";

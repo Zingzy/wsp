@@ -22,11 +22,11 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
-import { fixtureCloud, fixtureFleet, fixtureFolders, fixtureRepos, fixtureState } from "./fixture-state.mjs";
+import { fixtureCloud, fixtureFleet, fixtureFolders, fixtureRepos, fixtureState, HERE_AGENTS } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
 import { writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
-import { APP_UP, failuresToCheck } from "./ready.mjs";
+import { APP_UP, failuresToCheck, STILL_LOADING } from "./ready.mjs";
 
 function usage(why) {
   console.error(`${why}\n\nusage: pnpm --filter @wsp/web screenshots -- --out <folder> [--surfaces <file.json>]`);
@@ -141,6 +141,8 @@ async function shoot(context, shot, base, out, token) {
   await page.waitForTimeout(shot.settleMs);
   // A click leaves its control focused and the ring would be the one thing the eye goes to.
   await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+  const loading = await page.locator(STILL_LOADING.join(", ")).filter({ visible: true }).count();
+  if (loading > 0) throw new Error(`the page was still loading: ${loading} ${loading === 1 ? "part still reads" : "parts still read"} as on its way (a skeleton bar or a status still checking)`);
   await page.screenshot({ path: join(out, shot.file) });
   const failures = await unmeantFailures(page, shot);
   if (failures.length > 0) throw new Error(`the page shows a failure it was not meant to: ${failures.join("; ")}`);
@@ -203,6 +205,7 @@ async function main() {
       wsPort: await freePort(),
       cloud: fixtureCloud(fixture),
       records: writeStandIn(own, fixtureFleet(state)),
+      agents: HERE_AGENTS,
     });
     const made = { ...started, home: own, token: hostToken(started) };
     if (!fresh) others.set(fixture, made);
@@ -213,7 +216,7 @@ async function main() {
     // The stand-in's records, seeded and named: a fixture's sleeping fork is asleep because its provider says so,
     // and this run names no folder for the machines, so nothing runs on any of them. The cloud those machines are
     // meant to be at rides with them, or the stand-in stands in for nothing and no provider is on the places table.
-    host = await startHost({ home, state, port: await freePort(), wsPort: await freePort(), cloud: fixtureCloud(), records: writeStandIn(home, fixtureFleet(state)) });
+    host = await startHost({ home, state, port: await freePort(), wsPort: await freePort(), cloud: fixtureCloud(), records: writeStandIn(home, fixtureFleet(state)), agents: HERE_AGENTS });
     host.token = hostToken(host);
     browser = await chromium.launch({ args: BROWSER_ARGS });
     for (const shot of shotPlan(list)) {

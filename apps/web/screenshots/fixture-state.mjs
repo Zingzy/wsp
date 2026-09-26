@@ -88,6 +88,28 @@ const workspace = (id, name, extra = {}) => ({
  * every shot whichever Mac takes it. */
 export const HERE_LABEL = "zingzy's MacBook Pro";
 
+/** The agents on this computer in every fixture, which the harness stands in for under the throwaway home: what each
+ * agent's own version flag and sign-in status command say, by catalog id, the newest version each vendor is taken to
+ * have published, and the MCP servers in the agents' own files. A server with tools is a stand-in command that
+ * answers them; one without is written as given and never started. */
+export const HERE_AGENTS = {
+  agents: {
+    claude: { version: "2.1.283 (Claude Code)", status: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) },
+    codex: { version: "codex-cli 0.155.0", status: "Logged in using ChatGPT" },
+  },
+  latest: { claude: "2.1.283", codex: "0.155.0" },
+  servers: [
+    {
+      name: "docs",
+      agents: ["claude", "codex"],
+      tools: [
+        { name: "search_docs", description: "Search the project's docs by keyword." },
+        { name: "read_page", description: "Read one docs page as markdown." },
+      ],
+    },
+    { name: "linear", agents: ["claude"], transport: { kind: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer ${LINEAR_API_KEY}" } } },
+  ],
+};
 
 /** A project as the host records one: one computer, the source that computer sees and the folder a workspace of it
  * works in. A project here is a folder under the work folder; anywhere else it is a repo the computer cloned into
@@ -278,6 +300,20 @@ const MIGRATION = {
   costUsd: 0.21,
 };
 
+/** Every workspace's meter as a host that has ticked keeps it, with where the workspace stands: the fixture's own
+ * meter where it names one, and a first tick at nothing spent where it does not. A host meters a workspace from its
+ * first tick, five seconds into a watch, and counts it against a computer only once it knows where it stands, so a
+ * state without these read no spend until then, and a run whose earlier shots were quick drew the Spend line in the
+ * later theme's shots alone. */
+const metered = (workspaces, meters = {}) =>
+  Object.fromEntries(
+    workspaces.map(w => {
+      const [, doc] = meters[w.id] === undefined ? meter(w.id, { rateUsdPerHour: 0, hours: 0, phase: w.phase }) : [w.id, meters[w.id]];
+      const where = { kind: w.kind, machineId: w.machineId, ...(w.place === undefined ? {} : { place: w.place }), ...(w.provider === undefined ? {} : { provider: w.provider }) };
+      return [w.id, { ...doc, where }];
+    }),
+  );
+
 /** One store as the JSON file holds it: one object per collection, keyed the way the runtime keys it. Every
  * fixture below builds one. */
 const store = ({ projects, workspaces, sessions = {}, transcripts = {}, goldens, images, places, meters, preferences }) => ({
@@ -286,7 +322,7 @@ const store = ({ projects, workspaces, sessions = {}, transcripts = {}, goldens,
   sessions,
   transcripts,
   ...(goldens !== undefined ? { goldens } : {}),
-  ...(meters === undefined ? {} : { "cost-histories": meters }),
+  "cost-histories": metered(workspaces, meters),
   ...(images !== undefined ? { images } : {}),
   ...(preferences === undefined ? {} : { preferences: { default: preferences } }),
   ...(places === undefined

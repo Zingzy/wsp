@@ -151,26 +151,88 @@ export const agentStores = home => Object.fromEntries(agentStoreRows(home).map((
  * than in the environment, since that is where the command takes it. */
 export const hostArgv = ({ statePath, port, wsPort, advertise }) => [HOST_BIN, "up", "--state", statePath, "--port", String(port), "--ws-port", String(wsPort), ...(advertise === undefined ? [] : ["--advertise", advertise])];
 
+/** An executable script at `path`, its whole text given, interpreter line and all. */
+export function writeScript(path, text) {
+  writeFileSync(path, text);
+  chmodSync(path, 0o755);
+}
+
+/** The text of a shell script whose body is `body`. */
+const sh = body => `#!/bin/sh\n${body}\n`;
+
 /** A folder holding the one command a host asks for this Mac's name, answering the fixtures' label: the host reads
  * the row's label off `scutil --get ComputerName` on its path, so the shots name one computer whichever Mac takes
  * them. Answers the folder, which leads the host's path. */
 export function writeHereLabel(home) {
   const bin = join(home, ".wsp-system");
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "scutil"), `#!/bin/sh\nprintf '%s\\n' ${shellQuote(HERE_LABEL)}\n`);
-  chmodSync(join(bin, "scutil"), 0o755);
+  writeScript(join(bin, "scutil"), sh(`printf '%s\\n' ${shellQuote(HERE_LABEL)}`));
+  return bin;
+}
+
+/** The folders a host serving a fixture's own agents looks past its stand-ins to: the system's, where no agent a Mac
+ * installs lives, so no agent of this computer's is found, run or read. */
+export const SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+/** A stand-in MCP server over stdin: it answers initialize and tools/list with the fixture's tools and nothing else,
+ * each answer carrying the id its request came with. */
+const serverScript = (name, tools) => {
+  const answer = result => {
+    const [head, tail] = JSON.stringify({ jsonrpc: "2.0", id: 0, result }).split('"id":0');
+    return `printf '%s%s%s\\n' ${shellQuote(`${head}"id":`)} "$id" ${shellQuote(tail)}`;
+  };
+  const hello = answer({ protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name, version: "1.0.0" } });
+  const listed = answer({ tools: tools.map(t => ({ ...t, inputSchema: { type: "object", properties: {} } })) });
+  const id = `id=$(printf '%s' "$line" | sed -n 's/.*"id":\\([0-9]*\\).*/\\1/p')`;
+  return `while IFS= read -r line; do\n  ${id}\n  case "$line" in\n    *'"method":"initialize"'*) ${hello} ;;\n    *'"method":"tools/list"'*) ${listed} ;;\n  esac\ndone`;
+};
+
+/** This computer's agents as a fixture has them, all under the throwaway home: a stand-in for each agent's command that
+ * says the fixture's version and sign-in, a stand-in command for each server with tools, and each agent's own MCP
+ * file written by the catalog's module for its format. Answers the folder the commands are in, which leads the host's
+ * path. */
+export function writeHereAgents(home, here) {
+  const bin = join(home, ".local", "bin");
+  mkdirSync(bin, { recursive: true });
+  for (const [id, said] of Object.entries(here.agents)) {
+    const agent = CATALOG_AGENTS.find(a => a.id === id);
+    if (agent === undefined) throw new Error(`the fixture names an agent the catalog does not have: ${id}`);
+    writeScript(join(bin, agent.bin), sh(`case "$1" in\n  --version) printf '%s\\n' ${shellQuote(said.version)} ;;\n  *) printf '%s\\n' ${shellQuote(said.status)} ;;\nesac`));
+  }
+  const transports = new Map(
+    here.servers.map(s => {
+      if (s.tools === undefined) return [s.name, s.transport];
+      const command = join(bin, `${s.name}-mcp`);
+      writeScript(command, sh(serverScript(s.name, s.tools)));
+      return [s.name, { kind: "stdio", command, args: [], env: {} }];
+    }),
+  );
+  for (const agent of CATALOG_AGENTS) {
+    const mine = here.servers.filter(s => s.agents.includes(agent.id));
+    if (mine.length === 0 || agent.mcp === undefined) continue;
+    const file = agent.mcp.files[0].replace(/^~\//, `${home}/`);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, mine.reduce((text, s) => agent.mcp.format.place(text, s.name, transports.get(s.name)).text, undefined));
+  }
   return bin;
 }
 
 /** Starts the built wsp command on a throwaway home holding one fixture state, and answers once it serves. A
  * secret is handed to the child and never written into the environment this answers with: the lab records and
- * prints what it started the host with, and a key in that record would be a key in a log. */
-export async function startHost({ home, state, port, wsPort, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, records, advertise, secrets = {} }) {
+ * prints what it started the host with, and a key in that record would be a key in a log.
+ *
+ * `agents` names the fixture's own agents on this computer, which the host then reads in place of this computer's:
+ * their stand-ins lead a path of the system's folders alone, and the newest versions are kept as already asked, so
+ * no agent of the person's is run and no vendor is asked. A lab names none, since its testers' turns run real agents. */
+export async function startHost({ home, state, port, wsPort, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, records, advertise, agents, secrets = {} }) {
   const statePath = join(home, ".wsp", "state.json");
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
   const out = logPath === undefined ? "pipe" : openSync(logPath, "a");
-  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn, records, path: `${writeHereLabel(home)}:${await hostPath()}` });
+  const { hostTokenFor, writeKeptLatest } = await import(pathToFileURL(HOST_PACKAGE).href);
+  if (agents !== undefined) writeKeptLatest(statePath, agents.latest, Date.now());
+  const path = agents === undefined ? await hostPath() : `${writeHereAgents(home, agents)}:${SYSTEM_PATH}`;
+  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn, records, path: `${writeHereLabel(home)}:${path}` });
   const child = spawn(process.execPath, hostArgv({ statePath, port, wsPort, advertise }), {
     cwd: home,
     env: { ...env, ...secrets },
@@ -182,7 +244,6 @@ export async function startHost({ home, state, port, wsPort, logPath, detached =
   child.stderr?.on("data", d => log.push(String(d)));
   const said = () => (logPath === undefined ? log.join("") : `the host's log is at ${logPath}`);
   const base = `http://127.0.0.1:${port}`;
-  const { hostTokenFor } = await import(pathToFileURL(HOST_PACKAGE).href);
   const answer = { child, base, log, env, token: () => hostTokenFor(statePath) };
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
