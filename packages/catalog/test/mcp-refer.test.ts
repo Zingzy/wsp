@@ -5,7 +5,7 @@
 // vault. What the agent reads back is the same server with only names in it.
 import { parse as parseToml } from "smol-toml";
 import { describe, expect, it } from "vitest";
-import { CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_SERVERS_JSON, OPENCODE_JSON, mcpHeaderVariable, parseJsonc, serversByName, type McpFormat } from "../src/index.js";
+import { CATALOG_AGENTS, CODEX_TOML, GEMINI_SETTINGS_JSON, MCP_SERVERS_JSON, OPENCODE_JSON, mcpHeaderVariable, parseJsonc, serversByName, type McpFormat } from "../src/index.js";
 
 const HOME = "/Users/dev";
 const TOKEN = "lin_api_TESTONLY";
@@ -209,7 +209,7 @@ describe("what a reference writer refuses rather than guess", () => {
   });
 
   it("Codex: reads no variable for an OAuth client secret, so the file stays on this computer and the refusal names the key", async () => {
-    const said = "linear keeps an OAuth client secret in mcp_servers.linear.oauth.client_secret, and Codex reads no variable there, so the file stays on this computer";
+    const said = "linear keeps an OAuth secret in mcp_servers.linear.oauth.client_secret, and Codex reads no variable there, so the file stays on this computer";
     const spellings = [
       '[mcp_servers.linear]\nurl = "https://l.example"\n\n[mcp_servers.linear.oauth]\nclient_id = "cid"\nclient_secret = "cs_TESTONLY_table"\n',
       '[mcp_servers.linear]\nurl = "https://l.example"\noauth = { client_id = "cid", client_secret = "cs_TESTONLY_inline" }\n',
@@ -230,7 +230,7 @@ describe("what a reference writer refuses rather than guess", () => {
 
   it("the copy's last check refuses a server definition that still carries an OAuth client secret, whatever the format's writer let through", async () => {
     const lax: McpFormat = { ...CODEX_TOML, refer: async text => ({ text, servers: [{ name: "s", values: {} }], entries: [{ url: "https://s.example", oauth: { client_id: "cid", client_secret: "cs_TESTONLY" } }] }) };
-    await expect(serversByName(lax, "[mcp_servers.s]\n", new Map(), () => undefined)).rejects.toThrow("a server still carries an OAuth client secret after it was written by name, and no agent reads one by name, so the file stays on this computer");
+    await expect(serversByName(lax, "[mcp_servers.s]\n", new Map(), () => undefined)).rejects.toThrow("a server still carries an OAuth secret in oauth.client_secret after it was written by name, so the file stays on this computer");
     const clean: McpFormat = { ...lax, refer: async text => ({ text, servers: [{ name: "s", values: {} }], entries: [{ url: "https://s.example", oauth: { client_id: "cid" } }] }) };
     expect((await serversByName(clean, "[mcp_servers.s]\n", new Map(), () => undefined)).dropped).toEqual([]);
   });
@@ -299,6 +299,100 @@ describe("what a reference writer refuses rather than guess", () => {
     await expect(GEMINI_SETTINGS_JSON.refer(JSON.stringify({ mcpServers: { s: { command: "x", env: { K: "ab$cd" } } } }))).rejects.toThrow("s's K mixes a value with a variable, so it cannot travel by name; make it one or the other");
     // A whole reference, a bearer's included, stands as written.
     expect((await MCP_SERVERS_JSON.refer(JSON.stringify({ mcpServers: { s: { url: "https://s.example", headers: { Authorization: "Bearer ${X}", Y: "${Y:-d}" } } } }))).servers).toEqual([{ name: "s", values: {} }]);
+  });
+});
+
+describe("an MCP server's OAuth secrets", () => {
+  const CS = "cs_TESTONLY_oauth";
+  type Oauthy = { oauth?: Record<string, unknown> };
+
+  it("Gemini CLI: writes ${NAME} for oauth.clientSecret, which it expands, and hands the value to the vault", async () => {
+    const text = JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example/mcp", oauth: { enabled: true, clientId: "cid", clientSecret: CS } } } }, null, 2);
+    const out = await GEMINI_SETTINGS_JSON.refer(text);
+    expect((parseJsonc(out.text) as { mcpServers: Record<string, Oauthy> }).mcpServers.linear!.oauth).toEqual({ enabled: true, clientId: "cid", clientSecret: "${WSP_MCP_LINEAR_OAUTH_CLIENTSECRET}" });
+    expect(out.servers).toEqual([{ name: "linear", values: { WSP_MCP_LINEAR_OAUTH_CLIENTSECRET: CS } }]);
+    const copied = await serversByName(GEMINI_SETTINGS_JSON, text, new Map(), () => undefined);
+    expect(copied.text).not.toContain(CS);
+    expect(copied.text).toContain("${WSP_MCP_LINEAR_OAUTH_CLIENTSECRET}");
+  });
+
+  it("OpenCode: writes {env:NAME} for oauth.clientSecret and for the snake_case client_secret it also reads", async () => {
+    for (const key of ["clientSecret", "client_secret"]) {
+      const n = mcpHeaderVariable("linear", `oauth.${key}`);
+      const text = JSON.stringify({ mcp: { linear: { type: "remote", url: "https://l.example/mcp", oauth: { clientId: "cid", [key]: CS } } } }, null, 2);
+      const out = await OPENCODE_JSON.refer(text);
+      expect((parseJsonc(out.text) as { mcp: Record<string, Oauthy> }).mcp.linear!.oauth, key).toEqual({ clientId: "cid", [key]: `{env:${n}}` });
+      expect(out.servers, key).toEqual([{ name: "linear", values: { [n]: CS } }]);
+      expect((await serversByName(OPENCODE_JSON, text, new Map(), () => undefined)).text, key).not.toContain(CS);
+    }
+    expect(mcpHeaderVariable("linear", "oauth.client_secret")).toBe("WSP_MCP_LINEAR_OAUTH_CLIENT_SECRET");
+    const off = JSON.stringify({ mcp: { linear: { type: "remote", url: "https://l.example/mcp", oauth: false } } });
+    expect((await serversByName(OPENCODE_JSON, off, new Map(), () => undefined)).text).toBe(off);
+  });
+
+  it("refuses an OAuth secret the agent reads no variable for, naming the key, so the file stays on this computer", async () => {
+    const cases: [McpFormat, string, string][] = [
+      [MCP_SERVERS_JSON, JSON.stringify({ mcpServers: { linear: { type: "http", url: "https://l.example", oauth: { clientId: "cid", clientSecret: CS } } } }), "mcpServers.linear.oauth.clientSecret"],
+      [MCP_SERVERS_JSON, JSON.stringify({ projects: { [HOME]: { mcpServers: { linear: { type: "http", url: "https://l.example", oauth: { client_secret: CS } } } } } }), `projects.${HOME}.mcpServers.linear.oauth.client_secret`],
+      [GEMINI_SETTINGS_JSON, JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: { clientSecret: "${OK}", refreshToken: CS } } } }), "mcpServers.linear.oauth.refreshToken"],
+      [GEMINI_SETTINGS_JSON, JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: { client_secret: CS } } } }), "mcpServers.linear.oauth.client_secret"],
+      [OPENCODE_JSON, JSON.stringify({ mcp: { linear: { type: "remote", url: "https://l.example", oauth: { access_token: CS } } } }), "mcp.linear.oauth.access_token"],
+    ];
+    for (const [format, text, where] of cases) {
+      const said = `linear keeps an OAuth secret in ${where}, and its agent reads no variable there, so the file stays on this computer`;
+      await expect(format.refer(text), where).rejects.toThrow(said);
+      await expect(serversByName(format, text, new Map(), () => undefined), where).rejects.toThrow(said);
+    }
+    await expect(GEMINI_SETTINGS_JSON.refer(JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: { clientSecret: 7 } } } }))).rejects.toThrow("linear keeps an OAuth secret in mcpServers.linear.oauth.clientSecret");
+    await expect(GEMINI_SETTINGS_JSON.refer(JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: CS } } }))).rejects.toThrow("mcpServers.linear is written in a shape wsp does not read, so its values cannot be written by name");
+    await expect(GEMINI_SETTINGS_JSON.refer(JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: { clientSecret: `x_\${Y}` } } } }))).rejects.toThrow("linear's oauth.clientSecret mixes a value with a variable");
+    await expect(CODEX_TOML.refer(`[mcp_servers.linear]\nurl = "https://l.example"\noauth = { refresh_token = "${CS}" }\n`)).rejects.toThrow("linear keeps an OAuth secret in mcp_servers.linear.oauth.refresh_token, and Codex reads no variable there, so the file stays on this computer");
+  });
+
+  it("leaves a secret that already names a variable as written, and another server's secret alone when one server is asked for", async () => {
+    const named = JSON.stringify({ mcpServers: { linear: { type: "http", url: "https://l.example", oauth: { clientSecret: "${LINEAR_SECRET}" } } } });
+    expect((await serversByName(MCP_SERVERS_JSON, named, new Map(), () => undefined)).text).toBe(named);
+    const beside = JSON.stringify({ mcpServers: { linear: { httpUrl: "https://l.example", oauth: { refreshToken: CS } }, other: { command: "o", env: { K: "k_TESTONLY" } } } });
+    expect((await GEMINI_SETTINGS_JSON.refer(beside, "other")).servers).toEqual([{ name: "other", values: { K: "k_TESTONLY" } }]);
+  });
+
+  it("the copy's last check reads every spelling of an OAuth secret at any depth of a definition, and lets through only a reference the agent expands", async () => {
+    const lax = (format: McpFormat, entries: unknown[]): McpFormat => ({ ...format, refer: async text => ({ text, servers: [{ name: "s", values: {} }], entries }) });
+    const spellings: [unknown, string][] = [
+      [{ oauth: { clientSecret: CS } }, "oauth.clientSecret"],
+      [{ oauth: { client_secret: CS } }, "oauth.client_secret"],
+      [{ oauth: { "Client-Secret": CS } }, "oauth.Client-Secret"],
+      [{ OAuth: { CLIENTSECRET: CS } }, "OAuth.CLIENTSECRET"],
+      [{ oauth: { refresh_token: CS } }, "oauth.refresh_token"],
+      [{ oauth: { refreshToken: CS } }, "oauth.refreshToken"],
+      [{ oauth: { accessToken: CS } }, "oauth.accessToken"],
+      [{ oauth: { id_token: CS } }, "oauth.id_token"],
+      [{ servers: { x: { oauth: { client_secret: CS } } } }, "servers.x.oauth.client_secret"],
+      [{ list: [{ oauth: { clientSecret: 7 } }] }, "list.0.oauth.clientSecret"],
+    ];
+    for (const format of [MCP_SERVERS_JSON, GEMINI_SETTINGS_JSON, OPENCODE_JSON, CODEX_TOML]) {
+      for (const [entry, where] of spellings) {
+        await expect(serversByName(lax(format, [entry]), "{}", new Map(), () => undefined), where).rejects.toThrow(`a server still carries an OAuth secret in ${where} after it was written by name, so the file stays on this computer`);
+      }
+      expect((await serversByName(lax(format, [{ oauth: { clientId: "cid", clientSecret: "" } }]), "{}", new Map(), () => undefined)).dropped).toEqual([]);
+    }
+    expect((await serversByName(lax(GEMINI_SETTINGS_JSON, [{ oauth: { clientSecret: "${X}" } }]), "{}", new Map(), () => undefined)).dropped).toEqual([]);
+    expect((await serversByName(lax(OPENCODE_JSON, [{ oauth: { client_secret: "{env:X}" } }]), "{}", new Map(), () => undefined)).dropped).toEqual([]);
+    await expect(serversByName(lax(OPENCODE_JSON, [{ oauth: { clientSecret: "${X}" } }]), "{}", new Map(), () => undefined)).rejects.toThrow("oauth.clientSecret");
+    await expect(serversByName(lax(CODEX_TOML, [{ oauth: { client_secret: "${X}" } }]), "{}", new Map(), () => undefined)).rejects.toThrow("oauth.client_secret");
+  });
+
+  it("OpenCode: a secret under the mcp.servers envelope it also reads keeps the file on this computer", async () => {
+    const text = JSON.stringify({ mcp: { servers: { linear: { type: "remote", url: "https://l.example", oauth: { client_secret: CS } } } } });
+    await expect(serversByName(OPENCODE_JSON, text, new Map(), () => undefined)).rejects.toThrow("a server still carries an OAuth secret in linear.oauth.client_secret after it was written by name, so the file stays on this computer");
+  });
+
+  it("no agent row copies the file Gemini CLI or OpenCode keeps its MCP sign-in tokens in", () => {
+    const stores: Record<string, string> = { gemini: "~/.gemini/mcp-oauth-tokens.json", opencode: "~/.local/share/opencode/mcp-auth.json" };
+    for (const [id, store] of Object.entries(stores)) {
+      const a = CATALOG_AGENTS.find(x => x.id === id)!;
+      for (const p of [...a.configPaths, ...(a.mcp?.files ?? [])]) expect(store === p || store.startsWith(`${p.replace(/\/+$/, "")}/`), `${id}: ${p}`).toBe(false);
+    }
   });
 });
 

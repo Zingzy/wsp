@@ -139,6 +139,9 @@ export interface McpFormat {
   /** A variable written as this format's agent expands it inside a server's arguments and address; absent where the
    * agent expands none there. */
   argRef?(variable: string): string;
+  /** Whether a string is one reference in the syntax this format's agent expands and nothing else; absent where the
+   * agent expands none. */
+  whole?(value: string): boolean;
 }
 
 export type McpResolved = { transport: McpTransport; values: string[] } | { missing: string };
@@ -163,6 +166,26 @@ const stringsIn = (v: unknown): string[] => (typeof v === "string" ? [v] : Array
 
 /** A value whole, and with its scheme word (`Bearer`, `Basic`, `token`) taken off where it carries one. */
 export const valueForms = (v: string): string[] => [v, ...(/^(?:bearer|basic|token)\s+(.+)$/i.exec(v)?.slice(1) ?? [])];
+
+/** A key's name with case, `_` and `-` taken out, so every spelling of one field reads the same. */
+const squashed = (key: string): string => key.toLowerCase().replace(/[-_]/g, "");
+
+const OAUTH_SECRETS = new Set(["clientsecret", "refreshtoken", "accesstoken", "idtoken"]);
+
+/** The keys of a server's `oauth` table that hold a secret, however the file spells them. */
+const oauthSecretKeys = (oauth: Record<string, unknown>): string[] => Object.keys(oauth).filter(k => OAUTH_SECRETS.has(squashed(k)));
+
+/** Where a definition still holds an OAuth secret, at any depth and in any spelling, as a dotted path inside it; an
+ * empty string and a whole reference the agent expands hold none. */
+function oauthSecretsIn(v: unknown, whole: (s: string) => boolean, at: readonly string[] = []): string[] {
+  if (Array.isArray(v)) return v.flatMap((x, i) => oauthSecretsIn(x, whole, [...at, String(i)]));
+  if (!isObject(v)) return [];
+  return Object.entries(v).flatMap(([k, x]) => {
+    const here = [...at, k];
+    const own = isObject(x) && squashed(k) === "oauth" ? oauthSecretKeys(x).filter(s => !(typeof x[s] === "string" && (x[s] === "" || whole(x[s])))).map(s => [...here, s].join(".")) : [];
+    return [...own, ...oauthSecretsIn(x, whole, here)];
+  });
+}
 
 /** A query value decoded as a server reads it; the raw text where it is not valid percent-encoding. */
 function queryValue(raw: string): string {
@@ -326,7 +349,7 @@ const clashLine = (name: string, by: string | readonly string[]): string => {
  * need a name to hold two values, or a value of more than one line, is taken out of the text with the reason, and so is
  * one that sets a variable a catalog row keeps its key under, which `rowOf` names; a provider's key is never a server's
  * value. A name servers.env holds with another value is a second value too, unless it is this server's alone, whose new
- * value is its rotation. A copy whose definitions still carry an OAuth client secret is refused whole. */
+ * value is its rotation. A copy whose definitions still carry an OAuth secret is refused whole. */
 export async function serversByName(format: McpFormat, text: string, held: Map<string, { value: string; by: string }>, rowOf: (name: string) => string | undefined, known: Readonly<Record<string, { value: string; by: readonly string[] }>> = {}): Promise<{ text: string; dropped: { name: string; reason: string }[] }> {
   const knownValues = Object.entries(known).map(([name, at]): KnownValue => [name, at.value]);
   const found = (await format.refer(text, undefined, knownValues)).servers;
@@ -352,7 +375,8 @@ export async function serversByName(format: McpFormat, text: string, held: Map<s
   if (found.length === 0) return { text, dropped: [] };
   const final = await format.refer(out, undefined, knownValues);
   stillStands(final.entries, found);
-  if (final.entries.some(e => isObject(e) && isObject(e["oauth"]) && e["oauth"]["client_secret"] !== undefined)) throw new Error("a server still carries an OAuth client secret after it was written by name, and no agent reads one by name, so the file stays on this computer");
+  const secret = oauthSecretsIn(final.entries, format.whole ?? (() => false)).map(p => p.slice(p.indexOf(".") + 1))[0];
+  if (secret !== undefined) throw new Error(`a server still carries an OAuth secret in ${secret} after it was written by name, so the file stays on this computer`);
   const result = final.text;
   for (const [name, at] of kept) held.set(name, at);
   return { text: result, dropped: dropped.map(({ name, reason }) => ({ name, reason })) };
@@ -816,7 +840,12 @@ interface JsonShape {
   ref: RegExp;
   /** A variable written in that syntax. */
   refOf(variable: string): string;
+  /** The keys of a server's `oauth` table whose secret the agent reads with `ref`'s variables expanded. */
+  oauthSecrets?: readonly string[];
 }
+
+/** Whether a string is one reference in `ref`'s syntax and nothing else. */
+const wholeRef = (ref: RegExp) => (v: string): boolean => new RegExp(`^(?:${ref.source})$`).test(v);
 
 /** The reference writer for a JSON file: each server's header and command variable values put in place by name,
  * every other key and comment where it was. */
@@ -834,6 +863,7 @@ function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
   const names = (v: string): boolean => new RegExp(shape.ref.source).test(v);
   /** A value that is one reference and nothing else, a bearer's included. */
   const whole = (v: string): boolean => new RegExp(`^(?:Bearer\\s+)?(?:${shape.ref.source})$`, "i").test(v);
+  const bare = wholeRef(shape.ref);
   return async (text, only, known = []) => {
     const root = jsonObject(text);
     const tables = serverTables(root, only === undefined);
@@ -855,9 +885,21 @@ function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
             edits.push([[...table.at, name, key, k], token !== undefined ? `Bearer ${shape.refOf(n)}` : shape.refOf(n)]);
           }
         };
-        const minted = headerVariables(name, Object.keys(dict(def.headers)));
+        const oauth = def.oauth;
+        if (oauth !== undefined && oauth !== false && !isObject(oauth)) throw new Error(`${[...table.at, name].join(".")} is written in a shape wsp does not read, so its values cannot be written by name`);
+        const secrets = isObject(oauth) ? oauthSecretKeys(oauth) : [];
+        const minted = headerVariables(name, [...Object.keys(dict(def.headers)), ...secrets.map(k => `oauth.${k}`)]);
         put("headers", dict(def.headers), h => minted.get(h)!, true);
         put(shape.envKey, dict(def[shape.envKey]), k => k, false);
+        for (const k of secrets) {
+          const v = (oauth as Tree)[k];
+          if (typeof v === "string" && (v === "" || bare(v))) continue;
+          if (typeof v !== "string" || !(shape.oauthSecrets ?? []).includes(k)) throw new Error(`${name} keeps an OAuth secret in ${[...table.at, name, "oauth", k].join(".")}, and its agent reads no variable there, so the file stays on this computer`);
+          if (names(v)) throw new Error(`${name}'s oauth.${k} mixes a value with a variable, so it cannot travel by name; make it one or the other`);
+          const n = minted.get(`oauth.${k}`)!;
+          values[n] = v;
+          edits.push([[...table.at, name, "oauth", k], shape.refOf(n)]);
+        }
         servers.push({ name, ...(table.project !== undefined ? { project: table.project } : {}), values });
         defs.push({ at: [...table.at, name], name, def, values });
       }
@@ -946,6 +988,7 @@ function jsonFormat(shape: JsonShape): McpFormat {
     refer: jsonReferrer(shape),
     resolve: jsonResolver(shape.ref),
     argRef: shape.refOf,
+    whole: wholeRef(shape.ref),
     ...(shape.flip === undefined ? {} : { enable: jsonEnabler(shape.key, shape.flip) }),
   };
 }
@@ -964,7 +1007,7 @@ function jsonEnabler(key: string, flip: NonNullable<JsonShape["flip"]>): NonNull
 
 /** `mcpServers.<name> = { command, args, env, cwd }` or `{ url | httpUrl, headers }`, whose url and headers take
  * `ref`'s variables from the environment; an address is written as `remote` writes its key. */
-const mcpServersJson = (ref: RegExp, remote: (url: string) => Record<string, string>, extra: Pick<JsonShape, "off" | "flip"> = {}): McpFormat =>
+const mcpServersJson = (ref: RegExp, remote: (url: string) => Record<string, string>, extra: Pick<JsonShape, "off" | "flip" | "oauthSecrets"> = {}): McpFormat =>
   jsonFormat({
     ...extra,
     key: "mcpServers",
@@ -993,9 +1036,10 @@ const mcpServersJson = (ref: RegExp, remote: (url: string) => Record<string, str
  * switch is per folder in its own /mcp, so no server is turned off here. */
 export const MCP_SERVERS_JSON: McpFormat = mcpServersJson(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g, url => ({ type: "http", url }));
 
-/** Gemini CLI's settings, which also expand a bare `$X`, take a streamable address as `httpUrl`, and switch a server
- * off by its name in `mcp.excluded`. */
+/** Gemini CLI's settings, which also expand a bare `$X` anywhere in the file (so `oauth.clientSecret` too, 0.58.0),
+ * take a streamable address as `httpUrl`, and switch a server off by its name in `mcp.excluded`. */
 export const GEMINI_SETTINGS_JSON: McpFormat = mcpServersJson(/\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))/g, url => ({ httpUrl: url }), {
+  oauthSecrets: ["clientSecret"],
   off: root => strs(tree(root.mcp)?.excluded),
   flip: (root, _entry, name, on) => {
     const held = tree(root.mcp)?.excluded;
@@ -1008,13 +1052,15 @@ export const GEMINI_SETTINGS_JSON: McpFormat = mcpServersJson(/\$(?:\{([A-Za-z_]
 const OPENCODE_REF = /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g;
 
 /** `mcp.<name> = { type: "local", command: [command, ...args], environment }` or `{ type: "remote", url, headers }`:
- * OpenCode's config. */
+ * OpenCode's config, whose `{env:X}` is filled across the whole text before it is parsed, and whose remote `oauth`
+ * takes its secret as `clientSecret` or `client_secret` (1.18.27). */
 export const OPENCODE_JSON: McpFormat = jsonFormat({
   key: "mcp",
   projects: false,
   envKey: "environment",
   ref: OPENCODE_REF,
   refOf: v => `{env:${v}}`,
+  oauthSecrets: ["clientSecret", "client_secret"],
   server: (name, raw, scope) => {
     if (!isObject(raw)) return undefined;
     const off = raw.enabled === false ? { disabled: true as const } : {};
@@ -1437,7 +1483,7 @@ function referCodexLines(text: string, only?: string): string {
 /** The reference writer for Codex: the file read whole by a TOML parser, so a server's headers and variables read the
  * same however the file spells them (a table, a sub-table, an inline table, a dotted key, a quoted name), and the tree
  * rewritten by name. The text the line editor makes is kept where it parses to that same tree, which keeps every
- * comment; any other spelling is written out from the tree. An OAuth client secret refuses the file, since Codex reads
+ * comment; any other spelling is written out from the tree. An OAuth secret refuses the file, since Codex reads
  * `oauth.client_secret` only as written and names no variable for it. The parser is loaded on the first call: every host
  * process carries this module and the host's memory has a budget, so nothing that never writes a Codex file pays it. */
 async function referCodex(text: string, only?: string, known: readonly KnownValue[] = []): Promise<McpReferred> {
@@ -1464,7 +1510,8 @@ async function referCodex(text: string, only?: string, known: readonly KnownValu
     const oauth = raw["oauth"];
     if (oauth !== undefined && !isObject(oauth)) throw unread(`mcp_servers.${name}`);
     if (only !== undefined && name !== only) continue;
-    if (oauth?.["client_secret"] !== undefined) throw new Error(`${name} keeps an OAuth client secret in mcp_servers.${name}.oauth.client_secret, and Codex reads no variable there, so the file stays on this computer`);
+    const secret = oauth === undefined ? undefined : oauthSecretKeys(oauth)[0];
+    if (secret !== undefined) throw new Error(`${name} keeps an OAuth secret in mcp_servers.${name}.oauth.${secret}, and Codex reads no variable there, so the file stays on this computer`);
     const headers = dict(raw["http_headers"]);
     const env = dict(raw["env"]);
     const values: Record<string, string> = {};
