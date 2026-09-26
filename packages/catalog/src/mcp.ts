@@ -74,8 +74,6 @@ export interface McpMergeResult {
 export interface McpMerged {
   text: string;
   results: McpMergeResult[];
-  /** The agent's own file held comments the rewrite does not keep, so the person is told. */
-  commentsDropped: boolean;
 }
 
 /** What every editor is handed besides the text. */
@@ -170,7 +168,7 @@ function jsonObject(text: string | undefined): Record<string, unknown> {
 }
 
 /** One change to a JSON file: the value at the path set, or taken out where it is undefined. */
-type JsonEdit = [JSONPath, unknown];
+export type JsonEdit = [JSONPath, unknown];
 
 /** The same change made to the parsed value, a missing object on the way made as the in-place edit makes one; a
  * number at the end is an element of the array there, -1 one put after its last. */
@@ -188,7 +186,7 @@ function setAt(root: Tree, [path, value]: JsonEdit): void {
       else held[last] = value;
       return;
     }
-    if (tree(held) === undefined) put(at, key, {});
+    if (tree(held) === undefined && !Array.isArray(held)) put(at, key, {});
     at = at[key] as Tree;
   }
   if (value === undefined) delete at[String(last)];
@@ -341,10 +339,46 @@ function editOnce(text: string, [path, value]: JsonEdit): string {
       out = text.slice(0, node.offset) + rendered(wrap(depth), lined ? layout(text, comments).indent(node.offset) : undefined, eol) + text.slice(node.offset + node.length);
     }
   }
+  keepsComments(text, comments, out, own);
+  return out;
+}
+
+/** Refuses an edit after which a comment outside `own`, the span it took out, no longer stands. */
+function keepsComments(text: string, comments: readonly Comment[], out: string, own: [number, number]): void {
   const kept = comments.filter(c => c.at < own[0] || c.end > own[1]).map(c => text.slice(c.at, c.end));
   const left = commentsOf(out).map(c => out.slice(c.at, c.end));
   if (kept.length !== left.length || kept.some((c, i) => c !== left[i])) throw new Error(LOST_COMMENT);
+}
+
+/** Several keys an object does not hold put into it with one parse of the text, in the order given; an object the
+ * text does not hold yet is made whole as editOnce makes one. */
+function insertMany(text: string, at: JSONPath, members: readonly [string, unknown][]): string {
+  const doc = parseTree(text, [], { allowTrailingComma: true });
+  if (doc === undefined) throw new Error("the file is not JSON");
+  const node = findNodeAtLocation(doc, at);
+  if (node === undefined) return editOnce(text, [at, Object.fromEntries(members)]);
+  const comments = commentsOf(text);
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const entry = (indent: string | undefined): string => members.map(([key, value]) => `${JSON.stringify(key)}: ${rendered(value, indent, eol)}`).join(indent === undefined ? ", " : `,${eol}${indent}`);
+  const out = inserted(text, node, entry, comments);
+  keepsComments(text, comments, out, [0, 0]);
   return out;
+}
+
+/** The edits from `from` on that each put a new key into one same object, which insertMany makes in one parse: a
+ * merge of many servers into a file of megabytes would otherwise parse it once per server. */
+function newKeys(root: Tree, edits: readonly JsonEdit[], from: number): JsonEdit[] {
+  const parent = edits[from]![0].slice(0, -1);
+  const run: JsonEdit[] = [];
+  for (const edit of edits.slice(from)) {
+    const [path, value] = edit;
+    const key = path[path.length - 1];
+    if (value === undefined || typeof key !== "string" || path.length !== parent.length + 1 || parent.some((k, i) => k !== path[i])) break;
+    const holder = parent.reduce<unknown>((v, k) => (tree(v) !== undefined && Object.hasOwn(v as Tree, String(k)) ? (v as Tree)[String(k)] : undefined), root);
+    if ((holder !== undefined && (tree(holder) === undefined || Object.hasOwn(holder as Tree, key))) || run.some(([p]) => p[p.length - 1] === key)) break;
+    run.push(edit);
+  }
+  return run;
 }
 
 /** The file's text with the edits made in place, so every comment and every byte they do not touch stays where it
@@ -354,9 +388,12 @@ function editJsonc(text: string, root: Tree, edits: readonly JsonEdit[]): string
   let out = text;
   let same = false;
   try {
-    for (const edit of edits) {
-      out = editOnce(out, edit);
-      setAt(root, edit);
+    for (let i = 0; i < edits.length; ) {
+      const run = newKeys(root, edits, i);
+      const step = run.length > 1 ? run : [edits[i]!];
+      out = run.length > 1 ? insertMany(out, run[0]![0].slice(0, -1), run.map(([path, value]) => [String(path[path.length - 1]), value])) : editOnce(out, step[0]!);
+      for (const edit of step) setAt(root, edit);
+      i += step.length;
     }
     same = jsonCanonical(readJsonc(out).value) === jsonCanonical(root);
   } catch (e) {
@@ -364,6 +401,15 @@ function editJsonc(text: string, root: Tree, edits: readonly JsonEdit[]): string
   }
   if (!same) throw new Error("the file could not be changed in place, which keeps its comments; change it by hand");
   return out;
+}
+
+/** A config's JSON or jsonc text with the edits made in place, every comment and byte they do not touch where it
+ * was: the one editor every road that changes an agent's JSON config goes through. Throws when the text is not a
+ * JSON object or the edits cannot be made in place. */
+export function editJson(text: string, edits: readonly JsonEdit[]): string {
+  const root = tree(readJsonc(text).value);
+  if (root === undefined) throw new Error("the file is not a JSON object");
+  return editJsonc(text, root, edits);
 }
 
 /** The servers under `key` of a JSON object, each read by the format's own entry shape. */
@@ -402,31 +448,24 @@ function jsonCanonical(v: unknown): string {
   return o === undefined ? (JSON.stringify(v) ?? "null") : `{${Object.keys(o).sort().map(k => `${JSON.stringify(k)}:${jsonCanonical(o[k])}`).join(",")}}`;
 }
 
-/** The merge for a JSON file with its servers under `key`: the agent's own file parsed, wsp's keys put in it, the
- * whole of it written back, and not one other key of theirs read or moved. Per-folder servers go under
- * `projects.<folder>.<key>` as the editor puts them, and the folder the definitions travelled from is not made. */
+/** The merge for a JSON file with its servers under `key`: wsp's keys put into the agent's own file in place, and
+ * not one other key or comment of theirs read or moved. Per-folder servers go under `projects.<folder>.<key>` as
+ * the editor puts them, and the folder the definitions travelled from is not made. */
 function jsonMerger(key: string): McpFormat["merge"] {
   return (lib, scope, own, travelled) => {
-    const held = own === undefined || own.trim() === "" ? undefined : readJsonc(own);
-    const root = tree(held?.value ?? {});
+    const held = own === undefined || own.trim() === "" ? undefined : own;
+    const root = tree(held === undefined ? {} : readJsonc(held).value);
     if (root === undefined) throw new Error("the file is not a JSON object");
     const from = tree(readJsonc(travelled).value);
     if (from === undefined) throw new Error("the copy that travelled is not a JSON object");
     const project = scope.project;
     const source = project === undefined ? from : tree(tree(from.projects)?.[project.from]) ?? {};
     const arrived = tree(source[key]) ?? {};
-    /** The servers standing in the agent's own file under this scope's key, read without making the table. */
-    const standing = (): Tree => (project === undefined ? tree(root[key]) ?? {} : tree(tree(tree(root.projects)?.[project.to])?.[key]) ?? {});
-    /** The same table, made where the file has none, for a name that is about to be written. */
-    const target = (): Tree => {
-      if (project === undefined) return (root[key] = tree(root[key]) ?? {});
-      const projects = (root.projects = tree(root.projects) ?? {});
-      const to = (projects[project.to] = tree(projects[project.to]) ?? {});
-      return (to[key] = tree(to[key]) ?? {});
-    };
+    const at: JSONPath = project === undefined ? [key] : ["projects", project.to, key];
+    const standing = project === undefined ? tree(root[key]) ?? {} : tree(tree(tree(root.projects)?.[project.to])?.[key]) ?? {};
     const replace = new Set(scope.replace);
     const results: McpMergeResult[] = [];
-    let wrote = false;
+    const edits: JsonEdit[] = [];
     for (const name of scope.keep) {
       const def = arrived[name];
       if (def === undefined) {
@@ -435,25 +474,26 @@ function jsonMerger(key: string): McpFormat["merge"] {
       }
       const next = walkStrings(lib, def, false);
       const said = (outcome: McpMergeResult["outcome"]): void => void results.push({ name, outcome, command: jsonCommandOf(next) });
-      const here = standing()[name];
+      const here = standing[name];
       if (here !== undefined && jsonCanonical(here) === jsonCanonical(next)) said("same");
       else if (here !== undefined && !replace.has(name)) said("theirs");
       else {
-        target()[name] = next;
-        wrote = true;
+        edits.push([[...at, name], next]);
         said(here === undefined ? "added" : "replaced");
       }
     }
     for (const name of scope.drop) {
-      if (standing()[name] === undefined || !replace.has(name)) {
+      if (standing[name] === undefined || !replace.has(name)) {
         results.push({ name, outcome: "left" });
         continue;
       }
-      delete target()[name];
-      wrote = true;
+      edits.push([[...at, name], undefined]);
       results.push({ name, outcome: "dropped" });
     }
-    return { text: wrote ? `${JSON.stringify(root, null, 2)}\n` : own ?? "", results, commentsDropped: wrote && held?.comments === true };
+    if (edits.length === 0) return { text: own ?? "", results };
+    if (held !== undefined) return { text: editJsonc(held, root, edits), results };
+    for (const edit of edits) setAt(root, edit);
+    return { text: `${JSON.stringify(root, null, 2)}\n`, results };
   };
 }
 
@@ -477,23 +517,31 @@ function jsonRemover(shape: JsonShape): McpFormat["remove"] {
   };
 }
 
+/** Each string of a definition the machine reads another way, as an edit at its own path, so every comment inside
+ * the definition stands. */
+const stringEdits = (lib: McpEditLib, v: unknown, path: JSONPath, command: boolean): JsonEdit[] => {
+  if (typeof v === "string") {
+    const next = lib.rewriteString(v, command);
+    return next === v ? [] : [[path, next]];
+  }
+  if (Array.isArray(v)) return v.flatMap((x, i) => stringEdits(lib, x, [...path, i], command && i === 0));
+  const o = tree(v);
+  return o === undefined ? [] : Object.keys(o).flatMap(k => stringEdits(lib, o[k], [...path, k], k === "command"));
+};
+
 /** The editor for a JSON file with its servers under `key`, and per-folder servers under
- * `projects.<folder>.<key>` when the scope names a folder. */
+ * `projects.<folder>.<key>` when the scope names a folder: edited in place, every comment outside what moves kept. */
 function jsonEditor(key: string): McpEditor {
   return (lib, scope, before) => {
     const root = tree(readJsonc(before).value);
     if (root === undefined) throw new Error("the file is not a JSON object");
     const project = scope.project;
-    const source = project === undefined ? root : tree(tree(root.projects)?.[project.from]) ?? {};
-    const servers = tree(source[key]) ?? {};
-    const target = (): Tree => {
-      if (project === undefined) return servers;
-      const projects = (root.projects = tree(root.projects) ?? {});
-      const to = (projects[project.to] = tree(projects[project.to]) ?? {});
-      return (to[key] = tree(to[key]) ?? {});
-    };
+    const src: JSONPath = project === undefined ? [key] : ["projects", project.from, key];
+    const dst: JSONPath = project === undefined ? [key] : ["projects", project.to, key];
+    const servers = (project === undefined ? tree(root[key]) : tree(tree(tree(root.projects)?.[project.from])?.[key])) ?? {};
     const moved = project === undefined ? {} : tree(tree(tree(root.projects)?.[project.to])?.[key]) ?? {};
     const results: McpEditResult[] = [];
+    const edits: JsonEdit[] = [];
     for (const name of scope.keep) {
       const def = servers[name];
       if (def === undefined) {
@@ -501,17 +549,15 @@ function jsonEditor(key: string): McpEditor {
         continue;
       }
       const next = walkStrings(lib, def, false);
-      if (project !== undefined) delete servers[name];
-      target()[name] = next;
+      if (project === undefined) edits.push(...stringEdits(lib, def, [...src, name], false));
+      else edits.push([[...src, name], undefined], [[...dst, name], next]);
       results.push({ name, outcome: "written", command: jsonCommandOf(next) });
     }
     for (const name of scope.drop) {
-      delete servers[name];
+      if (Object.hasOwn(servers, name)) edits.push([[...src, name], undefined]);
       results.push({ name, outcome: "dropped" });
     }
-    // The text stands byte for byte where nothing moved: a rewrite of its own would drop comments and reindent it.
-    const changed = JSON.stringify(readJsonc(before).value) !== JSON.stringify(root);
-    return { text: changed ? `${JSON.stringify(root, null, 2)}\n` : before, results };
+    return { text: edits.length === 0 ? before : editJsonc(before, root, edits), results };
   };
 }
 
@@ -937,7 +983,7 @@ function codexMerge(lib: McpEditLib, scope: McpMergeScope, own: string | undefin
     wrote = true;
     results.push({ name, outcome: "dropped" });
   }
-  return { text: wrote ? lines.join("\n") : own ?? "", results, commentsDropped: false };
+  return { text: wrote ? lines.join("\n") : own ?? "", results };
 }
 
 /** The remove: each named server's tables go with their sub-tables and the blank lines under them, the way a

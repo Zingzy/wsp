@@ -4,7 +4,7 @@
 // script the placer refuses comes out of the copy, listed by the path as it was
 // written. The placer is a fake here; the host owns the disk.
 import { describe, expect, it } from "vitest";
-import { CATALOG_AGENTS, CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, CODEX_CONFIG_FILE, CODEX_HOOKS, catalogEntry, onMachine, type AgentEntry } from "../src/index.js";
+import { CATALOG_AGENTS, CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, CODEX_CONFIG_FILE, CODEX_HOOKS, catalogEntry, onMachine, parseJsonc, type AgentEntry } from "../src/index.js";
 
 const HOME = "/Users/dev";
 const HERE = new Map([
@@ -147,6 +147,37 @@ describe("Claude Code's hooks", () => {
       { from: `${HOME}/.codync/notify.sh`, to: "/root/.codync/notify.sh" },
     ]);
     expect(asked).toEqual([`${HOME}/.claude/hooks/remind`, `${HOME}/.claude/hooks/remind`, `${HOME}/x.sh`, `${HOME}/.codync/notify.sh`, `${HOME}/.codync/notify.sh`, `${HOME}/.claude/hooks/remind`, `${HOME}/.claude/hooks/gone`]);
+  });
+
+  it("carries the hooks of a settings file with comments in place: every comment outside a hook it took out stands", () => {
+    const before = [
+      "{",
+      "  // my settings",
+      '  "model": "opus", // the big one',
+      '  "hooks": {',
+      "    /* on start */",
+      '    "SessionStart": [{ "hooks": [',
+      '      { "type": "command", "command": "~/.claude/hooks/remind" }, // reminds me',
+      "      // gone soon",
+      '      { "type": "command", "command": "~/.claude/hooks/gone" }',
+      "    ] }],",
+      '    "Stop": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/gone" }] }] // stop',
+      "  }",
+      "}",
+      "// the end",
+      "",
+    ].join("\n");
+    const out = CLAUDE_HOOKS.carry(before, HOME, place);
+    for (const c of ["// my settings", "// the big one", "/* on start */", "// reminds me", "// the end"]) expect(out.text, c).toContain(c);
+    expect(parseJsonc(out.text)).toEqual({ model: "opus", hooks: { SessionStart: [{ hooks: [{ type: "command", command: "/root/.claude-cfg/hooks/remind" }] }] } });
+    expect(out.left).toEqual(["~/.claude/hooks/gone", "~/.claude/hooks/gone"]);
+    expect(out.carried).toEqual([{ from: `${HOME}/.claude/hooks/remind`, to: "/root/.claude-cfg/hooks/remind" }]);
+  });
+
+  it("carries a notify in a config.toml full of comments and leaves every comment it did not take out", () => {
+    const before = `# my codex\nmodel = "gpt-5.5" # the model\nnotify = ["python3", "~/.codex/notify.py"] # after a turn\n\n# trusted\n[projects."${HOME}"]\ntrust_level = "trusted" # yes\n`;
+    const out = CODEX_HOOKS.carry(before, HOME, place);
+    expect(out.text).toBe(before.replace("~/.codex/notify.py", "/root/.codex/notify.py"));
   });
 
   it("leaves a command that names no file, a prompt hook, a file that is not JSON or has no hooks object exactly as written", () => {

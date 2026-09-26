@@ -153,6 +153,11 @@ export const serverThereRefusal = (name: string, file: string): string => `${nam
 /** Why a config that is a link out of the home, or out of the project for a project's file, was not written. */
 export const configLinkRefusal = (file: string, to: string): string => `${file} is a link to ${to}, outside the folder it belongs to, so wsp does not write through it.`;
 
+/** Why a config was not written: a second hard link to it would keep the old text after a write by rename; and how
+ * to find that link and let the write through. */
+export const configHardLinkRefusal = (file: string): string =>
+  `${file} has another hard link, which a write by rename would split from it, so nothing was written. See the link count with ls -li ${file} and find the other name with find / -xdev -samefile ${file}, since a hard link stays on its own volume; remove that name or give ${file} a copy of its own, then run the command again.`;
+
 /** Why a write stopped: the agent or the person wrote the file between wsp's read and its write. */
 export const configChangedRefusal = (file: string): string => `${file} changed while wsp was writing it, so nothing was written; try again.`;
 

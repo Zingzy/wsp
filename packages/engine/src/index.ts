@@ -44,4 +44,5 @@ export * from "./snapshot-storage.js";
 export * from "./tool-sizes.js";
 export * from "./project-install.js";
 export * from "./project-state/index.js";
+export * from "./config-here.js";
 export * from "./provider-slot.js";

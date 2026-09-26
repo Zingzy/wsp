@@ -2,12 +2,12 @@
 // The MCP stage against a guest that is a temp directory: the configs are read
 // off it and the edited bytes land back on it; the command checks, the uv
 // install and the df reading are canned, so the files it ends with are the proof.
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyMcp, mcpPlanFor, mcpTally, type McpPlan, type McpResult } from "../src/golden-mcp.js";
-import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, UV_INSTALL, type McpEditor, type McpFormat, type McpRemoved } from "@wsp/catalog";
-import { MCP_ID_PREFIX } from "@wsp/protocol";
+import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, UV_INSTALL, parseJsonc, type McpEditor, type McpFormat, type McpRemoved } from "@wsp/catalog";
+import { MCP_ID_PREFIX, configHardLinkRefusal, shellQuote } from "@wsp/protocol";
 import type { RecipeEntry } from "../src/golden-import.js";
 import { guardedRoad, type ToolResult } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
@@ -165,15 +165,17 @@ describe("applyMcp", () => {
     // The read's answer is every config whole, the servers' secrets with it, so it says its output is not a log's.
     expect(runOpts[0]).toMatchObject({ unlogged: true });
     expect(runOpts[1]?.unlogged).toBeUndefined();
-    // Each edited config lands beside itself, is poured into a copy of the file so its mode and owner stand, and
-    // that copy is renamed over it, so an agent launching in that moment reads one whole copy or the other.
-    expect(landed).toEqual([join(root, ".claude-cfg/.claude.json.wsp-mcp"), join(root, ".codex/config.toml.wsp-mcp"), join(root, ".gemini/settings.json.wsp-mcp")]);
-    const at = join(root, ".codex/config.toml");
-    const pour = cmds.find(c => c.includes(`cat '${at}.wsp-mcp' > '${at}.wsp-new'`))!;
-    expect(pour).toContain(`cp -p '${at}' '${at}.wsp-new'`);
-    expect(pour.indexOf(`mv '${at}.wsp-new' '${at}'`)).toBeGreaterThan(pour.indexOf(`cat '${at}.wsp-mcp'`));
-    expect(existsSync(`${at}.wsp-mcp`)).toBe(false);
-    expect(existsSync(`${at}.wsp-new`)).toBe(false);
+    // Each edited config lands beside itself under the writer's own prefix and goes over the file by the one config
+    // write, so its mode and owner stand and an agent launching in that moment reads one whole copy or the other.
+    const configs = [".claude-cfg/.claude.json", ".codex/config.toml", ".gemini/settings.json"].map(f => join(root, f));
+    expect(landed.map(l => dirname(l))).toEqual(configs.map(c => dirname(c)));
+    for (const l of landed) expect(basename(l)).toMatch(/^\.wsp-config-tmp\.[0-9a-f]{12}$/);
+    const write = cmds.find(c => c.includes(`mv -f "$n" "$r"`))!;
+    for (const [i, c] of configs.entries()) {
+      expect(write).toContain(`f=${shellQuote(c)}\n`);
+      expect(write).toContain(shellQuote(landed[i]!));
+    }
+    for (const c of configs) expect(readdirSync(dirname(c)).filter(n => n.startsWith(".wsp-"))).toEqual([]);
     const check = cmds.find(c => c.split("\n")[1]?.startsWith("if command -v"))!;
     expect(check).toBeDefined();
     expect(runs).not.toContain(check);
@@ -211,7 +213,9 @@ describe("applyMcp", () => {
       "",
     ].join("\n"));
 
-    expect(JSON.parse(readFileSync(join(root, ".gemini", "settings.json"), "utf8"))).toEqual({ mcpServers: { memory: { command: "codebase-memory-mcp" } }, theme: "dark" });
+    const gemini = readFileSync(join(root, ".gemini", "settings.json"), "utf8");
+    expect(parseJsonc(gemini)).toEqual({ mcpServers: { memory: { command: "codebase-memory-mcp" } }, theme: "dark" });
+    expect(gemini).toContain("  // servers\n");
 
     // A definition whose package npx or uv pulls down when the agent first starts it is in place, not installed.
     expect(results).toEqual<McpResult[]>([
@@ -252,7 +256,7 @@ describe("applyMcp", () => {
 
   const geminiOnly = (root: string, over: Partial<McpPlan> = {}): McpPlan =>
     planOn(root, { agents: [{ id: "gemini", label: "Gemini CLI", scopes: [{ files: [join(root, ".gemini/settings.json")], format: MCP_SERVERS_JSON, keep: ["memory", "vanished"], drop: [] }], aside: [] }], ...over });
-  const geminiServers = (root: string): string[] => Object.keys(JSON.parse(readFileSync(join(root, ".gemini/settings.json"), "utf8")).mcpServers);
+  const geminiServers = (root: string): string[] => Object.keys((parseJsonc(readFileSync(join(root, ".gemini/settings.json"), "utf8")) as { mcpServers: object }).mcpServers);
 
   it("a server whose command is not on the machine is taken out of the config and skipped with the reason; a kept server the config no longer holds is named", async () => {
     const { root, machine } = guest(["npx"]);
@@ -423,17 +427,35 @@ describe("applyMcp", () => {
     expect(readFileSync(join(root, ".claude-cfg", ".claude.json"), "utf8")).toBe(before);
   });
 
-  it("a pour-over the machine refuses leaves no landing beside the config: those bytes are the whole file at the upload road's own mode", async () => {
-    const { root, cmds, machine } = guest(["codebase-memory-mcp"]);
+  it("a write the machine refuses leaves no landing beside the config: those bytes are the whole file at the upload road's own mode", async () => {
+    const { root, cmds, landed, machine } = guest(["codebase-memory-mcp"]);
     seed(root);
-    const refusing = { ...machine, exec: async (cmd: string) => (cmd.startsWith("set -e\nif [ -f ") ? { exitCode: 1, stdout: "", stderr: "cat: write error: No space left on device" } : machine.exec(cmd)) } as unknown as Machine;
+    const refusing = { ...machine, exec: async (cmd: string) => (cmd.includes('mv -f "$n" "$r"') ? { exitCode: 1, stdout: "", stderr: "cat: write error: No space left on device" } : machine.exec(cmd)) } as unknown as Machine;
     const results = await applyMcp(refusing, geminiOnly(root), () => {});
     expect(results.find(r => r.name === "memory")?.note).toBe("the edited config did not land (cat: write error: No space left on device)");
-    expect(existsSync(join(root, ".gemini", "settings.json.wsp-mcp"))).toBe(false);
-    // Both names beside the config go: either could hold the whole file at the upload road's own mode.
-    expect(cmds.some(c => c === `rm -f '${join(root, ".gemini", "settings.json.wsp-mcp")}' '${join(root, ".gemini", "settings.json.wsp-new")}'`)).toBe(true);
-    // The config itself is as it was: the pour never ran.
+    expect(landed).toHaveLength(1);
+    expect(existsSync(landed[0]!)).toBe(false);
+    expect(cmds).toContain(`rm -f ${shellQuote(landed[0]!)}`);
+    // The config itself is as it was: the write never ran.
     expect(readFileSync(join(root, ".gemini", "settings.json"), "utf8")).toBe(GEMINI);
+  });
+
+  it("a config with a second hard link is left as it is with the words, and one linked inside the home is written through and stays a link", async () => {
+    const { root, machine } = guest(["codebase-memory-mcp"]);
+    seed(root);
+    linkSync(join(root, ".gemini", "settings.json"), join(root, "twin.json"));
+    const refused = await applyMcp(machine, geminiOnly(root), () => {});
+    expect(refused.find(r => r.name === "memory")?.note).toBe(`the edited config did not land (${configHardLinkRefusal(join(root, ".gemini", "settings.json"))})`);
+    expect(readFileSync(join(root, ".gemini", "settings.json"), "utf8")).toBe(GEMINI);
+    expect(readdirSync(join(root, ".gemini")).filter(n => n.startsWith(".wsp-"))).toEqual([]);
+
+    rmSync(join(root, "twin.json"));
+    mkdirSync(join(root, "dotfiles"));
+    renameSync(join(root, ".gemini", "settings.json"), join(root, "dotfiles", "settings.json"));
+    symlinkSync(join(root, "dotfiles", "settings.json"), join(root, ".gemini", "settings.json"));
+    await applyMcp(machine, geminiOnly(root), () => {});
+    expect(lstatSync(join(root, ".gemini", "settings.json")).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(root, "dotfiles", "settings.json"), "utf8")).toContain('"memory": { "command": "codebase-memory-mcp" }');
   });
 
   it("a config that is on the machine and empty did not parse; it is not a config that is not there", async () => {

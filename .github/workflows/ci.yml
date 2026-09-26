@@ -67,9 +67,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
-      - name: Stage the desktop app
-        # Bundled and laid out, not packaged: a web change once deleted a folder the staging copied and nothing ran it.
-        run: pnpm --filter @wsp/desktop run build:app
       - name: Tests
         # The Build step staged this runner's daemon binary, so the case that reads its version against the
         # protocol's runs here rather than skipping: a checkout with no binary staged is a developer's machine.
@@ -78,3 +75,24 @@ jobs:
         run: pnpm exec vitest run --minWorkers=1 --maxWorkers=2
       - name: Types
         run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' exec tsc --noEmit
+
+  desktop:
+    name: Stage the desktop app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The release's road, bundled and laid out but not packaged, on a tree that built only what build:deps builds:
+      # after the full build a package missing from the app's dependencies goes unseen until a tag fails.
+      - name: Build what the desktop app depends on
+        run: pnpm --filter @wsp/desktop run build:deps
+      - name: Stage the desktop app
+        run: pnpm --filter @wsp/desktop run build:app
