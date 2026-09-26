@@ -63,22 +63,50 @@ describe("harness catalogs", () => {
     expect(row.models.map(m => m.value)).toContain(row.smallModel);
   });
 
-  it("the claude legacy rows are the pinned binary's own model catalog, so a bump of the pin fails here until a recording and the rows move with it", () => {
-    // One entry per legacy id off the binary's baked-in model table: its name, its context and its capabilities.
+  describe("the claude rows against the pinned binary's own model catalog", () => {
+    // One entry per current and legacy id off the binary's baked-in model table: its name, its context and its capabilities.
     const recording = new URL(`../../adapter-claude/test/fixtures/model-catalog-${CLAUDE_CODE.version}.json`, import.meta.url);
-    if (!existsSync(recording)) throw new Error(`no recorded model catalog for ${CLAUDE_CODE.version}; record the legacy ids' entries off the binary`);
-    type Entry = { id: string; display_name: string; context: { supports_1m_suffix?: boolean }; capabilities: string[]; default_effort?: string };
-    const entries = JSON.parse(readFileSync(recording, "utf8")) as Entry[];
+    type Entry = { id: string; display_name: string; context: { window: number; supports_1m_beta?: boolean; supports_1m_suffix?: boolean }; capabilities: string[]; default_effort?: string };
+    const entries = (): Entry[] => {
+      if (!existsSync(recording)) throw new Error(`no recorded model catalog for ${CLAUDE_CODE.version}; record the current and legacy ids' entries off the binary`);
+      return JSON.parse(readFileSync(recording, "utf8")) as Entry[];
+    };
+    // The table keys a model by its family id; the row names the dated id the binary sends for it, as Haiku 4.5's is.
+    const entryOf = (value: string): Entry | undefined => entries().find(e => e.id === value || e.id === value.replace(/-\d{8}$/, ""));
     const levels = (caps: string[]): string[] => [...(caps.includes("effort") ? ["low", "medium", "high"] : []), ...(caps.includes("xhigh_effort") ? ["xhigh"] : []), ...(caps.includes("max_effort") ? ["max"] : [])];
-    expect(harnessCatalog("claude")!.legacyModels).toEqual(
-      entries.map(e => ({
-        value: e.id,
-        label: e.display_name,
-        efforts: levels(e.capabilities),
-        ...(e.default_effort !== undefined ? { defaultEffort: e.default_effort } : {}),
-        contextWindows: e.context.supports_1m_suffix === true ? ["200k", "1m"] : [],
-      })),
-    );
+
+    it("each current model starts at the effort the table gives it, but Opus 5.5, which starts at the high the CLI documents", () => {
+      // A start that names no effort is sent the marked one, so the mark is what a thread runs at. With no --effort the
+      // binary would take an org default, then a remote flag, then the remote model config, then this table, which
+      // gives Opus 5.5 medium; wsp keeps the documented high (code.claude.com/docs/en/model-config) for the model every
+      // thread opens on rather than follow a baked value the account's remote config may already override.
+      const row = harnessCatalog("claude")!;
+      const startsAt = (value: string): string | undefined => effortsFor(row, modelOf(row, value)).find(o => o.isDefault)?.value;
+      const differs = row.models.filter(m => startsAt(m.value) !== (entryOf(m.value)!.default_effort ?? startsAt(m.value)));
+      expect(differs.map(m => [m.value, startsAt(m.value), entryOf(m.value)!.default_effort])).toEqual([["claude-opus-5-5", "high", "medium"]]);
+      expect(row.models.map(m => m.efforts)).toEqual(row.models.map(m => levels(entryOf(m.value)!.capabilities)));
+    });
+
+    it("Haiku 4.5 takes no window though the table takes its 1M suffix: its window there is 200k with no 1M beta, and the handshake offers no 1M Haiku", () => {
+      const haiku = entryOf("claude-haiku-4-5-20251001")!;
+      expect(haiku.context).toEqual({ window: 200_000, supports_1m_suffix: true });
+      expect(harnessCatalog("claude")!.models.find(m => m.value === "claude-haiku-4-5-20251001")?.contextWindows).toEqual([]);
+    });
+
+    it("the legacy rows are the table's, so a bump of the pin fails here until a recording and the rows move with it", () => {
+      const current = new Set(harnessCatalog("claude")!.models.map(m => entryOf(m.value)?.id));
+      expect(harnessCatalog("claude")!.legacyModels).toEqual(
+        entries()
+          .filter(e => !current.has(e.id))
+          .map(e => ({
+            value: e.id,
+            label: e.display_name,
+            efforts: levels(e.capabilities),
+            ...(e.default_effort !== undefined ? { defaultEffort: e.default_effort } : {}),
+            contextWindows: e.context.supports_1m_suffix === true ? ["200k", "1m"] : [],
+          })),
+      );
+    });
   });
 
   it("Codex offers the models and reasoning efforts its app-server reports, and no context window", () => {

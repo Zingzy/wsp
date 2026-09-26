@@ -83,10 +83,18 @@ const SCRIPT = [
   `done | LC_ALL=C awk -v cap=${SKILL_HEAD_BYTES} '${FRONTMATTERS}' && printf '\\036END\\n'`,
 ].join("\n");
 
-const unquote = (v: string): string => {
+/** A one-line YAML value as a string: a quoted one is what its quotes hold, a plain one ends where a comment starts. */
+const scalar = (v: string): string => {
   const t = v.trim();
-  return (t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")) ? t.slice(1, -1) : t;
+  const single = /^'((?:[^']|'')*)'/.exec(t);
+  if (single !== null) return single[1]!.replaceAll("''", "'");
+  const double = /^"((?:[^"\\]|\\.)*)"/.exec(t);
+  if (double !== null) return double[1]!.replace(/\\(["\\])/g, "$1");
+  return t.replace(/(^|\s+)#.*$/, "");
 };
+
+/** A top-level `name` or `description` key as YAML reads one: bare or quoted, with or without room before its colon. */
+const KEY = /^(?:(name|description)|"(name|description)"|'(name|description)')\s*:(?:\s+(.*))?$/;
 
 /** What a SKILL.md's frontmatter says; `names` counts the name lines when there is more than one. */
 export interface SkillFront {
@@ -102,15 +110,15 @@ export function skillFrontmatter(text: string): SkillFront {
   let names = 0;
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
-    const m = /^(name|description):\s*(.*)$/.exec(lines[i]!);
+    const m = KEY.exec(lines[i]!);
     if (m === null) continue;
-    const key = m[1] as "name" | "description";
+    const key = (m[1] ?? m[2] ?? m[3]) as "name" | "description";
     if (key === "name") names++;
-    let value = m[2]!.trim();
+    let value = (m[4] ?? "").trim();
     const block = /^[>|][-+]?$/.test(value);
     const more: string[] = [];
     while (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1]!)) more.push(lines[++i]!.trim());
-    value = block ? more.join(" ") : [unquote(value), ...more].filter(w => w !== "").join(" ");
+    value = block ? more.join(" ") : [scalar(value), ...more].filter(w => w !== "").join(" ");
     if (value !== "" && out[key] === undefined) out[key] = value;
   }
   if (names > 1) out.names = names;

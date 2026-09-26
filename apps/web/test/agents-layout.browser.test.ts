@@ -4,12 +4,14 @@
 // classes as built, and checks them against the thresholds the stylesheet
 // carries. Then, at every width the shape changes over, the control never
 // scrolls and takes the shape the rule gives; the toolbar stands on the 32 px
-// ladder; every row of a tab stands at the tab's one height; the head, the
-// tabs, the search, the first group label, the first row's mark and a
-// detail's first label share one left edge, and on the computer page the
-// page's own edges; labels and rows keep one rhythm; the head, tabs and
-// toolbar stay pinned while the list scrolls; a tab's tooltip opens only
-// while its word is hidden; Tab reaches every row with its ring drawn.
+// ladder; every row of a tab stands at the tab's one height; the tab's line,
+// the tabs, the search box, the first group label, the first row's mark and a
+// detail's first label share one left edge and the tabs and Add one right
+// edge, and on the computer page the page's own edges; labels and rows keep
+// one rhythm; the tabs, the line and the toolbar stay pinned while the list
+// scrolls, whose end keeps the rows' side gutter under it; a tab's tooltip
+// opens only while its word is hidden; Tab reaches every row with its ring
+// drawn.
 // Photographs of every tab, a detail of each kind and an agent not installed,
 // Add a skill with its results and a skill's SKILL.md at 360, 480 and 696 in
 // both themes, and the real right panel and computer page. Vite serves
@@ -146,28 +148,37 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     }
   }, 120_000);
 
-  it("keeps one left edge for the head, the tabs, the search field, the first group label, the first row's mark and a detail's first label", async () => {
+  it("keeps one left edge for the line, the tabs, the search box, the first group label, the first row's mark and a detail's first label, and one right edge for the tabs and Add", async () => {
     await open("screen=agents-widths&theme=dark");
     await page!.waitForSelector("[data-agents-row]");
-    for (const width of [360, 696]) {
+    for (const width of [360, 520, 696]) {
       await pickTab(width, "MCP servers");
       const list = await at(width).evaluate(el => {
-        const left = el.getBoundingClientRect().left;
-        const x = (sel: string) => Math.round((el.querySelector(sel)?.getBoundingClientRect().left ?? NaN) - left);
-        return { line: x("[data-k=agents-title], [data-k=agents-line]"), tabs: x("[data-slot=segmented-control]"), search: x("[data-agents-toolbar] [data-slot=input-group] svg circle"), label: x("[data-group-label] span"), mark: x("[data-agents-row] [data-k=lead-box]") };
+        const box = el.getBoundingClientRect();
+        const x = (sel: string) => Math.round((el.querySelector(sel)?.getBoundingClientRect().left ?? NaN) - box.left);
+        const r = (sel: string) => Math.round(box.right - (el.querySelector(sel)?.getBoundingClientRect().right ?? NaN));
+        return {
+          line: x("[data-k=agents-line]"),
+          tabs: x("[data-slot=segmented-control]"),
+          search: x("[data-agents-toolbar] [data-slot=input-group]"),
+          label: x("[data-group-label] span"),
+          mark: x("[data-agents-row] [data-k=lead-box]"),
+          tabsRight: r("[data-slot=segmented-control]"),
+          addRight: r("[data-k=agents-add]"),
+        };
       });
       await at(width).locator('[data-agents-row="server-global-notion-http-mcp.notion.com"] [data-row-trigger]').click();
       const detail = await at(width).evaluate(el => Math.round(el.querySelector("[data-fact-label]")!.getBoundingClientRect().left - el.getBoundingClientRect().left));
-      console.info(`agents left edge at ${width}: ${JSON.stringify({ ...list, detail })}`);
-      // The panel's 16 px; the page's 21, the cards' hairline and px-5. The ghost search box starts in the gutter, so
-      // its glyph's ink is what stands on the edge.
-      const edge = width === 360 ? 16 : 21;
+      console.info(`agents edges at ${width}: ${JSON.stringify({ ...list, detail })}`);
+      // The panel's 16 px; the page's 21, the cards' hairline and px-5. The search box's own edge stands on it.
+      const edge = width === 696 ? 21 : 16;
       expect([list.line, list.tabs, list.search, list.label, list.mark, detail]).toEqual([edge, edge, edge, edge, edge, edge]);
+      expect([list.tabsRight, list.addRight]).toEqual([edge, edge]);
       await at(width).locator("[data-k=agents-back]").click();
     }
   });
 
-  it("keeps one rhythm down the list, labels and rows 2 px apart alike with a label's words centred, and 12 px from the tabs to the search", async () => {
+  it("keeps one rhythm down the list, labels and rows 2 px apart alike with a label's words centred, and 12 px from the tabs to the line and the search", async () => {
     await open("screen=agents-widths&theme=dark");
     await page!.waitForSelector("[data-agents-row]");
     for (const width of [360, 696]) {
@@ -182,19 +193,22 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
             return Math.round(words.top - box.top - (box.bottom - words.bottom));
           });
           const tabs = el.querySelector("[data-slot=segmented-control]")!.getBoundingClientRect();
+          const line = el.querySelector("[data-agents-line]")?.getBoundingClientRect();
           const toolbar = el.querySelector("[data-agents-toolbar]")?.getBoundingClientRect();
-          return { gaps, labels, toSearch: toolbar === undefined ? undefined : Math.round(toolbar.top - tabs.bottom) };
+          const above = line ?? tabs;
+          return { gaps, labels, toLine: line === undefined ? undefined : Math.round(line.top - tabs.bottom), toSearch: toolbar === undefined ? undefined : Math.round(toolbar.top - above.bottom) };
         });
         console.info(`agents rhythm at ${width} ${name}: ${JSON.stringify(read)}`);
         expect(read.labels.length, `${width} ${name}`).toBeGreaterThan(0);
         for (const g of read.gaps) expect(g, `${width} ${name}`).toBe(2);
         for (const off of read.labels) expect(Math.abs(off), `${width} ${name}`).toBeLessThanOrEqual(1);
         if (name !== "Agents") expect(read.toSearch).toBe(12);
+        if (read.toLine !== undefined) expect(read.toLine).toBe(12);
       }
     }
   });
 
-  it("pins the head, the tabs and the toolbar at the top while the list scrolls, in the panel and on the page", async () => {
+  it("pins the tabs, the line and the toolbar at the top while the list scrolls, in the panel and on the page", async () => {
     await open("screen=panel-agents&theme=dark", { width: 1280, height: 420 });
     await page!.waitForSelector("[data-k=agents-surface] [data-agents-row]");
     const surface = page!.locator("[data-k=agents-surface]");
@@ -217,7 +231,8 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     expect(panel.scrolled).toBeGreaterThan(0);
     expect(panel.offset).toBe(0);
     expect(panel.inside).toBe(false);
-    expect(await page!.locator("[data-k=agents-surface] [data-k=agents-line]").count()).toBe(0);
+    expect(await page!.locator("[data-k=agents-surface] [data-agents-top] [data-k=agents-line]").count()).toBe(1);
+    expect(await page!.locator("[data-k=agents-surface] [data-agents-head]").count()).toBe(0);
     await open("screen=settings-computer&theme=dark", { width: 1280, height: 600 });
     await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
     const card = page!.locator("[data-settings-card='agents']");
@@ -233,6 +248,28 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     }, under.toString());
     expect(onPage.offset).toBe(0);
     expect(onPage.bg).toEqual(onPage.under);
+  });
+
+  it("keeps the rows' side gutter under the list's end on every tab, once it is scrolled there", async () => {
+    await open("screen=panel-agents&theme=dark", { width: 1280, height: 420 });
+    await page!.waitForSelector("[data-k=agents-surface] [data-agents-row]");
+    const surface = page!.locator("[data-k=agents-surface]");
+    for (const name of TABS) {
+      await surface.locator("[data-segment]").filter({ has: page!.locator(`[aria-label="${name}"]`) }).click();
+      const m = await surface.evaluate(el => {
+        const body = el.querySelector<HTMLElement>("[data-agents-body]")!;
+        body.scrollTop = body.scrollHeight;
+        const box = body.getBoundingClientRect();
+        const last = (body.lastElementChild as HTMLElement).getBoundingClientRect();
+        const row = el.querySelector<HTMLElement>("[data-agents-row]")!.getBoundingClientRect();
+        const contentBottom = box.top + body.clientTop + body.scrollHeight - body.scrollTop;
+        return { scrolls: body.scrollHeight > body.clientHeight, under: Math.round(contentBottom - last.bottom), side: Math.round(row.left - box.left), end: Math.round(box.bottom - last.bottom) };
+      });
+      console.info(`agents list end on ${name}: ${JSON.stringify(m)}`);
+      expect(m.side, name).toBe(8);
+      expect(m.under, name).toBe(m.side);
+      if (m.scrolls) expect(m.end, name).toBe(m.side);
+    }
   });
 
   it("stands on the computer page's edges: its outer edge on the section labels and card borders, its content on the cards' text", async () => {
@@ -283,8 +320,13 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
   it("lets Tab reach the rows with the ring drawn, the arrows move over them, and Enter open one", async () => {
     await open("screen=agents-widths&theme=dark");
     await page!.waitForSelector("[data-agents-row]");
-    // From the tabs, Tab passes the held Add and lands on the list's one row in the Tab order.
+    // From the tabs, Tab reaches the computer's name and Read again on the tab's line, then the list's one row in the
+    // Tab order.
     await at(360).locator("[data-segment][data-checked]").focus();
+    await page!.keyboard.press("Tab");
+    expect(await page!.evaluate(() => (document.activeElement as HTMLElement).dataset["k"])).toBe("agents-computer");
+    await page!.keyboard.press("Tab");
+    expect(await page!.evaluate(() => (document.activeElement as HTMLElement).dataset["k"])).toBe("agents-read-again");
     await page!.keyboard.press("Tab");
     const first = await page!.evaluate(() => {
       const el = document.activeElement as HTMLElement;
@@ -412,8 +454,10 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       }
       // A server's tools and one tool, at the panel's floor.
       await pickTab(360, "MCP servers");
+      // A command on a joined computer waits for Check, which checks it in place.
+      await at(360).locator('[data-agents-row="server-global-airtable-stdio-npx -y airtable-mcp-server"] [data-row-slot] [data-k=act-check]').click();
+      await at(360).locator('[data-agents-row="server-global-airtable-stdio-npx -y airtable-mcp-server"] [data-k=status][data-state=connected]').waitFor();
       await at(360).locator('[data-agents-row="server-global-airtable-stdio-npx -y airtable-mcp-server"] [data-row-trigger]').click();
-      await at(360).locator("[data-k=act-list-tools]").click();
       await at(360).locator("[data-k=act-view-tools]").click();
       await at(360).locator("[data-agents-under] [data-under-row]").first().waitFor();
       await at(360).screenshot({ path: join(SHOTS_DIR, `agents-360-tools-${theme}.png`), animations: "disabled" });
@@ -514,30 +558,31 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
       await page!.waitForSelector("[data-agents-row]");
       for (const width of [360, 696]) {
         await pickTab(width, "MCP servers");
+        await at(width).locator('[data-agents-row] [data-k=status][data-state="connected"]').first().waitFor();
         const marks = await at(width)
-          .locator("[data-k=server-status]")
+          .locator("[data-agents-row] [data-k=status]")
           .evaluateAll(els =>
             els.map(el => {
               const dot = el.querySelector<HTMLElement>("[data-status-dot]")!;
               const word = getComputedStyle(el.querySelector<HTMLElement>("[data-status-word]")!);
               const box = getComputedStyle(el);
               const d = dot.getBoundingClientRect();
-              return { state: el.getAttribute("data-state"), word: el.textContent, dot: [Math.round(d.width), Math.round(d.height)], round: getComputedStyle(dot).borderRadius, size: word.fontSize, border: box.borderTopWidth, bg: box.backgroundColor, svg: el.querySelector("svg") !== null };
+              return { state: el.getAttribute("data-state"), word: [...el.querySelectorAll("[data-status-word], [data-status-count]")].map(w => w.textContent).join(" "), dot: [Math.round(d.width), Math.round(d.height)], round: getComputedStyle(dot).borderRadius, size: word.fontSize, border: box.borderTopWidth, bg: box.backgroundColor, svg: el.querySelector("svg") !== null };
             }),
           );
         expect(marks.map(m => [m.state, m.word])).toEqual([
-          ["open", "no sign-in needed"],
-          ["connected", "connected"],
-          ["signed-in", "signed in"],
-          ["needs-sign-in", "needs sign-in"],
+          ["connected", "connected 3 tools"],
           ["failed", "failed"],
-          ["open", "no sign-in needed"],
+          ["needs-sign-in", "needs sign-in"],
+          ["signed-in", "signed in"],
+          ["off", "off"],
+          ["checking", "checking"],
           ["open", "no sign-in needed"],
         ]);
         for (const m of marks) expect(m).toMatchObject({ dot: [8, 8], size: "11px", border: "0px", bg: "rgba(0, 0, 0, 0)", svg: false });
         await at(width).screenshot({ path: join(SHOTS_DIR, `agents-states-${width}-${theme}.png`), animations: "disabled" });
       }
-      await at(360).locator('[data-agents-row="server-global-notion-http-mcp.notion.com"] [data-row-slot] [data-k=act-sign-in]').click();
+      await at(360).locator('[data-agents-row="server-global-linear-http-mcp.linear.app"] [data-row-slot] [data-k=act-sign-in]').click();
       const flow = at(360).locator("[data-k=sign-in-flow]");
       await flow.locator("[data-k=sign-in-open]").waitFor();
       expect(await flow.locator("[data-k=sign-in-browser]").textContent()).toBe("Finish in your browser");
@@ -555,11 +600,16 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     for (const theme of ["dark", "light"] as const) {
       await open(`screen=panel-agents&theme=${theme}`, { width: 1280, height: 800 });
       await page!.waitForSelector("[data-k=agents-surface] [data-agents-row]");
-      expect(await page!.locator("[data-k=agents-surface] [data-k=agents-title]").textContent()).toMatch(/^On spoo, for /);
+      expect(await page!.locator("[data-k=agents-surface] [data-k=agents-line]").textContent()).toBe("Agents on spoo");
       const rows = await page!.locator("[data-k=agents-surface] [data-agents-row]").evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().height)));
       for (const h of rows) expect(h).toBe(72);
-      expect(await page!.locator("[data-k=agents-surface] [data-k=agents-project]").getAttribute("title")).toMatch(/^[~/]/);
       await page!.screenshot({ path: join(SHOTS_DIR, `agents-panel-${theme}.png`), animations: "disabled" });
+      const surface = page!.locator("[data-k=agents-surface]");
+      await surface.locator("[data-segment]").filter({ has: page!.locator('[aria-label="MCP servers"]') }).click();
+      expect(await surface.locator("[data-k=agents-line]").textContent()).toMatch(/^MCP servers on spoo, for \S/);
+      expect(await surface.locator("[data-k=agents-project]").getAttribute("title")).toMatch(/^[~/]/);
+      await surface.locator("[data-agents-row] [data-k=status]:not([data-state=checking])").first().waitFor();
+      await page!.screenshot({ path: join(SHOTS_DIR, `agents-panel-servers-${theme}.png`), animations: "disabled" });
       await open(`screen=settings-computer&theme=${theme}`, { width: 1280, height: 1800 });
       await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
       expect(await page!.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");

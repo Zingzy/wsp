@@ -141,7 +141,7 @@ describe("the agents report off this computer and off a workspace", () => {
     expect(failed.agents.find(a => a.id === "claude")).toMatchObject({ version: "2.1.281", pinned: versionOf(catalogEntry("claude")!.installRoad) });
     expect(failed.agents.some(a => a.latest !== undefined)).toBe(false);
     let asked = 0;
-    const off = await agentsReader({ vault: () => ({}), here: () => here(at), latest: async () => (asked++, { claude: "2.1.283" }) }).read({ kind: "here" }, undefined, { latest: false });
+    const off = await agentsReader({ vault: () => ({}), here: () => here(at), latest: async () => (asked++, { claude: "2.1.283" }) }).read({ kind: "here" }, { latest: false });
     expect(asked).toBe(0);
     expect(off.agents.some(a => a.latest !== undefined)).toBe(false);
   });

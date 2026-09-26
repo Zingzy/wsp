@@ -17,13 +17,21 @@ export type AgentsShell = "panel" | "page";
  * the kind's glyph. */
 export type Lead = { readonly kind: "agent"; readonly agent: string } | { readonly kind: "box"; readonly icon: LucideIcon; readonly host?: string } | { readonly kind: "glyph"; readonly icon: LucideIcon };
 
-/** A server's state as its dot and word say it: `open` needs no sign-in by its config and was never checked. */
-export type ServerState = "connected" | "signed-in" | "open" | "env-key" | "needs-sign-in" | "failed" | "off" | "unknown";
+/** A server's state as its dot and word say it: `open` needs no sign-in by its config and was never checked;
+ * `checking` waits on the one connect that decides it. */
+export type ServerState = "connected" | "signed-in" | "open" | "env-key" | "needs-sign-in" | "failed" | "off" | "unknown" | "checking";
 
-export interface ServerStatus {
-  readonly state: ServerState;
+/** What a status dot says at a glance: working, waiting on the person, broken, or nothing to say. */
+export type Tone = "good" | "waiting" | "bad" | "quiet";
+
+/** A status as one dot and its word, on every tab: the state it stands for, the word, and what the word counts. */
+export interface Status {
+  readonly state: string;
+  readonly tone: Tone;
   readonly words: string;
   readonly hover?: string;
+  /** A figure the state answered with, after the word: a server's tools. */
+  readonly count?: string;
 }
 
 export interface RowView {
@@ -36,9 +44,8 @@ export interface RowView {
   readonly subtext?: string;
   /** Not on the computer: the name faded and the subtext the catalog's sentence, not a fact. */
   readonly available?: boolean;
-  readonly status?: ServerStatus;
-  /** A second line under the subtext in the muted mono: an agent's sign-in state. */
-  readonly state?: string;
+  /** A line under the subtext: its dot and word. */
+  readonly status?: Status;
   /** The one step the row offers at its right end; pressing it opens the detail as well, unless it acts in place. */
   readonly quick?: RowAct;
   /** Turned off: the name faded and `off` at the right end. */
@@ -51,8 +58,9 @@ export interface Fact {
   readonly label: string;
   readonly value?: string;
   readonly agent?: string;
-  readonly status?: ServerStatus;
-  readonly fact?: string;
+  readonly status?: Status;
+  /** After the value: its reason or its state. */
+  readonly fact?: string | Status;
   readonly hover?: string;
   /** The value is a line somebody would paste: a Copy glyph stands beside it on hover. */
   readonly copy?: boolean;
@@ -91,6 +99,8 @@ export interface UnderLevel {
   readonly rows?: readonly UnderRow[];
   readonly readAt?: string;
   readonly refused?: string;
+  /** Why no rows stand where nothing failed, in the level's quiet sentence. */
+  readonly empty?: string;
   readonly refresh?: () => void;
 }
 
@@ -193,8 +203,11 @@ export interface KindModule<T> {
   readonly noun: (n: number) => string;
   /** The search field's placeholder; absent, the tab has no search. */
   readonly search?: string;
-  /** What the toolbar's Add says on its hover and to a reader. */
-  readonly add: string;
+  /** The toolbar's Add, naming the one thing a press adds; absent, the tab has no Add. */
+  readonly add?: string;
+  /** The line under the tabs saying what the list holds, around the computer's name: the words before and after it,
+   * which name the project where the list holds its rows. */
+  readonly line: (project: string | undefined) => readonly [string, string];
   /** The one height every row of the kind stands at. */
   readonly rowHeight: string;
   readonly groupings: readonly GroupBy[];
@@ -207,6 +220,8 @@ export interface KindModule<T> {
   groups(items: readonly T[], by: GroupBy, ctx: RowsContext): readonly GroupView<T>[];
   row(item: T, ctx: RowsContext): RowView;
   detail(item: T, ctx: RowsContext, nav: DetailNav): DetailView;
+  /** What the kind asks of the host each time its tab shows a report. */
+  shown?(items: readonly T[], ctx: RowsContext): void;
   empty(on: string): string;
   /** The page-level empty's ghost word. */
   none: string;

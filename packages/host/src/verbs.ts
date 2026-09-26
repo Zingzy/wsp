@@ -13,6 +13,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { parseArgs, type ParseArgsConfig } from "node:util";
+import { Transform, type Writable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { z } from "zod";
@@ -256,6 +258,9 @@ import {
   SignInLine,
   THIS_COMPUTER,
   type SealedPin,
+  escapeC1,
+  jsonLine,
+  withoutControlChars,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
@@ -599,13 +604,22 @@ export interface Out {
 function formatter(io: CliIO, json: boolean): Out {
   return {
     emit: (value, line) => {
-      if (json) io.log(JSON.stringify(value));
+      if (json) io.log(jsonLine(value));
       else if (line !== undefined) io.log(line);
     },
     stream: text => {
       if (!json) io.stream?.(text);
     },
   };
+}
+
+/** The agent's end of stdio with every C1 control escaped: JSON.stringify leaves C1 raw, where a script printing the
+ * answer would hand it to a terminal. */
+export function c1Escaped(out: Writable): Writable {
+  const text = new StringDecoder("utf8");
+  const safe = new Transform({ transform: (chunk: Buffer, _encoding, done) => done(null, escapeC1(text.write(chunk))), flush: done => done(null, escapeC1(text.end())) });
+  safe.pipe(out);
+  return safe;
 }
 
 /** The rows wsp places prints. Every fact is what the place last reported; a provider row carries its rate and no
@@ -2512,7 +2526,7 @@ const Argv = z.array(z.string()).min(1);
 type Structured = Record<string, unknown>;
 
 /** A result the agent reads as text and a client with a schema reads as the same value. */
-const asJson = (structured: Structured): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(structured, null, 2) }], structuredContent: structured });
+const asJson = (structured: Structured): CallToolResult => ({ content: [{ type: "text", text: jsonLine(structured, 2) }], structuredContent: structured });
 const asText = (text: string, structured: Structured): CallToolResult => ({ content: [{ type: "text", text }], structuredContent: structured });
 
 const turnView = (turn: Turn): z.infer<typeof TurnOut> => ({
@@ -2758,7 +2772,7 @@ function reportFacts(r: AgentsReport): Pick<AgentsReport, "target" | "home" | "u
 /** The lines under every list: a napping workspace's report is the one it last had, and each reader that could not
  * answer is named. */
 function reportTail(r: AgentsReport): string[] {
-  return [...(r.stale === "napping" ? ["napping: this is what stood there when it last ran"] : []), ...r.refused.map(line => `refused: ${line}`)];
+  return [...(r.stale === "napping" ? ["napping: this is what stood there when it last ran"] : []), ...r.refused.map(line => `refused: ${cell(line)}`)];
 }
 
 function agentRowLines(r: AgentsReport): string[] {
@@ -2767,11 +2781,11 @@ function agentRowLines(r: AgentsReport): string[] {
 }
 
 /** Where a skill or a server stands, as both tables print it: its scope, or the project it is a project's of by name. */
-const scopeWord = (row: { scope: string; project?: { name: string } }): string => (row.project !== undefined ? `project ${row.project.name}` : row.scope);
+const scopeWord = (row: { scope: string; project?: { name: string } }): string => (row.project !== undefined ? `project ${cell(row.project.name)}` : row.scope);
 
-function skillRowLines(r: AgentsReport): string[] {
-  const where = (s: SkillRow): string => s.paths.map(p => (p.linkTo === undefined ? p.path : `${p.path} -> ${p.linkTo}`)).join(", ");
-  return [...(r.skills.length === 0 ? ["no skills"] : table([["SKILL", "KIND", "WHERE"], ...r.skills.map(s => [s.name, scopeWord(s), where(s)])])), ...reportTail(r)];
+export function skillRowLines(r: AgentsReport): string[] {
+  const where = (s: SkillRow): string => s.paths.map(p => (p.linkTo === undefined ? cell(p.path) : `${cell(p.path)} -> ${cell(p.linkTo)}`)).join(", ");
+  return [...(r.skills.length === 0 ? ["no skills"] : table([["SKILL", "KIND", "WHERE"], ...r.skills.map(s => [cell(s.name), scopeWord(s), where(s)])])), ...reportTail(r)];
 }
 
 function serverRowLines(r: AgentsReport): string[] {
@@ -2848,7 +2862,7 @@ const SERVER_CHANGE_WORDS =
   "Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.";
 
 const SERVER_TOOLS_WORDS =
-  "Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer stands for an hour unless refreshed, and an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.";
+  "Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.";
 
 /** The wsp tools into one agent's config on this computer. */
 async function addTools(client: HostClient, agent: string): Promise<{ file: string }> {
@@ -2887,8 +2901,11 @@ async function searchSkillsSh(client: HostClient, q: string, limit: number | und
 /** Text off skills.sh as a terminal may print it: no control character but newline and tab, so no escape sequence. */
 const printable = (s: string): string => s.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
 
+/** A name a line prints: on one line, so a folder name cannot draw a row of its own, and with no control character. */
+const cell = (s: string): string => withoutControlChars(s.replace(/[\n\t]/g, " "));
+
 export function skillHitLines(hits: readonly SkillHit[]): string[] {
-  return hits.length === 0 ? ["no skills on skills.sh match"] : table([["SKILL", "INSTALLS", "ADD WITH"], ...hits.map(h => [printable(h.name), String(h.installs), printable(h.id)])]);
+  return hits.length === 0 ? ["no skills on skills.sh match"] : table([["SKILL", "INSTALLS", "ADD WITH"], ...hits.map(h => [cell(h.name), String(h.installs), cell(h.id)])]);
 }
 
 /** A skill named `<owner>/<repo>/<skill>` is one on skills.sh; any other name is one already on the target. */
@@ -2914,10 +2931,12 @@ async function skillAdded(client: HostClient, skill: string, workspace: string |
   return SkillAdded.parse((await client.request<{ added: unknown }>("skills.add", { target, skill, ...(agents !== undefined && agents.length > 0 ? { agents } : {}), ...(project.project ? { project: true } : {}) })).added);
 }
 
-function addedLine(skill: string, a: SkillAdded): string {
-  const name = skill.split("/").at(-1) ?? skill;
-  return a.agents.length === 0 ? `${name} is in ${a.path}.` : `${name} is in ${a.path}, and in ${a.agents.map(x => `${agentName(x.agent)}'s ${x.path}`).join(", ")}.`;
+export function addedLine(skill: string, a: SkillAdded): string {
+  const name = cell(skill.split("/").at(-1) ?? skill);
+  return a.agents.length === 0 ? `${name} is in ${cell(a.path)}.` : `${name} is in ${cell(a.path)}, and in ${a.agents.map(x => `${agentName(x.agent)}'s ${cell(x.path)}`).join(", ")}.`;
 }
+
+export const removedLine = (name: string, removed: readonly string[]): string => `${cell(name)} is gone from ${removed.map(cell).join(", ")}.`;
 
 /** A skill there turned off, on, or removed, by its name. */
 async function skillChanged(client: HostClient, op: "skills.remove" | "skills.toggle", name: string, workspace: string | undefined, on: string | undefined, project: ProjectAsked, turn: boolean | undefined, usage: string): Promise<string[]> {
@@ -3093,7 +3112,7 @@ export const VERBS: readonly Verb[] = [
       const [name, workspace, ...rest] = ctx.args;
       if (name === undefined || rest.length > 0) throw usageRefusal("wsp skills remove takes one skill's name and one workspace at most.", usageIs(ctx));
       const removed = await skillChanged(await ctx.client(), "skills.remove", name, workspace, flag(ctx.flags, "on"), projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx)), undefined, usageIs(ctx));
-      ctx.out.emit({ removed }, `${name} is gone from ${removed.join(", ")}.`);
+      ctx.out.emit({ removed }, removedLine(name, removed));
       return 0;
     },
     tool: tool({
@@ -3102,7 +3121,7 @@ export const VERBS: readonly Verb[] = [
       output: { removed: z.array(z.string()) },
       call: async ({ name, workspace, on, project }, deps) => {
         const removed = await skillChanged(await deps.client(), "skills.remove", name, workspace, on, projectAsked(project, workspace, on, "skills_remove"), undefined, "skills_remove takes a workspace or on, not both");
-        return asText(`${name} is gone from ${removed.join(", ")}.`, { removed });
+        return asText(removedLine(name, removed), { removed });
       },
     }),
   },
@@ -3134,7 +3153,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "servers",
     usage: "wsp servers [<workspace>] [--on <computer>]",
-    about: "the MCP servers the agents on this computer, a box you added or a workspace are set up with: how each is reached, the file it is defined in and whether it needs a sign-in",
+    about: "the MCP servers the agents on this computer, a box you added or a workspace are set up with: how each is reached, the file it is defined in and its sign-in as its config says it",
     page: "agent",
     options: { on: { type: "string" } },
     run: async ctx => {
@@ -3255,7 +3274,7 @@ export const VERBS: readonly Verb[] = [
         workspace: AgentsWorkspaceIn,
         on: AgentsOnIn,
         project: z.string().optional().describe("the project on that computer whose server it is, by the name projects lists, with on; a workspace finds its own project's servers"),
-        refresh: z.boolean().optional().describe("start it again even where an answer from the last hour stands"),
+        refresh: z.boolean().optional().describe("start it again even where an answer from the last three minutes stands"),
       },
       output: ServerToolsAnswer.shape,
       call: async ({ name, agent, workspace, on, project, refresh }, deps) => {
@@ -4519,7 +4538,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "servers signin on": AGENTS_ON_WORDS,
   "servers signin agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
   "servers tools agent": "the agent whose config names the server, by its catalog id as wsp servers shows it",
-  "servers tools refresh": "start the server again even where an answer from the last hour stands",
+  "servers tools refresh": "start the server again even where an answer from the last three minutes stands",
   "servers tools project": "the project on the computer --on names whose server it is, by name; a workspace finds its own project's servers",
   "servers add on": AGENTS_ON_WORDS,
   "servers add agent": "the agent whose config takes the server, by its catalog id",
@@ -4657,7 +4676,7 @@ function parseRefusal(verb: CliVerb | CliOnlyVerb, e: unknown): Error {
  * so a sentence that names itself is printed alone rather than behind a second copy of its own name. */
 export function failed(io: CliIO, json: boolean, e: unknown, prefix = ""): number {
   const failure = verbFailure(e);
-  io.error(json ? JSON.stringify(failure) : sayOnce(prefix, failure.error));
+  io.error(json ? jsonLine(failure) : sayOnce(prefix, failure.error));
   return failure.exit;
 }
 

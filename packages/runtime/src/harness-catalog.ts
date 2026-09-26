@@ -40,6 +40,7 @@ const levels = (values: readonly string[], isDefault?: string): HarnessOption[] 
 const CLAUDE_CONTEXT_WINDOWS: HarnessOption[] = [option("200k", "200k"), { ...option("1m", "1M"), isDefault: true }];
 
 // The handshake lists each model's levels and names no default; the CLI documents high on every model that takes one (code.claude.com/docs/en/model-config, Adjust effort level).
+// The binary's baked-in table gives Opus 5.5 medium instead; harness-catalog.test.ts pins that difference and why high stays.
 const CLAUDE_EFFORTS: HarnessOption[] = levels(["low", "medium", "high", "xhigh", "max"], "high");
 
 // The table alone cannot say whether a harness steers, whether it keeps a person's name for a session, or whether it
