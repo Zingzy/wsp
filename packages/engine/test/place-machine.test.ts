@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The computer itself as a machine: the frames it sends over the link its
 // daemon holds, and the calls that belong to a workspace and are refused here.
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +9,7 @@ import { EXEC_TIMEOUT_MAX_MS, placeProvisionPaths } from "@wsp/protocol";
 import { INLINE_EXEC_MS, execFits } from "../src/exec-detached.js";
 import { LINK_MARGIN_MS } from "../src/link-backend.js";
 import { NOT_A_WORKSPACE, PLACE_PART_BYTES, PlaceMachine, placePartBoundMs } from "../src/place-machine.js";
+import { spawnSyncFed } from "../src/spawn-fed.js";
 
 const HOME = "/root";
 
@@ -126,9 +126,12 @@ describe("bytes onto the computer itself", () => {
     // Every frame this put sent, run by a real shell, with the part frames and the join each sent twice: what the
     // link does with a frame whose answer it lost is send it again, and the file must read the same either way.
     for (const f of l.frames) {
-      const send = (): Buffer => execFileSync("bash", ["-c", String(f.params["cmd"])], { input: f.params["stdin"] === undefined ? "" : Buffer.from(String(f.params["stdin"]), "base64") });
-      send();
-      send();
+      const stdin = f.params["stdin"] === undefined ? Buffer.alloc(0) : Buffer.from(String(f.params["stdin"]), "base64");
+      for (const send of [1, 2]) {
+        const ran = spawnSyncFed("bash", ["-c", String(f.params["cmd"])], stdin, { encoding: "utf8", timeout: 15_000 });
+        expect(ran.error, `send ${send} of ${String(f.params["cmd"])} did not finish`).toBeUndefined();
+        expect(ran.status, ran.stderr).toBe(0);
+      }
     }
     expect(readFileSync(path)).toEqual(file);
     expect(readdirSync(join(at, "deep"))).toEqual(["in.tgz"]);
