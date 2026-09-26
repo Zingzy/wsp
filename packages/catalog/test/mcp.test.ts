@@ -103,7 +103,7 @@ describe("read", () => {
     ].join("\n");
     expect(CODEX_TOML.read(toml, HOME)).toEqual<McpServer[]>([
       { name: "grafana", scope: "user", transport: { kind: "stdio", command: "/opt/homebrew/bin/uvx", args: ["mcp-grafana", "a\tbé"], env: { GRAFANA_SERVICE_ACCOUNT_TOKEN: "glsa_abcdefghij", GRAFANA_URL: "https://g.example" } }, envRefs: [] },
-      { name: "sentry", scope: "user", transport: { kind: "http", url: "https://mcp.sentry.dev/mcp?x=1", headers: {} }, envRefs: ["SENTRY_TOKEN", "SENTRY_ORG"] },
+      { name: "sentry", scope: "user", transport: { kind: "http", url: "https://mcp.sentry.dev/mcp?x=1", headers: {} }, envRefs: ["SENTRY_TOKEN", "SENTRY_ORG"], reads: { env: [], headers: { "X-Org": "SENTRY_ORG" }, bearer: "SENTRY_TOKEN" } },
       { name: "my server", scope: "user", transport: { kind: "stdio", command: "node", args: ["/Applications/Tool.app/Contents/mcp.js"], env: { A_KEY: "1234" } }, envRefs: [] },
     ]);
     expect(CODEX_TOML.read('model = "x"\n', HOME)).toEqual([]);
