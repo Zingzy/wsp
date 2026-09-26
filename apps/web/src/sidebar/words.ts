@@ -6,7 +6,7 @@
 // Nothing here says what a workspace is made of: that pair of words is the
 // protocol's table (madeOfWord, portsWord), so a row in the app and a cell in
 // the command line's table cannot say two things about one workspace.
-import { THIS_COMPUTER_WORD } from "../settings/places.js";
+import { onceNamed } from "../settings/format.js";
 
 /** The one word for the act, read by the plus on a project, the palette row and the dialog's own title: three
  * surfaces offering one act, so none of them can name it differently. */
@@ -21,7 +21,7 @@ export const WORK_GHOST = "pricing page";
  * Start, since the screen has one act and its title says what that act starts. */
 export const FIRST_RUN_WORDS = {
   title: "Add a project to get started",
-  sentence: `A project is a git repo on ${THIS_COMPUTER_WORD}. Every piece of work on it gets its own copy.`,
+  sentence: (here: string) => onceNamed(here, h => `A project is a git repo on ${h}. Every piece of work on it gets its own copy.`),
   add: "Add a project",
 } as const;
 
@@ -68,7 +68,7 @@ export const ADD_PROJECT_WORDS = {
   noFolders: "No folders here.",
   noMatch: "No repo matches.",
   added: "added",
-  noCloneHere: `A repository address is cloned on a box, Solari or ASCII. ${THIS_COMPUTER_WORD}'s projects are folders you already have.`,
+  noCloneHere: (here: string) => onceNamed(here, h => `A repository address is cloned on a box, Solari or ASCII. Projects on ${h} are folders you already have.`),
   cloneLine: (url: string, on: string) => `Clone ${url} on ${on}`,
   boxSays: (name: string) => `Repos on ${name} show here soon. Paste a repository address above to clone it there.`,
   providerSays: (name: string) => `${name} clones a project from its repository address. Paste one above.`,

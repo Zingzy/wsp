@@ -3,7 +3,7 @@
 // (the one vocabulary), the daemon reach and the pane's own socket. A pty
 // survives a pause (the machine is frozen, not rebuilt), so a paused pane keeps
 // its frame and offers the wake; only a replaced machine loses the shell.
-import { biggerSizeLine, outOfMemoryLine, THIS_COMPUTER, type AbsentComputer, type DaemonLinkStatus, type MachineSizeOffer, type MemoryReading, type ReachState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { biggerSizeLine, outOfMemoryLine, type AbsentComputer, type DaemonLinkStatus, type MachineSizeOffer, type MemoryReading, type ReachState, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 
 export type TerminalPaneState =
   | { readonly kind: "live" }
@@ -47,15 +47,16 @@ export interface TerminalPaneInput {
   readonly local?: boolean;
   /** The one reading of this workspace's computer while it is not answering; null while it is. */
   readonly absent?: AbsentComputer | null;
-  /** What this link's sentences call where they are being opened: the workspace's own name, which on a machine wsp
-   * forked is the name of that machine. Left out only where the caller holds no record yet. */
+  /** What this link's sentences call where they are being opened: the computer's own name for the person's own
+   * computer, else the workspace's name, which on a machine wsp forked is the name of that machine. Left out only
+   * where the caller holds no record yet. */
   readonly where?: string;
 }
 
 export function terminalPaneState(input: TerminalPaneInput): TerminalPaneState {
   const oom = input.outOfMemory ? { outOfMemory: input.outOfMemory } : {};
   const local = input.local ?? false;
-  const where = local ? THIS_COMPUTER : (input.where ?? "this task");
+  const where = input.where ?? "this task";
   /** What a machine that is up but whose link is not open reads as, from the link alone. */
   const fromLink = (): TerminalPaneState => {
     if (input.socket === "opening") return { kind: "starting", local, where };

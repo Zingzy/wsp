@@ -1209,11 +1209,11 @@ describe("the project switcher", () => {
     expect(rowOf("spoo-landing").dataset["lines"]).toBe("2");
     expect(rowOf("spoo-landing").querySelector("[data-project-computer]")!.textContent).toBe(BOX_NAME);
     expect(rowOf("spoo-landing").querySelector("[data-project-name]")!.textContent).toBe("spoo-landing");
-    expect(rowOf("wsp").querySelector("[data-project-computer]")!.textContent).toBe(placeName(PLACES[0]!, true));
+    expect(rowOf("wsp").querySelector("[data-project-computer]")!.textContent).toBe(placeName(PLACES[0]!));
     expect(document.querySelector("[data-sidebar-search] svg.lucide-settings, [data-sidebar-tree] svg.lucide-settings")).toBeNull();
     // What a screen reader is given is what the face shows: the name, the computer, and the count while the row is shut.
     expect(rowOf("spoo-landing").getAttribute("aria-label")).toBe(`spoo-landing, ${BOX_NAME}`);
-    expect(rowOf("wsp").getAttribute("aria-label")).toBe(`wsp, ${placeName(PLACES[0]!, true)}`);
+    expect(rowOf("wsp").getAttribute("aria-label")).toBe(`wsp, ${placeName(PLACES[0]!)}`);
     // The first click opens the project's home and leaves its workspaces showing; a click on the open home shuts it.
     fireEvent.click(rowOf("spoo-landing"));
     expect(useStore.getState().projectHome).toBe("pr_1");

@@ -15,14 +15,15 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts } from "@wsp/protocol";
-import { useHarnessCatalog, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { useHarnessCatalog, usePlaces, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { ThreadLink } from "../ThreadLink.js";
 import { useDiffRevealStore } from "../../diffs/reveal";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
 import { DEFAULT_TIMESTAMP_FORMAT, pausedLine, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
 import { threadsOpenedBy, type ThreadOnWorkspace } from "../../sidebar/threadTree";
-import { useWhereWord, whereWord } from "../../sidebar/workspaceRows";
+import { onName } from "../../settings/format.js";
+import { computerName, useComputerName } from "../../sidebar/workspaceRows";
 import { TimelineRuleLine } from "./TimelineRuleLine";
 import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
@@ -86,7 +87,7 @@ export function ChatView({
   // naming the workspace and, while it wakes, where it runs, since that is what the send is waiting on.
   const state = useWorkspaceState(workspaceId);
   const status = useStatus(workspaceId);
-  const where = useWhereWord(workspaceId);
+  const where = useComputerName(workspaceId);
   const runs = useMemo(() => ({ name: workspace?.name ?? workspaceId, where }), [workspace, workspaceId, where]);
   const machineWait = useMemo<MachineWait | null>(() => {
     if (state === null || !view.running) return null;
@@ -259,12 +260,13 @@ function openedSpend(opened: ReadonlyArray<ThreadOnWorkspace>): number {
  * with where that runs, how it stands, and the page's own address for it, so a person reading the opener can reach
  * every thread it started without hunting the sidebar for it. */
 function OpenedThreadRows({ opened }: { opened: ReadonlyArray<ThreadOnWorkspace> }) {
+  const places = usePlaces();
   return (
     <>
       {opened.map(({ thread, runs }) => (
         <TimelineRuleLine key={thread.id} data-opened-thread line="opened" {...(thread.indicator === null ? {} : { end: thread.indicator.label })}>
           <ThreadLink thread={thread} className="min-w-0 truncate text-foreground" />{" "}
-          <span className="ms-1 shrink-0 whitespace-nowrap">{`${runs.displayName} on ${whereWord(runs)}`}</span>{" "}
+          <span className="ms-1 shrink-0 whitespace-nowrap">{`${runs.displayName}${onName(computerName(places, runs))}`}</span>{" "}
         </TimelineRuleLine>
       ))}
     </>

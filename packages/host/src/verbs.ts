@@ -188,6 +188,7 @@ import {
   validatorRefusal,
   verbFailure,
   waitTimedOutLine,
+  thisComputer,
   whereWord,
   workspaceAsleepAgainLine,
   workspaceKind,
@@ -1417,7 +1418,7 @@ export function workspaceLine(w: WorkspaceListing, places: ReadonlyMap<string, s
     // What this workspace's copy of the project is and what its ports are, in the words the app's own row says
     // them in. Both cells are empty on a fork, whose project arrives by the runtime's own road.
     w.copy === undefined ? "" : madeOfWord(w.copy.road),
-    w.copy === undefined || capabilities === undefined ? "" : portsWord(capabilities, w.portBase, hostPlatform()),
+    w.copy === undefined || capabilities === undefined ? "" : portsWord(capabilities, w.portBase, thisComputer(hostPlatform())),
     kind.rowReadsMachine ? fmtSize(w.size, kind.cpu) : "",
     workspaceWord(workspaceStateOf(w, w), capabilities?.pauseMode),
     agentsWord(w.agents),

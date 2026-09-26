@@ -201,7 +201,7 @@ describe("the view's own last line", () => {
       ...over,
     };
     useStore.setState({
-      places: [{ id: "here", kind: "computer", name: "zingzy-mbp", default: false, present: true, takesForks: false }] as never,
+      places: [{ id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: false, present: true, takesForks: false }] as never,
       workspaces: [workspace],
       landings: { pr_1: { name: "here", capabilities: { copies: true, ownNetwork: false } as never } },
     } as never);
@@ -212,12 +212,12 @@ describe("the view's own last line", () => {
     const view = await mount(answered());
     // The protocol's word table, the same one the row it becomes reads: this screen writes no road of its own and
     // the runtime's stage words end on ready with nothing about the copy.
-    expect(view.querySelector("[data-k=made-of]")?.textContent).toBe("a copy shares this Mac's ports, PORT 3100");
+    expect(view.querySelector("[data-k=made-of]")?.textContent).toBe("a copy shares zingzy's MacBook Pro's ports, PORT 3100");
   });
 
   it("says a copy by either road as that, and names the computer only where the work did not land here", async () => {
     const view = await mount(answered({ copy: { road: "worktree", path: "/Users/dev/spoo-qr-codes", source: "/Users/dev/spoo", base: "", branch: "main", carried: "config-only" }, portBase: undefined }));
-    expect(view.querySelector("[data-k=made-of]")?.textContent).toBe("a copy shares this Mac's ports");
+    expect(view.querySelector("[data-k=made-of]")?.textContent).toBe("a copy shares zingzy's MacBook Pro's ports");
     expect(view.textContent).not.toContain("zingzy-mbp");
   });
 

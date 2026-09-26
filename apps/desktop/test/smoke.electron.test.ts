@@ -8,8 +8,8 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { LAUNCHD_PATH, placeWiring, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { GET_THE_APP_WORD, HOST_WORDS, hereWord } from "@wsp/protocol";
+import { LAUNCHD_PATH, computerNameHere, placeWiring, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
+import { GET_THE_APP_WORD, HOST_WORDS } from "@wsp/protocol";
 import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -733,7 +733,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     // And the move a person makes through the Hosts menu loads the host page with the session swept first. The window
     // is on that url already, so the reload is its own navigation of the main frame, waited for as one.
     const reloaded = win.waitForEvent("framenavigated", { predicate: frame => frame === win.mainFrame() });
-    await hostsMenu(launched.app, hereWord(process.platform === "darwin"));
+    await hostsMenu(launched.app, computerNameHere());
     await reloaded;
     expect(win.url()).toMatch(APP_URL);
     expect(await launched.app.evaluate(({ session }) => Object.keys(session.defaultSession.serviceWorkers.getAllRunning()).length)).toBe(0);
@@ -873,7 +873,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const win = await windowAt(launched.app, APP_URL);
     const home = win.url();
     await win.waitForSelector("[data-host-foot]");
-    const here = hereWord(process.platform === "darwin");
+    const here = computerNameHere();
     expect(await win.locator("[data-host-label]").textContent()).toBe(here);
     await hostsMenu(launched.app, "box");
     await win.waitForURL(`${at}/`);

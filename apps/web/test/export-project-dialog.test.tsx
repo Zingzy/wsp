@@ -47,7 +47,9 @@ const event = (over: Partial<ProjectExportEvent>): EventUnion => ({
 
 const THREADS = [session("s1", "claude"), session("s2", "codex"), session("s3", "claude")];
 
-/** This Mac's folders as the host lists them, home the only root. */
+const MAC = "zingzy's MacBook Pro";
+
+/** The Mac's folders as the host lists them, home the only root. */
 const LEVELS: Record<string, string[]> = { "/Users/me": ["/Users/me/code"], "/Users/me/code": ["/Users/me/code/archive"], "/Users/me/code/archive": [] };
 function fakeFolders() {
   const asked: (string | undefined)[] = [];
@@ -89,7 +91,7 @@ function fakeApi(sessions: SessionView[] = THREADS) {
 }
 
 beforeEach(() => {
-  useStore.setState({ api: null, workspaces: [workspace], conn: "live", sessions: {} });
+  useStore.setState({ api: null, places: [{ id: "here", kind: "computer", name: "zingzy-mbp", label: MAC, default: true }], workspaces: [workspace], conn: "live", sessions: {} });
   useRootStore.setState({ byWorkspaceId: {} });
   useRootStore.getState().follow("ws_a", SOURCE);
   delete (window as { wsp?: unknown }).wsp;
@@ -124,9 +126,9 @@ describe("export project dialog", () => {
     render(<ExportProjectDialog workspace={workspace} onClose={() => {}} />);
     const root = await dialog();
     expect(within(root).getByText("Export a project")).toBeDefined();
-    expect(within(root).getByText(exportFromLine("api"))).toBeDefined();
+    expect(within(root).getByText(exportFromLine("api", MAC))).toBeDefined();
     expect(field(root, "Folder on the task").value).toBe(SOURCE);
-    expect(field(root, "Folder on this Mac").value).toBe(SOURCE);
+    expect(field(root, `Folder on ${MAC}`).value).toBe(SOURCE);
     await codexRow(root);
     expect(sections(root).map(s => s.dataset["k"])).toEqual(["source", "dest", "agents", "summary"]);
     expect(new Set(sections(root).map(s => s.className)).size).toBe(1);
@@ -157,9 +159,9 @@ describe("export project dialog", () => {
     expect(field(root, "Folder on the task").value).toBe(workspace.project.path);
     expect(button(root, "Export").disabled).toBe(false);
     fireEvent.change(field(root, "Folder on the task"), { target: { value: "/root/other" } });
-    expect(field(root, "Folder on this Mac").value).toBe("/root/other");
+    expect(field(root, `Folder on ${MAC}`).value).toBe("/root/other");
     expect(button(root, "Export").disabled).toBe(false);
-    fireEvent.change(field(root, "Folder on this Mac"), { target: { value: "/Users/me/other" } });
+    fireEvent.change(field(root, `Folder on ${MAC}`), { target: { value: "/Users/me/other" } });
     fireEvent.click(button(root, "Export"));
     expect(api.exportProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: "/root/other", dest: "/Users/me/other" });
   });
@@ -183,7 +185,7 @@ describe("export project dialog", () => {
     (window as { wsp?: unknown }).wsp = { pickFolder };
     render(<ExportProjectDialog workspace={workspace} onClose={() => {}} />);
     const root = await dialog();
-    expect(within(root).queryByLabelText("Folder on this Mac")).toBeNull();
+    expect(within(root).queryByLabelText(`Folder on ${MAC}`)).toBeNull();
     expect(value(root, "path")).toBe(SOURCE);
     fireEvent.change(field(root, "Folder on the task"), { target: { value: "/root/work/spoo" } });
     expect(value(root, "path")).toBe("/root/work/spoo");
@@ -213,9 +215,9 @@ describe("export project dialog", () => {
     fireEvent.click(root.querySelector<HTMLElement>('[data-folder="/Users/me/code"]')!);
     await waitFor(() => expect(rows()).toEqual(["archive"]));
     // Walking does not name a destination; the one action does.
-    expect(field(root, "Folder on this Mac").value).toBe("/root/work/spoo");
+    expect(field(root, `Folder on ${MAC}`).value).toBe("/root/work/spoo");
     fireEvent.click(button(root, "Use this folder"));
-    expect(field(root, "Folder on this Mac").value).toBe("/Users/me/code/spoo");
+    expect(field(root, `Folder on ${MAC}`).value).toBe("/Users/me/code/spoo");
     fireEvent.click(button(root, "Export"));
     expect(api.exportProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: "/root/work/spoo", dest: "/Users/me/code/spoo" });
   });
@@ -258,7 +260,7 @@ describe("export project dialog", () => {
     expect(api.exportProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: SOURCE, dest: SOURCE });
     expect(button(root, "Export").disabled).toBe(true);
     expect(button(root, "Cancel").disabled).toBe(true);
-    expect(field(root, "Folder on this Mac").disabled).toBe(true);
+    expect(field(root, `Folder on ${MAC}`).disabled).toBe(true);
     const codex = within(root).getByRole("checkbox", { name: "Codex" });
     expect(codex.hasAttribute("disabled") || codex.getAttribute("aria-disabled") === "true").toBe(true);
     // The export runs on the runtime whatever this dialog does, so it cannot be dismissed while it runs.
@@ -277,11 +279,11 @@ describe("export project dialog", () => {
     emit(event({ stage: "downloading", message: "Agent state: 0 B of 200 B.", elapsedMs: 66, bytes: 0, total: 200 }));
     expect(progress(root)).toEqual({ line: "Downloading sessions, 200 B", percent: "50" });
     emit(event({ stage: "landing", message: "Landing at /root/proj.", elapsedMs: 70 }));
-    expect(progress(root)).toEqual({ line: "Landing on this Mac", percent: "100" });
+    expect(progress(root)).toEqual({ line: `Landing on ${MAC}`, percent: "100" });
     emit(event({ stage: "done", message: "11 files, 3 KB, landed at /root/proj; 1 cache left behind; sessions: Claude Code (2 sessions) moved.", elapsedMs: 80 }));
     expect(progress(root)).toEqual({ line: "Done", percent: "100" });
     await act(async () => finish());
-    await waitFor(() => expect(progress(root)).toEqual({ line: "proj is at /root/proj on this Mac.", percent: "100" }));
+    await waitFor(() => expect(progress(root)).toEqual({ line: `proj is at /root/proj on ${MAC}.`, percent: "100" }));
     expect(within(root).getByRole("status").className).toContain("text-muted-foreground");
     expect(value(root, "files")).toBe("11 files 3 KB");
     expect(root.querySelector("[data-k=files]")!.className).not.toContain("text-muted-foreground");
@@ -308,7 +310,7 @@ describe("export project dialog", () => {
     const replace = button(root, "Replace and export");
     expect(replace.disabled).toBe(false);
     expect(within(root).queryByRole("button", { name: "Export" })).toBeNull();
-    fireEvent.change(field(root, "Folder on this Mac"), { target: { value: "/Users/me/elsewhere" } });
+    fireEvent.change(field(root, `Folder on ${MAC}`), { target: { value: "/Users/me/elsewhere" } });
     expect(within(root).getByRole("status").textContent).toBe("");
     expect(button(root, "Export").disabled).toBe(false);
     api.exportProject.mockRejectedValueOnce(new RequestError(words, "exists"));
