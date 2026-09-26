@@ -8,13 +8,15 @@ import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
-import { GUARD_BEGIN, GUARD_END, type ManifestEntry, withIgnoreUnknown } from "@wsp/collect";
+import { dirname, join, relative } from "node:path";
+import { GUARD_BEGIN, GUARD_END, nodeHost, type ManifestEntry, withIgnoreUnknown } from "@wsp/collect";
 import { NODE_RELEASES, planFiles, type PlannedFile, type StagedFile } from "@wsp/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CLAUDE_INSTALL, GOLDEN_SMOKE, GUEST_HOME, MCP_SERVERS_JSON } from "@wsp/catalog";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
+import { serverVault, type ServerVault } from "../src/env-keys.js";
+import { serversActs } from "../src/servers-acts.js";
 
 vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
 
@@ -610,6 +612,9 @@ describe("packPlan", () => {
   });
 });
 
+/** A vault that owns nothing and pushes each hand-over to `into`. */
+const pushVault = (into: Record<string, string>[], held: Record<string, string> = {}): ServerVault => ({ file: "/state/servers.env", held: () => ({ ...held }), owners: () => ({}), hold: v => void into.push({ ...v }), release: () => {} });
+
 describe("packPlan: MCP servers travel by name", () => {
   it("writes every server's headers and variables as names in the copy of each agent's config, hands the values to the vault, and leaves this computer's files as they were", async () => {
     const home = laptop();
@@ -620,7 +625,7 @@ describe("packPlan: MCP servers travel by name", () => {
     writeFileSync(join(home, ".codex", "config.toml"), codex);
     const plan = planFiles([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude.json"] }), row({ rung: "agents", id: "agents/codex", paths: ["~/.codex/config.toml"] })], { home, stat: statOf, platform: "darwin" });
     const vaulted: Record<string, string>[] = [];
-    const packed = await packPlan(plan, { secrets: new Map(), home, vault: v => void vaulted.push({ ...v }) });
+    const packed = await packPlan(plan, { secrets: new Map(), home, vault: pushVault(vaulted) });
     const at = extract(packed.tar);
     const copiedClaude = readFileSync(join(at, ".claude.json"), "utf8");
     const copiedCodex = readFileSync(join(at, ".codex", "config.toml"), "utf8");
@@ -632,7 +637,7 @@ describe("packPlan: MCP servers travel by name", () => {
     expect(copiedClaude).toContain('"NOTION_TOKEN": "${NOTION_TOKEN}"');
     expect(copiedClaude).toContain("// mine");
     expect(copiedCodex).toBe('[mcp_servers.linear]\nbearer_token_env_var = "WSP_MCP_LINEAR_AUTHORIZATION"\nurl = "https://mcp.linear.app/mcp"\n');
-    expect(vaulted).toEqual([{ WSP_MCP_LINEAR_AUTHORIZATION: "lin_api_TESTONLY", NOTION_TOKEN: "ntn_TESTONLY" }]);
+    expect(vaulted).toEqual([{ WSP_MCP_LINEAR_AUTHORIZATION: "lin_api_TESTONLY" }, { NOTION_TOKEN: "ntn_TESTONLY" }]);
     expect(packed.skipped).toContainEqual({ id: "agents/codex", path: "~/.codex/config.toml", note: "other left out of the copy: sets NOTION_TOKEN, which notion already sets to another value" });
     expect(readFileSync(join(home, ".claude.json"), "utf8")).toBe(claude);
     expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toBe(codex);
@@ -642,9 +647,80 @@ describe("packPlan: MCP servers travel by name", () => {
     const home = laptop();
     writeFileSync(join(home, ".claude.json"), '{ "mcpServers": { "a": { "command": "x", "env": { "K": "sk-x" } } }, oops }');
     const plan = planFiles([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude.json"] })], { home, stat: statOf, platform: "darwin" });
-    const packed = await packPlan(plan, { secrets: new Map(), home, vault: () => {} });
+    const packed = await packPlan(plan, { secrets: new Map(), home, vault: pushVault([]) });
     expect(listTar(packed.tar).map(e => e.path)).not.toContain(".claude.json");
     expect(packed.skipped).toContainEqual({ id: "agents/claude", path: "~/.claude.json", note: "left out of the copy: its MCP servers could not be written by name (the file is not valid JSON; add the server by hand)" });
+  });
+});
+
+describe("packPlan: a value servers.env holds goes back to its reference", () => {
+  it("writes the variable's reference where a server added here holds the value in an argument or the address, and Codex's file stays here naming the argument", async () => {
+    const home = laptop();
+    const V = "sk_TESTONLY_local";
+    const claude = JSON.stringify({ mcpServers: { acme: { command: "acme-mcp", args: [`--token=${V}`], env: { ACME_TOKEN: V } }, remote: { type: "http", url: `https://acme.example/mcp?key=${V}` } } }, null, 2);
+    const codex = `[mcp_servers.acme]\ncommand = "acme-mcp"\nargs = ["--token=${V}"]\n`;
+    writeFileSync(join(home, ".claude.json"), claude);
+    mkdirSync(join(home, ".codex"));
+    writeFileSync(join(home, ".codex", "config.toml"), codex);
+    const plan = planFiles([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude.json"] }), row({ rung: "agents", id: "agents/codex", paths: ["~/.codex/config.toml"] })], { home, stat: statOf, platform: "darwin" });
+    const vaulted: Record<string, string>[] = [];
+    const packed = await packPlan(plan, { secrets: new Map(), home, vault: pushVault(vaulted, { ACME_TOKEN: V }) });
+    const at = extract(packed.tar);
+    const copied = JSON.parse(readFileSync(join(at, ".claude.json"), "utf8")) as { mcpServers: Record<string, { args?: string[]; env?: Record<string, string>; url?: string }> };
+    expect(copied.mcpServers["acme"]).toEqual({ command: "acme-mcp", args: ["--token=${ACME_TOKEN}"], env: { ACME_TOKEN: "${ACME_TOKEN}" } });
+    expect(copied.mcpServers["remote"]!.url).toBe("https://acme.example/mcp?key=${ACME_TOKEN}");
+    expect(listTar(packed.tar).map(e => e.path)).not.toContain(".codex/config.toml");
+    expect(packed.skipped).toContainEqual({ id: "agents/codex", path: "~/.codex/config.toml", note: "left out of the copy: its MCP servers could not be written by name (acme passes the value of ACME_TOKEN in the --token argument, and Codex reads no variable there, so the file stays on this computer)" });
+    expect(vaulted).toEqual([{ ACME_TOKEN: V }]);
+    expect(readFileSync(join(home, ".claude.json"), "utf8")).toBe(claude);
+    expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toBe(codex);
+  });
+});
+
+describe("the ticket's own flow: a server added here with --env, then copied", () => {
+  it("writes the reference for Claude Code, Gemini CLI and OpenCode, keeps the value in this computer's files and in servers.env, and Codex's file stays here", async () => {
+    const home = laptop();
+    const statePath = join(home, ".wsp", "state.json");
+    mkdirSync(dirname(statePath), { recursive: true });
+    const V = "sk_TESTONLY_flow";
+    const acts = serversActs({ here: () => ({ ...nodeHost(), home }), vault: serverVault(statePath) });
+    const server = { name: "acme", command: "acme-mcp", args: ["--token=${ACME_TOKEN}"], env: { ACME_TOKEN: V } };
+    for (const agent of ["claude", "gemini", "opencode", "codex"]) await acts.add({ kind: "here" }, { agent, ...server });
+    const files = { claude: ".claude.json", gemini: ".gemini/settings.json", opencode: ".config/opencode/opencode.json", codex: ".codex/config.toml" };
+    for (const rel of Object.values(files)) expect(readFileSync(join(home, rel), "utf8"), rel).toContain(`--token=${V}`);
+    expect(serverVault(statePath).held()).toEqual({ ACME_TOKEN: V });
+    const plan = planFiles(
+      Object.entries(files).map(([id, rel]) => row({ rung: "agents", id: `agents/${id}`, paths: [`~/${rel}`] })),
+      { home, stat: statOf, platform: "darwin" },
+    );
+    const packed = await packPlan(plan, { secrets: new Map(), home, vault: serverVault(statePath) });
+    const at = extract(packed.tar);
+    const copied = (rel: string): string => readFileSync(join(at, rel), "utf8");
+    for (const rel of [files.claude, files.gemini, files.opencode]) expect(copied(rel), rel).not.toContain(V);
+    expect(copied(files.claude)).toContain('"--token=${ACME_TOKEN}"');
+    expect(copied(files.gemini)).toContain('"--token=${ACME_TOKEN}"');
+    expect(copied(files.opencode)).toContain('"--token={env:ACME_TOKEN}"');
+    expect(listTar(packed.tar).map(e => e.path)).not.toContain(files.codex);
+    expect(packed.skipped).toContainEqual({ id: "agents/codex", path: `~/${files.codex}`, note: "left out of the copy: its MCP servers could not be written by name (acme passes the value of ACME_TOKEN in the --token argument, and Codex reads no variable there, so the file stays on this computer)" });
+  });
+});
+
+describe("packPlan: servers.env is written over by no copy", () => {
+  it("leaves out a copied server that sets a name servers.env holds for another server with another value, and keeps servers.env as it was", async () => {
+    const home = laptop();
+    const statePath = join(home, ".wsp", "state.json");
+    const vault = serverVault(statePath);
+    vault.hold({ TOKEN: "sk_TESTONLY_first" }, "a");
+    mkdirSync(join(home, ".gemini"));
+    writeFileSync(join(home, ".gemini", "settings.json"), JSON.stringify({ mcpServers: { other: { command: "o", env: { TOKEN: "sk_TESTONLY_second" } }, a: { command: "a", env: { TOKEN: "sk_TESTONLY_rotated" } } } }));
+    const plan = planFiles([row({ rung: "agents", id: "agents/gemini", paths: ["~/.gemini/settings.json"] })], { home, stat: statOf, platform: "darwin" });
+    const packed = await packPlan(plan, { secrets: new Map(), home, vault });
+    expect(packed.skipped).toContainEqual({ id: "agents/gemini", path: "~/.gemini/settings.json", note: "other left out of the copy: sets TOKEN, which a already sets to another value" });
+    const copied = readFileSync(join(extract(packed.tar), ".gemini", "settings.json"), "utf8");
+    expect(copied).not.toContain("sk_TESTONLY_second");
+    // The server the name belongs to rotates it.
+    expect(vault.held()).toEqual({ TOKEN: "sk_TESTONLY_rotated" });
+    expect(vault.owners()).toEqual({ TOKEN: ["a"] });
   });
 });
 

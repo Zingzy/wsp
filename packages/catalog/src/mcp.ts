@@ -128,8 +128,10 @@ export interface McpFormat {
   /** The text with every header and every command variable of its servers written as the name of a variable, in
    * the syntax this format's agent expands from its environment, and each value that left the text under the name
    * it now reads. A value that already names a variable stands as the person wrote it. `only` names one server of
-   * the file's own table and leaves every other as it is. Throws when the text is not the format. */
-  refer(text: string, only?: string): Promise<McpReferred>;
+   * the file's own table and leaves every other as it is. A `known` value standing whole in an argument or the
+   * address is written as its variable's reference too, and throws where the agent expands none there. Throws when
+   * the text is not the format. */
+  refer(text: string, only?: string, known?: readonly KnownValue[]): Promise<McpReferred>;
   /** The server's transport as its agent starts it, every reference this format writes read from `value`, and each
    * value read that way; or the first variable it reads that has no value and no default. A command's name and
    * arguments stand as written, since whatever is put there is on the process list. */
@@ -171,32 +173,46 @@ function queryValue(raw: string): string {
   }
 }
 
-/** Each part of a definition's string a value can stand as whole, with where it stands: the string itself, and
- * within it a flag's value (`--token=<v>`), a header line's (`Authorization: Bearer <v>`), an address's query
- * value, and whatever follows a scheme word (`Bearer`, `Basic`, `token`). */
-function placesIn(s: string, at: string, out: Map<string, string>): void {
+/** A part of a definition's string a value can stand as whole: where it stands, and its offset in the string where
+ * the part is the string's own characters rather than a decoding of them. */
+interface Place {
+  text: string;
+  at: string;
+  start?: number;
+}
+
+/** Each part of a definition's string a value can stand as whole: the string itself, and within it a flag's value
+ * (`--token=<v>`), a header line's (`Authorization: Bearer <v>`), an address's query value, and whatever follows a
+ * scheme word (`Bearer`, `Basic`, `token`). */
+function* places(s: string, at: string, start: number | undefined): Generator<Place> {
   if (s === "") return;
-  if (!out.has(s)) out.set(s, at);
+  yield { text: s, at, ...(start !== undefined ? { start } : {}) };
+  const tail = (part: string): number | undefined => (start === undefined ? undefined : start + s.length - part.length);
   const flag = /^(-{1,2}[A-Za-z0-9][\w.-]*)=([^]+)$/.exec(s);
-  if (flag !== null) placesIn(flag[2]!, `the ${flag[1]} argument`, out);
+  if (flag !== null) yield* places(flag[2]!, `the ${flag[1]} argument`, tail(flag[2]!));
   const header = /^([A-Za-z0-9-]+):[ \t]*([^/][^]*)$/.exec(s);
-  if (header !== null) placesIn(header[2]!, `the ${header[1]} header`, out);
-  for (const rest of valueForms(s).slice(1)) placesIn(rest, at, out);
+  if (header !== null) yield* places(header[2]!, `the ${header[1]} header`, tail(header[2]!));
+  for (const rest of valueForms(s).slice(1)) yield* places(rest, at, tail(rest));
   const query = /^[a-z][a-z0-9+.-]*:\/\/[^?#]*\?([^#]*)/i.exec(s);
+  let offset = query === null ? 0 : query[0].length - query[1]!.length;
   for (const pair of query?.[1]!.split("&") ?? []) {
     const [key = "", raw = ""] = pair.split(/=([^]*)/);
-    for (const v of new Set([raw, queryValue(raw)])) placesIn(v, `the ${key} parameter of an address`, out);
+    const where = `the ${key} parameter of an address`;
+    yield* places(raw, where, start === undefined ? undefined : start + offset + key.length + 1);
+    const decoded = queryValue(raw);
+    if (decoded !== raw) yield* places(decoded, where, undefined);
+    offset += pair.length + 1;
   }
 }
 
 const base64 = (v: string): string => btoa(String.fromCharCode(...new TextEncoder().encode(v)));
 
 /** Refuses a copy whose server definitions still hold a value that was taken out of them, whole, in any place
- * `placesIn` finds, or as its base64. Only the definitions are read, since the values come from nowhere else, and
+ * `places` finds, or as its base64. Only the definitions are read, since the values come from nowhere else, and
  * the rest of an agent's file is prose and counters a value may match by chance. */
 export function stillStands(entries: readonly unknown[], servers: McpReferred["servers"]): void {
   const held = new Map<string, string>();
-  for (const s of stringsIn(entries)) placesIn(s, "the file", held);
+  for (const s of stringsIn(entries)) for (const p of places(s, "the file", undefined)) if (!held.has(p.text)) held.set(p.text, p.at);
   const where = (form: string): string | undefined => {
     const b = base64(form).replace(/=+$/, "");
     const encoded = [`${b}${"=".repeat((4 - (b.length % 4)) % 4)}`, b, b.replace(/\+/g, "-").replace(/\//g, "_")].map(e => held.get(e)).find(x => x !== undefined);
@@ -208,6 +224,74 @@ export function stillStands(entries: readonly unknown[], servers: McpReferred["s
       if (found !== undefined) throw new Error(`${s.name}'s value still stands in ${found} after it was written by name, so the file stays on this computer`);
     }
   }
+}
+
+/** A variable servers.env holds, with its value. */
+export type KnownValue = readonly [name: string, value: string];
+
+interface KnownHit {
+  name: string;
+  value: string;
+  at: string;
+  start: number;
+  end: number;
+}
+
+/** Where a known value stands whole in one of the string's places as its own characters, the outer place winning
+ * where two overlap; one standing only decoded or as base64 is not written, and `knownStands` refuses it. */
+function knownIn(s: string, at: string, known: readonly KnownValue[]): KnownHit[] {
+  const hits: KnownHit[] = [];
+  for (const p of places(s, at, 0)) {
+    const k = known.find(([, v]) => v === p.text);
+    if (k !== undefined && p.start !== undefined) hits.push({ name: k[0], value: k[1], at: p.at, start: p.start, end: p.start + p.text.length });
+  }
+  hits.sort((a, b) => a.start - b.start || b.end - a.end);
+  const apart: KnownHit[] = [];
+  for (const h of hits) if (h.start >= (apart.at(-1)?.end ?? 0)) apart.push(h);
+  return apart;
+}
+
+const spliced = (s: string, hits: readonly KnownHit[], ref: (variable: string) => string): string => {
+  let out = "";
+  let last = 0;
+  for (const h of hits) {
+    out += s.slice(last, h.start) + ref(h.name);
+    last = h.end;
+  }
+  return out + s.slice(last);
+};
+
+/** Where `server`'s string holds a known value, a name the server itself sets (`own`) taken first, refused where a
+ * server of the file sets that name to another value, since the reference would then read that other value. */
+function knownHits(s: string, at: string, known: readonly KnownValue[], servers: McpReferred["servers"], server: string, own: Readonly<Record<string, string>>): KnownHit[] {
+  const given = known.filter(([, v]) => v !== "");
+  const hits = knownIn(s, at, [...given.filter(([n]) => own[n] !== undefined), ...given.filter(([n]) => own[n] === undefined)]);
+  for (const h of hits) {
+    const other = servers.find(x => x.values[h.name] !== undefined && x.values[h.name] !== h.value);
+    if (other !== undefined) throw new Error(`${server} passes the value servers.env holds as ${h.name} in ${h.at}, which ${other.name} sets to another value, so the file stays on this computer`);
+  }
+  return hits;
+}
+
+/** Refuses a server whose arguments and address, as they will be written, still hold a known value in any form the
+ * final guard reads: whole, decoded from a query, or as base64. */
+function knownStands(strings: readonly string[], known: readonly KnownValue[], server: string): void {
+  stillStands(strings, [{ name: server, values: Object.fromEntries(known.filter(([, v]) => v !== "")) }]);
+}
+
+/** Each argument and address of a definition, by its path inside it: `args`, a command written as a list past its
+ * first word, `url` and `httpUrl`. */
+function argStrings(def: Record<string, unknown>): [JSONPath, string, string][] {
+  const out: [JSONPath, string, string][] = [];
+  for (const [key, from] of [["args", 0], ["command", 1]] as const) {
+    const list = def[key];
+    if (Array.isArray(list)) list.forEach((v, i) => i >= from && typeof v === "string" && out.push([[key, i], v, "an argument"]));
+  }
+  for (const key of ["url", "httpUrl"]) {
+    const v = def[key];
+    if (typeof v === "string") out.push([[key], v, "the address"]);
+  }
+  return out;
 }
 
 /** Why a value typed or copied for a catalog row's own variable does not travel as a server's: `row` is that row. */
@@ -230,12 +314,22 @@ function headerVariables(server: string, headers: readonly string[]): Map<string
 /** `Authorization: Bearer <token>`: the token alone, which is what both agents' by-name bearer fields read. */
 const bearerToken = (header: string, value: string): string | undefined => (/^authorization$/i.test(header) ? /^Bearer\s+(\S.*)$/i.exec(value)?.[1] : undefined);
 
+/** Why a server is left out of a copy for setting a name `by` already set to another value; servers.env's own where
+ * it recorded no server for the name. */
+const clashLine = (name: string, by: string | readonly string[]): string => {
+  const who = typeof by === "string" ? [by] : by;
+  return who.length > 0 ? `sets ${name}, which ${who.join(" and ")} already ${who.length > 1 ? "set" : "sets"} to another value` : `sets ${name}, which servers.env already holds with another value and no server recorded for it`;
+};
+
 /** A file's servers written by name for a copy on another machine, `held` carrying the values an earlier file of the
- * same copy handed over. A server that would need a name to hold two values, or a value of more than one line, is
- * taken out of the text with the reason, and so is one that sets a variable a catalog row keeps its key under, which
- * `rowOf` names; a provider's key is never a server's value. */
-export async function serversByName(format: McpFormat, text: string, held: Map<string, { value: string; by: string }>, rowOf: (name: string) => string | undefined): Promise<{ text: string; dropped: { name: string; reason: string }[] }> {
-  const found = (await format.refer(text)).servers;
+ * same copy handed over and `known` what servers.env holds, with the servers each name belongs to. A server that would
+ * need a name to hold two values, or a value of more than one line, is taken out of the text with the reason, and so is
+ * one that sets a variable a catalog row keeps its key under, which `rowOf` names; a provider's key is never a server's
+ * value. A name servers.env holds with another value is a second value too, unless it is this server's alone, whose new
+ * value is its rotation. */
+export async function serversByName(format: McpFormat, text: string, held: Map<string, { value: string; by: string }>, rowOf: (name: string) => string | undefined, known: Readonly<Record<string, { value: string; by: readonly string[] }>> = {}): Promise<{ text: string; dropped: { name: string; reason: string }[] }> {
+  const knownValues = Object.entries(known).map(([name, at]): KnownValue => [name, at.value]);
+  const found = (await format.refer(text, undefined, knownValues)).servers;
   const dropped: { name: string; reason: string; project?: string }[] = [];
   const kept = new Map<string, { value: string; by: string }>();
   for (const s of found) {
@@ -243,18 +337,20 @@ export async function serversByName(format: McpFormat, text: string, held: Map<s
     const owned = values.map(([name]) => [name, rowOf(name)] as const).find(([, row]) => row !== undefined);
     const clash = values.find(([name, value]) => {
       const at = held.get(name) ?? kept.get(name);
-      return at !== undefined && at.value !== value;
+      if (at !== undefined) return at.value !== value;
+      const vault = known[name];
+      return vault !== undefined && vault.value !== value && !(vault.by.length === 1 && vault.by[0] === s.name);
     });
     const tall = values.find(([, value]) => crossesLines(value));
     if (owned !== undefined) dropped.push({ name: s.name, reason: rowVariableLine(owned[0], owned[1]!), ...(s.project !== undefined ? { project: s.project } : {}) });
-    else if (clash !== undefined) dropped.push({ name: s.name, reason: `sets ${clash[0]}, which ${(held.get(clash[0]) ?? kept.get(clash[0]))!.by} already sets to another value`, ...(s.project !== undefined ? { project: s.project } : {}) });
+    else if (clash !== undefined) dropped.push({ name: s.name, reason: clashLine(clash[0], (held.get(clash[0]) ?? kept.get(clash[0]))?.by ?? known[clash[0]]!.by.filter(b => b !== s.name)), ...(s.project !== undefined ? { project: s.project } : {}) });
     else if (tall !== undefined) dropped.push({ name: s.name, reason: `sets ${tall[0]} to a value on more than one line, which cannot travel by name`, ...(s.project !== undefined ? { project: s.project } : {}) });
     else for (const [name, value] of values) if (!held.has(name) && !kept.has(name)) kept.set(name, { value, by: s.name });
   }
   let out = text;
   for (const d of dropped) out = format.remove(out, [d.name], d.project).text;
   if (found.length === 0) return { text, dropped: [] };
-  const final = await format.refer(out);
+  const final = await format.refer(out, undefined, knownValues);
   stillStands(final.entries, found);
   const result = final.text;
   for (const [name, at] of kept) held.set(name, at);
@@ -737,11 +833,12 @@ function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
   const names = (v: string): boolean => new RegExp(shape.ref.source).test(v);
   /** A value that is one reference and nothing else, a bearer's included. */
   const whole = (v: string): boolean => new RegExp(`^(?:Bearer\\s+)?(?:${shape.ref.source})$`, "i").test(v);
-  return async (text, only) => {
+  return async (text, only, known = []) => {
     const root = jsonObject(text);
     const tables = serverTables(root, only === undefined);
     const edits: JsonEdit[] = [];
     const servers: McpReferred["servers"] = [];
+    const defs: { at: JSONPath; name: string; def: Tree; values: Record<string, string> }[] = [];
     for (const table of tables) {
       for (const [name, raw] of Object.entries(table.servers)) {
         const def = tree(raw);
@@ -761,7 +858,19 @@ function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
         put("headers", dict(def.headers), h => minted.get(h)!, true);
         put(shape.envKey, dict(def[shape.envKey]), k => k, false);
         servers.push({ name, ...(table.project !== undefined ? { project: table.project } : {}), values });
+        defs.push({ at: [...table.at, name], name, def, values });
       }
+    }
+    for (const { at, name, def, values } of defs) {
+      const written: string[] = [];
+      for (const [path, v, where] of argStrings(def)) {
+        const hits = knownHits(v, where, known, servers, name, values);
+        written.push(hits.length === 0 ? v : spliced(v, hits, shape.refOf));
+        if (hits.length === 0) continue;
+        edits.push([[...at, ...path], written.at(-1)!]);
+        for (const h of hits) values[h.name] = h.value;
+      }
+      knownStands(written, known, name);
     }
     const out = edits.length === 0 ? text : editJsonc(text, root, edits);
     const entries = serverTables(jsonObject(out), true).flatMap(t => Object.values(t.servers));
@@ -1329,7 +1438,7 @@ function referCodexLines(text: string, only?: string): string {
  * rewritten by name. The text the line editor makes is kept where it parses to that same tree, which keeps every
  * comment; any other spelling is written out from the tree. The parser is loaded on the first call: every host
  * process carries this module and the host's memory has a budget, so nothing that never writes a Codex file pays it. */
-async function referCodex(text: string, only?: string): Promise<McpReferred> {
+async function referCodex(text: string, only?: string, known: readonly KnownValue[] = []): Promise<McpReferred> {
   const { parse: parseToml, stringify: stringifyToml } = await import("smol-toml");
   let tree: Record<string, unknown>;
   try {
@@ -1378,6 +1487,15 @@ async function referCodex(text: string, only?: string): Promise<McpReferred> {
     }
     next[name] = def;
     changed = true;
+  }
+  for (const [name, raw] of Object.entries(table)) {
+    if (only !== undefined && name !== only) continue;
+    const strings = argStrings(raw as Record<string, unknown>);
+    for (const [, v, where] of strings) {
+      const hit = knownHits(v, where, known, servers, name, servers.find(s => s.name === name)?.values ?? {})[0];
+      if (hit !== undefined) throw new Error(`${name} passes the value of ${hit.name} in ${hit.at}, and Codex reads no variable there, so the file stays on this computer`);
+    }
+    knownStands(strings.map(([, v]) => v), known, name);
   }
   if (!changed) return { text, servers, entries: Object.values(table) };
   const want = { ...tree, mcp_servers: next };

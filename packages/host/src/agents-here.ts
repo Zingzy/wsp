@@ -18,19 +18,28 @@ export interface AgentHere {
   version?: string;
 }
 
-/** Whether any of the agent's MCP config files names wsp; a file that is not its format names nothing. */
-async function configured(host: Host, agentId: string): Promise<boolean> {
-  const agent = MCP_AGENTS.find(a => a.id === agentId);
-  if (agent === undefined) return false;
+/** Whether any of the agent's MCP config files names the server; a file that is not its format names nothing. */
+async function lists(host: Host, agent: (typeof MCP_AGENTS)[number], name: string): Promise<boolean> {
   for (const file of agent.mcp.files) {
     const text = await host.fs.readText(expand(host, file));
     if (text === undefined) continue;
     try {
-      if (agent.mcp.format.read(text, host.home).some(s => s.name === MCP_SERVER_NAME)) return true;
+      if (agent.mcp.format.read(text, host.home).some(s => s.name === name)) return true;
     } catch {
       // Not the format: it names no server.
     }
   }
+  return false;
+}
+
+const configured = async (host: Host, agentId: string): Promise<boolean> => {
+  const agent = MCP_AGENTS.find(a => a.id === agentId);
+  return agent !== undefined && lists(host, agent, MCP_SERVER_NAME);
+};
+
+/** Whether any agent's MCP config on this host still names the server. */
+export async function serverListedHere(host: Host, name: string): Promise<boolean> {
+  for (const agent of MCP_AGENTS) if (await lists(host, agent, name)) return true;
   return false;
 }
 
