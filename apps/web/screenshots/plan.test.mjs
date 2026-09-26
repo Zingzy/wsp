@@ -130,8 +130,9 @@ describe("every row the surfaces list aims at", () => {
       for (const step of surface.steps ?? []) {
         const word = step.includes(":") && !step.startsWith("row-id=") && !step.startsWith("place-row=") ? step.slice(step.indexOf(":") + 1) : step;
         // A cloud's row is the host's own, keyed by the provider's id, so it is in no fixture's places collection.
+        // A workspace is a tile of its own only while it holds no thread; one that does is reached by its threads.
         const held = word.startsWith("row-id=ws:")
-          ? state.workspaces[word.slice("row-id=ws:".length)] !== undefined
+          ? state.workspaces[word.slice("row-id=ws:".length)] !== undefined && (state.sessions[word.slice("row-id=ws:".length)]?.sessions.length ?? 0) === 0
           : word.startsWith("row-id=thread:")
             ? threads.has(threadId(word.slice("row-id=thread:".length)))
             : word.startsWith("place-row=")
@@ -140,6 +141,17 @@ describe("every row the surfaces list aims at", () => {
         expect([surface.name, word, held]).toEqual([surface.name, word, true]);
       }
     }
+  });
+});
+
+describe("a surface taller than its width's window", () => {
+  it("takes the height it names, and every other surface its width's own", () => {
+    const read = list([{ name: "tall", at: "/", height: 1100 }, { name: "plain", at: "/" }], { widths: [1440] });
+    expect(shotPlan(read).map(s => [s.name, s.height])).toEqual([["tall", 1100], ["plain", 900], ["tall", 1100], ["plain", 900]]);
+  });
+
+  it("refuses a height that is not a whole count of pixels", () => {
+    expect(() => list([{ name: "tall", at: "/", height: 0 }])).toThrow(/height/);
   });
 });
 
@@ -200,6 +212,10 @@ describe("the surfaces list this repo ships", () => {
       "threads-picker",
       "thread-list",
       "palette-threads",
+      "tiles",
+      "tiles-root",
+      "tiles-picker",
+      "tiles-settled-open",
     ]);
     // The one surface shot as a window on another computer, which is the only state the asleep line is drawn in.
     expect(read.surfaces.filter(s => s.remote).map(s => s.name)).toEqual(["host-asleep"]);
@@ -208,11 +224,11 @@ describe("the surfaces list this repo ships", () => {
     // Those served from a state of their own: an image that is built cannot stand in the same state file as one
     // that never was, a thread whose agent opened threads elsewhere needs the workspaces those threads run on, and
     // a person on the first run has no project added.
-    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "orchestrator", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states"]);
+    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "orchestrator", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "tiles", "tiles", "tiles", "tiles"]);
     // The first run is shot at the two widths a design reading is held to, and New workspace at the one width whose
     // sidebar carries its control, and the thread status, the two switchers, the threads list and the palette at the widest alone; the rest take every width the list shoots.
     const narrowed = read.surfaces.filter(s => s.widths.length < read.widths.length);
-    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]], ["thread-status", [1440]], ["threads-computers", [1440]], ["threads-computers-shut", [1440]], ["threads-computer-picked", [1440]], ["threads-picker", [1440]], ["thread-list", [1440]], ["palette-threads", [1440]]]);
+    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]], ["thread-status", [1440]], ["threads-computers", [1440]], ["threads-computers-shut", [1440]], ["threads-computer-picked", [1440]], ["threads-picker", [1440]], ["thread-list", [1440]], ["palette-threads", [1440]], ["tiles", [1440]], ["tiles-root", [1440]], ["tiles-picker", [1440]], ["tiles-settled-open", [1440]]]);
     expect(shotPlan(read)).toHaveLength(read.surfaces.reduce((n, s) => n + s.widths.length, 0) * 2);
     // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
     expect(read.widths).toContain(1280);

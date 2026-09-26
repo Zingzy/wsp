@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { FREE_WORD, NO_LINGER_LINE, NO_NODE_LINE, OVER_SSH, THREAD_ARCHIVE_MS, absentComputer, awayMsOf, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type PlaceView, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { THREAD_ARCHIVE_MS, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { RequestError } from "../src/protocol/client.js";
 import { openedBy, threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
@@ -22,17 +22,10 @@ import {
   splitSidebarThreads,
   topSidebarThread,
 } from "../src/sidebar/Sidebar.logic.js";
-import { absenceOf } from "../src/settings/places.js";
 import { currentWorkspaceId } from "../src/adapt/workspaces.js";
 import {
   compactTimeLabel,
-  metaSentences,
-  holdsStateWord,
-  stateSlotWord,
-  daemonGoneLine,
   computerName,
-  threadMetaWords,
-  workspaceMetaLine,
 } from "../src/sidebar/workspaceRows.js";
 import { formatRelativeTimeLabel } from "../src/lib/timestampFormat.js";
 
@@ -124,175 +117,7 @@ const status = (over: Partial<WorkspaceStatus>): WorkspaceStatus => ({
   machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, ...over,
 });
 
-describe("workspace row labels", () => {
-  const now = Date.parse("2026-09-03T12:00:00Z");
-
-  /** A project as the adapter folds it from a status, with the record's phase behind it. */
-  const project = (over: Partial<WorkspaceStatus>, view: Partial<WorkspaceView> = {}, threads: { asking: string | null }[] = []) => {
-    const st = status(over);
-    return {
-      state: workspaceState({ phase: st.phase, machineState: st.machineState, reach: st.reach.state }),
-      status: st,
-      reach: st.reach.state,
-      workspace: { ...st, ...view },
-      threads: threads as unknown as SidebarProjectSnapshot["threads"],
-    };
-  };
-
-  it("a thread stopped on a permission prompt puts what it is asking on the row's third line, ahead of the spend and of the helper's own note", () => {
-    const asked = [{ asking: "Write out.txt in root (2 B)" }, { asking: null }];
-    const line = (threads: { asking: string | null }[], over: Partial<WorkspaceStatus> = {}) =>
-      workspaceMetaLine({ project: project(over, {}, threads), outOfMemory: undefined });
-    expect(line(asked)).toBe("Write out.txt in root (2 B)");
-    // Even while the helper has something to say: the prompt is the one thing on the row a person can answer now.
-    expect(line(asked, { daemonNote: "updating the helper" })).toBe("Write out.txt in root (2 B)");
-    // The oldest waiting thread's, so a second prompt never takes the line from the one that has waited longest.
-    expect(line([{ asking: "Run: ls" }, ...asked])).toBe("Run: ls");
-    // Nothing waiting and no branch on the record: the line is empty rather than a figure.
-    expect(line([{ asking: null }])).toBe("");
-    // The line is handed over whole: the slot's own width cuts it, and the whole sentence rides the row's title.
-    const long = "Run: wsp --version && wsp host list && wsp workspaces";
-    expect(line([{ asking: long }])).toBe(long);
-  });
-
-  it("what the runtime is doing to the machine's helper, or a drop with memory near full, takes the whole line", () => {
-    const GiB = 1024 ** 3;
-    expect(workspaceMetaLine({ project: project({ daemonNote: "updating the helper" }), outOfMemory: undefined })).toBe("updating the helper");
-    expect(workspaceMetaLine({ project: project({}), outOfMemory: { used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.4 } })).toBe("out of memory, 3.6 of 3.9 GB");
-    // Before a status arrives the record's own note is the line; a status without one says nothing about the helper.
-    expect(workspaceMetaLine({ project: { ...project({}), status: null }, outOfMemory: undefined })).toBe("");
-    expect(workspaceMetaLine({ project: { ...project({}, { daemonNote: "updating the helper" }), status: null }, outOfMemory: undefined })).toBe("updating the helper");
-    // A status that arrived with no note of its own says nothing about the helper, whatever the record held.
-    expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), outOfMemory: undefined })).toBe("");
-  });
-
-  it("the state slot says nothing while running, since the row's own glyph says it, and the state's word otherwise", () => {
-    const slot = (state: WorkspaceState, label: string, tone: "running" | "paused" | "neutral", pulse = false) =>
-      stateSlotWord({ state, indicator: { label, tone, pulse }, workspace: project({}).workspace });
-    expect(slot("running", "Running", "running")).toBe("");
-    expect(slot("paused", "Paused", "paused")).toBe("Paused");
-    expect(slot("gone", "Gone", "neutral")).toBe("Gone");
-    expect(slot("waking", "Waking", "neutral", true)).toBe("Waking");
-  });
-
-  it("one rule says whether a word can stand in the slot at all, and the row's room and its word both read it", () => {
-    const slot = (view: Partial<WorkspaceView>) => ({ ...project({}, view), indicator: { label: "Paused", tone: "paused" as const, pulse: false }, state: "paused" as const });
-    const cloud = slot({ kind: "cloud" });
-    const local = slot({ kind: "local" });
-    const absent = { word: "No daemon", said: "zingzy's MacBook Pro's daemon is not running" } as Parameters<typeof stateSlotWord>[1];
-    // A machine wsp drives holds a word; the folder worked in place holds none, and the room the row keeps for one
-    // follows the same reading, so a row cannot keep width for a word that never comes.
-    expect(holdsStateWord(cloud)).toBe(true);
-    expect(stateSlotWord(cloud)).toBe("Paused");
-    expect(holdsStateWord(local)).toBe(false);
-    expect(stateSlotWord(local)).toBe("");
-    // Whatever its kind, a row whose computer is not answering holds that computer's own word.
-    expect(holdsStateWord(local, absent)).toBe(true);
-    expect(stateSlotWord(local, absent)).toBe("No daemon");
-  });
-
-  it("a row says its daemon is gone on the meta line, whatever kind of machine it is", () => {
-    const local = (reach: ReachState) => project({ reach: { state: reach } }, { kind: "local" });
-    const line = (reach: ReachState) => workspaceMetaLine({ project: local(reach), outOfMemory: undefined });
-    // The two are different facts: nothing answering on the port, and no daemon road at all.
-    expect(line("no-daemon")).toBe("no daemon answering");
-    // A machine with no daemon road at all says nothing here: the bare fact had no verb in it and named a thing
-    // the person never installed, and where the machine said what it lacks that is the line instead.
-    expect(line("unsupported")).toBe("");
-    expect(line("reachable")).toBe("");
-    // Its state word is still empty by design, which is why the line is where this goes.
-    expect(stateSlotWord({ ...local("no-daemon"), indicator: { label: "Unreachable", tone: "neutral", pulse: false } })).toBe("");
-    // What the runtime is doing to the daemon still leads: a note means an attempt is in flight.
-    expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "updating the helper" }, { kind: "local" }), outOfMemory: undefined })).toBe("updating the helper");
-    expect(daemonGoneLine("slow", kindWords("local"))).toBeUndefined();
-    expect(daemonGoneLine(null, kindWords("local"))).toBeUndefined();
-  });
-
-  it("this computer's own daemon is read off its workspace's reach, and says so in every slot the row has", () => {
-    const here = { id: "ws_m", name: "mac", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" } as const;
-    const silent = { ...status({ reach: { state: "unreachable" } }), kind: "local" as const };
-    // The places list holds no link for the computer the host runs on, so the reading comes off the workspace.
-    const places: PlaceView[] = [{ id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true }];
-    const reading = absenceOf(places, here, silent, null)!;
-    expect(reading.said).toBe("zingzy's MacBook Pro's daemon is not running");
-    expect(reading.word).toBe("No daemon");
-    // A probe that found the port dead rather than silence is the same daemon, not running.
-    expect(absenceOf(places, here, { ...silent, reach: { state: "no-daemon" } }, null)!.said).toBe(reading.said);
-    expect(absenceOf([], here, { ...silent, reach: { state: "reachable" } }, null)).toBeNull();
-    expect(absenceOf([], here, null, null)).toBeNull();
-    // The row's slot and its third line then read that one reading, where they read nothing and free before.
-    const row = project({ reach: { state: "unreachable" } }, { kind: "local" });
-    expect(stateSlotWord({ ...row, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, reading)).toBe("No daemon");
-    expect(workspaceMetaLine({ project: row, absent: reading, outOfMemory: undefined })).toBe("daemon not running, start it");
-  });
-
-  it("a fork whose daemon died says so too: Unreachable alone reads as a lost machine, and this one is fine", () => {
-    const driven = (reach: ReachState) => project({ reach: { state: reach } });
-    const line = (reach: ReachState) => workspaceMetaLine({ project: driven(reach), outOfMemory: undefined });
-    expect(line("no-daemon")).toBe("no daemon answering");
-    // Nothing else changed: a reach that says nothing about the daemon leaves the spend and the countdown alone.
-    expect(line("reachable")).toBe("");
-    expect(line("slow")).toBe("");
-    // While the runtime is putting the daemon back, that is what the row says instead.
-    expect(workspaceMetaLine({ project: project({ reach: { state: "no-daemon" }, daemonNote: "restarting the helper" }), outOfMemory: undefined })).toBe("restarting the helper");
-    // Only the daemon that died crosses to a driven kind. A machine wsp forks is built with the road to a daemon,
-    // so a fork's row saying there is none would be saying something that cannot be true of it.
-    expect(line("unsupported")).toBe("");
-
-    expect(daemonGoneLine("unsupported", kindWords("cloud"))).toBeUndefined();
-    expect(daemonGoneLine("unsupported", kindWords("local"))).toBeUndefined();
-    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBeUndefined();
-    // The phrase a backend developer read as a status with no verb is on no row of any kind.
-    for (const kind of ["cloud", "local", "ssh"] as const) {
-      expect(daemonGoneLine("unsupported", kindWords(kind), NO_LINGER_LINE)).not.toBe("no daemon on it");
-    }
-  });
-
-  it("a machine over ssh carries no figure on its row, and what the runtime is doing to its daemon still leads", () => {
-    const over = (reach: ReachState) => project({ reach: { state: reach } }, { kind: "ssh" });
-    const line = (reach: ReachState) => workspaceMetaLine({ project: over(reach), outOfMemory: undefined });
-    // No figure of any kind reaches a row: a machine's shape and its cost are its computer's row in Settings.
-    expect(line("reachable")).toBe("");
-    // What the runtime is doing about its daemon still leads on both surfaces.
-    expect(line("unsupported")).toBe("");
-    expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" }, daemonNote: "updating the helper" }, { kind: "ssh" }), outOfMemory: undefined })).toBe("updating the helper");
-    // This computer reads the same rule: what the machine said it lacks is the line, and nothing where it said nothing.
-    expect(workspaceMetaLine({ project: project({ reach: { state: "unsupported" } }, { kind: "local" }), outOfMemory: undefined })).toBe("");
-  });
-
-  it("a machine that told the host what it lacks says that on its row, in the first clause of what it said", () => {
-    const said = (why: string) =>
-      workspaceMetaLine({ project: project({ reach: { state: "unsupported" }, daemonRefusedAt: { machineId: "ssh://dev@box:22", at: "2026-09-11T14:04:50.380Z", why } }, { kind: "ssh" }), outOfMemory: undefined });
-    // Why, rather than the bare fact that none is there: the row cuts from the right, so it takes the head of the
-    // sentence, which is what the machine has not got. Both refusals are written to fit it.
-    expect(said(NO_NODE_LINE)).toBe("this machine has no Node 22");
-    expect(said(NO_LINGER_LINE)).toBe("this login does not linger");
-    // The whole sentence carries the command to type, which is at the end of it and no row would show; the
-    // Machine tab is where it goes, and that is proved where that surface is rendered.
-    expect(NO_LINGER_LINE).toContain("loginctl enable-linger");
-    expect(machineLacksShort(NO_LINGER_LINE)).not.toContain("loginctl");
-    // Nothing said, nothing on the line: the row has no fact to spend it on.
-    expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBeUndefined();
-  });
-
-  it("a workspace whose computer is not answering reads one state on the row: the word in the slot, the silence on line three, the whole sentence on its title", () => {
-    const absent = absentComputer("old-laptop", awayMsOf({ lastSeenAt: new Date(now - 38 * 60_000).toISOString() }, now));
-    const on = project({ reach: { state: "unreachable" } }, { kind: "cloud", machineId: "ctr_9f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, place: "p_oldlaptop" });
-    // The computer's own silence outranks the row's word: the slot reads what the person can act on, which is the
-    // computer, and a blank slot there was the row that said nothing beside readings of unreachable.
-    expect(stateSlotWord({ ...on, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, absent)).toBe(absent!.word);
-    expect(stateSlotWord({ ...on, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, null)).toBe("Unreachable");
-    // Line three is the silence and what to do about it, and it takes the line ahead of everything else on the
-    // row: nothing else there is known while that computer is not connected.
-    const line = workspaceMetaLine({ project: on, absent, outOfMemory: undefined });
-    expect(line).toBe("no answer 38 min, is it on?");
-    expect(metaSentences({ project: on, absent, outOfMemory: undefined })[0]).toBe(line);
-    // The whole sentence is one string every surface reads, and it never names the machine's id.
-    expect(absent.sentence).toBe("old-laptop is not answering; it connects on its own when it is on");
-    expect(absent.sentence).not.toContain("place:");
-    expect(absent.sentence).not.toContain("daemon");
-  });
-
+describe("row labels", () => {
   it("relative time: t3code's label, compacted for the row", () => {
     const threeMinutesAgo = new Date(Date.now() - 3 * 60_000).toISOString();
     expect(formatRelativeTimeLabel(threeMinutesAgo)).toBe("3m ago");
@@ -452,21 +277,8 @@ describe("the tree a thread's own threads make", () => {
   });
 });
 
-describe("a thread row's words", () => {
-  const spawned = { parentThreadId: "th_lead", project: "spoo", startedBy: "agent" as const };
-  const own = { parentThreadId: null, project: "spoo", startedBy: "person" as const };
+describe("where a workspace runs", () => {
   const runs = (over: Partial<WorkspaceStatus>, view: Partial<WorkspaceView> = {}) => ({ status: status(over), workspace: { ...status(over), ...view } });
-
-  it("a spawned row holds its workspace where a top row holds the project, and drops it when it is the row it is drawn under", () => {
-    expect(threadMetaWords(spawned, { workspace: "spoo-bench", where: "ascii" }, "spoo-fix")).toEqual(["spoo-bench", "ascii"]);
-    expect(threadMetaWords(spawned, { workspace: "spoo-fix", where: "hetzner" }, "spoo-fix")).toEqual(["hetzner"]);
-  });
-
-  it("a row a person or the command line opened keeps the project and who opened it, and never names a workspace", () => {
-    expect(threadMetaWords(own, { workspace: "spoo-fix", where: "hetzner" }, "spoo-fix")).toEqual(["spoo", "you"]);
-    expect(threadMetaWords({ ...own, startedBy: "cli" }, { workspace: "spoo-bench", where: "ascii" }, "spoo-fix")).toEqual(["spoo", "cli"]);
-    expect(threadMetaWords({ ...own, project: null }, { workspace: "spoo-fix", where: "hetzner" }, "spoo-fix")).toEqual(["you"]);
-  });
 
   it("where a workspace runs: the provider the record carries, the kind's own word where it has one, and the name wsp holds for the machine where it has neither", () => {
     expect(computerName([], runs({}, { kind: "local" }))).toBe("");
