@@ -305,10 +305,10 @@ describe("rows from the fixture wire", () => {
       expect(lead.nextElementSibling!.hasAttribute("data-thread-title")).toBe(true);
       return { label: row.getAttribute("title"), text: row.textContent, mark: mark.getAttribute("data-harness-mark"), svg: mark.tagName, tone, size: [...mark.classList].find(c => c.startsWith("size-")) };
     };
-    expect(reads("fix the port list")).toEqual({ label: "Claude Code · the-project · cli", text: "fix the port listWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
-    expect(reads("upgrade node")).toEqual({ label: "Codex · the-project · you", text: "upgrade nodeWorking", mark: "codex", svg: "svg", tone: undefined, size: "size-[13px]" });
-    expect(reads("before provenance")).toEqual({ label: "Claude Code · the-project · you", text: "before provenanceWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
-    expect(reads("from the director")).toEqual({ label: "Claude Code · the-project · agent", text: "from the directorWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
+    expect(reads("fix the port list")).toEqual({ label: "Claude Code, the-project, cli", text: "fix the port listWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
+    expect(reads("upgrade node")).toEqual({ label: "Codex, the-project, you", text: "upgrade nodeWorking", mark: "codex", svg: "svg", tone: undefined, size: "size-[13px]" });
+    expect(reads("before provenance")).toEqual({ label: "Claude Code, the-project, you", text: "before provenanceWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
+    expect(reads("from the director")).toEqual({ label: "Claude Code, the-project, agent", text: "from the directorWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
     // Nothing on the face but the title and the slot: no second line, no dots drawn as text, no opener word.
     for (const title of ["fix the port list", "upgrade node"]) {
       expect(rowOf(title).querySelector("[data-thread-meta], [data-thread-provenance]")).toBeNull();
@@ -336,11 +336,11 @@ describe("rows from the fixture wire", () => {
     expect(rowOf("spoo").dataset["depth"]).toBe("0");
     for (const title of ["fix the port list", "upgrade node", "no project"]) {
       expect(rowOf(title).textContent).not.toContain("spoo");
-      expect(rowOf(title).getAttribute("title")).toContain("· spoo ·");
+      expect(rowOf(title).getAttribute("title")).toContain(", spoo,");
       expect(rowOf(title).className).toBe(rowOf("fix the port list").className);
     }
-    expect(rowOf("fix the port list").getAttribute("title")).toBe("Claude Code · spoo · cli");
-    expect(rowOf("no project").getAttribute("title")).toBe("Claude Code · spoo · you");
+    expect(rowOf("fix the port list").getAttribute("title")).toBe("Claude Code, spoo, cli");
+    expect(rowOf("no project").getAttribute("title")).toBe("Claude Code, spoo, you");
   });
 
   it("a long title shares its line with the one slot alone, which holds the state word or the time, and every row is one height", async () => {
@@ -559,7 +559,7 @@ describe("rows from the fixture wire", () => {
     await mount(api, "zingzy-mac");
     const row = () => rowOf("zingzy-mac");
     await waitFor(() => expect(stateSlot(row()).textContent).toBe("No daemon"));
-    expect(metaOf(row()).textContent).toBe("daemon not running · start it");
+    expect(metaOf(row()).textContent).toBe("daemon not running, start it");
     // The start is the row's menu's, as every other action is: the row's face holds its words and nothing to press.
     expect(screen.queryByRole("button", { name: "Start the daemon of zingzy-mac" })).toBeNull();
     expect(screen.queryByRole("button", { name: "New thread in zingzy-mac" })).toBeNull();
@@ -975,9 +975,9 @@ describe("the row's third line after a bring back", () => {
     const meta = () => metaOf(rowOf("api"));
     // 44 characters, over the cap a row used to cut every line three at; the slot wears truncate and the width
     // decides, so at a wider sidebar the whole of it reads.
-    await waitFor(() => expect(meta().textContent).toBe("agent/readme-badge · pushed, no pull request"));
+    await waitFor(() => expect(meta().textContent).toBe("agent/readme-badge pushed, no pull request"));
     expect(meta().className.split(" ")).toContain("truncate");
-    expect(meta().getAttribute("title")).toBe(`agent/readme-badge · pushed, no pull request: ${note}`);
+    expect(meta().getAttribute("title")).toBe(`agent/readme-badge pushed, no pull request: ${note}`);
   });
 });
 
@@ -1067,8 +1067,8 @@ describe("Solari out of reach from this computer", () => {
     expect(threadState(rowOf("review the diff"))).toBe("Failed");
     expect(threadState(rowOf("ship the search rewrite"))).toBe("Working");
     // The workspace it runs in is the one it is drawn under, so the hover text holds where that workspace runs and nothing else.
-    expect(rowOf("write the migration").getAttribute("title")).toBe("Claude Code · solari");
-    expect(rowOf("ship the search rewrite").getAttribute("title")).toBe("Claude Code · the-project · you");
+    expect(rowOf("write the migration").getAttribute("title")).toBe("Claude Code, solari");
+    expect(rowOf("ship the search rewrite").getAttribute("title")).toBe("Claude Code, the-project, you");
     expect(depthOf(rowOf("write the migration"))).toBe(depthOf(rowOf("ship the search rewrite")) + 1);
     // Real nesting: the working child sits in a list inside the opener's item. The one that failed rests among the
     // settled threads, parted from its working opener, so it keeps the workspace's thread depth there.
@@ -1108,8 +1108,8 @@ describe("a thread an agent opened on another workspace", () => {
   it("names the workspace it runs in and then where that workspace runs in its hover text, the two facts the row above it does not carry", async () => {
     await opened();
     await waitFor(() => expect(screen.getByText("benchmark the new index")).toBeDefined());
-    expect(rowOf("benchmark the new index").getAttribute("title")).toBe("Claude Code · spoo-bench · ascii");
-    expect(rowOf("run the migration across the fleet").getAttribute("title")).toBe("Claude Code · the-project · you");
+    expect(rowOf("benchmark the new index").getAttribute("title")).toBe("Claude Code, spoo-bench, ascii");
+    expect(rowOf("run the migration across the fleet").getAttribute("title")).toBe("Claude Code, the-project, you");
     // Nothing of that on either face: the title and the slot alone.
     expect(rowOf("benchmark the new index").textContent).toBe("benchmark the new indexWorking");
   });

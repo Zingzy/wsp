@@ -41,7 +41,7 @@ import {
   SIGN_IN_LATER,
   titleWithNeed,
   initSetupLines,
-  initTallyLine,
+  initTallyCount,
   threadWorkingLine,
   permissionAskLine,
   INIT_SIGN_IN_WORDS,
@@ -204,7 +204,7 @@ describe("the words the clients print for the job", () => {
   });
 
   it("the collapsed row's line is the phase and the count while it builds, the sign-in waited on while one is open, and the phase alone otherwise", () => {
-    expect(initProgressLine(JOB)).toBe("building · 1/3");
+    expect(initProgressLine(JOB)).toBe("building 1/3");
     const waiting = { ...JOB, phase: "signing-in" as const, rows: [...JOB.rows, row({ id: "sign-in/gh", kind: "sign-in", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device", code: "8F4A-C21B" })] };
     expect(initProgressLine(waiting)).toBe("sign in to GitHub CLI login");
     expect(initProgressLine({ ...JOB, phase: "answering", rows: [] })).toBe("waiting for you");
@@ -244,7 +244,7 @@ describe("the words the clients print for the job", () => {
   });
 
   it("the cost line names the size and the rate once, from the backend's own number", () => {
-    expect(initCostLine({ cpu: 2, memMb: 4096 }, 0.11)).toBe("A 2 vCPU · 4 GB workspace costs about $0.11 an hour while it runs and naps when idle");
+    expect(initCostLine({ cpu: 2, memMb: 4096 }, 0.11)).toBe("A 2 vCPU, 4 GB workspace costs about $0.11 an hour while it runs and naps when idle");
   });
 
   it("the agent's first message names the two tools and where the recipe goes, asks the agent to ask nothing, and says plainly to run no commands", () => {
@@ -294,7 +294,7 @@ describe("the words the clients print for the job", () => {
       "Box API key: not set",
       "Solari API key: saved",
       "Agents here: Claude Code (MCP added), Codex",
-      "A 2 vCPU · 4 GB workspace costs about $0.11 an hour while it runs and naps when idle",
+      "A 2 vCPU, 4 GB workspace costs about $0.11 an hour while it runs and naps when idle",
       "No setup is running; the app's Image section starts one.",
     ]);
     const waiting = { ...JOB, phase: "signing-in" as const, rows: [row(), row({ id: "sign-in/gh", kind: "sign-in", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device", code: "8F4A-C21B" })] };
@@ -342,14 +342,14 @@ describe("the words the clients print for the job", () => {
   it("the sidebar's line says a machine an earlier build left is still going before it says anything about the job it is on", () => {
     const at = (id: string, state: string): InitRow => ({ id, kind: "stage", label: id, state });
     const building: Pick<InitJob, "phase" | "rows" | "progress"> = { phase: "building", rows: [at("stage/creating", "done"), at("stage/ready", "running")], progress: { done: 1, total: 2 } };
-    expect(initProgressLine(building)).toBe("building · 1/2");
+    expect(initProgressLine(building)).toBe("building 1/2");
     const left = (state: string): InitRow => ({ id: "machine/b_1", kind: "machine", label: "Builder b_1", state });
     const sweeping = { ...building, rows: [...building.rows, left(INIT_ROW_STATES.retrying)] };
     expect(initSweeping(building.rows)).toBe(false);
     expect(initSweeping(sweeping.rows)).toBe(true);
     expect(initProgressLine(sweeping)).toBe(MACHINE_SWEEP_LINE);
     // Once the provider took it the line goes back to the job the person is looking at.
-    expect(initProgressLine({ ...building, rows: [...building.rows, left(INIT_ROW_STATES.gone)] })).toBe("building · 1/2");
+    expect(initProgressLine({ ...building, rows: [...building.rows, left(INIT_ROW_STATES.gone)] })).toBe("building 1/2");
     // A machine row's name is words, never a bare provider id in a column of sentences.
     // No provider id in a row's name or a sentence: the builder is the builder, and a stopped build's machine is the machine.
     expect(MACHINE_ROW_LABEL).toBe("The builder");
@@ -410,11 +410,11 @@ describe("the words the clients print for the job", () => {
   });
 
   it("the tally, the disk words and a row's calls come from one formatter each: whole units under a gigabyte, a thousands separator on calls", () => {
-    expect(initTallyLine(3, "agents", 1.1 * 1024 * MIB)).toBe("3 agents on the image · 1.1 GB");
-    expect(initTallyLine(1, "tools", 60 * MIB)).toBe("1 tool on the image · 60 MB");
-    expect(initTallyLine(0, "agents", 0)).toBe("0 agents on the image · 0 B");
-    expect(initTallyLine(3, "more", 1.2 * 1024 * MIB)).toBe("3 more on the image · 1.2 GB");
-    expect(initTallyLine(1, "more", MIB)).toBe("1 more on the image · 1 MB");
+    expect([initTallyCount(3, "agents"), fmtBytesOfTotal(1.1 * 1024 * MIB)]).toEqual(["3 agents on the image", "1.1 GB"]);
+    expect([initTallyCount(1, "tools"), fmtBytesOfTotal(60 * MIB)]).toEqual(["1 tool on the image", "60 MB"]);
+    expect([initTallyCount(0, "agents"), fmtBytesOfTotal(0)]).toEqual(["0 agents on the image", "0 B"]);
+    expect([initTallyCount(3, "more"), fmtBytesOfTotal(1.2 * 1024 * MIB)]).toEqual(["3 more on the image", "1.2 GB"]);
+    expect([initTallyCount(1, "more"), fmtBytesOfTotal(MIB)]).toEqual(["1 more on the image", "1 MB"]);
     expect(initDiskLine(1.1 * 1024 * MIB, 20 * 1024 * MIB)).toBe("about 1.1 GB of 20 GB on the image");
     // Past the disk the tooltip carries the overshoot too: said there and in Continue's refusal, nowhere else.
     expect(initDiskLine(21 * 1024 * MIB, 20 * 1024 * MIB)).toBe("about 21 GB of 20 GB on the image, over by 1 GB");
@@ -477,7 +477,7 @@ describe("the words the clients print for the job", () => {
     expect(initTallyOf(logins, new Set())).toEqual({ count: 0, bytes: 0 });
     // Agents ticked to 663 MB and tools to 4.3 GB: the tools step counts its own rows and reads the whole image.
     expect(initImageBytes(job)).toBe(663 * MIB + 300 * MIB + 4 * GIB);
-    expect(initTallyLine(3, "tools", initImageBytes(job), job.disk.total)).toBe("3 tools on the image · 4.9 GB of 20 GB");
+    expect([initTallyCount(3, "tools"), fmtBytesOfTotal(initImageBytes(job), job.disk.total)]).toEqual(["3 tools on the image", "4.9 GB of 20 GB"]);
     // What the disk holds before any tick is under every estimate; a draft kept on a step stands over what the host
     // last answered; the draft a client holds and the host has not echoed stands over both.
     expect(initImageBytes({ ...job, disk: { fixed: 2 * GIB, total: 20 * GIB } })).toBe(2 * GIB + 663 * MIB + 300 * MIB + 4 * GIB);
@@ -491,7 +491,7 @@ describe("the words the clients print for the job", () => {
     // The estimate reads in the tone its share of the disk earns, never its weight: 4.9 GB is the danger weight and a quarter of the disk.
     expect(fmtBytesOfTotal(4.9 * GIB, 20 * GIB)).toBe("4.9 GB of 20 GB");
     expect(fmtBytesOfTotal(4.9 * GIB)).toBe("4.9 GB");
-    expect(initTallyLine(0, "more", 4.9 * GIB)).toBe("0 more on the image · 4.9 GB");
+    expect(initTallyCount(0, "more")).toBe("0 more on the image");
     expect(diskTone(initImageBytes(job), job.disk.total)).toBe("muted");
     expect(sizeTone(initImageBytes(job))).toBe("danger");
     // The agents screen's sizes are muted whatever they weigh; the tools and what-else screens' wear the weight table; nothing measured is muted anywhere.

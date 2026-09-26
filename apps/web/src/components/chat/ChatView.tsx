@@ -11,7 +11,7 @@
 // with the workspace it runs on and a link to it, and the footer weighs the
 // turn's own cost against what those threads spent.
 import { HeroAtmosphere, HeroMark } from "./EmptyHero.js";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
 import { isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts } from "@wsp/protocol";
@@ -262,26 +262,30 @@ function OpenedThreadRows({ opened }: { opened: ReadonlyArray<ThreadOnWorkspace>
   return (
     <>
       {opened.map(({ thread, runs }) => (
-        <TimelineRuleLine key={thread.id} data-opened-thread line="opened">
-          <ThreadLink thread={thread} className="min-w-0 truncate text-foreground" />
-          <span className="shrink-0 whitespace-nowrap">
-            {` · ${[runs.displayName, whereWord(runs), ...(thread.indicator === null ? [] : [thread.indicator.label])].join(" · ")}`}
-          </span>
+        <TimelineRuleLine key={thread.id} data-opened-thread line="opened" {...(thread.indicator === null ? {} : { end: thread.indicator.label })}>
+          <ThreadLink thread={thread} className="min-w-0 truncate text-foreground" />{" "}
+          <span className="ms-1 shrink-0 whitespace-nowrap">{`${runs.displayName} on ${whereWord(runs)}`}</span>{" "}
         </TimelineRuleLine>
       ))}
     </>
   );
 }
 
+/** Facts as flex items, the gap between them the only separator. The spaces between draw nothing in a flex row;
+ * they keep the words apart in the text content a plain-text read takes. */
+function FlexParts({ parts }: { parts: ReadonlyArray<string> }) {
+  return parts.map((part, at) => (
+    <Fragment key={part}>
+      {at === 0 ? null : " "}
+      <span className="whitespace-nowrap">{part}</span>
+    </Fragment>
+  ));
+}
+
 function SettledFacts({ parts }: { parts: ReadonlyArray<string> }) {
   return (
-    <p data-testid="settled-footer" className="flex flex-wrap items-center gap-x-2 text-muted-foreground text-xs tabular-nums">
-      {parts.map(part => (
-        <span key={part} className="whitespace-nowrap">
-          <span aria-hidden className="pe-2">·</span>
-          {part}
-        </span>
-      ))}
+    <p data-testid="settled-footer" className="ms-1 flex flex-wrap items-center gap-x-3 text-muted-foreground text-xs tabular-nums">
+      <FlexParts parts={parts} />
     </p>
   );
 }
@@ -305,17 +309,11 @@ function SettledFooter({ turn, openedCostUsd, onThisComputer }: { turn: TurnSumm
     <div
       data-testid="settled-footer"
       className={cn(
-        "flex w-full flex-wrap items-center gap-x-2 px-1 pb-2 font-mono text-[11px] tabular-nums",
+        "flex w-full flex-wrap items-center gap-x-3 px-1 pb-2 font-mono text-[11px] tabular-nums",
         failed ? "text-destructive" : "text-muted-foreground",
       )}
     >
-      <span className="whitespace-nowrap">{TURN_STATUS[turn.state]}</span>
-      {parts.map(part => (
-        <span key={part} className="whitespace-nowrap">
-          <span aria-hidden className="pe-2">·</span>
-          {part}
-        </span>
-      ))}
+      <FlexParts parts={[TURN_STATUS[turn.state], ...parts]} />
     </div>
   );
 }

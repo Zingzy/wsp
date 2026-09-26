@@ -283,7 +283,7 @@ describe("export project dialog", () => {
     await act(async () => finish());
     await waitFor(() => expect(progress(root)).toEqual({ line: "proj is at /root/proj on this Mac.", percent: "100" }));
     expect(within(root).getByRole("status").className).toContain("text-muted-foreground");
-    expect(value(root, "files")).toBe("11 files · 3 KB");
+    expect(value(root, "files")).toBe("11 files 3 KB");
     expect(root.querySelector("[data-k=files]")!.className).not.toContain("text-muted-foreground");
     expect(value(root, "caches")).toBe("1 folder");
     expect(root.querySelector("[data-k=cache-list]")).toBeNull();

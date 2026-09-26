@@ -78,6 +78,7 @@ import { classifyMarkdownImageSource } from "../lib/markdownImages";
 import { mediaKindFromPath } from "../lib/filePreview";
 import { isAbsolutePath } from "../terminal-links";
 import { cn } from "../lib/utils";
+import { Spaced } from "./ui/spaced";
 
 interface ChatMarkdownProps {
   text: string;
@@ -857,7 +858,7 @@ interface MarkdownFileLinkProps {
       absolute host path outside it, null when the panel cannot show the file. */
   panelPath: string | null;
   line?: number | undefined;
-  label: string;
+  label: ReadonlyArray<string>;
   copyMarkdown: string;
   onOpenFile?: ((path: string, line?: number) => void) | undefined;
   className?: string | undefined;
@@ -1089,7 +1090,7 @@ function ChatMarkdownImageFallback(props: {
     >
       <span className="inline-flex items-center gap-1.5">
         <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0" />
-        {props.alt.length > 0 ? `${label} · ${props.alt}` : label}
+        {props.alt.length > 0 ? `${label}: ${props.alt}` : label}
       </span>
     </span>
   );
@@ -1258,11 +1259,13 @@ function MarkdownExternalLinkContent({
   );
 }
 
-function MarkdownFileChipContent({ label }: { label: string }) {
+function MarkdownFileChipContent({ label }: { label: ReadonlyArray<string> }) {
   return (
     <>
       <FileIcon aria-hidden className={COMPOSER_INLINE_CHIP_ICON_CLASS_NAME} />
-      <span className={CHAT_INLINE_CHIP_LABEL_CLASS_NAME}>{label}</span>
+      <span className={CHAT_INLINE_CHIP_LABEL_CLASS_NAME}>
+        <Spaced parts={label} />
+      </span>
     </>
   );
 }
@@ -1337,7 +1340,7 @@ function areMarkdownFileLinkPropsEqual(
     previous.displayPath === next.displayPath &&
     previous.panelPath === next.panelPath &&
     previous.line === next.line &&
-    previous.label === next.label &&
+    previous.label.join("\n") === next.label.join("\n") &&
     previous.copyMarkdown === next.copyMarkdown &&
     previous.onOpenFile === next.onOpenFile &&
     previous.className === next.className
@@ -1456,7 +1459,7 @@ function ChatMarkdown({
           displayPath={fileLinkMeta.displayPath}
           panelPath={panelPath}
           line={fileLinkMeta.line}
-          label={labelParts.join(" · ")}
+          label={labelParts}
           copyMarkdown={copyMarkdown}
           onOpenFile={options?.inert ? undefined : onOpenFile}
           className={className}

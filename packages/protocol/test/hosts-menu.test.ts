@@ -48,9 +48,9 @@ describe("what the Computers table says about a computer", () => {
     for (const over of [{ lastSeenAt: "2026-09-12T10:00:00.000Z" }, { lastSeenAt: "2026-09-12T11:48:00.000Z" }, {}]) {
       expect(reading(over).away).toBe("no answer");
     }
-    expect(reading({ lastSeenAt: "2026-09-12T10:00:00.000Z" }).line).toBe("no answer 2 h · is it on?");
-    expect(reading({ lastSeenAt: "2026-09-12T11:48:00.000Z" }).line).toBe("no answer 12 min · is it on?");
-    expect(reading({}).line).toBe("no answer · is it on?");
+    expect(reading({ lastSeenAt: "2026-09-12T10:00:00.000Z" }).line).toBe("no answer 2 h, is it on?");
+    expect(reading({ lastSeenAt: "2026-09-12T11:48:00.000Z" }).line).toBe("no answer 12 min, is it on?");
+    expect(reading({}).line).toBe("no answer, is it on?");
   });
 
   it("says the count it is given and nothing else about a computer of the person's own, whether or not it answers", () => {
@@ -63,9 +63,9 @@ describe("what the Computers table says about a computer", () => {
 
   it("puts the month behind a row beside its count, where the host has metered anything on it", () => {
     const provider = { id: "box", kind: "provider" as const, name: "box", default: false };
-    expect(placeWorkspacesCell(provider, 2, 0.41)).toBe("2 · $0.41 this month");
+    expect(placeWorkspacesCell(provider, 2, 0.41)).toBe("2, $0.41 this month");
     // Money is spelled the one way the protocol spells it, which is cents whatever the size.
-    expect(placeWorkspacesCell(provider, 1, 0.0042)).toBe("1 · $0.00 this month");
+    expect(placeWorkspacesCell(provider, 1, 0.0042)).toBe("1, $0.00 this month");
     // A computer of the person's own is charged by nobody, so a month never lands on its row.
     expect(placeWorkspacesCell(view(), 1, 0.41)).toBe("1");
     expect(placeWorkspacesCell(provider, 2)).toBe("2");
@@ -79,13 +79,13 @@ describe("what the Computers table says about a computer", () => {
     // The one line is the two parts joined, so a table and a row of words cannot say different things.
     for (const [row, count, usd] of [[provider, 2, 0.41], [view(), 1, undefined]] as const) {
       const parts = placeWorkspacesParts(row, count, usd);
-      expect(placeWorkspacesCell(row, count, usd)).toBe(parts.note === undefined ? parts.count : `${parts.count} · ${parts.note}`);
+      expect(placeWorkspacesCell(row, count, usd)).toBe(parts.note === undefined ? parts.count : `${parts.count}, ${parts.note}`);
     }
   });
 
   it("says what one place took this month and what it burns now, and what every provider took together", () => {
-    expect(placeSpendLine({ monthUsd: 4.12, rateUsdPerHour: 0.16 }, 2)).toBe("$4.12 this month · $0.16/hr now across 2 workspaces");
-    expect(placeSpendLine({ monthUsd: 0, rateUsdPerHour: 0 }, 1)).toBe("$0.00 this month · $0.00/hr now across 1 workspace");
+    expect(placeSpendLine({ monthUsd: 4.12, rateUsdPerHour: 0.16 }, 2)).toBe("$4.12 this month, $0.16/hr now across 2 workspaces");
+    expect(placeSpendLine({ monthUsd: 0, rateUsdPerHour: 0 }, 1)).toBe("$0.00 this month, $0.00/hr now across 1 workspace");
     expect(placesSpendFoot(4.53, 2)).toBe("$4.53 this month across 2 providers");
     expect(placesSpendFoot(0.41, 1)).toBe("$0.41 this month across 1 provider");
   });

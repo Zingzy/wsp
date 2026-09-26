@@ -138,23 +138,23 @@ describe("a copy of the image beside the record", () => {
     expect(copyStanding(sealed, copy({}))).toBe(COPY_STALE);
     expect(copyStanding(image, copy({ hash: image.hash }))).toBeUndefined();
     // The line a person reads on the command line is the same rule spelled once: what it says is what the word says.
-    expect(sealedCopyLine(sealed, copy({ hash: image.hash }))).toBe(`solari · v1 · ${COPY_CURRENT}`);
-    expect(sealedCopyLine(image, copy({ hash: image.hash }))).toBe("solari · v1");
+    expect(sealedCopyLine(sealed, copy({ hash: image.hash }))).toBe(`solari  v1  ${COPY_CURRENT}`);
+    expect(sealedCopyLine(image, copy({ hash: image.hash }))).toBe("solari  v1");
   });
 
   it("a build's own line is the copy's, and says when nothing was built", () => {
     const sealed = { ...image, vault: { sha256: "c".repeat(64), bytes: 10, paths: 2, takenAt: "t" } };
     const built = copy({ hash: image.hash });
     expect(sealedBuiltLine(sealed, { copy: built, built: true })).toBe(sealedCopyLine(sealed, built));
-    expect(sealedBuiltLine(sealed, { copy: built, built: false })).toBe(`${sealedCopyLine(sealed, built)} · already built from this image; nothing was built`);
+    expect(sealedBuiltLine(sealed, { copy: built, built: false })).toBe(`${sealedCopyLine(sealed, built)}  already built from this image; nothing was built`);
   });
 
   it("a place's row says the stage a copy build there is at in the seal's own words, or why the last one stopped, and that sentence is the row's note while it stands", () => {
-    expect(copyBuildingLine("creating")).toBe("copying your image · creating the machine");
-    expect(copyBuildingLine("uploading-files")).toBe("copying your image · copying your files");
-    expect(copyStoppedLine("no room today")).toBe("the build stopped · no room today");
+    expect(copyBuildingLine("creating")).toBe("copying your image: creating the machine");
+    expect(copyBuildingLine("uploading-files")).toBe("copying your image: copying your files");
+    expect(copyStoppedLine("no room today")).toBe("the build stopped: no room today");
     expect(copyStoppedLine()).toBe("the build stopped");
-    expect(copyStoppedLine("fetch failed")).toBe(`the build stopped · ${NETWORK_LOST_LINE}`);
+    expect(copyStoppedLine("fetch failed")).toBe(`the build stopped: ${NETWORK_LOST_LINE}`);
     const box: PlaceView = { id: "p_1", kind: "computer", name: "box", default: false, takesForks: true, build: copyBuildingLine("creating") };
     expect(placeWorkspacesParts(box, 2)).toEqual({ count: "2", note: copyBuildingLine("creating") });
     const provider: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, takesForks: true, build: copyStoppedLine("no room") };
@@ -232,7 +232,7 @@ describe("what a computer says about its agents, and what a person reads off it"
 
   it("the agents cell names each agent, its version and its sign-in, and says nothing for a row that reported none", () => {
     const row = { agents: ["claude", "codex"], agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" }, signIns: { claude: "vault-key" as const, codex: "none" as const } };
-    expect(wire.agentsCell(row)).toBe("claude 2.1.270 your key · codex 0.153.0 not signed in");
+    expect(wire.agentsCell(row)).toBe("claude 2.1.270 your key, codex 0.153.0 not signed in");
     expect(wire.agentsCell({ agents: ["codex"], signIns: { codex: "signed-in" } })).toBe("codex signed in");
     expect(wire.agentsCell({})).toBe("");
     expect(wire.agentSignInWord("signed-in")).toBe("signed in");
@@ -1780,7 +1780,7 @@ describe("project goldens", () => {
     expect(wire.ProjectGoldenRemoved.safeParse({ projectGolden: golden }).success).toBe(false);
     const view = { image: null, copies: [], projects: [{ ...golden, sizeBytes: 5_000_000_000 }, golden] };
     expect(wire.SealedImageView.parse(view)).toEqual(view);
-    expect(wire.sealedProjectLine(view.projects[0]!)).toBe("snap_project-proj · project task · proj · 4.7 GB · 2026-09-06T10:05:00.000Z");
+    expect(wire.sealedProjectLine(view.projects[0]!)).toBe("snap_project-proj  project task  proj  4.7 GB  2026-09-06T10:05:00.000Z");
   });
 });
 

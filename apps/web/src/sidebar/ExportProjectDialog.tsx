@@ -17,6 +17,7 @@ import { agentName } from "@wsp/catalog";
 import { EXPORT_SESSIONS_NOTE, NO_THREADS_NOTE, NOT_LANDED_WORD, exportFromLine, fmtBytes, type ProjectAgentResult, type ProjectExportEvent, type ProjectExportResult, type WorkspaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
+import { Spaced } from "../components/ui/spaced.js";
 import { useWorkingFolder } from "../files/root.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import type { ProtocolEvent } from "../protocol/client.js";
@@ -151,7 +152,7 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
             <TripSection k="summary" label="What comes home">
               <div className="flex flex-col">
                 <FactRow label="Files" k="files" muted={result === null}>
-                  {result === null ? NOT_LANDED_WORD : `${count(result.files, "file")} · ${fmtBytes(result.bytes)}`}
+                  {result === null ? NOT_LANDED_WORD : <Spaced parts={[count(result.files, "file"), fmtBytes(result.bytes)]} />}
                 </FactRow>
                 <CachesRow excluded={result?.excluded ?? null} idle={NOT_LANDED_WORD} />
               </div>

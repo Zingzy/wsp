@@ -24,11 +24,10 @@ export const deviceName = (device: DeviceView): string => (device.here === true 
 
 /** How long ago a device was last heard from, in the protocol's own span, except inside the minute, where that
  * span reads 0 min: a device answering right now is what a person reads on the row they are sitting at. */
-export function deviceDescription(device: DeviceView, now: number, held: string | null = null): string {
+export function deviceDescription(device: DeviceView, now: number, held: string | null = null): string[] {
   const since = now - Date.parse(device.lastSeenAt);
-  const when = builtWhen(device.createdAt, now);
-  const line = since < 60_000 ? DEVICES_WORDS.pairedNow(when) : DEVICES_WORDS.paired(when, offlineFor(since));
-  return held === null ? line : `${line} · ${held}`;
+  const seen = since < 60_000 ? DEVICES_WORDS.seenNow : DEVICES_WORDS.seen(offlineFor(since));
+  return [DEVICES_WORDS.paired(builtWhen(device.createdAt, now)), seen, ...(held === null ? [] : [held])];
 }
 
 /** The one act on a device: asks, then takes its token away and reads the list again. */

@@ -78,7 +78,7 @@ export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
           id: project.id,
           title: project.name,
           lead: <ProjectGlyph projectId={project.id} />,
-          description: `${computer} · ${sourceWord(project.source)}`,
+          description: [computer, sourceWord(project.source)],
           mono: true,
           // A project nothing stands on reads 0: the count is loaded, and a blank where a sibling reads 3 is a
           // fact nobody can tell from a fact that never arrived.
@@ -150,7 +150,7 @@ export function ProjectPage({ project, ctx }: { project: ProjectView; ctx: Setti
     { kind: "line", id: "added", label: PROJECTS_WORDS.added, value: builtWhen(project.createdAt, ctx.now), hover: PROJECTS_WORDS.addedHover, attrs: { "data-k": "added" } },
     ...(project.seeded === undefined
       ? []
-      : [{ kind: "line" as const, id: "seeded", label: PROJECTS_WORDS.seeded, value: `${plural(project.seeded.files, "file")} · ${fmtBytes(project.seeded.bytes)} · memory ${project.seeded.memory}`, hover: PROJECTS_WORDS.seededHover, attrs: { "data-k": "seeded" } }]),
+      : [{ kind: "line" as const, id: "seeded", label: PROJECTS_WORDS.seeded, value: [plural(project.seeded.files, "file"), fmtBytes(project.seeded.bytes), `memory ${project.seeded.memory}`], hover: PROJECTS_WORDS.seededHover, attrs: { "data-k": "seeded" } }]),
   ];
   const starts: SettingsItem[] = [
     { kind: "row", id: "branch", title: PROJECTS_WORDS.branch, description: PROJECTS_WORDS.branchDescription, word: project.base ?? project.defaultBranch, attrs: { "data-k": "branch" } },

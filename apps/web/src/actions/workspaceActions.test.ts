@@ -57,10 +57,10 @@ describe("bring back on the workspace row", () => {
   });
 
   it("says pull request in full on the row's third line, and what happened where there is none", () => {
-    expect(broughtBackRowLine({ ...back, pr: { number: 12, url: "https://example/pr/12", state: "open", host: "github.com" } })).toBe("agent/pricing-page · pull request #12 open");
+    expect(broughtBackRowLine({ ...back, pr: { number: 12, url: "https://example/pr/12", state: "open", host: "github.com" } })).toBe("agent/pricing-page: pull request #12 open");
     // The honest half reads on the row; the host's own sentence for why is longer than any row and rides the hover.
-    expect(broughtBackRowLine({ ...back, note: "no gh on this computer" })).toBe("agent/pricing-page · pushed, no pull request");
-    expect(broughtBackRowLine(back)).toBe("agent/pricing-page · pushed");
+    expect(broughtBackRowLine({ ...back, note: "no gh on this computer" })).toBe("agent/pricing-page pushed, no pull request");
+    expect(broughtBackRowLine(back)).toBe("agent/pricing-page pushed");
   });
 
   it("stands on the row in place of the branch, and yields to the one sentence a person is waiting on", () => {
@@ -73,7 +73,7 @@ describe("bring back on the workspace row", () => {
     } as unknown as SidebarProjectSnapshot;
     const answer = { ...back, pr: { number: 12, url: "https://example/pr/12", state: "open" as const, host: "github.com" } };
     expect(workspaceMetaLine({ project, outOfMemory: undefined })).toBe("agent/pricing-page");
-    expect(workspaceMetaLine({ project, outOfMemory: undefined, broughtBack: answer })).toBe("agent/pricing-page · pull request #12 open");
+    expect(workspaceMetaLine({ project, outOfMemory: undefined, broughtBack: answer })).toBe("agent/pricing-page: pull request #12 open");
     const asking = { ...project, threads: [{ asking: "Write out.txt in root (2 B)" }] } as unknown as SidebarProjectSnapshot;
     expect(workspaceMetaLine({ project: asking, outOfMemory: undefined, broughtBack: answer })).toBe("Write out.txt in root (2 B)");
   });
@@ -88,8 +88,8 @@ describe("bring back on the workspace row", () => {
     } as unknown as SidebarProjectSnapshot;
     const note = "no signed-in command line for github.com is on this computer; the branch is pushed and the pull request waits for one";
     const pushed = { project, outOfMemory: undefined, broughtBack: { ...back, note } };
-    expect(workspaceMetaLine(pushed)).toBe("agent/pricing-page · pushed, no pull request");
-    expect(workspaceMetaTitle(pushed)).toBe(`agent/pricing-page · pushed, no pull request: ${note}`);
+    expect(workspaceMetaLine(pushed)).toBe("agent/pricing-page pushed, no pull request");
+    expect(workspaceMetaTitle(pushed)).toBe(`agent/pricing-page pushed, no pull request: ${note}`);
     // A line that is not a bring back's carries no note behind it.
     expect(workspaceMetaTitle({ project, outOfMemory: undefined })).toBe("agent/pricing-page");
   });

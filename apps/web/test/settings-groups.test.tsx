@@ -78,10 +78,10 @@ describe("Projects", () => {
     useStore.setState({ places: [here, box], projects: [project("pr_spoo", "spoo"), project("pr_landing", "landing", "p_spoo", { source: { kind: "github", repo: "dev/landing" } })], workspaces: [view("ws_a", "pricing page", "pr_spoo"), view("ws_b", "webhook retries", "pr_spoo")] });
     await mount({}, "projects");
     expect(rowTitles()).toEqual(["spoo", "landing"]);
-    expect(descriptionOf("pr_spoo")).toBe(`${placeName(here, true)} · /Users/dev/spoo`);
+    expect(descriptionOf("pr_spoo")).toBe(`${placeName(here, true)} /Users/dev/spoo`);
     expect(rowOf("pr_spoo")!.querySelector("svg")).not.toBeNull();
     expect(wordOf("pr_spoo")).toBe("2");
-    expect(descriptionOf("pr_landing")).toBe("spoo · dev/landing");
+    expect(descriptionOf("pr_landing")).toBe("spoo dev/landing");
     // A loaded zero is a fact: a blank where a sibling reads 2 cannot be told from a count that never arrived.
     expect(wordOf("pr_landing")).toBe("0");
     fireEvent.click(screen.getByRole("button", { name: PROJECTS_WORDS.add }));
@@ -116,7 +116,7 @@ describe("Projects", () => {
     expect(wordOf("remote")).toBe("https://github.com/dev/spoo.git");
     expect(lineOf("remote")?.getAttribute("title")).toBe(PROJECTS_WORDS.remoteHover);
     expect(wordOf("added")).toMatch(/^Sep 12 \d\d:\d\d$/);
-    expect(wordOf("seeded")).toBe(`412 files · ${fmtBytes(3_250_000)} · memory landed`);
+    expect(wordOf("seeded")).toBe(`412 files ${fmtBytes(3_250_000)} memory landed`);
     // About comes first, then Look with its two selects, then what a new workspace starts from.
     expect([...document.querySelectorAll("[data-settings-page] [data-settings-head]")].map(h => h.textContent)).toEqual([PROJECTS_WORDS.about, PROJECTS_WORDS.look, PROJECTS_WORDS.newWorkspaces]);
     expect(rowTitles()).toEqual([PROJECTS_WORDS.icon, PROJECTS_WORDS.hue, PROJECTS_WORDS.branch, PROJECTS_WORDS.lastAgent, "Remove spoo"]);
@@ -206,9 +206,9 @@ describe("Devices", () => {
       "devices",
     );
     expect(rowTitles()).toEqual(["zingzy-laptop", DEVICES_WORDS.thisBrowser]);
-    expect(descriptionOf("d_1")).toMatch(/^paired Sep 1 \d\d:\d\d · seen 1[12] min ago$/);
+    expect(descriptionOf("d_1")).toMatch(/^paired Sep 1 \d\d:\d\d seen 1[12] min ago$/);
     // A device heard from inside the minute says so in words rather than as a span of zero.
-    expect(descriptionOf("d_2")).toMatch(/^paired Sep 1 \d\d:\d\d · seen just now$/);
+    expect(descriptionOf("d_2")).toMatch(/^paired Sep 1 \d\d:\d\d seen just now$/);
     expect(rowOf("d_1")?.querySelector("[data-settings-description]")?.className).toContain("font-mono");
     // The door to the confirmation is neutral where it stands and red only under the pointer; the act itself, in
     // the dialog, is the one red thing at rest.
@@ -236,7 +236,7 @@ describe("Devices", () => {
     const revoke = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>("[data-k=revoke]")!;
     expect(revoke().disabled).toBe(true);
     expect(revoke().hasAttribute("title")).toBe(false);
-    expect(descriptionOf("d_1")).toMatch(new RegExp(`· ${WHERE_WORDS.notYet}$`));
+    expect(descriptionOf("d_1")).toMatch(new RegExp(` ${WHERE_WORDS.notYet}$`));
   });
 
   it("says one line where nothing is paired, and one where a page served on a ticket socket is refused the list", async () => {

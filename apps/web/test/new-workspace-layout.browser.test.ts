@@ -45,7 +45,7 @@ describe.skipIf(renderSkipped !== undefined)("the new-workspace dialog laid out 
     expect(await page!.locator("[aria-label=Size]").count()).toBe(0);
     // The project pick's segments carry hidden radio inputs of their own; the one field is the task's.
     expect(await page!.locator("[role=dialog] input:not([aria-hidden=true])").count()).toBe(1);
-    expect(await line.textContent()).toBe("This Mac · shares this Mac's ports");
+    expect(await line.textContent()).toBe("This Mac shares this Mac's ports");
     const drawn = await line.evaluate(el => ({ font: getComputedStyle(el).fontFamily, width: Math.round(el.getBoundingClientRect().width) }));
     expect(drawn.font.toLowerCase()).toMatch(/mono/);
     expect(drawn.width).toBeLessThanOrEqual(334);
@@ -60,7 +60,7 @@ describe.skipIf(renderSkipped !== undefined)("the new-workspace dialog laid out 
     await page!.goto(`${base}?theme=${theme}`);
     await page!.locator("[data-k=landing]").waitFor();
     await page!.locator("[data-segment=pr_2]").click();
-    expect(await page!.locator("[data-k=landing]").textContent()).toBe("spoo · own network");
+    expect(await page!.locator("[data-k=landing]").textContent()).toBe("spoo own network");
     await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `new-workspace-elsewhere-${theme}.png`) });
   });
 

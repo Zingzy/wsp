@@ -197,8 +197,10 @@ describe("command palette", () => {
     await waitFor(() => expect(palette()).not.toBeNull());
     // The provider its own record names, and, on a record that names none, what the machine is: a person picks a
     // workspace by its state and where it runs, and the id the provider minted for the machine names neither.
-    expect(metaOn("api")).toBe("Running · solari · Current task");
-    expect(metaOn("worker")).toBe("Stopped · a provider");
+    expect(metaOn("api")).toBe("Running on solari");
+    expect(metaOn("worker")).toBe("Stopped on a provider");
+    // The open workspace says so at the row's right edge, apart from the facts under its title.
+    expect(within(palette()!).getAllByText("Current task")).toHaveLength(1);
     for (const title of ["api", "worker"]) expect(metaOn(title)).not.toMatch(/m_ws_/);
   });
 
@@ -428,7 +430,7 @@ describe("command palette", () => {
     // The workspace it runs on and where that runs, which is what tells it from a thread of the opener's own. This
     // fixture's records name no provider, so where it runs is what the machine is.
     const row = inPalette().getByText("migration on worker").closest<HTMLElement>("[data-slot=command-item]")!;
-    expect(within(row).getByText("worker · a provider")).toBeTruthy();
+    expect(within(row).getByText("worker on a provider")).toBeTruthy();
   });
 
   it("a thread the sidebar has folded into its archive is still found by title and still opens", async () => {

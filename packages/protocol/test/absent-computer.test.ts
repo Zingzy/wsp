@@ -11,7 +11,7 @@ describe("the one state of a computer that is not answering", () => {
     // The table's slot stands beside three fact columns and holds one word; how long it has been is on the row's
     // title and in its detail's Answered row, which is where the figure already was.
     expect(reading.away).toBe("no answer");
-    expect(reading.line).toBe("no answer 38 min · is it on?");
+    expect(reading.line).toBe("no answer 38 min, is it on?");
     expect(reading.said).toBe("old-laptop is not answering");
     expect(reading.will).toBe("it connects on its own when it is on");
     expect(reading.sentence).toBe("old-laptop is not answering; it connects on its own when it is on");
@@ -26,7 +26,7 @@ describe("the one state of a computer that is not answering", () => {
   it("says nothing about how long it has been when this host never heard from it", () => {
     expect(awayMsOf({}, now)).toBeNull();
     expect(absentComputer("old-laptop", null).away).toBe("no answer");
-    expect(absentComputer("old-laptop", null).line).toBe("no answer · is it on?");
+    expect(absentComputer("old-laptop", null).line).toBe("no answer, is it on?");
   });
 
   it("states the silence and asks, and never claims the computer is off, which this host cannot know", () => {
@@ -58,7 +58,7 @@ describe("the one state of this computer's own daemon while it is not running", 
     expect(reading.sentence).toBe("this Mac's daemon is not running");
     expect(reading.word).toBe("No daemon");
     expect(reading.away).toBe("no daemon");
-    expect(reading.line).toBe("daemon not running · start it");
+    expect(reading.line).toBe("daemon not running, start it");
   });
 
   it("never says Unreachable about the computer the app is drawn on", () => {
@@ -94,7 +94,7 @@ describe("what this host knows about reaching a computer that is not answering",
   it("names the login it dials on the ssh road, dates the silence and puts the last refusal at the end", () => {
     const road = absentRoad({ name: "vps", road: { ssh: "root@65.21.4.12" }, awayMs, dialled: { answered: false, said: "ssh: connect to host 65.21.4.12 port 22: Connection refused" } });
     // The spec's row detail, one string: the address and the road it is.
-    expect(road.address).toBe("root@65.21.4.12 · ssh");
+    expect(road.address).toBe("root@65.21.4.12 over ssh");
     expect(road.answered).toBe("32 min ago");
     expect(road.refused).toBe("ssh: connect to host 65.21.4.12 port 22: Connection refused");
     expect(road.sentence).toBe("wsp logs in to vps at root@65.21.4.12 over ssh; it last answered 32 min ago. The last try said: ssh: connect to host 65.21.4.12 port 22: Connection refused");
@@ -102,20 +102,20 @@ describe("what this host knows about reaching a computer that is not answering",
 
   it("names the address a computer that joined with a code dialled in from, since that is the only one there is", () => {
     const road = absentRoad({ name: "old-laptop", road: { from: "192.168.1.34" }, awayMs: 36 * 60_000 });
-    expect(road.address).toBe("192.168.1.34 · dials in");
+    expect(road.address).toBe("192.168.1.34 dials in");
     expect(road.refused).toBeNull();
     expect(road.sentence).toBe("wsp waits for old-laptop to dial in, last from 192.168.1.34; it last answered 36 min ago.");
   });
 
   it("says a box on the ssh dial-back dials back over ssh, and never that it dials in from this computer's loopback", () => {
     const road = absentRoad({ name: "spoo", road: { ssh: "root@spoo", from: "127.0.0.1", back: { boxPort: 4640 } }, awayMs });
-    expect(road.address).toBe("root@spoo · ssh");
+    expect(road.address).toBe("root@spoo over ssh");
     expect(road.dialsBack).toBe("dials back over ssh (127.0.0.1:4640 on spoo)");
     expect(road.sentence).toBe("wsp logs in to spoo at root@spoo over ssh, and spoo dials back over ssh (127.0.0.1:4640 on spoo); it last answered 32 min ago.");
     const bare = absentRoad({ name: "spoo", road: { from: "127.0.0.1", back: { boxPort: 4640 } }, awayMs });
     expect(bare.address).toBeNull();
     expect(bare.sentence).toBe("spoo dials back over ssh (127.0.0.1:4640 on spoo); it last answered 32 min ago.");
-    for (const said of [road.sentence, bare.sentence, road.address, bare.address]) expect(said ?? "").not.toContain("127.0.0.1 · dials in");
+    for (const said of [road.sentence, bare.sentence, road.address, bare.address]) expect(said ?? "").not.toContain("127.0.0.1 dials in");
     expect(bare.sentence).not.toContain("last from 127.0.0.1");
     expect(absentRoad({ name: "vps", road: { ssh: "root@65.21.4.12", from: "65.21.4.12" }, awayMs }).dialsBack).toBeNull();
   });
@@ -143,12 +143,12 @@ describe("what this host knows about reaching a computer that is not answering",
   });
 
   it("marks a fact the computer has stopped answering for as the reading it is, never as one still coming", () => {
-    expect(lastKnown("Debian 12", awayMs)).toBe("Debian 12 · last seen 32 min ago");
+    expect(lastKnown("Debian 12", awayMs)).toBe("Debian 12, last seen 32 min ago");
     // Nothing to date it against leaves the fact as it stands rather than inventing a span.
     expect(lastKnown("Debian 12", null)).toBe("Debian 12");
     // A figure that grows while the computer is up is dated by the report it was read in, not by the silence: the
     // two spans differ by however long the link was held after that report.
-    expect(lastKnown("4h 12m", 3 * 3_600_000, REPORTED_WORD)).toBe("4h 12m · reported 3 h ago");
+    expect(lastKnown("4h 12m", 3 * 3_600_000, REPORTED_WORD)).toBe("4h 12m, reported 3 h ago");
   });
 });
 

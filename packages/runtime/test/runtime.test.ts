@@ -93,7 +93,7 @@ describe("runtime", () => {
     try {
       const ws = await createOn(rt, { golden: "snap_g", name: "big", cpu: 2, memMb: 8192 });
       const got = { cpu: 2, memMb: 4096 };
-      const line = "asked for 2\u00a0vCPU\u00a0·\u00a08\u00a0GB; the machine has 2\u00a0vCPU\u00a0·\u00a04\u00a0GB";
+      const line = "asked for 2\u00a0vCPU,\u00a08\u00a0GB; the machine has 2\u00a0vCPU,\u00a04\u00a0GB";
       expect(ws.notice).toBe(line);
       expect(await store.get("workspaces", ws.id)).toMatchObject({ size: got, shape: { cpu: 2, memMb: 8192 } });
       const [status] = await rt.status.list();
@@ -117,7 +117,7 @@ describe("runtime", () => {
 
   it.each([
     [8_060_000, 8192, undefined],
-    [6_144_000, 6000, "asked for 2\u00a0vCPU\u00a0·\u00a08\u00a0GB; the machine has 2\u00a0vCPU\u00a0·\u00a05.9\u00a0GB"],
+    [6_144_000, 6000, "asked for 2\u00a0vCPU,\u00a08\u00a0GB; the machine has 2\u00a0vCPU,\u00a05.9\u00a0GB"],
     [8_388_608, 8192, undefined],
   ])("a guest counting %i kB of an asked 8 GB is recorded at %i MB: an offered size within a sixteenth of the count, else the count itself", async (kb, memMb, notice) => {
     const { backend } = guestCounting(counted(kb));
@@ -257,9 +257,9 @@ describe("runtime", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const inherited = await createOn(rt, { golden: "snap_golden-v1", name: "a" });
-      expect(inherited.notice).toBe("the image's size is 2 vCPU · 8 GB; the machine has 2 vCPU · 4 GB");
+      expect(inherited.notice).toBe("the image's size is 2 vCPU, 8 GB; the machine has 2 vCPU, 4 GB");
       const asked = await createOn(rt, { golden: "snap_golden-v1", name: "b", cpu: 2, memMb: 8192 });
-      expect(asked.notice).toBe("asked for 2 vCPU · 8 GB; the machine has 2 vCPU · 4 GB");
+      expect(asked.notice).toBe("asked for 2 vCPU, 8 GB; the machine has 2 vCPU, 4 GB");
     } finally {
       warn.mockRestore();
     }

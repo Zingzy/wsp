@@ -1169,8 +1169,10 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
       <TimelineRuleLine data-machine-wait className="my-1" line={machineWait.label}>
         {machineWait.elapsed && row.createdAt !== null ? (
           <>
-            <span aria-hidden>·</span>
-            <WorkingTimer createdAt={row.createdAt} />
+            {" "}
+            <span className="ms-1">
+              <WorkingTimer createdAt={row.createdAt} />
+            </span>
           </>
         ) : null}
         {machineWait.onWake !== null ? (
@@ -1196,7 +1198,10 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
           ) : row.waitingOnYou ? (
             row.createdAt ? (
               <>
-                {WAITING_ON_YOU_LEAD} <span aria-hidden>·</span> <WorkingTimer createdAt={row.createdAt} />
+                {WAITING_ON_YOU_LEAD}{" "}
+                <span className="ms-2">
+                  <WorkingTimer createdAt={row.createdAt} />
+                </span>
               </>
             ) : (
               WAITING_ON_YOU_LEAD

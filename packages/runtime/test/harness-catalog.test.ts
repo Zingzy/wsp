@@ -28,7 +28,7 @@ describe("harness catalogs", () => {
       expect(table.models.length).toBeGreaterThan(0);
       expect(table.version).toMatch(/^\S+ \d+\.\d+\.\d+, \d{4}-\d{2}-\d{2}$/);
       const line = catalogSourceLine(table, THIS_COMPUTER);
-      expect(line).toBe(`${id} table · ${table.version!}`);
+      expect(line).toBe(`${id} table, ${table.version!}`);
       // One line at the popup's width: 48 characters of the 10px mono the footer draws in (measured in Chromium).
       expect(line.length).toBeLessThanOrEqual(48);
       for (const other of THREAD_AGENTS.filter(a => a !== id)) {
@@ -41,7 +41,7 @@ describe("harness catalogs", () => {
   it("the pin is what was run on the row's own binary, and a row written from a CLI's docs claims none", () => {
     expect(harnessCatalog("claude")!.version).toBe("--help 2.1.280, 2026-09-23");
     expect(harnessCatalog("codex")!.version).toBe("app-server 0.153.0, 2026-09-07");
-    expect(catalogSourceLine(harnessCatalog("codex")!, THIS_COMPUTER)).toBe("codex table · app-server 0.153.0, 2026-09-07");
+    expect(catalogSourceLine(harnessCatalog("codex")!, THIS_COMPUTER)).toBe("codex table, app-server 0.153.0, 2026-09-07");
     for (const id of ["gemini", "opencode", "pi", "hermes"]) {
       expect(harnessCatalog(id)!.version, id).toBeNull();
       expect(catalogSourceLine(harnessCatalog(id)!, THIS_COMPUTER)).toBe(`${id} table`);

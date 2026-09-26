@@ -161,10 +161,10 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
         />
       ) : compactPreviewVisible ? (
         <div className="px-2 pb-1.5 pt-1">
-          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
             {scopeSummary.map((scope, index) => (
               <span key={scope.label} className="inline-flex items-center gap-1">
-                {index > 0 ? <span aria-hidden="true">·</span> : null}
+                {index > 0 ? " " : null}
                 <span className="font-mono text-foreground/75">{scope.label}</span>
                 <span>
                   {scope.fileCount} file{scope.fileCount === 1 ? "" : "s"}
