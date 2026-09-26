@@ -7,9 +7,9 @@
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON } from "@wsp/catalog";
+import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, parseJsonc } from "@wsp/catalog";
 import { MCP_ID_PREFIX, TOOLS_PATH, placeProvisionPaths } from "@wsp/protocol";
-import { commentsDroppedLine, type McpPlan } from "../src/golden-mcp.js";
+import type { McpPlan } from "../src/golden-mcp.js";
 import { closeAgentFiles, oncePathsOf, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
 import { provisionMcp, theirServerLine } from "../src/provision-mcp.js";
 import { tarOf } from "../src/vault.js";
@@ -58,7 +58,7 @@ const CLAUDE_TRAVELLED = (gsc: string[] = ["--stdio"], far = false): string =>
 
 const CODEX_TRAVELLED = ['model = "gpt-5"', "", "[mcp_servers.context7]", 'command = "npx"', 'args = ["-y", "context7"]', "", "[mcp_servers.grafana]", 'command = "npx"', ""].join("\n");
 
-/** OpenCode's own config as somebody keeps it on that computer: jsonc, with a comment the rewrite cannot keep. */
+/** OpenCode's own config as somebody keeps it on that computer: jsonc, with a comment of the person's. */
 const OPENCODE_ON_BOX = '{\n  // my own servers\n  "theme": "dark",\n  "mcp": {}\n}\n';
 const OPENCODE_TRAVELLED = `${JSON.stringify({ mcp: { docs: { type: "local", command: ["npx", "docs-mcp"], enabled: true } } }, null, 2)}\n`;
 
@@ -266,7 +266,7 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
     expect(claudeOf(root).mcpServers["mine"]).toEqual({ command: "/usr/local/bin/mine", args: [] });
   });
 
-  it("says on every row of a jsonc config that the comments its rewrite could not keep are gone", async () => {
+  it("merges into a jsonc config in place, so the person's comments stand and no row says anything of them", async () => {
     const g = box();
     const { root } = g;
     const config = join(root, ".config/opencode/opencode.json");
@@ -274,25 +274,11 @@ describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }
     writeFileSync(config, OPENCODE_ON_BOX);
     const lands: ProvisionLanding[] = [{ id: "agents/opencode", label: "OpenCode", dest: ".config/opencode/opencode.json", once: true }];
     const landed = await provisionFiles(g.machine, { home: root, lands, pack: async () => packed(tarOf([{ path: ".config/opencode/opencode.json", mode: 0o600, content: OPENCODE_TRAVELLED }])) });
-    const said: string[] = [];
-    const rows = await provisionMcp(g.machine, opencodePlanOn(root), {
-      home: root,
-      landed: landed.owned,
-      tools: [],
-      path: TOOLS_PATH,
-      stage: (_which, detail) => {
-        if (detail !== undefined) said.push(detail);
-      },
-    });
-    expect(rows.map(r => [r.id, r.outcome])).toEqual([[`${MCP_ID_PREFIX}opencode/docs`, "installed"]]);
-    // Beside whatever else that row had to say, and in the words the install on this computer reads for it.
-    expect(rows[0]!.note).toBe(`npx fetches the package on first use; ${commentsDroppedLine(config)}`);
-    // And once as the round goes, since a row that installed reads as installed and no more on the screen.
-    expect(said.filter(line => line === commentsDroppedLine(config))).toHaveLength(1);
-    // The server is merged into the person's own file, and what the rewrite could not keep is the comment.
+    const rows = await provisionMcp(g.machine, opencodePlanOn(root), { home: root, landed: landed.owned, tools: [], path: TOOLS_PATH, stage: () => {} });
+    expect(rows.map(r => [r.id, r.outcome, r.note])).toEqual([[`${MCP_ID_PREFIX}opencode/docs`, "installed", "npx fetches the package on first use"]]);
     const held = readFileSync(config, "utf8");
-    expect(JSON.parse(held)).toEqual({ theme: "dark", mcp: { docs: { type: "local", command: ["npx", "docs-mcp"], enabled: true } } });
-    expect(held).not.toContain("my own servers");
+    expect(parseJsonc(held)).toEqual({ theme: "dark", mcp: { docs: { type: "local", command: ["npx", "docs-mcp"], enabled: true } } });
+    expect(held).toContain("  // my own servers\n");
   });
 
   it("leaves a config that is on no computer to the merge itself, which skips its servers rather than writing a file nobody has", async () => {

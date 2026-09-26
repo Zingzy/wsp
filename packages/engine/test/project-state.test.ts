@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { ProjectCarry } from "@wsp/protocol";
@@ -13,6 +14,9 @@ import { PROJECT_STATE_RESOLVERS, agentHome, agentHomes, countProjectState, gues
 import { mergeScript } from "../src/project-state/merge.js";
 import { rewriteJsonl } from "../src/project-state/resolver.js";
 import { PY_PREAMBLE } from "../src/project-state/py.js";
+
+/** The built engine, for a test whose move has to run in a process of its own. */
+const ENGINE_DIST = fileURLToPath(new URL("../dist/index.js", import.meta.url));
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite") as typeof import("node:sqlite");
 
@@ -379,6 +383,21 @@ describe("gemini resolver", () => {
       { state: "project temp dir", files: [join(home, "tmp", "b_2.x", ".project_root"), join(home, "tmp", "sub", ".project_root")], changed: 2 },
       { state: "shell history", files: [join(home, "history", "b_2.x", ".project_root")], changed: 1 },
     ]);
+  });
+
+  // The move runs in a process of its own under a file size cap, so whatever writes the registry is killed by
+  // SIGXFSZ partway through the bytes: the registry must then be the old one whole or the new one whole.
+  it.skipIf(!existsSync(ENGINE_DIST))("leaves the registry old or new, never half, when its write is killed partway", () => {
+    const home = geminiHome(scratch());
+    const many = Object.fromEntries(Array.from({ length: 20_000 }, (_, i) => [`/Users/me/p${i}`, `slug-${i}`]));
+    const old = `${JSON.stringify({ projects: { [FROM]: "b_2.x", ...many } }, null, 2)}\n`;
+    writeFileSync(join(home, "projects.json"), old);
+    const script = `const { PROJECT_STATE_RESOLVERS } = await import(${JSON.stringify(ENGINE_DIST)}); await PROJECT_STATE_RESOLVERS.get("gemini").move(process.argv[1], process.argv[2], process.argv[3]);`;
+    const run = spawnSync("/bin/sh", ["-c", 'ulimit -f 512; exec "$0" --input-type=module -e "$1" "$2" "$3" "$4"', process.execPath, script, home, FROM, TO], { encoding: "utf8" });
+    expect(run.status).not.toBe(0);
+    const left = readFileSync(join(home, "projects.json"), "utf8");
+    expect([old, old.replace(JSON.stringify(FROM), JSON.stringify(TO))]).toContain(left);
+    expect(readdirSync(home).filter(n => n.startsWith(".wsp-"))).toEqual([]);
   });
 
   it("moves the registry alone when the project never opened a shell", async () => {

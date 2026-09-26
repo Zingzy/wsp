@@ -7,6 +7,7 @@ export * from "./linux-casks.js";
 export * from "./signin.js";
 export * from "./jsonc.js";
 export * from "./mcp.js";
+export * from "./config-write.js";
 export * from "./mcp-check.js";
 export * from "./mcp-login.js";
 export * from "./skills.js";

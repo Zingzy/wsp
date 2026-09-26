@@ -650,8 +650,8 @@ describe("taking wsp's servers back out of the agents' own files there", () => {
       wrote,
       port: {
         run: script => Promise.resolve(script.includes(MCP_ID_PREFIX) ? Object.entries(keys).map(([id, digest]) => `${SERVER_MARK}\t${digest}\t${id}`).join("\n") : ""),
-        read: candidates => Promise.resolve(candidates.flatMap(path => (files[path] === undefined ? [] : [{ path, text: files[path]! }]))[0]),
-        write: (path, text) => {
+        read: candidates => Promise.resolve(candidates.flatMap(path => (files[path] === undefined ? [] : [{ path, text: files[path]!, sum: "" }]))[0]),
+        write: ({ path }, text) => {
           files[path] = text;
           wrote.push(path);
           return Promise.resolve();

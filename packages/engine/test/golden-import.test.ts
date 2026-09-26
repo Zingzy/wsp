@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 import { describeDiff, diffRecipes, isEmptyDiff } from "../src/golden-diff.js";
 import { withRecordedPins } from "../src/golden-tools.js";
-import { CATALOG_AGENTS, CLAUDE_INSTALL, LOCAL_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, CLAUDE_INSTALL, LOCAL_BIN, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf, parseJsonc } from "@wsp/catalog";
 import {
   rowRoad,
   UNMEASURED_ROAD,
@@ -316,6 +316,27 @@ describe("planFiles: which laptop files travel and where they land", () => {
     expect(withApiKeyHelper(undefined, "cat /root/.claude-cfg/anthropic-api-key")).toBe('{\n  "apiKeyHelper": "cat /root/.claude-cfg/anthropic-api-key"\n}\n');
     for (const text of ['{"model": "opus"}', "{ not json", ""]) expect(withApiKeyHelper(text, undefined)).toBe(text);
     expect(withApiKeyHelper("{ not json", "cat x")).toBe("{ not json");
+  });
+
+  it("withApiKeyHelper edits a settings.json with comments in place, every comment of the person's standing", () => {
+    const settings = '{\n  // my settings\n  "apiKeyHelper": "security find-generic-password -w", // on the Mac\n  /* the model */\n  "model": "opus"\n}\n// the end\n';
+    expect(withApiKeyHelper(settings, "cat /root/key")).toBe(settings.replace("security find-generic-password -w", "cat /root/key"));
+    // The comment lines right above the helper and the one at the end of its line are the helper's, and go with it.
+    const dropped = withApiKeyHelper(settings, undefined)!;
+    expect(dropped).toBe('{\n  /* the model */\n  "model": "opus"\n}\n// the end\n');
+    expect(parseJsonc(dropped)).toEqual({ model: "opus" });
+  });
+
+  it("places and drops a gh account in a hosts.yml full of comments, and keeps every comment outside the account it took out", () => {
+    const mac = ["# my hosts", "github.com:", "# written by gh", "    git_protocol: ssh # ssh for me", "    users:", "        # the work one", "        other:", "            # its token", "        Zingzy: # me", "    user: Zingzy", "# the end", ""].join("\n");
+    const placed = placeGhToken("github.com", "gho_z", mac, "Zingzy");
+    for (const c of ["# my hosts", "# written by gh", "# ssh for me", "# the work one", "# its token", "# me", "# the end"]) expect(placed, c).toContain(c);
+    expect(ghAccounts(placed, "github.com")).toEqual({ users: ["other", "Zingzy"], active: "Zingzy" });
+    expect(placed).toContain("    oauth_token: gho_z\n");
+    expect(placed).toContain("        Zingzy: # me\n            oauth_token: gho_z\n");
+    const dropped = dropGhAccount("github.com", mac, "other");
+    for (const c of ["# my hosts", "# written by gh", "# ssh for me", "# the work one", "# me", "# the end"]) expect(dropped, c).toContain(c);
+    expect(ghAccounts(dropped, "github.com")).toEqual({ users: ["Zingzy"], active: "Zingzy" });
   });
 
   it("a Keychain login not chosen as copy is neither read nor noted", () => {

@@ -476,13 +476,12 @@ export interface ServerPort {
   run(script: string): Promise<string>;
   /** The first of an agent's files that is there, with its text; nothing where none of them is. */
   read(files: readonly string[]): Promise<ScopeFile | undefined>;
-  /** That file with this text, its mode kept, and an agent launching in that moment reading one whole copy of it
-   * or the other. */
-  write(path: string, text: string): Promise<void>;
+  /** That file, as it was read, with this text by the one config write inside `home`. */
+  write(file: ScopeFile, text: string, home: string): Promise<void>;
 }
 
-/** The port over a machine: the same read of a config off it and the same landing, pour and rename the servers
- * round writes one back with. */
+/** The port over a machine: the same read of a config off it and the same landing and write the servers round puts
+ * one back with. */
 export function machineServerPort(machine: Machine): ServerPort {
   return {
     run: async script => {
@@ -496,8 +495,8 @@ export function machineServerPort(machine: Machine): ServerPort {
       const res = await machine.run(readConfigsCmd(asked), { deadlineMs: READ_MS, unlogged: true }).catch(() => undefined);
       return res === undefined || res.exitCode !== 0 ? undefined : parseConfigs(res.stdout, asked)?.[0];
     },
-    write: async (path, text) => {
-      const failure = await landConfigs(machine, [], new Map([[path, text]]));
+    write: async (file, text, home) => {
+      const failure = await landConfigs(machine, home, [file], new Map([[file.path, text]]));
       if (failure !== undefined) throw new Error(failure);
     },
   };
@@ -542,7 +541,7 @@ export async function unmergeServers(port: ServerPort, home: string): Promise<Se
         took.push(...names);
       }
       if (took.length === 0 || text === file.text) continue;
-      await port.write(file.path, text);
+      await port.write(file, text, home);
       out.push({ path: file.path, names: took });
     } catch {
       continue;

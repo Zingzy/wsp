@@ -339,6 +339,47 @@ const CLAUDE_TRAVELLED = (gscArgs: string[] = ["--stdio"]): string =>
     2,
   )}\n`;
 
+/** A jsonc config as a person keeps one: comments above, beside and below its keys and servers. */
+const COMMENTS = ["// top of the file", "// beside the theme", "/* before the servers */", "// the person's own server", "// end of mine", "/* his */", "// the end"];
+const commented = (key: string, entry: (command: string) => unknown): string =>
+  [
+    "{",
+    "  // top of the file",
+    '  "theme": "x", // beside the theme',
+    "  /* before the servers */",
+    `  ${JSON.stringify(key)}: {`,
+    "    // the person's own server",
+    `    "mine": ${JSON.stringify(entry("/usr/local/bin/mine"))}, // end of mine`,
+    `    "old": ${JSON.stringify(entry("x"))}`,
+    "  },",
+    '  "projects": { "/root/work": { /* his */ "history": [] } }',
+    "}",
+    "// the end",
+    "",
+  ].join("\n");
+const JSON_FORMATS: [McpFormat, string, (command: string) => unknown][] = [
+  [MCP_SERVERS_JSON, "mcpServers", command => ({ command, args: [] })],
+  [GEMINI_SETTINGS_JSON, "mcpServers", command => ({ command, args: [] })],
+  [OPENCODE_JSON, "mcp", command => ({ type: "local", command: [command] })],
+];
+
+describe("edit", () => {
+  it("every JSON format edits a jsonc file in place: each comment outside what it took out stands, a kept server's strings are rewritten where they are, and a folder's servers move", () => {
+    for (const [format, key, entry] of JSON_FORMATS) {
+      const own = commented(key, entry).replace('"/usr/local/bin/mine"', JSON.stringify(`${HOME}/mine`));
+      const edited = format.edit(LIB, { keep: ["mine"], drop: ["old"] }, own);
+      expect(edited.results, key).toEqual([{ name: "mine", outcome: "written", command: "/root/mine" }, { name: "old", outcome: "dropped" }]);
+      for (const c of COMMENTS) expect(edited.text, c).toContain(c);
+      expect((parseJsonc(edited.text) as Record<string, unknown>)[key]).toEqual({ mine: entry("/root/mine") });
+      expect(format.edit(LIB, { keep: ["nobody"], drop: [] }, own).text).toBe(own);
+    }
+    const home = commented("mcpServers", c => ({ command: c })).replace('"projects": { "/root/work"', `"projects": { ${JSON.stringify(HOME)}: { "mcpServers": { "zed": { "command": ${JSON.stringify(`${HOME}/zed`)} } } }, "/root/work"`);
+    const moved = MCP_SERVERS_JSON.edit(LIB, { keep: ["zed"], drop: [], project: { from: HOME, to: "/root" } }, home);
+    for (const c of COMMENTS) expect(moved.text, c).toContain(c);
+    expect((parseJsonc(moved.text) as { projects: Record<string, unknown> }).projects).toEqual({ [HOME]: { mcpServers: {} }, "/root/work": { history: [] }, "/root": { mcpServers: { zed: { command: "/root/zed" } } } });
+  });
+});
+
 describe("merge", () => {
   it("mcpServers JSON: the agent's own keys and the server the person has stand, wsp's are added, and a second merge over what it landed writes nothing", () => {
     const merged = MCP_SERVERS_JSON.merge(LIB, { keep: ["gsc", "notion", "mine"], drop: [], replace: [] }, CLAUDE_OWN, CLAUDE_TRAVELLED());
@@ -355,7 +396,6 @@ describe("merge", () => {
     expect(root.mcpServers["mine"]).toEqual({ command: "/usr/local/bin/mine", args: [] });
     expect(Object.keys(root.mcpServers)).toEqual(["mine", "gsc", "notion"]);
     expect(root.mcpServers["gsc"]).toEqual({ command: "bare", args: ["--stdio"] });
-    expect(merged.commentsDropped).toBe(false);
 
     const again = MCP_SERVERS_JSON.merge(LIB, { keep: ["gsc", "notion", "mine"], drop: [], replace: ["gsc", "notion"] }, merged.text, CLAUDE_TRAVELLED());
     expect(again.results.map(r => r.outcome)).toEqual(["same", "same", "theirs"]);
@@ -404,13 +444,33 @@ describe("merge", () => {
     expect(() => MCP_SERVERS_JSON.merge(LIB, { keep: [], drop: [], replace: [] }, "[]", CLAUDE_TRAVELLED())).toThrow("the file is not a JSON object");
   });
 
-  it("OpenCode's jsonc: the merge says the comments its rewrite does not keep", () => {
-    const own = '{\n  // my servers\n  "theme": "x",\n  "mcp": {}\n}\n';
-    const travelled = '{ "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"], "enabled": true } } }';
-    const merged = OPENCODE_JSON.merge(LIB, { keep: ["wsp"], drop: [], replace: [] }, own, travelled);
-    expect(merged.commentsDropped).toBe(true);
-    expect(JSON.parse(merged.text)).toEqual({ theme: "x", mcp: { wsp: { type: "local", command: ["wsp", "mcp"], enabled: true } } });
-    expect(OPENCODE_JSON.merge(LIB, { keep: ["nobody"], drop: [], replace: [] }, own, travelled).commentsDropped).toBe(false);
+  it("every JSON format merges into a jsonc file in place: each comment it did not take out stands, and a folder's servers land under the machine's own", () => {
+    for (const [format, key, entry] of JSON_FORMATS) {
+      const own = commented(key, entry);
+      const travelled = JSON.stringify({ [key]: { gsc: entry(`${HOME}/.local/bin/bare`), old: entry("x") }, projects: { [HOME]: { [key]: { zed: entry(`${HOME}/zed`) } } } });
+      const merged = format.merge(LIB, { keep: ["gsc"], drop: ["old"], replace: ["old"] }, own, travelled);
+      expect(merged.results.map(r => r.outcome), key).toEqual(["added", "dropped"]);
+      for (const c of COMMENTS) expect(merged.text, c).toContain(c);
+      expect(parseJsonc(merged.text)).toEqual({ ...(parseJsonc(own) as object), [key]: { mine: entry("/usr/local/bin/mine"), gsc: entry("bare") } });
+      if (format === OPENCODE_JSON) continue;
+      const home = format.merge(LIB, { keep: ["zed"], drop: [], replace: [], project: { from: HOME, to: "/root" } }, merged.text, travelled);
+      for (const c of COMMENTS) expect(home.text, c).toContain(c);
+      expect((parseJsonc(home.text) as { projects: Record<string, unknown> }).projects).toEqual({ "/root/work": { history: [] }, "/root": { [key]: { zed: entry("/root/zed") } } });
+    }
+  });
+
+  it("mcpServers JSON: many servers merged at once land in order after the person's own, on lines or on one line as the table is, comments kept", () => {
+    const names = Array.from({ length: 20 }, (_, i) => `s${i}`);
+    const travelled = JSON.stringify({ mcpServers: Object.fromEntries(names.map(n => [n, { command: "npx", args: [n] }])), projects: { [HOME]: { mcpServers: Object.fromEntries(names.map(n => [n, { command: "npx", args: [n] }])) } } });
+    const want = { mine: { command: "mine", args: [] }, ...Object.fromEntries(names.map(n => [n, { command: "npx", args: [n] }])) };
+    for (const own of ['{\n  // mine\n  "mcpServers": {\n    "mine": { "command": "mine", "args": [] } // his\n  }\n}\n', '{ /* mine */ "mcpServers": { "mine": { "command": "mine", "args": [] } } }']) {
+      const merged = MCP_SERVERS_JSON.merge(LIB, { keep: names, drop: [], replace: [] }, own, travelled);
+      expect(merged.results.every(r => r.outcome === "added")).toBe(true);
+      expect(Object.entries((parseJsonc(merged.text) as { mcpServers: object }).mcpServers)).toEqual(Object.entries(want));
+      for (const c of ["// mine", "// his", "/* mine */"]) if (own.includes(c)) expect(merged.text).toContain(c);
+      const home = MCP_SERVERS_JSON.merge(LIB, { keep: names, drop: [], replace: [], project: { from: HOME, to: "/root" } }, merged.text, travelled);
+      expect(Object.keys((parseJsonc(home.text) as { projects: Record<string, { mcpServers: object }> }).projects["/root"]!.mcpServers)).toEqual(names);
+    }
   });
 
   it("Codex's TOML: its trust tables, its hooks state and the person's own server stand line for line, and wsp's tables are appended with their sub-tables", () => {
