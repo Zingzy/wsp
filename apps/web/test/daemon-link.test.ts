@@ -62,7 +62,7 @@ describe("connectDaemonLink over the host's relay", () => {
     await until(() => events.some(e => e.type === "pty.data" && e.data.includes("link-mark-42")), 10_000);
   }, 20_000);
 
-  it("a refusal rejects as DaemonRequestError, with the typed code when the op sends one", async () => {
+  it("a refusal rejects as DaemonRequestError, with the typed code when the op sends one, and an op in the params never replaces the op asked for", async () => {
     harness = await startRelayHarness();
     link = connect(harness);
     await until(() => link!.status() === "live");
@@ -75,6 +75,7 @@ describe("connectDaemonLink over the host's relay", () => {
     const plain = await link.request("pty.write", { ptyId: "nope", data: "x" }).catch((e: unknown) => e);
     expect(plain).toBeInstanceOf(DaemonRequestError);
     expect((plain as DaemonRequestError).code).toBeUndefined();
+    await expect(link.request("ping", { op: "pty.write", ptyId: "nope", data: "x" })).resolves.toMatchObject({ ok: true });
   }, 20_000);
 
   it("a machine refusing this host's token says reauth-needed, and goes live once the machine takes it", async () => {

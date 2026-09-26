@@ -262,6 +262,45 @@ describe("connectDaemon", () => {
     await until(() => reach!.status() === "dead");
   });
 
+  it("stamps its own id and op over any the caller's params carry, so a frame cannot take another's reply", async () => {
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    const frames: Record<string, unknown>[] = [];
+    let release: () => void = () => {};
+    server.on("connection", ws => {
+      ws.on("message", raw => {
+        const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+        frames.push(frame);
+        const reply = (): void => ws.send(JSON.stringify({ id: frame["id"], ok: true, answered: frame["op"] }));
+        if (frame["op"] === "hold") release = reply;
+        else reply();
+      });
+    });
+    await new Promise<void>(r => server.once("listening", () => r()));
+    try {
+      const port = (server.address() as { port: number }).port;
+      reach = connectDaemon({ previewUrl: `ws://127.0.0.1:${port}`, token: TOKEN, onEvent: () => {}, heartbeatMs: 60_000 });
+      await reach.ready;
+      const held = reach.request("hold");
+      await until(() => frames.some(f => f["op"] === "hold"));
+      const heldId = frames.find(f => f["op"] === "hold")!["id"];
+
+      for (const params of [{ id: heldId }, { op: "machine.kill" }]) {
+        const count = frames.length;
+        const asking = reach.request("ping", params);
+        await until(() => frames.length > count);
+        expect(frames[count]!["id"]).not.toBe(heldId);
+        expect(frames[count]!["op"]).toBe("ping");
+        expect((await asking)["answered"]).toBe("ping");
+      }
+
+      release();
+      expect((await held)["answered"]).toBe("hold");
+    } finally {
+      reach?.close();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+
   it("refuses to be built with neither a route to dial nor a socket to take", () => {
     expect(() => connectDaemon({ onEvent: () => {} })).toThrow(/previewUrl to dial or an open socket/);
     expect(() => connectDaemon({ previewUrl: "ws://127.0.0.1:1", onEvent: () => {} })).toThrow(/needs the daemon's token/);

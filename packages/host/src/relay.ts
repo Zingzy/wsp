@@ -236,7 +236,7 @@ function daemonSocketOver(channel: DaemonChannel): DaemonSocket {
   void channel.closed.then(() => (open = false));
   return {
     op: async (op, extra = {}) => {
-      const reply = await channel.send({ op, ...extra });
+      const reply = await channel.send({ ...extra, op });
       if (reply.ok !== true) throw new Error(String((reply as { error?: unknown }).error ?? `${op} was refused`));
       return reply;
     },

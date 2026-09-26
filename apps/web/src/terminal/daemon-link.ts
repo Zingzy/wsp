@@ -136,7 +136,7 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
   function request(op: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     const on = proven;
     if (on === null) return Promise.reject(new Error("daemon unreachable"));
-    return sendOn(on, { op, ...params });
+    return sendOn(on, { ...params, op });
   }
 
   function stopHeartbeat(): void {

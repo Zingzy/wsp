@@ -23,7 +23,7 @@ export function linkOver(ws: WebSocket): MachineLink {
       new Promise((done, fail) => {
         const id = next++;
         pending.set(id, { done, fail });
-        ws.send(JSON.stringify({ id, op, ...params }));
+        ws.send(JSON.stringify({ ...params, id, op }));
       }),
     forward: async placePort => ({ localPort: placePort }),
   };

@@ -382,7 +382,7 @@ export function agentsReads<Caller>(o: AgentsReadOptions<Caller>): {
         };
         running.set(signInId, run);
         const link: PtyLink = {
-          op: async (op, extra) => (await channel.send({ op, ...extra } as DaemonFrame)) as Record<string, unknown>,
+          op: async (op, extra) => (await channel.send({ ...extra, op } as DaemonFrame)) as Record<string, unknown>,
           onEvent: fn => {
             readers.add(fn);
             return () => readers.delete(fn);

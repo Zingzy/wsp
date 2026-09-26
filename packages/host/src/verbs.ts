@@ -447,7 +447,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
     const id = next++;
     const frame = await new Promise<Frame>((settle, fail) => {
       pending.set(id, { settle, fail });
-      const text = JSON.stringify({ id, op, ...params });
+      const text = JSON.stringify({ ...params, id, op });
       ws.send(seal === undefined ? text : seal.seal(text));
     });
     if (frame.ok !== true) throw Object.assign(new Error(typeof frame["error"] === "string" ? frame["error"] : `${op} failed`), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {});
