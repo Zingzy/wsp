@@ -19,7 +19,7 @@ import { NO_FINDER_CHOOSER, PASTE_THIS, homeOf, keptLog, labLines, launchDiesLin
 
 describe("the fixtures a lab serves", () => {
   it("has one per kind of person the testers play", () => {
-    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "mac-and-boxes", "orchestrator", "image-built"]);
+    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "mac-and-boxes", "orchestrator", "thread-states", "image-built"]);
   });
 
   it("gives the two personas who have this computer and nothing else the first run, with no project added", () => {
@@ -125,6 +125,18 @@ describe("the fixtures a lab serves", () => {
         for (const row of doc.sessions) expect([name, row.workspaceId]).toEqual([name, workspaceId]);
       }
     }
+  });
+
+  it("serves one child of the root in each state the thread status slot draws, the running ones on a fork that keeps them running", () => {
+    const state = fixtureState("thread-states");
+    const rows = Object.values(state.sessions).flatMap(d => d.sessions).filter(r => r.parentThreadId === threadId("migrate"));
+    const read = rows.map(r => [r.status, r.asking !== undefined, state.workspaces[r.workspaceId].kind, r.run !== undefined]);
+    expect(read).toEqual([
+      ["completed", false, "cloud", false],
+      ["running", false, "cloud", true],
+      ["running", true, "cloud", true],
+      ["failed", false, "cloud", false],
+    ]);
   });
 
   it("hangs an orchestrator's spawned threads off the one root, one on each machine the root's reply names", () => {
@@ -251,6 +263,7 @@ describe("the fixtures a lab serves", () => {
       "no-sign-in": "no cloud",
       "mac-and-boxes": "no cloud",
       orchestrator: "box",
+      "thread-states": "box",
       "image-built": "no cloud",
     });
     // Every fixture with a cloud machine names the cloud it is standing in for, and no fixture without one does.
@@ -378,6 +391,7 @@ describe("the provider a fixture's host runs under", () => {
       "no-sign-in": "none",
       "mac-and-boxes": "fake",
       orchestrator: "fake",
+      "thread-states": "fake",
       "image-built": "fake",
     });
   });

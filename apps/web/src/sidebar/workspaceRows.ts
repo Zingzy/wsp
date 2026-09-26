@@ -201,27 +201,6 @@ export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness">, 
   return [agentName(thread.harness), ...words].join(", ");
 }
 
-/** The word a thread row's state slot carries, off the adapter's own reading: a thread waiting on the person, one
- * that is working and one that did not settle each say so, and the resting states say nothing, since a row nobody
- * is waiting on is what every other row is. No dot for any state: a state is a word here, and the row beside it
- * says the rest. */
-export function threadStateWord(thread: Pick<SidebarThreadSnapshot, "status" | "indicator" | "asking">): string | null {
-  if (!thread.indicator) return null;
-  if (thread.asking !== null) return thread.indicator.label;
-  switch (thread.status) {
-    case "running":
-    case "failed":
-      return thread.indicator.label;
-    case "completed":
-    case "interrupted":
-      return null;
-    default: {
-      const _exhaustive: never = thread.status;
-      return null;
-    }
-  }
-}
-
 /** The computer a project lives on, as the switcher and a project row name it: nothing for a project on the
  * computer this window runs on, which every row would otherwise carry, and the name this host has for the computer
  * otherwise, through the protocol's one rule for the question. */
