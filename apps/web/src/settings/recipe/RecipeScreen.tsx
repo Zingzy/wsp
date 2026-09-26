@@ -124,8 +124,8 @@ export function RecipeScreen({ screen, draft, onDraft, image }: { screen: InitSc
       {tally !== undefined && screen.tally !== undefined ? (
         <p data-k="tally" className={cn(META, "mt-3 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center")}>
           <span>
-            {initTallyCount(tally.count, screen.tally)} ·{" "}
-            <span data-k="tally-size" data-tone={imageTone} className={TONE_TEXT[imageTone]}>
+            {initTallyCount(tally.count, screen.tally)}{" "}
+            <span data-k="tally-size" data-tone={imageTone} className={cn("ms-2", TONE_TEXT[imageTone])}>
               {fmtBytesOfTotal(image.used, image.total)}
             </span>
           </span>

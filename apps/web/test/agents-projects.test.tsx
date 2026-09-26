@@ -191,7 +191,7 @@ describe("a computer's page over its projects", () => {
     const level = document.querySelector<HTMLElement>("[data-agents-under-row]")!;
     expect(level.querySelector("[data-k=under-list] h4")?.textContent).toBe(W.parameters);
     expect([...level.querySelectorAll("[data-under-item]")].map(i => [...i.querySelectorAll("span")].map(s => s.textContent))).toEqual([
-      ["sqlstring · required", "sql", "string · required", "The query to run"],
+      ["sqlstring, required", "sql", "string, required", "The query to run"],
       ["limitinteger", "limit", "integer"],
       ["raw", "raw"],
     ]);

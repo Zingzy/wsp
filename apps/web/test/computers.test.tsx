@@ -278,17 +278,17 @@ describe("a computer's own page", () => {
     await mountComputers(computersApi(dialling()).api, { kind: "computer", id: "p_3" });
     // The facts are lines with the value at the right and no sentence under them; the whole is on hover.
     expect(lineLabels()).toEqual([WHERE_WORDS.system, WHERE_WORDS.size, WHERE_WORDS.diskFree, WHERE_WORDS.joined, "spoo-fix"]);
-    expect(lineValue("system")).toBe("Ubuntu 24.04 · last seen 2 h ago");
+    expect(lineValue("system")).toBe("Ubuntu 24.04, last seen 2 h ago");
     expect(lineOf("system")?.getAttribute("title")).toBe(WHERE_WORDS.systemHover);
     expect(lineValue("size")).toBe(fmtSize(vps.shape!, "cores"));
     expect(lineValue("disk-free")).toBe(fmtBytes(vps.diskFreeBytes!));
     expect(lineValue("joined")).toBe("1 h ago");
     expect(lineOf("system")?.querySelector("[data-settings-description]")).toBeNull();
     // The connection card: the address and when it last answered with how long the frame took, beside Try.
-    expect(wordOf("address")).toBe("root@65.21.4.12 · ssh");
-    expect(wordOf("answered")).toBe(`${absentRoad({ name: "vps", awayMs: 2 * 3_600_000 + 60_000 }).answered} · 14 ms`);
+    expect(wordOf("address")).toBe("root@65.21.4.12 over ssh");
+    expect(wordOf("answered")).toBe(`${absentRoad({ name: "vps", awayMs: 2 * 3_600_000 + 60_000 }).answered}, 14 ms`);
     expect(descriptionOf("answered")).toBe(WHERE_WORDS.answeredDescription);
-    expect(document.querySelector("[data-settings-page] [data-k='workspace-line'] [data-settings-word]")?.textContent).toBe("Running · 2 threads");
+    expect(document.querySelector("[data-settings-page] [data-k='workspace-line'] [data-settings-word]")?.textContent).toBe("Running 2 threads");
     // The rows and the lines stand at their own two heights.
     expect(rowOf("address")?.className).toContain("h-16");
     expect(lineOf("system")?.className).toContain("h-11");
@@ -298,12 +298,12 @@ describe("a computer's own page", () => {
     const spoo: PlaceView = { ...laptop, id: "p_4", name: "spoo", present: true, road: { ssh: "root@spoo", from: "127.0.0.1", back: { boxPort: 4640 } } };
     useStore.setState({ places: [here, spoo] });
     await mountComputers(computersApi(dialling()).api, { kind: "computer", id: "p_4" });
-    expect(wordOf("address")).toBe("root@spoo · ssh");
+    expect(wordOf("address")).toBe("root@spoo over ssh");
     expect(descriptionOf("address")).toBe(WHERE_WORDS.addressBackDescription("dials back over ssh (127.0.0.1:4640 on spoo)"));
     expect(descriptionOf("address")).toBe("It dials back over ssh (127.0.0.1:4640 on spoo).");
     const page = document.querySelector("[data-settings-page]")?.textContent ?? "";
     expect(page).not.toContain("dials in");
-    expect(page).not.toContain("127.0.0.1 ·");
+    expect(page).not.toContain("127.0.0.1 dials in");
   });
 
   it("this Mac's page has no Connection card and no acts, and reads its agents, skills and servers off this computer", async () => {
@@ -611,11 +611,11 @@ describe("the cloud's page", () => {
     await mountComputers(api, { kind: "computer", id: "solari" });
     // The rate is what is running there, so the count of workspaces it is spread over is not said again: the
     // clause wrapped the value onto a second line at a phone's width to add nothing.
-    expect(lineValue("spend")).toBe("$4.12 this month · $0.16/hr");
+    expect(lineValue("spend")).toBe("$4.12 this month $0.16/hr");
     expect([...document.querySelectorAll("[data-settings-page] [data-settings-card]")].map(card => card.getAttribute("data-settings-card"))).toEqual(["cloud", "image", "agents", "copies", "acts"]);
     expect(document.querySelector("[data-k='image-state']")?.getAttribute("data-state")).toBe("none");
     expect(document.querySelector("[data-k='edit-recipe']")?.textContent).toBe(IMAGE_WORDS.holdsEdit);
-    expect([...document.querySelectorAll("[data-k='image-copy']")].map(row => [row.getAttribute("data-place"), row.querySelector("[data-settings-word]")?.textContent])).toEqual([["hetzner", expect.stringMatching(new RegExp(`^v1 · ${COPY_CURRENT} · 4.2 GB · `))]]);
+    expect([...document.querySelectorAll("[data-k='image-copy']")].map(row => [row.getAttribute("data-place"), row.querySelector("[data-settings-word]")?.textContent])).toEqual([["hetzner", expect.stringMatching(new RegExp(`^v1 \\(${COPY_CURRENT}\\), 4\\.2 GB, `))]]);
     expect(descriptionOf("remove")).toBe(WHERE_WORDS.removeCloudDescription);
     fireEvent.click(document.querySelector("[data-k='edit-recipe']")!);
     await settle();

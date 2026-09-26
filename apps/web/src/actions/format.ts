@@ -121,8 +121,8 @@ export const BRING_BACK_HINT = "Pushes the agent's branch and opens a pull reque
  * short form is a word only people who live in one git host read. The note that says why there is none is the
  * host's own sentence and longer than any row: it rides the row's hover text, where the whole of this line does. */
 export function broughtBackRowLine(back: Pick<BringBackResult, "branch" | "pr" | "note">): string {
-  if (back.pr !== undefined) return `${back.branch} · pull request #${back.pr.number} ${back.pr.state}`;
-  return back.note === undefined ? `${back.branch} · pushed` : `${back.branch} · pushed, no pull request`;
+  if (back.pr !== undefined) return `${back.branch}: pull request #${back.pr.number} ${back.pr.state}`;
+  return back.note === undefined ? `${back.branch} pushed` : `${back.branch} pushed, no pull request`;
 }
 
 export const NO_WORKSPACE_FORK = "Running a copy of a task is not in the runtime yet; make a second task of the same project from the plus on its row";

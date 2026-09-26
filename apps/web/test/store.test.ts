@@ -339,8 +339,8 @@ describe("store creations", () => {
     emit(stage({ stage: "ready", message: "ready", elapsedMs: 210_000 }));
 
     expect(useStore.getState().creations[0]!.lines.map(l => [l.stage, l.message, l.notice])).toEqual([
-      ["image", "building your image on hetzner · installing agents", undefined],
-      ["image", "building your image on hetzner · taking the snapshot", "about 4.2 GB"],
+      ["image", "building your image on hetzner: installing agents", undefined],
+      ["image", "building your image on hetzner: taking the snapshot", "about 4.2 GB"],
       ["ready", "ready", undefined],
     ]);
   });

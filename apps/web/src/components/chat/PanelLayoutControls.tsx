@@ -78,7 +78,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         </TooltipTrigger>
         <TooltipPopup side="bottom">
           {`Toggle right panel${rightPanelShortcutLabel ? ` (${rightPanelShortcutLabel})` : ""}${
-            liveAgentCount > 0 ? ` · ${liveAgentCount} ${liveAgentCount === 1 ? "agent" : "agents"} working` : ""
+            liveAgentCount > 0 ? `, ${liveAgentCount} ${liveAgentCount === 1 ? "agent" : "agents"} working` : ""
           }`}
         </TooltipPopup>
       </Tooltip>

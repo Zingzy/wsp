@@ -162,7 +162,7 @@ describe.skipIf(renderSkipped !== undefined)("the export dialog laid out in Chro
     expect(await textColor("[role=status]")).toBe(quiet);
     expect(await page!.locator("[data-k=outcome]").allTextContents()).toEqual(["moved", "transcripts landed, not yet listed, 1 rollout skipped", "nothing to bring"]);
     expect(await whole("[data-k=outcome]")).toEqual([true, true, true]);
-    expect(await page!.locator("[data-k=files]").textContent()).toBe("1202 files · 38 MB");
+    expect(await page!.locator("[data-k=files]").textContent()).toBe("1202 files 38 MB");
     expect(await page!.locator("[data-k=caches]").textContent()).toBe("4 folders");
     await dialog.screenshot({ path: join(SHOTS, `export-done-${theme}.png`) });
     expect(existsSync(join(SHOTS, `export-done-${theme}.png`))).toBe(true);

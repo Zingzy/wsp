@@ -336,7 +336,7 @@ describe("wsp verbs over the host", () => {
     // id the provider minted for the machine is on no row.
     const cells = (row: string): string[] => row.split(/ {2,}/);
     expect(rows.map(cells)).toEqual([
-      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\d+ vCPU · \d+ GB$/), expect.stringMatching(/^\S+$/)],
+      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\d+ vCPU, \d+ GB$/), expect.stringMatching(/^\S+$/)],
       [
         "mac",
         expect.stringMatching(/^ws_/),
@@ -344,7 +344,7 @@ describe("wsp verbs over the host", () => {
         expect.stringMatching(/^this (?:Mac|computer)$/),
         madeOfWord("clonefile"),
         expect.stringMatching(/^shares this (?:Mac|computer)'s ports, PORT \d+$/),
-        expect.stringMatching(/^\d+ cores · \d+ GB$/),
+        expect.stringMatching(/^\d+ cores, \d+ GB$/),
         expect.stringMatching(/^\S+$/),
       ],
     ]);
@@ -693,7 +693,7 @@ describe("wsp verbs over the host", () => {
     expect(lines[0]).toContain("default v1");
     expect(lines[0]).toContain(IMAGE_NO_VAULT);
     expect(lines[0]).not.toContain("sign-in held");
-    expect(lines[1]).toMatch(/^default · v1/);
+    expect(lines[1]).toMatch(/^default  v1/);
     const [view] = json((await run("image", "--json")).io) as [{ image: { version: number; vault?: unknown }; copies: { place: string }[] }];
     expect(view.image.version).toBe(1);
     expect(view.image.vault).toBeUndefined();
@@ -712,10 +712,10 @@ describe("wsp verbs over the host", () => {
     expect(listed.code).toBe(0);
     const lines = listed.io.lines.join("\n").split("\n");
     expect(lines.slice(2)).toEqual([
-      "  Claude Code · 2.1.3 · installs latest by its own installer",
-      "  GitHub CLI · v2.86.0 · checksum bbbbbbbbbbbb",
-      "  Cloudflare Wrangler · 4.1.0",
-      "  zingzy/tap/diskbloom · 0.1.0 · installs latest with Homebrew",
+      "  Claude Code  2.1.3  installs latest by its own installer",
+      "  GitHub CLI  v2.86.0  checksum bbbbbbbbbbbb",
+      "  Cloudflare Wrangler  4.1.0",
+      "  zingzy/tap/diskbloom  0.1.0  installs latest with Homebrew",
     ]);
     const [view] = json((await run("image", "--json")).io) as [{ image: { pins: unknown } }];
     expect(view.image.pins).toEqual(pins);
@@ -1562,12 +1562,12 @@ describe("wsp verbs over the host", () => {
     await macProject("mac");
     const here = captured();
     expect(await cli(["run", "mac", "look around", "--state", statePath], here, undefined, env)).toBe(0);
-    expect(here.streamed).toContain(`completed · Worked for 1m 12s · $0.19 ${LIST_PRICE_WORD}`);
+    expect(here.streamed).toContain(`completed  Worked for 1m 12s  $0.19 ${LIST_PRICE_WORD}`);
 
     await run("new", cloud.name, "alpha");
     const forked = captured();
     expect(await cli(["run", "alpha", "look around", "--state", statePath], forked, undefined, env)).toBe(0);
-    expect(forked.streamed).toContain("completed · Worked for 1m 12s · $0.19\n");
+    expect(forked.streamed).toContain("completed  Worked for 1m 12s  $0.19\n");
     expect(forked.streamed).not.toContain(LIST_PRICE_WORD);
   });
 
@@ -1651,7 +1651,7 @@ describe("wsp verbs over the host", () => {
       "~packages/host/src/exec.ts:12: shellQuote(argv)~",
       "~Wombat~",
       "~failed: no tool by that name~",
-      "~completed · Worked for 1m 12s · $0.22~",
+      "~completed  Worked for 1m 12s  $0.22~",
       "",
     ]);
     expect(io.lines).toEqual([expect.stringMatching(/^thread /), "had a look"]);
@@ -1731,13 +1731,13 @@ describe("wsp verbs over the host", () => {
     const { code, io } = await run("run", "alpha", "say hi");
     expect(code).toBe(EXIT_CODES.auth);
     expect(io.lines).toEqual([expect.stringMatching(/^thread /)]);
-    expect(io.streamed.split("\n").filter(l => l !== "")).toEqual(["failed · Worked for 88ms · $0.00"]);
+    expect(io.streamed.split("\n").filter(l => l !== "")).toEqual(["failed  Worked for 88ms  $0.00"]);
     expect(io.errors).toEqual([`wsp run: ${refusal}`]);
 
     const [row] = await rt.sessions.list();
     const read = await run("thread", "read", row!.threadId!);
     expect(read.code).toBe(0);
-    expect(read.io.lines.join("\n")).toContain(`failed · Worked for 88ms · $0.00: ${refusal}`);
+    expect(read.io.lines.join("\n")).toContain(`failed  Worked for 88ms  $0.00: ${refusal}`);
     expect(read.io.lines.join("\n").split("Not logged in")).toHaveLength(2);
   });
 
@@ -1892,7 +1892,7 @@ describe("wsp verbs over the host", () => {
         "status.list": { statuses: [{ id: "ws_1", idleAt: Date.now() + 20 * 60_000 + 30_000 }] },
       });
       // Nothing is napped under a turn that is still going, so the line says what the machine costs until then.
-      expect(await napAfterDeadLaunch(client, woken, undefined)).toBe("alpha stays awake · naps in 20m");
+      expect(await napAfterDeadLaunch(client, woken, undefined)).toBe("alpha stays awake, naps in 20m");
     });
 
     it("says the machine is up with no countdown where the host answers no nap time for it", async () => {
@@ -3397,7 +3397,7 @@ describe("wsp verbs over the host", () => {
     const [alpha] = await rt.workspaces.list();
     const taken = await rt.workspaces.snapshot(alpha!.id);
     const listed = await run("image");
-    expect(listed.io.lines.join("\n").split("\n")).toContain(`${taken.snapshotId} · project alpha · ${alpha!.project.name} · 7.5 GB · ${taken.createdAt}`);
+    expect(listed.io.lines.join("\n").split("\n")).toContain(`${taken.snapshotId}  project alpha  ${alpha!.project.name}  7.5 GB  ${taken.createdAt}`);
 
     expect((await run("new", cloud.name, "task-a", "--from", taken.snapshotId)).code).toBe(0);
     const standing = await run("image", "remove", taken.snapshotId, "--yes");

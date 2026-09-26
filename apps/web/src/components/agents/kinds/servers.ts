@@ -211,7 +211,7 @@ const NO_NAV = (): void => {};
 /** A tool as a row of its server's tools, and its own level: the description whole, then each parameter by name with
  * its type and whether a call needs it. */
 function toolRow(tool: McpTool): UnderRow {
-  const facts = (p: McpToolParam): string | undefined => [p.type, p.required ? W.required : undefined].filter(w => w !== undefined).join(" · ") || undefined;
+  const facts = (p: McpToolParam): string | undefined => [p.type, p.required ? W.required : undefined].filter(w => w !== undefined).join(", ") || undefined;
   return {
     key: tool.name,
     title: tool.name,

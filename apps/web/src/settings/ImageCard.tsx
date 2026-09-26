@@ -172,7 +172,7 @@ export function ImageCard({ place, name, state, view, ctx }: { place: PlaceView;
   const stateRow: Omit<SettingsRowData, "kind"> = {
     id: "image-state",
     title: row.title,
-    description: row.description ?? row.chips?.map(chip => chip.text).join(" · ") ?? "",
+    description: row.description ?? row.chips?.map(chip => chip.text) ?? "",
     mono: row.mono === true,
     ...(row.chips === undefined ? {} : { chips: row.chips }),
     ...(control === undefined ? {} : { control }),

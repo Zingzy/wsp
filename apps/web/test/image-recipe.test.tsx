@@ -191,7 +191,7 @@ describe("the recipe in the Image card", () => {
     await open(fake.api, "solari");
     const holds = card().querySelector("[data-k='image-holds']")!;
     expect(holds.querySelector("[data-settings-title]")?.textContent).toBe(IMAGE_WORDS.holds);
-    expect(holds.querySelector("[data-settings-description]")?.textContent).toBe("Claude Code · GitHub CLI, protoc");
+    expect(holds.querySelector("[data-settings-description]")?.textContent).toBe("Claude Code, GitHub CLI, protoc");
     await press("edit-recipe");
     expect(recipeStep()).toBe("choice");
     await press("recipe-primary");

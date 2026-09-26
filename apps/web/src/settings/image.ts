@@ -74,14 +74,13 @@ export function recordChips(image: SealedImage): ChipItem[] {
   return [{ text: `v${image.version}`, icon: TagIcon }, ...size, { text: plural(sealedLoginsHeld(image), "sign-in"), icon: KeyRoundIcon }];
 }
 
-/** What the recipe puts on the image, as names: the agents ticked, then the tools ticked and the rows added by hand,
- * each list comma-joined and the two apart. A row outside the catalog reads by its own id. */
+/** What the recipe puts on the image, as one comma list of names: the agents ticked, then the tools ticked and the
+ * rows added by hand. A row outside the catalog reads by its own id. */
 export function recipeNames(recipe: Recipe): string {
   const named = (kind: "agent" | "tool"): string[] => recipe.rows.filter(row => row.on && row.kind === kind).map(row => catalogEntry(row.id)?.name ?? row.id);
   return [named("agent"), [...named("tool"), ...customRows(recipe).map(row => row.name)]]
-    .filter(names => names.length > 0)
-    .map(names => names.join(", "))
-    .join(" · ");
+    .flat()
+    .join(", ");
 }
 
 /** A stamp as the section reads one: the clock alone on the day it happened, the day and the clock before that, so

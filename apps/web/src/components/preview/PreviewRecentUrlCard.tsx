@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import type { BrowserHistoryEntry } from "../../browser/recents";
 
 import { PreviewFaviconIcon } from "./PreviewFaviconIcon";
+import { Spaced } from "../ui/spaced";
 
 interface Props {
   entry: BrowserHistoryEntry;
@@ -30,8 +31,7 @@ export function PreviewRecentUrlCard({ entry, visitedLabel, onOpen, onRemove }: 
             {entry.title ?? label}
           </span>
           <span className="truncate text-xs text-muted-foreground">
-            {entry.title ? `${label} · ` : ""}
-            {visitedLabel}
+            <Spaced parts={entry.title ? [label, visitedLabel] : [visitedLabel]} />
           </span>
         </div>
       </button>

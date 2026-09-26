@@ -45,9 +45,7 @@ export const UNKNOWN_SIZE = "size unknown";
 /** How often the agents ran a tool here, the one number a usage row shows. */
 export const fmtCalls = (n: number): string => `${n.toLocaleString("en-US")} ${n === 1 ? "call" : "calls"}`;
 
-/** The line under a screen's card: the step's own count, then the whole image so far against the machine's disk. */
-export const initTallyLine = (count: number, noun: string, used: number, total?: number): string => `${initTallyCount(count, noun)} · ${fmtBytesOfTotal(used, total)}`;
-/** The tally's first half, the count of rows on the image, so a view can colour the estimate after it on its own. The
+/** The tally under a screen's card, first half: the count of rows on the image, so a view can colour the estimate after it on its own. The
  * noun is the screen's plural ("agents", "tools"), or a word that does not count ("more") kept as it is. */
 export const initTallyCount = (count: number, noun: string): string => `${noun.endsWith("s") ? plural(count, noun.replace(/s$/, "")) : `${count} ${noun}`} on the image`;
 /** Two byte counts against each other, each under the byte rule ("4.9 GB of 20 GB"): the tally's running estimate
@@ -131,11 +129,11 @@ export function fmtMemGb(memMb: number): string {
 /** What one of a machine's cpus is called: a provider's are virtual, this computer's are the cores it has. */
 export type CpuWord = "vCPU" | "cores";
 
-/** A size as the sidebar row, the Machine tab and the new-workspace form show it: "2 vCPU · 4 GB", or "10 cores · 16 GB"
+/** A size as the sidebar row, the Machine tab and the new-workspace form show it: "2 vCPU, 4 GB", or "10 cores, 16 GB"
  * in the word the machine's kind has for a cpu. A size offer is always a provider's, so the provider's word is the default. */
 /** The size joins its words with no-break spaces, so a sentence carrying it never breaks between a number and its unit. */
 export function fmtSize(size: WorkspaceSize, cpu: CpuWord = "vCPU"): string {
-  return `${size.cpu}\u00a0${cpu}\u00a0·\u00a0${fmtMemGb(size.memMb).replace(" ", "\u00a0")}`;
+  return `${size.cpu}\u00a0${cpu},\u00a0${fmtMemGb(size.memMb).replace(" ", "\u00a0")}`;
 }
 
 /** What the create says where the machine it got is not the size it was forked at, the one asked for or else the
@@ -150,7 +148,7 @@ export function sizeGotLine(asked: WorkspaceSize, got: WorkspaceSize, named: boo
  * whole line is joined with no-break spaces, fmtSize's own rule carried on: it is one phrase about one computer. */
 export function placeFactsLine(shape: WorkspaceSize, diskFreeBytes?: number): string {
   const parts = [fmtSize(shape, "cores"), ...(diskFreeBytes === undefined ? [] : [`${fmtBytes(diskFreeBytes)} free`])];
-  return parts.join(" · ").replace(/ /g, "\u00a0");
+  return parts.join(", ").replace(/ /g, "\u00a0");
 }
 
 /** The room a box has left, as the doctor reads it back: what the computer has, what the workspaces on it hold
@@ -442,7 +440,7 @@ export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: n
  * `spendWord` is what the figure is, where the surface knows: a turn on a computer of the person's own ran on
  * their own sign-in and its figure is LIST_PRICE_WORD, which is the word the app's footer already gives it. */
 export function turnSettledLine(result: TurnResult, spendWord?: string): string {
-  return [result.status, ...turnSettledParts(result, undefined, spendWord)].join(" · ");
+  return [result.status, ...turnSettledParts(result, undefined, spendWord)].join("  ");
 }
 
 /** The row a turn's end leaves in a read transcript: the footer above, and why it did not complete where it did
@@ -877,9 +875,8 @@ export function subagentTaskLine(input: string): string | undefined {
 export const subagentAskerLine = (task: string): string => `${task} asks`;
 
 /** Who is asking, above a prompt drawn in a thread that did not raise it: the thread whose turn is stopped on the
- * question, named, since the thread reading this one is only held up until somebody answers it. Two parts under the
- * row grammar's middle dot, as every other line of facts on a row is joined. */
-export const waitingAskerLine = (title: string): string => `${title} asks · this thread waits on the answer`;
+ * question, named, since the thread reading this one is only held up until somebody answers it. */
+export const waitingAskerLine = (title: string): string => `${title} asks; this thread waits on the answer`;
 
 /** A count with its noun, the noun pluralised by an s: the one rule every line that counts rows, sessions, calls,
  * threads or a plan's files reads, so none of them says "1 sessions". A noun that does not take an s is spelled by
@@ -935,7 +932,7 @@ export function sealedLoginsHeld(image: Pick<SealedImage, "logins">): number {
 export function sealedImageLine(image: SealedImage): string {
   const held = image.vault === undefined ? IMAGE_NO_VAULT : `${plural(sealedLoginsHeld(image), "sign-in")} held, ${plural(image.vault.paths, "path")}`;
   const size = image.usedBytes === undefined ? [] : [fmtBytes(image.usedBytes)];
-  return [`${image.name} v${image.version}`, image.hash, held, ...size, `sealed on ${image.sealedFrom}`].join(" · ");
+  return [`${image.name} v${image.version}`, image.hash, held, ...size, `sealed on ${image.sealedFrom}`].join("  ");
 }
 
 /** A sentence opening read mid-line: its first letter lowered, the rest as written. */
@@ -943,7 +940,7 @@ export const lowerFirst = (words: string): string => `${words.charAt(0).toLowerC
 
 /** What a place's row says while a copy of the image is built there: the stage in the seal's own words, so the row
  * and the init sheet name one stage one way. */
-export const copyBuildingLine = (stage: Exclude<GoldenStage, "failed">): string => `copying your image · ${lowerFirst(GOLDEN_STAGE_WORDS[stage])}`;
+export const copyBuildingLine = (stage: Exclude<GoldenStage, "failed">): string => `copying your image: ${lowerFirst(GOLDEN_STAGE_WORDS[stage])}`;
 
 /** What the row says after a build there stopped: the seal's own headline, and the reason the way the sheet reads it.
  * It stands until the next build there starts: wsp image build, the next version cut, or the computer connecting
@@ -951,7 +948,7 @@ export const copyBuildingLine = (stage: Exclude<GoldenStage, "failed">): string 
 export const copyStoppedLine = (reason?: string): string => {
   const head = lowerFirst(CLOUD_SETUP_WORDS.build.failed);
   const said = reason === undefined ? "" : initStoppedLine(reason);
-  return said === "" ? head : `${head} · ${said}`;
+  return said === "" ? head : `${head}: ${said}`;
 };
 
 /** What one golden.stage frame says of the copy at its place: the stage while a build runs, the reason once one
@@ -981,21 +978,21 @@ export function copyStanding(image: Pick<SealedImage, "hash" | "vault">, copy: P
 export function sealedCopyLine(image: SealedImage, copy: SealedImageCopy): string {
   const size = copy.sizeBytes === undefined ? [] : [fmtBytes(copy.sizeBytes)];
   const standing = copyStanding(image, copy);
-  return [copy.place, `v${copy.version}`, ...size, ...(standing === undefined ? [] : [standing])].join(" · ");
+  return [copy.place, `v${copy.version}`, ...size, ...(standing === undefined ? [] : [standing])].join("  ");
 }
 
 /** What a build at a place came to, as the line a person reads after it: the copy that place now holds, and, when
  * the place already stood on the record, that nothing was built. */
 export function sealedBuiltLine(image: SealedImage, built: { copy: SealedImageCopy; built: boolean }): string {
   const line = sealedCopyLine(image, built.copy);
-  return built.built ? line : `${line} · already built from this image; nothing was built`;
+  return built.built ? line : `${line}  already built from this image; nothing was built`;
 }
 
 /** One project image under the image, as a line: the id a remove or a --from takes, the workspace it was taken off,
  * the projects on that disk, its size where the provider lists one, and when. */
 export function sealedProjectLine(project: SealedProjectImage): string {
   const size = project.sizeBytes === undefined ? [] : [fmtBytes(project.sizeBytes)];
-  return [project.snapshotId, `project ${project.workspaceName}`, project.projects.map(p => p.name).join(", "), ...size, project.createdAt].join(" · ");
+  return [project.snapshotId, `project ${project.workspaceName}`, project.projects.map(p => p.name).join(", "), ...size, project.createdAt].join("  ");
 }
 
 /** Why a word names no project image here: a golden version's snapshot, a project's name and a typo alike, since a
@@ -1025,7 +1022,7 @@ export const projectImageRefusedLine = (id: string, answer: ProviderAnswer): str
 
 /** What an export wrote, as the line a person reads after it. */
 export function sealedExportLine(exported: SealedImageExport): string {
-  return `${exported.path} · ${fmtBytes(exported.bytes)} · opens with the passphrase you typed and nothing else`;
+  return `${exported.path}  ${fmtBytes(exported.bytes)}  opens with the passphrase you typed and nothing else`;
 }
 
 /** One name inside a comma-joined list of names: quoted when the name carries that comma itself, so a free-text
@@ -1041,7 +1038,7 @@ export function nameList(names: readonly string[]): string {
 
 /** What the copy answer reads as on the row of a tool signed in as one account at a time: the answer's own words and
  * the login a copy would carry, so the row says whose sign-in lands on the machine before anyone answers it. */
-export const copyNamesLogin = (copy: string, login: string): string => `${copy} · ${login}`;
+export const copyNamesLogin = (copy: string, login: string): string => `${copy} (${login})`;
 
 /** That row's own detail: the login the tool is in use as here, and the accounts a copy leaves where they are,
  * since the machine is signed in as one of them and a file naming the rest would hold no token for them. */
@@ -1092,9 +1089,8 @@ export function cutLine(text: string, room: number): string {
   return `${wordsWithin(text, head) ?? text.slice(0, head).replace(SEPARATOR_TAIL, "")}${ELLIPSIS}`;
 }
 
-/** What a cut leaves dangling at its edge: the space it broke on, the punctuation that hung off the word before,
- * and the middle dot a row's line parts its facts with. */
-const SEPARATOR_TAIL = /[\s,;:·]+$/;
+/** What a cut leaves dangling at its edge: the space it broke on and the punctuation that hung off the word before. */
+const SEPARATOR_TAIL = /[\s,;:]+$/;
 
 /** The whole words of a line that fit in the room, the separator they ended on taken off; nothing when the line's
  * first word alone overruns it. A word that ends exactly at the room's edge is kept whole. */
@@ -1362,7 +1358,7 @@ export const workspaceAsleepAgainLine = (name: string): string => `${name} is as
  * line says what that costs by naming when the idle window takes it. Whole minutes, since nothing turns on the
  * seconds and a countdown a person reads once need not move. */
 export const workspaceStaysAwakeLine = (name: string, napsInMs?: number): string =>
-  `${name} stays awake${napsInMs === undefined ? "" : ` · naps in ${fmtUptime(napsInMs)}`}`;
+  `${name} stays awake${napsInMs === undefined ? "" : `, naps in ${fmtUptime(napsInMs)}`}`;
 
 /** The reason a status carries when the runtime's idle policy napped a workspace, with the one reading of it back
  * beside it: the runtime stamps the nap through `of` and the app's paused line takes the window out through
@@ -1382,7 +1378,7 @@ export const PROVIDER_UNREACHED_LINE = "Solari cannot be reached from this compu
 /** What a window on another computer says while the wsp it shows has gone quiet: the computer that host runs on is
  * asleep or off, and the workspaces on every other computer keep working. It reads as a fact in the sidebar's own
  * prose line and as the send's reason, never as an alert: nothing is broken and nothing is lost. */
-export const HOST_ASLEEP_LINE = "your Mac is asleep · threads on your other computers keep running";
+export const HOST_ASLEEP_LINE = "your Mac is asleep; threads on your other computers keep running";
 export const HOST_ASLEEP_SEND = "your Mac is asleep; new turns start when it wakes";
 
 /** One line per retry of a provider call that never left this computer: which call, the system error the road gave,
@@ -1541,7 +1537,7 @@ export function catalogSourceLine(catalog: HarnessCatalog, where: string): strin
   const version = catalog.version;
   if (catalog.source === "harness") return `${catalog.label}${version === null ? "" : ` ${version}`} on ${where}`;
   const why = catalog.refusal ?? `${catalog.harness} table`;
-  return version === null ? why : `${why} · ${version}`;
+  return version === null ? why : `${why}, ${version}`;
 }
 
 /** The one line in place of the model rows: what the binary reported, or what the table holds, and never a count the
@@ -2254,7 +2250,7 @@ export function initProgressLine(job: Pick<InitJob, "phase" | "rows" | "progress
   if (open !== undefined) return signInTo(open.label);
   if (initSweeping(job.rows)) return MACHINE_SWEEP_LINE;
   const word = initPhaseWord(job.phase);
-  return initJobBuilding(job.phase) && job.progress.total > 0 ? `${word} · ${job.progress.done}/${job.progress.total}` : word;
+  return initJobBuilding(job.phase) && job.progress.total > 0 ? `${word} ${job.progress.done}/${job.progress.total}` : word;
 }
 
 /** The id of the stage row the build's sign-ins fold into. */
@@ -3008,7 +3004,7 @@ export function permissionPromptWords(toolName: string, input: string, detail?: 
   const rest = Object.entries(fields)
     .filter(([key]) => !named.has(key))
     .map(([key, value]) => `${key}: ${restValue(value)}`)
-    .join(" · ");
+    .join("\n");
   return { ...parts, rest, ...(body === undefined ? {} : { body: { label: BODY_LABEL, text: body } }) };
 }
 
@@ -3211,7 +3207,7 @@ export function pinsReadLine(fixed: readonly { name: string; tag: string }[], la
 export function sealedPinLine(name: string, pin: ToolPin, words?: string): string {
   const sum = pin.sha256 === undefined ? [] : [`checksum ${shortSum(pin.sha256)}`];
   const latest = pin.latest === true ? [`${INSTALLS_LATEST}${words === undefined ? "" : ` ${words}`}`] : [];
-  return [name, pin.tag, ...sum, ...latest].join(" · ");
+  return [name, pin.tag, ...sum, ...latest].join("  ");
 }
 
 /** Why a tool installs differently now when its road stands: the lines the road runs are not the golden's. */
@@ -3645,7 +3641,7 @@ export function offlineFor(ms: number): string {
  * forks are on neither. */
 export function placeWorkspacesCell(view: PlaceView, count: number, monthUsd?: number): string {
   const { count: n, note } = placeWorkspacesParts(view, count, monthUsd);
-  return note === undefined ? n : `${n} · ${note}`;
+  return note === undefined ? n : `${n}, ${note}`;
 }
 
 /** The same cell in its two parts, for a table that draws them in two inks: the count a person is counting, and
@@ -3667,7 +3663,7 @@ export const spentThisMonth = (usd: number): string => `${fmtCost(usd)} this mon
  * across. A row burning nothing says so with the rate rather than dropping the clause, since a $0.00/hr that is
  * measured and a figure left out read differently. */
 export function placeSpendLine(spend: { monthUsd: number; rateUsdPerHour: number }, workspaces: number): string {
-  return `${spentThisMonth(spend.monthUsd)} · ${fmtRate(spend.rateUsdPerHour)} now across ${plural(workspaces, "workspace")}`;
+  return `${spentThisMonth(spend.monthUsd)}, ${fmtRate(spend.rateUsdPerHour)} now across ${plural(workspaces, "workspace")}`;
 }
 
 /** The foot under the places table: what the providers that have taken something this month took, together, and how
@@ -3720,7 +3716,7 @@ export function agentsCell(place: Pick<PlaceView, "agents" | "agentVersions" | "
       const state = place.signIns?.[id];
       return [id, version === undefined ? undefined : agentVersionWord(version), state === undefined ? undefined : agentSignInWord(state)].filter(word => word !== undefined).join(" ");
     })
-    .join(" · ");
+    .join(", ");
 }
 
 /** How much of the provider's own reason for refusing a key a sentence carries: enough to tell a dead key from a

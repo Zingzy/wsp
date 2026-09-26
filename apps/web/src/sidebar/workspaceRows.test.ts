@@ -25,23 +25,23 @@ const row = (over: Partial<WorkspaceView>): Pick<SidebarProjectSnapshot, "worksp
 
 describe("what a workspace row says it is made of", () => {
   it("joins the copy word, the computer where it is not this one, and the ports word, all off the protocol's table", () => {
-    expect(madeOfLine({ project: row({ copy: copy({ road: "worktree" }) }), landing: SHARES, computer: null })).toBe("a copy · shares this Mac's ports");
-    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: SHARES, computer: null })).toBe("a copy · shares this Mac's ports, PORT 3100");
-    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: OWN, computer: "spoo" })).toBe("a copy · spoo · own network");
+    expect(madeOfLine({ project: row({ copy: copy({ road: "worktree" }) }), landing: SHARES, computer: null })).toEqual(["a copy", "shares this Mac's ports"]);
+    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: SHARES, computer: null })).toEqual(["a copy", "shares this Mac's ports, PORT 3100"]);
+    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: OWN, computer: "spoo" })).toEqual(["a copy", "spoo", "own network"]);
   });
 
   it("says the network alone for a fork, which has no copy of a folder on any computer", () => {
-    expect(madeOfLine({ project: row({}), landing: OWN, computer: "solari" })).toBe("solari · own network");
+    expect(madeOfLine({ project: row({}), landing: OWN, computer: "solari" })).toEqual(["solari", "own network"]);
   });
 
   it("says nothing about the network until the host has answered where this project lands", () => {
-    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: null, computer: null })).toBe("a copy");
-    expect(madeOfLine({ project: row({ copy: copy() }), landing: null, computer: "spoo" })).toBe("a copy · spoo");
+    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: null, computer: null })).toEqual(["a copy"]);
+    expect(madeOfLine({ project: row({ copy: copy() }), landing: null, computer: "spoo" })).toEqual(["a copy", "spoo"]);
   });
 
   it("carries no figure of any kind: a machine's shape and its cost are its computer's row in Settings", () => {
     const line = madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: SHARES, computer: null });
-    expect(line).not.toMatch(/\$|GB|cores|vCPU/);
+    expect(line.join(" ")).not.toMatch(/\$|GB|cores|vCPU/);
   });
 });
 
