@@ -2755,6 +2755,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       else landing.set(scope.rootThreadId, now);
     };
   };
+  /** Where a thread's act lands in its tree: under the thread that asked and its root, which is what the thread
+   * tree nests by and what the machine cap counts; nothing for a caller that is no thread. */
+  const treeOf = (scope: ThreadScope | undefined): { parentThreadId?: string; rootThreadId?: string } =>
+    scope === undefined ? {} : { parentThreadId: scope.threadId, rootThreadId: scope.rootThreadId };
   /** What a record says its machine is, for the one rule that one workspace stands on one machine: what the machine
    * itself answered where its kind can ask, else the id, which is the machine on every other kind. */
   const identityOf = (record: WorkspaceRecord): string => record.machineIdentity ?? record.machineId;
@@ -5052,7 +5056,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       firstLife: true,
       // Written before the machine is asked for: the cap counts machines under a root off these two fields, so a
       // fork that is still landing already holds its place and two forks at once cannot both pass the count.
-      ...(spawned !== undefined ? { parentThreadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : {}),
+      ...treeOf(spawned),
       ...(o.parent !== undefined ? { parentWorkspaceId: o.parent } : {}),
       // The branch this copy starts from, kept because a bring back measures against it long after the parent may
       // have moved on or gone to sleep; nothing reads the parent's machine for it again.
@@ -5191,7 +5195,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * one project two checkouts on two branches rather than two names for one working tree, and what keeps an agent
    * out of the person's own folder from the first wsp new. The machine is this computer, and its phase is running
    * with auto-nap off from the start: a machine wsp does not run neither naps nor wakes. */
-  const recordExisting = async (recorded: ProjectView, o: CreateWorkspaceOptions, caller: Caller | undefined, parent?: LiveWorkspace): Promise<WorkspaceView> => {
+  const recordExisting = async (recorded: ProjectView, o: CreateWorkspaceOptions, caller: Caller | undefined, parent?: LiveWorkspace, landed?: () => void): Promise<WorkspaceView> => {
     const n = nameGiven(o.name);
     refuseRecording(n, caller);
     // The workspace is a copy of the folder and forks nothing, so the words a fork takes have nothing to act on
@@ -5218,6 +5222,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       project: project.id,
       copy,
       portBase,
+      ...treeOf(scopeOf(caller)),
       ...(o.parent !== undefined ? { parentWorkspaceId: o.parent } : {}),
       ...(project.base !== undefined ? { base: project.base } : {}),
       spec: {},
@@ -5226,6 +5231,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       idleWindowMs: null,
     };
     attach(record, machine);
+    // In the live map from here, so the record holds the place under the root the guard took for it.
+    landed?.();
     try {
       await moduleOf("local").landProject(live.get(record.id)!, project, () => {});
       // The copy sits beside the person's folder, outside the daemon's home root, so the daemon is told about it
@@ -5289,9 +5296,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (parent !== undefined && parent.record.project !== project.id) {
         throw Object.assign(new Error(parentProjectRefusal(parent.record.name, projectHeld(parent.record.project).name, project.name)), { kind: "invalid" });
       }
-      if (copies) return recordExisting(project, o, origin, parent);
       // The place under the root is taken here, with no await between the count and the taking, and handed back in
-      // the finally below however this create ends: the record it becomes is what holds it from then on.
+      // the finally below however this create ends: the record it becomes is what holds it from then on. A copy on
+      // this computer is a child in the tree as a fork is, so it takes the same place.
       const freePlace = spawnGuard("fork", origin);
       const spawned = scopeOf(origin);
       // A thread's fork carries the switch of the workspace it was asked from, and nothing the caller says: the
@@ -5299,6 +5306,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (spawned !== undefined && o.agents !== undefined) {
         freePlace();
         throw new Error(spawnActRefusal(spawned.threadId, "agents"));
+      }
+      if (copies) {
+        try {
+          return await recordExisting(project, o, origin, parent, freePlace);
+        } finally {
+          freePlace();
+        }
       }
       const refusal = nameRefusal(o.name);
       if (refusal !== undefined) {
@@ -6904,9 +6918,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // person opened is its own root, and one a thread opened hangs under that thread's root.
       const spawnedBy = opens ? scopeOf(origin) : undefined;
       const tree = opens
-        ? spawnedBy === undefined
-          ? {}
-          : { parentThreadId: spawnedBy.threadId, rootThreadId: spawnedBy.rootThreadId }
+        ? treeOf(spawnedBy)
         : { ...(parentOf(threadId) !== undefined ? { parentThreadId: parentOf(threadId)! } : {}), ...(rootOf(threadId) !== threadId ? { rootThreadId: rootOf(threadId) } : {}) };
       // me is the caller: the thread this request came out of when its token says it came out of one, and the person
       // when there is no token, which is every road that is not a turn. A target named twice is one target, since a

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -44,7 +45,7 @@ import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { keyFingerprint } from "@wsp/engine";
 import { newPlaceKeyPair } from "../src/places.js";
-import { stubBackend, copyingFake, createOn, projectOn, testPlatform } from "./stub-backend.js";
+import { stubBackend, copyingFake, createOn, projectOn, tempRepo, testPlatform } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient, createOverWire } from "./ws-client.js";
 
@@ -844,6 +845,39 @@ describe("agents spawning agents", () => {
     await expect(createOn(rt, { name: "b3" }, asThread(scope))).rejects.toThrow(spawnCapRefusal("t_root", 2, 2));
     expect((await rt.workspaces.list()).filter(w => w.rootThreadId === "t_root")).toHaveLength(2);
     await rt.close();
+  });
+
+  it("a thread's copy on this computer hangs under that thread and passes the same guard a fork does", async () => {
+    const first = runtimeWith({ claude: heldAdapter().factory });
+    // A child copy starts on the branch its parent's checkout is on, so the folder needs a commit to name one.
+    const repo = tempRepo();
+    execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
+    const mac = await createOn(first, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(first, HERE_PLACE_ID, repo)).id });
+    const stored = (await store.get("workspaces", mac.id)) as Record<string, unknown>;
+    await first.close();
+    const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: mac.id, rootThreadId: "t_root" };
+    // A thread on this computer reaches the host on its own road, so the caller is scoped without being relayed.
+    const here: Caller = { origin: "here", by: scope };
+    const off = runtimeWith({ claude: heldAdapter().factory });
+    await expect(createOn(off, { name: "kid" }, here)).rejects.toThrow(agentsOffRefusal("mac", "fork"));
+    await off.close();
+
+    await store.put("workspaces", mac.id, { ...stored, agents: { spawn: true, maxMachines: 1, maxDepth: 1 } });
+    const rt = runtimeWith({ claude: heldAdapter().factory });
+    await expect(createOn(rt, { name: "wide", agents: { maxMachines: 50 } }, here)).rejects.toThrow(spawnActRefusal("t_root", "agents"));
+    const kid = await createOn(rt, { name: "kid" }, here);
+    expect(kid.kind).toBe("local");
+    expect(kid.parentThreadId).toBe("t_root");
+    expect(kid.rootThreadId).toBe("t_root");
+    expect(kid.parentWorkspaceId).toBe(mac.id);
+    expect((await rt.workspaces.list(here)).map(w => w.name).sort()).toEqual(["kid", "mac"]);
+    await expect(createOn(rt, { name: "kid2" }, here)).rejects.toThrow(spawnCapRefusal("t_root", 1, 1));
+    const deep: Caller = { origin: "here", by: { ...scope, threadId: "t_child" } };
+    await store.put("workspaces", mac.id, { ...stored, agents: { spawn: true, maxMachines: 5, maxDepth: 0 } });
+    await rt.close();
+    const capped = runtimeWith({ claude: heldAdapter().factory });
+    await expect(createOn(capped, { name: "kid3" }, deep)).rejects.toThrow(spawnDepthRefusal("t_child", 0, 0));
+    await capped.close();
   });
 
   it("turning the lead's switch off stops the tree it spawned, not only the threads on the lead", async () => {
