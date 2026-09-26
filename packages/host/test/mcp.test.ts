@@ -17,7 +17,7 @@ import { type ProjectView, HERE_PLACE_ID, noProjectImageLine, projectImageInUseR
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
-import { BUILT_IN_LIST_CLAUSE, hostPlatform, noHostServingLine } from "../src/verbs.js";
+import { BUILT_IN_LIST_CLAUSE, c1Escaped, hostPlatform, noHostServingLine } from "../src/verbs.js";
 import { placeWiring } from "../src/places.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
 import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from "../src/recipe-answer.js";
@@ -1170,5 +1170,39 @@ describe("the MCP server never talks to the provider", () => {
     for (const [file, imports] of walked) {
       for (const i of imports) expect(`${i} in ${file}`).not.toMatch(banned);
     }
+  });
+});
+
+describe("what the MCP server writes to its agent", () => {
+  it("carries no raw C1 control character on stdio, since a script that prints the JSON is a terminal too", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-mcp-c1-"));
+    const toServer = new PassThrough();
+    const fromServer = new PassThrough();
+    const read: Buffer[] = [];
+    fromServer.on("data", (b: Buffer) => read.push(b));
+    const served = serveMcp(join(dir, "state.json"), { env: {} }, { input: toServer, output: fromServer });
+    const stdio = new Client({ name: "test-agent", version: "0.0.0" });
+    await stdio.connect(streamTransport(toServer, fromServer));
+    // The SDK's own answer to a tool it has none of names the tool, so the name comes back in a frame as it was sent.
+    await stdio.callTool({ name: "no-such\x9b2J\x85tool", arguments: {} }).catch(() => undefined);
+    await stdio.close();
+    await served;
+    const text = Buffer.concat(read).toString("utf8");
+    expect(text).toContain("no-such");
+    expect(text).not.toMatch(/[\x7f-\x9f]/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("escapes a character split across two writes as a whole", async () => {
+    const out = new PassThrough();
+    const read: Buffer[] = [];
+    out.on("data", (b: Buffer) => read.push(b));
+    const safe = c1Escaped(out);
+    const bytes = Buffer.from('{"a":"caf\u00e9\u009b"}\n', "utf8");
+    const at = bytes.indexOf(0xc3) + 1;
+    await new Promise<void>(done => safe.write(bytes.subarray(0, at), () => done()));
+    await new Promise<void>(done => safe.write(bytes.subarray(at), () => done()));
+    expect(JSON.parse(Buffer.concat(read).toString("utf8"))).toEqual({ a: "caf\u00e9\u009b" });
+    expect(Buffer.concat(read).toString("utf8")).not.toMatch(/[\x7f-\x9f]/);
   });
 });

@@ -13,7 +13,7 @@
 // the one the person typed.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, copiesFolder, type ProjectView, type SeedChoice, type SeedPlan,
@@ -29,7 +29,6 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   parsePlaceFile,
   fmtPrice,
   PLACE_DOOR_UNSERVED,
-  PLACE_FILE_MODE,
   PLACE_ADD_WORDS,
   PlaceUpdateReply,
   placeCurrentLine,
@@ -100,7 +99,7 @@ import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
-import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile, wspArgvOf } from "./place-report.js";
+import { joinStanding, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writeExclusive, writePlaceFile, wspArgvOf } from "./place-report.js";
 import { PROVIDER_ENV, addedProviders, providerBackendFor, type ProviderEnv } from "./providers.js";
 import { placeLink, relaySignIn, type BoxSignIn, type BoxSignedIn, type PlaceLink } from "./place-signin.js";
 import { publicHostname } from "./relay-link.js";
@@ -336,6 +335,31 @@ export const noPlaceManagerLine = (platform: string): string => `wsp writes no s
 
 /** The refusal wsp leave gets on the same computer. */
 export const NOTHING_TO_LEAVE_LINE = "this computer is not a place in any wsp, so there is nothing to leave";
+
+/** What is left of a join that did not finish, or a place file that does not parse, is broken rather than joined: a
+ * join refuses it and a leave takes it. */
+export const brokenJoinLine = (path: string): string => `${path} is left from a wsp join that did not finish or cannot be read; run ${PLACE_LEAVE_LINE} to remove it, then join again`;
+
+/** What a leave says first when what it took was broken, since there is no wsp to name. */
+export const brokenPlaceLeftLine = (path: string): string => `${path} was left from a wsp join that did not finish or cannot be read; removed:`;
+
+/** A join a leave cut off between its key and its place file: the leave took the key, so the join takes back its file. */
+export const joinCutByLeaveLine = `${PLACE_LEAVE_LINE} ran on this computer while it was joining, so nothing of the join is left; run wsp join again`;
+
+/** Why a join stops at what stands here, or nothing where nothing does. */
+function joinRefusal(home: string): string | undefined {
+  const standing = joinStanding(home);
+  return standing === undefined ? undefined : "joined" in standing ? ALREADY_JOINED_LINE : brokenJoinLine(standing.broken);
+}
+
+/** Whether the key at that path is still the one this join wrote. */
+function keyIs(key: string, pem: string): boolean {
+  try {
+    return readFileSync(key, "utf8") === pem;
+  } catch {
+    return false;
+  }
+}
 
 /** What a person may name beside the address on wsp add: the name the computer is known by here, and the port and
  * key their own ssh would have been told. */
@@ -1771,7 +1795,8 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
   const { home, addresses, code, hostKey } = opts;
   if (home === "") throw new Error("a join needs this login's home folder, and this process has none");
   const file = placeFilePath(home);
-  if (joinedAlready(home)) throw new Error(ALREADY_JOINED_LINE);
+  const standing = joinRefusal(home);
+  if (standing !== undefined) throw new Error(standing);
   // Before the handshake: a computer nothing would keep the daemon up on is refused with nothing written on it.
   const on = opts.platform ?? platform();
   const manager = "manager" in opts ? opts.manager : serviceManagerFor(on);
@@ -1787,9 +1812,6 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
   const joined = await handshakeAt(io, addresses, code, hostKey, name, home, opts.client === true, dial);
   const address = joined.dialed;
   const key = placeKeyPath(home);
-  mkdirSync(dirname(key), { recursive: true, mode: 0o700 });
-  writeFileSync(key, joined.privateKeyPem, { mode: PLACE_FILE_MODE });
-  chmodSync(key, PLACE_FILE_MODE);
   const placeFile: PlaceFile = {
     placeId: joined.placeId,
     name,
@@ -1800,7 +1822,18 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
     keyPath: key,
     joinedAt: new Date(now()).toISOString(),
   };
-  writePlaceFile(file, placeFile);
+  // The handshake ran since the check above, so another join may be writing meanwhile. The key is the claim: of two
+  // joins one creates it and the other stops here with nothing written, and the create never follows a link. The
+  // place file is the last write, so a join cut off between the two leaves a key alone, which reads as broken.
+  if (!writeExclusive(key, joined.privateKeyPem)) throw new Error(ALREADY_JOINED_LINE);
+  if (!writePlaceFile(file, placeFile)) {
+    if (keyIs(key, joined.privateKeyPem)) rmSync(key, { force: true });
+    throw new Error(joinRefusal(home) ?? ALREADY_JOINED_LINE);
+  }
+  if (!keyIs(key, joined.privateKeyPem)) {
+    rmSync(file, { force: true });
+    throw new Error(joinCutByLeaveLine);
+  }
   io.log(joinedLine(name, address));
   const answer: JoinedPlace = {
     placeId: joined.placeId,
@@ -1859,8 +1892,9 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
     if (at === undefined) throw new JoinRefused("address", `${JOIN_ADDRESS_LINE.what} ${JOIN_ADDRESS_LINE.fix}`);
     return at;
   });
-  if (joinedAlready(home)) {
-    io.error(ALREADY_JOINED_LINE);
+  const standing = joinRefusal(home);
+  if (standing !== undefined) {
+    io.error(standing);
     return 1;
   }
   const { code, hostKey } = joinCode(flags);
@@ -1884,18 +1918,19 @@ export async function leaveCommand(io: CliIO, args: readonly string[], deps: { h
   if (args.length !== 0) throw usageRefusal("wsp leave takes no positional arguments.", "Run wsp leave on its own; it takes wsp off the computer you are sitting at.");
   const home = deps.home;
   if (home === "") throw new Error("wsp leave needs this login's home folder, and this process has none");
-  const held = readPlaceFile(placeFilePath(home));
-  if (held === undefined) {
+  const standing = joinStanding(home);
+  if (standing === undefined) {
     io.error(NOTHING_TO_LEAVE_LINE);
     return 1;
   }
+  const held = "joined" in standing ? standing.joined : undefined;
   const manager = serviceManagerFor(deps.platform);
   // The agent is another process from this one, so the sweep stops it before taking its unit file, and the lines
   // below say so.
   const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run });
-  io.log(`${held.name} left the wsp at ${held.hostUrls.join(", ")}; removed:`);
+  io.log("broken" in standing ? brokenPlaceLeftLine(standing.broken) : `${standing.joined.name} left the wsp at ${standing.joined.hostUrls.join(", ")}; removed:`);
   for (const line of swept.removed) io.log(sweptLine(line));
   for (const line of swept.kept) io.log(line);
-  io.log("The host over there still lists it until somebody runs wsp remove on it.");
+  if (held !== undefined) io.log("The host over there still lists it until somebody runs wsp remove on it.");
   return 0;
 }
