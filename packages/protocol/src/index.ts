@@ -2876,6 +2876,9 @@ export const PlaceView = z.object({
   /** What the last dial of this computer got. Kept on the row, so the answer stands after the window is closed
    * and opened again rather than living only in the button that asked. */
   dialled: PlaceDialled.optional(),
+  /** Why nothing runs inside a copy there, off that computer's last report: its link stays up for the acts that
+   * need no copy running. Absent while it runs workspaces. */
+  blocked: z.string().optional(),
   /** The copy of the image at this place while it is not standing: the stage sentence while a build runs there, the
    * reason after one stopped there. Absent once the copy stands, and on a place nothing was ever built at. */
   build: z.string().optional(),
@@ -3769,6 +3772,14 @@ export const PROC_FILESYSTEMS_PATH = "/proc/filesystems";
  * and nothing is written on it. */
 export const placeCannotBootLine = (place: string, reason?: string): string =>
   reason === undefined ? `${place} cannot run wsp workspaces, so it cannot be a place` : `${place} cannot run wsp workspaces: ${reason.replace("this computer", "it")}`;
+
+/** The same sentence off a computer's own report, or nothing while it runs workspaces: one reading for the join's
+ * refusal, the row, and every act that runs inside a copy there. */
+export const placeBlocked = (place: string, report: Pick<PlaceReport, "runsWorkspaces" | "workspacesBlocked">): string | undefined =>
+  report.runsWorkspaces ? undefined : placeCannotBootLine(place, report.workspacesBlocked);
+
+/** The word a computer's row carries while its doctor says it cannot run workspaces. */
+export const PLACE_BLOCKED_WORD = "can't run threads";
 
 /** The one sentence a login that is not root reads when it tries to join a Linux computer. The daemon there is a
  * system service under /etc/systemd/system, so a plain account cannot install it and nothing is written before
