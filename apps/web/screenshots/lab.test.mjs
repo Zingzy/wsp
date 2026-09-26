@@ -11,10 +11,10 @@ import { homedir, hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GHOST_IS_NOT_A_CONTROL, HELD, HELD_ON_THE_PAGE, whyHeld, OPEN_OVER_THE_PAGE, PRESS_NEEDS_FOCUS, READ_PAGE, SAID_ON_THE_PAGE, SEVERAL_READ, UNDER_AN_OPEN_MENU, attrWord, diffLines, findByWords, findField, openMenu, parseArgs, typedField, whyNotClicked, whyNotOne } from "./drive.mjs";
-import { FIXTURE_NAMES, fixtureCloud, fixtureFleet, fixtureFolders, fixtureMachines, fixtureRepos, fixtureSnapshots, fixtureState, threadId } from "./fixture-state.mjs";
-import { DAEMON_BUILD, agentStoreRows, daemonBinaryHere, hostArgv, hostEnv, hostPath, providerFor, whatIsNotBuilt } from "./host.mjs";
+import { atProvider, HERE_LABEL, FIXTURE_NAMES, fixtureCloud, fixtureFleet, fixtureFolders, fixtureMachines, fixtureRepos, fixtureSnapshots, fixtureState, threadId } from "./fixture-state.mjs";
+import { DAEMON_BUILD, agentStoreRows, daemonBinaryHere, hostArgv, hostEnv, hostPath, providerFor, whatIsNotBuilt, writeHereLabel } from "./host.mjs";
 import { AGENT_KEYS, binDir, builtAt, copyApp, folderHash, keysFound, labHome, labLogs, labRoot, labShell, notThisLabsShell, shimText, standInRoot, writeAgentHome, writeKeys, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
-import { A_MESSAGE, APP_UP, NOT_READY_NAMES, PROMPT_ECHOES, READY_ON_THE_PAGE } from "./ready.mjs";
+import { A_MESSAGE, APP_UP, FAILED_ON_THE_PAGE, failuresToCheck, NOT_READY_NAMES, PROMPT_ECHOES, READY_ON_THE_PAGE } from "./ready.mjs";
 import { NO_FINDER_CHOOSER, PASTE_THIS, homeOf, keptLog, labLines, launchDiesLine, parseArgs as parseLabArgs, pointerPath, stopLab, whyALaunchDies, whyNotOursToRemove } from "./lab.mjs";
 
 describe("the fixtures a lab serves", () => {
@@ -22,14 +22,11 @@ describe("the fixtures a lab serves", () => {
     expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "mac-and-boxes", "orchestrator", "image-built"]);
   });
 
-  it("gives the two personas who have this computer and nothing else an empty window named after it", () => {
+  it("gives the two personas who have this computer and nothing else the first run, with no project added", () => {
     for (const name of ["mac-only", "no-sign-in"]) {
       const state = fixtureState(name);
-      const workspaces = Object.values(state.workspaces);
-      expect([name, workspaces.map(w => w.name)]).toEqual([name, [hostname()]]);
-      // Nothing of anybody else's to read: no thread tagged as theirs, no folder they never imported, no cost.
-      expect([name, workspaces[0].projects]).toEqual([name, undefined]);
-      expect([name, state.sessions, state.transcripts]).toEqual([name, {}, {}]);
+      // Nothing of anybody else's to read: no project they never added, no workspace, no thread, no cost.
+      expect([name, state.projects, state.workspaces, state.sessions, state.transcripts]).toEqual([name, {}, {}, {}, {}]);
     }
   });
 
@@ -68,15 +65,16 @@ describe("the fixtures a lab serves", () => {
     for (const name of FIXTURE_NAMES) {
       const state = fixtureState(name);
       const workspaces = Object.values(state.workspaces);
-      expect([name, workspaces.length > 0]).toEqual([name, true]);
       for (const w of workspaces) {
         // The key is the id: the store reads a collection as one document per id, so a row filed under another
         // key would load as a workspace nothing can name.
         expect([name, state.workspaces[w.id]]).toEqual([name, w]);
-        expect([name, ["local", "place", "cloud"].includes(w.kind)]).toEqual([name, true]);
+        expect([name, ["local", "cloud"].includes(w.kind)]).toEqual([name, true]);
         expect([name, typeof w.name, typeof w.machineId, typeof w.phase]).toEqual([name, "string", "string", "string"]);
-        // A fork boots from the image the manifest's head names; a local machine forks from nothing.
-        if (w.kind === "cloud") expect([name, w.golden]).toEqual([name, state.goldens.default.versions.at(-1).snapshotId]);
+        // Every workspace is a copy of one project, and the host refuses a record naming none it holds.
+        expect([name, w.id, state.projects[w.project]?.id]).toEqual([name, w.id, w.project]);
+        // A fork at the provider boots from the image the manifest's head names; everything else forks from nothing.
+        if (atProvider(w)) expect([name, w.golden]).toEqual([name, state.goldens.default.versions.at(-1).snapshotId]);
         else expect([name, w.golden]).toEqual([name, ""]);
       }
     }
@@ -100,7 +98,7 @@ describe("the fixtures a lab serves", () => {
     }
     const state = fixtureState("solari-only");
     const machines = fixtureMachines(state);
-    const forks = Object.values(state.workspaces).filter(w => w.kind === "cloud");
+    const forks = Object.values(state.workspaces).filter(atProvider);
     expect(forks.length).toBeGreaterThan(0);
     for (const w of forks) {
       expect([w.name, machines[w.machineId].state]).toEqual([w.name, w.phase === "napping" ? "paused" : "running"]);
@@ -140,7 +138,7 @@ describe("the fixtures a lab serves", () => {
     expect(rows.find(r => r.threadId === threadId("migrate"))?.startedBy).toBe("person");
     // Every fork the root made has a thread on it. The reply says a thread stands on each of the three, and a
     // tester who counted the rows and found two read the reply as the product lying to him.
-    const forks = Object.values(state.workspaces).filter(w => w.kind === "cloud");
+    const forks = Object.values(state.workspaces).filter(atProvider);
     expect(forks.map(w => w.name).sort()).toEqual(["api", "docs", "web"]);
     for (const fork of forks) expect([fork.name, (state.sessions[fork.id]?.sessions ?? []).length]).toEqual([fork.name, 1]);
   });
@@ -198,8 +196,8 @@ describe("the fixtures a lab serves", () => {
     // The note a snapshot leaves names the projects it holds, so a fork called api holding a project called spoo
     // answered "Image of spoo taken" on a screen headed api, to a persona who had never heard of spoo.
     for (const name of FIXTURE_NAMES) {
-      for (const w of Object.values(fixtureState(name).workspaces).filter(w => w.kind === "cloud")) {
-        for (const p of w.projects ?? []) expect([name, w.name, p.name]).toEqual([name, w.name, w.name]);
+      for (const w of Object.values(fixtureState(name).workspaces).filter(atProvider)) {
+        expect([name, w.name, fixtureState(name).projects[w.project].name]).toEqual([name, w.name, w.name]);
       }
     }
   });
@@ -217,10 +215,10 @@ describe("the fixtures a lab serves", () => {
     for (const [name, workspaceId, placeId, cores] of [["mac-and-laptop", "ws_laptop", "p_oldlaptop", 4], ["mac-and-vps", "ws_build", "p_vps", 2]]) {
       const state = fixtureState(name);
       const w = state.workspaces[workspaceId];
-      expect([name, w.kind, w.machineId]).toEqual([name, "place", `place:${placeId}`]);
-      // The shape it reported is its own, not this computer's, and its folders are on it.
+      expect([name, w.kind, w.place]).toEqual([name, "cloud", placeId]);
+      // The shape it reported is its own, not this computer's, and its project is on it.
       expect([name, state.places[placeId].report.shape.cpu]).toEqual([name, cores]);
-      expect([name, w.folder.startsWith(homedir())]).toEqual([name, false]);
+      expect([name, state.projects[w.project].computer, state.projects[w.project].path.startsWith(homedir())]).toEqual([name, placeId, false]);
     }
     // The server running Docker says so, which is what makes it a place a fork could stand on.
     expect(fixtureState("mac-and-vps").places.p_vps.report.runsWorkspaces).toBe(true);
@@ -232,7 +230,7 @@ describe("the fixtures a lab serves", () => {
     for (const name of ["solari-only", "both-providers", "orchestrator"]) {
       const state = fixtureState(name);
       const meters = state["cost-histories"];
-      for (const w of Object.values(state.workspaces).filter(w => w.kind === "cloud")) {
+      for (const w of Object.values(state.workspaces).filter(atProvider)) {
         const last = meters[w.id]?.points.at(-1);
         expect([name, w.id, last !== undefined && last.accruedUsd > 0]).toEqual([name, w.id, true]);
         // A machine that is awake is still being charged for; one asleep is not, and both have an amount.
@@ -257,7 +255,7 @@ describe("the fixtures a lab serves", () => {
     });
     // Every fixture with a cloud machine names the cloud it is standing in for, and no fixture without one does.
     for (const name of FIXTURE_NAMES) {
-      const forks = Object.values(fixtureState(name).workspaces).some(w => w.kind === "cloud");
+      const forks = Object.values(fixtureState(name).workspaces).some(atProvider);
       expect([name, fixtureCloud(name) !== undefined]).toEqual([name, forks]);
     }
   });
@@ -340,6 +338,29 @@ describe("what a lab must find built before it will serve anything", () => {
     });
     expect(await daemonBinaryHere(load)).toBe(bin);
     expect(await daemonBinaryHere(async () => ({ daemonTargetHere: () => undefined, daemonBinaryIn: () => "", workspaceAsset: () => "" }))).toBeUndefined();
+  });
+});
+
+describe("the failures a shot must not show", () => {
+  it("checks every failure mark on every shot but the one its surface waits for", () => {
+    expect(failuresToCheck({ wait: "[data-shell-center]" })).toEqual(FAILED_ON_THE_PAGE);
+    expect(failuresToCheck({ wait: "[data-refused]" })).toEqual(FAILED_ON_THE_PAGE.filter(s => s !== "[data-refused]"));
+    // A create that stopped is a failure however the log it waits for reads.
+    expect(failuresToCheck({ wait: '[data-testid="creation-log"]' })).toContain('[data-testid="workspace-creation"][aria-busy="false"]');
+  });
+});
+
+describe("the name a fixture's host gives this computer", () => {
+  it("answers the fixture's own label where the host asks the system for this Mac's name", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-here-label-"));
+    try {
+      const bin = writeHereLabel(dir);
+      const said = spawnSync(join(bin, "scutil"), ["--get", "ComputerName"], { encoding: "utf8" });
+      expect([said.status, said.stdout.trim()]).toEqual([0, HERE_LABEL]);
+      expect(HERE_LABEL).toBe("zingzy's MacBook Pro");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

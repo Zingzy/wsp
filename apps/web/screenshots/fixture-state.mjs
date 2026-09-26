@@ -3,7 +3,7 @@
 // of person: what their sidebar holds, whether an image is sealed, and what
 // their threads say. The default is what the screenshot run photographs, this
 // computer with work on it and two computers of the person's own joined to it,
-// the folders imported into this one and the threads with the transcript each
+// its projects recorded on each and the threads with the transcript each
 // replays, one of them opened by another thread's agent, so no surface is
 // photographed empty and the spawned row's grammar is in a shot; the rest vary
 // the setup a tester meets. Nothing here is a real computer, a real key or a
@@ -21,6 +21,7 @@
 // first minute working out whose Mac they were on, and a project folder under
 // the person's own home put a tester's turn inside the person's real
 // repository.
+import { HERE_PLACE_ID as HERE } from "@wsp/protocol";
 import { createHash } from "node:crypto";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
@@ -35,8 +36,13 @@ const THIS_COMPUTER = hostname();
  * per build below and read by every helper here, since every path in a fixture hangs off the same home. */
 let HOME = homedir();
 
-/** The folder a workspace's projects are imported into, the way wsp imports one: under the work folder of the home
- * the host runs in, never beside the person's own checkouts. */
+/** The cloud word the fixture being built stands in for, which is the computer a fork's project is recorded on: the
+ * host names the provider it forks on by that word, and a project on any other word would be a fork on a computer
+ * this host has never heard of. Set once per build below, as the home is. */
+let CLOUD;
+
+/** The folder a project on this computer sits in: under the work folder of the home the host runs in, never beside
+ * the person's own checkouts. */
 const projectDest = name => join(HOME, "wsp-work", name);
 
 /** Every stamp hangs off the hour this run started in rather than a date written here: the app words a
@@ -78,7 +84,30 @@ const workspace = (id, name, extra = {}) => ({
   ...extra,
 });
 
-const project = (name, size, minutes) => ({ name, dest: projectDest(name), importedAt: new Date(ago(minutes)).toISOString(), size });
+/** The name this computer's own row wears in every fixture, as a person gives it in System Settings: the same in
+ * every shot whichever Mac takes it. */
+export const HERE_LABEL = "zingzy's MacBook Pro";
+
+
+/** A project as the host records one: one computer, the source that computer sees and the folder a workspace of it
+ * works in. A project here is a folder under the work folder; anywhere else it is a repo the computer cloned into
+ * `path`. Every field the add writes is written, since a record missing one is filled and written back at load. */
+const project = (name, computer, minutes, path = computer === HERE ? projectDest(name) : `/root/${name}`) => {
+  const remote = `https://github.com/you/${name}.git`;
+  const memoryKey = path.replace(/[^A-Za-z0-9]/g, "-");
+  return {
+    id: `pr_${name}`,
+    name,
+    computer,
+    source: computer === HERE ? { kind: "folder", path } : { kind: "git", url: remote },
+    path,
+    remote,
+    defaultBranch: "main",
+    memoryKey,
+    memoryDir: computer === HERE ? join(HOME, ".claude", "projects", memoryKey, "memory") : `/root/.wsp/projects/${memoryKey}/memory`,
+    createdAt: new Date(ago(minutes)).toISOString(),
+  };
+};
 
 const turn = (thread, minutes, workspaceId = "ws_api") => ({
   id: sessionId(thread.id),
@@ -244,7 +273,8 @@ const MIGRATION = {
 
 /** One store as the JSON file holds it: one object per collection, keyed the way the runtime keys it. Every
  * fixture below builds one. */
-const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, images, places, meters }) => ({
+const store = ({ projects, workspaces, sessions = {}, transcripts = {}, goldens, images, places, meters }) => ({
+  projects: Object.fromEntries(projects.map(p => [p.id, p])),
   workspaces: Object.fromEntries(workspaces.map(w => [w.id, w])),
   sessions,
   transcripts,
@@ -260,31 +290,55 @@ const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, images, p
       }),
 });
 
-/** A workspace standing on a joined computer: the machine id the engine gives one, so the settings table counts it
- * against that computer's row. Every path a turn there runs under is built from the login it reported, so a record
- * without one is a record no join wrote and the runtime refuses it at startup. */
-const onPlace = (id, name, placeId, size, login = { HOME: "/root", USER: "root", PATH: "/usr/local/bin:/usr/bin:/bin" }) => ({
+/** A workspace standing on a joined computer, as the host records one: a copy that computer made, filed under the
+ * place it stands on, so the settings table counts it against that computer's row. */
+const onPlace = (id, name, placeId, size, projectId) => ({
   id,
   name,
-  machineId: `place:${placeId}`,
+  machineId: `${placeId}-${name}`,
   phase: "running",
-  kind: "place",
+  kind: "cloud",
+  place: placeId,
+  project: projectId,
   golden: "",
   createdAt: new Date(ago(60 * 20)).toISOString(),
-  home: login.HOME,
-  folder: login.HOME,
-  login,
   size,
   shape: size,
   spec: {},
 });
 
+/** What a joined computer that holds workspaces says about the backend it offers, kept on its record so a workspace
+ * standing there is served before the computer dials in: copies of the computer, priced at nothing. */
+const placeFacts = size => ({
+  offer: "docker",
+  capabilities: {
+    liveCloneForks: false,
+    pauseMode: "memory",
+    replacesMachine: true,
+    previewUrls: false,
+    signedUrls: false,
+    callbackRelay: true,
+    diskSnapshots: true,
+    images: true,
+    snapshotsAnyLife: false,
+    snapshotListing: true,
+    templates: true,
+    kept: false,
+    copies: true,
+    ownNetwork: true,
+    sizes: [{ ...size, rateUsdPerHour: 0 }],
+  },
+  pricing: { defaultSize: size, snapshotStorage: { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" } },
+  lifecycle: { budgets: { wakeAttempts: 1, daemonAnswersMs: 30_000 } },
+  baseTemplates: { sandbox: "ubuntu:24.04", desktop: "ubuntu:24.04" },
+});
+
 /** A computer somebody joined, as the host's record of it: what it last reported about itself, and when it was
  * last seen, so the table has a row that is not this computer. */
-const place = (id, name, minutes, over = {}, workspaceId) => ({
+const place = (id, name, minutes, over = {}, holdsWorkspaces = false) => ({
   id,
   name,
-  ...(workspaceId === undefined ? {} : { workspaceId }),
+  ...(holdsWorkspaces ? { backendFacts: placeFacts(over.shape ?? { cpu: 4, memMb: 8192 }) } : {}),
   publicKey: `no-key-verifies-against-this-${id}`,
   joinedAt: new Date(ago(60 * 26)).toISOString(),
   lastSeenAt: new Date(ago(minutes)).toISOString(),
@@ -356,8 +410,7 @@ const meter = (workspaceId, { rateUsdPerHour, hours, phase = "running" }) => {
 const FORK_RATE = 0.16;
 
 /** This computer after a while of use, with two computers of the person's own joined to it: one workspace on each,
- * the folders imported into this one, threads on two of them, and no image sealed, so the cloud setup button
- * stands in the sidebar's foot. What the screenshot run photographs, since a surface with nothing on it shows a
+ * three projects recorded on this one, threads on two of them, and no image sealed. What the screenshot run photographs, since a surface with nothing on it shows a
  * reviewer nothing.
  *
  * Three rows and not five: one workspace stands on one machine, and this computer is one machine, so the four
@@ -367,26 +420,27 @@ const FORK_RATE = 0.16;
  * with one Mac would have run them. */
 const macInUse = () =>
   store({
+    projects: [project("spoo", HERE, 60 * 20), project("wsp", HERE, 60 * 5), project("landing", HERE, 60 * 9), project("web", "p_oldmacbook", 60 * 22, "/Users/maya/web"), project("box-build", "p_hetzner", 60 * 21)],
     workspaces: [
-      workspace("ws_api", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20), project("wsp", 133_000_000, 60 * 5), project("landing", 9_400_000, 60 * 9)] }),
-      onPlace("ws_web", "web", "p_oldmacbook", { cpu: 4, memMb: 8192 }, { HOME: "/Users/maya", USER: "maya", PATH: "/usr/local/bin:/usr/bin:/bin" }),
-      onPlace("ws_hetzner", "box-build", "p_hetzner", { cpu: 2, memMb: 4096 }),
+      workspace("ws_api", THIS_COMPUTER, { project: "pr_spoo" }),
+      onPlace("ws_web", "web", "p_oldmacbook", { cpu: 4, memMb: 8192 }, "pr_web"),
+      onPlace("ws_hetzner", "box-build", "p_hetzner", { cpu: 2, memMb: 4096 }, "pr_box-build"),
     ],
     ...merge(
       threadsOn("ws_api", [[CHART, 300], [REDIRECT, 45], [SEARCH, 12], [spawned("migration", MIGRATION, "search", "search"), 9]]),
-      threadsOn("ws_hetzner", [[CHART, 200], [REDIRECT, 30]]),
+      threadsOn("ws_hetzner", [[{ ...CHART, id: "chart-box" }, 200], [{ ...REDIRECT, id: "redirect-box" }, 30]]),
     ),
     places: {
-      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, "ws_hetzner"),
-      p_oldmacbook: place("p_oldmacbook", "old-macbook", 120, {}, "ws_web"),
+      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, true),
+      p_oldmacbook: place("p_oldmacbook", "old-macbook", 120, {}, true),
     },
   });
 
-/** This computer and nothing else, as the person sitting at it first meets it: one workspace, named after this
- * computer, with no folder imported and no thread on it. Two personas are given this one, the person with a Mac
- * and nothing else and the person who will sign in to nothing, because what those two meet is the same window;
- * what differs is what they try to do in it. */
-const thisComputer = () => store({ workspaces: [workspace("ws_here", THIS_COMPUTER)] });
+/** This computer and nothing else, as the person sitting at it first meets it: no project added yet, so no
+ * workspace and no thread, since a workspace is a copy of a project. Two personas are given this one, the person
+ * with a Mac and nothing else and the person who will sign in to nothing, because what those two meet is the same
+ * window; what differs is what they try to do in it. */
+const thisComputer = () => store({ projects: [], workspaces: [] });
 
 /** This computer and an old laptop the person joined: this computer as the one workspace it is, the laptop as a
  * workspace standing on that computer, and the laptop itself in the places collection with the shape it reported,
@@ -397,17 +451,15 @@ const thisComputer = () => store({ workspaces: [workspace("ws_here", THIS_COMPUT
  * two of them were on. No thread on either, since nothing has been run here yet. */
 const macAndLaptop = () =>
   store({
-    workspaces: [
-      workspace("ws_here", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20), project("landing", 9_400_000, 60 * 9)] }),
-      onPlace("ws_laptop", "old-laptop", "p_oldlaptop", { cpu: 4, memMb: 8192 }, { HOME: "/home/dev", USER: "dev", PATH: "/usr/local/bin:/usr/bin:/bin" }),
-    ],
+    projects: [project("spoo", HERE, 60 * 20), project("landing", HERE, 60 * 9), project("notes", "p_oldlaptop", 60 * 20, "/home/dev/notes")],
+    workspaces: [workspace("ws_here", THIS_COMPUTER, { project: "pr_spoo" }), onPlace("ws_laptop", "old-laptop", "p_oldlaptop", { cpu: 4, memMb: 8192 }, "pr_notes")],
     places: {
       p_oldlaptop: place(
         "p_oldlaptop",
         "old-laptop",
         12,
         { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 4, memMb: 8192 }, diskFreeBytes: 61 * 1024 ** 3, login: { HOME: "/home/dev", USER: "dev", PATH: "/usr/bin" }, wsp: ["/home/dev/.wsp/bin/wsp"] },
-        "ws_laptop",
+        true,
       ),
     },
   });
@@ -417,17 +469,15 @@ const macAndLaptop = () =>
  * the word for her own box. This computer is one row, for macAndLaptop's reason. */
 const macAndVps = () =>
   store({
-    workspaces: [
-      workspace("ws_here", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20)] }),
-      onPlace("ws_build", "build", "p_vps", { cpu: 2, memMb: 4096 }),
-    ],
+    projects: [project("spoo", HERE, 60 * 20), project("build", "p_vps", 60 * 20)],
+    workspaces: [workspace("ws_here", THIS_COMPUTER, { project: "pr_spoo" }), onPlace("ws_build", "build", "p_vps", { cpu: 2, memMb: 4096 }, "pr_build")],
     places: {
       p_vps: place(
         "p_vps",
         "vps",
         2,
         { platform: "linux", os: "Debian GNU/Linux 12", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 44 * 1024 ** 3, runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" }, wsp: ["/root/.wsp/bin/wsp"] },
-        "ws_build",
+        true,
       ),
     },
   });
@@ -439,7 +489,8 @@ const macAndVps = () =>
  * contradicting itself. */
 const asciiOnly = () =>
   store({
-    workspaces: [fork("ws_api", "api", "fk_ascii_1", { phase: "napping", projects: [project("api", 48_200_000, 60 * 20)] })],
+    projects: [project("api", CLOUD, 60 * 20)],
+    workspaces: [fork("ws_api", "api", "fk_ascii_1", { phase: "napping", project: "pr_api" })],
     goldens: sealed(),
     // Nothing on the clock: this persona is on the trial they opened minutes ago, and a sidebar reading $0.48
     // before they had pasted a key was read as the product billing them for a machine they never made.
@@ -455,9 +506,10 @@ const AGENTS_SPAWN = { spawn: true, maxMachines: 2, maxDepth: 1 };
 /** Forks on Solari and nothing else, one of them napping, which is where most of a fleet sits. */
 const solariOnly = () =>
   store({
+    projects: [project("api", CLOUD, 60 * 20), project("web", CLOUD, 60 * 20)],
     workspaces: [
-      fork("ws_api", "api", "fk_slr_1", { agents: AGENTS_SPAWN, projects: [project("api", 48_200_000, 60 * 20)] }),
-      fork("ws_web", "web", "fk_slr_2", { agents: AGENTS_SPAWN, phase: "napping", vaultedAt: new Date(ago(90)).toISOString() }),
+      fork("ws_api", "api", "fk_slr_1", { agents: AGENTS_SPAWN, project: "pr_api" }),
+      fork("ws_web", "web", "fk_slr_2", { agents: AGENTS_SPAWN, phase: "napping", vaultedAt: new Date(ago(90)).toISOString(), project: "pr_web" }),
     ],
     goldens: sealed(),
     meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 8 }), meter("ws_web", { rateUsdPerHour: FORK_RATE, hours: 3, phase: "napping" })]),
@@ -468,10 +520,11 @@ const solariOnly = () =>
  * word; a record that names its own provider is what a second cloud in one sidebar waits on. */
 const bothProviders = () =>
   store({
+    projects: [project("wsp", HERE, 60 * 5), project("api", CLOUD, 60 * 20), project("web", CLOUD, 60 * 20)],
     workspaces: [
-      workspace("ws_here", THIS_COMPUTER, { projects: [project("wsp", 133_000_000, 60 * 5)] }),
-      fork("ws_api", "api", "fk_slr_1", { projects: [project("api", 48_200_000, 60 * 20)] }),
-      fork("ws_web", "web", "fk_slr_2", { phase: "napping" }),
+      workspace("ws_here", THIS_COMPUTER, { project: "pr_wsp" }),
+      fork("ws_api", "api", "fk_slr_1", { project: "pr_api" }),
+      fork("ws_web", "web", "fk_slr_2", { phase: "napping", project: "pr_web" }),
     ],
     goldens: sealed(),
     meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 8 }), meter("ws_web", { rateUsdPerHour: FORK_RATE, hours: 4, phase: "napping" })]),
@@ -559,11 +612,12 @@ const orchestrator = () => {
   return store({
     // Three forks made one after another, minutes apart, because the sidebar draws its rows in the order the
     // workspaces were made and a fixture where all three claim one minute says nothing about that order.
+    projects: [project("wsp", HERE, 60 * 5), project("api", CLOUD, 60 * 9), project("web", CLOUD, 60 * 9), project("docs", CLOUD, 60 * 9)],
     workspaces: [
-      workspace("ws_here", THIS_COMPUTER, { agents: { spawn: true, maxMachines: 3, maxDepth: 1 }, projects: [project("wsp", 133_000_000, 60 * 5)] }),
-      fork("ws_api", "api", "fk_run_1", { ...tree, createdAt: new Date(ago(60 * 8)).toISOString() }),
-      fork("ws_web", "web", "fk_run_2", { ...tree, createdAt: new Date(ago(60 * 8 - 2)).toISOString() }),
-      fork("ws_docs", "docs", "fk_run_3", { ...tree, phase: "napping", createdAt: new Date(ago(60 * 8 - 4)).toISOString() }),
+      workspace("ws_here", THIS_COMPUTER, { agents: { spawn: true, maxMachines: 3, maxDepth: 1 }, project: "pr_wsp" }),
+      fork("ws_api", "api", "fk_run_1", { ...tree, project: "pr_api", createdAt: new Date(ago(60 * 8)).toISOString() }),
+      fork("ws_web", "web", "fk_run_2", { ...tree, project: "pr_web", createdAt: new Date(ago(60 * 8 - 2)).toISOString() }),
+      fork("ws_docs", "docs", "fk_run_3", { ...tree, project: "pr_docs", phase: "napping", createdAt: new Date(ago(60 * 8 - 4)).toISOString() }),
     ],
     ...merge(
       threadsOn("ws_here", [[root, 120]]),
@@ -585,7 +639,8 @@ const orchestrator = () => {
  * has to pick. What the dialog and the creation log are photographed from. */
 const macAndBoxes = () =>
   store({
-    workspaces: [workspace("ws_here", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20)] })],
+    projects: [project("spoo", HERE, 60 * 20)],
+    workspaces: [workspace("ws_here", THIS_COMPUTER, { project: "pr_spoo" })],
     goldens: sealed(),
     places: {
       p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }),
@@ -598,9 +653,13 @@ const macAndBoxes = () =>
  * both standing words. One workspace, for macInUse's reason: this computer is one machine. */
 const imageBuilt = () =>
   store({
-    workspaces: [workspace("ws_api", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20), project("landing", 9_400_000, 60 * 9)] })],
-    goldens: Object.fromEntries([copyAt("hetzner", 90), copyAt("ascii", 60, { imageHash: OLDER_HASH })]),
+    projects: [project("spoo", HERE, 60 * 20), project("landing", HERE, 60 * 9)],
+    workspaces: [workspace("ws_api", THIS_COMPUTER, { project: "pr_spoo" })],
+    goldens: Object.fromEntries([copyAt("p_hetzner", 90), copyAt("ascii", 60, { imageHash: OLDER_HASH })]),
     images: imageRecord(),
+    places: {
+      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, true),
+    },
   });
 
 /** Every setup a lab can serve, by the word `--fixture` takes. One row per kind of person: what builds its store,
@@ -636,6 +695,7 @@ const fixtureRow = name => {
  * the screenshot run photographs; a lab that took it would put a tester's turn in the person's own repository. */
 export function fixtureState(name = "mac-in-use", { home = homedir() } = {}) {
   HOME = resolve(home);
+  CLOUD = fixtureRow(name).cloud;
   return fixtureRow(name).build();
 }
 
@@ -653,6 +713,10 @@ export function fixtureSnapshots(state) {
   );
 }
 
+/** Whether a fixture's workspace is a fork at the provider the host forks on, which the stand-in answers for; a fork
+ * on a joined computer is that computer's, and the stand-in holds nothing of it. */
+export const atProvider = w => w.kind === "cloud" && w.place === undefined;
+
 /** The disk every fork in a fixture reads as, the same figure the stand-in gives a machine it mints itself. */
 const STANDIN_DISK_GB = 20;
 
@@ -664,7 +728,7 @@ const STANDIN_DISK_GB = 20;
 export function fixtureMachines(state) {
   return Object.fromEntries(
     Object.values(state.workspaces ?? {})
-      .filter(w => w.kind === "cloud")
+      .filter(atProvider)
       .map(w => [
         w.machineId,
         {
@@ -681,10 +745,10 @@ export function fixtureMachines(state) {
  * or not the machines have a folder to run commands in. */
 export const fixtureFleet = state => ({ machines: fixtureMachines(state), snapshots: fixtureSnapshots(state) });
 
-/** Every folder a fixture expects to exist, so whoever serves it can make them: the projects imported into its
- * workspaces, which is where a turn on one of them starts. */
+/** Every folder a fixture expects to exist on this computer, so whoever serves it can make them: the folder of each
+ * project here, which is where a turn on a workspace of it starts. */
 export function fixtureFolders(state) {
-  return Object.values(state.workspaces ?? {}).flatMap(w => (w.projects ?? []).map(p => p.dest));
+  return Object.values(state.projects ?? {}).flatMap(p => (p.computer === HERE ? [p.path] : []));
 }
 
 /** The repositories a fixture's person already has, as folders under the home the host serving it runs in: work of

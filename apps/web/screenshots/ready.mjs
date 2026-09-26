@@ -24,6 +24,13 @@ import { TRANSCRIPT_LOADING } from "../src/transcript-words.js";
 /** The centre column, drawn once the store has rendered. */
 export const APP_UP = "[data-shell-center]";
 
+/** What the page wears when something went wrong: an error notice, a create that stopped, a refused field and an
+ * alert. A shot that shows one is not the shot it is named for, unless waiting for it is the point of the shot. */
+export const FAILED_ON_THE_PAGE = ['[data-notice][data-kind="error"]', '[data-testid="workspace-creation"][aria-busy="false"]', "[data-refused]", '[role="alert"]'];
+
+/** The failures a shot must not show: every one but the one its surface waits for. */
+export const failuresToCheck = shot => FAILED_ON_THE_PAGE.filter(selector => selector !== shot.wait);
+
 /** The mark one message of a transcript carries, whoever sent it. */
 export const A_MESSAGE = "[data-message-role]";
 
