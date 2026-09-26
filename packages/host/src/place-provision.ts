@@ -11,6 +11,7 @@ import { agentStateFile, provisionBox, provisionPlanOf, type BrewTable } from "@
 import { probePath } from "@wsp/protocol";
 import { TOOL_PREFIX } from "@wsp/catalog";
 import type { PlaceProvisioner } from "@wsp/runtime";
+import { serverVault } from "./env-keys.js";
 import { brewTableFor, copyRows, planImport } from "./image-recipe.js";
 import { loadRecipe, smallRecipePath } from "./recipe-file.js";
 
@@ -50,7 +51,7 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
         // The files that travel to a computer somebody owns are the agents' own: their skills, their standing
         // instructions and their configuration, in the agents' homes there. A dotfile, a login's store and a
         // shell's rc are the person's computer, and the computer they joined is one they already live on.
-        { rows, small: recipe, home: o.home, platform: o.platform, brew, secrets: new Map(), keepFile: agentStateFile, path, prefix },
+        { rows, small: recipe, home: o.home, platform: o.platform, brew, secrets: new Map(), vault: serverVault(o.statePath), keepFile: agentStateFile, path, prefix },
       );
       return provisionPlanOf(imp, recipe.at, path, prefix);
     },

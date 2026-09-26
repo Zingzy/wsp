@@ -444,8 +444,8 @@ export interface Api {
   skillsRemove?(target: AgentsTarget, name: string, project: boolean): Promise<void>;
   /** One skill there turned off or on. */
   skillsToggle?(target: AgentsTarget, name: string, project: boolean, on: boolean): Promise<void>;
-  /** One MCP server written into an agent's config there; its values ride this once and go into that file alone. A
-   * client without it holds Add an MCP server. */
+  /** One MCP server written into an agent's config there; its values ride this once and go into that file on this
+   * computer, or the vault for any other. A client without it holds Add an MCP server. */
   serversAdd?(target: AgentsTarget, ask: ServerAdd): Promise<{ file: string }>;
   /** One server's entry taken out of an agent's config there. */
   serversRemove?(target: AgentsTarget, ask: ServerAsk): Promise<{ file: string }>;

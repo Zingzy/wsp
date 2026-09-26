@@ -3288,7 +3288,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "servers add",
     usage: "wsp servers add <name> [<workspace>] [--on <computer>] --agent <id> (--command \"<line>\" [--env <NAME>]... | --url <address> [--header <name>=<VARIABLE>]...) [--project [<name>]]",
-    about: "writes one MCP server into an agent's own config: a command with its arguments and variables, or an address with its headers, each value read off this terminal's environment and written into that file alone",
+    about: "writes one MCP server into an agent's own config: a command with its arguments and variables, or an address with its headers, each value read off this terminal's environment and written into that file on this computer; on any other the file names a variable and the value goes to the vault",
     page: "agent",
     options: { agent: { type: "string" }, on: { type: "string" }, command: { type: "string" }, env: { type: "string", multiple: true }, url: { type: "string" }, header: { type: "string", multiple: true }, project: { type: "string", valueWith: "on" } },
     run: async ctx => {
@@ -3306,7 +3306,7 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `Writes one MCP server into one agent's own config on one computer or workspace, the project's file with project from a workspace: a command with its arguments and the variables it is given, or an address with its headers. Every value is read by name off the environment the wsp tools run with and goes into that file alone, never into an answer; a name already in the file is refused rather than written over. ${SERVER_CHANGE_WORDS}`,
+      description: `Writes one MCP server into one agent's own config on one computer or workspace, the project's file with project from a workspace: a command with its arguments and the variables it is given, or an address with its headers. Every value is read by name off the environment the wsp tools run with and never goes into an answer: on this computer it goes into that file, and on any other the file names a variable and the value goes to the vault, which hands it to every turn. A name already in the file is refused rather than written over. ${SERVER_CHANGE_WORDS}`,
       input: {
         name: z.string().describe("what to call the server in the agent's config"),
         agent: z.string().describe("the catalog id of the agent whose config takes it"),

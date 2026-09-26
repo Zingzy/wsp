@@ -90,6 +90,43 @@ describe("adding an MCP server", () => {
     expect(CODEX_TOML.read(after, at.home).find(s => s.name === "acme")?.transport).toEqual({ kind: "http", url: "https://mcp.acme.example/mcp", headers: { Authorization: "Bearer tok-acme" } });
   });
 
+  it("writes names into another computer's files and hands each value to the vault, never to the file", async () => {
+    const at = fixture();
+    const vaulted: Record<string, string>[] = [];
+    const acts = serversActs({ vault: v => void vaulted.push({ ...v }) });
+    await acts.add(box(at, road(at).machine), { agent: "claude", name: "tracker", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer lin_api_TESTONLY", "X-Team": "eng" } });
+    await acts.add(box(at, road(at).machine), { agent: "codex", name: "tracker", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer lin_api_TESTONLY" } });
+    await acts.add(box(at, road(at).machine), { agent: "codex", name: "notion", command: "npx", args: ["notion-mcp"], env: { NOTION_TOKEN: "ntn_TESTONLY" } });
+    const claude = readFileSync(join(at.home, ".claude.json"), "utf8");
+    const codex = readFileSync(join(at.home, ".codex/config.toml"), "utf8");
+    for (const secret of ["lin_api_TESTONLY", "ntn_TESTONLY"]) {
+      expect(claude).not.toContain(secret);
+      expect(codex).not.toContain(secret);
+    }
+    expect(json(join(at.home, ".claude.json")).mcpServers!.tracker).toEqual({ type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer ${WSP_MCP_TRACKER_AUTHORIZATION}", "X-Team": "${WSP_MCP_TRACKER_X_TEAM}" } });
+    expect(codex).toContain('[mcp_servers.tracker]\nbearer_token_env_var = "WSP_MCP_TRACKER_AUTHORIZATION"');
+    expect(codex).toContain('[mcp_servers.notion]\nenv_vars = ["NOTION_TOKEN"]');
+    expect(vaulted).toEqual([{ WSP_MCP_TRACKER_AUTHORIZATION: "lin_api_TESTONLY", WSP_MCP_TRACKER_X_TEAM: "eng" }, { WSP_MCP_TRACKER_AUTHORIZATION: "lin_api_TESTONLY" }, { NOTION_TOKEN: "ntn_TESTONLY" }]);
+  });
+
+  it("refuses a value for a variable a catalog row keeps its key under, naming the row, and writes nothing", async () => {
+    const at = fixture();
+    const before = readFileSync(join(at.home, ".codex/config.toml"), "utf8");
+    const vaulted: Record<string, string>[] = [];
+    await expect(serversActs({ vault: v => void vaulted.push({ ...v }) }).add(box(at, road(at).machine), { agent: "codex", name: "gem", command: "gem-mcp", env: { GEMINI_API_KEY: "gem_TESTONLY" } })).rejects.toThrow(
+      "GEMINI_API_KEY belongs to the Gemini CLI key, so set it there or give the variable another name.",
+    );
+    expect(readFileSync(join(at.home, ".codex/config.toml"), "utf8")).toBe(before);
+    expect(vaulted).toEqual([]);
+  });
+
+  it("refuses a value for another computer where the host wired no vault to hold it, and writes nothing", async () => {
+    const at = fixture();
+    const before = readFileSync(join(at.home, ".claude.json"), "utf8");
+    await expect(serversActs().add(box(at, road(at).machine), { agent: "claude", name: "acme", command: "npx", env: { ACME_KEY: "sk-acme-x" } })).rejects.toThrow("There is no vault here to hold the server's values, so nothing was written.");
+    expect(readFileSync(join(at.home, ".claude.json"), "utf8")).toBe(before);
+  });
+
   it("makes a config that is not there yet with its folder, readable by the login alone", async () => {
     const at = fixture();
     rmSync(join(at.home, ".gemini"), { recursive: true });

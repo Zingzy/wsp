@@ -19,6 +19,7 @@ import {
   provisionLandedLine,
   provisionLines,
   provisionListReadLine,
+  provisionSkippedLine,
   provisionPackedLine,
   provisionServersLine,
   provisionShippedLine,
@@ -504,6 +505,22 @@ describe("the person's own files and their servers, on the same run", () => {
       provisionListReadLine(0),
       provisionServersLine(rows.filter(r => r.kind === "server" && r.outcome === "installed").length, 1),
     ]);
+  });
+
+  it("says each thing the pack left out of the copy as a line of the job, where the person reads it", async () => {
+    const tar = tarOf([{ path: ".claude-cfg/skills/why/SKILL.md", mode: 0o644, content: "why\n" }]);
+    const plan = withFilesAndServers([]);
+    const note = "gem left out of the copy: GEMINI_API_KEY belongs to the Gemini CLI key, so set it there or give the variable another name";
+    const { machine } = boxMachine();
+    const said: string[] = [];
+    await provisionBox(
+      machine,
+      { ...plan, files: { lands: plan.files!.lands, pack: async () => ({ tar, bytes: tar.length, unpacked: 4, files: 1, skipped: [{ id: "agents/claude", path: "~/.claude.json", note }], cut: [], silenced: [], macPaths: [] }) } },
+      detail => said.push(detail),
+      ON,
+    );
+    expect(said).toContain(provisionSkippedLine("~/.claude.json", note));
+    expect(provisionSkippedLine("~/.claude.json", note)).toBe(`~/.claude.json: ${note}`);
   });
 
   it("says every path the archive carried failed, with the reason, when the files could not be packed or landed, and goes on with the rest", async () => {

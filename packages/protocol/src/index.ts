@@ -4311,6 +4311,9 @@ export const provisionLandedLine = (files: number): string => `landed: ${plural(
  * file there. */
 export const provisionListReadLine = (keys: number): string => `list read: ${plural(keys, "server key")}`;
 
+/** What the pack left out of the copy for a computer you own, one line per path and reason, as the job says it. */
+export const provisionSkippedLine = (path: string, note: string): string => `${path}: ${note}`;
+
 /** What the servers round wrote into the agents' own files on that computer, of the servers the recipe names. */
 export const provisionServersLine = (written: number, servers: number): string =>
   `servers merged: ${written} of ${plural(servers, "server")} written into the agents' own files`;

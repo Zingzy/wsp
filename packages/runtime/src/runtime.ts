@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, guestEnv, installEnv, installHomes, sharedOn } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, serverValuesOf, guestEnv, installEnv, installHomes, sharedOn } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -1302,7 +1302,8 @@ export interface Runtime {
     skillsRemove(target: AgentsTarget, ask: SkillAsk, origin?: Caller): Promise<{ removed: string[] }>;
     /** A skill turned off or on there, by the rename of its SKILL.md. */
     skillsToggle(target: AgentsTarget, ask: SkillAsk & { on: boolean }, origin?: Caller): Promise<{ paths: string[] }>;
-    /** One MCP server written into an agent's config there, its values into that file alone. */
+    /** One MCP server written into an agent's config there: its values into that file on this computer, and on any
+     * other the file names a variable for each and the value goes to the vault. */
     serversAdd(target: AgentsTarget, ask: ServerAdd, origin?: Caller): Promise<{ file: string }>;
     /** One server's entry taken out of an agent's config there, every other line as it was. */
     serversRemove(target: AgentsTarget, ask: ServerAsk, origin?: Caller): Promise<{ file: string }>;
@@ -6116,12 +6117,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * written nowhere else. `waiting` is the turn's own reading of whether it is waiting on something outside its own
    * process, a person's answer to a prompt or a command it started in the background, which its stream's idle clock
    * reads; absent on every road that is not a turn. It is handed beside the limits and never as one, so the turn
-   * road goes on handing the factory none and runs under the turn's own. */
-  const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting): { harness: string; adapter: HarnessAdapter } => {
+   * road goes on handing the factory none and runs under the turn's own. `servers` is the values the MCP servers'
+   * definitions read by name, which only a turn's agent starts servers with, under the machine's own environment. */
+  const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting, servers: Readonly<Record<string, string>> = {}): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
     if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
     const kind = moduleOf(entry.record.kind);
+    const vault = opts.vault?.() ?? {};
     return {
       harness,
       adapter: factory({
@@ -6129,13 +6132,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         workspaceId: entry.record.id,
         execStream: execFactoryFor(entry, undefined, waiting),
         home: id => kind.home(entry, id),
-        env: { ...kind.env(entry, harness), ...turnEnv },
+        env: { ...servers, ...kind.env(entry, harness), ...turnEnv },
         ...((): { projectKey?: string } => {
           const key = kind.memoryKey(entry, harness);
           return key !== undefined ? { projectKey: key } : {};
         })(),
         signInRefusal: signInRefusalLine({ kind: entry.record.kind }),
-        vault: opts.vault?.() ?? {},
+        vault,
         loginStands: id => kind.loginStands(entry, id),
       }),
     };
@@ -7022,6 +7025,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               : {}),
           },
           () => waiting.on,
+          // A name no catalog row declares is one an MCP server's definition reads, which only the environment carries.
+          serverValuesOf(opts.vault?.() ?? {}),
         );
       } catch (e) {
         dropScope();

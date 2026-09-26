@@ -417,6 +417,18 @@ describe("local workspace", () => {
     await rt.close();
   });
 
+  it("a command over the wire carries none of the values the vault holds for MCP servers, since it starts no agent", async () => {
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: HARNESS_ADAPTERS.claude }, local: localWiring, vault: () => ({ WSP_MCP_LINEAR_AUTHORIZATION: "lin_api_TESTONLY" }) });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const stream = await rt.workspaces.execStream(ws.id, ["env"]);
+    let out = "";
+    for await (const line of stream.lines) out += line;
+    expect(await stream.exited).toBe(0);
+    expect(out).toContain("PATH=");
+    expect(out).not.toContain("lin_api_TESTONLY");
+    await rt.close();
+  });
+
   it("exec runs on this computer and returns the exit code; files read and write under the folder", async () => {
     const rt = runtime();
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });

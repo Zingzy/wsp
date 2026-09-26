@@ -610,6 +610,44 @@ describe("packPlan", () => {
   });
 });
 
+describe("packPlan: MCP servers travel by name", () => {
+  it("writes every server's headers and variables as names in the copy of each agent's config, hands the values to the vault, and leaves this computer's files as they were", async () => {
+    const home = laptop();
+    const claude = `{\n  // mine\n  "mcpServers": {\n    "linear": { "type": "http", "url": "https://mcp.linear.app/mcp", "headers": { "Authorization": "Bearer lin_api_TESTONLY" } }\n  },\n  "projects": { "${home}": { "mcpServers": { "notion": { "command": "npx", "env": { "NOTION_TOKEN": "ntn_TESTONLY" } } } } }\n}\n`;
+    const codex = '[mcp_servers.linear]\nurl = "https://mcp.linear.app/mcp"\nhttp_headers = { "Authorization" = "Bearer lin_api_TESTONLY" }\n\n[mcp_servers.other]\ncommand = "o"\nenv = { NOTION_TOKEN = "ntn_OTHER" }\n';
+    writeFileSync(join(home, ".claude.json"), claude);
+    mkdirSync(join(home, ".codex"));
+    writeFileSync(join(home, ".codex", "config.toml"), codex);
+    const plan = planFiles([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude.json"] }), row({ rung: "agents", id: "agents/codex", paths: ["~/.codex/config.toml"] })], { home, stat: statOf, platform: "darwin" });
+    const vaulted: Record<string, string>[] = [];
+    const packed = await packPlan(plan, { secrets: new Map(), home, vault: v => void vaulted.push({ ...v }) });
+    const at = extract(packed.tar);
+    const copiedClaude = readFileSync(join(at, ".claude.json"), "utf8");
+    const copiedCodex = readFileSync(join(at, ".codex", "config.toml"), "utf8");
+    for (const secret of ["lin_api_TESTONLY", "ntn_TESTONLY", "ntn_OTHER"]) {
+      expect(copiedClaude).not.toContain(secret);
+      expect(copiedCodex).not.toContain(secret);
+    }
+    expect(copiedClaude).toContain('"Authorization": "Bearer ${WSP_MCP_LINEAR_AUTHORIZATION}"');
+    expect(copiedClaude).toContain('"NOTION_TOKEN": "${NOTION_TOKEN}"');
+    expect(copiedClaude).toContain("// mine");
+    expect(copiedCodex).toBe('[mcp_servers.linear]\nbearer_token_env_var = "WSP_MCP_LINEAR_AUTHORIZATION"\nurl = "https://mcp.linear.app/mcp"\n');
+    expect(vaulted).toEqual([{ WSP_MCP_LINEAR_AUTHORIZATION: "lin_api_TESTONLY", NOTION_TOKEN: "ntn_TESTONLY" }]);
+    expect(packed.skipped).toContainEqual({ id: "agents/codex", path: "~/.codex/config.toml", note: "other left out of the copy: sets NOTION_TOKEN, which notion already sets to another value" });
+    expect(readFileSync(join(home, ".claude.json"), "utf8")).toBe(claude);
+    expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toBe(codex);
+  });
+
+  it("leaves a config out of the copy whole where its servers cannot be written by name", async () => {
+    const home = laptop();
+    writeFileSync(join(home, ".claude.json"), '{ "mcpServers": { "a": { "command": "x", "env": { "K": "sk-x" } } }, oops }');
+    const plan = planFiles([row({ rung: "agents", id: "agents/claude", paths: ["~/.claude.json"] })], { home, stat: statOf, platform: "darwin" });
+    const packed = await packPlan(plan, { secrets: new Map(), home, vault: () => {} });
+    expect(listTar(packed.tar).map(e => e.path)).not.toContain(".claude.json");
+    expect(packed.skipped).toContainEqual({ id: "agents/claude", path: "~/.claude.json", note: "left out of the copy: its MCP servers could not be written by name (the file is not valid JSON; add the server by hand)" });
+  });
+});
+
 describe("packPlan: excludes and consent rows", () => {
   function demo(home: string): void {
     mkdirSync(join(home, ".config", "demo", "cache"), { recursive: true });

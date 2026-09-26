@@ -121,6 +121,91 @@ export interface McpFormat {
    * a format that keeps servers per folder. The text stands where it defines none of them. Throws when the text is
    * not the format. */
   remove(text: string, names: readonly string[], project?: string): McpRemoved;
+  /** The text with every header and every command variable of its servers written as the name of a variable, in
+   * the syntax this format's agent expands from its environment, and each value that left the text under the name
+   * it now reads. A value that already names a variable stands as the person wrote it. `only` names one server of
+   * the file's own table and leaves every other as it is. Throws when the text is not the format. */
+  refer(text: string, only?: string): Promise<McpReferred>;
+}
+
+/** What a reference writer came to: the text, and per server the values it no longer holds, by variable name.
+ * `project` is the folder whose own servers it sits under, for a format that keeps servers per folder. */
+export interface McpReferred {
+  text: string;
+  servers: { name: string; project?: string; values: Record<string, string> }[];
+  /** Every server definition the returned text holds, parsed. */
+  entries: unknown[];
+}
+
+/** The variable a server's header travels under, since a header's name is not a variable's. */
+export const mcpHeaderVariable = (server: string, header: string): string => `WSP_MCP_${server}_${header}`.toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+
+/** A value no variable can carry: an env file holds one variable per line. */
+export const crossesLines = (value: string): boolean => /[\n\r]/.test(value);
+
+/** Every string inside the given server definitions, at any depth. */
+const stringsIn = (v: unknown): string[] => (typeof v === "string" ? [v] : Array.isArray(v) ? v.flatMap(stringsIn) : isObject(v) ? Object.values(v).flatMap(stringsIn) : []);
+
+/** Refuses a copy whose server definitions still hold a value that was taken out of them, each side read whole and
+ * with its scheme word (`Bearer`, `Basic`, `token`) taken off. Only the definitions are read, since
+ * the values come from nowhere else, and the rest of an agent's file is prose and counters a value may match by chance. */
+function stillStands(entries: readonly unknown[], servers: McpReferred["servers"]): void {
+  const forms = (v: string): string[] => [v, ...(/^(?:bearer|basic|token)\s+(.+)$/i.exec(v)?.slice(1) ?? [])];
+  const held = new Set(stringsIn(entries).flatMap(forms));
+  for (const s of servers) {
+    if (Object.values(s.values).some(v => forms(v).some(f => held.has(f)))) throw new Error(`${s.name}'s value still stands in the file after it was written by name, so the file stays on this computer`);
+  }
+}
+
+/** Why a value typed or copied for a catalog row's own variable does not travel as a server's: `row` is that row. */
+export const rowVariableLine = (name: string, row: string): string => `${name} belongs to the ${row} key, so set it there or give the variable another name`;
+
+/** The minted names of one server's headers, refused where two headers would travel under one. */
+function headerVariables(server: string, headers: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const seen = new Map<string, string>();
+  for (const h of headers) {
+    const n = mcpHeaderVariable(server, h);
+    const other = seen.get(n);
+    if (other !== undefined) throw new Error(`${server} sends ${other} and ${h}, which would both travel as ${n}; rename one`);
+    seen.set(n, h);
+    out.set(h, n);
+  }
+  return out;
+}
+
+/** `Authorization: Bearer <token>`: the token alone, which is what both agents' by-name bearer fields read. */
+const bearerToken = (header: string, value: string): string | undefined => (/^authorization$/i.test(header) ? /^Bearer\s+(\S.*)$/i.exec(value)?.[1] : undefined);
+
+/** A file's servers written by name for a copy on another machine, `held` carrying the values an earlier file of the
+ * same copy handed over. A server that would need a name to hold two values, or a value of more than one line, is
+ * taken out of the text with the reason, and so is one that sets a variable a catalog row keeps its key under, which
+ * `rowOf` names; a provider's key is never a server's value. */
+export async function serversByName(format: McpFormat, text: string, held: Map<string, { value: string; by: string }>, rowOf: (name: string) => string | undefined): Promise<{ text: string; dropped: { name: string; reason: string }[] }> {
+  const found = (await format.refer(text)).servers;
+  const dropped: { name: string; reason: string; project?: string }[] = [];
+  const kept = new Map<string, { value: string; by: string }>();
+  for (const s of found) {
+    const values = Object.entries(s.values);
+    const owned = values.map(([name]) => [name, rowOf(name)] as const).find(([, row]) => row !== undefined);
+    const clash = values.find(([name, value]) => {
+      const at = held.get(name) ?? kept.get(name);
+      return at !== undefined && at.value !== value;
+    });
+    const tall = values.find(([, value]) => crossesLines(value));
+    if (owned !== undefined) dropped.push({ name: s.name, reason: rowVariableLine(owned[0], owned[1]!), ...(s.project !== undefined ? { project: s.project } : {}) });
+    else if (clash !== undefined) dropped.push({ name: s.name, reason: `sets ${clash[0]}, which ${(held.get(clash[0]) ?? kept.get(clash[0]))!.by} already sets to another value`, ...(s.project !== undefined ? { project: s.project } : {}) });
+    else if (tall !== undefined) dropped.push({ name: s.name, reason: `sets ${tall[0]} to a value on more than one line, which cannot travel by name`, ...(s.project !== undefined ? { project: s.project } : {}) });
+    else for (const [name, value] of values) if (!held.has(name) && !kept.has(name)) kept.set(name, { value, by: s.name });
+  }
+  let out = text;
+  for (const d of dropped) out = format.remove(out, [d.name], d.project).text;
+  if (found.length === 0) return { text, dropped: [] };
+  const final = await format.refer(out);
+  stillStands(final.entries, found);
+  const result = final.text;
+  for (const [name, at] of kept) held.set(name, at);
+  return { text: result, dropped: dropped.map(({ name, reason }) => ({ name, reason })) };
 }
 
 export interface McpConfig {
@@ -575,6 +660,61 @@ interface JsonShape {
   /** The edits that turn the entry at `entry` on or off by the switch the agent reads, in the order they are made;
    * absent where it keeps none. */
   flip?(root: Tree, entry: JSONPath, name: string, on: boolean): JsonEdit[];
+  /** The key an entry's command variables sit under. */
+  envKey: string;
+  /** A variable named anywhere in a string, in the syntax this format's agent expands. */
+  ref: RegExp;
+  /** A variable written in that syntax. */
+  refOf(variable: string): string;
+}
+
+/** The reference writer for a JSON file: each server's header and command variable values put in place by name,
+ * every other key and comment where it was. */
+function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
+  /** The file's own server table, and with `folders` each folder's under `projects`, for a format that keeps them. */
+  const serverTables = (root: Tree, folders: boolean): { at: JSONPath; project?: string; servers: Tree }[] => [
+    { at: [shape.key], servers: tree(root[shape.key]) ?? {} },
+    ...(shape.projects && folders
+      ? Object.entries(tree(root.projects) ?? {}).flatMap(([folder, held]) => {
+          const servers = tree(tree(held)?.[shape.key]);
+          return servers === undefined ? [] : [{ at: ["projects", folder, shape.key] as JSONPath, project: folder, servers }];
+        })
+      : []),
+  ];
+  const names = (v: string): boolean => new RegExp(shape.ref.source).test(v);
+  /** A value that is one reference and nothing else, a bearer's included. */
+  const whole = (v: string): boolean => new RegExp(`^(?:Bearer\\s+)?(?:${shape.ref.source})$`, "i").test(v);
+  return async (text, only) => {
+    const root = jsonObject(text);
+    const tables = serverTables(root, only === undefined);
+    const edits: JsonEdit[] = [];
+    const servers: McpReferred["servers"] = [];
+    for (const table of tables) {
+      for (const [name, raw] of Object.entries(table.servers)) {
+        const def = tree(raw);
+        if (def === undefined || (only !== undefined && name !== only)) continue;
+        const values: Record<string, string> = {};
+        const put = (key: string, entries: Record<string, string>, variable: (k: string) => string, bearer: boolean): void => {
+          for (const [k, v] of Object.entries(entries)) {
+            if (v === "" || whole(v)) continue;
+            if (names(v)) throw new Error(`${name}'s ${k} mixes a value with a variable, so it cannot travel by name; make it one or the other`);
+            const n = variable(k);
+            const token = bearer ? bearerToken(k, v) : undefined;
+            values[n] = token ?? v;
+            edits.push([[...table.at, name, key, k], token !== undefined ? `Bearer ${shape.refOf(n)}` : shape.refOf(n)]);
+          }
+        };
+        const minted = headerVariables(name, Object.keys(dict(def.headers)));
+        put("headers", dict(def.headers), h => minted.get(h)!, true);
+        put(shape.envKey, dict(def[shape.envKey]), k => k, false);
+        servers.push({ name, ...(table.project !== undefined ? { project: table.project } : {}), values });
+      }
+    }
+    const out = edits.length === 0 ? text : editJsonc(text, root, edits);
+    const entries = serverTables(jsonObject(out), true).flatMap(t => Object.values(t.servers));
+    stillStands(entries, servers);
+    return { text: out, servers, entries };
+  };
 }
 
 function jsonFormat(shape: JsonShape): McpFormat {
@@ -613,6 +753,7 @@ function jsonFormat(shape: JsonShape): McpFormat {
     },
     merge: jsonMerger(shape.key),
     remove: jsonRemover(shape),
+    refer: jsonReferrer(shape),
     ...(shape.flip === undefined ? {} : { enable: jsonEnabler(shape.key, shape.flip) }),
   };
 }
@@ -636,6 +777,9 @@ const mcpServersJson = (ref: RegExp, remote: (url: string) => Record<string, str
     ...extra,
     key: "mcpServers",
     projects: true,
+    envKey: "env",
+    ref,
+    refOf: v => `\${${v}}`,
     server: (name, raw, scope) => {
       if (!isObject(raw)) return undefined;
       const command = str(raw.command);
@@ -669,18 +813,23 @@ export const GEMINI_SETTINGS_JSON: McpFormat = mcpServersJson(/\$(?:\{([A-Za-z_]
   },
 });
 
+const OPENCODE_REF = /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g;
+
 /** `mcp.<name> = { type: "local", command: [command, ...args], environment }` or `{ type: "remote", url, headers }`:
  * OpenCode's config. */
 export const OPENCODE_JSON: McpFormat = jsonFormat({
   key: "mcp",
   projects: false,
+  envKey: "environment",
+  ref: OPENCODE_REF,
+  refOf: v => `{env:${v}}`,
   server: (name, raw, scope) => {
     if (!isObject(raw)) return undefined;
     const off = raw.enabled === false ? { disabled: true as const } : {};
     if (raw.type === "remote") {
       const url = str(raw.url);
       const headers = dict(raw.headers);
-      return url === undefined ? undefined : { name, scope, transport: { kind: "http", url, headers }, envRefs: refsIn(Object.values(headers), /\{env:([A-Za-z_][A-Za-z0-9_]*)\}/g), ...off };
+      return url === undefined ? undefined : { name, scope, transport: { kind: "http", url, headers }, envRefs: refsIn(Object.values(headers), OPENCODE_REF), ...off };
     }
     const [command, ...args] = strs(raw.command);
     if (command === undefined) return undefined;
@@ -1021,6 +1170,144 @@ function enableCodex(text: string, name: string, on: boolean): Placed {
   return { text: next.join("\n") };
 }
 
+/** The key a line of a table sets, unquoted; nothing for a line that sets none. */
+function tomlKey(line: string): string | undefined {
+  const code = uncommentToml(line);
+  const eq = code.indexOf("=");
+  return eq < 0 ? undefined : code.slice(0, eq).trim().replace(/^"(.*)"$/, "$1");
+}
+
+/** Codex's text edited line by line toward the tree referCodex wants, for the spellings the line reader reads: a
+ * server's http_headers and env, inline or as their own tables, go, and its bearer_token_env_var, env_http_headers and
+ * env_vars name the variables instead, every other line byte for byte. */
+function referCodexLines(text: string, only?: string): string {
+  let lines = text.split("\n");
+  for (const s of readCodex(text)) {
+    if (only !== undefined && s.name !== only) continue;
+    const headers = s.transport.kind === "http" ? s.transport.headers : {};
+    const env = s.transport.kind === "stdio" ? s.transport.env : {};
+    if (Object.keys(headers).length + Object.keys(env).length === 0) continue;
+    const owner = codexOwners(lines);
+    const subs = lines.map(l => {
+      const t = uncommentToml(l).trim();
+      return t.startsWith("[") ? tomlHeader(t)?.sub : undefined;
+    });
+    /** Each line's sub-table within the server, carried down from the header above it. */
+    let sub: string | undefined;
+    const subOf = lines.map((_, i) => (owner[i] !== s.name ? undefined : (sub = uncommentToml(lines[i]!).trim().startsWith("[") ? subs[i] : sub)));
+    const mine = (i: number): boolean => owner[i] === s.name;
+    const head = lines.findIndex((l, i) => mine(i) && uncommentToml(l).trim().startsWith("[") && subs[i] === undefined);
+    const mainKey = (key: string): number => lines.findIndex((l, i) => mine(i) && i > head && subOf[i] === undefined && tomlKey(l) === key);
+    const hasBearer = mainKey("bearer_token_env_var") >= 0;
+    let bearer: string | undefined;
+    const envHeaders: [string, string][] = [];
+    const minted = headerVariables(s.name, Object.keys(headers));
+    for (const [h, v] of Object.entries(headers)) {
+      const token = hasBearer || bearer !== undefined ? undefined : bearerToken(h, v);
+      const n = minted.get(h)!;
+      if (token !== undefined) bearer = n;
+      else envHeaders.push([h, n]);
+    }
+    const envNames = Object.keys(env);
+    const drop = new Set(lines.flatMap((l, i) => (mine(i) && (subOf[i] === "http_headers" || subOf[i] === "env" || (subOf[i] === undefined && i > head && (tomlKey(l) === "http_headers" || tomlKey(l) === "env"))) ? [i] : [])));
+    const replace = new Map<number, string[]>();
+    const added: string[] = [];
+    if (bearer !== undefined) added.push(`bearer_token_env_var = ${tomlString(bearer)}`);
+    if (envHeaders.length > 0) {
+      const inline = mainKey("env_http_headers");
+      const table = lines.findIndex((l, i) => mine(i) && subs[i] === "env_http_headers" && uncommentToml(l).trim().startsWith("["));
+      if (inline >= 0) replace.set(inline, [`env_http_headers = ${tomlInline({ ...(tomlValue(uncommentToml(lines[inline]!).slice(uncommentToml(lines[inline]!).indexOf("=") + 1)) as Record<string, string>), ...Object.fromEntries(envHeaders) })}`]);
+      else if (table >= 0) {
+        let last = table;
+        for (let i = table + 1; i < lines.length && subOf[i] === "env_http_headers" && mine(i); i++) if (lines[i]!.trim() !== "") last = i;
+        replace.set(last, [lines[last]!, ...envHeaders.map(([h, n]) => `${tomlString(h)} = ${tomlString(n)}`)]);
+      } else added.push(`env_http_headers = ${tomlInline(Object.fromEntries(envHeaders))}`);
+    }
+    if (envNames.length > 0) {
+      const at = mainKey("env_vars");
+      if (at >= 0) {
+        let end = at;
+        let value = uncommentToml(lines[at]!).slice(uncommentToml(lines[at]!).indexOf("=") + 1).trim();
+        while (tomlOpenArray(value) && end + 1 < lines.length) value += uncommentToml(lines[++end]!).trim();
+        const had = tomlStrings(value);
+        replace.set(at, [`env_vars = [${[...had, ...envNames.filter(k => !had.includes(k))].map(tomlString).join(", ")}]`]);
+        for (let i = at + 1; i <= end; i++) drop.add(i);
+      } else added.push(`env_vars = [${envNames.map(tomlString).join(", ")}]`);
+    }
+    lines = lines.flatMap((l, i) => (i === head ? [l, ...added] : drop.has(i) ? [] : (replace.get(i) ?? [l])));
+  }
+  return lines.join("\n");
+}
+
+/** The reference writer for Codex: the file read whole by a TOML parser, so a server's headers and variables read the
+ * same however the file spells them (a table, a sub-table, an inline table, a dotted key, a quoted name), and the tree
+ * rewritten by name. The text the line editor makes is kept where it parses to that same tree, which keeps every
+ * comment; any other spelling is written out from the tree. The parser is loaded on the first call: every host
+ * process carries this module and the host's memory has a budget, so nothing that never writes a Codex file pays it. */
+async function referCodex(text: string, only?: string): Promise<McpReferred> {
+  const { parse: parseToml, stringify: stringifyToml } = await import("smol-toml");
+  let tree: Record<string, unknown>;
+  try {
+    tree = parseToml(text) as Record<string, unknown>;
+  } catch (e) {
+    throw new Error(`the file is not valid TOML (${(e instanceof Error ? e.message : String(e)).split("\n")[0]})`);
+  }
+  const unread = (where: string): Error => new Error(`${where} is written in a shape wsp does not read, so its values cannot be written by name`);
+  const table = tree["mcp_servers"];
+  if (table === undefined) return { text, servers: [], entries: [] };
+  if (!isObject(table)) throw unread("mcp_servers");
+  const servers: McpReferred["servers"] = [];
+  const next: Record<string, unknown> = { ...table };
+  let changed = false;
+  for (const [name, raw] of Object.entries(table)) {
+    if (!isObject(raw)) throw unread(`mcp_servers.${name}`);
+    for (const key of ["http_headers", "env"]) {
+      const held = raw[key];
+      if (held !== undefined && (!isObject(held) || Object.values(held).some(v => typeof v !== "string"))) throw unread(`mcp_servers.${name}`);
+    }
+    if (only !== undefined && name !== only) continue;
+    const headers = dict(raw["http_headers"]);
+    const env = dict(raw["env"]);
+    const values: Record<string, string> = {};
+    servers.push({ name, values });
+    if (Object.keys(headers).length + Object.keys(env).length === 0) continue;
+    const minted = headerVariables(name, Object.keys(headers));
+    let bearer = typeof raw["bearer_token_env_var"] === "string" ? undefined : ("" as string | undefined);
+    const envHeaders: Record<string, string> = {};
+    for (const [h, v] of Object.entries(headers)) {
+      const n = minted.get(h)!;
+      const token = bearer === "" ? bearerToken(h, v) : undefined;
+      values[n] = token ?? v;
+      if (token !== undefined) bearer = n;
+      else envHeaders[h] = n;
+    }
+    for (const [k, v] of Object.entries(env)) if (v !== "") values[k] = v;
+    const def: Record<string, unknown> = { ...raw };
+    delete def["http_headers"];
+    delete def["env"];
+    if (bearer !== undefined && bearer !== "") def["bearer_token_env_var"] = bearer;
+    if (Object.keys(envHeaders).length > 0) def["env_http_headers"] = { ...dict(raw["env_http_headers"]), ...envHeaders };
+    if (Object.keys(env).length > 0) {
+      const had = Array.isArray(raw["env_vars"]) ? (raw["env_vars"] as unknown[]) : [];
+      def["env_vars"] = [...had, ...Object.keys(env).filter(k => !had.includes(k))];
+    }
+    next[name] = def;
+    changed = true;
+  }
+  if (!changed) return { text, servers, entries: Object.values(table) };
+  const want = { ...tree, mcp_servers: next };
+  let out: string;
+  try {
+    const lined = referCodexLines(text, only);
+    out = jsonCanonical(parseToml(lined)) === jsonCanonical(want) ? lined : stringifyToml(want);
+  } catch {
+    out = stringifyToml(want);
+  }
+  const entries = Object.values(((parseToml(out) as Record<string, unknown>)["mcp_servers"] ?? {}) as Record<string, unknown>);
+  stillStands(entries, servers);
+  return { text: out, servers, entries };
+}
+
 export const CODEX_TOML: McpFormat = {
   read: readCodex,
   place: (text, name, server) => ({ text: placeCodex(text, name, server) }),
@@ -1033,4 +1320,5 @@ export const CODEX_TOML: McpFormat = {
   merge: codexMerge,
   remove: removeCodex,
   enable: enableCodex,
+  refer: referCodex,
 };
