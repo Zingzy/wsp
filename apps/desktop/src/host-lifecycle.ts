@@ -3,8 +3,8 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { accountAim, aimedAlias, aimedHost, defaultHomeIn, devCheckoutState, dialAddress, dialHost, homeNamed, hostLogPath, hostTokenFor, lockPathFor, ownPid, readHost, serve, servingHost, severalAccountHostsLine, wspHome, type CliIO, type HereAt, type HostLock, type HostRecord, type RestartRoad, type RunningWsp, type UrlOpener } from "@wsp/host";
-import { LOOPBACK, authority, bootLineOf, hereWord, isLoopback, type BootPayload } from "@wsp/protocol";
+import { accountAim, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, homeNamed, hostLogPath, hostTokenFor, lockPathFor, ownPid, readHost, serve, servingHost, severalAccountHostsLine, wspHome, type CliIO, type HereAt, type HostLock, type HostRecord, type RestartRoad, type RunningWsp, type UrlOpener } from "@wsp/host";
+import { LOOPBACK, authority, bootLineOf, isLoopback, type BootPayload } from "@wsp/protocol";
 import { safeEqual, tokenDigest, type Runtime } from "@wsp/runtime";
 
 export interface HostSession {
@@ -89,7 +89,7 @@ export function remoteSession(alias: string, record: HostRecord, url: string): H
 }
 
 function attached(port: number, url: string): HostSession {
-  return { url, port, owned: false, remote: false, label: hereWord(process.platform === "darwin"), close: async () => {} };
+  return { url, port, owned: false, remote: false, label: computerNameHere(), close: async () => {} };
 }
 
 /** Whether a digest is the one of the token the host serving this state file holds, compared the one way this repo
@@ -242,5 +242,5 @@ export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
     ...(opts.restart !== undefined ? { restart: opts.restart } : {}),
     ...(opts.here !== undefined ? { here: opts.here } : {}),
   });
-  return { url: `http://${authority(LOOPBACK, handle.port)}`, port: handle.port, owned: true, remote: false, label: hereWord(process.platform === "darwin"), close: () => handle.close() };
+  return { url: `http://${authority(LOOPBACK, handle.port)}`, port: handle.port, owned: true, remote: false, label: computerNameHere(), close: () => handle.close() };
 }

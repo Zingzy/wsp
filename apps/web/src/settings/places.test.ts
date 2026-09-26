@@ -2,12 +2,13 @@
 import { describe, expect, it } from "vitest";
 import { DAEMON_VERSION, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, type PlaceProvision, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, copiesWord, outcomeWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereSegments } from "./places.js";
+import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, copiesWord, hereName, outcomeWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
 
-const here: PlaceView = { id: "here", kind: "computer", name: "This Mac", default: false, shape: { cpu: 8, memMb: 16 * 1024 }, diskFreeBytes: 210 * 1024 ** 3, engine: "none", present: true, takesForks: false };
+const MAC = "zingzy's MacBook Pro";
+const here: PlaceView = { id: "here", kind: "computer", name: "zingzys-macbook-pro.local", default: false, shape: { cpu: 8, memMb: 16 * 1024 }, diskFreeBytes: 210 * 1024 ** 3, engine: "none", present: true, takesForks: false };
 const hetzner: PlaceView = {
   id: "p_1",
   kind: "computer",
@@ -30,48 +31,54 @@ describe("what the section computes beyond the table's own cells", () => {
     expect(placeName(hetzner)).toBe("hetzner");
   });
 
-  it("calls the computer the host runs on by what it is, not by its hostname", () => {
-    expect(placeName({ ...here, name: "zingzys-macbook-pro.local" }, true)).toBe("This Mac");
+  it("calls the computer the host runs on by the name its owner gave it, else its hostname, never this Mac", () => {
+    expect(placeName({ ...here, name: "zingzys-macbook-pro.local", label: MAC })).toBe(MAC);
     expect(placeName({ ...here, name: "zingzys-macbook-pro.local" })).toBe("zingzys-macbook-pro.local");
+    expect(hereName([{ ...here, label: MAC }, hetzner])).toBe(MAC);
+    expect(hereName([hetzner, { ...here, label: MAC }])).toBe(MAC);
+    // Until the places list holds the row there is no name, and no stand-in word is said in its place.
+    expect(hereName([hetzner])).toBe("");
+    expect(hereName([])).toBe("");
+    expect(removeSentence(hetzner, NOTHING_HELD, "")).toBe("");
   });
 });
 
 describe("the remove sentence", () => {
-  it("names what comes off a computer that holds workspaces, and what leaves this Mac", () => {
+  it("names what comes off a computer that holds workspaces, and what leaves the computer the host runs on", () => {
     expect(removeTitle(hetzner)).toBe("Remove hetzner?");
-    expect(removeSentence(hetzner, { workspaces: [{ name: "spoo-fix", state: "Running", threads: 2 }] }, 4.2 * 1024 ** 3)).toBe(
-      "wsp and its task come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The task's record and 2 threads leave this Mac.",
+    expect(removeSentence(hetzner, { workspaces: [{ name: "spoo-fix", state: "Running", threads: 2 }] }, MAC, 4.2 * 1024 ** 3)).toBe(
+      "wsp and its task come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The task's record and 2 threads leave zingzy's MacBook Pro.",
     );
   });
 
   it("says workspaces and records in the plural above one", () => {
-    expect(removeSentence(hetzner, { workspaces: [{ name: "a", state: "Running", threads: 2 }, { name: "b", state: "Running", threads: 1 }] }, 4.2 * 1024 ** 3)).toBe(
-      "wsp and its 2 tasks come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The tasks' records and 3 threads leave this Mac.",
+    expect(removeSentence(hetzner, { workspaces: [{ name: "a", state: "Running", threads: 2 }, { name: "b", state: "Running", threads: 1 }] }, MAC, 4.2 * 1024 ** 3)).toBe(
+      "wsp and its 2 tasks come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The tasks' records and 3 threads leave zingzy's MacBook Pro.",
     );
   });
 
   it("drops the second sentence for a computer that holds none", () => {
-    expect(removeSentence(hetzner, NOTHING_HELD, 4.2 * 1024 ** 3)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is.");
+    expect(removeSentence(hetzner, NOTHING_HELD, MAC, 4.2 * 1024 ** 3)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is.");
   });
 
   it("leaves the size out where nothing has measured the image", () => {
-    expect(removeSentence(hetzner, NOTHING_HELD)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image stays where it is.");
+    expect(removeSentence(hetzner, NOTHING_HELD, MAC)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image stays where it is.");
   });
 
   it("says what becomes of the copy of the image, since every computer that joined runs workspaces and holds one", () => {
     // What Remove promises about four gigabytes of somebody's disk is what the sweep does: it walks wsp's own
     // folder and the unit, and never the store the copy sits in, so the copy stays.
-    expect(removeSentence(hetzner, NOTHING_HELD, 4.2 * 1024 ** 3)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is.");
+    expect(removeSentence(hetzner, NOTHING_HELD, MAC, 4.2 * 1024 ** 3)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is.");
   });
 
   it("says a provider's workspaces are deleted there and its key forgotten here", () => {
-    expect(removeSentence(ascii, { workspaces: [{ name: "api", state: "Running", threads: 3 }, { name: "web", state: "Running", threads: 2 }] })).toBe(
-      "Its 2 tasks are deleted at Box by ASCII and the key is forgotten on this Mac. Their records and 5 threads leave this Mac.",
+    expect(removeSentence(ascii, { workspaces: [{ name: "api", state: "Running", threads: 3 }, { name: "web", state: "Running", threads: 2 }] }, MAC)).toBe(
+      "Its 2 tasks are deleted at Box by ASCII and the key is forgotten on zingzy's MacBook Pro. Their records and 5 threads leave zingzy's MacBook Pro.",
     );
   });
 
   it("adds when an offline computer is swept", () => {
-    expect(removeSentence(laptop, NOTHING_HELD)).toBe(
+    expect(removeSentence(laptop, NOTHING_HELD, MAC)).toBe(
       "wsp comes off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. It is offline; what is on it is swept the next time it connects.",
     );
   });

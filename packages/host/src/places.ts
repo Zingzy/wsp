@@ -213,6 +213,10 @@ export function placeLabelHere(): string | undefined {
   return labelHere;
 }
 
+/** What a window names this computer by: the name its owner gave it, else its hostname, the one reading the host's
+ * own row of the places list gives the app. */
+export const computerNameHere = (): string => placeLabelHere() ?? placeNameHere();
+
 export function placeHere(name: string = placeNameHere()): HerePlace {
   const report = placeReport({ name });
   const label = placeLabelHere();

@@ -169,6 +169,7 @@ describe("the surfaces list this repo ships", () => {
       "composer-slash-menu",
       "composer-slash-filtered",
       "machine",
+      "agents-here",
       "spawned-thread",
       "threads-across-workspaces",
       "opener-transcript",

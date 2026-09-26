@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { ABOUT_WORDS, GROUP_BLURBS, SETTINGS_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, SETTINGS_WORDS, groupBlurbs } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { SYSTEM_DARK_QUERY, useThemeEffect } from "../src/settings/theme.js";
@@ -21,7 +21,7 @@ import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { crumb, descriptionOf, liftedRowIds, lineLabels, mountSettings, pageAt, resetSettings, rowOf, rowTitles, settingsApi, settle, sidebarRowIds } from "./settings-harness.js";
 
 const FILE: TerminalConfig = { files: ["/Users/dev/.config/ghostty/config"], fontFamily: [], fontSize: 16, palette: Array<null>(16).fill(null) };
-const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, takesForks: false, shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 210 * 1024 ** 3 };
+const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true, present: true, takesForks: false, shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 210 * 1024 ** 3 };
 const box: PlaceView = { id: "p_spoo", kind: "computer", name: "spoo", default: false, present: true, takesForks: true, engine: "docker", os: "Ubuntu 24.04", shape: { cpu: 4, memMb: 8192 }, diskFreeBytes: 63 * 1024 ** 3, joinedAt: "2026-09-12T11:00:00.000Z", lastSeenAt: "2026-09-12T11:59:00.000Z", road: { ssh: "root@spoo" } };
 const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.11, takesForks: true };
 const project = (id: string, name: string, computer = "here"): ProjectView => ({ id, name, computer, source: { kind: "folder", path: `/Users/dev/${name}` }, path: `/Users/dev/${name}`, remote: `https://github.com/dev/${name}.git`, defaultBranch: "main", memoryKey: `-Users-dev-${name}`, memoryDir: `/Users/dev/.claude-cfg/projects/-Users-dev-${name}/memory`, createdAt: "2026-09-12T09:14:00.000Z" });
@@ -178,7 +178,7 @@ describe("search over a computer", () => {
     mountSettings({ api: settingsApi().api });
     await settle();
     fireEvent.change(field(), { target: { value: "210 GB free" } });
-    expect(rowTitles()).toEqual(["This Mac"]);
+    expect(rowTitles()).toEqual(["zingzy's MacBook Pro"]);
   });
 });
 
@@ -345,7 +345,7 @@ describe("Appearance", () => {
     await settle();
     const head = document.querySelector<HTMLElement>("[data-settings-page] [data-k=settings-page-head]")!;
     expect(head.querySelector("h1")!.textContent).toBe(SETTINGS_WORDS.appearance);
-    expect(head.querySelector("p")!.textContent).toBe(GROUP_BLURBS.appearance);
+    expect(head.querySelector("p")!.textContent).toBe(groupBlurbs("").appearance);
     expect(document.querySelectorAll("[data-settings-page] [data-settings-row], [data-settings-page] [data-settings-line]")).toHaveLength(0);
     expect(document.querySelector("[data-k=sidebar-width]")).toBeNull();
     expect(document.querySelector("[data-k=terminal-size-row]")).toBeNull();

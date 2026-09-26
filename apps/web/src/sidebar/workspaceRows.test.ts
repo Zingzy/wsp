@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { THIS_COMPUTER, type Capabilities, type ProjectCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { type Capabilities, type PlaceView, type ProjectCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
-import { branchLine, madeOfLine, whereWord, workspaceMetaLine } from "./workspaceRows";
+import { branchLine, computerName, madeOfLine, workspaceMetaLine } from "./workspaceRows";
 
 const workspace = (over: Partial<WorkspaceView>): WorkspaceView =>
   ({ id: "ws_1", name: "a", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-12T00:00:00.000Z", ...over }) as WorkspaceView;
@@ -17,7 +17,9 @@ const copy = (over: Partial<ProjectCopy> = {}): ProjectCopy => ({
   ...over,
 });
 
-/** What a computer that copies by directory and shares its network says about itself, which is this Mac. */
+const MAC = "zingzy's MacBook Pro";
+
+/** What a computer that copies by directory and shares its network says about itself, which is the Mac. */
 const SHARES: Pick<Capabilities, "copies" | "ownNetwork"> = { copies: true, ownNetwork: false };
 const OWN: Pick<Capabilities, "copies" | "ownNetwork"> = { copies: false, ownNetwork: true };
 
@@ -25,22 +27,23 @@ const row = (over: Partial<WorkspaceView>): Pick<SidebarProjectSnapshot, "worksp
 
 describe("what a workspace row says it is made of", () => {
   it("joins the copy word, the computer where it is not this one, and the ports word, all off the protocol's table", () => {
-    expect(madeOfLine({ project: row({ copy: copy({ road: "worktree" }) }), landing: SHARES, computer: null })).toEqual(["a copy", "shares this Mac's ports"]);
-    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: SHARES, computer: null })).toEqual(["a copy", "shares this Mac's ports, PORT 3100"]);
-    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: OWN, computer: "spoo" })).toEqual(["a copy", "spoo", "own network"]);
+    expect(madeOfLine({ project: row({ copy: copy({ road: "worktree" }) }), landing: SHARES, computer: null, here: MAC })).toEqual(["a copy", "shares zingzy's MacBook Pro's ports"]);
+    expect(madeOfLine({ project: row({ copy: copy() }), landing: SHARES, computer: "spoo", here: MAC })).toEqual(["a copy", "spoo", "shares spoo's ports"]);
+    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: SHARES, computer: null, here: MAC })).toEqual(["a copy", "shares zingzy's MacBook Pro's ports, PORT 3100"]);
+    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: OWN, computer: "spoo", here: MAC })).toEqual(["a copy", "spoo", "own network"]);
   });
 
   it("says the network alone for a fork, which has no copy of a folder on any computer", () => {
-    expect(madeOfLine({ project: row({}), landing: OWN, computer: "solari" })).toEqual(["solari", "own network"]);
+    expect(madeOfLine({ project: row({}), landing: OWN, computer: "solari", here: MAC })).toEqual(["solari", "own network"]);
   });
 
   it("says nothing about the network until the host has answered where this project lands", () => {
-    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: null, computer: null })).toEqual(["a copy"]);
-    expect(madeOfLine({ project: row({ copy: copy() }), landing: null, computer: "spoo" })).toEqual(["a copy", "spoo"]);
+    expect(madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: null, computer: null, here: MAC })).toEqual(["a copy"]);
+    expect(madeOfLine({ project: row({ copy: copy() }), landing: null, computer: "spoo", here: MAC })).toEqual(["a copy", "spoo"]);
   });
 
   it("carries no figure of any kind: a machine's shape and its cost are its computer's row in Settings", () => {
-    const line = madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: SHARES, computer: null });
+    const line = madeOfLine({ project: row({ copy: copy(), portBase: 3100 }), landing: SHARES, computer: null, here: MAC });
     expect(line.join(" ")).not.toMatch(/\$|GB|cores|vCPU/);
   });
 });
@@ -71,9 +74,19 @@ describe("the workspace row's third line", () => {
 });
 
 describe("where a row says a workspace runs", () => {
-  it("reads the live record's provider, and the computer the host runs on in that machine's own words", () => {
-    expect(whereWord({ workspace: workspace({ kind: "cloud", provider: "solari" }), status: null })).toBe("solari");
-    expect(whereWord({ workspace: workspace({ kind: "local" }), status: null })).toBe(THIS_COMPUTER);
-    expect(whereWord({ workspace: workspace({ kind: "local" }), status: { machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, facts: { os: "macOS 26.4" } } as WorkspaceStatus })).toBe("this Mac");
+  const mac: PlaceView = { id: "here", kind: "computer", name: "zingzys-macbook-pro.local", label: MAC, default: true };
+  const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false };
+  const onMac = { machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, facts: { os: "macOS 26.4" } } as WorkspaceStatus;
+
+  it("names the computer the host runs on by its own name, a Mac included, and a cloud by its row's name", () => {
+    expect(computerName([mac, solari], { workspace: workspace({ kind: "local" }), status: onMac })).toBe(MAC);
+    expect(computerName([mac, solari], { workspace: workspace({ kind: "cloud", provider: "solari" }), status: null })).toBe("Solari");
+  });
+
+  it("with no places list, reads the live record's provider, and leaves the computer the host runs on unnamed rather than saying a stand-in", () => {
+    expect(computerName([], { workspace: workspace({ kind: "cloud", provider: "solari" }), status: null })).toBe("solari");
+    expect(computerName([], { workspace: workspace({ kind: "local" }), status: null })).toBe("");
+    expect(computerName([], { workspace: workspace({ kind: "local" }), status: onMac })).toBe("");
+    expect(madeOfLine({ project: row({ copy: copy() }), landing: SHARES, computer: null, here: "" })).toEqual(["a copy"]);
   });
 });

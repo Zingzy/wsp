@@ -37,7 +37,7 @@ import { ACCESS_REFUSED_LINE, accessReachLine, kindForComputer, workspaceAccess,
 import { baseName } from "../../files/entries";
 import { useChosenFolder, useDefaultProject, useProject, useRootStore } from "../../files/root";
 import { projectHomeKey, useHarnessCatalog, useHarnessCatalogs, useLatestSession, useProjects, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
-import { useWhereWord } from "../../sidebar/workspaceRows";
+import { useComputerName } from "../../sidebar/workspaceRows";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -405,7 +405,7 @@ export function ComposerOptionPickers({
   const catalogs = useHarnessCatalogs(workspaceId);
   const project = useProject(workspaceId);
   const projects = useMemo(() => (project === null ? [] : [project]), [project]);
-  const where = useWhereWord(workspaceId);
+  const where = useComputerName(workspaceId);
   const { catalog, model, picks, pinned } = useComposerPicks(workspaceId, thread);
   if (catalog === null || picks === null) return null;
   const efforts = effortsFor(catalog, model);

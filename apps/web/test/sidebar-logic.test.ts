@@ -3,7 +3,7 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { FREE_WORD, NO_LINGER_LINE, NO_NODE_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, absentComputer, awayMsOf, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, NO_LINGER_LINE, NO_NODE_LINE, OVER_SSH, THREAD_ARCHIVE_MS, absentComputer, awayMsOf, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type PlaceView, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { RequestError } from "../src/protocol/client.js";
 import { openedBy, threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
@@ -30,7 +30,7 @@ import {
   holdsStateWord,
   stateSlotWord,
   daemonGoneLine,
-  whereWord,
+  computerName,
   threadMetaWords,
   workspaceMetaLine,
 } from "../src/sidebar/workspaceRows.js";
@@ -179,7 +179,7 @@ describe("workspace row labels", () => {
     const slot = (view: Partial<WorkspaceView>) => ({ ...project({}, view), indicator: { label: "Paused", tone: "paused" as const, pulse: false }, state: "paused" as const });
     const cloud = slot({ kind: "cloud" });
     const local = slot({ kind: "local" });
-    const absent = { word: "No daemon", said: "this Mac's daemon is not running" } as Parameters<typeof stateSlotWord>[1];
+    const absent = { word: "No daemon", said: "zingzy's MacBook Pro's daemon is not running" } as Parameters<typeof stateSlotWord>[1];
     // A machine wsp drives holds a word; the folder worked in place holds none, and the room the row keeps for one
     // follows the same reading, so a row cannot keep width for a word that never comes.
     expect(holdsStateWord(cloud)).toBe(true);
@@ -212,11 +212,12 @@ describe("workspace row labels", () => {
     const here = { id: "ws_m", name: "mac", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" } as const;
     const silent = { ...status({ reach: { state: "unreachable" } }), kind: "local" as const };
     // The places list holds no link for the computer the host runs on, so the reading comes off the workspace.
-    const reading = absenceOf([], here, silent, null)!;
-    expect(reading.said).toBe("this Mac's daemon is not running");
+    const places: PlaceView[] = [{ id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true }];
+    const reading = absenceOf(places, here, silent, null)!;
+    expect(reading.said).toBe("zingzy's MacBook Pro's daemon is not running");
     expect(reading.word).toBe("No daemon");
     // A probe that found the port dead rather than silence is the same daemon, not running.
-    expect(absenceOf([], here, { ...silent, reach: { state: "no-daemon" } }, null)!.said).toBe(reading.said);
+    expect(absenceOf(places, here, { ...silent, reach: { state: "no-daemon" } }, null)!.said).toBe(reading.said);
     expect(absenceOf([], here, { ...silent, reach: { state: "reachable" } }, null)).toBeNull();
     expect(absenceOf([], here, null, null)).toBeNull();
     // The row's slot and its third line then read that one reading, where they read nothing and free before.
@@ -468,17 +469,17 @@ describe("a thread row's words", () => {
   });
 
   it("where a workspace runs: the provider the record carries, the kind's own word where it has one, and the name wsp holds for the machine where it has neither", () => {
-    expect(whereWord(runs({}, { kind: "local" }))).toBe(THIS_COMPUTER);
+    expect(computerName([], runs({}, { kind: "local" }))).toBe("");
     // A fork runs at the provider its own record names, never the opaque id that provider minted for the machine,
     // and never a word read off the kind: this host is wired to one provider of several and only the record says which.
-    expect(whereWord(runs({ machineId: "sb_9f2c1d8a", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "solari" }))).toBe("solari");
-    expect(whereWord(runs({ machineId: "bx_4c11e0", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "box" }))).toBe("box");
-    expect(whereWord(runs({ machineId: "wsp-api", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "docker" }))).toBe("docker");
+    expect(computerName([], runs({ machineId: "sb_9f2c1d8a", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "solari" }))).toBe("solari");
+    expect(computerName([], runs({ machineId: "bx_4c11e0", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "box" }))).toBe("box");
+    expect(computerName([], runs({ machineId: "wsp-api", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "docker" }))).toBe("docker");
     // A record from before the provider rode the wire says what the machine is; the id the provider minted for it
     // names nothing to the person reading the row, and no row anywhere shows one.
-    expect(whereWord(runs({ machineId: "sb_9f2c1d8a" }))).toBe("a provider");
-    expect(whereWord(runs({ machineId: "dev@box" }, { kind: "ssh" }))).toBe("dev@box");
-    expect(whereWord({ status: null, workspace: { ...status({}), kind: "ssh", machineId: "m_recorded" } })).toBe("m_recorded");
+    expect(computerName([], runs({ machineId: "sb_9f2c1d8a" }))).toBe("a provider");
+    expect(computerName([], runs({ machineId: "dev@box" }, { kind: "ssh" }))).toBe("dev@box");
+    expect(computerName([], { status: null, workspace: { ...status({}), kind: "ssh", machineId: "m_recorded" } })).toBe("m_recorded");
   });
 });
 

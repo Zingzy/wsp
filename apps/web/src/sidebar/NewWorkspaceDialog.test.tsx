@@ -21,7 +21,7 @@ const project = (id: string, name: string, computer = "here"): ProjectView => ({
 const caps = (over: Partial<Capabilities>): Capabilities => ({ copies: true, ownNetwork: false, ...over }) as Capabilities;
 /** The computers this host holds: the one it runs on first, then a box of the person's own. */
 const PLACES = [
-  { id: "here", kind: "computer", name: "studio.local", default: false, present: true, takesForks: false },
+  { id: "here", kind: "computer", name: "studio.local", label: "zingzy's MacBook Pro", default: false, present: true, takesForks: false },
   { id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true },
 ] as unknown as PlaceView[];
 // The runtime answers the id of the computer it runs on here, which the line names off the places list.
@@ -60,7 +60,7 @@ describe("New workspace asks one thing", () => {
   it("reads where the work lands off the landing the host answered, and says nothing until it has", () => {
     mount([project("pr_1", "spoo")], { pr_1: HERE });
     // The computer the host runs on is named the way every other surface names it, never by the id the wire carries.
-    expect(document.querySelector("[data-k=landing]")!.textContent).toBe("This Mac shares this Mac's ports");
+    expect(document.querySelector("[data-k=landing]")!.textContent).toBe("zingzy's MacBook Pro shares zingzy's MacBook Pro's ports");
     cleanup();
     mount([project("pr_2", "wsp", "p_1")], { pr_2: BOX });
     expect(document.querySelector("[data-k=landing]")!.textContent).toBe("spoo own network");

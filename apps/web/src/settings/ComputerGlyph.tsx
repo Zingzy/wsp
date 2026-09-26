@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A computer's icon: one of a fixed set, the person's pick where they made
-// one, otherwise read off what the computer is. This Mac draws as a laptop
+// one, otherwise read off what the computer is. The host's computer draws as a laptop
 // when its own name says so, a joined box as a server, a cloud account as a
 // cloud.
 import { BoxIcon, CloudIcon, CpuIcon, HardDriveIcon, HouseIcon, LaptopIcon, MonitorIcon, ServerIcon, type LucideIcon } from "lucide-react";
