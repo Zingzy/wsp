@@ -21,7 +21,7 @@ import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
-import { stubBackend, tokenGuest, type StubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
+import { missesFirstDelete, stubBackend, tokenGuest, type StubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
 import { scriptGuest } from "./script-guest.js";
 import { fakeClock } from "./fake-clock.js";
 import { WebSocketServer } from "ws";
@@ -3974,6 +3974,79 @@ describe("runtime golden builders", () => {
     for (const id of [own.id, foreign.id, unowned.id, experiment.id]) expect(backend.machines.find(m => m.id === id)!.killed).toBe(false);
   });
 
+  it("a stale builder whose first delete reached the copy that never held it is asked again behind the sweep until it is gone", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
+    const stale = await crashed.golden.prepare({ name: "other" });
+    backend.machines[0]!.paused = true;
+    missesFirstDelete(backend.machines[0]!);
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe, killConfirm: { graceMs: 20, pollMs: 1 } });
+    expect(await rt.reap()).toEqual({ reaped: [{ id: stale.id, builder: true, reason: "recorded" }], spared: [] });
+    await vi.waitFor(() => expect(backend.machines[0]!.killed).toBe(true));
+    await rt.close();
+  });
+
+  it("an own machine no record claims, whose first delete reached the copy that never held it, is asked again behind the sweep until it is gone", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, killConfirm: { graceMs: 20, pollMs: 1 } });
+    const lost = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": await rt.owner(), createdAt: new Date(Date.now() - 5 * 60_000).toISOString() } });
+    missesFirstDelete(backend.machines[0]!);
+    expect((await rt.reap()).reaped.map(r => [r.id, r.reason])).toEqual([[lost.id, "own"]]);
+    await vi.waitFor(() => expect(backend.machines[0]!.killed).toBe(true));
+    await rt.close();
+  });
+
+  it("a machine still being asked to stop is the watch's, so the next sweep neither stops nor names it again", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, killConfirm: { graceMs: 20, pollMs: 1 } });
+    const lost = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": await rt.owner(), createdAt: new Date(Date.now() - 5 * 60_000).toISOString() } });
+    backend.machines[0]!.kill = async () => {};
+    expect((await rt.reap()).reaped.map(r => r.id)).toEqual([lost.id]);
+    expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
+    await rt.close();
+  });
+
+  it("once close() resolves the watch sends the provider nothing more, even mid-round", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, killConfirm: { graceMs: 1500, pollMs: 100 } });
+    await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": await rt.owner(), createdAt: new Date(Date.now() - 5 * 60_000).toISOString() } });
+    let calls = 0;
+    const get = backend.get.bind(backend);
+    backend.get = async id => {
+      calls++;
+      return get(id);
+    };
+    backend.machines[0]!.kill = async () => void calls++;
+    await rt.reap();
+    await vi.waitFor(() => expect(calls).toBeGreaterThan(2));
+    await rt.close();
+    const atClose = calls;
+    await new Promise(r => setTimeout(r, 400));
+    expect(calls).toBe(atClose);
+  });
+
+  it("what became of a machine the watch is asking about is said on the line the sweep was handed", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, killConfirm: { graceMs: 20, pollMs: 1 } });
+    const lost = await backend.create({ kind: "sandbox", labels: { wsp: "1", "wsp-builder": "1", "wsp-owner": await rt.owner(), createdAt: new Date(Date.now() - 5 * 60_000).toISOString() } });
+    backend.machines[0]!.kill = async () => {};
+    const said: string[] = [];
+    await rt.reap(undefined, line => void said.push(line));
+    await vi.waitFor(() => expect(said).toEqual([expect.stringMatching(new RegExp(`^machine ${lost.id} is still running after .*; asking again in 60 s$`))]));
+    await rt.close();
+  });
+
+  it("an upgrade's replaced machine, whose first delete reached the copy that never held it, is asked again until it is gone", async () => {
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, killConfirm: { graceMs: 20, pollMs: 1 } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+    missesFirstDelete(backend.machines[0]!);
+    expect((await rt.workspaces.upgrade(ws.id)).machineId).toBe("m2");
+    await vi.waitFor(() => expect(backend.machines[0]!.killed).toBe(true));
+    await rt.close();
+  });
+
   it("a recorded marked builder at 6 h 1 min by our createdAt label is reaped although get(id) says running; one at 5 h 59 min is kept", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -6003,7 +6076,7 @@ describe("runtime golden update and the post-seal grace", () => {
     backend.execImpl = dfOk;
     const store = memoryStore();
     const { clock, advance } = fakeClock();
-    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock, hostId: "h1" });
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()), clock, hostId: "h1", killConfirm: { graceMs: 20, pollMs: 1 } });
     return { backend, store, clock, advance, rt };
   };
 
@@ -6125,6 +6198,17 @@ describe("runtime golden update and the post-seal grace", () => {
     // The timer's work is async: the kill lands, then the record goes.
     await vi.waitFor(async () => expect(await store.list("builders")).toEqual([]));
     expect(builder.killed).toBe(true);
+  });
+
+  it("a kept builder whose first delete at the window's end reached the copy that never held it is asked again until it is gone", async () => {
+    const { backend, store, rt, advance } = started();
+    const b = await rt.golden.prepare();
+    await rt.golden.seal(b.id);
+    missesFirstDelete(backend.machines[0]!);
+    advance(GRACE_MS);
+    await vi.waitFor(async () => expect(await store.list("builders")).toEqual([]));
+    await vi.waitFor(() => expect(backend.machines[0]!.killed).toBe(true));
+    await rt.close();
   });
 
   it("the grace ends on the timer at GRACE_MS: the builder is killed and forgotten; a second process over the store past the window stops it on its sweep with reason grace", async () => {

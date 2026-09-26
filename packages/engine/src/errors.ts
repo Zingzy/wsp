@@ -108,6 +108,12 @@ export function isMissing(e: unknown): boolean {
   return (e as WspError | undefined)?.kind === "missing";
 }
 
+/** The provider refused the account itself, a bad key or a plan that does not allow the call: no re-ask can end it. */
+export function isAccountRefusal(e: unknown): boolean {
+  const kind = (e as WspError | undefined)?.kind;
+  return kind === "auth" || kind === "plan";
+}
+
 export function shouldRetry(e: WspError, attempt: number): boolean {
   return e.kind === "transient" && attempt < 3;
 }

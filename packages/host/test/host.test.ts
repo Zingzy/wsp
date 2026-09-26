@@ -657,9 +657,9 @@ describe("host sweeps orphaned machines", () => {
     const killed = (m: { id: string }): boolean => backend.machines.find(x => x.id === m.id)!.killed;
     expect([owned, foreign, orphan, young, ageless, experiment, foreignWs, strayWs, garbage, foreignSmoke].map(killed)).toEqual([true, false, true, false, false, false, false, true, false, false]);
     expect(lines).toEqual([
-      `reap: stopped ${owned.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`,
-      `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
-      `reap: stopped ${strayWs.id} (wsp=1 createdAt=${strayAt}): workspace with no owner, 12 min old`,
+      `reap: stopping ${owned.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`,
+      `reap: stopping ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
+      `reap: stopping ${strayWs.id} (wsp=1 createdAt=${strayAt}): workspace with no owner, 12 min old`,
       `reap: left alone ${foreign.id}: builder from another wsp setup (owner h_other), 53 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
       `reap: left alone ${young.id}: builder with no owner, 2 min old, $0.11/h (about $0.00 so far); reaped once it is 6.0 h old`,
       `reap: left alone ${ageless.id}: builder with no owner, age unknown, $0.11/h; never reaped by this host`,
@@ -702,7 +702,7 @@ describe("host sweeps orphaned machines", () => {
 
     expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
     expect(lines).toEqual([
-      `reap: stopped ${owned.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`,
+      `reap: stopping ${owned.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`,
       "reap: sweep failed: list 502",
     ]);
   });
@@ -725,8 +725,8 @@ describe("host sweeps orphaned machines", () => {
 
     expect(backend.machines.map(m => m.killed)).toEqual([true, false, true, false]);
     expect(lines).toEqual([
-      `reap: stopped ${stray.id} (wsp=1 createdAt=${strayAt}): workspace with no owner, 12 min old`,
-      `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
+      `reap: stopping ${stray.id} (wsp=1 createdAt=${strayAt}): workspace with no owner, 12 min old`,
+      `reap: stopping ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
       `reap: left alone ${foreign.id}: builder from another wsp setup (owner h_other), 53 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
       `reap: ${lost.id}: could not stop: Bad Gateway`,
     ]);
@@ -770,7 +770,7 @@ describe("host sweeps orphaned machines", () => {
 
     expect(backend.machines.map(m => m.killed)).toEqual([false, true]);
     expect(lines).toEqual([
-      `reap: stopped ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
+      `reap: stopping ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
       `reap: ${stuck.id}: could not stop: 502 exec failed; stays recorded, retried next sweep`,
     ]);
   });
@@ -812,7 +812,7 @@ describe("host sweeps orphaned machines", () => {
     await store.put("builders", b.id, { ...record, sealed: { ...record.sealed, at: ago(11 * 60_000) } });
     const later: string[] = [];
     handle = await startHost({ runtime: createRuntime({ backend, store, adapters: {} }), port: 0, wsPort: 0, webDir: webDir(), log: l => later.push(l) });
-    expect(later).toEqual([`reap: stopped ${b.id}: the builder kept after the save for one more change; its ten-minute window is over`, "storage: 1 snapshot, 8.0 GB; inside the free 10 GB, nothing to pay from 2026-10-01"]);
+    expect(later).toEqual([`reap: stopping ${b.id}: the builder kept after the save for one more change; its ten-minute window is over`, "storage: 1 snapshot, 8.0 GB; inside the free 10 GB, nothing to pay from 2026-10-01"]);
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await store.list("builders")).toEqual([]);
   });
@@ -857,7 +857,7 @@ describe("host sweeps orphaned machines", () => {
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l), recipePath: "/home/me/.wsp/state/golden-recipe.json" });
 
     expect(backend.machines[0]!.killed).toBe(true);
-    expect(lines).toEqual(["reap: stopped m1: your earlier builder from this setup; its setup never finished"]);
+    expect(lines).toEqual(["reap: stopping m1: your earlier builder from this setup; its setup never finished"]);
     expect(await store.list("builders")).toEqual([]);
   });
 
@@ -892,7 +892,7 @@ describe("host sweeps orphaned machines", () => {
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
 
     expect(backend.machines[0]!.killed).toBe(true);
-    expect(lines).toEqual([`reap: stopped ${ageless.id}: your earlier builder from this setup, age unknown; a kept builder with no readable age is stopped at once`]);
+    expect(lines).toEqual([`reap: stopping ${ageless.id}: your earlier builder from this setup, age unknown; a kept builder with no readable age is stopped at once`]);
     expect(await store.list("builders")).toEqual([]);
   });
 
@@ -906,8 +906,23 @@ describe("host sweeps orphaned machines", () => {
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
 
     expect(backend.machines[0]!.killed).toBe(true);
-    expect(lines).toEqual([`reap: stopped ${old.id}: your earlier builder from this setup, 6.0 h old; a kept builder is stopped at six hours`]);
+    expect(lines).toEqual([`reap: stopping ${old.id}: your earlier builder from this setup, 6.0 h old; a kept builder is stopped at six hours`]);
     expect(await store.list("builders")).toEqual([]);
+  });
+
+  it("a builder still there after the sweep's stop is said on the host's log under the sweep's own prefix", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const crashed = createRuntime({ backend, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true" } });
+    const old = await crashed.golden.prepare();
+    backend.machines[0]!.spec.labels!["createdAt"] = ago(BUILDER_IDLE_MS + 60_000);
+    backend.machines[0]!.kill = async () => {};
+    const rt = createRuntime({ backend, store, adapters: {}, killConfirm: { graceMs: 20, pollMs: 1 } });
+    const lines: string[] = [];
+
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
+
+    await vi.waitFor(() => expect(lines.at(-1)).toMatch(new RegExp(`^reap: machine ${old.id} is still running after .*; asking again in 60 s$`)));
   });
 
   it("lists once per sweep", async () => {
@@ -934,7 +949,7 @@ describe("host sweeps orphaned machines", () => {
     expect(reap).toHaveBeenCalledTimes(1);
     expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
     // The foreign builder is listed at start only; later sweeps stay quiet about it.
-    expect(lines).toEqual([expect.stringContaining("stopped m1")]);
+    expect(lines).toEqual([expect.stringContaining("stopping m1")]);
 
     await vi.advanceTimersByTimeAsync(REAP_INTERVAL_MS);
     expect(reap).toHaveBeenCalledTimes(2);
