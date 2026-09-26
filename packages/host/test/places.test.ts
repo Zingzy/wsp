@@ -13,7 +13,7 @@ import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 /** A seam between a join's key and its place file, where another process's leave or a crash would land. */
 const fsHooks = vi.hoisted(() => ({ beforeLink: undefined as (() => void) | undefined }));
@@ -41,6 +41,7 @@ import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemL
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { computerLines, hostPlatform, placeLines } from "../src/verbs.js";
+import { refusedPort } from "../../runtime/test/held-port.js";
 import {
   ADD_FLAGS_REFUSAL,
   NOTHING_TO_LEAVE_LINE,
@@ -2684,11 +2685,9 @@ describe("the check a box runs for whether it can reach this host", () => {
   it("reaches an address that answers and not one nobody listens on, by curl, by bash under timeout, and by neither", async () => {
     const listening = createHttpServer((_req, res) => res.end("ok"));
     await new Promise<void>(done => listening.listen(0, "127.0.0.1", done));
-    const quiet = createHttpServer();
-    await new Promise<void>(done => quiet.listen(0, "127.0.0.1", done));
-    const closedPort = (quiet.address() as { port: number }).port;
-    await new Promise<void>(done => quiet.close(() => done()));
-    const urls = [`http://127.0.0.1:${closedPort}`, `http://127.0.0.1:${(listening.address() as { port: number }).port}`];
+    const refused = await refusedPort();
+    onTestFinished(refused.close);
+    const urls = [`http://127.0.0.1:${refused.port}`, `http://127.0.0.1:${(listening.address() as { port: number }).port}`];
     const run = async (PATH: string): Promise<string> => (await promisify(execFile)("/bin/bash", ["-c", reachScript(urls)], { env: { PATH }, timeout: 20_000 })).stdout;
     try {
       expect(reachedUrls(await run(boxPath("reach-curl", { curl: true })), urls)).toEqual([urls[1]]);

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer, type Server } from "node:http";
 import { EventUnion, PLACES_TICKET_REFUSAL, THREAD_OPS, computerOffline, machineUnreachableLine, sendRefusal, workspaceState, workspaceWord, type PlaceView, type WorkspaceStatus } from "@wsp/protocol";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { roadFailed, type ExecResult } from "@wsp/engine";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { POLL_INTERVAL_MS, createStatusTracker, probeReach, type StatusListOptions, type StatusRecord, type StatusWatchOptions } from "../src/status.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { droppingPort } from "./held-port.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
@@ -1389,15 +1390,6 @@ describe("the reach word a row shows", () => {
     const addr = server.address();
     return { port: typeof addr === "object" && addr !== null ? addr.port : 0, mode, hits: () => hits };
   }
-  /** A port nothing listens on: the far end refuses, which is the machine's miss, not this computer's. */
-  async function closedPort(): Promise<number> {
-    const server = createServer();
-    await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
-    const addr = server.address();
-    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
-    await new Promise<void>(r => server.close(() => r()));
-    return port;
-  }
   /** What fetch rejects with when the name will not resolve: the shape Node gives, with the system error as the cause. */
   const noDns = (code = "ENOTFOUND"): TypeError => new TypeError("fetch failed", { cause: Object.assign(new Error(`getaddrinfo ${code} edge.example`), { code }) });
   /** The same over several addresses tried, as Node reports a host with no route to any of them. */
@@ -1445,7 +1437,8 @@ describe("the reach word a row shows", () => {
     await createOn(rt, { golden: "snap_g", name: "steady" });
     await createOn(rt, { golden: "snap_g", name: "dark" });
     const daemon = await switchable();
-    const dead = await closedPort();
+    const { port: dead, close: closeDead } = await droppingPort();
+    onTestFinished(closeDead);
     backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${daemon.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
     backend.machines[1]!.previewUrl = async port => ({ url: `http://127.0.0.1:${dead}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
     const row = (all: WorkspaceStatus[], name: string): WorkspaceStatus => all.find(w => w.name === name)!;
@@ -1570,7 +1563,9 @@ describe("the reach word a row shows", () => {
     const held = await httpStub(426, "never");
     openServers.push(held.server);
     expect(await probeReach(`http://127.0.0.1:${held.port}/`, probe)).toEqual({ state: "unreachable", fromDaemon: false });
-    expect(await probeReach(`http://127.0.0.1:${await closedPort()}/`, probe)).toEqual({ state: "unreachable", fromDaemon: false });
+    const dropped = await droppingPort();
+    onTestFinished(dropped.close);
+    expect(await probeReach(`http://127.0.0.1:${dropped.port}/`, probe)).toEqual({ state: "unreachable", fromDaemon: false });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(noDns());
     try {
       expect(await probeReach("http://edge.example/", probe)).toEqual({ state: "unreachable", fromDaemon: false, offline: true });
