@@ -200,8 +200,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --color-sidebar-row-active: var(--sidebar-row-active);
   --color-sidebar-row-selected: var(--sidebar-row-selected);
   --color-sidebar-border: var(--sidebar-border);
-  --color-agent-claude: var(--agent-claude);
-  --color-agent-gemini: var(--agent-gemini);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -819,11 +817,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --update: var(--primary);
   --update-surface: color-mix(in srgb, var(--update) 12%, transparent);
   --sidebar-border: var(--border);
-  /* Each agent's brand hue, the one colour a row carries besides its state dot, as simple-icons publishes it
-     (Claude #d97757, Gemini #8e75b2). The terracotta measures 2.99:1 on zinc-50, so the light theme takes it one
-     step darker for the 3:1 graphics floor (3.84 on zinc-50); Gemini's clears it as published (3.77). */
-  --agent-claude: #c4643f;
-  --agent-gemini: #8e75b2;
   --code-background: color-mix(in srgb, var(--card) 90%, var(--background));
   --code-foreground: var(--foreground);
   --terminal-background: var(--background);
@@ -860,8 +853,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
     --caution-foreground: var(--color-orange-400);
     --yellow-foreground: var(--color-yellow-400);
     --update-surface: color-mix(in srgb, var(--update) 18%, transparent);
-    --agent-claude: #d97757;
-    --agent-gemini: #8e75b2;
     --terminal-selection-background: color-mix(in srgb, var(--primary) 25%, transparent);
     /* The twelve hues are libghostty's own where they read. libghostty's two black slots read at 1.20:1 and
        3.45:1 on a near-black pane, so a program printing black writes into the background: lifted onto the pane,

@@ -402,32 +402,60 @@ here are included or relied upon under their own licenses, reproduced below.
 
 ------------------------------------------------------------------------
 
-8. Agent marks under apps/web/src/assets/agents
+8. Agent marks in packages/catalog/src/agents
 
-   Each file is one agent's published mark, kept path for path and read by
-   apps/web/src/adapt/harnesses.ts so the app can draw it in the agent's
-   colour. The marks identify the agents they belong to and remain their
-   owners' trademarks; no licence below grants trademark rights.
+   Each agent's catalog module carries its published mark as one inline svg,
+   drawn by the app wherever the agent is named, with its source and license
+   beside it in the module's mark field. The marks identify the agents they
+   belong to and remain their owners' trademarks; no license below grants
+   trademark rights.
 
-   claude.svg: Anthropic's Claude mark, taken from pingdotgg/t3code
+   claude.ts: Anthropic's Claude mark, taken from pingdotgg/t3code
    apps/web/src/components/Icons.tsx (ClaudeAI) at be7796d. MIT License,
-   Copyright (c) 2026 T3 Tools Inc.; the MIT text is under item 1.
+   Copyright (c) 2026 T3 Tools Inc.; the MIT text is under item 1. Drawn in
+   #d97757 on the dark theme and one step darker, #c4643f, on the light, where
+   the published hue measures under 3:1.
 
-   codex.svg: OpenAI's mark, drawn for Codex, taken from pingdotgg/t3code
+   codex.ts: OpenAI's mark, drawn for Codex, taken from pingdotgg/t3code
    apps/web/src/components/Icons.tsx (OpenAI) at 57a66608b. MIT License,
    Copyright (c) 2026 T3 Tools Inc.; the MIT text is under item 1.
 
-   gemini.svg: Google Gemini's spark, from simple-icons/simple-icons
-   icons/googlegemini.svg (https://github.com/simple-icons/simple-icons).
-   CC0 1.0 Universal.
+   gemini.ts: Google Gemini's spark in its colours, from lobehub/lobe-icons
+   src/Gemini/components/Color.tsx at 329f378c. MIT License, Copyright (c)
+   2023 LobeHub; the MIT text is under item 1.
 
-   opencode.svg: OpenCode's mark, from simple-icons/simple-icons
+   opencode.ts: OpenCode's mark, from simple-icons/simple-icons
    icons/opencode.svg, which traces it to anomalyco/opencode
    packages/identity/mark.svg. CC0 1.0 Universal.
 
-   pi.svg: Pi's mark from the press kit at https://pi.dev/press-kit
-   (https://pi.dev/logo-auto.svg, its two paths and fill rule). MIT License,
-   Earendil Inc. and contributors.
+   pi.ts: Pi's mark from the press kit at https://pi.dev/press-kit, the
+   file https://pi.dev/logo.svg as served on 2026-09-25 with etag
+   83ce9b96de956e389a65386b733922a1 (logo-auto.svg is the same file): its
+   three paths as published, in #f09082, #4d9abf and #f1be58 on the dark
+   theme and in #c76b5e, #408eb2 and #b07f00 on the light, where the
+   published colours measure under 3:1. MIT License, Earendil Inc. and
+   contributors.
+
+   hermes.ts: Hermes Agent's mark, from lobehub/lobe-icons
+   src/HermesAgent/components/Mono.tsx at 329f378c. MIT License, Copyright
+   (c) 2023 LobeHub.
+
+   goose.ts: Goose's mark, from lobehub/lobe-icons
+   src/Goose/components/Mono.tsx at 329f378c. MIT License, Copyright (c) 2023
+   LobeHub.
+
+   amp.ts: Amp's mark in its colour, from lobehub/lobe-icons
+   src/Amp/components/Color.tsx at 329f378c. MIT License, Copyright (c) 2023
+   LobeHub.
+
+   qwen.ts: Qwen Code's mark, from QwenLM/qwen-code
+   packages/vscode-ide-companion/assets/sidebar-icon.svg at c3a4058a, in the
+   #6d44e8 its packages/web-shell/client/public/assets/icon.svg fills it with
+   on the light theme and #8b6cf0 on the dark, where the published violet
+   measures under 3:1. Apache License 2.0; the text is under item 5.
+
+   Crush carries no mark: its only published mark is under FSL-1.1, and
+   no MIT or CC0 icon set carries it, so the app draws its initials.
 
    CC0 1.0 Universal (simple-icons): the contributors have waived all
    copyright and related rights to the icon paths to the extent possible
@@ -441,8 +469,8 @@ here are included or relied upon under their own licenses, reproduced below.
    apps/web/src/adapt/signins.ts for the sign-in rows of the cloud setup
    modal, drawn in the row's own colour. The marks identify the companies
    whose sign-in pages the rows open and remain their owners' trademarks; no
-   licence below grants trademark rights. OpenAI's mark is the codex.svg
-   under item 8.
+   licence below grants trademark rights. OpenAI's mark is the one
+   codex.ts carries under item 8.
 
    github.svg: GitHub's mark, from simple-icons/simple-icons icons/github.svg
    (release 16.30.0). CC0 1.0 Universal.

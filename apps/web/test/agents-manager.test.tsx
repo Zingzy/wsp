@@ -124,7 +124,7 @@ describe("the list grammar", () => {
     for (const row of rows()) expect(row.querySelector("[data-row-subtext]")?.textContent ?? "").not.toContain(" · ");
   });
 
-  it("stands an agent's version and sign-in state as two lines under its name, its mark in a tile, one step at the right end, and the ones not installed in their own group, faded, with Install", () => {
+  it("stands an agent's version and sign-in state as two lines under its name, its mark in a tile, one step at the right end, and the ones not installed in their own group, faded, with Install and their mark in its own colours", () => {
     draw();
     expect(titles()).toEqual(["Claude Code", "Codex", "OpenCode", "Pi"]);
     expect([subtext("agent-claude"), stateLine("agent-claude")]).toEqual(["2.1.281", "signed in"]);
@@ -145,7 +145,7 @@ describe("the list grammar", () => {
     const pi = rowEl("agent-pi");
     expect(pi.hasAttribute("data-available")).toBe(true);
     expect(pi.querySelector("[data-row-title]")?.className).toContain("text-foreground/70");
-    expect(pi.querySelector("[data-harness-mark]")?.getAttribute("class")).toContain("grayscale");
+    expect(pi.querySelector("[data-harness-mark]")?.getAttribute("class")).not.toMatch(/grayscale|text-foreground/);
     expect(quick("agent-pi")?.textContent).toBe("Install");
     expect(quick("agent-pi")?.closest("[title]")?.getAttribute("title")).toBe(W.notYet);
     // One fact under an agent not installed: who it is, in the catalog's words.

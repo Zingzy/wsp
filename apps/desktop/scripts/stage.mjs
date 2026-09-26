@@ -5,9 +5,10 @@
 // where the host's asset table reads them back from for the window and for
 // the wsp command alike). Nothing native rides beside the bundles: the daemon
 // is a static binary among the assets.
-import { cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeGlyphs } from "./glyphs.mjs";
 
 // The table of shipped assets lives in @wsp/host's build output, and build:app
 // runs on its own from `start`, so a tree that has not built it is named here
@@ -38,10 +39,8 @@ if (webCss === undefined) throw new Error(`web stylesheet not found under ${webA
 const page = readFileSync(join(root, "src", "onboarding.html"), "utf8");
 if (!page.includes("__WEB_CSS__")) throw new Error("onboarding.html has no __WEB_CSS__ to write the stylesheet into");
 if (!page.includes("__AGENT_GLYPHS__")) throw new Error("onboarding.html has no __AGENT_GLYPHS__ to write the agents' glyphs into");
-// The agents screen draws each agent's glyph from the web app's own copies, laid beside the page.
-const glyphs = join(root, "..", "web", "src", "assets", "agents");
-cpSync(glyphs, join(app, "main", "agents"), { recursive: true });
-const glyphIds = readdirSync(glyphs).filter(f => f.endsWith(".svg")).map(f => f.slice(0, -4));
+// The agents screen masks each agent's glyph out of its catalog mark, written beside the page.
+const glyphIds = writeGlyphs(join(app, "main", "agents"));
 writeFileSync(
   join(app, "main", "onboarding.html"),
   page.replace("__WEB_CSS__", `../${ASSETS_DIR}/web/assets/${webCss}`).replace("__AGENT_GLYPHS__", JSON.stringify(glyphIds)),
