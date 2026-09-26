@@ -182,6 +182,7 @@ describe("the surfaces list this repo ships", () => {
       "composer-slash-filtered",
       "machine",
       "agents-here",
+      "mcp-servers-here",
       "spawned-thread",
       "threads-across-workspaces",
       "opener-transcript",

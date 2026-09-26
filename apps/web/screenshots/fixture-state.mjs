@@ -88,6 +88,28 @@ const workspace = (id, name, extra = {}) => ({
  * every shot whichever Mac takes it. */
 export const HERE_LABEL = "zingzy's MacBook Pro";
 
+/** The agents on this computer in every fixture, which the harness stands in for under the throwaway home: what each
+ * agent's own version flag and sign-in status command say, by catalog id, the newest version each vendor is taken to
+ * have published, and the MCP servers in the agents' own files. A server with tools is a stand-in command that
+ * answers them; one without is written as given and never started. */
+export const HERE_AGENTS = {
+  agents: {
+    claude: { version: "2.1.283 (Claude Code)", status: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) },
+    codex: { version: "codex-cli 0.155.0", status: "Logged in using ChatGPT" },
+  },
+  latest: { claude: "2.1.283", codex: "0.155.0" },
+  servers: [
+    {
+      name: "docs",
+      agents: ["claude", "codex"],
+      tools: [
+        { name: "search_docs", description: "Search the project's docs by keyword." },
+        { name: "read_page", description: "Read one docs page as markdown." },
+      ],
+    },
+    { name: "linear", agents: ["claude"], transport: { kind: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer ${LINEAR_API_KEY}" } } },
+  ],
+};
 
 /** A project as the host records one: one computer, the source that computer sees and the folder a workspace of it
  * works in. A project here is a folder under the work folder; anywhere else it is a repo the computer cloned into

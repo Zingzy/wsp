@@ -87,7 +87,17 @@
         "1440:row-id=thread:redirect",
         "surface-launch=agents"
       ],
-      "wait": "k=agents-computer"
+      "wait": "agents-row"
+    },
+    {
+      "name": "mcp-servers-here",
+      "at": "/",
+      "steps": [
+        "1440:row-id=thread:redirect",
+        "surface-launch=agents",
+        "segment=servers"
+      ],
+      "wait": "state=connected"
     },
     {
       "name": "spawned-thread",
