@@ -876,6 +876,17 @@ describe("the list of every place", () => {
     expect(places.find(p => p.default)!.id).toBe("here");
   });
 
+  it("notes a login a sign-in at a terminal landed on that computer, so the listing says signed in before it dials again", async () => {
+    const { hostKey } = await serving();
+    const joined = await join(hostKey, { code: await code(), report: report("srv", { agents: ["codex"], logins: [] }) });
+    sockets.push(joined.client.ws);
+    expect((await placesOf()).find(p => p.id === joined.placeId)!.signIns?.["codex"]).toBe("none");
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect(await host.request("places.loginLanded", { placeId: joined.placeId, agent: "codex" })).toMatchObject({ ok: true });
+    host.close();
+    expect((await placesOf()).find(p => p.id === joined.placeId)!.signIns?.["codex"]).toBe("signed-in");
+  });
+
   it("is refused on a socket let in on a ticket, and is no op a thread may send", async () => {
     await serving();
     const host = await WsClient.connect(srv!.port, { token: "host-token" });
@@ -886,6 +897,7 @@ describe("the list of every place", () => {
     expect(await relayed.request("places.remove", { placeId: "p_1" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(await relayed.request("places.add", { address: "root@10.0.0.9" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(await relayed.request("places.dial", { placeId: "p_1" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
+    expect(await relayed.request("places.loginLanded", { placeId: "p_1", agent: "codex" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     relayed.close();
     expect(THREAD_OPS).not.toContain("places.list");
     expect(THREAD_OPS).not.toContain("places.remove");
