@@ -5,7 +5,6 @@
 // at medium weight, as the thread crumb is. While the field holds text the
 // page is Search. The left crumbs give way first when the line is short.
 import { ProjectGlyph } from "../projects/look.js";
-import { HERE_PLACE_ID } from "@wsp/protocol";
 import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useStore } from "../protocol/store.js";
 import { SETTINGS_WORDS } from "./format.js";
@@ -31,7 +30,7 @@ export function SettingsCrumbs() {
   const searching = search !== "" && !isMobile;
   const place = at.kind === "computer" ? places.find(p => p.id === at.id) : undefined;
   const project = at.kind === "project" ? projects.find(p => p.id === at.id) : undefined;
-  const page = place !== undefined ? placeName(place, place.id === HERE_PLACE_ID) : project?.name;
+  const page = place !== undefined ? placeName(place) : project?.name;
   return (
     <>
       <span data-breadcrumb-settings className="min-w-0 truncate text-muted-foreground">

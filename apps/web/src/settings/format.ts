@@ -35,18 +35,27 @@ export const THEME_WORDS: Record<ThemePreference, string> = {
   dark: "Dark",
 };
 
-/** The sentence under each settings page's name: what the page is for, before any row. */
-export const GROUP_BLURBS = {
-  general: "How wsp behaves on this Mac.",
+/** A sentence that names the computer the host runs on, said only once that name is known: until the places list
+ * arrives it is empty, since a stand-in word flashed in its place would be text that is not true. */
+export const onceNamed = (here: string, sentence: (here: string) => string): string => (here === "" ? "" : sentence(here));
+
+/** What a fact says after it about where it is, " on <name>", or nothing while the name is not known yet, so no line
+ * is left ending on a dangling "on". */
+export const onName = (name: string): string => onceNamed(name, n => ` on ${n}`);
+
+/** The sentence under each settings page's name: what the page is for, before any row. `here` is the name of the
+ * computer the host runs on. */
+export const groupBlurbs = (here: string) => ({
+  general: onceNamed(here, h => `How wsp behaves on ${h}.`),
   appearance: "How wsp looks, on every screen that opens it.",
-  computers: "The computers your tasks run on. This Mac is the first one.",
+  computers: onceNamed(here, h => `The computers your tasks run on. ${h} is the first one.`),
   projects: "The repos wsp makes tasks from, each on one computer.",
   devices: "The phones and other computers paired with this wsp.",
   account: "Your sign-in, which lets your other devices find this wsp.",
   privacy: "What wsp asks of services outside your computers.",
   keybindings: "The keys wsp answers to.",
   about: "Which wsp this is.",
-} as const;
+});
 
 /** What the Computers pages say beyond the words the wire already carries in PLACES_WORDS: the list row, a
  * computer's own page, its agents and the Remove dialog, which are this build's and are drawn nowhere else. No
@@ -76,8 +85,8 @@ export const WHERE_WORDS = {
   default: "default",
   remove: "Remove",
   removeTitle: (computer: string): string => `Remove ${computer}`,
-  removeDescription: (computer: string): string => `wsp comes off ${computer} and its tasks' records leave this Mac. Your files there stay.`,
-  removeCloudDescription: "Its key is forgotten on this Mac.",
+  removeDescription: (computer: string, here: string): string => onceNamed(here, h => `wsp comes off ${computer} and its tasks' records leave ${h}. Your files there stay.`),
+  removeCloudDescription: (here: string): string => onceNamed(here, h => `Its key is forgotten on ${h}.`),
   removing: "Removing…",
   cancel: "Cancel",
   /** Why a row's action is held: the op that carries it is not on the wire yet. */
@@ -239,7 +248,7 @@ export const PROJECTS_WORDS = {
   added: "Added",
   addedHover: "When it was recorded.",
   seeded: "Seeded",
-  seededHover: "What the seed carried from this Mac, once.",
+  seededHover: (here: string): string => onceNamed(here, h => `What the seed carried from ${h}, once.`),
   newWorkspaces: "New tasks",
   branch: "Branch",
   branchDescription: "Where a new task starts.",

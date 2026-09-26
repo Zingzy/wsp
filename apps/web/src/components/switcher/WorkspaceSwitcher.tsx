@@ -28,6 +28,7 @@ export function WorkspaceSwitcher() {
   const workspaces = useStore(s => s.workspaces);
   const statuses = useStore(s => s.statuses);
   const sessions = useStore(s => s.sessions);
+  const places = useStore(s => s.places);
   const selectedThreadId = useStore(s => s.selectedThreadId);
   const images = useWorkspacePreviews(s => s.images);
   const [painted, setPainted] = useState(false);
@@ -65,12 +66,13 @@ export function WorkspaceSwitcher() {
     if (!open || !painted) return [];
     return buildSwitcherCards({
       projects: deriveSidebarProjects({ workspaces, statuses, sessions }),
+      places,
       targets,
       images,
       currentId: from,
       pinnedThreadId: selectedThreadId,
     });
-  }, [from, targets, images, open, painted, selectedThreadId, sessions, statuses, workspaces]);
+  }, [from, targets, images, open, painted, places, selectedThreadId, sessions, statuses, workspaces]);
 
   if (!open || !painted) return null;
   return (

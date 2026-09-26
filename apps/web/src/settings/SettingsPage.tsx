@@ -12,8 +12,9 @@ import { useIsMobile } from "../hooks/useMediaQuery.js";
 import { useStore } from "../protocol/store.js";
 import { AddProjectDialog } from "../sidebar/AddProjectDialog.js";
 import { ComputerPage } from "./computers.js";
-import { GROUP_BLURBS, SETTINGS_WORDS } from "./format.js";
+import { SETTINGS_WORDS, groupBlurbs } from "./format.js";
 import { drawnGroups, groupById, searchGroup } from "./groups.js";
+import { hereName } from "./places.js";
 import { ProjectPage } from "./projects.js";
 import { Card, cardDrops, Cards, Line, Row, ROW_CLASS } from "./rows.js";
 import { useSettingsAt, useSettingsContext, type SettingsContext } from "./settingsContext.js";
@@ -68,7 +69,7 @@ function Page({ at, ctx }: { at: SettingsAt; ctx: SettingsContext }) {
       <>
         <header data-k="settings-page-head" className="flex flex-col gap-1.5 pb-2">
           <h1 className="text-lg font-medium tracking-tight">{group.name}</h1>
-          <p className="text-[13px] text-muted-foreground">{GROUP_BLURBS[at.group]}</p>
+          <p className="text-[13px] text-muted-foreground">{groupBlurbs(hereName(ctx.places))[at.group]}</p>
         </header>
         <Cards cards={group.cards(ctx)} />
       </>

@@ -9,7 +9,7 @@
 import { HERE_PLACE_ID, isLocalWorkspace, type WorkspaceView } from "@wsp/protocol";
 import { useAbsentComputer, useStore, useWorkspace } from "../../protocol/store.js";
 import { openImageRecipe } from "../../settings/openAt.js";
-import { placeName, placeOf, THIS_COMPUTER_WORD } from "../../settings/places.js";
+import { hereName, placeName, placeOf } from "../../settings/places.js";
 import { useSettingsStore } from "../../settings/settingsStore.js";
 import { openPanelTerminalWith } from "../../shell/shellCommands.js";
 import type { AgentsWhere } from "./agentsRows.js";
@@ -46,12 +46,12 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
   const place = workspace === null ? undefined : placeOf(places, workspace);
   const where: AgentsWhere = workspace === null || isLocalWorkspace(workspace) ? "here" : place?.kind === "computer" ? "box-task" : "fork";
   const cloud = place === undefined ? undefined : placeName(place);
-  const computer = where === "here" ? THIS_COMPUTER_WORD : where === "fork" && workspace !== null ? PANEL_WORDS.fork(workspace.name, cloud ?? "") : (cloud ?? "");
+  const computer = where === "here" ? hereName(places) : where === "fork" && workspace !== null ? PANEL_WORDS.fork(workspace.name, cloud ?? "") : (cloud ?? "");
   const project = workspace?.project.name ?? "";
   const path = workspace === null ? undefined : projectPath(workspace);
   const placeId = place?.id ?? (where === "here" ? HERE_PLACE_ID : undefined);
   const head: AgentsHead = {
-    computer,
+    ...(computer === "" ? {} : { computer }),
     ...(project === "" ? {} : { project: { name: project, ...(path === undefined ? {} : { path }) } }),
     ...(placeId === undefined
       ? {}

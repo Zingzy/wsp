@@ -8,6 +8,7 @@ import { isLocalWorkspace, type DaemonLinkStatus } from "@wsp/protocol";
 import { linkDownLine, terminalPaneHints, terminalPaneState, type TerminalPaneState } from "../adapt/index.js";
 import { useOutOfMemoryReading } from "../machine/live.js";
 import { useAbsentComputer, useCapabilities, useStatus, useStore, useWorkspace, useWorkspaceState } from "../protocol/store.js";
+import { useComputerName } from "../sidebar/workspaceRows.js";
 import { getTerminals, NOT_OPENED_YET, onTerminals } from "./link.js";
 
 /** The pane's state from the workspace's one vocabulary plus this link's socket and its last memory reading, the
@@ -23,8 +24,10 @@ export function useTerminalPane(workspaceId: string, socket: DaemonLinkStatus, r
   const outOfMemory = useOutOfMemoryReading(workspaceId, phase);
   const local = workspace !== null && isLocalWorkspace(workspace);
   const absent = useAbsentComputer(workspaceId);
-  // What this link's sentences name: the workspace, which on a machine wsp forked is that machine's own name.
-  const where = workspace?.name ?? "";
+  // What this link's sentences name: the person's own computer by its name once the places list holds it, else the
+  // workspace, which on a machine wsp forked is that machine's own name.
+  const computer = useComputerName(workspaceId);
+  const where = local && computer !== "" ? computer : (workspace?.name ?? "");
   const pane = useMemo(() => terminalPaneState({ state, reach, socket, outOfMemory, refusal, local, absent, ...(where === "" ? {} : { where }) }), [state, reach, socket, outOfMemory, refusal, local, absent, where]);
   const size = status?.size ?? null;
   const sizes = capabilities?.sizes ?? null;

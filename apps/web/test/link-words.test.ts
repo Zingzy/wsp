@@ -5,7 +5,10 @@
 // the one state table the pane and the main screen both read.
 import { createServer } from "node:net";
 import type { AddressInfo } from "node:net";
-import { THIS_COMPUTER, type DaemonLinkStatus } from "@wsp/protocol";
+import type { DaemonLinkStatus } from "@wsp/protocol";
+
+/** The name the pane is handed for the person's own computer, off its places row. */
+const MAC = "zingzy's MacBook Pro";
 import { afterEach, describe, expect, it } from "vitest";
 import { linkDownLine, terminalEmptyLine, terminalInputRefusal, terminalPaneHints, terminalPaneState, terminalPaneTitle, type TerminalPaneState } from "../src/adapt/index.js";
 import { connectDaemonLink, type DaemonLink } from "../src/terminal/daemon-link.js";
@@ -41,7 +44,7 @@ function connect(over: RelayHarness, opts: Partial<Parameters<typeof connectDaem
 
 /** The pane as a running workspace draws it from this link, which is what every surface reads. */
 function paneOf(l: DaemonLink, local = true): TerminalPaneState {
-  return terminalPaneState({ state: "running", reach: "reachable", socket: l.status(), refusal: l.refusal(), local, where: "api" });
+  return terminalPaneState({ state: "running", reach: "reachable", socket: l.status(), refusal: l.refusal(), local, where: local ? MAC : "api" });
 }
 
 const saidBy = (pane: TerminalPaneState): string[] => [
@@ -78,10 +81,10 @@ describe("the words a link gets", () => {
     expect(link.status()).toBe("opening");
 
     const pane = paneOf(link);
-    expect(pane).toEqual({ kind: "starting", local: true, where: THIS_COMPUTER });
+    expect(pane).toEqual({ kind: "starting", local: true, where: MAC });
     // The word for the person's own computer is the protocol's, not one typed again here.
-    expect(terminalPaneTitle(pane)).toBe(`Starting a terminal on ${THIS_COMPUTER}`);
-    expect(terminalEmptyLine(pane)).toBe(`Starting a terminal on ${THIS_COMPUTER}; the first one opens when it is ready`);
+    expect(terminalPaneTitle(pane)).toBe(`Starting a terminal on ${MAC}`);
+    expect(terminalEmptyLine(pane)).toBe(`Starting a terminal on ${MAC}; the first one opens when it is ready`);
     // The one word that promises something back belongs to a link that was open once, and this is not one.
     for (const line of saidBy(pane)) expect(line).not.toMatch(/reconnect/i);
     saysNoMachine(pane);
@@ -120,10 +123,10 @@ describe("the words a link gets", () => {
     await until(() => link!.status() === "unanswered");
 
     const pane = paneOf(link);
-    expect(pane).toEqual({ kind: "unanswered", local: true, where: THIS_COMPUTER });
+    expect(pane).toEqual({ kind: "unanswered", local: true, where: MAC });
     // Two halves: what did not answer, then the one thing a person can do about it.
-    expect(terminalPaneTitle(pane)).toBe(`Nothing has answered on ${THIS_COMPUTER}`);
-    expect(terminalPaneHints(pane, null, null)).toEqual([`wsp keeps trying; look at the terminal you started wsp in on ${THIS_COMPUTER}`]);
+    expect(terminalPaneTitle(pane)).toBe(`Nothing has answered on ${MAC}`);
+    expect(terminalPaneHints(pane, null, null)).toEqual([`wsp keeps trying; look at the terminal you started wsp in on ${MAC}`]);
     expect(terminalPaneHints(paneOf(link, false), null, null)).toEqual(["wsp keeps trying; the task's row says what api is doing"]);
     saysNoMachine(paneOf(link, false));
     for (const line of saidBy(pane)) expect(line).not.toMatch(/reconnect/i);
@@ -148,7 +151,7 @@ describe("the words a link gets", () => {
     expect(linkDownLine(paneOf(link))).toBeNull();
 
     await until(() => link!.status() === "unanswered");
-    expect(linkDownLine(paneOf(link))).toBe(`Nothing has answered on ${THIS_COMPUTER}`);
+    expect(linkDownLine(paneOf(link))).toBe(`Nothing has answered on ${MAC}`);
     // One place for the words: the main screen says the pane's own sentence, never a second copy of it.
     expect(linkDownLine(paneOf(link))).toBe(terminalPaneTitle(paneOf(link)));
 

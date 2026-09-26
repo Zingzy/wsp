@@ -12,7 +12,7 @@
 // of what a copy's ports are.
 import { useState } from "react";
 import { portsWord, type PlaceView, type ProjectView , type WorkspaceLanding } from "@wsp/protocol";
-import { APP_PLATFORM, PROJECT_PICK_WORDS, landingName } from "../settings/places.js";
+import { PROJECT_PICK_WORDS, landingName } from "../settings/places.js";
 import { Button } from "../components/ui/button.js";
 import {
   Dialog,
@@ -137,7 +137,8 @@ export function NewWorkspaceDialog({
  * No road word: which road the next workspace of this project takes is the runtime's own rule, and the row reads
  * it off the record the create answers with. */
 export function landsLine(places: readonly PlaceView[], landing: WorkspaceLanding): string[] {
-  return [landingName(places, landing), portsWord(landing.capabilities, undefined, APP_PLATFORM)].filter(part => part !== "");
+  const name = landingName(places, landing);
+  return [name, portsWord(landing.capabilities, undefined, name)].filter(part => part !== "");
 }
 
 /** The projects themselves: the one there is reads as its own name and takes no pick, since a control offering one

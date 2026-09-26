@@ -1627,8 +1627,8 @@ describe("the import dialog's words", () => {
 });
 
 describe("the export dialog's words", () => {
-  it("names the workspace the folder comes from and that it lands on this Mac", () => {
-    expect(exportFromLine("dev2")).toBe("From dev2, to this Mac.");
+  it("names the workspace the folder comes from and the computer it lands on by its own name", () => {
+    expect(exportFromLine("dev2", "zingzy's MacBook Pro")).toBe("From dev2, to zingzy's MacBook Pro.");
   });
 
   it("tells a stranger what the ticks on the agent rows do, what happens when the workspace has no threads, and why a row is empty before the export", () => {
@@ -1652,8 +1652,8 @@ describe("the export dialog's words", () => {
   ];
 
   it("reads the trip's current step in plain words and holds the bar: the folder packs and downloads by its total, the sessions are their own named pass, the landing, done", () => {
-    expect(exportProgress([])).toBeNull();
-    const seen = TRIP.map((_, i) => exportProgress(TRIP.slice(0, i + 1)));
+    expect(exportProgress([], "zingzy's MacBook Pro")).toBeNull();
+    const seen = TRIP.map((_, i) => exportProgress(TRIP.slice(0, i + 1), "zingzy's MacBook Pro"));
     expect(seen.map(p => p?.line)).toEqual([
       "Packing the folder",
       "Downloading the folder, 31 MB",
@@ -1662,7 +1662,7 @@ describe("the export dialog's words", () => {
       "Packing sessions",
       "Downloading sessions, 1 MB",
       "Downloading sessions, 1 MB",
-      "Landing on this Mac",
+      "Landing on zingzy's MacBook Pro",
       "Done",
     ]);
     expect(seen.map(p => p?.fraction)).toEqual([0, 0, 0.5, 1, 1, 1, 1, 1, 1]);
@@ -1670,8 +1670,8 @@ describe("the export dialog's words", () => {
   });
 
   it("a download without a total still reads, and a failure has no step since the status line carries it", () => {
-    expect(exportProgress([ev({ stage: "packing" }), ev({ stage: "downloading", message: "The folder." })])).toEqual({ line: "Downloading the folder", fraction: 0 });
-    expect(exportProgress([ev({ stage: "packing" }), ev({ stage: "failed", message: "the machine went away" })])).toBeNull();
+    expect(exportProgress([ev({ stage: "packing" }), ev({ stage: "downloading", message: "The folder." })], "spoo")).toEqual({ line: "Downloading the folder", fraction: 0 });
+    expect(exportProgress([ev({ stage: "packing" }), ev({ stage: "failed", message: "the machine went away" })], "spoo")).toBeNull();
   });
 });
 

@@ -2450,10 +2450,10 @@ export const inPlaceRecordLine = (workspaceId: string, folder: string): string =
  * copies on one computer's network cannot both have 3000. Nothing at all on a computer that copies nothing, which
  * has no copy to say it of. Reads the two capability flags and nothing about the workspace's kind, so a computer
  * that gains its own network changes one flag and every line follows. */
-export function portsWord(c: Pick<Capabilities, "copies" | "ownNetwork">, portBase: number | undefined, platform: "darwin" | "linux"): string {
+export function portsWord(c: Pick<Capabilities, "copies" | "ownNetwork">, portBase: number | undefined, computer: string): string {
   if (c.ownNetwork) return "own network";
   if (!c.copies) return "";
-  const shares = `shares ${thisComputer(platform)}'s ports`;
+  const shares = `shares ${computer}'s ports`;
   return portBase === undefined ? shares : `${shares}, PORT ${portBase}`;
 }
 
@@ -3452,9 +3452,9 @@ export function secretSignalsLine(s: ProjectSecret): string {
   return `${s.signals.join(", ")}, ${fmtBytes(s.bytes)}`;
 }
 
-/** The line under the export dialog's title: which workspace the folder leaves, and where it lands. */
-export function exportFromLine(workspaceName: string): string {
-  return `From ${workspaceName}, to this Mac.`;
+/** The line under the export dialog's title: which workspace the folder leaves, and the computer it lands on. */
+export function exportFromLine(workspaceName: string, here: string): string {
+  return `From ${workspaceName}, to ${here}.`;
 }
 
 /** What the ticks on the export dialog's agent rows do. */
@@ -3518,7 +3518,7 @@ export function importProgress(events: readonly Pick<ProjectImportEvent, "stage"
  * then packs and downloads the sessions as a second pass whose bytes start again at nought, so the pass is named by
  * counting the packings and the bar holds its high-water mark; a download is named by its total so the words hold
  * still while the bar moves. A failure has no step; the status line carries it. */
-export function exportProgress(events: readonly Pick<ProjectExportEvent, "stage" | "bytes" | "total">[]): TripProgress | null {
+export function exportProgress(events: readonly Pick<ProjectExportEvent, "stage" | "bytes" | "total">[], here: string): TripProgress | null {
   let line = "";
   let fraction = 0;
   let packings = 0;
@@ -3534,7 +3534,7 @@ export function exportProgress(events: readonly Pick<ProjectExportEvent, "stage"
         if (e.bytes !== undefined && e.total !== undefined && e.total > 0) fraction = Math.max(fraction, e.bytes / e.total);
         break;
       case "landing":
-        line = "Landing on this Mac";
+        line = here === "" ? "Landing" : `Landing on ${here}`;
         fraction = 1;
         break;
       case "done":

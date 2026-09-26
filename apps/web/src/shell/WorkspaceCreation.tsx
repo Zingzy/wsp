@@ -19,7 +19,7 @@ import { MICRO_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { useStore, type Creation, type CreationLine } from "../protocol/store.js";
 import { FACT } from "../settings/format.js";
-import { placeName, placeOf } from "../settings/places.js";
+import { hereName, isHere, placeName, placeOf } from "../settings/places.js";
 import { madeOfLine } from "../sidebar/workspaceRows.js";
 import { Spaced } from "../components/ui/spaced.js";
 
@@ -89,8 +89,8 @@ function MadeOf({ creation }: { creation: Creation }) {
   // The computer's name where the work did not land on the computer the app runs on, which is the row's own rule
   // for the same line: this computer is not named on a screen that is already on it.
   const at = workspace === undefined ? undefined : placeOf(places, workspace);
-  const computer = at === undefined || at === places[0] ? null : placeName(at);
-  const said = workspace === undefined ? [] : madeOfLine({ project: { workspace }, landing: landing === null ? null : landing.capabilities, computer });
+  const computer = at === undefined || isHere(at) ? null : placeName(at);
+  const said = workspace === undefined ? [] : madeOfLine({ project: { workspace }, landing: landing === null ? null : landing.capabilities, computer, here: hereName(places) });
   return (
     <p data-k="made-of" className={cn(FACT, "mt-1.5 min-h-4 w-full text-left")} title={said.join(", ")}>
       <Spaced parts={said} />

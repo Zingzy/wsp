@@ -3,7 +3,7 @@
 // the repos the chosen computer holds, most recently used first, and the field
 // searches all of them by name and path. A path typed from / or ~ walks the disk
 // instead, and a repository address is cloned where a computer clones: a box or a
-// provider, never this Mac, whose projects are folders of the person's own. The
+// provider, never the host's computer, whose projects are folders of the person's own. The
 // list keeps one height across every state, so nothing around it moves.
 import { CloudIcon, CornerDownLeftIcon, FolderGitIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, LaptopIcon, PlusIcon, ServerIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
@@ -15,7 +15,7 @@ import { baseName } from "../files/entries.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
-import { isProviderPlace, placeName, placeTakesWorkspaces } from "../settings/places.js";
+import { hereName, isProviderPlace, placeName, placeTakesWorkspaces } from "../settings/places.js";
 import { ADD_PROJECT_WORDS } from "./words.js";
 
 /** Whether the field holds a repository address rather than a search or a path. */
@@ -169,7 +169,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
       );
     }
     if (!here) return say(computer !== undefined && isProviderPlace(computer) ? ADD_PROJECT_WORDS.providerSays(placeName(computer)) : ADD_PROJECT_WORDS.boxSays(computer === undefined ? "" : placeName(computer)));
-    if (repoWord) return say(ADD_PROJECT_WORDS.noCloneHere);
+    if (repoWord) return say(ADD_PROJECT_WORDS.noCloneHere(hereName(places)));
     if (repos === null && path === null) return null;
     if (rows.length === 0) return say(path !== null ? ADD_PROJECT_WORDS.noFolders : field.trim() === "" ? ADD_PROJECT_WORDS.noRepos : ADD_PROJECT_WORDS.noMatch);
     return rows.map((row, at) => (
@@ -238,7 +238,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
         <div className="grid h-[400px] grid-cols-[minmax(0,1fr)_210px] max-sm:grid-cols-1">
           <div className="flex min-h-0 flex-col border-r border-border max-sm:border-r-0">
             <div className="flex h-10 shrink-0 items-center px-5 text-xs text-muted-foreground">
-              {path !== null ? <span className="truncate font-mono">{tilde(path.dir, home)}</span> : here ? ADD_PROJECT_WORDS.reposOn(computer === undefined ? "" : placeName(computer, true)) : null}
+              {path !== null ? <span className="truncate font-mono">{tilde(path.dir, home)}</span> : here ? ADD_PROJECT_WORDS.reposOn(computer === undefined ? "" : placeName(computer)) : null}
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{listBody}</div>
           </div>
@@ -249,7 +249,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
               return (
                 <button key={place.id} type="button" data-k={`computer-${place.id}`} onClick={() => setOn(place.id)} className={cn(SIDE_ROW, place.id === computer?.id ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}>
                   <Glyph aria-hidden className="size-4 shrink-0" />
-                  <span className="truncate">{placeName(place, at === 0)}</span>
+                  <span className="truncate">{placeName(place)}</span>
                 </button>
               );
             })}

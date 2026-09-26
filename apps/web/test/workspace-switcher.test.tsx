@@ -10,8 +10,9 @@
 // before this one.
 import { act, cleanup, configure, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type PlaceView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { deriveSidebarProjects } from "../src/adapt/index.js";
+import { buildPaletteItems } from "../src/components/palette/paletteItems.js";
 import { buildSwitcherCards } from "../src/components/switcher/switcherCards.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -671,7 +672,7 @@ describe("buildSwitcherCards", () => {
   const projects = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_b: SESSIONS } });
 
   it("keeps the order it is given, drops an id the snapshot no longer holds, and carries the three parts alone", () => {
-    const cards = buildSwitcherCards({ projects, targets: ["ws_c", "ws_gone", "ws_a"].map(workspaceId => ({ workspaceId, threadId: null })), images: {}, currentId: "ws_a", pinnedThreadId: null });
+    const cards = buildSwitcherCards({ places: [], projects, targets: ["ws_c", "ws_gone", "ws_a"].map(workspaceId => ({ workspaceId, threadId: null })), images: {}, currentId: "ws_a", pinnedThreadId: null });
     expect(cards.map(c => c.workspaceId)).toEqual(["ws_c", "ws_a"]);
     expect(Object.keys(cards[0]!)).toEqual(["workspaceId", "threadId", "name", "threadTitle", "image"]);
   });
@@ -680,7 +681,7 @@ describe("buildSwitcherCards", () => {
     const older = session("s_old", "ws_a", "The oldest thread.", Date.parse("2026-09-01T01:00:00Z"));
     const working = { ...session("s_new", "ws_a", "The working thread.", Date.parse("2026-09-01T02:00:00Z")), status: "running" as const, endedAt: undefined };
     const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [older, working] } });
-    const cards = buildSwitcherCards({ projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: null, pinnedThreadId: null });
+    const cards = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: null, pinnedThreadId: null });
     expect(cards[0]?.threadTitle).toBe("The working thread.");
   });
 
@@ -688,16 +689,30 @@ describe("buildSwitcherCards", () => {
     const older = session("s_old", "ws_a", "The oldest thread.", Date.parse("2026-09-01T01:00:00Z"));
     const newer = session("s_new", "ws_a", "The newest thread.", Date.parse("2026-09-01T02:00:00Z"));
     const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [older, newer] } });
-    const pinned = buildSwitcherCards({ projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: "ws_a", pinnedThreadId: "s_old" });
+    const pinned = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: "ws_a", pinnedThreadId: "s_old" });
     expect(pinned[0]?.threadTitle).toBe("The oldest thread.");
-    const elsewhere = buildSwitcherCards({ projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: "ws_b", pinnedThreadId: "s_old" });
+    const elsewhere = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: null }], images: {}, currentId: "ws_b", pinnedThreadId: "s_old" });
     expect(elsewhere[0]?.threadTitle).toBe("The newest thread.");
+  });
+
+  it("says where a thread on this computer runs only once the name is known, never leaving a line on a dangling on", () => {
+    const here = { ...view("ws_a", "api"), kind: "local" as const, machineId: "local" };
+    const lead = { ...session("s_lead", "ws_a", "The lead.", Date.parse("2026-09-01T01:00:00Z")), threadId: "thr_lead" };
+    const child = { ...session("s_kid", "ws_a", "The child.", Date.parse("2026-09-01T02:00:00Z")), threadId: "thr_kid", parentThreadId: "thr_lead", startedBy: "agent" as const };
+    const projects = deriveSidebarProjects({ workspaces: [here], sessions: { ws_a: [lead, child] } });
+    const MAC: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true };
+    const palette = (places: PlaceView[]) => buildPaletteItems({ projects, selectedId: null, query: "", canCreate: false, handlers: {} as never, verbs: {} as never, places });
+    const card = (places: PlaceView[]) => buildSwitcherCards({ places, projects, targets: [{ workspaceId: "ws_a", threadId: "thr_kid" }], images: {}, currentId: null, pinnedThreadId: null })[0]?.threadTitle;
+    for (const said of [...palette([]).workspaceItems, ...palette([]).recentThreadItems].map(item => item.description ?? "")) expect(said).not.toMatch(/ on\s*$|this computer/);
+    expect(card([])).toBe("Claude Code");
+    expect(palette([MAC]).recentThreadItems.map(item => item.description)).toContain("api on zingzy's MacBook Pro");
+    expect(card([MAC])).toBe("Claude Code, zingzy's MacBook Pro");
   });
 
   it("a thread target is a card of the thread's title over where it came from, with no picture well, and a thread that has gone leaves none", () => {
     const thread = { ...session("s_t", "ws_a", "The thread.", Date.parse("2026-09-01T02:00:00Z")), threadId: "thr_t", startedBy: "cli" as const };
     const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [thread] } });
-    const cards = buildSwitcherCards({ projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: "thr_t" }, { workspaceId: "ws_a", threadId: "thr_gone" }], images: { ws_a: "data:image/png;base64,AAA" }, currentId: "ws_a", pinnedThreadId: null });
+    const cards = buildSwitcherCards({ places: [], projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: "thr_t" }, { workspaceId: "ws_a", threadId: "thr_gone" }], images: { ws_a: "data:image/png;base64,AAA" }, currentId: "ws_a", pinnedThreadId: null });
     expect(cards).toEqual([{ workspaceId: "ws_a", threadId: "thr_t", name: "The thread.", threadTitle: "Claude Code, the-project, cli", image: null }]);
   });
 });

@@ -3,9 +3,10 @@
 // workspace card carries its name and its top thread, a thread card the
 // thread's title and where it came from, as its row's hover text reads.
 // Nothing here decides an order or a thread of its own.
+import type { PlaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot } from "../../adapt/index.js";
 import { topSidebarThread } from "../../sidebar/Sidebar.logic.js";
-import { provenanceLabel, threadMetaWords, whereWord } from "../../sidebar/workspaceRows.js";
+import { computerName, provenanceLabel, threadMetaWords } from "../../sidebar/workspaceRows.js";
 import type { SwitchTarget } from "../../shell/workspaceSwitcher.js";
 
 export interface SwitcherCard {
@@ -21,6 +22,7 @@ export interface SwitcherCard {
 
 export interface SwitcherCardsInput {
   readonly projects: ReadonlyArray<SidebarProjectSnapshot>;
+  readonly places: readonly PlaceView[];
   /** The targets the overlay froze when it opened; a workspace or thread that has since gone leaves no card. */
   readonly targets: ReadonlyArray<SwitchTarget>;
   readonly images: Readonly<Record<string, string>>;
@@ -40,7 +42,7 @@ export function buildSwitcherCards(input: SwitcherCardsInput): SwitcherCard[] {
       if (thread === undefined) return [];
       // The card says what the row says under the same thread: the agent, then its project and who opened it, or
       // the workspace and where it runs on a thread another thread's agent opened.
-      const words = threadMetaWords(thread, { workspace: project.displayName, where: whereWord(project) }, project.displayName);
+      const words = threadMetaWords(thread, { workspace: project.displayName, where: computerName(input.places, project) }, project.displayName);
       return [{ workspaceId, threadId, name: thread.title, threadTitle: provenanceLabel(thread, words), image: null }];
     }
     const current = workspaceId === input.currentId;
