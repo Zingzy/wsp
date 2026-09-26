@@ -65,6 +65,30 @@ describe("runtime", () => {
     expect(events).toContain("workspace.napped");
   });
 
+  it("a create whose fork the provider refused is reached by its name and cleared with delete, which every client hears", async () => {
+    const backend = stubBackend();
+    backend.create = async () => {
+      throw Object.assign(new Error("Snapshot not found"), { kind: "missing", status: 404 });
+    };
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const said: { type: string; workspaceId?: string; stage?: string }[] = [];
+    rt.events.on("*", e => said.push(e as (typeof said)[number]));
+    const failing = async (): Promise<string> => {
+      await expect(createOn(rt, { golden: "snap_g", name: "fleet check" })).rejects.toThrow("Snapshot not found");
+      return said.filter(e => e.type === "workspace.creating" && e.stage === "failed").at(-1)!.workspaceId!;
+    };
+    const first = await failing();
+    // Asked again under the name, the older failure goes, from the runtime and from every client's rows.
+    const id = await failing();
+    expect(said).toContainEqual(expect.objectContaining({ type: "workspace.deleted", workspaceId: first }));
+    await expect(rt.workspaces.delete(first)).rejects.toThrow(`no such workspace: ${first}`);
+    expect(await rt.workspaces.resolve("fleet check")).toMatchObject({ id, name: "fleet check", machineId: "", phase: "gone", gone: "Snapshot not found" });
+    await rt.workspaces.delete(id);
+    expect(said.at(-1)).toMatchObject({ type: "workspace.deleted", workspaceId: id });
+    await expect(rt.workspaces.resolve("fleet check")).rejects.toThrow(/no workspace/);
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+
   it("a create that asks for an offered size forks the machine at it and the record and the rate follow; one off the list is refused with the list before any machine is forked", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });

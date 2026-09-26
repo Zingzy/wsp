@@ -241,7 +241,7 @@ wsp snapshot dev                      # project image of dev: its image plus the
 wsp new dev-2 --from wsp              # a machine from that project image, every project it carried in place, no upload; the created line names them
 wsp image remove snap_1a2b3c4d        # deletes that project image at the provider and drops its record; refused while a workspace stands on it
 wsp fork dev --send "Run the gate."   # a sibling machine from dev's image version, first thread opened
-wsp new gate --size 2x8               # a machine at a size the provider offers; the refusal lists them
+wsp new gate --size 2x4               # a machine at a size the provider offers; the refusal lists them
 ```
 
 `fork` copies the image version, not the live disk: work on the source's disk is not on the fork. Fork from a project image when the fork needs the project. When a fork's first turn fails, the workspace still exists and the error names it; continue with `wsp run` on it, do not fork again. `snapshot` takes only a running first-life machine with a project imported; a woken machine or one without a project is refused in one line and nothing is taken.
