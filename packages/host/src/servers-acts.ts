@@ -249,11 +249,13 @@ export function serversActs(o: ServersActsOptions = {}): ServersActs {
         return format.argRef(name);
       });
       const placed = formatted(shown, () => format.place(read.text, ask.name, byName));
-      const named = await format.refer(placed.text, ask.name).catch((e: unknown) =>
+      const named = await format.refer(placed.text, ask.name, [], new Set(Object.keys(o.vault?.held() ?? {}))).catch((e: unknown) =>
         formatted(shown, () => {
           throw e;
         }),
       );
+      const unread = named.servers.find(sv => sv.unread !== undefined)?.unread;
+      if (unread !== undefined) throw usage(`${ask.name} ${unread}. Nothing was written.`);
       formatted(shown, () => stillStands(named.entries, [{ name: ask.name, values: given }]));
       // An address's variables live in no entry of the file, so only the vault carries them.
       const values: Record<string, string> = { ...given, ...Object.fromEntries(named.servers.flatMap(sv => Object.entries(sv.values))) };
