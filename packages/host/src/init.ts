@@ -20,6 +20,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, plural, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED, BREW_ID_PREFIX, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, savedKeyStoppedLine, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, SIGN_IN_ANSWERS, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
+import { serverVault } from "./env-keys.js";
 import { importResultPath, keychainLogins, readSecrets, refusedIsDir, type SecretReader } from "./init-import.js";
 import { planGoldenRecipe, planImport, wantsBrew, type BuildContext } from "./image-recipe.js";
 import {
@@ -1080,7 +1081,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   let landed: ImportResult | undefined;
   /** What every build road here is planned against: this computer, its Homebrew and the Keychain values read below.
    * The rows change as the screens and the Keychain reads answer; the context around them does not. */
-  const context = (): BuildContext => ({ home: opts.home, platform: opts.platform, brew, secrets });
+  const context = (): BuildContext => ({ home: opts.home, platform: opts.platform, brew, secrets, vault: serverVault(opts.statePath) });
   const importHooks = () => ({
     onResult: (r: ImportResult) => {
       writeFileSync(resultsPath, `${JSON.stringify({ ...r, ...(lastBuild !== undefined ? { build: lastBuild } : {}) }, null, 2)}\n`);

@@ -2,14 +2,18 @@
 // The recipe beside this host's state file, planned for a computer somebody
 // owns: the same rows a copy of the image is planned from, come to the steps
 // that run on the computer itself.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Manifest } from "@wsp/collect";
 import { TOOL_PREFIX, catalogEntry } from "@wsp/catalog";
-import { MCP_ID_PREFIX, probePath, type Recipe } from "@wsp/protocol";
-import { AGENT_NODE_STEP, pathLine, type ProvisionPlan } from "@wsp/engine";
+import { MCP_ID_PREFIX, TOOLS_PATH, probePath, type Recipe } from "@wsp/protocol";
+import { AGENT_NODE_STEP, closeAgentFiles, oncePathsOf, pathLine, provisionFiles, provisionMcp, type ProvisionPlan } from "@wsp/engine";
+import { nodeHost } from "@wsp/collect";
+import { boxGuest, cleanGuests } from "../../engine/test/box-guest.js";
+import { parseEnvFile, serverEnvFileFor } from "../src/env-keys.js";
+import { serversActs } from "../src/servers-acts.js";
 import { placeProvisioner } from "../src/place-provision.js";
 import { smallRecipePath } from "../src/recipe-file.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
@@ -147,6 +151,35 @@ describe("the recipe this host holds, planned for a computer you own", () => {
     expect(plan.mcp?.agents.map(a => [a.id, a.scopes.flatMap(sc => sc.keep)])).toEqual([["claude", ["github"]]]);
     // The config the server is defined in travels with the agent's own row, which is what the edit there reads.
     expect(plan.files?.lands.map(l => l.dest)).toContain(".claude-cfg/.claude.json");
+  });
+
+  it("puts a server added here with a header on that computer by name: no file there holds the value, and the vault does", async () => {
+    write(SMALL);
+    await serversActs({ here: () => ({ ...nodeHost(), home }) }).add({ kind: "here" }, { agent: "claude", name: "linear", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer lin_api_TESTONLY" } });
+    // This computer's own file holds the value as it was typed.
+    expect(readFileSync(join(home, ".claude.json"), "utf8")).toContain("lin_api_TESTONLY");
+    const withServer = {
+      ...FIXTURE,
+      entries: [...FIXTURE.entries, { rung: "agents" as const, id: `${MCP_ID_PREFIX}claude/linear`, label: "linear", group: "Claude Code MCP servers", paths: ["~/.claude.json"], bytes: 300, default: "bring" as const }],
+    };
+    const g = boxGuest(["npx"]);
+    try {
+      const plan = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => withServer, brew: async () => new Map() }).plan({ home: g.root });
+      if ("noRecipe" in plan || plan.files === undefined || plan.mcp === undefined) throw new Error("no files or servers planned");
+      const landed = await provisionFiles(g.machine, { home: g.root, lands: plan.files.lands, pack: plan.files.pack });
+      const rows = await provisionMcp(g.machine, plan.mcp, { home: g.root, landed: landed.owned, tools: [], stage: () => {}, path: TOOLS_PATH });
+      expect(rows.find(r => r.id === `${MCP_ID_PREFIX}claude/linear`)?.outcome).toBe("installed");
+      const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? walk(join(dir, e.name)) : e.isFile() ? [join(dir, e.name)] : []));
+      const files = walk(g.root);
+      expect(files.some(f => f.endsWith(".claude.json"))).toBe(true);
+      for (const f of files) expect(readFileSync(f, "utf8"), f).not.toContain("lin_api_TESTONLY");
+      await closeAgentFiles(g.machine, g.root, oncePathsOf(plan.files.lands));
+      for (const f of walk(g.root)) expect(readFileSync(f, "utf8"), f).not.toContain("lin_api_TESTONLY");
+      expect(readFileSync(join(g.root, ".claude-cfg", ".claude.json"), "utf8")).toContain('"Authorization": "Bearer ${WSP_MCP_LINEAR_AUTHORIZATION}"');
+      expect(parseEnvFile(serverEnvFileFor(statePath))).toEqual({ WSP_MCP_LINEAR_AUTHORIZATION: "lin_api_TESTONLY" });
+    } finally {
+      cleanGuests([g]);
+    }
   });
 
   it("plans nothing at all for a row of this computer that has no Linux road, and sets nothing aside for it", async () => {

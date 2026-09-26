@@ -30,7 +30,7 @@ import {
   type Store,
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
-import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
+import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
 import { authRefusal, FORWARD_ENV, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
@@ -39,7 +39,7 @@ import { DAEMON_DEPLOYED_LINE, cappedLine, claudeEnvs, deployDaemon, doctor, doc
 import { daemonFixLine, releaseUpdateLine } from "./daemon-fix.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
-import { ANTHROPIC_KEY, KEY_LAYER_WORDS, envFileFor, keyIn, parseEnvFile, savedEnv, vaultOf, writeEnvFile, type Keys } from "./env-keys.js";
+import { ANTHROPIC_KEY, KEY_LAYER_WORDS, envFileFor, keyIn, parseEnvFile, savedEnv, serverEnvFileFor, serverVault, vaultOf, writeEnvFile, type Keys } from "./env-keys.js";
 // The writer of a host's own .env now sits beside its reader; the name stays exported here for every caller
 // that already had it from this module.
 export { writeEnvFile } from "./env-keys.js";
@@ -408,9 +408,10 @@ export function keysFound(sources: KeySources, layers: Array<Record<string, stri
  * nothing else. Not this shell: a host serving under launchd, and the app, start without it, so a key only in a
  * shell would reach the turns one road launched and none of the others. Not a folder's .env either: the folder a
  * host happened to start in is nobody's vault. The one file is what wsp init writes and what the person can read,
- * and a token saved there while the host runs is in the next turn, since nothing of this is cached. */
+ * and a token saved there while the host runs is in the next turn, since nothing of this is cached. The servers'
+ * values beside it come too, under the names their definitions on other computers read. */
 export function vaultNow(statePath: string): Record<string, string> {
-  return vaultOf(savedEnv(statePath));
+  return { ...serverValuesOf(parseEnvFile(serverEnvFileFor(statePath))), ...vaultOf(savedEnv(statePath)) };
 }
 
 /** Names the file only when the state file this run serves is not the default home's. */
@@ -791,8 +792,9 @@ export function makeRuntime(
     agentsActs: hostActs({ vaultFile: envFileFor(statePath), home: homedir, wspServer: () => mcpServerSpec(statePath, agents?.run ?? runningWsp()) }),
     // skills.sh is asked from this host and never from the page; a skill lands as the login of the computer it is for.
     skillsActs: skillsActs(),
-    // A server lands in the agent's own config as the login of the computer it is for, its values in that file alone.
-    serversActs: serversActs(),
+    // A server lands in the agent's own config as the login of the computer it is for: its values in that file on
+    // this computer, and on any other the file names a variable for each and the value goes to the vault.
+    serversActs: serversActs({ vault: serverVault(statePath) }),
     // A remote server's icon is asked of Google from this host, never from the page or a machine, and kept beside the
     // state file.
     serverIcons: serverIcons({ dir: join(dirname(statePath), "icons") }),
@@ -800,7 +802,7 @@ export function makeRuntime(
     // this computer, and the host's pack of whichever rows the person ticked.
     seed: hostSeed(),
     goldenRecipe: recipe,
-    copyRecipe: hostCopyRecipe(),
+    copyRecipe: hostCopyRecipe(statePath),
     hostId: hostIdentity(),
     vaultCaches: CACHE_RULE,
   });
@@ -822,13 +824,14 @@ function hostSeed(): SeedWiring {
 
 /** How a copy of the image is planned on this computer for a serving host: the same readers wsp init builds from,
  * the keys as they stand at the ask rather than at the start, and the daemon deploy every build made here gets. */
-function hostCopyRecipe(): (image: SealedImage) => Promise<GoldenRecipe> {
+function hostCopyRecipe(statePath: string): (image: SealedImage) => Promise<GoldenRecipe> {
   return image =>
     copyGoldenRecipe(image, {
       collect: () => collectThisComputer(() => {}),
       brew: () => readBrewTable(nodeHost()),
       home: homedir(),
       platform: hostPlatform(),
+      vault: serverVault(statePath),
       deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE),
     });
 }

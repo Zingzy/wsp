@@ -8,7 +8,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { writeOwn } from "@wsp/own-file";
-import { VAULT_VARIABLES } from "@wsp/catalog";
+import { VAULT_VARIABLES, agentName, crossesLines, vaultVariableRow } from "@wsp/catalog";
 
 export const ANTHROPIC_KEY = "ANTHROPIC_API_KEY";
 
@@ -27,7 +27,7 @@ export function parseEnvFile(path: string): Record<string, string> {
   const out: Record<string, string> = {};
   if (!existsSync(path)) return out;
   for (const line of readFileSync(path, "utf8").split("\n")) {
-    const m = line.match(/^([A-Z_]+)=(.*)$/);
+    const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
     if (m && m[2]) out[m[1]!] = m[2]!.trim();
   }
   return out;
@@ -37,6 +37,22 @@ export function parseEnvFile(path: string): Record<string, string> {
  * state file it serves, as everything else a host writes for itself sits there. A host on another state file
  * reads no key of the wsp home's, and on the home's own state file this is the home's own .env. */
 export const envFileFor = (statePath: string): string => join(dirname(statePath), ".env");
+
+/** The file beside it that holds the values the MCP servers on other computers read by name: a header's under its
+ * WSP_MCP_ name, a command's variable under its own. Every name in it is handed to every turn. */
+export const serverEnvFileFor = (statePath: string): string => join(dirname(statePath), "servers.env");
+
+/** The name of the catalog row that keeps its key under `variable`, as a refusal names it; nothing for any other. */
+export const rowOwning = (variable: string): string | undefined => {
+  const id = vaultVariableRow(variable);
+  return id === undefined ? undefined : agentName(id);
+};
+
+/** The one writer of that file for the host serving `statePath`, which every road that takes a server's value hands. */
+export const serverVault =
+  (statePath: string) =>
+  (values: Readonly<Record<string, string>>): void =>
+    writeEnvFile(serverEnvFileFor(statePath), { ...values });
 
 /** That file as it stands. */
 export function savedEnv(statePath: string): Record<string, string> {
@@ -67,13 +83,13 @@ export function vaultOf(env: Readonly<Record<string, string | undefined>>): Reco
  * break is refused before anything is written rather than becoming a second variable of its own. */
 export function writeEnvFile(path: string, set: Record<string, string>): void {
   for (const [name, value] of Object.entries(set)) {
-    if (/[\n\r]/.test(value)) throw new Error(`the value for ${name} carries a line break, and one variable is one line`);
+    if (crossesLines(value)) throw new Error(`the value for ${name} carries a line break, and one variable is one line`);
   }
   const pending = new Map(Object.entries(set));
   const lines: string[] = [];
   if (existsSync(path)) {
     for (const line of readFileSync(path, "utf8").split("\n")) {
-      const key = line.match(/^([A-Z_]+)=/)?.[1];
+      const key = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=/)?.[1];
       const value = key === undefined ? undefined : pending.get(key);
       if (key === undefined || value === undefined) {
         lines.push(line);
