@@ -4,12 +4,13 @@ import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, rea
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CODEX_TOML, GEMINI_SETTINGS_JSON, OPENCODE_JSON } from "@wsp/catalog";
-import { nodeHost, type Host } from "@wsp/collect";
+import { nodeHost, tilde, type Host } from "@wsp/collect";
 import type { ExecResult, Machine } from "@wsp/engine";
 import { configChangedRefusal, configHardLinkRefusal, noServerSwitchRefusal, noSuchServerRefusal, serverNameFormatRefusal, serverNameRefusal, serverThereRefusal } from "@wsp/protocol";
 import type { AgentsOn } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
+import { serverVault, type ServerVault } from "../src/env-keys.js";
 import { serverTransport, serversActs } from "../src/servers-acts.js";
 
 const roots: string[] = [];
@@ -62,6 +63,12 @@ function road(at: AgentHome, o: { root?: boolean; bytes?: boolean; before?: (cmd
 }
 
 const HERE: AgentsOn = { kind: "here" };
+
+/** A vault in memory that keeps what it is handed, each hand-over also pushed to `into`. */
+function memVault(into: Record<string, string>[]): ServerVault {
+  const held: Record<string, string> = {};
+  return { file: "/state/servers.env", held: () => ({ ...held }), owners: () => ({}), hold: v => void (into.push({ ...v }), Object.assign(held, v)), release: () => {} };
+}
 const json = (path: string): Record<string, Record<string, unknown>> => JSON.parse(readFileSync(path, "utf8")) as Record<string, Record<string, unknown>>;
 const mode = (path: string): number => statSync(path).mode & 0o777;
 const box = (at: AgentHome, machine: Pick<Machine, "exec">): AgentsOn => ({ kind: "box", machine, login: { HOME: at.home, PATH: `${at.bin}:/usr/bin:/bin` } });
@@ -93,7 +100,7 @@ describe("adding an MCP server", () => {
   it("writes names into another computer's files and hands each value to the vault, never to the file", async () => {
     const at = fixture();
     const vaulted: Record<string, string>[] = [];
-    const acts = serversActs({ vault: v => void vaulted.push({ ...v }) });
+    const acts = serversActs({ vault: memVault(vaulted) });
     await acts.add(box(at, road(at).machine), { agent: "claude", name: "tracker", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer lin_api_TESTONLY", "X-Team": "eng" } });
     await acts.add(box(at, road(at).machine), { agent: "codex", name: "tracker", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer lin_api_TESTONLY" } });
     await acts.add(box(at, road(at).machine), { agent: "codex", name: "notion", command: "npx", args: ["notion-mcp"], env: { NOTION_TOKEN: "ntn_TESTONLY" } });
@@ -112,7 +119,7 @@ describe("adding an MCP server", () => {
   it("keeps a variable an argument or the address names as ${NAME} by name in each agent's own syntax, the value given with env in the vault alone", async () => {
     const at = fixture();
     const vaulted: Record<string, string>[] = [];
-    const acts = serversActs({ vault: v => void vaulted.push({ ...v }) });
+    const acts = serversActs({ vault: memVault(vaulted) });
     const secret = "sk_TESTONLY_arg";
     const stdio = { command: "npx", args: ["acme-mcp", "--token=${ACME_TOKEN}"], env: { ACME_TOKEN: secret } };
     const http = { url: "https://mcp.acme.example/mcp?key=${ACME_TOKEN}", env: { ACME_TOKEN: secret } };
@@ -136,7 +143,7 @@ describe("adding an MCP server", () => {
     const file = join(at.home, ".codex/config.toml");
     const before = readFileSync(file, "utf8");
     const vaulted: Record<string, string>[] = [];
-    const acts = serversActs({ vault: v => void vaulted.push({ ...v }) });
+    const acts = serversActs({ vault: memVault(vaulted) });
     await expect(acts.add(box(at, road(at).machine), { agent: "codex", name: "acme", command: "npx", args: ["acme-mcp", "--token=${ACME_TOKEN}"], env: { ACME_TOKEN: "sk_TESTONLY_arg" } })).rejects.toThrow(
       "Codex reads no variable inside a server's arguments, so --token=${ACME_TOKEN} cannot travel without its value and nothing was written.",
     );
@@ -155,11 +162,117 @@ describe("adding an MCP server", () => {
     expect(json(join(at.home, ".claude.json")).mcpServers!.acme9).toEqual({ type: "http", url: "https://mcp.acme.example/mcp?key=sk_TESTONLY_arg" });
   });
 
+  it("records every value passed on this computer in the vault too, never an empty value", async () => {
+    const at = fixture();
+    const vaulted: Record<string, string>[] = [];
+    const acts = serversActs({ here: () => here(at), vault: memVault(vaulted) });
+    await acts.add(HERE, { agent: "claude", name: "acme", command: "npx", args: ["--token=${ACME_TOKEN}"], env: { ACME_TOKEN: "sk_TESTONLY_arg", EMPTY: "" } });
+    await acts.add(HERE, { agent: "claude", name: "plain", command: "npx" });
+    expect(vaulted).toEqual([{ ACME_TOKEN: "sk_TESTONLY_arg" }]);
+    expect(json(join(at.home, ".claude.json")).mcpServers!.acme).toMatchObject({ args: ["--token=sk_TESTONLY_arg"], env: { ACME_TOKEN: "sk_TESTONLY_arg" } });
+  });
+
+  it("refuses a catalog row's or a provider's key as a server's variable, on this computer and on another, naming whose key it is, and writes nothing", async () => {
+    const at = fixture();
+    const files = [".claude.json", ".codex/config.toml"].map(f => join(at.home, f));
+    const before = files.map(f => readFileSync(f, "utf8"));
+    const vaulted: Record<string, string>[] = [];
+    const acts = serversActs({ here: () => here(at), vault: memVault(vaulted) });
+    const words: [string, string][] = [
+      ["SOLARI_API_KEY", "SOLARI_API_KEY belongs to the Solari key, so set it there or give the variable another name."],
+      ["BOX_API_KEY", "BOX_API_KEY belongs to the Box by ASCII key, so set it there or give the variable another name."],
+      ["GEMINI_API_KEY", "GEMINI_API_KEY belongs to the Gemini CLI key, so set it there or give the variable another name."],
+    ];
+    for (const [name, said] of words) {
+      for (const on of [HERE, box(at, road(at).machine)]) {
+        await expect(acts.add(on, { agent: "claude", name: "p", command: "npx", env: { [name]: "sk_TESTONLY_key" } }), `${name} ${on.kind}`).rejects.toThrow(said);
+        await expect(acts.add(on, { agent: "codex", name: "p", command: "npx", env: { [name]: "sk_TESTONLY_key" } })).rejects.toThrow(said);
+      }
+    }
+    expect(files.map(f => readFileSync(f, "utf8"))).toEqual(before);
+    expect(vaulted).toEqual([]);
+  });
+
+  describe("servers.env as the place of record, with the server each name belongs to", () => {
+    const setup = () => {
+      const at = fixture();
+      const state = join(at.root, "state", "state.json");
+      const vault = serverVault(state);
+      return { at, vault, acts: serversActs({ here: () => here(at), vault }), envFile: join(at.root, "state", "servers.env") };
+    };
+
+    it("refuses a second server claiming a name with another value, on this computer and on another, naming the first and a road that frees it", async () => {
+      const { at, vault, acts } = setup();
+      await acts.add(HERE, { agent: "claude", name: "first", command: "npx", args: ["--token=${TOKEN}"], env: { TOKEN: "sk_TESTONLY_first" } });
+      const gemini = join(at.home, ".gemini/settings.json");
+      const before = readFileSync(gemini, "utf8");
+      const said = "TOKEN already holds the value first was added with, so nothing was written; give this server's variable another name, or free it by removing first with wsp servers remove.";
+      await expect(acts.add(HERE, { agent: "gemini", name: "second", command: "npx", env: { TOKEN: "sk_TESTONLY_second" } })).rejects.toThrow(said);
+      await expect(acts.add(box(at, road(at).machine), { agent: "gemini", name: "second", command: "npx", env: { TOKEN: "sk_TESTONLY_second" } })).rejects.toThrow(said);
+      expect(readFileSync(gemini, "utf8")).toBe(before);
+      expect(vault.held()).toEqual({ TOKEN: "sk_TESTONLY_first" });
+      expect(vault.owners()).toEqual({ TOKEN: ["first"] });
+      // The same value is no claim of another value: both servers now hold the name.
+      await acts.add(HERE, { agent: "gemini", name: "second", command: "npx", env: { TOKEN: "sk_TESTONLY_first" } });
+      expect(vault.owners()).toEqual({ TOKEN: ["first", "second"] });
+      // Two servers holding it, neither rotates it alone.
+      await expect(acts.add(HERE, { agent: "opencode", name: "first", command: "npx", env: { TOKEN: "sk_TESTONLY_new" } })).rejects.toThrow("TOKEN already holds the value second was added with");
+    });
+
+    it("takes a new value from the same server as its rotation, on this computer and on another", async () => {
+      const { at, vault, acts } = setup();
+      await acts.add(HERE, { agent: "claude", name: "acme", command: "npx", args: ["--token=${TOKEN}"], env: { TOKEN: "sk_TESTONLY_old" } });
+      await acts.remove(HERE, { agent: "claude", name: "acme" });
+      await acts.add(HERE, { agent: "claude", name: "acme", command: "npx", args: ["--token=${TOKEN}"], env: { TOKEN: "sk_TESTONLY_new" } });
+      expect(vault.held()).toEqual({ TOKEN: "sk_TESTONLY_new" });
+      await acts.add(HERE, { agent: "gemini", name: "acme", command: "npx", env: { TOKEN: "sk_TESTONLY_newer" } });
+      await acts.add(box(at, road(at).machine), { agent: "opencode", name: "acme", command: "npx", env: { TOKEN: "sk_TESTONLY_newest" } });
+      expect(vault.held()).toEqual({ TOKEN: "sk_TESTONLY_newest" });
+      expect(vault.owners()).toEqual({ TOKEN: ["acme"] });
+    });
+
+    it("frees a removed server's names from servers.env, keeping a name another server still holds and every other line", async () => {
+      const { vault, acts, envFile } = setup();
+      await acts.add(HERE, { agent: "claude", name: "a", command: "npx", env: { ONLY_A: "sk_TESTONLY_a", SHARED: "sk_TESTONLY_s" } });
+      await acts.add(HERE, { agent: "claude", name: "b", command: "npx", env: { SHARED: "sk_TESTONLY_s" } });
+      writeFileSync(envFile, `${readFileSync(envFile, "utf8")}# mine\n`);
+      await acts.remove(HERE, { agent: "claude", name: "a" });
+      expect(vault.held()).toEqual({ SHARED: "sk_TESTONLY_s" });
+      expect(vault.owners()).toEqual({ SHARED: ["b"] });
+      expect(readFileSync(envFile, "utf8")).toBe("SHARED=sk_TESTONLY_s\n# mine\n");
+      expect(statSync(envFile).mode & 0o777).toBe(0o600);
+      await acts.remove(HERE, { agent: "claude", name: "b" });
+      expect(vault.held()).toEqual({});
+      expect(vault.owners()).toEqual({});
+    });
+
+    it("keeps a server's values while another agent here still lists it, and frees them at the last removal", async () => {
+      const { vault, acts } = setup();
+      await acts.add(HERE, { agent: "claude", name: "x", command: "npx", env: { X_TOKEN: "sk_TESTONLY_x" } });
+      await acts.add(HERE, { agent: "codex", name: "x", command: "npx", env: { X_TOKEN: "sk_TESTONLY_x" } });
+      await acts.remove(HERE, { agent: "claude", name: "x" });
+      expect(vault.held()).toEqual({ X_TOKEN: "sk_TESTONLY_x" });
+      expect(vault.owners()).toEqual({ X_TOKEN: ["x"] });
+      await acts.remove(HERE, { agent: "codex", name: "x" });
+      expect(vault.held()).toEqual({});
+      expect(vault.owners()).toEqual({});
+    });
+
+    it("refuses a name servers.env holds with another value and no server recorded for it, naming the file to take the line out of", async () => {
+      const { at, acts, envFile } = setup();
+      mkdirSync(dirname(envFile), { recursive: true });
+      writeFileSync(envFile, "LEGACY=sk_TESTONLY_legacy\n");
+      await expect(acts.add(HERE, { agent: "claude", name: "c", command: "npx", env: { LEGACY: "sk_TESTONLY_c" } })).rejects.toThrow(
+        `LEGACY already holds another value in ${tilde(at.home, envFile)}, and no server is recorded for it, so nothing was written; give this server's variable another name, or take that line out of the file.`,
+      );
+    });
+  });
+
   it("refuses a value for a variable a catalog row keeps its key under, naming the row, and writes nothing", async () => {
     const at = fixture();
     const before = readFileSync(join(at.home, ".codex/config.toml"), "utf8");
     const vaulted: Record<string, string>[] = [];
-    await expect(serversActs({ vault: v => void vaulted.push({ ...v }) }).add(box(at, road(at).machine), { agent: "codex", name: "gem", command: "gem-mcp", env: { GEMINI_API_KEY: "gem_TESTONLY" } })).rejects.toThrow(
+    await expect(serversActs({ vault: memVault(vaulted) }).add(box(at, road(at).machine), { agent: "codex", name: "gem", command: "gem-mcp", env: { GEMINI_API_KEY: "gem_TESTONLY" } })).rejects.toThrow(
       "GEMINI_API_KEY belongs to the Gemini CLI key, so set it there or give the variable another name.",
     );
     expect(readFileSync(join(at.home, ".codex/config.toml"), "utf8")).toBe(before);
