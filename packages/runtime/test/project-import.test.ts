@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tarOf } from "@wsp/engine";
+import { tarRead } from "../../engine/test/tar-read.js";
 import type { EventUnion, HostFolderListing, ProjectAgent, ProjectAgentOutcome, ProjectImportEvent, ProjectPlan, ProjectSecret } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRuntime, type PackedProject, type PackedState, type ProjectBundler, type StateRequest } from "../src/runtime.js";
@@ -95,7 +95,7 @@ function fakeBundler(extra: ProjectSecret[] = [], agents: ProjectAgent[] = []): 
 const extract = (tgz: Buffer): string => {
   const dir = mkdtempSync(join(tmpdir(), "wsp-import-out-"));
   dirs.push(dir);
-  execFileSync("tar", ["-xzf", "-", "-C", dir], { input: tgz });
+  tarRead(["-xzf", "-", "-C", dir], tgz);
   return dir;
 };
 

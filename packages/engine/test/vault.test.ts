@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { gzipSync } from "node:zlib";
 import { UPLOAD_PART_BYTES, exportFolder, exportPaths, exportPathsInto, fitsTar, folderExportScript, importInto, landBundle, tarOf, type CacheRule } from "../src/vault.js";
 import type { ExecResult, Machine } from "../src/machine.js";
+import { tarRead } from "./tar-read.js";
 
 const TAR_BYTES = Buffer.from("fake-tgz-bytes-" + "x".repeat(64));
 
@@ -475,7 +476,7 @@ describe("tarOf", () => {
   const extract = (tgz: Buffer): string => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-tarof-"));
     dirs.push(dir);
-    execFileSync("tar", ["-xzf", "-", "-C", dir], { input: tgz });
+    tarRead(["-xzf", "-", "-C", dir], tgz);
     return dir;
   };
 
@@ -488,7 +489,7 @@ describe("tarOf", () => {
       { path: "/etc/wsp/empty", mode: 0o644, content: "" },
     ]);
     const dir = extract(tgz);
-    expect(execFileSync("tar", ["-tzf", "-"], { input: tgz }).toString().trim().split("\n")).toEqual(["etc/wsp/machine-context.md", "root/.hermes/skills/wsp-machine/SKILL.md", deep, "etc/wsp/empty"]);
+    expect(tarRead(["-tzf", "-"], tgz).toString().trim().split("\n")).toEqual(["etc/wsp/machine-context.md", "root/.hermes/skills/wsp-machine/SKILL.md", deep, "etc/wsp/empty"]);
     expect(readFileSync(join(dir, "etc/wsp/machine-context.md"), "utf8")).toBe("short text\n");
     expect(readFileSync(join(dir, "root/.hermes/skills/wsp-machine/SKILL.md"), "utf8")).toBe("skill\n");
     expect(readFileSync(join(dir, deep), "utf8")).toBe("deep\n");
@@ -638,7 +639,7 @@ describe("exportFolder", () => {
   }
 
   const listing = (tgz: Buffer): string[] =>
-    execFileSync("tar", ["-tzf", "-"], { input: tgz }).toString().trim().split("\n").filter(l => l !== "").map(l => l.replace(/^\.\//, "").replace(/\/$/, "")).filter(l => l !== "." && l !== "").sort();
+    tarRead(["-tzf", "-"], tgz).toString().trim().split("\n").filter(l => l !== "").map(l => l.replace(/^\.\//, "").replace(/\/$/, "")).filter(l => l !== "." && l !== "").sort();
 
   it("the script tars the folder from its root, leaves every cache root the rule names behind, names them on stdout, and judges nothing under .git", async () => {
     const root = folder();
@@ -986,7 +987,7 @@ describe("exportFolder", () => {
     try {
       const tar = await exportPaths(g.machine, readdirSync(fork).map(e => join(fork, e)), { fetch: globalThis.fetch, drop: dropped(fork) });
       const depth = fork.replace(/^\//, "").split("/").length;
-      execFileSync("tar", ["xzf", "-", "-C", image, `--strip-components=${depth}`, "--recursive-unlink"], { input: tar });
+      tarRead(["xzf", "-", "-C", image, `--strip-components=${depth}`, "--recursive-unlink"], tar);
       const read = (rel: string): string => readFileSync(join(image, rel), "utf8");
       expect(read(".zshrc")).toBe("v2 zshrc\n");
       expect(read(".claude/settings.json")).toBe("v2 settings\n");

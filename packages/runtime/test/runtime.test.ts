@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -19,6 +18,7 @@ import { POLL_INTERVAL_MS } from "../src/status.js";
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { tarRead } from "../../engine/test/tar-read.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
 import { missesFirstDelete, stubBackend, tokenGuest, type StubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
@@ -4203,10 +4203,10 @@ describe("runtime golden rollback", () => {
 
 describe("runtime machine context", () => {
   const probe = "WSP_CTX\nKERNEL 6.6.30\nDISK 20466256 11720704\nAGENT claude\nSHELL zsh\nWSP_CTX_END\n";
-  const namesIn = (tgz: Buffer): string[] => execFileSync("tar", ["-tzf", "-"], { input: tgz }).toString("utf8").trim().split("\n");
+  const namesIn = (tgz: Buffer): string[] => tarRead(["-tzf", "-"], tgz).toString("utf8").trim().split("\n");
   /** The context archives that went up for a machine: the texts travel through the upload road, never inside an exec. */
   const writes = (backend: StubBackend, m: StubMachine) => backend.puts.filter(p => p.machine === m.id && namesIn(p.body).includes("etc/wsp/machine-context.md")).map(p => p.body);
-  const docOf = (tgz: Buffer) => execFileSync("tar", ["-xzOf", "-", "etc/wsp/skills/wsp-machine/SKILL.md"], { input: tgz }).toString("utf8");
+  const docOf = (tgz: Buffer) => tarRead(["-xzOf", "-", "etc/wsp/skills/wsp-machine/SKILL.md"], tgz).toString("utf8");
   const version = { version: 4, snapshotId: "snap_g", baseTemplate: "base", setupSha: "abcdef0123456789", createdAt: "2026-09-05T10:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } };
 
   it("refreshes the document on the fresh fork with the workspace's name and its golden version", async () => {
