@@ -31,7 +31,7 @@ function testRuntime(status?: StatusWatchOptions): {
   backend: StubBackend;
 } {
   const backend = stubBackend();
-  const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, ...(status ? { status } : {}) });
+  const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goneConfirmMs: 0, ...(status ? { status } : {}) });
   return { rt, backend };
 }
 
@@ -144,13 +144,13 @@ describe("status.list", () => {
   it("maps napping and gone machines without probing", async () => {
     const { rt, backend } = testRuntime();
     const a = await createOn(rt, { golden: "snap_g", name: "a" });
-    await createOn(rt, { golden: "snap_g", name: "b" });
+    const b = await createOn(rt, { golden: "snap_g", name: "b" });
     await rt.workspaces.nap(a.id);
     await backend.machines[1]!.kill();
-    const statuses = await rt.status.list();
-    const byName = new Map(statuses.map(s => [s.name, s]));
-    expect(byName.get("a")).toMatchObject({ machineState: "paused", reach: { state: "napping" } });
-    expect(byName.get("b")).toMatchObject({ machineState: "gone", reach: { state: "gone" } });
+    const byName = async () => new Map((await rt.status.list()).map(s => [s.name, s]));
+    expect((await byName()).get("a")).toMatchObject({ machineState: "paused", reach: { state: "napping" } });
+    await until(async () => (await rt.workspaces.get(b.id)).phase === "gone");
+    expect((await byName()).get("b")).toMatchObject({ machineState: "gone", reach: { state: "gone" } });
   });
 
   it("an explicit list() asks the provider once per machine and never list()", async () => {
@@ -163,6 +163,9 @@ describe("status.list", () => {
     backend.machines[0]!.paused = true; // the provider paused it behind our back
     expect((await rt.status.list())[0]).toMatchObject({ phase: "running", machineState: "paused" });
     await backend.machines[0]!.kill();
+    // One gone read is not gone: the row reads the record's word until the reads that confirm it agree.
+    expect((await rt.status.list())[0]).toMatchObject({ phase: "running", machineState: "running" });
+    await until(async () => (await rt.workspaces.list())[0]!.phase === "gone");
     expect((await rt.status.list())[0]).toMatchObject({ machineState: "gone", reach: { state: "gone" } });
   });
 

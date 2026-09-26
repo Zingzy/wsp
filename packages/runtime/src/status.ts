@@ -208,6 +208,8 @@ export interface StatusTrackerOptions {
    * client needs is the changes; what the runtime needs about its own machines is the measurement, and a machine
    * parked in one state changes nothing for hours while staying just as dark. */
   onPolled?(statuses: WorkspaceStatus[]): void;
+  /** A provider read that answered gone for a record not marked gone, with the words the record would carry. */
+  onGone?(id: string, machineId: string, reason: string): void;
   /** Time source for the meters, the reconcile and zombie windows and the probe's elapsed read, and the timer the cost
    * and poll ticks run on; tests inject one they can advance. */
   clock?: Clock;
@@ -610,14 +612,16 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         // A machine that cannot say what it is this tick keeps its row; the facts are the one part left off it.
         const said = facts === undefined ? undefined : await factsRead(r, facts);
         const base = { ...view, size, rateUsdPerHour: r.rateUsdPerHour, ...(idleAt !== undefined ? { idleAt } : {}), ...(said !== undefined ? { facts: said } : {}) };
-        const gone = (reason: string | undefined): WorkspaceStatus => ({ ...base, machineState: "gone", reach: { state: "gone" }, ...(reason !== undefined ? { reason } : {}) });
-        const done = (state: MachineState, reach: WorkspaceStatus["reach"]): WorkspaceStatus =>
-          state === "gone" ? gone(goneReasons.get(r.id) ?? goneWords(r.machineId)) : { ...base, machineState: state, reach };
+        // One 404 is not gone: the row keeps the record's word until the runtime's confirmation settles the record.
+        const done = (state: MachineState, reach: WorkspaceStatus["reach"]): WorkspaceStatus => {
+          if (state === "gone") o.onGone?.(r.id, r.machineId, goneReasons.get(r.id) ?? goneWords(r.machineId));
+          return { ...base, machineState: state === "gone" ? machineStateOf(view.phase) : state, reach };
+        };
 
         // A gone record already holds the provider's last word; asking again would only 404.
         if (view.phase === "gone") {
           suspects.delete(r.id);
-          return gone(view.gone);
+          return { ...base, machineState: "gone", reach: { state: "gone" }, ...(view.gone !== undefined ? { reason: view.gone } : {}) };
         }
         // The computer this machine lives on is not connected: nothing is asked of it, the row says why, and the
         // machine keeps the word it was left with until that computer dials in again.
