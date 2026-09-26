@@ -34,15 +34,16 @@ function mount(over: Partial<SidebarThreadSnapshot> = {}) {
 }
 
 const row = (): HTMLElement => document.querySelector<HTMLElement>("[data-sidebar-row]")!;
-const state = (): string | null => document.querySelector("[data-thread-state]")?.textContent ?? null;
-const time = (): string | null => document.querySelector("[data-thread-time]")?.textContent ?? null;
+const slot = (): HTMLElement => document.querySelector<HTMLElement>("[data-thread-status]")!;
+const state = (): string | null => (slot().dataset["tone"] === undefined ? null : (slot().querySelector("span")?.textContent ?? null));
+const time = (): string | null => (slot().dataset["tone"] === undefined ? slot().textContent : null);
 /** Any dot the row might draw: a round span, which is what a status dot was. */
 const dots = (): number => document.querySelectorAll("[data-sidebar-row] .rounded-full, [data-sidebar-row] [class*=animate-status]").length;
 
 afterEach(cleanup);
 
 describe("a thread row's one line", () => {
-  it("carries the state as one mono word in the slot and no dot, whatever the state, and the time only once the thread rests", () => {
+  it("carries the one thread status in the slot and no dot, whatever the state, and the age only once the thread rests", () => {
     mount();
     expect(state()).toBe("Working");
     expect(time()).toBeNull();
@@ -64,7 +65,7 @@ describe("a thread row's one line", () => {
 
   it("is the mark, the title and the slot, nothing else on its face: the project, the agent and who opened it ride the hover text", () => {
     mount();
-    expect(row().textContent).toBe("fix the port listWorking");
+    expect(row().textContent).toMatch(/^fix the port listWorking\d/);
     expect(row().getAttribute("title")).toBe("Claude Code, spoo, you");
     expect(row().dataset["depth"]).toBe("2");
     const lead = row().firstElementChild!;
@@ -80,13 +81,25 @@ describe("a thread row's one line", () => {
     expect(row().getAttribute("title")).toBe("Claude Code, this Mac");
   });
 
-  it("the state word reads at the prose tier and the time at the whisper, both in the row's mono", () => {
-    mount();
-    expect(document.querySelector("[data-thread-state]")!.className).toContain("text-[var(--sidebar-prose)]");
-    expect(document.querySelector("[data-thread-state]")!.className).toContain("font-mono");
+  it("a toned state takes its status ink over the row's mono, and the age keeps the whisper", () => {
+    mount({ status: "failed" });
+    expect(slot().classList).toContain("text-status-failed");
+    expect(slot().className).toContain("font-mono");
     cleanup();
     mount({ status: "completed" });
-    expect(document.querySelector("[data-thread-time]")!.className).toContain("text-[var(--top-row-meta)]");
-    expect(document.querySelector("[data-thread-time]")!.className).not.toContain("w-[3ch]");
+    expect(slot().getAttribute("style")).toBeNull();
+    expect(slot().className).toContain("text-[var(--top-row-meta)]");
+    expect(slot().className).not.toContain("w-[3ch]");
+  });
+
+  it("a working row walks the crab in its slot, and no other row does", () => {
+    mount();
+    expect(slot().querySelector("canvas[data-crab]")).not.toBeNull();
+    cleanup();
+    for (const over of [{ status: "failed" as const }, { status: "completed" as const }, { asking: "Write out.txt" }]) {
+      mount(over);
+      expect(slot().querySelector("canvas"), JSON.stringify(over)).toBeNull();
+      cleanup();
+    }
   });
 });

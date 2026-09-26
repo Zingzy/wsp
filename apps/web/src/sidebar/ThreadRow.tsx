@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One thread's row under its workspace, one line at every depth, and the row a
 // send in flight stands as until the runtime writes its own. The agent's mark
-// leads it, the title takes the line, and one slot at the right edge holds the
-// state while the thread is one a person acts on ("Needs you", "Working",
-// "Failed") and the time otherwise. No dot for any state: the state is the
-// word. The project and the branch are not on the row, since the tree over it
-// names both; the agent, the project and who opened the thread ride the row's
-// hover text. A working title takes the sidebar's foreground and a settled one
+// leads it, the title takes the line, and the one thread status slot at the
+// right edge holds its state, the crab beside a working one. The project and
+// the branch are not on the row, since the tree over it names both; the
+// agent, the project and who opened the thread ride the row's hover text. A
+// working title takes the sidebar's foreground and a settled one
 // its muted ink, so the rows a person is waiting on stand out from the shelf.
 // Renaming turns the title into the sidebar's one name box in the
 // same slot, opened from the menu or by a double-click on the title, so the
@@ -14,18 +13,18 @@
 import type { MouseEvent } from "react";
 import { agentName } from "@wsp/catalog";
 import { THREAD_WORDS } from "../actions/format.js";
-import { threadIndicator } from "../adapt/index.js";
 import type { Launch, SidebarThreadSnapshot } from "../adapt/index.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
+import type { ThreadStatusInput } from "../components/status/kinds/index.js";
+import { ThreadStatus } from "../components/status/ThreadStatus.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
-import { ONE_LINE_ROW_CLASS, ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, threadRowId } from "./rowGrammar.js";
+import { ONE_LINE_ROW_CLASS, ROW_LEAD_CLASS, ROW_META_CLASS, threadRowId } from "./rowGrammar.js";
 import { isThreadWorking } from "./Sidebar.logic.js";
-import { provenanceLabel, threadMetaWords, threadStateWord } from "./workspaceRows.js";
+import { provenanceLabel, threadMetaWords } from "./workspaceRows.js";
 
-/** The one slot at the row's right edge: its own width, so a time takes no more room than it needs. */
-const SLOT_CLASS = "shrink-0 text-right";
+const SLOT_CLASS = cn(ROW_META_CLASS, "justify-end");
 
 export function ThreadRow({
   thread,
@@ -62,7 +61,6 @@ export function ThreadRow({
   /** Opens the box on this row, as the menu's Rename does; absent where the rename is refused, so the title is text alone. */
   onRenameOpen?: (() => void) | undefined;
 }) {
-  const state = threadStateWord(thread);
   // The Idle header can be shut, so the row carries the difference itself, in the title's colour.
   const idle = !isThreadWorking(thread);
   const label = provenanceLabel(thread, threadMetaWords(thread, runs, under));
@@ -96,25 +94,17 @@ export function ThreadRow({
           {thread.title}
         </span>
       )}
-      {state === null ? (
-        <span data-thread-time className={cn(ROW_META_CLASS, SLOT_CLASS)}>
-          {time}
-        </span>
-      ) : (
-        <span data-thread-state className={cn(ROW_PROSE_CLASS, SLOT_CLASS)}>
-          {state}
-        </span>
-      )}
+      <ThreadStatus thread={thread} age={time} crab className={SLOT_CLASS} />
     </SidebarMenuButton>
   );
 }
 
-/** The word a send in flight wears: it is working by the fact of having been sent, read through the tables the
- * runtime's own rows are read through, so the two rows cannot say different things about the same thread. */
-const LAUNCH_WORD = threadStateWord({ status: "running", asking: null, indicator: threadIndicator({ status: "running" }) });
+/** A send in flight is working by the fact of having been sent, read through the same status as the runtime's own
+ * rows, so the two rows cannot say different things about the same thread. */
+const LAUNCHED: ThreadStatusInput = { status: "running", asking: null, startedAt: null };
 
 /** The send the runtime has written no row for yet, in the thread row's own grammar: the mark, the message as the
- * title and the working word in the slot. Not a button: the thread it stands for has no id to select until the
+ * title and the working status in the slot. Not a button: the thread it stands for has no id to select until the
  * runtime answers, and the transcript the person is looking at is already this thread. */
 export function ThreadLaunchRow({ launch, depth }: { launch: Launch; depth: number }) {
   return (
@@ -125,9 +115,7 @@ export function ThreadLaunchRow({ launch, depth }: { launch: Launch; depth: numb
       <span data-thread-title className="min-w-0 flex-1 truncate text-sidebar-foreground">
         {launch.title}
       </span>
-      <span data-thread-state className={cn(ROW_PROSE_CLASS, SLOT_CLASS)}>
-        {LAUNCH_WORD}
-      </span>
+      <ThreadStatus thread={LAUNCHED} crab className={SLOT_CLASS} />
     </SidebarMenuButton>
   );
 }

@@ -41,4 +41,8 @@
   --material-ground: #0f1117;
   --material-raised: #212431;
   --material-edge: #252a38;
+  --status-input: #a3b3ff;
+  --status-working: #f472b6;
+  --status-failed: #ffa2a2;
+  --status-done: #5ee9b5;
 }

@@ -27,6 +27,11 @@ describe("index.css", () => {
     expect(appTerminalFontSize()).toBe(14);
   });
 
+  it("registers each thread status ink as a colour utility off the theme's own token", () => {
+    const inline = /@theme inline \{([\s\S]*?)\n\}/.exec(css)![1]!;
+    for (const tone of ["input", "working", "failed", "done"]) expect(inline).toContain(`--color-status-${tone}: var(--status-${tone});`);
+  });
+
   it("carries no second theme system: no contrast layer, no inherited theme ids, no workspace theme on the sidebar", () => {
     expect(css).not.toMatch(/--contrast-|--appearance-contrast|--app-theme-|data-theme-id|theme-inspector|data-space-|--space-grain|--toolbar-/);
     expect(css).not.toContain('[data-theme="dark"]');

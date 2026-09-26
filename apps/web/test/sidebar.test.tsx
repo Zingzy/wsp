@@ -153,10 +153,18 @@ async function mount(api: FakeApi, firstName: string) {
 const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
 const rowIds = () => Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-row]")).map(r => r.dataset["rowId"]);
 const stateSlot = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>("[data-workspace-state]")!;
-/** A thread row's state, which is one muted mono word and never a dot; null on a row that carries none. */
-const threadState = (row: HTMLElement): string | null => row.querySelector<HTMLElement>("[data-thread-state]")?.textContent ?? null;
-/** A thread row's time, which stands in the slot only once the thread rests; null while a state word holds it. */
-const threadTime = (row: HTMLElement): string | null => row.querySelector<HTMLElement>("[data-thread-time]")?.textContent ?? null;
+const statusSlot = (row: HTMLElement): HTMLElement | null => row.querySelector<HTMLElement>("[data-thread-status]");
+/** A thread row's state word, which a toned status slot carries (a working one for screen readers, beside its time);
+ * null on a row at rest. */
+const threadState = (row: HTMLElement): string | null => {
+  const slot = statusSlot(row);
+  return slot?.dataset["tone"] === undefined ? null : (slot.querySelector("span")?.textContent ?? null);
+};
+/** A thread row's age, which stands in the slot only once the thread rests; null while a state holds it. */
+const threadTime = (row: HTMLElement): string | null => {
+  const slot = statusSlot(row);
+  return slot === null || slot.dataset["tone"] !== undefined ? null : slot.textContent;
+};
 const depthOf = (row: HTMLElement): number => Number(row.dataset["depth"]);
 const head = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>("[data-k=project-switcher]")!;
 const menu = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-project-switcher-menu]");
@@ -305,10 +313,10 @@ describe("rows from the fixture wire", () => {
       expect(lead.nextElementSibling!.hasAttribute("data-thread-title")).toBe(true);
       return { label: row.getAttribute("title"), text: row.textContent, mark: mark.getAttribute("data-harness-mark"), svg: mark.tagName, tone, size: [...mark.classList].find(c => c.startsWith("size-")) };
     };
-    expect(reads("fix the port list")).toEqual({ label: "Claude Code, the-project, cli", text: "fix the port listWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
-    expect(reads("upgrade node")).toEqual({ label: "Codex, the-project, you", text: "upgrade nodeWorking", mark: "codex", svg: "svg", tone: undefined, size: "size-[13px]" });
-    expect(reads("before provenance")).toEqual({ label: "Claude Code, the-project, you", text: "before provenanceWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
-    expect(reads("from the director")).toEqual({ label: "Claude Code, the-project, agent", text: "from the directorWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
+    expect(reads("fix the port list")).toEqual({ label: "Claude Code, the-project, cli", text: expect.stringMatching(/^fix the port listWorking\d+s$/), mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
+    expect(reads("upgrade node")).toEqual({ label: "Codex, the-project, you", text: expect.stringMatching(/^upgrade nodeWorking\d+s$/), mark: "codex", svg: "svg", tone: undefined, size: "size-[13px]" });
+    expect(reads("before provenance")).toEqual({ label: "Claude Code, the-project, you", text: expect.stringMatching(/^before provenanceWorking\d+s$/), mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
+    expect(reads("from the director")).toEqual({ label: "Claude Code, the-project, agent", text: expect.stringMatching(/^from the directorWorking\d+s$/), mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
     // Nothing on the face but the title and the slot: no second line, no dots drawn as text, no opener word.
     for (const title of ["fix the port list", "upgrade node"]) {
       expect(rowOf(title).querySelector("[data-thread-meta], [data-thread-provenance]")).toBeNull();
@@ -363,9 +371,9 @@ describe("rows from the fixture wire", () => {
     // The lead, the title and the slot: three children of the row and nothing else.
     expect(title.parentElement).toBe(rowOf(LONG));
     expect(rowOf(LONG).children).toHaveLength(3);
-    expect(title.nextElementSibling!.hasAttribute("data-thread-state")).toBe(true);
-    expect(title.nextElementSibling!.textContent).toBe("Working");
-    expect(screen.getByText(SHORT).nextElementSibling!.hasAttribute("data-thread-time")).toBe(true);
+    expect(title.nextElementSibling!.getAttribute("data-thread-status")).toBe("working");
+    expect(threadState(rowOf(LONG))).toBe("Working");
+    expect(screen.getByText(SHORT).nextElementSibling!.getAttribute("data-thread-status")).toBe("resting");
     expect(screen.getByText(SHORT).nextElementSibling!.textContent).toBe("24m");
     // The slot is its own width, not a fixed column: a time takes no more room than it needs.
     for (const slot of [title.nextElementSibling!, screen.getByText(SHORT).nextElementSibling!]) {
@@ -601,11 +609,11 @@ describe("rows from the fixture wire", () => {
     expect(title.className).toContain("truncate");
     const slot = title.nextElementSibling as HTMLElement;
     expect(rowOf("fix the port list").children).toHaveLength(3);
-    expect(slot.textContent).toBe("Working");
+    expect(threadState(rowOf("fix the port list"))).toBe("Working");
     expect(slot.className).toContain("font-mono");
-    expect(slot.className).toContain("text-right");
+    expect(slot.className).toContain("justify-end");
     expect(slot.className).toContain("shrink-0");
-    expect(rowOf("upgrade node").querySelector("[data-thread-time]")!.textContent).toBe("now");
+    expect(threadTime(rowOf("upgrade node"))).toBe("now");
     // The mark leads the title: the row's first child is the lead and the title comes after it.
     expect(rowOf("fix the port list").firstElementChild!.querySelector("[data-harness-mark]")).not.toBeNull();
     expect(rowOf("fix the port list").firstElementChild!.nextElementSibling).toBe(title);
@@ -724,9 +732,9 @@ describe("new thread", () => {
     act(() => useStore.setState({ launches: { ws_b: { requestId: "r1", title: "read the port list", harness: "claude" } } }));
     const launched = item(rowOf("web")).querySelector<HTMLElement>("[data-thread-launch]")!;
     expect(launched.querySelector("[data-thread-title]")?.textContent).toBe("read the port list");
-    expect(launched.querySelector("[data-thread-state]")?.textContent).toBe("Working");
-    // No time yet: nothing has started to count, so the slot holds the word alone.
-    expect(launched.querySelector("[data-thread-time]")).toBeNull();
+    expect(threadState(launched)).toBe("Working");
+    // The runtime has stamped no start yet, so the time counts from the send.
+    expect(statusSlot(launched)!.querySelector("[aria-hidden]")!.textContent).toBe("0s");
     expect(launched.querySelector('svg[data-harness-mark="claude"]')).not.toBeNull();
     expect([...launched.classList]).toContain("h-9");
 
@@ -1111,7 +1119,7 @@ describe("a thread an agent opened on another workspace", () => {
     expect(rowOf("benchmark the new index").getAttribute("title")).toBe("Claude Code, spoo-bench, ascii");
     expect(rowOf("run the migration across the fleet").getAttribute("title")).toBe("Claude Code, the-project, you");
     // Nothing of that on either face: the title and the slot alone.
-    expect(rowOf("benchmark the new index").textContent).toBe("benchmark the new indexWorking");
+    expect(rowOf("benchmark the new index").textContent).toMatch(/^benchmark the new indexWorking\d+m$/);
   });
 });
 
