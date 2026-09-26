@@ -14,7 +14,11 @@ import { GHOST_IS_NOT_A_CONTROL, HELD, HELD_ON_THE_PAGE, whyHeld, OPEN_OVER_THE_
 import { atProvider, HERE_LABEL, FIXTURE_NAMES, fixtureCloud, fixtureFleet, fixtureFolders, fixtureMachines, fixtureRepos, fixtureSnapshots, fixtureState, threadId } from "./fixture-state.mjs";
 import { DAEMON_BUILD, agentStoreRows, daemonBinaryHere, hostArgv, hostEnv, hostPath, providerFor, whatIsNotBuilt, writeHereLabel } from "./host.mjs";
 import { AGENT_KEYS, binDir, builtAt, copyApp, folderHash, keysFound, labHome, labLogs, labRoot, labShell, notThisLabsShell, shimText, standInRoot, writeAgentHome, writeKeys, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
-import { A_MESSAGE, APP_UP, FAILED_ON_THE_PAGE, failuresToCheck, NOT_READY_NAMES, PROMPT_ECHOES, READY_ON_THE_PAGE } from "./ready.mjs";
+import { A_MESSAGE, APP_UP, FAILED_ON_THE_PAGE, failuresToCheck, NOT_READY_NAMES, PROMPT_ECHOES, READY_ON_THE_PAGE, STILL_LOADING } from "./ready.mjs";
+import { render } from "@testing-library/react";
+import { createElement } from "react";
+import { Skeleton } from "../src/components/ui/skeleton";
+import { StatusView } from "../src/components/agents/agentsParts";
 import { NO_FINDER_CHOOSER, PASTE_THIS, homeOf, keptLog, labLines, launchDiesLine, parseArgs as parseLabArgs, pointerPath, stopLab, whyALaunchDies, whyNotOursToRemove } from "./lab.mjs";
 
 describe("the fixtures a lab serves", () => {
@@ -361,6 +365,14 @@ describe("the failures a shot must not show", () => {
     expect(failuresToCheck({ wait: "[data-refused]" })).toEqual(FAILED_ON_THE_PAGE.filter(s => s !== "[data-refused]"));
     // A create that stopped is a failure however the log it waits for reads.
     expect(failuresToCheck({ wait: '[data-testid="creation-log"]' })).toContain('[data-testid="workspace-creation"][aria-busy="false"]');
+  });
+
+  it("knows a read still on its way by the marks the app's own parts wear, so a shot still loading fails the run", () => {
+    const still = STILL_LOADING.join(", ");
+    const shown = parts => render(createElement("div", null, ...parts)).container.querySelectorAll(still).length;
+    expect(shown([createElement(Skeleton)])).toBe(1);
+    const status = state => createElement(StatusView, { status: { state, tone: "quiet", words: state } });
+    expect([shown([status("checking")]), shown([status("connected")])]).toEqual([1, 0]);
   });
 });
 

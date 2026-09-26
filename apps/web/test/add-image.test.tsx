@@ -61,6 +61,7 @@ const cost = (within: HTMLElement | null): string[] => [...stateRow(within).quer
 const openRoad = async (api: Api, name: "ssh" | "cloud" | "code"): Promise<void> => {
   mountSettings({ api, at: { kind: "group", group: "computers" } });
   await settle();
+  fireEvent.click(document.querySelector("[data-k='add-computer-button']")!);
   fireEvent.click(document.querySelector(`[data-add-road='${name}']`)!);
   await settle();
 };

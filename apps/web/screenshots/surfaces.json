@@ -87,7 +87,17 @@
         "1440:row-id=thread:redirect",
         "surface-launch=agents"
       ],
-      "wait": "k=agents-computer"
+      "wait": "agents-row"
+    },
+    {
+      "name": "mcp-servers-here",
+      "at": "/",
+      "steps": [
+        "1440:row-id=thread:redirect",
+        "surface-launch=agents",
+        "segment=servers"
+      ],
+      "wait": "state=connected"
     },
     {
       "name": "spawned-thread",
@@ -207,9 +217,66 @@
         "390:key:Escape",
         "390:sidebar=trigger",
         "k=settings-row",
-        "k=settings-computers"
+        "k=settings-computers",
+        "k=add-computer-button"
       ],
       "wait": "k=add-computer",
+      "settleMs": 700
+    },
+    {
+      "name": "add-cloud",
+      "at": "/",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-computers",
+        "k=add-cloud-button"
+      ],
+      "wait": "k=road-cloud",
+      "settleMs": 700
+    },
+    {
+      "name": "agents-add",
+      "at": "/",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-computers",
+        "390:key:Escape",
+        "place-row=here",
+        "segment=servers"
+      ],
+      "wait": "k=agents-empty",
+      "settleMs": 700
+    },
+    {
+      "name": "agents-add-server",
+      "at": "/",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-computers",
+        "390:key:Escape",
+        "place-row=here",
+        "segment=servers",
+        "k=agents-add"
+      ],
+      "wait": "k=add-server-go",
       "settleMs": 700
     },
     {

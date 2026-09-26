@@ -76,6 +76,14 @@ function readKept(path: string, urls: ReadonlySet<string>): Record<string, Readi
   }));
 }
 
+/** Writes the file a host keeps beside `statePath` as though every vendor had been asked at `at` and answered the
+ * versions given, by agent id; a host started on it asks none of them for a day. */
+export function writeKeptLatest(statePath: string, versions: Readonly<Record<string, string>>, at: number): void {
+  const sources = CATALOG_AGENTS.flatMap(a => (a.latest === undefined ? [] : [{ id: a.id, url: urlOf(a.latest) }]));
+  const kept = Object.fromEntries(sources.map(s => [s.url, { ...(versions[s.id] === undefined ? {} : { version: versions[s.id] }), checkedAt: at, triedAt: at }]));
+  writeOwn(dirname(latestFileFor(statePath)), LATEST_FILE, `${JSON.stringify(kept)}\n`);
+}
+
 type LatestFetch = (url: string, init: { signal: AbortSignal; headers: Record<string, string> }) => Promise<Response>;
 
 export interface AgentLatest {

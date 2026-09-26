@@ -21,10 +21,10 @@ import { CATALOG_AGENTS, hasLogin } from "@wsp/catalog";
 import { MCP_SERVER_NAME, shellQuote, standInRecordsPath, TURN_TOKEN_ENV } from "@wsp/protocol";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { agentStoreRows, HOST_BIN, REPO, WEB_DIR } from "./host.mjs";
+import { agentStoreRows, HOST_BIN, REPO, WEB_DIR, writeScript } from "./host.mjs";
 
 /** Where a lab's homes live, for a run that wants them somewhere else: a throwaway root for a dry run. */
 export const LAB_ROOT_ENV = "WSP_LAB_ROOT";
@@ -323,8 +323,7 @@ export function writeShim(home, facts) {
   const dir = binDir(home);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "wsp");
-  writeFileSync(path, shimText(facts));
-  chmodSync(path, 0o755);
+  writeScript(path, shimText(facts));
   return path;
 }
 

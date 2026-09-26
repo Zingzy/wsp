@@ -896,10 +896,11 @@ export class BoxMachine implements Machine {
     }
     const quoted = names.map(shellQuote).join(" ");
     // A 502 on the commands endpoint means the command may already have run, and the request is sent again on one:
-    // a join that finds the target already at its size is done, since its pieces are gone. The other commands this
-    // file sends are reads, a rule added twice or a file written whole, and the run road claims its own launch.
+    // a join whose pieces are gone and whose target is at its size is done. The size alone proves nothing, since a
+    // daemon token is always 48 bytes and a sealed image already holds its builder's. The other commands this file
+    // sends are reads, a rule added twice or a file written whole, and the run road claims its own launch.
     const joined = await this.exec([
-      `[ "$(stat -c %s ${shellQuote(path)} 2>/dev/null)" = ${bytes.byteLength} ] && exit 0`,
+      `[ ! -e ${shellQuote(names[0]!)} ] && [ "$(stat -c %s ${shellQuote(path)} 2>/dev/null)" = ${bytes.byteLength} ] && exit 0`,
       `mkdir -p ${shellQuote(path.slice(0, path.lastIndexOf("/")) || "/")}`,
       `cat ${quoted} > ${shellQuote(path)} && chmod 0644 ${shellQuote(path)} && rm -f ${quoted}`,
       `[ "$(stat -c %s ${shellQuote(path)})" = ${bytes.byteLength} ] || { echo "WSP_SHORT $(stat -c %s ${shellQuote(path)})"; exit 1; }`,

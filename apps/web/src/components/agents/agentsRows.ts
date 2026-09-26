@@ -168,6 +168,8 @@ export interface RowAct {
   readonly id: string;
   readonly label: string;
   readonly icon?: LucideIcon;
+  /** An add, drawn as the shared Add button: its plus stands where the icon would. */
+  readonly add?: true;
   /** Why it is held where the reason is a fact the row does not show. */
   readonly hover?: string;
   /** Neutral at rest and the danger ink under the pointer: an act after which something does not come back. */

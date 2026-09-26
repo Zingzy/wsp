@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { HERE_PLACE_ID, UPDATE_CHECK_ENV } from "@wsp/protocol";
-import { LATEST_FLOOR_MS, LATEST_KEPT_MS, agentLatest, latestFileFor } from "../src/agent-latest.js";
+import { LATEST_FLOOR_MS, LATEST_KEPT_MS, agentLatest, latestFileFor, writeKeptLatest } from "../src/agent-latest.js";
 import { CLI_VERBS, runVerb, type HostClient } from "../src/verbs.js";
 import { captured } from "./verbs-fixture.js";
 
@@ -92,6 +92,17 @@ describe("each agent's newest version, read by this host", () => {
     await first.read();
     await first.idle();
     expect(v.asked).toHaveLength(Object.keys(ANSWERS).length);
+  });
+
+  it("answers numbers written as kept without asking any vendor that day, and nothing for an agent given none", async () => {
+    const statePath = stateIn();
+    const clock = Date.parse("2026-09-26T12:00:00.000Z");
+    writeKeptLatest(statePath, { claude: "2.1.283", codex: "0.155.0" }, clock);
+    const v = vendors();
+    const latest = on(statePath, v, () => clock + LATEST_KEPT_MS - 1);
+    expect(await latest.read()).toEqual({ claude: "2.1.283", codex: "0.155.0" });
+    await latest.idle();
+    expect(v.asked).toEqual([]);
   });
 
   it("answers the numbers it keeps at once and lets the next read carry the fresh ones, waiting only when it keeps none", async () => {
