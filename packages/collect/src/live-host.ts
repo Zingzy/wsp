@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { access, constants, readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -124,8 +124,32 @@ export const nodeExec: HostExec = {
   run: (cmd, args, opts = {}) => spawnRun(cmd, args, { ...process.env, ...opts.env }, opts),
 };
 
+/** The pid and every process under it, off one listing: a child that leads a group of its own, as timeout does, is
+ * out of reach of a kill sent to the group it was started in. */
+function treeOf(pid: number): number[] {
+  let listing: string;
+  try {
+    listing = execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8" });
+  } catch {
+    return [pid];
+  }
+  const children = new Map<number, number[]>();
+  for (const line of listing.split("\n")) {
+    const [p, parent] = line.trim().split(/\s+/).map(Number);
+    if (p === undefined || parent === undefined || Number.isNaN(p) || Number.isNaN(parent)) continue;
+    children.set(parent, [...(children.get(parent) ?? []), p]);
+  }
+  const tree = [pid];
+  for (let i = 0; i < tree.length; i++) tree.push(...(children.get(tree[i]!) ?? []));
+  return tree;
+}
+
 function spawnRun(cmd: string, args: readonly string[], env: NodeJS.ProcessEnv, opts: RunOptions): Promise<string | undefined> {
   return new Promise(resolve => {
+    if (opts.signal?.aborted === true) {
+      resolve(undefined);
+      return;
+    }
     const chunks: Buffer[] = [];
     let bytes = 0;
     let failed = false;
@@ -145,10 +169,30 @@ function spawnRun(cmd: string, args: readonly string[], env: NodeJS.ProcessEnv, 
       failed = true;
       killGroup("SIGTERM");
     }, opts.timeoutMs ?? 120_000);
+    const abort = (): void => {
+      failed = true;
+      // Node reaps the child at exit, so its pid is free from then on; only the group a job still holds is ours.
+      if (child.exitCode !== null || child.signalCode !== null) {
+        settle(child.exitCode, child.signalCode);
+        return;
+      }
+      if (child.pid === undefined) return;
+      const tree = treeOf(child.pid);
+      killGroup("SIGKILL");
+      for (const pid of tree) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          continue;
+        }
+      }
+    };
+    opts.signal?.addEventListener("abort", abort, { once: true });
     const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
       if (settled) return;
       settled = true;
       clearTimeout(budget);
+      opts.signal?.removeEventListener("abort", abort);
       if (grace !== undefined) clearTimeout(grace);
       killGroup("SIGKILL");
       child.stdout.destroy();

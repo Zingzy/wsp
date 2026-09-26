@@ -4285,8 +4285,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The machine a fork made, taken away and proven gone at the provider rather than at the delete's answer: a
    * DELETE Solari takes and does not act on would otherwise read as a machine that went. Rejects while the
-   * provider still holds it, which is what keeps a record naming it. */
-  const unfork = (entry: LiveWorkspace): Promise<void> => killUntilGone(backendFor(entry.record), entry.machine, opts.killConfirm);
+   * provider still holds it, which is what keeps a record naming it. A machine gone is marked, so one the provider
+   * lists running again is the sweep's to kill; a mark the store refuses is said, and the machine is still gone. */
+  const unfork = async (entry: LiveWorkspace): Promise<void> => {
+    const id = entry.machine.id;
+    await killUntilGone(backendFor(entry.record), entry.machine, opts.killConfirm);
+    await store.put(DROPPED, id, { machineId: id, at: new Date(clock.now()).toISOString() } satisfies DroppedMachine).catch((e: unknown) => {
+      console.warn(`machine ${id} is gone but its mark was not stored (${e instanceof Error ? e.message : String(e)}); should the provider list it running again, the sweep reports it rather than killing it`);
+    });
+  };
 
   /** The engine knows three phases. A pause in flight is a nap to it (the wake resumes either way); a gone record's
    * machine is a stand-in it only ever meets through rebuild, which replaces the machine whatever the phase says. */
@@ -5809,7 +5816,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               console.warn(line);
               throw Object.assign(new Error(line), { kind: e.kind });
             });
-            await store.put(DROPPED, entry.machine.id, { machineId: entry.machine.id, at: new Date(clock.now()).toISOString() } satisfies DroppedMachine);
           }
           await drop(id);
         } finally {
@@ -9141,10 +9147,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** A workspace machine of this setup's that no record claims is recorded again rather than killed: its record was
    * lost (a store the machine outlived), and it bills until a person can see and delete it. A running one whose
-   * workspace was deleted here is left unclaimed, so the engine kills it. The row is confirmed with one
-   * get(), so a row the listing lags on after a kill is skipped; a create in flight elsewhere is left its minute. A
-   * row the provider would not confirm (a failed read, a state that is neither running nor paused) is claimed in
-   * `known` all the same, so the engine spares it this sweep and the next one records it: a kill never rides on one read. */
+   * workspace was deleted here is left unclaimed, so the engine kills it. One this host cannot name is reported off
+   * its listing row alone: a get() resets the provider's idle timer (measured), so a read every sweep would keep awake
+   * the very machines it reports. A row about to be recorded is confirmed with one get(), so a row the listing lags on
+   * after a kill is skipped; a create in flight elsewhere is left its minute. A row the provider would not confirm (a
+   * failed read, a state that is neither running nor paused) is claimed in `known` all the same, so the engine spares
+   * it this sweep and the next one records it: a kill never rides on one read. */
   const adoptLost = async (listing: ListedMachine[], known: Set<string>, failed: ReapFailure[]): Promise<AdoptedMachine[]> => {
     const adopted: AdoptedMachine[] = [];
     const now = Date.now();
@@ -9156,6 +9164,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     for (const row of listing) {
       // The engine kills only a running row, so a paused one stays reported rather than silently left.
       if (known.has(row.id) || (dropped.has(row.id) && row.state === "running") || !lostWorkspace(row, owner, now)) continue;
+      // A stamped id another machine now holds is a body a rebuild or a wake replaced and failed to stop: the engine kills it.
+      const stamped = row.labels[WORKSPACE_LABEL];
+      if (stamped !== undefined && live.has(stamped)) continue;
+      const kept = stamped === undefined ? undefined : ((await store.get(WORKSPACE_NAMES, stamped)) as NamedWorkspace | undefined);
+      // A workspace is one project's copy, so a machine whose project this host cannot name is not a workspace
+      // here: it is reported rather than recorded, and the sweep's own --older-than is the road that ends it.
+      if (stamped === undefined || kept?.project === undefined || !projectsHeld.has(kept.project)) {
+        known.add(row.id);
+        failed.push({ id: row.id, message: `not recorded: this host holds no project for it, and a workspace is one project's copy; it is a machine of yours still running` });
+        continue;
+      }
       let machine: Machine;
       try {
         machine = observed(await backend.get(row.id));
@@ -9170,25 +9189,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         known.add(row.id);
         continue;
       }
-      // A stamped id another machine now holds is a body a rebuild or a wake replaced and failed to stop: the engine kills it.
-      const stamped = row.labels[WORKSPACE_LABEL];
-      if (stamped !== undefined && live.has(stamped)) continue;
-      const id = stamped ?? `ws_${randomBytes(4).toString("hex")}`;
-      // The name a person typed here outranks the one the fork stamped: the label is what the machine was forked
-      // under, and no provider road updates it.
-      const kept = stamped === undefined ? undefined : ((await store.get(WORKSPACE_NAMES, stamped)) as NamedWorkspace | undefined);
-      const named = kept?.name ?? row.labels[NAME_LABEL];
-      // A workspace is one project's copy, so a machine whose project this host cannot name is not a workspace
-      // here: it is reported rather than recorded, and the sweep's own --older-than is the road that ends it.
-      if (kept?.project === undefined || !projectsHeld.has(kept.project)) {
-        known.add(row.id);
-        failed.push({ id: row.id, message: `not recorded: this host holds no project for it, and a workspace is one project's copy; it is a machine of yours still running` });
-        continue;
-      }
       const bornAt = row.labels[CREATED_AT_LABEL];
       const record: WorkspaceRecord = {
-        id,
-        name: named !== undefined && nameRefusal(named) === undefined ? named : row.id,
+        id: stamped,
+        name: nameRefusal(kept.name) === undefined ? kept.name : row.id,
         kind: "cloud",
         project: kept.project,
         machineId: row.id,
@@ -9205,7 +9209,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (record.phase === "running") void syncDaemon(entry);
       bus.emit({ type: "workspace.created", workspace: view(record) });
       await emitStatus(entry, record.phase === "running" ? reachOf(entry) : "napping", RECORD_RESTORED);
-      adopted.push({ id: row.id, workspaceId: id, name: record.name, phase: record.phase });
+      adopted.push({ id: row.id, workspaceId: stamped, name: record.name, phase: record.phase });
     }
     return adopted;
   };
@@ -9407,6 +9411,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     close: async () => {
       idle.close();
+      // An agent's version or sign-in command that never answers would otherwise outlive this process.
+      opts.agentsReader?.close?.();
       // What this host started on a machine finishes before it lets that machine go: the boot fires a daemon sync
       // at every running workspace without waiting for it, and a write landing after the close is this process
       // touching a computer it no longer holds. Each sync is a read and a write, so the wait is milliseconds.

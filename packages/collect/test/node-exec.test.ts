@@ -2,7 +2,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { nodeExec, nodeFs } from "../src/live-host.js";
 
 const dirs: string[] = [];
@@ -92,6 +92,24 @@ describe("nodeExec.run", () => {
     const pid = await pidIn(join(d, "pid"));
     expect(out).toBe("listed\n");
     expect(await gone(pid)).toBe(true);
+  }, 15_000);
+
+  it("an abort after the child exited signals its group alone, never the pid it let go of", async () => {
+    const d = scratch();
+    const stop = new AbortController();
+    const out = nodeExec.run("/bin/sh", ["-c", `echo $$ > ${join(d, "pid")}; sleep 30 & echo $! > ${join(d, "job")}`], { signal: stop.signal });
+    const job = await pidIn(join(d, "job"));
+    const shell = Number(readFileSync(join(d, "pid"), "utf8").trim());
+    expect(await gone(shell)).toBe(true);
+    const sent = vi.spyOn(process, "kill");
+    try {
+      stop.abort();
+      expect(sent.mock.calls.filter(([pid]) => pid === shell)).toEqual([]);
+      expect(await out).toBeUndefined();
+      expect(await gone(job)).toBe(true);
+    } finally {
+      sent.mockRestore();
+    }
   }, 15_000);
 
   // The shell is a fixture here, not the subject: what this proves is that the budget takes the group, whatever
