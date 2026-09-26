@@ -7,13 +7,13 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DISK_SYNC_CMD } from "@wsp/engine";
 import { addedProjectOn, addingProjectLine, HERE_PLACE_ID, seedMemoryKeptLine, type AdapterEvent, type EventUnion, type MachineSpec, type ProjectAddEvent, type SeedChoice, type SeedPlan, type TurnResult } from "@wsp/protocol";
 import { MEMORY_KEPT_MARK, MEMORY_STANDS_MARK } from "../src/project-landing.js";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { fakeLocal, stubBackend, type StubBackend } from "./stub-backend.js";
+import { fakeLocal, missesFirstDelete, stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 
 const version = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", setupSha: "s1", createdAt: "2026-09-17T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } };
 const REMOTE = "https://github.com/spoo-me/frontend.git";
@@ -101,7 +101,7 @@ async function withImage(o: { at?: string; plan: SeedPlan; projects?: string; pa
   const root = mkdtempSync(join(tmpdir(), "wsp-add-local-"));
   roots.push(root);
   const adapters = { claude: recordingAdapter("claude"), codex: recordingAdapter("codex") };
-  return { rt: createRuntime({ backend, store, adapters, local: fakeLocal(root), seed }), backend, store, seed, packs };
+  return { rt: createRuntime({ backend, store, adapters, local: fakeLocal(root), seed, killConfirm: { graceMs: 20, pollMs: 1 } }), backend, store, seed, packs };
 }
 
 const stages = (events: readonly EventUnion[]): ProjectAddEvent[] => events.filter((e): e is ProjectAddEvent & { seq: number } => e.type === "project.add");
@@ -111,6 +111,15 @@ const commands = (backend: StubBackend): string => backend.machines.flatMap(m =>
 /** The spec of every machine it was asked for, in order. */
 const specs = (backend: StubBackend): MachineSpec[] => backend.machines.map(m => m.spec);
 const stopped = (backend: StubBackend): number => backend.machines.filter(m => m.killed).length;
+/** Every machine this backend makes from now on takes its first delete on the copy that never held it. */
+function missingFirstDeletes(backend: StubBackend): void {
+  const create = backend.create.bind(backend);
+  backend.create = async spec => {
+    const m = await create(spec);
+    missesFirstDelete(m as StubMachine);
+    return m;
+  };
+}
 /** What the machine answers one command with, over the probe the stub answers by default. */
 function answering(backend: StubBackend, reply: (cmd: string) => { exitCode: number; stdout: string; stderr: string } | undefined): void {
   const own = backend.execImpl;
@@ -353,6 +362,16 @@ describe("a project on a provider", () => {
     expect(synced).toEqual([1]);
   });
 
+  it("the machine it was built from is asked again behind the add when its first delete reached the copy that never held it", async () => {
+    const folder = repo();
+    const { rt, backend } = await withImage({ plan: plan(folder) });
+    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    missingFirstDeletes(backend);
+    await rt.projects.add({ source: folder, on: "default", seed: TICKED });
+    await vi.waitFor(() => expect(stopped(backend)).toBe(1));
+    await rt.close();
+  });
+
   it("the machine it was built from is stopped, and the person's own folder stays on this computer", async () => {
     const folder = repo();
     const { rt, backend } = await withImage({ plan: plan(folder) });
@@ -500,6 +519,15 @@ describe("a repo added by url on a computer the person owns", () => {
     expect(stopped(backend)).toBe(1);
     expect(backend.puts).toEqual([]);
     expect(project.seeded).toBeUndefined();
+  });
+
+  it("the machine the add worked in is asked again behind the add when its first delete reached the copy that never held it", async () => {
+    const { rt, backend } = await box();
+    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    missingFirstDeletes(backend);
+    await rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" });
+    await vi.waitFor(() => expect(stopped(backend)).toBe(1));
+    await rt.close();
   });
 
   it("is copied into every workspace of it, two in a row, and neither of them clones anything", async () => {
