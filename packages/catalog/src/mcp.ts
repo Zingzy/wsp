@@ -134,6 +134,9 @@ export interface McpFormat {
    * value read that way; or the first variable it reads that has no value and no default. A command's name and
    * arguments stand as written, since whatever is put there is on the process list. */
   resolve(server: McpServer, value: (name: string) => string | undefined): McpResolved;
+  /** A variable written as this format's agent expands it inside a server's arguments and address; absent where the
+   * agent expands none there. */
+  argRef?(variable: string): string;
 }
 
 export type McpResolved = { transport: McpTransport; values: string[] } | { missing: string };
@@ -159,13 +162,51 @@ const stringsIn = (v: unknown): string[] => (typeof v === "string" ? [v] : Array
 /** A value whole, and with its scheme word (`Bearer`, `Basic`, `token`) taken off where it carries one. */
 export const valueForms = (v: string): string[] => [v, ...(/^(?:bearer|basic|token)\s+(.+)$/i.exec(v)?.slice(1) ?? [])];
 
-/** Refuses a copy whose server definitions still hold a value that was taken out of them, each side read in every
- * form. Only the definitions are read, since
- * the values come from nowhere else, and the rest of an agent's file is prose and counters a value may match by chance. */
-function stillStands(entries: readonly unknown[], servers: McpReferred["servers"]): void {
-  const held = new Set(stringsIn(entries).flatMap(valueForms));
+/** A query value decoded as a server reads it; the raw text where it is not valid percent-encoding. */
+function queryValue(raw: string): string {
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, " "));
+  } catch {
+    return raw;
+  }
+}
+
+/** Each part of a definition's string a value can stand as whole, with where it stands: the string itself, and
+ * within it a flag's value (`--token=<v>`), a header line's (`Authorization: Bearer <v>`), an address's query
+ * value, and whatever follows a scheme word (`Bearer`, `Basic`, `token`). */
+function placesIn(s: string, at: string, out: Map<string, string>): void {
+  if (s === "") return;
+  if (!out.has(s)) out.set(s, at);
+  const flag = /^(-{1,2}[A-Za-z0-9][\w.-]*)=([^]+)$/.exec(s);
+  if (flag !== null) placesIn(flag[2]!, `the ${flag[1]} argument`, out);
+  const header = /^([A-Za-z0-9-]+):[ \t]*([^/][^]*)$/.exec(s);
+  if (header !== null) placesIn(header[2]!, `the ${header[1]} header`, out);
+  for (const rest of valueForms(s).slice(1)) placesIn(rest, at, out);
+  const query = /^[a-z][a-z0-9+.-]*:\/\/[^?#]*\?([^#]*)/i.exec(s);
+  for (const pair of query?.[1]!.split("&") ?? []) {
+    const [key = "", raw = ""] = pair.split(/=([^]*)/);
+    for (const v of new Set([raw, queryValue(raw)])) placesIn(v, `the ${key} parameter of an address`, out);
+  }
+}
+
+const base64 = (v: string): string => btoa(String.fromCharCode(...new TextEncoder().encode(v)));
+
+/** Refuses a copy whose server definitions still hold a value that was taken out of them, whole, in any place
+ * `placesIn` finds, or as its base64. Only the definitions are read, since the values come from nowhere else, and
+ * the rest of an agent's file is prose and counters a value may match by chance. */
+export function stillStands(entries: readonly unknown[], servers: McpReferred["servers"]): void {
+  const held = new Map<string, string>();
+  for (const s of stringsIn(entries)) placesIn(s, "the file", held);
+  const where = (form: string): string | undefined => {
+    const b = base64(form).replace(/=+$/, "");
+    const encoded = [`${b}${"=".repeat((4 - (b.length % 4)) % 4)}`, b, b.replace(/\+/g, "-").replace(/\//g, "_")].map(e => held.get(e)).find(x => x !== undefined);
+    return held.get(form) ?? (encoded === undefined ? undefined : `${encoded}, as base64`);
+  };
   for (const s of servers) {
-    if (Object.values(s.values).some(v => valueForms(v).some(f => held.has(f)))) throw new Error(`${s.name}'s value still stands in the file after it was written by name, so the file stays on this computer`);
+    for (const v of Object.values(s.values)) {
+      const found = valueForms(v).map(where).find(x => x !== undefined);
+      if (found !== undefined) throw new Error(`${s.name}'s value still stands in ${found} after it was written by name, so the file stays on this computer`);
+    }
   }
 }
 
@@ -794,6 +835,7 @@ function jsonFormat(shape: JsonShape): McpFormat {
     remove: jsonRemover(shape),
     refer: jsonReferrer(shape),
     resolve: jsonResolver(shape.ref),
+    argRef: shape.refOf,
     ...(shape.flip === undefined ? {} : { enable: jsonEnabler(shape.key, shape.flip) }),
   };
 }

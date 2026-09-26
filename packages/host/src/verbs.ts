@@ -3287,8 +3287,8 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "servers add",
-    usage: "wsp servers add <name> [<workspace>] [--on <computer>] --agent <id> (--command \"<line>\" [--env <NAME>]... | --url <address> [--header <name>=<VARIABLE>]...) [--project [<name>]]",
-    about: "writes one MCP server into an agent's own config: a command with its arguments and variables, or an address with its headers, each value read off this terminal's environment and written into that file on this computer; on any other the file names a variable and the value goes to the vault",
+    usage: "wsp servers add <name> [<workspace>] [--on <computer>] --agent <id> (--command \"<line>\" | --url <address> [--header <name>=<VARIABLE>]...) [--env <NAME>]... [--project [<name>]]",
+    about: "writes one MCP server into an agent's own config: a command with its arguments and variables, or an address with its headers, each value read off this terminal's environment and written into that file on this computer; on any other the file names a variable and the value goes to the vault, an argument or the address naming a variable as ${NAME} keeps that name there, and an agent that reads no variable there refuses it",
     page: "agent",
     options: { agent: { type: "string" }, on: { type: "string" }, command: { type: "string" }, env: { type: "string", multiple: true }, url: { type: "string" }, header: { type: "string", multiple: true }, project: { type: "string", valueWith: "on" } },
     run: async ctx => {
@@ -3306,14 +3306,14 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `Writes one MCP server into one agent's own config on one computer or workspace, the project's file with project from a workspace: a command with its arguments and the variables it is given, or an address with its headers. Every value is read by name off the environment the wsp tools run with and never goes into an answer: on this computer it goes into that file, and on any other the file names a variable and the value goes to the vault, which hands it to every turn. A name already in the file is refused rather than written over. ${SERVER_CHANGE_WORDS}`,
+      description: `Writes one MCP server into one agent's own config on one computer or workspace, the project's file with project from a workspace: a command with its arguments and the variables it is given, or an address with its headers. Every value is read by name off the environment the wsp tools run with and never goes into an answer: on this computer it goes into that file, and on any other the file names a variable and the value goes to the vault, which hands it to every turn. An argument or the address may name one of those variables as \${NAME}, an address's variables being only the ones it names: on this computer the value is put in place, on any other the name stays in the agent's own syntax, and an agent that reads no variable there is refused. A name already in the file is refused rather than written over. ${SERVER_CHANGE_WORDS}`,
       input: {
         name: z.string().describe("what to call the server in the agent's config"),
         agent: z.string().describe("the catalog id of the agent whose config takes it"),
         workspace: AgentsWorkspaceIn,
         on: AgentsOnIn,
         command: z.string().optional().describe("the line the server runs, the program and its arguments as a shell would split them, nothing expanded; or url"),
-        env: z.array(z.string()).optional().describe("variables the server is given, each by its name, its value read off the same name in the environment the wsp tools run with"),
+        env: z.array(z.string()).optional().describe("variables the server is given, or the address names as ${NAME}, each by its name, its value read off the same name in the environment the wsp tools run with; an argument or the address may name one as ${NAME}"),
         url: z.string().optional().describe("the server's https address; or command"),
         header: z.array(z.string()).optional().describe("headers sent to the address, each <name>=<VARIABLE>, its value read off that variable in the environment the wsp tools run with"),
         project: z.union([z.boolean(), z.string()]).optional().describe("put it in a project's file rather than the agent's own: true for the workspace's own project, or the project's name, as projects lists it, with on"),
@@ -4544,7 +4544,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "servers add on": AGENTS_ON_WORDS,
   "servers add agent": "the agent whose config takes the server, by its catalog id",
   "servers add command": "the line the server runs, its program and arguments in one quoted value, split as a shell splits it and nothing expanded; or --url",
-  "servers add env": "a variable the server is given, by its name, its value read off the same name in this terminal's environment; repeats",
+  "servers add env": "a variable the server is given, or one the address names as ${NAME}, by its name, its value read off the same name in this terminal's environment; an argument or the address may name it as ${NAME}; repeats",
   "servers add url": "the server's https address; or --command",
   "servers add header": "<name>=<VARIABLE>, a header sent to the address with its value read off that variable in this terminal's environment; repeats",
   "servers add project": "put it in a project's file rather than the agent's own: alone for the workspace's own project, or the project's name with --on",
