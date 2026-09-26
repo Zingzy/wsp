@@ -47,7 +47,8 @@ checkout of `main` on a computer with the Solari key in `.env`.
    Then a macOS runner builds `apps/desktop` as one universal
    bundle carrying both chips, signs it (see
    [Signing the mac bundles](#signing-the-mac-bundles)), checks both slices of
-   its signature and its packaged tree, and wraps it in the drag-to-Applications
+   its signature and its packaged tree, launches it under the desktop smoke,
+   and wraps it in the drag-to-Applications
    disk image `wsp-<version>-mac.dmg`; a Linux runner builds
    `wsp-<version>.AppImage`. Each also goes up as an unversioned copy,
    `wsp-mac.dmg` and `wsp-linux.AppImage`, which is what GitHub serves at

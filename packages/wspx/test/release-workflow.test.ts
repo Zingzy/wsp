@@ -185,9 +185,14 @@ describe("the release workflow", () => {
 
   it("builds each platform through the script apps/desktop owns", () => {
     for (const step of ["run build:mac", "run build:linux"]) expect(workflow).toContain(`pnpm --filter @wsp/desktop ${step}`);
-    // The screen smoke measures a real Mac's window and fails on a hosted runner's display; the packaged trees are
-    // checked there instead, and the smoke stays in the merge gate on a Mac.
-    expect(workflow).not.toContain("pnpm --filter @wsp/desktop smoke");
+    const check = macJob.indexOf("- name: Check the packaged trees\n");
+    const smoke = macJob.indexOf("- name: Drive the packaged app with the smoke\n");
+    expect(check).toBeGreaterThan(-1);
+    expect(smoke).toBeGreaterThan(check);
+    expect(macJob.indexOf("- name:", check + 1)).toBe(smoke);
+    expect(macJob.slice(smoke, macJob.indexOf("- name:", smoke + 1))).toContain("run: pnpm --filter @wsp/desktop smoke\n");
+    expect(workflow).not.toContain("WSP_DESKTOP_SCREEN");
+    expect(workflow).not.toContain("merge gate");
     expect(workflow).toContain("test/signing.test.ts");
     expect(workflow).not.toContain("pty-native");
     expect(desktopScripts["build:mac"]).toContain("--mac");
