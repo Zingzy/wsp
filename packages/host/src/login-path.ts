@@ -38,7 +38,7 @@ export function needsLoginPath(env: NodeJS.ProcessEnv): boolean {
 
 function runLoginShell(shell: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(shell, ["-ilc", 'printf %s "$PATH"'], { timeout: SHELL_LIMIT_MS, encoding: "utf8" }, (e, stdout) => (e === null ? resolve(stdout) : reject(e)));
+    execFile(shell, ["-ilc", 'printf %s "$PATH"'], { timeout: SHELL_LIMIT_MS, encoding: "utf8" }, (e, stdout) => (e === null ? resolve(stdout) : reject(e))).stdin?.end();
   });
 }
 
@@ -89,7 +89,14 @@ export function loginEnv(): Promise<Readonly<Record<string, string>>> {
   return (loginEnvRead ??=
     shell === undefined || shell === ""
       ? Promise.resolve({})
-      : new Promise(resolve => execFile(shell, ["-ilc", "env -0"], { timeout: SHELL_LIMIT_MS, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }, (e, stdout) => resolve(e === null ? loginEnvOf(stdout) : {}))));
+      : new Promise(resolve => {
+          const child = execFile(shell, ["-ilc", "env -0"], { timeout: SHELL_LIMIT_MS, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }, (e, stdout) => {
+            if (e !== null) console.error(loginPathLine(`${shell} failed to print its environment: ${e.message.split("\n")[0] ?? ""}`));
+            resolve(e === null ? loginEnvOf(stdout) : {});
+          });
+          // An rc file that reads its input would otherwise wait out the limit and leave every command server without it.
+          child.stdin?.end();
+        }));
 }
 
 let taken: Promise<void> | undefined;

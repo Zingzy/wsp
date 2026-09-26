@@ -193,3 +193,25 @@ describe("the login shell's environment", () => {
     expect(loginEnvOf("")).toEqual({});
   });
 });
+
+describe("the login shell's environment", () => {
+  it("is read even when an rc file waits on its input, since the shell's input is closed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-login-env-"));
+    const shell = join(dir, "sh");
+    writeFileSync(shell, `#!/bin/sh\nread answer\nprintf 'WSP_FROM_RC=yes\\0'\n`);
+    chmodSync(shell, 0o755);
+    const was = process.env["SHELL"];
+    process.env["SHELL"] = shell;
+    vi.resetModules();
+    try {
+      const { loginEnv } = await import("../src/login-path.js");
+      const started = Date.now();
+      expect(await loginEnv()).toMatchObject({ WSP_FROM_RC: "yes" });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      if (was === undefined) delete process.env["SHELL"];
+      else process.env["SHELL"] = was;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
