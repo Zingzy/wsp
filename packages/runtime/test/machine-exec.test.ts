@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -718,23 +718,15 @@ afterEach(() => {
 function localGuest(): { machine: Machine; runDir: string } {
   const dir = mkdtempSync(join(tmpdir(), "wsp-machine-exec-"));
   dirs.push(dir);
-  const shimDir = join(dir, "shims");
-  mkdirSync(shimDir);
-  if (!existsSync("/proc/1/stat")) {
-    const shims = {
-      setsid: "#!/bin/sh\nexec perl -e 'setpgrp(0, 0); exec @ARGV or die $!' -- \"$@\"\n",
-      base64: '#!/bin/sh\nargs=""\nfor a in "$@"; do [ "$a" = "-w0" ] || args="$args $a"; done\nexec /usr/bin/base64 $args\n',
-    };
-    for (const [name, body] of Object.entries(shims)) {
-      writeFileSync(join(shimDir, name), body);
-      chmodSync(join(shimDir, name), 0o755);
-    }
-  }
+  // Functions, not shim files: macOS assesses a freshly written executable at its first exec, 110 ms idle, seconds under load.
+  const prelude = existsSync("/proc/1/stat")
+    ? ""
+    : `setsid() { exec perl -e 'setpgrp(0, 0); exec @ARGV or die $!' -- "$@"; }\nbase64() { local a=(); for x in "$@"; do [ "$x" = "-w0" ] || a+=("$x"); done; /usr/bin/base64 "\${a[@]}"; }\n`;
   const machine = {
     id: "local",
     exec: (cmd: string) =>
       new Promise<ExecResult>(resolve => {
-        execFile("bash", ["-c", cmd], { env: { ...process.env, PATH: `${shimDir}:${process.env["PATH"] ?? ""}` }, maxBuffer: 16 * 1024 * 1024 }, (e, stdout, stderr) => {
+        execFile("bash", ["-c", `${prelude}${cmd}`], { maxBuffer: 16 * 1024 * 1024 }, (e, stdout, stderr) => {
           resolve({ exitCode: e === null ? 0 : ((e as { code?: number }).code ?? 1), stdout, stderr });
         });
       }),
