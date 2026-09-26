@@ -378,6 +378,15 @@
         1440
       ],
       "fresh": true
+    },
+    {
+      "name": "thread-status",
+      "at": "/",
+      "fixture": "thread-states",
+      "wait": "thread-status=working",
+      "widths": [
+        1440
+      ]
     }
   ]
 }

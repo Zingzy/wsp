@@ -109,11 +109,13 @@ const project = (name, computer, minutes, path = computer === HERE ? projectDest
   };
 };
 
+/** A turn still running when the host comes up keeps running only where the machine gives no answer about its run,
+ * which a fork on the stand-in does, so `run` names one; a turn stopped on a prompt carries its lead as `asking`. */
 const turn = (thread, minutes, workspaceId = "ws_api") => ({
   id: sessionId(thread.id),
   workspaceId,
   harness: "claude",
-  status: "completed",
+  status: thread.status ?? "completed",
   startedBy: thread.startedBy ?? "person",
   threadId: threadId(thread.id),
   turnId: turnId(thread.id),
@@ -121,7 +123,8 @@ const turn = (thread, minutes, workspaceId = "ws_api") => ({
   harnessTitle: thread.title,
   titleSource: "harness",
   startedAt: ago(minutes),
-  endedAt: ago(minutes - 3),
+  ...(thread.status === "running" ? { run: `run_${thread.id}` } : { endedAt: ago(minutes - 3) }),
+  ...(thread.asking === undefined ? {} : { asking: thread.asking }),
   cwd: thread.cwd ?? projectDest("spoo"),
   model: "opus",
   permissionMode: "default",
@@ -135,15 +138,19 @@ const event = (thread, rest, workspaceId = "ws_api") => ({ workspaceId, sessionI
 
 /** A whole turn as the transcript holds it: the person's words, a thought, one tool call and its result,
  * the reply, and the two events that close it. */
-const replay = (thread, minutes, workspaceId = "ws_api") => [
-  event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? projectDest("spoo"), ...(thread.harness === undefined ? {} : { harness: thread.harness }) }, workspaceId),
-  event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "thinking", text: thread.thought }, workspaceId),
-  event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "tool_use", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.input }, workspaceId),
-  event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "tool_result", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.result }, workspaceId),
-  event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "text", text: thread.reply }, workspaceId),
-  event(thread, { type: "session.done", at: ago(minutes - 3), result: { status: "completed", durationMs: 178_000, costUsd: thread.costUsd, text: thread.reply } }, workspaceId),
-  event(thread, { type: "session.end", at: ago(minutes - 3), exitCode: 0, sawResult: true }, workspaceId),
-];
+const replay = (thread, minutes, workspaceId = "ws_api") => {
+  const events = [
+    event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? projectDest("spoo"), ...(thread.harness === undefined ? {} : { harness: thread.harness }) }, workspaceId),
+    event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "thinking", text: thread.thought }, workspaceId),
+    event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "tool_use", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.input }, workspaceId),
+    event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "tool_result", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.result }, workspaceId),
+    event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "text", text: thread.reply }, workspaceId),
+    event(thread, { type: "session.done", at: ago(minutes - 3), result: { status: "completed", durationMs: 178_000, costUsd: thread.costUsd, text: thread.reply } }, workspaceId),
+    event(thread, { type: "session.end", at: ago(minutes - 3), exitCode: 0, sawResult: true }, workspaceId),
+  ];
+  // A running turn has not closed, so its transcript stops at the reply so far.
+  return thread.status === "running" ? events.slice(0, -2) : events;
+};
 
 /** What a real init announces, cut to what fits a shot: a run of bare names, the CLI's own screens among them,
  * and the commands two plugins named themselves in. The menu groups on the source those names carry. */
@@ -604,6 +611,31 @@ const DOCS_READ = {
   costUsd: 0.09,
 };
 
+/** Every state the one thread status slot draws, a child each under one root: working on api, stopped on a
+ * permission prompt on web, failed on docs, and resting beside the working one on api. */
+const threadStates = () => {
+  const tree = { parentThreadId: threadId("migrate"), rootThreadId: threadId("migrate") };
+  return store({
+    projects: [project("wsp", HERE, 60 * 5), project("api", CLOUD, 60 * 9), project("web", CLOUD, 60 * 9), project("docs", CLOUD, 60 * 9)],
+    workspaces: [
+      workspace("ws_here", THIS_COMPUTER, { agents: { spawn: true, maxMachines: 3, maxDepth: 1 }, project: "pr_wsp" }),
+      fork("ws_api", "api", "fk_run_1", { ...tree, project: "pr_api", createdAt: new Date(ago(60 * 8)).toISOString() }),
+      fork("ws_web", "web", "fk_run_2", { ...tree, project: "pr_web", createdAt: new Date(ago(60 * 8 - 2)).toISOString() }),
+      fork("ws_docs", "docs", "fk_run_3", { ...tree, project: "pr_docs", createdAt: new Date(ago(60 * 8 - 4)).toISOString() }),
+    ],
+    ...merge(
+      threadsOn("ws_here", [[MIGRATE, 120]]),
+      threadsOn("ws_api", [
+        [spawned("api-index", MIGRATION, "migrate", "migrate"), 110],
+        [{ ...spawned("api-move", REDIRECT, "migrate", "migrate"), status: "running" }, 4],
+      ]),
+      threadsOn("ws_web", [[{ ...spawned("web-move", CHART, "migrate", "migrate"), status: "running", asking: "Permission for Bash: pnpm install" }, 12]]),
+      threadsOn("ws_docs", [[{ ...spawned("docs-move", DOCS_READ, "migrate", "migrate"), status: "failed" }, 30]]),
+    ),
+    goldens: sealed(),
+  });
+};
+
 /** A person who drives agents with agents: this computer with spawning on, three forks a root thread made, and a
  * thread on each hanging under that root. */
 const orchestrator = () => {
@@ -679,6 +711,7 @@ const FIXTURES = {
   "no-sign-in": { build: thisComputer },
   "mac-and-boxes": { build: macAndBoxes },
   orchestrator: { build: orchestrator, cloud: "box" },
+  "thread-states": { build: threadStates, cloud: "box" },
   "image-built": { build: imageBuilt },
 };
 

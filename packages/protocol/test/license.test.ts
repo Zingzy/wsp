@@ -39,6 +39,14 @@ describe("the license is one and the same everywhere", () => {
     expect(licenseSection).toContain("THIRD_PARTY_NOTICES");
   });
 
+  it("the third-party notices credit Whimsy Loaders for the crab, and the crab's file names it as its source", () => {
+    const notices = read("THIRD_PARTY_NOTICES");
+    expect(notices).toContain("Whimsy Loaders");
+    expect(notices).toContain("https://www.whimsically.app/loaders");
+    expect(notices).toContain("apps/web/src/components/status/Crab.tsx");
+    expect(read("apps/web/src/components/status/Crab.tsx")).toContain("Whimsy Loaders (https://www.whimsically.app/loaders)");
+  });
+
   it("CONTRIBUTING tells a contributor the license and the header new files carry", () => {
     const text = read("CONTRIBUTING.md");
     expect(text).toContain(LICENSE_ID);

@@ -37,4 +37,8 @@
   --sidebar-hover-ink: #161e26;
   --sidebar-quiet: #5d6978;
   --sidebar-input: #c3cdd9;
+  --status-input: #4f39f6;
+  --status-working: #be185d;
+  --status-failed: #c10007;
+  --status-done: #007a55;
 }

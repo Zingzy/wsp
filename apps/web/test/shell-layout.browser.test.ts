@@ -262,7 +262,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         els.map(el => {
           const title = el.querySelector<HTMLElement>("[data-thread-title]");
           const mark = el.querySelector<HTMLElement>("[data-harness-mark]");
-          const slot = el.querySelector<HTMLElement>("[data-thread-state], [data-thread-time]");
+          const slot = el.querySelector<HTMLElement>("[data-thread-status]");
           if (!title || !mark || !slot) return null;
           const font = getComputedStyle(title);
           const ctx = document.createElement("canvas").getContext("2d")!;
@@ -293,7 +293,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       console.info(`thread rows at ${theme}: ${JSON.stringify(rows)}`);
       // The agent, the project and who opened it ride the hover text; the face is the title and the slot alone.
       expect(rows.map(r => r?.hover)).toEqual(["Claude Code, the-project, you", "Claude Code, the-project, cli", "Codex, the-project, cli", "Claude Code, the-project, you"]);
-      expect(rows[0]!.slot).toBe("Working");
+      expect(rows[0]!.slot).toMatch(/^Working\d+[smh]/);
       for (const row of rows.slice(1)) expect(row!.slot).toMatch(/^(now|\d+[mhd])$/);
       for (const row of rows) {
         expect(row!.face).toBe(`${row!.title}${row!.slot}`);
@@ -353,7 +353,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
           return {
             text: el.textContent ?? "",
             // Which row is the working one comes from the row's own slot, not from where it sits in the list.
-            working: row.querySelector("[data-thread-state]")?.textContent === "Working",
+            working: row.querySelector("[data-thread-status]")?.getAttribute("data-thread-status") === "working",
             color,
             opaque: bytes(color)[3] === 255,
             gap: Math.abs(luminance(color) - luminance(backdrop(el))),
@@ -1142,7 +1142,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     const TIERS = {
       "a thread's title once it is idle": "[data-app-sidebar] .text-sidebar-muted-foreground",
       "the word on a row at rest": "[data-app-sidebar] [data-slot=sidebar-menu-button]:not([data-active=true])",
-      "the state word beside a thread": "[data-sidebar-row] [data-thread-state]",
+      "the state word beside a thread": "[data-sidebar-row] [data-thread-status][data-tone]",
       "the row's meta line": "[data-app-sidebar] .text-\\[var\\(--top-row-meta\\)\\]",
     } as const;
     // The first three carry words a person reads, so their bar is AA. The last is the whisper the
