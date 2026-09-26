@@ -48,6 +48,10 @@ export const UPTIME_READ: readonly string[] = [
  * starts in: the read that records a workspace and the read behind its rows both ask for it this way. */
 export const HOME_READ = `printf "home %s\\n" "$HOME"`;
 
+/** The line that asks what system the machine runs, read before the chip: a Mac's arm64 and x86_64 are chip words
+ * a Linux box prints too, and only this says which of the two computers answered. */
+export const SYSTEM_READ = `printf "system %s\\n" "$(uname -s)"`;
+
 /** The line that asks what chip the machine runs on. Every binary wsp puts on a machine is built for one, and this
  * is the only word the machine itself uses for it, so what is sent there is picked off this and never off the chip
  * of the computer doing the sending. */
@@ -69,6 +73,12 @@ export const SHELL_READ = 'shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -
 export function archOf(values: Record<string, string>): string | undefined {
   const arch = values["arch"];
   return arch === undefined || arch === "" ? undefined : arch;
+}
+
+/** What the machine said its system is, in uname's own word, or nothing where it answered none. */
+export function systemOf(values: Record<string, string>): string | undefined {
+  const system = values["system"];
+  return system === undefined || system === "" ? undefined : system;
 }
 
 /** What the machine said its memory is, in whole MB, or nothing where the line printed no figure. */

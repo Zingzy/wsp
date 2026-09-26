@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { detectSkills, skillFrontmatter, skillRoots } from "../src/detect/skills.js";
+import { detectSkills, skillFrontmatter, skillMdFrontmatter, skillRoots } from "../src/detect/skills.js";
 import type { Host } from "../src/host.js";
 import { nodeHost } from "../src/live-host.js";
 import { agentHome } from "./agent-home.js";
@@ -74,6 +74,16 @@ describe("the skills on a computer", () => {
     writeFileSync(join(shared, "SKILL.md"), "---\nname: memo\n---\n");
     const again = (await detectSkills(host, await skillRoots(host))).skills.find(s => s.name === "memo")!;
     expect(again.paths.every(p => p.off === undefined)).toBe(true);
+  });
+
+  it("reads a SKILL.md saved with CRLF line ends as the node reader reads it", async () => {
+    const { host, home } = fixture();
+    const text = "---\r\nname: memo\r\ndescription: Keep notes\r\n---\r\nbody\r\n";
+    mkdirSync(join(home, ".agents/skills/memo"), { recursive: true });
+    writeFileSync(join(home, ".agents/skills/memo/SKILL.md"), text);
+    const memo = (await detectSkills(host, await skillRoots(host))).skills.find(s => s.name === "memo")!;
+    expect(memo.description).toBe("Keep notes");
+    expect(memo.description).toBe(skillMdFrontmatter(text).description);
   });
 
   it("keys a skill by its folder's name, so a SKILL.md naming another skill stands as its own row", async () => {

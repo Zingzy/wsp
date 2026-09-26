@@ -1,28 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Which wsp-daemon binary a machine runs: one row per target wsp builds, in
-// the words node, uname and the Rust toolchain each use for it, so the release
-// job, the bundle a guest gets, the unit a joined computer installs and the
-// daemon this computer spawns all read one table. Adding a target is a row
-// here and a matrix entry in the release workflow, whose test holds the two
-// equal.
+// Where a wsp-daemon binary sits and which row of the engine's target table a
+// machine takes, off what node or the machine itself says it is.
 import { join } from "node:path";
+import { DAEMON_TARGETS, type DaemonTarget } from "@wsp/engine";
 
-export interface DaemonTarget {
-  /** The Rust target triple: the folder the binary sits in under the daemon asset and the release artifact that carries it. */
-  triple: string;
-  /** node's own words for the machine that runs it. */
-  platform: "linux" | "darwin";
-  arch: "x64" | "arm64";
-  /** What `uname -m` prints there, the one word a deploy script can read a guest's chip off. */
-  uname: string;
-}
-
-export const DAEMON_TARGETS: readonly DaemonTarget[] = [
-  { triple: "x86_64-unknown-linux-musl", platform: "linux", arch: "x64", uname: "x86_64" },
-  { triple: "aarch64-unknown-linux-musl", platform: "linux", arch: "arm64", uname: "aarch64" },
-  { triple: "aarch64-apple-darwin", platform: "darwin", arch: "arm64", uname: "arm64" },
-  { triple: "x86_64-apple-darwin", platform: "darwin", arch: "x64", uname: "x86_64" },
-];
+export { DAEMON_TARGETS, type DaemonTarget };
 
 /** The targets a guest can be: every Linux row. A bundle carries all of them where the host has not read the
  * machine's own word for its chip, which is every fork of an image, since nothing answers there until the daemon
@@ -55,12 +37,25 @@ export const daemonArtifactName = (triple: string): string => `${DAEMON_BIN}-${t
 export const noDaemonBuildLine = (platform: string, arch: string): string =>
   `wsp builds no daemon for ${platform} ${arch}, so this computer cannot serve its own workspace or join a wsp as a place`;
 
-/** The row a machine's own `uname -m` names, out of the targets a guest can be. The one mapping from what a box
- * says about its chip to the binary it is sent, so nothing picks that binary off the chip of the computer doing
- * the sending. Nothing for a chip wsp builds no daemon for. */
-export function guestDaemonTarget(uname: string): DaemonTarget | undefined {
+/** The row a machine's own `uname -s` and `uname -m` name, out of the targets a guest can be. The one mapping from
+ * what a box says about itself to the binary it is sent, so nothing picks that binary off the computer doing the
+ * sending. A box that named no system is matched on its chip alone. Nothing for a system or chip no guest row has. */
+export function guestDaemonTarget(system: string | undefined, uname: string): DaemonTarget | undefined {
   const said = uname.trim();
-  return GUEST_DAEMON_TARGETS.find(t => t.uname === said);
+  return GUEST_DAEMON_TARGETS.find(t => (system === undefined || t.system === system) && t.uname === said);
+}
+
+/** Whether a guest row runs the system a machine named: a box that named none is left to its chip. */
+export const guestSystem = (system: string | undefined): boolean => system === undefined || GUEST_DAEMON_TARGETS.some(t => t.system === system);
+
+/** The refusal for a computer whose system no guest row runs, said before its chip: named by its own row where wsp
+ * builds a daemon for that system at all, by uname's word where it builds none. `joined` is a computer already in
+ * the wsp, which an update reaches. */
+export function noPlaceSystemLine(system: string, who = "that computer", joined = false): string {
+  const place = `wsp ${joined ? "keeps" : "joins"} only a ${GUEST_DAEMON_TARGETS[0]!.computer} as a place`;
+  const row = DAEMON_TARGETS.find(t => t.system === system);
+  if (row === undefined) return `${who} runs ${system}, and ${place}`;
+  return `${who} is a ${row.computer}, and ${place}; a ${row.computer} cannot ${joined ? "be updated as one" : "join yet"}`;
 }
 
 /** The refusal for a box whose chip wsp builds no daemon for, said before a byte of wsp's lands on it. */

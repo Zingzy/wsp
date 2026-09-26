@@ -6,6 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { posix } from "node:path";
 import { noHomeRefusal, noRunuserRefusal, shellQuote } from "@wsp/protocol";
+import { platformOfSystem } from "./daemon-targets.js";
 import { landBytes } from "./land-bytes.js";
 import type { Machine } from "./machine.js";
 
@@ -40,7 +41,7 @@ export async function targetLogin(machine: Pick<Machine, "exec">, given: { HOME?
   const res = await machine.exec(probe, { timeoutMs: PROBE_MS });
   if (res.exitCode !== 0) throw new Error(`the computer did not say who its lines run as: ${(res.stderr || res.stdout).trim().split("\n")[0] ?? ""}`);
   const [os = "", uid = "", self = "", owner = "", runuser = "", shellHome = "", shellPath = ""] = res.stdout.split("\n").map(l => l.trim());
-  const platform: TargetLogin["platform"] = os === "Darwin" ? "darwin" : "linux";
+  const platform: TargetLogin["platform"] = platformOfSystem(os) ?? "linux";
   const user = owner === "" ? self : owner;
   const path = given.PATH ?? shellPath;
   const at: TargetLogin = { platform, home: given.HOME ?? shellHome, ...(path !== "" ? { path } : {}), user };

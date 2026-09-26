@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlin
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { ARCH_READ, OS_READ, SHELL_READ, UPTIME_READ, archOf, readValues } from "../src/machine-facts.js";
+import { ARCH_READ, OS_READ, SHELL_READ, SYSTEM_READ, UPTIME_READ, archOf, readValues } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { probeCommand } from "../src/machine-context.js";
 import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostsWritten, offeredHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshHostName, sshWordReach, SSH_WORD_REFUSAL, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
@@ -362,6 +362,22 @@ describe("the chip a machine over ssh says it runs", () => {
     expect(archOf({})).toBeUndefined();
     expect(archOf({ arch: "" })).toBeUndefined();
     expect(archOf({ arch: "x86_64" })).toBe("x86_64");
+  });
+});
+
+describe("the system a machine over ssh says it runs", () => {
+  const reads = (lines: string): SshTransport => async (_reach, script) =>
+    script === SSH_READ_SCRIPT ? { exitCode: 0, stdout: `home /home/dev\n${lines}user dev\npath /usr/bin:/bin\ncpu 8\nmemkb 16384000\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
+
+  it("asks uname -s on the same read as the chip, ahead of it, and carries the word back as the machine said it", async () => {
+    expect(SYSTEM_READ).toContain("uname -s");
+    expect(SSH_READ_SCRIPT.indexOf(SYSTEM_READ)).toBeGreaterThanOrEqual(0);
+    expect(SSH_READ_SCRIPT.indexOf(SYSTEM_READ)).toBeLessThan(SSH_READ_SCRIPT.indexOf(ARCH_READ));
+    for (const said of ["Linux", "Darwin", "FreeBSD"]) {
+      expect(await readSshMachine(REACH, reads(`system ${said}\narch x86_64\n`))).toMatchObject({ system: said });
+      expect(await new SshBackend({ transport: reads(`system ${said}\n`), hostKey: async () => undefined, knownHosts: async () => ({}) }).adopt(REACH)).toMatchObject({ system: said });
+    }
+    expect(await readSshMachine(REACH, reads("system \n"))).not.toHaveProperty("system");
   });
 });
 

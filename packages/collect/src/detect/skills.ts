@@ -58,6 +58,7 @@ END {
       k++
       if (b + length(line) > cap) line = substr(line, 1, cap - b)
       b += length(line) + 1
+      sub(/\r$/, "", line)
       if (k == 1) { if (line != "---") break; continue }
       if (line == "---") break
       print line
