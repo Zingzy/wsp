@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
@@ -16,6 +15,7 @@ import { READS_PER_EXEC } from "../src/exec-detached.js";
 import { ALREADY_ON_MACHINE } from "../src/golden-base.js";
 import { goldenName } from "../src/snapshot-names.js";
 import { tarOf } from "../src/vault.js";
+import { tarRead } from "./tar-read.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, SnapshotProgress, TemplateRow } from "../src/machine.js";
 
 /** A fake whose kill() resolves like the provider's DELETE does: a call for
@@ -160,8 +160,8 @@ const REACH_OK: ExecResult = { exitCode: 0, stdout: "ok\n", stderr: "" };
 /** The stage detail the machine context leaves when no agent is on the guest, whatever its archive weighs. */
 const CONTEXT_WRITTEN = expect.stringMatching(/^installing-mcp:machine context: \d+(\.\d+)? KB written; no agent on the machine$/);
 /** What a gzipped archive holds and one file out of it, read with this computer's tar. */
-const namesIn = (tgz: Buffer): string[] => execFileSync("tar", ["-tzf", "-"], { input: tgz }).toString("utf8").trim().split("\n");
-const fileIn = (tgz: Buffer, path: string): string => execFileSync("tar", ["-xzOf", "-", path], { input: tgz }).toString("utf8");
+const namesIn = (tgz: Buffer): string[] => tarRead(["-tzf", "-"], tgz).toString("utf8").trim().split("\n");
+const fileIn = (tgz: Buffer, path: string): string => tarRead(["-xzOf", "-", path], tgz).toString("utf8");
 
 function stageRecorder() {
   const stages: string[] = [];

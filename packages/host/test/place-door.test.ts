@@ -61,15 +61,19 @@ const hold = (port: number, address: string = WILDCARD): Promise<Server | undefi
 
 const letGo = (server: Server | undefined): Promise<void> => (server === undefined ? Promise.resolve() : new Promise(done => server.close(() => done())));
 
+/** Below every operating system's ephemeral range (macOS from 49152, Linux from 32768), so no socket another process
+ * opens is handed either port of the pair between the probe and the host's bind. */
+const PAIR_BAND = { from: 20_000, to: 32_000 };
+
 /** An app port whose door port is free too: the door's own is the app's plus the offset and neither is stepped over,
  * so a pair is picked here rather than left to whatever the operating system hands back. Both are probed on the
  * address their real listener binds, so a port this answers for is one both listeners can have. */
 async function freePair(): Promise<number> {
   for (let tries = 0; tries < 20; tries += 1) {
-    const probe = createServer();
-    const port = await new Promise<number>(done => probe.listen(0, LOOPBACK, () => done((probe.address() as { port: number }).port)));
-    await new Promise<void>(done => probe.close(() => done()));
-    if (port + PLACE_PORT_OFFSET >= 65_535) continue;
+    const port = PAIR_BAND.from + Math.floor(Math.random() * (PAIR_BAND.to - PLACE_PORT_OFFSET - PAIR_BAND.from));
+    const own = await hold(port, LOOPBACK);
+    await letGo(own);
+    if (own === undefined) continue;
     const beside = await hold(port + PLACE_PORT_OFFSET);
     await letGo(beside);
     const besideLoopback = await hold(port + PLACE_PORT_OFFSET, LOOPBACK);
