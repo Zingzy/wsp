@@ -4,13 +4,13 @@
 // one row per workspace to switch to, recent threads at rest and every thread
 // whose title holds the typed query. Pure apart from the callbacks it is
 // handed, so the list is testable without the dialog.
-import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, FolderPlusIcon, MessageSquareIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, FolderIcon, FolderPlusIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { agentName } from "@wsp/catalog";
 import { PLACES_WORDS, type PlaceView } from "@wsp/protocol";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
 import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
-import { cn } from "../../lib/utils.js";
 import { SETTINGS_WORDS, onName } from "../../settings/format.js";
 import { groupNames } from "../../settings/groups.js";
 import { absenceOf } from "../../settings/places.js";
@@ -18,8 +18,12 @@ import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
 import { currentWorkspaceId } from "../../adapt/workspaces.js";
 import { threadTree, workspaceOf } from "../../sidebar/threadTree.js";
-import { compactTimeLabel, computerName, dotClassForTone } from "../../sidebar/workspaceRows.js";
+import { computerName } from "../../sidebar/workspaceRows.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "../../sidebar/words.js";
+import { HarnessMark } from "../chat/HarnessMark.js";
+import { Facts } from "../Facts.js";
+import { restingAge } from "../status/restingAge.js";
+import { LINE_SLOT_CLASS, ThreadStatus } from "../status/ThreadStatus.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
 
 export interface PaletteHandlers {
@@ -225,12 +229,7 @@ function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       kind: "action",
       value: `workspace:${project.id}`,
       searchTerms: [project.displayName],
-      icon: (
-        <span
-          aria-hidden
-          className={cn("mx-1 size-2 shrink-0 rounded-full", dotClassForTone(project.indicator.tone), project.indicator.pulse && "animate-status-pulse")}
-        />
-      ),
+      icon: <FolderIcon className={ITEM_ICON_CLASS} />,
       title: project.displayName,
       description: `${absent?.word ?? project.indicator.label}${onName(computerName(input.places, project))}`,
       ...(current ? { titleTrailingContent: <span className="shrink-0 text-muted-foreground/70 text-xs">Current task</span> } : {}),
@@ -245,12 +244,12 @@ function threadItem(thread: SidebarThreadSnapshot, project: SidebarProjectSnapsh
     kind: "action",
     value: `thread:${thread.id}`,
     searchTerms: [thread.title],
-    icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+    icon: <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-4" />,
     title: thread.title,
-    // The workspace it runs on and where that runs, the pair the sidebar's own row carries: a thread an agent
-    // opened somewhere else is told apart from its opener by these two words and nothing else.
-    description: `${project.displayName}${onName(computerName(places, project))}`,
-    timestamp: compactTimeLabel(thread.startedAt),
+    // The workspace it runs on and where that runs: a thread an agent opened somewhere else is told apart from its
+    // opener by these two words and nothing else.
+    description: <Facts parts={[project.displayName, computerName(places, project)]} className="overflow-hidden" />,
+    titleTrailingContent: <ThreadStatus thread={thread} age={restingAge(thread)} crab className={LINE_SLOT_CLASS} />,
     run: sync(() => handlers.selectThread(thread.workspaceId, thread.threadId)),
   };
 }

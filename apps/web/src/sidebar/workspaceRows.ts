@@ -8,7 +8,7 @@
 import { agentName } from "@wsp/catalog";
 import { broughtBackRowLine } from "../actions/format.js";
 import { HERE_PLACE_ID, isLocalWorkspace, kindWords, madeOfWord, portsWord, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, workspaceKind, type AbsentComputer, type BringBackResult, type Capabilities, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords } from "@wsp/protocol";
-import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
+import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
 import type { ProjectRef } from "./threadTree.js";
 import { PLACE_KIND_WORDS, hereName, isHere, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
@@ -213,21 +213,6 @@ export function projectComputerWord(project: Pick<ProjectRef, "computer">, named
  * names its computer by. */
 export function placeNames(places: readonly PlaceView[]): ReadonlyMap<string, string> {
   return new Map(places.map(place => [place.id, placeName(place)]));
-}
-
-export function dotClassForTone(tone: StatusIndicatorTone): string {
-  switch (tone) {
-    case "running":
-      return "bg-success-foreground";
-    case "paused":
-      return "border border-muted-foreground/60 bg-transparent";
-    case "neutral":
-      return "bg-muted-foreground/60";
-    default: {
-      const _exhaustive: never = tone;
-      return "";
-    }
-  }
 }
 
 /** t3code's row label: "just now" reads "now", "3m ago" reads "3m". */
