@@ -110,6 +110,7 @@ import { SERVICE_MANAGERS, type RunResult, type ServiceAddress, type ServiceMana
 import { addedBy, addedProviders } from "../src/providers.js";
 import { sha256sumBin } from "../../engine/test/sha256sum-bin.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 runsFromItsOwnFolder();
 
@@ -2601,11 +2602,8 @@ describe("what a failed add takes back off a box, run by a real shell", () => {
     const state = tmp("undo-fresh-unit-state");
     // A systemctl that keeps active and enabled as files, and refuses disable --now.
     const systemctl = join(tmp("undo-fresh-unit-bin"), "systemctl");
-    writeFileSync(
-      systemctl,
-      `#!/bin/sh\nS=${shellQuote(state)}\ncase "$1" in\n  is-active) [ -f "$S/active-$3" ];;\n  is-enabled) [ -f "$S/enabled-$3" ];;\n  stop) rm -f "$S/active-$2";;\n  disable) [ "$2" = --now ] && exit 1; rm -f "$S/enabled-$2";;\n  *) exit 0;;\nesac\n`,
-      { mode: 0o755 },
-    );
+    const refusing = `#!/bin/sh\nS=${shellQuote(state)}\ncase "$1" in\n  is-active) [ -f "$S/active-$3" ];;\n  is-enabled) [ -f "$S/enabled-$3" ];;\n  stop) rm -f "$S/active-$2";;\n  disable) [ "$2" = --now ] && exit 1; rm -f "$S/enabled-$2";;\n  *) exit 0;;\nesac\n`;
+    writeStub(systemctl, refusing);
     const place = joinedPlace({ home, path: "/usr/bin:/bin" }, { hostUrls: [], codeFile: `${placeDaemonPaths(home).wsp}/join-code`, name: "box" });
     const unitPath = join(home, ".config/systemd/user/wsp-place.service");
     const writes = joinedAddWrites(place, unitPath).filter(w => w.path.startsWith(`${home}/`));
@@ -2620,7 +2618,7 @@ describe("what a failed add takes back off a box, run by a real shell", () => {
     expect(existsSync(unitPath)).toBe(false);
     expect(existsSync(join(state, "active-wsp-place.service"))).toBe(true);
     // The same box where disable --now works: the unit stops and the undo says it finished.
-    writeFileSync(systemctl, readFileSync(systemctl, "utf8").replace('[ "$2" = --now ] && exit 1;', '[ "$2" = --now ] && rm -f "$S/active-$3";'));
+    writeStub(systemctl, refusing.replace('[ "$2" = --now ] && exit 1;', '[ "$2" = --now ] && rm -f "$S/active-$3";'));
     wroteTheAdd(home);
     writeFileSync(unitPath, "[Service]\n");
     expect(bash(addUndoScript(place, writes, found, systemctl, true))).toContain(DAEMON_GONE_LINE);
@@ -2678,7 +2676,7 @@ describe("the check a box runs for whether it can reach this host", () => {
     const dir = tmp(name);
     symlinkSync("/bin/bash", join(dir, "bash"));
     if (tools.curl === true) symlinkSync("/usr/bin/curl", join(dir, "curl"));
-    if (tools.timeout === true) writeFileSync(join(dir, "timeout"), '#!/bin/bash\nshift\nexec "$@"\n', { mode: 0o755 });
+    if (tools.timeout === true) writeStub(join(dir, "timeout"), '#!/bin/bash\nshift\nexec "$@"\n');
     return dir;
   }
 

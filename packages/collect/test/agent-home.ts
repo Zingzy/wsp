@@ -4,8 +4,9 @@
 // MCP config per agent with secrets in it, login files beside them, and a
 // project with its own skills and servers. Every value a reader must never
 // print carries SECRET, and every server command writes SPAWNED when run.
-import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 export const SECRET = "sk-fixture-SECRET";
 
@@ -82,8 +83,8 @@ export function agentHome(root: string): AgentHome {
 
   // Agents on the login's PATH, and the runners a server command would start, which say so if they ever run.
   const script = (name: string, body: string): void => {
-    put(join(bin, name), `#!/bin/sh\n${body}\n`);
-    chmodSync(join(bin, name), 0o755);
+    mkdirSync(bin, { recursive: true });
+    writeStub(join(bin, name), `#!/bin/sh\n${body}\n`);
   };
   script("claude", `case "$1" in --version) echo "2.1.281 (Claude Code)";; auth) echo '{"loggedIn": true, "authMethod": "claude.ai"}';; *) exit 2;; esac`);
   script("codex", `case "$1" in --version) echo "codex-cli 0.155.1";; login) echo "Not logged in"; exit 1;; *) exit 2;; esac`);

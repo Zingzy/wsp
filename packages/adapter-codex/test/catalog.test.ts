@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { HarnessCatalogProbe } from "@wsp/protocol";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 import { catalogProbeCommand, parseCatalogProbe } from "../src/catalog.js";
 
@@ -83,7 +84,7 @@ describe("catalogProbeCommand", () => {
     const bin = join(dir, "bin");
     execFileSync("mkdir", [bin]);
     const answers = ['{"id":1,"result":{}}', '{"id":2,"result":{}}', '{"id":4,"result":{}}', '{"id":3,"result":{}}'];
-    writeFileSync(
+    writeStub(
       join(bin, "codex"),
       [
         "#!/bin/sh",
@@ -95,7 +96,6 @@ describe("catalogProbeCommand", () => {
         "",
       ].join("\n"),
     );
-    chmodSync(join(bin, "codex"), 0o755);
     const started = Date.now();
     const out = execFileSync("bash", ["-c", catalogProbeCommand({ home: "/root/.codex" })], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`, HOME: dir } });
     expect(out).toContain("CALL --version");

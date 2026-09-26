@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -75,6 +75,7 @@ import { commandPage, COMMANDS_FOR_HELP, doctorRow, localWiring, SHARED_FLAGS, t
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 runsFromItsOwnFolder();
 
@@ -563,8 +564,7 @@ describe("the recipe's tools read from inside the workspace", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-inside-"));
     dirs.push(dir);
     for (const name of commands) {
-      writeFileSync(join(dir, name), "#!/bin/sh\nexit 0\n");
-      chmodSync(join(dir, name), 0o755);
+      writeStub(join(dir, name), "#!/bin/sh\nexit 0\n");
     }
     return dir;
   }
@@ -1265,9 +1265,9 @@ describe("deployScript", () => {
       mkdirSync(dirname(place.unitPath), { recursive: true });
       const bin = join(home, "bin");
       mkdirSync(bin);
-      writeFileSync(join(bin, "uname"), `#!/bin/sh\necho ${unameSays}\n`, { mode: 0o755 });
+      writeStub(join(bin, "uname"), `#!/bin/sh\necho ${unameSays}\n`);
       // The arm hands the unit it writes to systemd, which is not a unit test's business; the file it writes is.
-      writeFileSync(join(bin, "systemctl"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      writeStub(join(bin, "systemctl"), "#!/bin/sh\nexit 0\n");
       const lines = deployScript(place, "aabbcc").split("\n");
       const from = lines.indexOf('case "$(uname -m)" in');
       const to = lines.indexOf("esac");

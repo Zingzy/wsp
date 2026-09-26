@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFile } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { catalogEntry, versionOf } from "@wsp/catalog";
@@ -10,6 +10,7 @@ import { controlNameRefusal, placeProvisionPaths } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentHome, SECRET, type AgentHome } from "../../collect/test/agent-home.js";
 import { agentsReader } from "../src/agents-reader.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -21,8 +22,7 @@ function fixture(): AgentHome & { root: string } {
   roots.push(root);
   const at = agentHome(root);
   // runuser as a script on the login's PATH: it takes only the home's owner, and runs what it was handed.
-  writeFileSync(join(at.bin, "runuser"), `#!/bin/bash\n[ "$1" = -u ] && [ "$2" = ada ] && [ "$3" = -- ] || exit 9\nshift 3\nexec "$@"\n`);
-  chmodSync(join(at.bin, "runuser"), 0o755);
+  writeStub(join(at.bin, "runuser"), `#!/bin/bash\n[ "$1" = -u ] && [ "$2" = ada ] && [ "$3" = -- ] || exit 9\nshift 3\nexec "$@"\n`);
   return { ...at, root };
 }
 
@@ -151,8 +151,7 @@ describe("the agents report off this computer and off a workspace", () => {
     const shims = join(at.root, "T", "cmux-cli-shims");
     mkdirSync(shims, { recursive: true });
     for (const [name, body] of [["claude", `exec ${join(at.bin, "claude")} "$@"`], ["gemini", 'echo "0.58.0"']] as const) {
-      writeFileSync(join(shims, name), `#!/bin/sh\n${body}\n`);
-      chmodSync(join(shims, name), 0o755);
+      writeStub(join(shims, name), `#!/bin/sh\n${body}\n`);
     }
     const read = await agentsReader({ vault: () => ({}), here: () => here(at, `${shims}:${at.bin}:/usr/bin:/bin`) }).read({ kind: "here" });
     const agent = (id: string) => read.agents.find(a => a.id === id)!;
@@ -167,8 +166,7 @@ describe("the agents report off this computer and off a workspace", () => {
     const at = fixture();
     const shims = join(at.root, ".asdf", "shims");
     mkdirSync(shims, { recursive: true });
-    writeFileSync(join(shims, "claude"), `#!/bin/sh\nexec ${join(at.bin, "claude")} "$@"\n`);
-    chmodSync(join(shims, "claude"), 0o755);
+    writeStub(join(shims, "claude"), `#!/bin/sh\nexec ${join(at.bin, "claude")} "$@"\n`);
     const read = await agentsReader({ vault: () => ({}), here: () => here(at, `${shims}:${at.bin}:/usr/bin:/bin`) }).read({ kind: "here" });
     expect(read.agents.find(a => a.id === "claude")).toMatchObject({ via: "asdf" });
   });

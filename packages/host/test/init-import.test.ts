@@ -17,6 +17,7 @@ import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
 import { serverVault, type ServerVault } from "../src/env-keys.js";
 import { serversActs } from "../src/servers-acts.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
 
@@ -598,7 +599,7 @@ describe("packPlan", () => {
     dirs.push(shim);
     const record = join(shim, "modes");
     const real = execFileSync("sh", ["-c", "command -v tar"], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } }).trim();
-    writeFileSync(join(shim, "tar"), `#!/bin/sh\nfor a in "$@"; do case "$a" in *.tgz) "${process.execPath}" -e 'process.stdout.write((require("fs").statSync(process.argv[1]).mode & 0o777).toString(8) + "\\n")' "$a" >> "${record}" ;; esac; done\nexec "${real}" "$@"\n`, { mode: 0o755 });
+    writeStub(join(shim, "tar"), `#!/bin/sh\nfor a in "$@"; do case "$a" in *.tgz) "${process.execPath}" -e 'process.stdout.write((require("fs").statSync(process.argv[1]).mode & 0o777).toString(8) + "\\n")' "$a" >> "${record}" ;; esac; done\nexec "${real}" "$@"\n`);
     const home = laptop();
     const plan = planFiles([row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" })], { home, stat: statOf, platform: "darwin" });
     const path = process.env["PATH"];
