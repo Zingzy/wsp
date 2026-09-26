@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The small pieces every level of the agents manager draws: an act as an xs
-// outline button with its glyph, a row's or a head's lead, the agents' marks
-// after a name, a status as a dot and a word on every tab, and one pick of a
-// few in a select.
+// outline button with its glyph, or the shared Add button where it is an
+// add, a row's or a head's lead, the agents' marks after a name, a status as
+// a dot and a word on every tab, and one pick of a few in a select.
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { agentName } from "@wsp/catalog";
@@ -10,6 +10,7 @@ import { cn } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../ui/alert-dialog.js";
+import { AddButton } from "../ui/add-button.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../ui/button.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select.js";
 import { Spinner } from "../ui/spinner.js";
@@ -24,26 +25,34 @@ const TALL = "h-8 sm:h-8 px-2.5";
 /** One act as an xs outline button with its glyph: held where it has no road. A held button takes no pointer, so it
  * stands in a box that does: the box carries the hover, and a press on it lands there rather than on the row under it.
  * An act that asks first opens its confirmation, whose own button is the one red at rest. `tall` stands it at the
- * height of the controls beside it, and `wordClassName` may hide its word, which then stays its name. */
+ * height of the controls beside it, an add as the 32 px keycap itself, and `wordClassName` may hide its word, which then
+ * stays its name. */
 export function ActButton({ act, className, k, tall = false, wordClassName }: { act: RowAct; className?: string; k?: string; tall?: boolean; wordClassName?: string }) {
   const [asking, setAsking] = useState(false);
   const boxed = act.run === undefined || act.hover !== undefined;
   const Icon = act.icon;
   const run = act.run === undefined ? undefined : act.confirm === undefined ? act.run : () => setAsking(true);
-  const button = (
-    <Button
-      data-k={k ?? `act-${act.id}`}
-      size="xs"
-      variant="outline"
-      held={run === undefined}
-      className={cn(act.destructive === true && DANGER_BUTTON, tall && TALL, !boxed && className)}
-      {...(wordClassName === undefined ? {} : { "aria-label": act.label })}
-      {...(run === undefined ? {} : { onClick: run })}
-    >
-      {act.busy === true ? <Spinner className="size-3.5" /> : Icon === undefined ? null : <Icon aria-hidden className="size-3.5" />}
-      {wordClassName === undefined ? act.label : <span className={wordClassName}>{act.label}</span>}
-    </Button>
-  );
+  const keycap = act.add === true && tall;
+  const shared = {
+    "data-k": k ?? `act-${act.id}`,
+    size: keycap ? "default" : "xs",
+    held: run === undefined,
+    className: cn(act.destructive === true && DANGER_BUTTON, tall && !keycap && TALL, !boxed && className),
+    ...(wordClassName === undefined ? {} : { "aria-label": act.label }),
+    ...(run === undefined ? {} : { onClick: run }),
+  } as const;
+  const word = wordClassName === undefined ? act.label : <span className={wordClassName}>{act.label}</span>;
+  const button =
+    act.add === true ? (
+      <AddButton {...shared} busy={act.busy === true}>
+        {word}
+      </AddButton>
+    ) : (
+      <Button {...shared} variant="outline">
+        {act.busy === true ? <Spinner className="size-3.5" /> : Icon === undefined ? null : <Icon aria-hidden className="size-3.5" />}
+        {word}
+      </Button>
+    );
   const confirm =
     act.confirm === undefined || act.run === undefined ? null : (
       <AlertDialog open={asking} onOpenChange={setAsking}>

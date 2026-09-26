@@ -6,6 +6,7 @@
 import { CheckIcon, CloudIcon, ExternalLinkIcon, KeyRoundIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { AddButton } from "../components/ui/add-button.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { failureOf } from "../protocol/failure.js";
@@ -16,7 +17,7 @@ import { RefusalSlot } from "./sheetParts.js";
 
 export const INPUT = "h-10 w-full font-mono [&_input]:h-[38px] [&_input]:ps-9 [&_input]:text-[13px] [&_input]:leading-[38px] sm:[&_input]:h-[38px] sm:[&_input]:text-[13px] sm:[&_input]:leading-[38px]";
 
-/** One provider's key: the field, Save or Replace, and the provider's own refusal under it. `held`: the host holds a
+/** One provider's key: the field, Add or Replace, and the provider's own refusal under it. `held`: the host holds a
  * key for it from before; `kept`: one was saved here. What stands under the field is the caller's. */
 export function ProviderKey({ id, words, held, kept, onKept, children }: { id: string; words: (typeof PROVIDER_KEY_WORDS)[string]; held: boolean; kept: boolean; onKept: (yes: boolean) => void; children?: ReactNode }) {
   const canSave = useStore(s => s.api?.initKeys !== undefined);
@@ -75,9 +76,15 @@ export function ProviderKey({ id, words, held, kept, onKept, children }: { id: s
           <KeyRoundIcon aria-hidden className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input data-k="cloud-key" nativeInput type="password" autoComplete="off" spellCheck={false} value={key} placeholder={has ? MINE.replaceKey : words.keyName} aria-label={words.keyName} {...(refusal === null ? {} : { "aria-invalid": true })} onChange={e => setKey(e.target.value)} onKeyDown={e => (e.key === "Enter" && !busy ? save() : undefined)} className={INPUT} />
         </span>
-        <Button data-k="cloud-save" variant={has ? "outline" : "default"} className="h-10 px-4 sm:h-10" held={busy || key.trim() === ""} onClick={save}>
-          {busy ? MINE.checking : has ? MINE.replace : MINE.save}
-        </Button>
+        {has ? (
+          <Button data-k="cloud-save" variant="outline" className="h-10 px-4 sm:h-10" held={busy || key.trim() === ""} onClick={save}>
+            {busy ? MINE.checking : MINE.replace}
+          </Button>
+        ) : (
+          <AddButton primary data-k="cloud-save" busy={busy} held={busy || key.trim() === ""} onClick={save}>
+            {busy ? MINE.checking : MINE.add}
+          </AddButton>
+        )}
       </div>
       {refusal !== null ? <RefusalSlot k="cloud-refusal" {...refusal} /> : null}
       {children}

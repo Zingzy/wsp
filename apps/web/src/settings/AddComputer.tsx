@@ -10,10 +10,10 @@
 import { CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, HashIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, XIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { PLACES_WORDS, PLACE_INSTALL, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, placeBuildsNoImageLine, type InitSetup, type PlaceAddJob, type PlaceView } from "@wsp/protocol";
+import { AddButton } from "../components/ui/add-button.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { Kbd } from "../components/ui/kbd.js";
-import { Spinner } from "../components/ui/spinner.js";
 import { MICRO_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
@@ -33,7 +33,6 @@ import { RefusalSlot } from "./sheetParts.js";
 
 const MINE = ADD_COMPUTER_WORDS;
 const PLAN_FACTS: Partial<Record<PlaceAddStep, string>> = { wsp: PLACE_INSTALL.weight };
-const KEYCAP = "h-9 px-4 sm:h-9";
 
 type JoinLines = Awaited<ReturnType<NonNullable<Api["mintJoin"]>>>;
 type SshHost = Awaited<ReturnType<NonNullable<Api["sshHosts"]>>>[number];
@@ -180,9 +179,9 @@ function Joined({ place, now, onAgain }: { place: PlaceView; now: number; onAgai
     <div className="flex flex-col gap-6" data-k="joined">
       <div className="flex flex-col gap-3">
         <ComputerRow place={place} now={now} />
-        <Button size="xs" variant="outline" className="self-start" onClick={onAgain}>
+        <AddButton className="self-start" onClick={onAgain}>
           {MINE.another}
-        </Button>
+        </AddButton>
       </div>
       <ComputerSignIns place={place} now={now} />
       <ImageNext place={place} />
@@ -304,16 +303,9 @@ function SshForm({ job }: { job: PlaceAddJob | undefined }) {
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
             {running ? MINE.running : <><Kbd>↵</Kbd>{MINE.adds}</>}
           </span>
-          <Button data-k="ssh-add" className={cn(KEYCAP, "ms-auto")} held={running || held !== undefined || host.trim() === ""} onClick={() => add({ user, host, port })}>
-            {running ? (
-              <>
-                <Spinner data-k="adding-spinner" aria-hidden role={undefined} className="size-4" />
-                {MINE.adding}
-              </>
-            ) : (
-              MINE.addComputer
-            )}
-          </Button>
+          <AddButton primary data-k="ssh-add" className="ms-auto" busy={running} held={running || held !== undefined || host.trim() === ""} onClick={() => add({ user, host, port })}>
+            {running ? MINE.adding : MINE.addComputer}
+          </AddButton>
         </>
       }
     >
@@ -480,15 +472,18 @@ const ROADS = {
   cloud: { title: "A cloud", line: Object.values(PROVIDER_KEY_WORDS).map(p => p.name).join(" or "), picture: <CloudPicture />, panel: ({ setup }) => <CloudRoad setup={setup} /> },
   code: { title: "A computer running wsp", line: "a Mac or PC you sit at", picture: <CodePicture />, panel: ({ now }) => <CodeRoad now={now} /> },
 } satisfies Record<string, Road>;
-type AddRoad = keyof typeof ROADS;
+export type AddRoad = keyof typeof ROADS;
 
-export function AddComputer({ setup, now = () => Date.now() }: { setup: InitSetup | null; now?: () => number }) {
+/** The panel, opened on `road` where its button names one, else on the picker with none picked. */
+export function AddComputer({ setup, now = () => Date.now(), road: first = null }: { setup: InitSetup | null; now?: () => number; road?: AddRoad | null }) {
   const asked = useStore(s => s.addComputerOpen);
-  const [road, setRoad] = useState<AddRoad | null>(null);
+  const [road, setRoad] = useState<AddRoad | null>(first);
   const root = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!asked) return;
     root.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, []);
+  useEffect(() => {
+    if (!asked) return;
     setRoad(r => r ?? "ssh");
     useStore.getState().closeAddComputer();
   }, [asked]);

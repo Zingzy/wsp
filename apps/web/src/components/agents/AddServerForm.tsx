@@ -4,7 +4,7 @@
 // each value masked and held by this form alone until the host takes it once
 // and writes it into that agent's own file. The file it lands in stands at the
 // footer, following the agent and where; the host's refusal stands under it.
-import { PlusIcon, XIcon } from "lucide-react";
+import { XIcon } from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { MCP_AGENTS, agentName } from "@wsp/catalog";
 import { commandWords, unclosedQuoteRefusal, type AgentsProject, type AgentsReport, type ServerAdd } from "@wsp/protocol";
@@ -12,11 +12,11 @@ import { cn, errorText } from "../../lib/utils.js";
 import { FACT } from "../../settings/format.js";
 import { RefusalSlot } from "../../settings/sheetParts.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
+import { AddButton } from "../ui/add-button.js";
 import { Button } from "../ui/button.js";
 import { InputGroup, InputGroupInput } from "../ui/input-group.js";
 import { SegmentedControl } from "../ui/segmented-control.js";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select.js";
-import { Spinner } from "../ui/spinner.js";
 import { OneOf } from "./agentsParts.js";
 import { AGENTS_LIST_WORDS as W, inProject, pickOf, whereNow, type ProjectPick } from "./agentsRows.js";
 import type { AddFormProps } from "./kinds/kind.js";
@@ -203,10 +203,9 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
             </Button>
           </div>
         ))}
-        <Button data-k="add-server-pair-add" size="xs" variant="ghost-muted" className="self-start" onClick={addPair}>
-          <PlusIcon aria-hidden className="size-3.5" />
+        <AddButton data-k="add-server-pair-add" size="xs" className="self-start" onClick={addPair}>
           {road === "command" ? W.addVariable : W.addHeader}
-        </Button>
+        </AddButton>
       </Line>
       {where.options.length === 0 ? null : (
         <Line label={W.where} top>
@@ -217,10 +216,9 @@ export function AddServerForm({ report, ctx, first, done }: AddFormProps) {
         <span data-k="add-server-file" className={cn(FACT, "min-w-0 truncate")} title={file}>
           {file}
         </span>
-        <Button data-k="add-server-go" size="default" className="ml-auto shrink-0" held={!ready} {...(ready ? { onClick: submit } : {})}>
-          {adding ? <Spinner className="size-4" /> : <PlusIcon aria-hidden className="size-4" />}
+        <AddButton primary data-k="add-server-go" className="ml-auto shrink-0" busy={adding} held={!ready} {...(ready ? { onClick: submit } : {})}>
           {adding ? W.adding : W.addServerGo}
-        </Button>
+        </AddButton>
       </div>
       <RefusalSlot k="add-server-refused" {...(refused === undefined ? {} : { said: refused })} />
     </div>

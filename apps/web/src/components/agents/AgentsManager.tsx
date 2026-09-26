@@ -12,7 +12,7 @@
 // whose rows open the detail of one before it is added, or a form for what a
 // person types. Every kind is a registered module, so this file never names
 // one. Its root is the container every width rule reads.
-import { ListFilterIcon, PlusIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
+import { ListFilterIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { offlineFor, type AgentsReport } from "@wsp/protocol";
 import { MICRO_LABEL } from "../../lib/microLabel.js";
@@ -26,7 +26,7 @@ import { Skeleton } from "../ui/skeleton.js";
 import { Spinner } from "../ui/spinner.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip.js";
 import { ActButton } from "./agentsParts.js";
-import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, notYet, onImage, pausedReport, refusedLines, type RefusedLine, type RowAct, type RowsContext } from "./agentsRows.js";
+import { AGENTS_LIST_WORDS as W, editImageAct, heldReason, onImage, pausedReport, refusedLines, type RefusedLine, type RowAct, type RowsContext } from "./agentsRows.js";
 import { NARROW, TABS } from "./agentsWidths.js";
 import { AgentsRow } from "./AgentsRow.js";
 import { AddFormLevel, AddLevelView, DetailLevel, UnderLevelView, UnderRowLevel } from "./AgentsDetail.js";
@@ -173,7 +173,7 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
 
   const addWord = tab.add;
   const add: RowAct | undefined =
-    addWord === undefined ? undefined : onImage(ctx) ? editImageAct(ctx) : adder !== undefined || former !== undefined ? { id: "add", label: addWord, icon: PlusIcon, run: () => setLevel({ kind: "add" }) } : { ...notYet("add", addWord, PlusIcon), hover: heldReason(ctx) ?? W.notYet };
+    addWord === undefined ? undefined : onImage(ctx) ? editImageAct(ctx) : adder !== undefined || former !== undefined ? { id: "add", label: addWord, add: true, run: () => setLevel({ kind: "add" }) } : { id: "add", label: addWord, add: true, hover: heldReason(ctx) ?? W.notYet };
   // Each time a tab shows a report, its kind asks what it checks there.
   const shownRef = useRef<() => void>(() => {});
   shownRef.current = () => tab.shown?.(items, ctx);

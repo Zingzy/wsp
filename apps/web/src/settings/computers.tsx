@@ -13,6 +13,7 @@ import { CloudIcon, CpuIcon, GaugeIcon, HardDriveIcon, LayersIcon, MemoryStickIc
 import type { ChipItem } from "../components/ui/chips.js";
 import { useState } from "react";
 import { HERE_PLACE_ID, fmtMemGb, absentRoad, awayMsOf, copyStanding, fmtBytes, fmtRate, fmtSize, isLocalWorkspace, lastKnown, offlineFor, plural, portsWord, spentThisMonth, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { AddButton } from "../components/ui/add-button.js";
 import { Button, DANGER_BUTTON } from "../components/ui/button.js";
 import { AgentsManager } from "../components/agents/AgentsManager.js";
 import { imageAgentsReport, recipeMissLines } from "../components/agents/agentsRows.js";
@@ -115,25 +116,31 @@ export function computerSubPages(ctx: SettingsContext): { at: SettingsAt; name: 
 
 export function computersCards(ctx: SettingsContext): SettingsCardData[] {
   const counts = placeWorkspaceCounts(ctx.places, ctx.workspaces);
-  const rows = ctx.places;
+  const row = (place: PlaceView): SettingsRowData => {
+    const here = place.id === HERE_PLACE_ID;
+    return computerRowData(place, {
+      count: counts[place.id] ?? 0,
+      spend: ctx.reads.spend.find(spent => spent.place === place.id),
+      now: ctx.now,
+      ...(here ? { state: ownStateWord(ctx) } : {}),
+      open: () => ctx.go({ kind: "computer", id: place.id }),
+    });
+  };
+  const refused =
+    ctx.placesRefused === null ? null : <RefusalSlot k="places-refused" said={WHERE_WORDS.notRead(ctx.placesRefused.said)} {...(ctx.placesRefused.fix === undefined ? {} : { fix: ctx.placesRefused.fix })} />;
+  const adds = (
+    <div className="flex gap-2">
+      <AddButton data-k="add-computer-button" onClick={() => ctx.askAdd(null)}>
+        {ADD_COMPUTER_WORDS.title}
+      </AddButton>
+      <AddButton data-k="add-cloud-button" onClick={() => ctx.askAdd("cloud")}>
+        {ADD_COMPUTER_WORDS.addCloud}
+      </AddButton>
+    </div>
+  );
   return [
-    {
-      id: "computers",
-      items: rows.map(place => {
-        const here = place.id === HERE_PLACE_ID;
-        return computerRowData(place, {
-          count: counts[place.id] ?? 0,
-          spend: ctx.reads.spend.find(row => row.place === place.id),
-          now: ctx.now,
-          ...(here ? { state: ownStateWord(ctx) } : {}),
-          open: () => ctx.go({ kind: "computer", id: place.id }),
-        });
-      }),
-      ...(ctx.placesRefused === null
-        ? {}
-        : { under: <RefusalSlot k="places-refused" said={WHERE_WORDS.notRead(ctx.placesRefused.said)} {...(ctx.placesRefused.fix === undefined ? {} : { fix: ctx.placesRefused.fix })} /> }),
-    },
-    { id: "add-computer", head: ADD_COMPUTER_WORDS.title, items: [], body: <AddComputer setup={ctx.reads.setup} /> },
+    { id: "computers", items: ctx.places.map(row), under: refused === null ? adds : <div className="flex flex-col items-start gap-3">{refused}{adds}</div> },
+    ...(ctx.addAsked === null ? [] : [{ id: "add-computer", head: ADD_COMPUTER_WORDS.title, items: [], body: <AddComputer key={ctx.addAsked.n} setup={ctx.reads.setup} road={ctx.addAsked.road} /> }]),
   ];
 }
 

@@ -5,10 +5,11 @@
 // instead, and a repository address is cloned where a computer clones: a box or a
 // provider, never the host's computer, whose projects are folders of the person's own. The
 // list keeps one height across every state, so nothing around it moves.
-import { CloudIcon, CornerDownLeftIcon, FolderGitIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, LaptopIcon, PlusIcon, ServerIcon } from "lucide-react";
+import { CloudIcon, FolderGitIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, LaptopIcon, PlusIcon, ServerIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { HERE_PLACE_ID, sourceKind, type HostFolder, type HostFolderListing, type PlaceView, type ProjectHue, type ProjectIcon } from "@wsp/protocol";
 import { HueSelect, IconSelect } from "../projects/LookPicker.js";
+import { AddButton } from "../components/ui/add-button.js";
 import { Dialog, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { baseName } from "../files/entries.js";
@@ -223,16 +224,9 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
               {ADD_PROJECT_WORDS.choose}
             </button>
           ) : null}
-          <button
-            type="button"
-            data-k="add"
-            disabled={target === null || adding}
-            onClick={() => (target === null ? undefined : void add(target))}
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity duration-150 disabled:opacity-40"
-          >
-            <CornerDownLeftIcon aria-hidden className="size-3.5" />
+          <AddButton primary data-k="add" busy={adding} held={target === null || adding} onClick={() => (target === null ? undefined : void add(target))}>
             {ADD_PROJECT_WORDS.add}
-          </button>
+          </AddButton>
           <Kbd className="font-mono">esc</Kbd>
         </div>
         <div className="grid h-[400px] grid-cols-[minmax(0,1fr)_210px] max-sm:grid-cols-1">
