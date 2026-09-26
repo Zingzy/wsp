@@ -3,7 +3,7 @@
 // catalog could put there. An installed row says its version and its sign-in
 // state under its name, and offers Sign in where none stands, else Open in
 // terminal; the detail says who the agent is and the rest, next step first.
-import { BotIcon, CircleArrowUpIcon, DownloadIcon, SquareTerminalIcon, Trash2Icon, WrenchIcon } from "lucide-react";
+import { BotIcon, CircleArrowUpIcon, DownloadIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
 import { catalogEntry, installShown, runsThreads, type AgentEntry } from "@wsp/catalog";
 import { compareVersions, MCP_SERVER_NAME, type AgentRow, type AgentsReport } from "@wsp/protocol";
 import { AGENTS_LIST_WORDS as W, agentSignInStart, editImageAct, heldReason, holdAll, notYet, onImage, signInAct, waitingFlow, type RowAct, type RowsContext } from "../agentsRows.js";
@@ -65,8 +65,8 @@ function actsOf(item: AgentItem, ctx: RowsContext) {
   const adding = ctx.acts?.adding(row.id) === true;
   const addTools: RowAct =
     ctx.where !== "here"
-      ? { id: "add-tools", label: W.addTools, icon: WrenchIcon, hover: W.toolsHereOnly }
-      : { id: "add-tools", label: W.addTools, icon: WrenchIcon, ...(adding ? { busy: true } : ctx.acts === undefined ? {} : { run: () => ctx.acts!.addTools(row.id) }) };
+      ? { id: "add-tools", label: W.addTools, add: true, hover: W.toolsHereOnly }
+      : { id: "add-tools", label: W.addTools, add: true, ...(adding ? { busy: true } : ctx.acts === undefined ? {} : { run: () => ctx.acts!.addTools(row.id) }) };
   const update = notYet("update", W.update, CircleArrowUpIcon, hold === undefined ? {} : { hover: hold });
   const uninstall = notYet("uninstall", W.uninstall, Trash2Icon, { destructive: true, ...(hold === undefined ? {} : { hover: hold }) });
   const running = signIn.act.id === "cancel";

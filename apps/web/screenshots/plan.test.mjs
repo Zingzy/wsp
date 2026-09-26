@@ -117,8 +117,9 @@ describe("the folder a run leaves", () => {
 
 describe("every row the surfaces list aims at", () => {
   const SURFACES = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")).surfaces;
-  /** The clouds whose rows the host draws once it holds their key, by the id their rows carry. */
-  const CLOUD_ROWS = new Set(["solari", "box"]);
+  /** The rows the host draws for itself, by the id their rows carry: this computer's own, and the clouds once it
+   * holds their key. */
+  const HOST_ROWS = new Set(["here", "solari", "box"]);
 
   it("is a row the fixture that surface is served from really holds", () => {
     // The list names a workspace, a thread and a joined computer by id, and a fixture that stopped holding one
@@ -129,13 +130,13 @@ describe("every row the surfaces list aims at", () => {
       const threads = new Set(Object.values(state.sessions).flatMap(doc => doc.sessions.map(row => row.threadId)));
       for (const step of surface.steps ?? []) {
         const word = step.includes(":") && !step.startsWith("row-id=") && !step.startsWith("place-row=") ? step.slice(step.indexOf(":") + 1) : step;
-        // A cloud's row is the host's own, keyed by the provider's id, so it is in no fixture's places collection.
+        // This computer's row and a cloud's are the host's own, so they are in no fixture's places collection.
         const held = word.startsWith("row-id=ws:")
           ? state.workspaces[word.slice("row-id=ws:".length)] !== undefined
           : word.startsWith("row-id=thread:")
             ? threads.has(threadId(word.slice("row-id=thread:".length)))
             : word.startsWith("place-row=")
-              ? (state.places ?? {})[word.slice("place-row=".length)] !== undefined || CLOUD_ROWS.has(word.slice("place-row=".length))
+              ? (state.places ?? {})[word.slice("place-row=".length)] !== undefined || HOST_ROWS.has(word.slice("place-row=".length))
               : true;
         expect([surface.name, word, held]).toEqual([surface.name, word, true]);
       }
@@ -179,6 +180,9 @@ describe("the surfaces list this repo ships", () => {
       "settings-computers",
       "settings-account",
       "add-computer",
+      "add-cloud",
+      "agents-add",
+      "agents-add-server",
       "settings-image-fresh",
       "settings-image-built",
       "settings-image-recipe",
@@ -201,10 +205,10 @@ describe("the surfaces list this repo ships", () => {
     // that never was, a thread whose agent opened threads elsewhere needs the workspaces those threads run on, and
     // a person on the first run has no project added.
     expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "orchestrator", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes"]);
-    // The first run is shot at the two widths a design reading is held to, and New workspace at the one width whose
-    // sidebar carries its control; the rest take every width the list shoots.
+    // The first run and the Add surfaces are shot at the two widths a design reading is held to, and New workspace
+    // at the one width whose sidebar carries its control; the rest take every width the list shoots.
     const narrowed = read.surfaces.filter(s => s.widths.length < read.widths.length);
-    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]]]);
+    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["add-cloud", [1440, 390]], ["agents-add", [1440, 390]], ["agents-add-server", [1440, 390]], ["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]]]);
     expect(shotPlan(read)).toHaveLength(read.surfaces.reduce((n, s) => n + s.widths.length, 0) * 2);
     // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
     expect(read.widths).toContain(1280);

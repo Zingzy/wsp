@@ -115,6 +115,7 @@ export const WHERE_WORDS = {
 /** What Add a computer says beyond PLACES_WORDS.sheet and the roads' own names. */
 export const ADD_COMPUTER_WORDS = {
   title: "Add a computer",
+  addCloud: "Add a cloud",
   user: "User",
   host: "Host",
   hostPlaceholder: "box.example.com or an ssh alias",
@@ -136,7 +137,8 @@ export const ADD_COMPUTER_WORDS = {
   keySaved: "key saved",
   keyKept: "key kept; no computer yet",
   getKey: "Get a key",
-  save: "Save",
+  /** The first key for a cloud is an add: the key check and the cloud's row both follow it. */
+  add: "Add",
   checking: "Checking",
   keyRefused: (provider: { name: string; keyConsole?: string }): { said: string; fix: string } => ({
     said: `${provider.name} refused that key.`,

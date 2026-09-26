@@ -52,6 +52,7 @@ const joined = async (api: Api): Promise<void> => {
   useAdds.setState({ jobs: { a_1: { addId: "a_1", address: "root@hetzner", startedAt: AT, state: "done", steps: [], placeId: box.id } }, putAway: null });
   mountSettings({ api, at: { kind: "group", group: "computers" } });
   await settle();
+  fireEvent.click(document.querySelector("[data-k='add-computer-button']")!);
   fireEvent.click(document.querySelector("[data-add-road='ssh']")!);
   await settle();
 };

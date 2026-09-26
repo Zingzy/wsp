@@ -12,6 +12,7 @@ import { agentName } from "@wsp/catalog";
 import { HERE_PLACE_ID, fmtBytes, hereWord, plural, projectInUseRefusal, type ProjectLook, type ProjectSource, type ProjectView } from "@wsp/protocol";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "../components/ui/alert-dialog.js";
 import { Button, DANGER_BUTTON, NEUTRAL_RING } from "../components/ui/button.js";
+import { AddButton } from "../components/ui/add-button.js";
 import type { Api } from "../protocol/client.js";
 import { placeNames, projectComputerWord } from "../sidebar/workspaceRows.js";
 import { PROJECT_WORDS } from "../sidebar/words.js";
@@ -55,9 +56,9 @@ export function projectSubPages(ctx: SettingsContext): { at: SettingsAt; name: s
 export function projectsCards(ctx: SettingsContext): SettingsCardData[] {
   const named = placeNames(ctx.places);
   const under = (
-    <Button size="xs" variant="outline" data-k="add-project-button" onClick={ctx.openAddProject}>
+    <AddButton data-k="add-project-button" onClick={ctx.openAddProject}>
       {PROJECTS_WORDS.add}
-    </Button>
+    </AddButton>
   );
   if (ctx.projectsRefused !== null) {
     const { said, fix } = ctx.projectsRefused;
