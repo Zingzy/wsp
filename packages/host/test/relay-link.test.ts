@@ -4,6 +4,7 @@
 // it runs against its own loopback port, and the unlink that hands everything
 // back. The relay here is a real http server in this process, so the requests,
 // the headers and the refusals are real ones.
+import { spawn, type SpawnOptions } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -200,7 +201,7 @@ async function fakeRelay(): Promise<FakeRelay> {
 /** A script that says what a quick tunnel says and then waits, so the connector under test is a real child. */
 function fakeConnector(dir: string, hostname = "blue-sky-1234.trycloudflare.com"): string {
   const bin = join(dir, "fake-cloudflared");
-  writeFileSync(bin, `#!/bin/sh\necho "$@" > "${join(dir, "argv")}"\n>&2 echo 'INF |  https://${hostname}  |'\nsleep 30\n`, { mode: 0o755 });
+  writeFileSync(bin, `#!/bin/sh\necho "$@" > "${join(dir, "argv")}"\n>&2 echo 'INF |  https://${hostname}  |'\nexec sleep 30\n`, { mode: 0o755 });
   return bin;
 }
 
@@ -211,15 +212,18 @@ function restartingConnector(dir: string): string {
   const runs = join(dir, "runs");
   writeFileSync(
     bin,
-    `#!/bin/sh\nn=$(cat "${runs}" 2>/dev/null || echo 0)\nn=$((n+1))\necho "$n" > "${runs}"\n>&2 echo "INF |  https://name-$n.trycloudflare.com  |"\nif [ "$n" -ge 2 ]; then sleep 30; else exit 1; fi\n`,
+    `#!/bin/sh\nn=$(cat "${runs}" 2>/dev/null || echo 0)\nn=$((n+1))\necho "$n" > "${runs}"\n>&2 echo "INF |  https://name-$n.trycloudflare.com  |"\nif [ "$n" -ge 2 ]; then exec sleep 30; else exit 1; fi\n`,
     { mode: 0o755 },
   );
   return bin;
 }
 
+// macOS checks a file written moments ago at its first exec, half a second idle and longer under load; sh reading it is not checked.
+const throughShell = ((bin: string, args: readonly string[], options: SpawnOptions) => spawn("/bin/sh", [bin, ...args], options)) as typeof spawn;
+
 /** The connector, restarted fast enough for a test: the two seconds a real box waits are the box's constraint. */
 function restarting(dir: string): Partial<RelayDeps> {
-  return { cloudflared: async () => restartingConnector(dir), connector: opts => startConnector({ ...opts, restartMs: 20 }) };
+  return { cloudflared: async () => restartingConnector(dir), connector: opts => startConnector({ ...opts, restartMs: 20, spawnChild: throughShell }) };
 }
 
 function deps(dir: string, extra: Partial<RelayDeps> = {}): RelayDeps {
@@ -231,7 +235,7 @@ function deps(dir: string, extra: Partial<RelayDeps> = {}): RelayDeps {
     sleep: () => Promise.resolve(),
     deviceName: () => "the box",
     cloudflared: async () => fakeConnector(dir),
-    connector: startConnector,
+    connector: opts => startConnector({ ...opts, spawnChild: throughShell }),
     heartbeatMs: 40,
     ...extra,
   };
