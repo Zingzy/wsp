@@ -8,7 +8,7 @@ import { SidebarProvider } from "../components/ui/sidebar.js";
 import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { WorkspaceSidebar } from "./WorkspaceSidebar.js";
-import { NEW_WORKSPACE, PROJECT_WORDS } from "./words.js";
+import { PROJECT_WORDS } from "./words.js";
 
 // The triggers keep their elements and no popup mounts: Base UI's positioning against jsdom's zero-size rects
 // costs seconds per open, and this file reads rows rather than popups.
@@ -105,11 +105,31 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
   return { create };
 }
 
-/** Every project row the sidebar drew, in order, by its name with the count beside it once its row is shut. */
-const headers = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-row-id^=project\\:]")].map(row => `${row.querySelector("[data-project-name]")!.textContent}${row.querySelector("[data-project-count]")?.textContent ?? ""}`);
 const rowIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-sidebar-row]")].map(row => row.dataset["rowId"] ?? "");
 const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
 const depthOf = (text: string): number => Number(rowOf(text).dataset["depth"]);
+const HOUR = 60 * 60_000;
+const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+
+/** Sessions for the store, one per thread, keyed by workspace. */
+const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number }>) => {
+  const by: Record<string, unknown[]> = {};
+  for (const r of rows) {
+    (by[r.ws] ??= []).push({
+      id: `s_${r.id}`,
+      workspaceId: r.ws,
+      threadId: r.id,
+      harness: "claude",
+      status: r.status ?? "running",
+      prompt: r.prompt,
+      startedBy: r.parent === undefined ? "person" : "agent",
+      ...(r.parent === undefined ? {} : { parentThreadId: r.parent }),
+      startedAt: ago(r.startedAgo ?? HOUR),
+      ...(r.endedAgo === undefined ? {} : { endedAt: ago(r.endedAgo) }),
+    });
+  }
+  return by;
+};
 
 afterEach(() => {
   cleanup();
@@ -117,56 +137,61 @@ afterEach(() => {
   useStore.setState({ api: null, projects: [], workspaces: [], landings: {} } as never);
 });
 
-describe("the sidebar under the four nouns", () => {
-  it("draws one row per project with its workspaces one step in under it, opens its home on a click, shuts on the next and carries the count while shut", async () => {
-    mount({ projects: [project("pr_1", "spoo"), project("pr_2", "wsp")], workspaces: [workspace("ws_a", "pricing page", "pr_1"), workspace("ws_b", "webhook retries", "pr_1")] });
-    await waitFor(() => expect(screen.getByText("pricing page")).toBeDefined());
-    expect(headers()).toEqual(["spoo", "wsp"]);
-    expect(screen.queryByLabelText("Workspaces")).toBeNull();
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "ws:ws_b", "project:pr_2"]);
-    expect(depthOf("spoo")).toBe(0);
-    expect(depthOf("pricing page")).toBe(1);
-    // A project row is two lines, its computer over its name, sentence case, no caps and no letter-spacing.
-    expect(rowOf("spoo").className).toContain("h-13");
-    expect(rowOf("spoo").querySelector("[data-project-computer]")!.textContent).toBe("zingzy's MacBook Pro");
-    expect(rowOf("spoo").className).not.toMatch(/uppercase|tracking-/);
-    expect(rowOf("spoo").querySelector("[data-project-name]")!.className).not.toMatch(/uppercase|tracking-/);
-    // The count rides the row while its children are shut, so a shut project still says how much it holds.
-    fireEvent.click(rowOf("spoo"));
-    expect(useStore.getState().projectHome).toBe("pr_1");
-    expect(headers()[0]).toBe("spoo");
-    fireEvent.click(rowOf("spoo"));
-    await waitFor(() => expect(headers()[0]).toBe("spoo2"));
-    expect(rowIds()).toEqual(["project:pr_1", "project:pr_2"]);
+describe("the sidebar's list of thread tiles", () => {
+  it("lists every root thread as a tile across every workspace, newest first, with no project row and no workspace row over them", async () => {
+    mount({ projects: [project("pr_1", "spoo"), project("pr_2", "wsp")], workspaces: [workspace("ws_a", "pricing page", "pr_1"), workspace("ws_b", "webhook retries", "pr_2")] });
+    await act(async () => {
+      useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "th_old", prompt: "the older one", startedAgo: 3 * HOUR }, { ws: "ws_b", id: "th_new", prompt: "the newer one", startedAgo: HOUR }]) } as never);
+    });
+    await waitFor(() => expect(screen.getByText("the newer one")).toBeDefined());
+    expect(rowIds()).toEqual(["thread:th_new", "thread:th_old"]);
+    expect(document.querySelector("[data-row-id^=project\\:]")).toBeNull();
+    expect(rowOf("the older one").querySelector("[data-tile-where]")!.textContent).toBe("pr_1 @ zingzy's MacBook Pro");
+    expect(rowOf("the older one").querySelector("[data-tile-branch]")!.textContent).toBe("agent/pricing-page");
+    expect(depthOf("the newer one")).toBe(0);
   });
 
-  it("says a project has no workspaces yet as one leaf under its row, and its plus opens the dialog with that project picked", async () => {
-    mount({ projects: [project("pr_1", "spoo"), project("pr_2", "wsp")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+  it("draws a workspace with no thread as a tile of its own under its name, which selects it", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
     await waitFor(() => expect(screen.getByText("pricing page")).toBeDefined());
-    const leaf = screen.getByText(PROJECT_WORDS.noWorkspaces);
-    expect(leaf.closest("li")!.parentElement!.previousElementSibling!.querySelector("[data-row-id='project:pr_2']")).not.toBeNull();
-    expect(leaf.className).toContain("h-9");
-    expect(leaf.className).toContain("px-2");
-    // A sentence with a period is read, not glanced at: the sans in a quiet ink, never the mono.
-    expect(leaf.className).toContain("text-[13px]");
-    expect(leaf.className).toContain("text-muted-foreground");
-    expect(leaf.className).not.toContain("font-mono");
-    const plus = [...document.querySelectorAll<HTMLElement>(`[data-k=new-workspace]`)].find(el => el.dataset["project"] === "pr_2")!;
-    // The plus sits in the row's frame and reads at rest as nothing at every width: the hover and the keyboard focus lift it.
-    expect(plus.className).toMatch(/(^|\s)opacity-0(\s|$)/);
-    expect(plus.className).toContain("group-hover/menu-item:opacity-100");
-    expect(plus.getAttribute("aria-label")).toBe(NEW_WORKSPACE);
-    fireEvent.click(plus);
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.textContent).toContain(NEW_WORKSPACE);
-    // Two projects are a segmented control, and the one whose plus was pressed is the checked segment.
-    expect(dialog.querySelector<HTMLElement>("[data-segment=pr_2]")!.getAttribute("aria-checked")).toBe("true");
-    expect(dialog.querySelector<HTMLElement>("[data-segment=pr_1]")!.getAttribute("aria-checked")).toBe("false");
+    expect(rowIds()).toEqual(["ws:ws_a"]);
+    fireEvent.click(rowOf("pricing page"));
+    expect(useStore.getState().selectedId).toBe("ws_a");
+    expect(useStore.getState().selectedThreadId).toBeNull();
+  });
+
+  it("titles this computer's own workspace with no thread by the computer's name, never its host name, and a copy by its own", async () => {
+    const { copy: _copy, ...itself } = workspace("ws_a", "zingzys-MacBook-Pro.local", "pr_1");
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [itself] });
+    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_a"]));
+    const tile = document.querySelector<HTMLElement>("[data-row-id='ws:ws_a']")!;
+    expect(tile.querySelector("[data-thread-title]")!.textContent).toBe("zingzy's MacBook Pro");
+    expect(tile.textContent).not.toContain("zingzys-MacBook-Pro.local");
+  });
+
+  it("under a picked project lists that project's tiles alone, and All projects brings every tile back", async () => {
+    window.localStorage.setItem("wsp:sidebar-project", JSON.stringify("pr_2"));
+    mount({ projects: [project("pr_1", "spoo"), project("pr_2", "wsp")], workspaces: [workspace("ws_a", "pricing page", "pr_1"), workspace("ws_b", "webhook retries", "pr_2")] });
+    await waitFor(() => expect(screen.getByText("webhook retries")).toBeDefined());
+    expect(rowIds()).toEqual(["ws:ws_b"]);
+    fireEvent.click(document.querySelector<HTMLElement>("[data-k=project-switcher]")!);
+    fireEvent.click(await screen.findByText("All projects"));
+    await waitFor(() => expect(rowIds().sort()).toEqual(["ws:ws_a", "ws:ws_b"]));
+  });
+
+  it("says a project with nothing on it as one quiet sentence where the tiles would stand, and drops it once a tile is there", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [] });
+    const line = await waitFor(() => screen.getByText(PROJECT_WORDS.noWorkspaces));
+    expect(line.className).toContain("text-[13px]");
+    expect(line.className).not.toContain("font-mono");
+    act(() => useStore.setState({ workspaces: [workspace("ws_a", "pricing page", "pr_1")] } as never));
+    await waitFor(() => expect(screen.getByText("pricing page")).toBeDefined());
+    expect(screen.queryByText(PROJECT_WORDS.noWorkspaces)).toBeNull();
   });
 
   it("records another project from the foot of the switcher's menu, which opens the Add a project dialog, and from nowhere else at rest", async () => {
     mount({ projects: [project("pr_1", "spoo")], workspaces: [] });
-    await waitFor(() => expect(screen.getByText("spoo")).toBeDefined());
+    await waitFor(() => expect(document.querySelector<HTMLButtonElement>("[data-k=project-switcher]")!.disabled).toBe(false));
     expect(screen.queryByText(PROJECT_WORDS.add)).toBeNull();
     fireEvent.click(document.querySelector<HTMLElement>("[data-k=project-switcher]")!);
     fireEvent.click(await screen.findByText(PROJECT_WORDS.add));
@@ -174,7 +199,7 @@ describe("the sidebar under the four nouns", () => {
     expect(screen.getByRole("dialog", { name: PROJECT_WORDS.add })).toBeDefined();
   });
 
-  it("offers no Spaces row and no look action in a row's menu, whatever the preferences record says", async () => {
+  it("offers no Spaces row and no look action in a tile's menu, whatever the preferences record says", async () => {
     mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
     await waitFor(() => expect(screen.getByText("pricing page")).toBeDefined());
     expect(document.body.textContent).not.toContain("Spaces");
@@ -185,88 +210,70 @@ describe("the sidebar under the four nouns", () => {
     expect(workspaceActions.some(action => "labs" in action)).toBe(false);
   });
 
-  it("draws a workspace an agent forked one step in under the thread that forked it, inside that thread's own item", async () => {
+  it("hangs the threads an agent opened, and a workspace it forked with its threads, under the thread on the rail", async () => {
     const lead = workspace("ws_a", "pricing page", "pr_1");
     const forked = { ...workspace("ws_fork", "pricing table", "pr_1"), parentThreadId: "th_lead" };
-    mount({ projects: [project("pr_1", "spoo")], workspaces: [lead, forked] });
+    const empty = { ...workspace("ws_empty", "pricing copy", "pr_1"), parentThreadId: "th_lead", createdAt: ago(3 * HOUR) };
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [lead, forked, empty] });
     await act(async () => {
       useStore.setState({
-        sessions: {
-          ws_a: [{ id: "s_lead", workspaceId: "ws_a", threadId: "th_lead", harness: "claude", status: "running", prompt: "move the pricing table", startedBy: "person" }],
-          ws_fork: [{ id: "s_child", workspaceId: "ws_fork", threadId: "th_child", harness: "claude", status: "running", prompt: "write the migration", startedBy: "agent", parentThreadId: "th_lead" }],
-        },
-      } as never);
-    });
-    await waitFor(() => expect(screen.getByText("move the pricing table")).toBeDefined());
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:th_lead", "ws:ws_fork", "thread:th_child"]);
-    expect([depthOf("spoo"), depthOf("pricing page"), depthOf("move the pricing table"), depthOf("pricing table"), depthOf("write the migration")]).toEqual([0, 1, 2, 3, 4]);
-    // Real nesting: the fork's block is a child of the thread's list item, so the rails can be drawn per item.
-    const threadItem = rowOf("move the pricing table").closest("li[data-thread-item]")!;
-    expect(threadItem.contains(rowOf("pricing table"))).toBe(true);
-    expect(threadItem.contains(rowOf("write the migration"))).toBe(true);
-    // Its row carries the same two lines a top-level row does, off its own record: the name and the branch.
-    const row = rowOf("pricing table");
-    expect(row.querySelector("[data-workspace-meta]")!.textContent).toBe("agent/pricing-page");
-    expect(row.querySelector("[data-workspace-made-of]")).toBeNull();
-  });
-
-  it("keeps that forked workspace's row in its project's list whenever the thread that forked it is not drawn", async () => {
-    const lead = workspace("ws_a", "pricing page", "pr_1");
-    const forked = { ...workspace("ws_fork", "pricing table", "pr_1"), parentThreadId: "th_lead" };
-    /** The opener settled long enough ago to sit in the archive, which is shut; the fork's own thread still runs. */
-    const settledLongAgo = new Date(Date.now() - 48 * 60 * 60_000).toISOString();
-    mount({ projects: [project("pr_1", "spoo")], workspaces: [lead, forked] });
-    await act(async () => {
-      useStore.setState({
-        sessions: {
-          ws_a: [{ id: "s_lead", workspaceId: "ws_a", threadId: "th_lead", harness: "claude", status: "completed", prompt: "move the pricing table", startedBy: "person", startedAt: settledLongAgo, endedAt: settledLongAgo }],
-          ws_fork: [{ id: "s_child", workspaceId: "ws_fork", threadId: "th_child", harness: "claude", status: "running", prompt: "write the migration", startedBy: "agent", parentThreadId: "th_lead" }],
-        },
-      } as never);
-    });
-    // The opener is in the shut archive, so no thread row carries it; the fork stands in the project's own list
-    // with its own thread under it, where the plain rule puts it.
-    await waitFor(() => expect(rowIds()).toContain("ws:ws_fork"));
-    // The archive's fold alone, shut over the opener, since the shelf has no row of its own; then the fork's row.
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "archived:ws_a", "ws:ws_fork", "thread:th_child"]);
-    expect(screen.queryByText("move the pricing table")).toBeNull();
-    expect(screen.getByText("pricing table")).toBeDefined();
-    expect(depthOf("pricing table")).toBe(1);
-  });
-
-  it("keeps it in the list while the opener's own workspace is collapsed, and nests it again when that opens", async () => {
-    const lead = workspace("ws_a", "pricing page", "pr_1");
-    const forked = { ...workspace("ws_fork", "pricing table", "pr_1"), parentThreadId: "th_lead" };
-    mount({ projects: [project("pr_1", "spoo")], workspaces: [lead, forked] });
-    await act(async () => {
-      useStore.setState({
-        sessions: {
-          ws_a: [{ id: "s_lead", workspaceId: "ws_a", threadId: "th_lead", harness: "claude", status: "running", prompt: "move the pricing table", startedBy: "person" }],
-          ws_fork: [{ id: "s_child", workspaceId: "ws_fork", threadId: "th_child", harness: "claude", status: "running", prompt: "write the migration", startedBy: "agent", parentThreadId: "th_lead" }],
-        },
-      } as never);
-    });
-    await waitFor(() => expect(screen.getByText("move the pricing table")).toBeDefined());
-    fireEvent.click(screen.getByLabelText("Collapse pricing page"));
-    await waitFor(() => expect(screen.queryByText("move the pricing table")).toBeNull());
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "ws:ws_fork", "thread:th_child"]);
-    fireEvent.click(screen.getByLabelText("Expand pricing page"));
-    await waitFor(() => expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "thread:th_lead", "ws:ws_fork", "thread:th_child"]));
-  });
-
-  it("keeps it in the list once the opener thread is forgotten, so no workspace the host holds loses its row", async () => {
-    const lead = workspace("ws_a", "pricing page", "pr_1");
-    const forked = { ...workspace("ws_fork", "pricing table", "pr_1"), parentThreadId: "th_lead" };
-    mount({ projects: [project("pr_1", "spoo")], workspaces: [lead, forked] });
-    await act(async () => {
-      useStore.setState({
-        sessions: {
-          ws_a: [],
-          ws_fork: [{ id: "s_child", workspaceId: "ws_fork", threadId: "th_child", harness: "claude", status: "running", prompt: "write the migration", startedBy: "agent", parentThreadId: "th_lead" }],
-        },
+        sessions: sessions([
+          { ws: "ws_a", id: "th_lead", prompt: "move the pricing table", startedAgo: 2 * HOUR },
+          { ws: "ws_a", id: "th_review", prompt: "review the move", parent: "th_lead", startedAgo: 90 * 60_000 },
+          { ws: "ws_fork", id: "th_child", prompt: "write the migration", startedAgo: HOUR },
+        ]),
       } as never);
     });
     await waitFor(() => expect(screen.getByText("write the migration")).toBeDefined());
-    expect(rowIds()).toEqual(["project:pr_1", "ws:ws_a", "ws:ws_fork", "thread:th_child"]);
+    expect(rowIds()).toEqual(["thread:th_lead", "thread:th_child", "thread:th_review", "ws:ws_empty"]);
+    expect([depthOf("move the pricing table"), depthOf("write the migration"), depthOf("review the move"), depthOf("pricing copy")]).toEqual([0, 1, 1, 1]);
+    // Real nesting: the children sit in the root's own list item, each item drawing its rail.
+    const rootItem = rowOf("move the pricing table").closest("li[data-thread-item]")!;
+    expect(rootItem.contains(rowOf("write the migration"))).toBe(true);
+    expect(rootItem.className).not.toContain("before:");
+    expect(rowOf("write the migration").closest("li")!.className).toContain("before:bg-[var(--sidebar-rail)]");
+    expect(rowOf("write the migration").closest("li")!.className).toContain("after:top-[15px]");
+    expect(rowOf("write the migration").closest("ul")!.className).toContain("ml-3");
+  });
+
+  it("keeps a thread whose opener was forgotten as a root of its own, so no thread the host holds loses its tile", async () => {
+    const forked = { ...workspace("ws_fork", "pricing table", "pr_1"), parentThreadId: "th_lead" };
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1"), forked] });
+    await act(async () => {
+      useStore.setState({ sessions: sessions([{ ws: "ws_fork", id: "th_child", prompt: "write the migration", parent: "th_lead" }]) } as never);
+    });
+    await waitFor(() => expect(screen.getByText("write the migration")).toBeDefined());
+    expect(rowIds()).toEqual(["thread:th_child", "ws:ws_a"]);
+    expect(depthOf("write the migration")).toBe(0);
+  });
+
+  it("folds every root quiet a day into Settled at the foot: shut with its count, 12 px under the list, opened by its chevron and remembered", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await act(async () => {
+      useStore.setState({
+        sessions: sessions([
+          { ws: "ws_a", id: "th_live", prompt: "still going" },
+          { ws: "ws_a", id: "th_quiet", prompt: "finished yesterday", status: "completed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR },
+          { ws: "ws_a", id: "th_quiet_child", prompt: "its helper", parent: "th_quiet", status: "completed", startedAgo: 30 * HOUR, endedAgo: 28 * HOUR },
+        ]),
+      } as never);
+    });
+    await waitFor(() => expect(screen.getByText("still going")).toBeDefined());
+    expect(rowIds()).toEqual(["thread:th_live", "settled"]);
+    const fold = document.querySelector<HTMLElement>("[data-row-id=settled]")!;
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    expect(fold.className).toContain("h-9");
+    expect(fold.closest("li")!.className).toContain("mt-3");
+    expect(fold.querySelector("[data-group-word]")!.className).toContain("uppercase");
+    expect(fold.querySelector("[data-group-word]")!.className).toContain("font-mono");
+    expect(fold.querySelector("[data-group-count]")!.textContent).toBe("2");
+    expect(fold.textContent).not.toMatch(/[·•]/);
+    fireEvent.click(fold);
+    await waitFor(() => expect(rowIds()).toEqual(["thread:th_live", "settled", "thread:th_quiet", "thread:th_quiet_child"]));
+    expect(fold.querySelector("[data-group-count]")).toBeNull();
+    expect(window.localStorage.getItem("wsp:sidebar-settled-open")).toBe("true");
+    fireEvent.click(fold);
+    await waitFor(() => expect(rowIds()).toEqual(["thread:th_live", "settled"]));
+    expect(window.localStorage.getItem("wsp:sidebar-settled-open")).toBe("false");
   });
 });

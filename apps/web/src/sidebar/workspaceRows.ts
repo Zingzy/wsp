@@ -5,66 +5,17 @@
 // read here and never respelled. Pure but for the one hook beside the where
 // word, which reads that word off the store for the surfaces that hold a
 // workspace's id and no snapshot.
-import { agentName } from "@wsp/catalog";
-import { broughtBackRowLine } from "../actions/format.js";
-import { HERE_PLACE_ID, isLocalWorkspace, kindWords, madeOfWord, portsWord, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, workspaceKind, type AbsentComputer, type BringBackResult, type Capabilities, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords } from "@wsp/protocol";
-import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
+import { HERE_PLACE_ID, isLocalWorkspace, madeOfWord, portsWord, whereWord as whereOf, workspaceKind, type Capabilities, type PlaceView } from "@wsp/protocol";
+import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import type { ProjectRef } from "./threadTree.js";
 import { PLACE_KIND_WORDS, hereName, isHere, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
 import { usePlaces, useStatus, useWorkspace } from "../protocol/store.js";
-import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.logic.js";
 
-export const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
+const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
 export const NEW_THREAD_TITLE = NEW_THREAD_SHORTCUT ? `New thread (${NEW_THREAD_SHORTCUT})` : "New thread";
-
-/** The row's line for a daemon that is not there, and which of the two facts it is: no-daemon is a machine that
- * answers with nothing on the daemon's port, unsupported one with no daemon road at all. Nothing for every other
- * reach, and nothing at all on a kind whose machines serve no daemon, which has none to miss. A daemon that died
- * is said on every kind that has one, since a driven kind's state word reads Unreachable for it, which is also
- * what a machine gone dark reads, and only one of the two is a helper wsp puts back by itself while the machine is
- * fine. A machine with no road to a daemon says only what that machine said it lacks, which is the one thing on
- * the row a person can act on; the bare fact of a missing daemon is not a line, having no verb in it and naming a
- * thing a person never installed. */
-export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWords, lacks?: string): string | undefined {
-  if (!kind.daemon) return undefined;
-  if (reach === "no-daemon") return "no daemon answering";
-  if (reach !== "unsupported" || kind.driven || lacks === undefined) return undefined;
-  // The whole sentence rides the row's own hover text, since the instruction is at the end of it and this line
-  // cuts from the right.
-  return machineLacksShort(lacks);
-}
-
-/** The sentences a meta line can carry in place of its counts, in the order a surface draws them: the
- * computer that is not answering first, since nothing else on the row is known while it is, then a thread of this
- * workspace stopped on a question, then what the runtime is doing to the machine's daemon, then a drop with
- * memory near full, then a daemon that is not there at all. Written once because two surfaces draw them and both
- * have to tell them from a figure: prose takes the ink that reads at AA, the counts beside it keep the whisper.
- * Every one of them is something a person is waiting on now; a note on a step already taken (a nap that saved no
- * backup) is not here, since this slot is the row's state and its spend. */
-export function metaSentences({ project, absent, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "absent" | "outOfMemory">): string[] {
-  return [
-    absent?.line,
-    askingNote(project),
-    daemonNote(project),
-    outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
-    daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace)), (project.status ?? project.workspace).daemonRefusedAt?.why),
-  ].filter((line): line is string => line !== undefined);
-}
-
-export interface WorkspaceMetaInput {
-  readonly project: Pick<SidebarProjectSnapshot, "state" | "status" | "workspace" | "reach" | "threads">;
-  /** What the last bring back on this workspace answered, where one has; the row's third line reads it in place of
-   * the branch, since it says the branch and what became of it. */
-  readonly broughtBack?: BringBackResult | undefined;
-  /** The one reading of a computer that is not answering; the row's third line is then its own. Absent on a
-   * caller that holds no places list. */
-  readonly absent?: AbsentComputer | null | undefined;
-  /** The last memory sample from a machine whose link then dropped. */
-  readonly outOfMemory: MemoryReading | undefined;
-}
 
 /** What a workspace is made of, the row's second line: the word for its copy, the computer it stands on where
  * that is not the computer this window runs on (`here` names that one, whose ports a copy there shares), and what
@@ -86,57 +37,6 @@ export function madeOfLine({ project, landing, computer, here }: { project: Pick
  * none, which is a workspace whose copy was made with no branch of its own. */
 export function branchLine(project: Pick<SidebarProjectSnapshot, "workspace">): string {
   return project.workspace.copy?.branch ?? "";
-}
-
-/** The workspace row's third line: the one sentence a person is waiting on while there is one, else what the last
- * bring back answered, else the branch the agent is working on, else nothing. The sentence leads because it is the
- * one thing on the row a person can act on and the branch is there either way: a copy always carries one, so a
- * branch that led would hide every prompt and every note on this computer's rows. No figure ever stands here: what
- * a machine costs is a fact about the computer it runs on, and it lives on that computer's row in Settings. */
-export function workspaceMetaLine({ project, absent, outOfMemory, broughtBack }: WorkspaceMetaInput): string {
-  const waiting = metaSentences({ project, absent, outOfMemory })[0];
-  if (waiting !== undefined) return waiting;
-  return broughtBack === undefined ? branchLine(project) : broughtBackRowLine(broughtBack);
-}
-
-/** The whole of that line for the row's hover text: after a bring back that opened no pull request, the host's
- * own sentence for why follows it. That sentence names a command line and a remote and fits no row, and the line
- * without it would read as a push that simply stopped. */
-export function workspaceMetaTitle(input: WorkspaceMetaInput): string {
-  const line = workspaceMetaLine(input);
-  const note = input.broughtBack?.note;
-  return note === undefined || line !== broughtBackRowLine(input.broughtBack!) ? line : `${line}: ${note}`;
-}
-
-/** The lead of the prompt a thread of this workspace is stopped on, the one sentence a person is waiting on: the
- * oldest waiting thread's, so a second prompt never takes the line from the one that has waited longest. The row
- * cuts it at its own cap and the whole sentence rides the row's title, as every line three does. */
-export function askingNote(project: Pick<SidebarProjectSnapshot, "threads">): string | undefined {
-  return project.threads.find(thread => thread.asking !== null)?.asking ?? undefined;
-}
-
-/** What the runtime is doing to this machine's daemon, or why its last attempt failed; the status leads where one
- * has arrived, and nothing is being done when it is absent. */
-export function daemonNote(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string | undefined {
-  return project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
-}
-
-/** Whether a word can ever stand in this row's state slot: a machine wsp drives has a state of its own to name,
- * since wsp pauses and wakes it, and one wsp does not drive has none. The one exception is the computer under it
- * not answering, which is a state of that computer rather than of wsp's handling of it: a slot that stayed blank
- * there was the row that read nothing beside readings of unreachable. The row reads this to know how wide to keep
- * the slot, and the word below reads it to know whether to write one, so a row cannot keep room for a word that
- * never comes or cut a name short of one that does. */
-export function holdsStateWord(project: Pick<SidebarProjectSnapshot, "workspace">, absent?: AbsentComputer | null): boolean {
-  return absent != null || kindWords(workspaceKind(project.workspace)).driven;
-}
-
-/** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise, and
- * nothing at all in a slot no word can stand in. */
-export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "indicator" | "workspace">, absent?: AbsentComputer | null): string {
-  if (!holdsStateWord(project, absent)) return "";
-  if (absent != null) return absent.word;
-  return project.state === "running" ? "" : project.indicator.label;
 }
 
 /** The fuller reading of computerName, for the pane that has a whole row for it: the name, then what that row is.
@@ -170,35 +70,6 @@ export function useComputerName(workspaceId: string): string {
   const workspace = useWorkspace(workspaceId);
   const status = useStatus(workspaceId);
   return workspace === null ? workspaceId : computerName(places, { workspace, status });
-}
-
-/** The words a thread row's meta line carries after the agent's mark, in the order it draws them. A thread a
- * person or the command line opened names the project its folder sits in and who opened it. A thread another
- * thread's agent opened names neither: the indent already says an agent opened it, and that slot holds the
- * workspace it runs in, dropped where that is the workspace whose rows it is drawn under, then where that
- * workspace runs. The workspace and the project never share a position, so one word never means two things. */
-export function threadMetaWords(
-  thread: Pick<SidebarThreadSnapshot, "parentThreadId" | "project" | "startedBy">,
-  runs: { readonly workspace: string; readonly where: string },
-  under: string,
-): string[] {
-  if (thread.parentThreadId === null) {
-    return [...(thread.project !== null ? [thread.project] : []), openerWord(thread.startedBy)];
-  }
-  return [...(runs.workspace === under ? [] : [runs.workspace]), ...(runs.where === "" ? [] : [runs.where])];
-}
-
-const OPENER_WORD: Record<SessionOrigin, string> = { person: "you", cli: "cli", agent: "agent" };
-
-/** Who opened the thread: you, the command line on this computer, or a local agent. */
-export function openerWord(startedBy: SessionOrigin): string {
-  return OPENER_WORD[startedBy];
-}
-
-/** The agent inside the thread and the words beside its mark, as the row's hover text reads them and in the order
- * the row draws them, so what a screen reader is given is the line a person sees. */
-export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness">, words: ReadonlyArray<string>): string {
-  return [agentName(thread.harness), ...words].join(", ");
 }
 
 /** The computer a project lives on, as the switcher and a project row name it: nothing for a project on the

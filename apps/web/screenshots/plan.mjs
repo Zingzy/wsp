@@ -73,13 +73,14 @@ const stepWords = step =>
 
 const surfaceFrom = (raw, index, widths) => {
   if (raw === null || typeof raw !== "object") fail(`surface ${index} is not an object`);
-  const { name, at, steps, wait, settleMs, fixture, remote, fresh } = raw;
+  const { name, at, steps, wait, settleMs, fixture, remote, fresh, height } = raw;
   if (typeof name !== "string" || !NAME.test(name)) fail(`surface ${index} needs a name of lowercase words and dashes, got ${JSON.stringify(name)}`);
   if (typeof at !== "string" || !at.startsWith("/")) fail(`${name}: "at" is the route or hash the page opens, starting with /`);
   if (steps !== undefined && !Array.isArray(steps)) fail(`${name}: "steps" is an array of data attribute words, key presses and typed words`);
   if (settleMs !== undefined && (typeof settleMs !== "number" || settleMs < 0)) fail(`${name}: "settleMs" is a count of milliseconds`);
   if (remote !== undefined && typeof remote !== "boolean") fail(`${name}: "remote" says whether the page is served to another computer`);
   if (fresh !== undefined && typeof fresh !== "boolean") fail(`${name}: "fresh" says whether the shot changes what the host holds, and so takes a host of its own`);
+  if (height !== undefined && (!Number.isInteger(height) || height < 1)) fail(`${name}: "height" is the window height in whole pixels, for a surface taller than its width's window`);
   const own = raw.widths;
   if (own !== undefined && (!Array.isArray(own) || own.some(w => !widths.includes(w)))) fail(`${name}: "widths" picks from the list's own ${widths.join(", ")}`);
   if (fixture !== undefined && (typeof fixture !== "string" || !NAME.test(fixture))) fail(`${name}: "fixture" is the name of a fixture the state file serves`);
@@ -93,6 +94,7 @@ const surfaceFrom = (raw, index, widths) => {
     widths: own ?? widths,
     remote: remote === true,
     fresh: fresh === true,
+    ...(height !== undefined ? { height } : {}),
   };
 };
 
@@ -125,7 +127,7 @@ export function shotPlan(list) {
       for (const surface of list.surfaces) {
         if (!surface.widths.includes(width)) continue;
         const steps = surface.steps.filter(s => s.width === undefined || s.width === width).map(({ width: _kept, ...step }) => step);
-        shots.push({ name: surface.name, at: surface.at, steps, wait: surface.wait, ...(surface.fixture === undefined ? {} : { fixture: surface.fixture }), settleMs: surface.settleMs, remote: surface.remote, fresh: surface.fresh, theme, width, height: list.heights[width], file: shotName(surface.name, theme, width) });
+        shots.push({ name: surface.name, at: surface.at, steps, wait: surface.wait, ...(surface.fixture === undefined ? {} : { fixture: surface.fixture }), settleMs: surface.settleMs, remote: surface.remote, fresh: surface.fresh, theme, width, height: surface.height ?? list.heights[width], file: shotName(surface.name, theme, width) });
       }
     }
   }

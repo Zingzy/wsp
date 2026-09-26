@@ -1,40 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The shell's chrome in a real Chromium: the sidebar toggle starts where the
-// search row does and the brand lockup one gap after it, the two top rows are
-// one height and start where the workspace rows do, the
-// search row is a plain row that opens the palette without moving a row, a
-// thread row's title keeps its room at the default width with the agent's
-// mark before it and one slot after it, a toast holds a long token inside its box off the sidebar, the
-// line for a provider out of reach is one muted mono line under the
-// search row, the line the runtime puts on a machine's row takes that row's second line whole,
-// uncut and without growing the row, collapsing the sidebar leaves the
-// page header's left padding alone, a send refusal above the composer is
-// one muted mono line in a slot the composer keeps at one height whether or
-// not a line is in it, images pasted into the composer are one row of square
-// thumbnails above the text inside the box, each with its own remove,
-// a right-click on a workspace row opens the in-app menu
-// at the pointer in the tooltip skin, inside the viewport, Rename turns a
-// thread row's title and a workspace row's name into one field in the same
-// slot at the same row height, and the switch
-// chord held down puts the workspace switcher up, its cards three parts
-// each, without moving the shell under it, and at three sidebar widths the
-// workspace and thread rows keep one grammar: one height per row kind, the
-// state word in its slot at the right edge only off running, the meta line
-// cut from the right, no import or export glyph, the thread
-// title up to its one slot, the Spaces body draws one workspace
-// under its header with an icon per workspace centred at the sidebar's
-// bottom and no Workspaces header over it, a workspace's own theme paints
-// the sidebar's surface and its glyph in Spaces and nothing in the list, the
-// move to another space travels that body out the way it was pushed and the
-// next one in from the other side while the header and the space bar hold
-// still, or swaps it with no travel for a reader who asked for less motion,
-// a mixed list of a local machine and two cloud ones keeps that one
-// grammar with no glyph in any lead, and the threads quiet for
-// over a day sit in an Archived group shut under that workspace's idle
-// threads, in the fold row's own grammar. Vite
-// serves test/shell to Playwright's browser, so like the glyph test it runs
-// only when asked for (WSP_RENDER=1) and skips without Playwright's Chromium
-// on the machine.
+// search row does and the brand lockup one gap after it, the search row is a
+// plain row that opens the palette without moving a row, a thread tile's
+// title keeps its room at the default width with the agent's 12 px mark on
+// row three and the status on row one, every tile 68 px, an idle title sits
+// closer to the ground than a working one, the Settled fold sits shut at the
+// foot of the list and opens to tiles of the same height, a toast holds a
+// long token inside its box off the sidebar, the line for a provider out of
+// reach is one muted mono line under the search row at AA, collapsing the
+// sidebar leaves the page header's left padding alone, a send refusal above
+// the composer is one muted mono line in a slot the composer keeps at one
+// height whether or not a line is in it, images pasted into the composer are
+// one row of square thumbnails above the text inside the box, each with its
+// own remove, a right-click on a tile opens the in-app menu at the pointer in
+// the tooltip skin, inside the viewport, Rename turns a thread tile's title
+// into a field in the same row at the same tile height, and the switch chord
+// held down puts the workspace switcher up, its cards three parts each,
+// without moving the shell under it. Vite serves test/shell to Playwright's
+// browser, so like the glyph test it runs only when asked for (WSP_RENDER=1)
+// and skips without Playwright's Chromium on the machine.
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -44,7 +28,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ACCESS_REFUSED_LINE, accessReachLine, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, PROVIDER_UNREACHED_LINE, sendRefusal, SIDE_INK, stillWorkingLine, THEME_PRESETS, themeInk, themeScheme, type Rgb } from "@wsp/protocol";
 import { WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
-import { WHERE_WORDS } from "../src/settings/format";
 import { textContrast } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
@@ -255,68 +238,57 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("a thread row keeps twelve characters of a long title at the default width, the agent's bare mark before it and one slot after it, rows one height", async () => {
+  it("a thread tile keeps twelve characters of a long title at the default width, the agent's 12 px mark on row three and the status on row one, every tile 68 px", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
       const rows = await page!.locator("[data-row-id^='thread:']").evaluateAll(els =>
         els.map(el => {
-          const title = el.querySelector<HTMLElement>("[data-thread-title]");
-          const mark = el.querySelector<HTMLElement>("[data-harness-mark]");
-          const slot = el.querySelector<HTMLElement>("[data-thread-status]");
-          if (!title || !mark || !slot) return null;
+          const title = el.querySelector<HTMLElement>("[data-thread-title]")!;
+          const mark = el.querySelector<HTMLElement>("[data-harness-mark]")!;
+          const slot = el.querySelector<HTMLElement>("[data-thread-status]")!;
           const font = getComputedStyle(title);
           const ctx = document.createElement("canvas").getContext("2d")!;
           ctx.font = `${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
           const markBox = mark.getBoundingClientRect();
-          const titleBox = title.getBoundingClientRect();
           const paint = getComputedStyle(mark);
           return {
             height: el.getBoundingClientRect().height,
             titleWidth: title.clientWidth,
             twelveChars: ctx.measureText((title.textContent ?? "").slice(0, 12)).width,
-            title: title.textContent ?? "",
-            face: el.textContent ?? "",
+            titleSize: font.fontSize,
             slot: slot.textContent ?? "",
             slotClipped: slot.scrollWidth > slot.clientWidth,
-            slotMono: /mono/i.test(getComputedStyle(slot).fontFamily),
-            hover: el.getAttribute("title"),
+            slotRow: slot.parentElement === el.children[0],
+            markRow: mark.closest("[data-sidebar-row] > span") === el.children[2],
+            hover: (el.getAttribute("title") ?? "").split("\n"),
             mark: mark.getAttribute("data-harness-mark"),
             markSize: [markBox.width, markBox.height],
-            // The mark's centre against the title's centre: optically on the line, not hanging above it.
-            markOffset: markBox.y + markBox.height / 2 - (titleBox.y + titleBox.height / 2),
             markColor: paint.color,
-            titleColor: font.color,
             bare: paint.backgroundColor === "rgba(0, 0, 0, 0)" && paint.borderTopWidth === "0px" && paint.boxShadow === "none",
           };
         }),
       );
-      console.info(`thread rows at ${theme}: ${JSON.stringify(rows)}`);
-      // The agent, the project and who opened it ride the hover text; the face is the title and the slot alone.
-      expect(rows.map(r => r?.hover)).toEqual(["Claude Code, the-project, you", "Claude Code, the-project, cli", "Codex, the-project, cli", "Claude Code, the-project, you"]);
-      expect(rows[0]!.slot).toMatch(/^Working\d+[smh]/);
-      for (const row of rows.slice(1)) expect(row!.slot).toMatch(/^(now|\d+[mhd])$/);
+      console.info(`thread tiles at ${theme}: ${JSON.stringify(rows)}`);
+      expect(rows.map(r => r.hover[2])).toEqual(["Claude Code", "Claude Code", "Codex", "Claude Code"]);
       for (const row of rows) {
-        expect(row!.face).toBe(`${row!.title}${row!.slot}`);
-        expect(row!.titleWidth).toBeGreaterThanOrEqual(row!.twelveChars);
-        expect(row!.slotClipped).toBe(false);
-        expect(row!.slotMono).toBe(true);
-        // Bare marks of 13 to 16 px, centred on the title beside them, in a colour of their own, on nothing.
-        for (const side of row!.markSize) {
-          expect(side).toBeGreaterThanOrEqual(13);
-          expect(side).toBeLessThanOrEqual(16);
-        }
-        expect(Math.abs(row!.markOffset)).toBeLessThan(1.5);
-        expect(row!.bare).toBe(true);
+        expect(row.hover[1]).toMatch(/^the-project @ /);
+        expect(row.height).toBe(68);
+        expect(row.titleSize).toBe("14px");
+        expect(row.titleWidth).toBeGreaterThanOrEqual(row.twelveChars);
+        expect(row.slotClipped).toBe(false);
+        expect(row.slotRow).toBe(true);
+        expect(row.markRow).toBe(true);
+        expect(row.markSize).toEqual([12, 12]);
+        expect(row.bare).toBe(true);
       }
+      expect(rows.some(row => /^\d+[smh]/.test(row.slot))).toBe(true);
       // Claude's mark is its terracotta; OpenAI's is monochrome by design, so it takes the row's ink.
-      const colours = new Map(rows.map(r => [r!.mark, r!.markColor]));
+      const colours = new Map(rows.map(r => [r.mark, r.markColor]));
       expect(colours.size).toBe(2);
       expect(colours.get("claude")).not.toBe(colours.get("codex"));
-      expect(new Set(rows.map(r => r!.height)).size).toBe(1);
-      expect(rows[0]!.height).toBe(36);
       const path = join(SHOTS_DIR, `sidebar-threads-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
-      console.info(`sidebar thread rows screenshot: ${path}`);
+      console.info(`sidebar thread tiles screenshot: ${path}`);
     }
   }, 30_000);
 
@@ -374,83 +346,49 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 30_000);
 
-  it("the Archived group sits shut under the workspace's idle threads, a plain fold with no colour of its own, and opens to rows of the same height, in both themes", async () => {
-    const readGroups = () =>
+  it("the Settled fold sits shut at the foot of the list, 36 px, no fill and no border, and opens to tiles of the same height under it, in both themes", async () => {
+    const read = () =>
       page!.evaluate(() => {
-        const read = (rowId: string) => {
-          const row = document.querySelector<HTMLElement>(`[data-row-id='${rowId}']`)!;
-          const word = row.querySelector<HTMLElement>("span")!;
-          const box = row.getBoundingClientRect();
-          const style = getComputedStyle(word);
-          const rowStyle = getComputedStyle(row);
-          return {
-            text: row.getAttribute("aria-label"),
-            expanded: row.getAttribute("aria-expanded"),
-            y: box.y,
-            height: box.height,
-            x: box.x,
-            right: box.right,
-            color: style.color,
-            size: style.fontSize,
-            weight: style.fontWeight,
-            background: rowStyle.backgroundColor,
-            border: rowStyle.borderBottomWidth,
-            radius: rowStyle.borderBottomRightRadius,
-          };
-        };
-        // Only the first workspace's own block: the other two draw their own thread rows further down the list.
-        const block = document.querySelector<HTMLElement>("[data-row-id='ws:ws_a']")!.closest<HTMLElement>("[data-sidebar='menu-item']")!;
+        const fold = document.querySelector<HTMLElement>("[data-row-id='settled']")!;
+        const box = fold.getBoundingClientRect();
+        const style = getComputedStyle(fold);
         return {
-          archived: read("archived:ws_a"),
-          threads: Array.from(block.querySelectorAll<HTMLElement>("[data-row-id^='thread:']")).map(row => ({
-            id: row.getAttribute("data-row-id"),
-            y: row.getBoundingClientRect().y,
-            height: row.getBoundingClientRect().height,
-          })),
+          fold: { text: fold.getAttribute("aria-label"), expanded: fold.getAttribute("aria-expanded"), y: box.y, height: box.height, right: box.right, background: style.backgroundColor, border: style.borderBottomWidth, above: box.y - fold.closest("li")!.previousElementSibling!.getBoundingClientRect().bottom },
+          tiles: Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='thread:'], [data-row-id^='ws:']")).map(row => ({ id: row.getAttribute("data-row-id"), y: row.getBoundingClientRect().y, height: row.getBoundingClientRect().height })),
           sidebar: document.querySelector<HTMLElement>("[data-slot=sidebar]")!.getBoundingClientRect().right,
         };
       });
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&archived=1&sidebar=300`);
-      await page!.waitForSelector("[data-row-id='archived:ws_a']");
-      const shut = await readGroups();
-      console.info(`archived group ${theme} shut: ${JSON.stringify(shut)}`);
-      // Shut, carrying its count, under the workspace's idle threads rather than above them.
-      expect(shut.archived.expanded).toBe("false");
-      expect(shut.archived.text).toBe("Archived 2");
-      // The two threads it holds are not drawn; the working row and the one idle row are.
-      expect(shut.threads.map(t => t.id)).toEqual(["thread:s1", "thread:s2"]);
-      for (const thread of shut.threads) expect(thread.y).toBeLessThan(shut.archived.y);
-      // A fold is a label over rows, not a chip or a badge, so it carries no fill and no border of its own.
-      expect(shut.archived.height).toBe(28);
-      expect(shut.archived.background).toBe("rgba(0, 0, 0, 0)");
-      expect(shut.archived.border).toBe("0px");
-      expect(shut.archived.right).toBeLessThanOrEqual(shut.sidebar);
-      const path = join(SHOTS_DIR, `sidebar-archived-shut-${theme}.png`);
+      await page!.waitForSelector("[data-row-id='settled']");
+      const shut = await read();
+      console.info(`settled fold ${theme} shut: ${JSON.stringify(shut)}`);
+      expect(shut.fold.expanded).toBe("false");
+      expect(shut.fold.text).toBe("Settled 2");
+      expect(shut.tiles.map(t => t.id)).toEqual(["thread:s2", "thread:s1", "thread:s3", "thread:s4", "ws:ws_c"]);
+      for (const tile of shut.tiles) expect(tile.y).toBeLessThan(shut.fold.y);
+      expect(shut.fold.height).toBe(36);
+      expect(Math.round(shut.fold.above)).toBe(12);
+      expect(shut.fold.background).toBe("rgba(0, 0, 0, 0)");
+      expect(shut.fold.border).toBe("0px");
+      expect(shut.fold.right).toBeLessThanOrEqual(shut.sidebar);
+      const path = join(SHOTS_DIR, `sidebar-settled-shut-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
-      console.info(`sidebar archived shut screenshot: ${path}`);
-      // One click opens it, and what it holds are ordinary thread rows at the ordinary thread-row height.
-      await page!.locator("[data-row-id='archived:ws_a']").click();
-      await page!.waitForFunction(
-        () => document.querySelector("[data-row-id='ws:ws_a']")!.closest("[data-sidebar='menu-item']")!.querySelectorAll("[data-row-id^='thread:']").length === 4,
-      );
-      // The chevron turns to point down in 150 ms; the shot waits for it to land, so it is a chevron and not a corner,
-      // and the pointer leaves the row, so the fold carries no hover fill in the shot.
-      await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-row-id='archived:ws_a'] svg")!).transform === "none");
+      console.info(`sidebar settled shut screenshot: ${path}`);
+      await page!.locator("[data-row-id='settled']").click();
+      await page!.waitForFunction(() => document.querySelectorAll("[data-row-id^='thread:']").length === 6);
+      await page!.waitForFunction(() => getComputedStyle(document.querySelector("[data-row-id='settled'] svg")!).transform === "none");
       await page!.mouse.move(640, 760);
       await page!.waitForTimeout(200);
-      const open = await readGroups();
-      console.info(`archived group ${theme} open: ${JSON.stringify(open)}`);
-      expect(open.archived.expanded).toBe("true");
-      expect(open.archived.text).toBe("Archived");
-      expect(open.threads.map(t => t.id)).toEqual(["thread:s1", "thread:s2", "thread:s5", "thread:s6"]);
-      expect(new Set(open.threads.map(t => Math.round(t.height))).size).toBe(1);
-      for (const id of ["thread:s5", "thread:s6"]) {
-        expect(open.threads.find(t => t.id === id)!.y).toBeGreaterThan(open.archived.y);
-      }
-      const openPath = join(SHOTS_DIR, `sidebar-archived-open-${theme}.png`);
+      const open = await read();
+      console.info(`settled fold ${theme} open: ${JSON.stringify(open)}`);
+      expect(open.fold.expanded).toBe("true");
+      expect(open.fold.text).toBe("Settled");
+      expect(new Set(open.tiles.map(t => Math.round(t.height)))).toEqual(new Set([68]));
+      for (const id of ["thread:s5", "thread:s6"]) expect(open.tiles.find(t => t.id === id)!.y).toBeGreaterThan(open.fold.y);
+      const openPath = join(SHOTS_DIR, `sidebar-settled-open-${theme}.png`);
       await page!.locator("[data-slot=sidebar]").first().screenshot({ path: openPath });
-      console.info(`sidebar archived open screenshot: ${openPath}`);
+      console.info(`sidebar settled open screenshot: ${openPath}`);
     }
   }, 60_000);
 
@@ -509,80 +447,6 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       const path = join(SHOTS_DIR, `notice-version-behind-${theme}.png`);
       await notice.screenshot({ path });
       console.info(`notice version screenshot: ${path}`);
-    }
-  }, 30_000);
-
-  it("the state slot is one width whatever word is in it, so a name keeps its room when a word arrives, in both themes", async () => {
-    for (const theme of ["dark", "light"] as const) {
-      // One row not answering beside a paused one and a gone one: the longest of the state words against the two
-      // the fixture already draws.
-      await page!.goto(`${base}?theme=${theme}&oom=1`);
-      await page!.waitForSelector("[data-sidebar-row]");
-      const slots = await page!.evaluate(() =>
-        Array.from(document.querySelectorAll<HTMLElement>("[data-row-id^='ws:']")).map(row => {
-          const slot = row.querySelector<HTMLElement>("[data-workspace-state]")!;
-          const name = row.querySelector<HTMLElement>("[data-workspace-name]")!;
-          // The word's own width, which is what the slot has to hold: the slot's box is its min-width once it is
-          // wider than the text, so the box says nothing about whether the word fits in it.
-          const range = document.createRange();
-          range.selectNodeContents(slot);
-          return { state: slot.textContent ?? "", slotWidth: slot.getBoundingClientRect().width, wordWidth: range.getBoundingClientRect().width, nameWidth: name.getBoundingClientRect().width };
-        }),
-      );
-      console.info(`state slots at ${theme}: ${JSON.stringify(slots)}`);
-      // The stopping words: a row reads the pause mode of the computer its project lands on, and this shell is
-      // served no landing, so it reads what every computer but a provider with memory pauses does.
-      expect(slots.map(s => s.state)).toEqual(["Unreachable", "Stopped", "Gone"]);
-      // The slot is one width on every row, so the name beside it is too: the name used to give back 16 px the
-      // moment a long word arrived, which moved it under a person reading it.
-      expect(new Set(slots.map(s => Math.round(s.slotWidth))).size).toBe(1);
-      expect(new Set(slots.map(s => Math.round(s.nameWidth))).size).toBe(1);
-      // And the longest word there is is drawn whole in it rather than cut by it.
-      for (const slot of slots) expect(slot.wordWidth).toBeLessThanOrEqual(slot.slotWidth);
-    }
-  }, 30_000);
-
-  it("the line the runtime puts on a machine's row is the whole second line, drawn whole and at the row's own height, in both themes", async () => {
-    const metaOf = (): Promise<{ text: string; clipped: boolean; height: number }[]> =>
-      page!.locator("[data-row-id^='ws:']").evaluateAll(rows =>
-        rows.map(row => {
-          const meta = row.querySelector<HTMLElement>("[data-workspace-meta]");
-          // textContent is the whole string whatever CSS does to it, so what the person sees is scroll against client.
-          return { text: meta?.textContent ?? "", clipped: meta !== null && meta.scrollWidth > meta.clientWidth, height: row.getBoundingClientRect().height, widths: [meta?.clientWidth, meta?.scrollWidth, document.querySelector("[data-slot=sidebar]")!.getBoundingClientRect().width] };
-        }),
-      );
-    for (const theme of ["dark", "light"] as const) {
-      await open(theme);
-      const plain = await metaOf();
-      // A cloud fork with no copy of a folder has no branch to name: its row is one line at a thread row's height,
-      // with no blank second line and never a figure.
-      expect(plain[0]!.text).toBe("");
-      expect(plain[0]!.height).toBe(36);
-
-      await page!.goto(`${base}?theme=${theme}&helper=1`);
-      await page!.waitForSelector("[data-sidebar-row]");
-      const updating = await metaOf();
-      console.info(`helper line at ${theme}: ${JSON.stringify(updating[0])}`);
-      // The whole line, nothing beside it, drawn whole rather than cut, on the second line a row on a branch has.
-      // The slot is about 159px at the default width, so a line that outgrows it goes red here.
-      expect(updating[0]!.text).toBe("updating the helper");
-      expect(updating[0]!.clipped).toBe(false);
-      expect(updating[0]!.height).toBe(52);
-      expect(updating.slice(1).map(m => m.text)).toEqual(plain.slice(1).map(m => m.text));
-      const path = join(SHOTS_DIR, `sidebar-helper-${theme}.png`);
-      await page!.locator("[data-slot=sidebar]").first().screenshot({ path });
-      console.info(`sidebar helper line screenshot: ${path}`);
-
-      // The same slot when the link dropped after a near-full sample: the row form of the words, whole.
-      await page!.goto(`${base}?theme=${theme}&oom=1`);
-      await page!.waitForSelector("[data-sidebar-row]");
-      const oom = await metaOf();
-      expect(oom[0]!.text).toBe("out of memory, 3.6 of 3.9 GB");
-      expect(oom[0]!.clipped).toBe(false);
-      expect(oom[0]!.height).toBe(52);
-      const oomPath = join(SHOTS_DIR, `sidebar-oom-${theme}.png`);
-      await page!.locator("[data-slot=sidebar]").first().screenshot({ path: oomPath });
-      console.info(`sidebar out-of-memory line screenshot: ${oomPath}`);
     }
   }, 30_000);
 
@@ -956,7 +820,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(Math.abs(after.y - before.y)).toBeLessThan(1);
       const crumb = await box("header [data-thread-breadcrumb]");
       expect(Math.abs(crumb.x - (after.x + after.width + (await rowGap("header [data-header-row]"))))).toBeLessThan(1);
-      expect(await page!.locator("header [data-thread-breadcrumb]").evaluate(el => el.textContent)).toBe("api/Reply with exactly the word hi.");
+      expect(await page!.locator("header [data-thread-breadcrumb]").evaluate(el => el.textContent)).toBe("Reply with exactly the word hi.");
       const ratios = await textContrast(page!, "header [data-thread-breadcrumb] .text-muted-foreground");
       for (const ratio of ratios) expect(ratio, `the collapsed header's quiet crumb reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
       const path = join(SHOTS_DIR, `header-collapsed-${theme}.png`);
@@ -964,9 +828,8 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       console.info(`collapsed header screenshot: ${path}`);
     }
   }, 60_000);
-  /** One row's name slot: the row's height, where the name starts, where the slot at the right edge ends, and the
-   * name's own font, read the same way whether the slot holds the text or the one name box. `selector` picks the row
-   * and `nameSelector` the text it wears, so a workspace row and a thread row are read by the same rule. */
+  /** One tile's name slot: the tile's height, where the name starts, where the status slot on row one ends, and the
+   * name's own font, read the same way whether row two holds the text or the one name box. */
   const nameSlot = async (
     selector: string,
     nameSelector: string,
@@ -974,7 +837,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     page!.locator(selector).first().evaluate((row: HTMLElement, of: string) => {
       const input = row.querySelector<HTMLInputElement>("[data-row-name-input]");
       const name = input ?? row.querySelector<HTMLElement>(of)!;
-      const slot = row.querySelector<HTMLElement>(`${of} ~ span, [data-row-name-input] ~ span`)!;
+      const slot = row.querySelector<HTMLElement>("[data-thread-status]")!;
       const s = getComputedStyle(name);
       return {
         rowHeight: row.getBoundingClientRect().height,
@@ -989,11 +852,11 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }, nameSelector);
   const titleSlot = () => nameSlot("[data-row-id^='thread:']", "[data-thread-title]");
 
-  it("a right-click on a workspace row opens the in-app menu at the pointer in the tooltip skin, kept inside the viewport, and Escape closes it, in both themes", async () => {
+  it("a right-click on a tile opens the in-app menu at the pointer in the tooltip skin, kept inside the viewport, and Escape closes it, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await open(theme);
-      const row = await box("[data-row-id='ws:ws_a']");
-      // On the row's hover buttons too: the whole row is the workspace's.
+      // The gone copy with no thread on it: its tile's menu is the copy's own verbs.
+      const row = await box("[data-row-id='ws:ws_c']");
       const at = { x: row.x + row.width - 12, y: row.y + row.height / 2 };
       await page!.mouse.click(at.x, at.y, { button: "right" });
       await page!.waitForSelector("[data-context-menu]");
@@ -1011,30 +874,30 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(skin.background).not.toBe("rgba(0, 0, 0, 0)");
       expect(skin.z).toBe("130");
       expect(skin.arrows).toBe(0);
-      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(10);
-      // Bring back, export (this fake host has no folder ops), run a copy and delete.
-      expect(await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").count()).toBe(4);
+      // Wake, held while the machine is gone, Rebuild, held on this fake host, which carries none, and Forget.
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(3);
+      expect(await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").count()).toBe(2);
       // The first row that can run holds focus, so the keyboard is already in the menu.
-      expect(await page!.locator("[data-context-menu] [role=menuitem]").first().evaluate(el => document.activeElement === el)).toBe(true);
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").nth(2).evaluate(el => document.activeElement === el)).toBe(true);
       const path = join(SHOTS_DIR, `sidebar-context-menu-${theme}.png`);
       await page!.screenshot({ path, clip: { x: 0, y: 0, width: 520, height: 520 } });
       console.info(`sidebar context menu screenshot: ${path}`);
       // The refusal rides the tooltip skin: hovering a dimmed row shows it.
       await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").first().hover();
       await page!.waitForSelector("[data-slot=tooltip-popup]");
-      // Bring back is the first held row: this fake host carries no bring back.
-      expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe(WHERE_WORDS.notYet);
+      expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe("Workspace machine is gone; rebuild it to wake");
       const tipPath = join(SHOTS_DIR, `sidebar-context-menu-refusal-${theme}.png`);
       await page!.screenshot({ path: tipPath, clip: { x: 0, y: 0, width: 640, height: 520 } });
       console.info(`sidebar context menu refusal screenshot: ${tipPath}`);
       await page!.keyboard.press("Escape");
       await page!.waitForSelector("[data-context-menu]", { state: "detached" });
       // Focus goes back where it was: the row's own button under the pointer, which Chromium focused on the press.
-      expect(await page!.evaluate(() => document.activeElement?.closest("[data-sidebar='menu-item']")?.querySelector("[data-row-id='ws:ws_a']") !== null)).toBe(true);
+      expect(await page!.evaluate(() => document.activeElement?.closest("[data-row-id='ws:ws_c']") !== null)).toBe(true);
+      // A root thread's tile carries its four verbs and its copy's pause and delete.
       const thread = await box("[data-row-id^='thread:']");
       await page!.mouse.click(thread.x + 20, thread.y + thread.height / 2, { button: "right" });
       await page!.waitForSelector("[data-context-menu]");
-      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(4);
+      expect(await page!.locator("[data-context-menu] [role=menuitem]").count()).toBe(6);
       await page!.screenshot({ path: join(SHOTS_DIR, `thread-context-menu-${theme}.png`), clip: { x: 0, y: 0, width: 520, height: 520 } });
       console.info(`thread context menu screenshot: ${join(SHOTS_DIR, `thread-context-menu-${theme}.png`)}`);
 
@@ -1067,74 +930,16 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("Rename turns a workspace row's name into the same field in the same slot, from the menu and from a double-click, in both themes", async () => {
-    const wsSlot = () => nameSlot("[data-row-id='ws:ws_a']", "[data-workspace-name]");
-    for (const theme of ["dark", "light"] as const) {
-      await open(theme);
-      const plain = await wsSlot();
-      const row = await box("[data-row-id='ws:ws_a']");
-      await page!.mouse.click(row.x + 40, row.y + row.height / 4, { button: "right" });
-      await page!.waitForSelector("[data-context-menu]");
-      await page!.locator("[data-context-menu] [role=menuitem]", { hasText: "Rename task" }).click();
-      await page!.waitForSelector("[data-row-name-input]");
-
-      // The field takes the name's place: the row keeps its height, the name starts where it started, the state slot
-      // at the right edge keeps its place, and the field wears the name's own font and size.
-      const named = await wsSlot();
-      expect(named.rowHeight).toBe(plain.rowHeight);
-      expect(named.nameX).toBe(plain.nameX);
-      expect(named.slotRight).toBe(plain.slotRight);
-      expect(named.font).toBe(plain.font);
-      expect(named.size).toBe(plain.size);
-      expect(named.value).toBe(plain.text);
-      expect(named.focused).toBe(true);
-      await page!.keyboard.type("the name he typed");
-      const typed = await wsSlot();
-      expect(typed.value).toBe("the name he typed");
-      expect(typed.rowHeight).toBe(plain.rowHeight);
-      expect(typed.slotRight).toBe(plain.slotRight);
-      const path = join(SHOTS_DIR, `workspace-row-renaming-${theme}.png`);
-      await page!.screenshot({ path, clip: { x: 0, y: 0, width: 520, height: 300 } });
-      console.info(`workspace row renaming screenshot: ${path}`);
-
-      await page!.keyboard.press("Escape");
-      await page!.waitForSelector("[data-row-name-input]", { state: "detached" });
-      expect((await wsSlot()).text).toBe(plain.text);
-
-      // A double-click on the name opens the same box, and Enter names the workspace: the row reads the new name.
-      await page!.locator("[data-row-id='ws:ws_a'] [data-workspace-name]").dblclick();
-      await page!.waitForSelector("[data-row-name-input]");
-      await page!.keyboard.type("the name he typed");
-      await page!.keyboard.press("Enter");
-      await page!.waitForSelector("[data-row-name-input]", { state: "detached" });
-      expect((await wsSlot()).text).toBe("the name he typed");
-      expect((await wsSlot()).rowHeight).toBe(plain.rowHeight);
-    }
-  }, 60_000);
-
-  // The sidebar paints its quiet text in four tiers, three of them at part opacity. An alpha buys
-  // less contrast over a light surface than over a dark one, so the two themes have to be measured
-  // against each other and not only against a floor: with one light token behind them the tiers
-  // read 4.62, 4.47, 2.68 and 2.10 to 1 where the dark side's read 8.33, 5.43, 4.35 and 3.00.
-  // A sentence drawn in the whisper tier is not a branch: the offline line is one, and so are the line
-  // for what the runtime is doing to a daemon and the one for a drop with memory near full. They take
-  // the prose ink, which clears AA on both surfaces, while the branch a row's meta line carries keeps
-  // the whisper, and a row whose copy has no branch has no meta line at all.
-  it("a sentence in a row's meta line takes the prose ink and reads at AA in both themes, and the branch beside it keeps the whisper", async () => {
+  // A sentence drawn in the whisper tier would sit under AA on the light glass: the offline line under the search
+  // row takes the prose ink, which clears it on both surfaces.
+  it("the offline sentence under the search row takes the prose ink and reads at AA in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&offline=1`);
       await page!.waitForSelector("[data-sidebar-offline]");
-      // The one row on a branch draws the line, and the branchless rows draw none.
-      const metaLines = await page!.locator("[data-app-sidebar] [data-row-id^='ws:']").evaluateAll(rows => rows.map(row => [row.getAttribute("data-row-id"), row.querySelector("[data-workspace-meta]")?.textContent ?? null]));
-      expect(metaLines).toEqual([["ws:ws_a", null], ["ws:ws_b", "lockfile-bump"], ["ws:ws_c", null]]);
       const prose = await textContrast(page!, "[data-sidebar-offline]");
-      const branches = await textContrast(page!, "[data-app-sidebar] [data-workspace-meta]");
-      console.info(`${theme}: the offline sentence reads at ${prose.map(r => r.toFixed(2)).join(", ")}, the branch beside it at ${branches.map(r => r.toFixed(2)).join(", ")} to 1`);
+      console.info(`${theme}: the offline sentence reads at ${prose.map(r => r.toFixed(2)).join(", ")} to 1`);
       expect(prose.length).toBeGreaterThan(0);
       for (const ratio of prose) expect(ratio, `the offline sentence reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
-      // The branch stays the whisper it was: this raises the sentences, not the tier.
-      expect(branches.length).toBe(1);
-      for (const ratio of branches) expect(ratio, `the branch reads at ${ratio} in ${theme}`).toBeLessThan(4.5);
     }
   }, 60_000);
 

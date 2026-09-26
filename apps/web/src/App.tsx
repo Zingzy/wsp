@@ -8,6 +8,7 @@ import { useThemeEffect } from "./settings/theme.js";
 import { AppShell } from "./shell/AppShell.js";
 import { MaterialTuner } from "./dev/MaterialTuner.js";
 import { useHostNotices } from "./notices/hostNotices.js";
+import { useWorkspaceLineNotices } from "./notices/workspaceLines.js";
 import { useShellVersionEffect } from "./shell/shellVersion.js";
 import { FirstRun } from "./shell/FirstRun.js";
 import { ProjectHome } from "./shell/ProjectHome.js";
@@ -57,6 +58,7 @@ export function App({ wsUrl, token, onUnauthorized }: AppProps) {
   useEffect(() => wireHostLive(useStore), []);
   useThemeEffect();
   useHostNotices();
+  useWorkspaceLineNotices();
   useShellVersionEffect();
   return <Shell />;
 }
