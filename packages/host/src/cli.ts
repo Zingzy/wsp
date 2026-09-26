@@ -2105,7 +2105,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   join: {
     page: "agent",
     usage: "wsp join <url>... --code <code> [--code-file <path>] [--name <name>]",
-    about: "on the computer you are sitting at: join it to the wsp at that address, then install the daemon under this computer's own service manager, which dials again at every login",
+    about: "on the computer you are sitting at: join it to the wsp at that address, then install the daemon as a systemd system unit, which dials again at every boot. A place is a Linux computer; a Mac refuses",
     json: false,
     host: "refused",
     cliOnly: "joins the computer it is typed on to somebody's wsp and keeps the key it proves itself with in this person's own files; where their computer belongs is theirs to say",

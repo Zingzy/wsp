@@ -3946,6 +3946,7 @@ const DAEMON_CONTENTS = [
   "de414be04f6f1b5142c2e5e718f4acd0a0526558dc96bed3a02b31f7acd924ba",
   "15f43fcf51b6d460b6e1acfa2ed0ce279a6645647834a10174bd9d249c2b2e6e",
   "7a1d4e70b470d3f404c987c4300756615bfca9f904f0ef12e74f26497775d72d",
+  "c76e7e2a3b9a767beaa281b973a409e1bc8869969255fa6c9fdeb6211b38ce3d",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4155,7 +4156,8 @@ const DAEMON_CONTENTS = [
  * removed beside that project, and refuses to remove a path that is not a copy of the project it names.
  * Version 75 takes back what a failed ssh add put on a box: before the add lands anything it asks which of its paths already exist, and after a failed deploy it removes only what this add wrote, stops a unit this add started, and leaves the box as it found it when another add took it meanwhile.
  * Version 76 answers as 75 does: a directory clone's removal takes the copy's own path off the shape check, and a test pins that a path with a trailing slash sets aside the link it names.
- * Version 77 forwards a guest's `wsp mcp` to the running host over the daemon's link, so a thread's MCP server needs no host process of its own on the machine. */
+ * Version 77 forwards a guest's `wsp mcp` to the running host over the daemon's link, so a thread's MCP server needs no host process of its own on the machine.
+ * Version 78 changes no behaviour: the pty broker's cases moved to a test binary of their own, and the file they left is hashed. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
