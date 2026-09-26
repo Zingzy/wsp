@@ -1,0 +1,1109 @@
+<!doctype html>
+<html lang="en" class="dark" data-theme="graphite">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wsp screens on the new nouns</title>
+<script src="assets.js"></script>
+<script src="crab.js"></script>
+<style>
+/* The locked mockup of the wsp app on the new nouns, 2026-09-26. Static fake data, the app's own tokens.
+   Tokens copied from apps/web/src/themes/graphite.css, paper.css and index.css on main. The agent marks and the
+   lucide paths come from assets.js, read off packages/catalog and node_modules. */
+
+[data-theme="graphite"] {
+  color-scheme: dark;
+  --background: oklch(14.5% 0 none);
+  --foreground: oklch(97% 0 none);
+  --card: color-mix(in srgb, var(--background) 97%, #fff);
+  --surface-raised: color-mix(in srgb, var(--background) 97%, #fff);
+  --muted-foreground: color-mix(in srgb, oklch(55.6% 0 none) 90%, #fff);
+  --accent: color-mix(in oklab, #fff 4%, transparent);
+  --primary: oklch(0.571 0.21 264);
+  --primary-foreground: #fff;
+  --border: color-mix(in srgb, #fff 10%, var(--background));
+  --input: color-mix(in oklab, #fff 8%, transparent);
+  --input-fill: color-mix(in oklab, #fff 2.5%, transparent);
+  --error-foreground: oklch(70.4% 0.191 22.216);
+  --success: oklch(69.6% 0.17 162.48);
+  --warning: oklch(76.9% 0.188 70.08);
+  --sidebar: #000;
+  --sidebar-foreground: #f1f3f7;
+  --sidebar-muted-foreground: #a3a3a3;
+  --sidebar-whisper: var(--sidebar-muted-foreground);
+  --sidebar-row-rest: color-mix(in oklab, var(--sidebar-muted-foreground) 80%, transparent);
+  --sidebar-row-hover: color-mix(in srgb, var(--sidebar-foreground) 4%, transparent);
+  --sidebar-row-selected: color-mix(in srgb, var(--sidebar-foreground) 7%, transparent);
+  --sidebar-row-edge: transparent;
+  --sidebar-rail: rgb(255 255 255 / 16%);
+  --sidebar-border: var(--border);
+  --composer-outline: color-mix(in srgb, #fff 5%, transparent);
+  --composer-highlight: rgb(255 255 255 / 3%);
+  --composer-shadow: none;
+  --strip-edge: rgb(255 255 255 / 7%);
+  --strip-fill: linear-gradient(to bottom, transparent 0 1rem, rgb(0 0 0 / 18%) 1rem, transparent calc(1rem + 10px)), linear-gradient(rgb(255 255 255 / 1%), rgb(255 255 255 / 1%));
+  --keycap-top: rgb(255 255 255 / 6%);
+  --popover-edge: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --popover-shadow: 0 12px 32px -12px rgb(0 0 0 / 45%), 0 2px 6px -2px rgb(0 0 0 / 25%);
+  --dialog-shadow: inset 0 1px rgb(255 255 255 / 4%), 0 24px 72px -20px rgb(0 0 0 / 90%);
+  --project-hue: oklch(78% 0.13 185);
+  --hue-orange: oklch(70.5% 0.213 47.604);
+  --status-input: #a3b3ff;
+  --status-working: #f472b6;
+  --status-failed: #ffa2a2;
+  --status-done: #5ee9b5;
+}
+[data-theme="paper"] {
+  color-scheme: light;
+  --background: oklch(99.2% 0 0);
+  --foreground: oklch(27.4% 0.006 286.033);
+  --card: #fff;
+  --surface-raised: #fff;
+  --muted-foreground: oklch(53.5% 0.016 285.938);
+  --accent: oklch(96.7% 0.001 286.375);
+  --primary: oklch(0.488 0.217 264);
+  --primary-foreground: #fff;
+  --border: oklch(92% 0.004 286.32);
+  --input: oklch(87.1% 0.006 286.286);
+  --input-fill: #fff;
+  --error-foreground: oklch(50.5% 0.213 27.518);
+  --success: oklch(59.6% 0.145 163.225);
+  --warning: oklch(66.6% 0.179 58.318);
+  --sidebar: oklch(98.5% 0 none);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-muted-foreground: oklch(44.2% 0.017 285.786);
+  --sidebar-whisper: oklch(37% 0.013 285.805);
+  --sidebar-row-rest: var(--sidebar-muted-foreground);
+  --sidebar-row-hover: oklch(99.2% 0 0);
+  --sidebar-row-selected: oklch(96.7% 0.001 286.375);
+  --sidebar-row-edge: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --sidebar-rail: rgb(0 0 0 / 16%);
+  --sidebar-border: var(--border);
+  --composer-outline: rgb(0 0 0 / 8%);
+  --composer-highlight: transparent;
+  --composer-shadow: 0 12px 28px -18px rgb(0 0 0 / 40%);
+  --strip-edge: rgb(0 0 0 / 8%);
+  --strip-fill: none;
+  --keycap-top: rgb(255 255 255 / 60%);
+  --popover-edge: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --popover-shadow: 0 12px 32px -12px rgb(0 0 0 / 18%), 0 2px 6px -2px rgb(0 0 0 / 10%);
+  --dialog-shadow: 0 24px 64px -24px rgb(0 0 0 / 35%);
+  --project-hue: oklch(55% 0.12 185);
+  --hue-orange: oklch(70.5% 0.213 47.604);
+  --status-input: #4f39f6;
+  --status-working: #be185d;
+  --status-failed: #c10007;
+  --status-done: #007a55;
+}
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 10px;
+  --control-radius: 8px;
+  --popover: var(--card);
+  --placeholder: var(--muted-foreground);
+  --destructive: var(--error-foreground);
+  --top-row-meta: color-mix(in srgb, var(--sidebar-whisper) 55%, transparent);
+  --sidebar-prose: color-mix(in srgb, var(--sidebar-whisper) 75%, transparent);
+  --sidebar-icon-color: color-mix(in srgb, var(--sidebar-muted-foreground) 60%, var(--sidebar));
+  --sidebar-width: 256px;
+  --panel-width: 400px;
+  --topbar: 52px;
+  --grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+}
+
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-sans); font-size: 14px; line-height: 20px; color: var(--foreground);
+  background: var(--background); background-image: var(--grain); background-size: 256px 256px;
+  -webkit-font-smoothing: antialiased;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; padding: 0; text-align: left; }
+svg { display: block; }
+.i { width: 16px; height: 16px; flex: none; }
+.truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.meta { font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--top-row-meta); }
+.prose { font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--sidebar-prose); }
+.fact { font-family: var(--font-mono); font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+.value { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--foreground); }
+.micro { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-foreground); }
+/* Facts beside each other: a gap, never a dot. */
+.facts { display: flex; gap: 12px; min-width: 0; }
+.facts > * { white-space: nowrap; }
+
+/* The agent marks: the catalog svg inline, a shape with no fill of its own in the first ink, the ink switched by
+   the side the page draws. A mark with no inks takes the colour of whatever it sits in. */
+.mark { flex: none; fill: currentColor; }
+.mark text { font-family: var(--font-mono); font-weight: 800; }
+
+/* The frame: sidebar, centre, right panel. The two edges are the only full-height lines on the screen. */
+.frame { display: flex; height: 100%; min-height: 100vh; }
+.sidebar {
+  width: var(--sidebar-width); flex: none; display: flex; flex-direction: column;
+  background: var(--sidebar); background-image: var(--grain); background-size: 256px 256px;
+  color: var(--sidebar-foreground); border-right: 1px solid var(--sidebar-border);
+}
+.centre { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.panel { width: var(--panel-width); flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--border); min-height: 0; }
+
+/* The frame row, 52 px: the sidebar toggle and the lockup, no line under it. */
+.framerow { height: var(--topbar); flex: none; display: flex; align-items: center; gap: 16px; padding-left: 8px; }
+.lockup { height: 14px; width: 51px; color: var(--muted-foreground); transform: translateY(2px); }
+.ghosticon {
+  width: 28px; height: 28px; flex: none; border-radius: var(--control-radius); display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted-foreground); transition: background-color 150ms, color 150ms;
+}
+.ghosticon:hover { background: var(--accent); color: var(--foreground); }
+.ghosticon[aria-pressed="true"] { background: var(--accent); color: var(--foreground); }
+.sidebar .ghosticon { color: var(--sidebar-muted-foreground); }
+.sidebar .ghosticon:hover { background: var(--sidebar-row-hover); color: var(--sidebar-foreground); }
+
+/* The sidebar's rows: 36 px, 8 px inset, radius 8, the rest ink, hover in 150 ms. Exactly today's grammar. */
+.side { padding: 0 8px; display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.fixed { flex: none; display: flex; flex-direction: column; }
+.row {
+  position: relative; display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; padding: 0 8px;
+  border-radius: var(--control-radius); color: var(--sidebar-row-rest); font-size: 14px; transition: background-color 150ms, color 150ms;
+}
+.row:hover { background: var(--sidebar-row-hover); color: var(--sidebar-foreground); }
+.row > .i { color: var(--sidebar-icon-color); }
+.row:hover > .i { color: var(--sidebar-foreground); }
+.row .grow { flex: 1; }
+.row.pe { padding-right: 32px; }
+.rowaction {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%); width: 20px; height: 20px; border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--sidebar-foreground); transition: background-color 150ms;
+}
+.rowaction:hover { background: var(--sidebar-row-hover); }
+.switcher { position: relative; }
+.chev { transition: transform 150ms; }
+.switcher[data-open="true"] .chev { transform: rotate(180deg); }
+
+/* The switcher's menu: the popover surface, the field at its top, one row per project, Add a project at its foot. */
+.menu {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 5; border-radius: 12px; overflow: hidden;
+  background: color-mix(in srgb, var(--popover) 96%, transparent); border: 1px solid var(--popover-edge); box-shadow: var(--popover-shadow);
+  backdrop-filter: blur(8px); color: var(--foreground);
+}
+.menu .search { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-bottom: 1px solid var(--border); }
+.menu .search .i { color: var(--muted-foreground); }
+.menu .search input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; font-size: 13px; color: var(--foreground); }
+.menu .search input::placeholder { color: var(--placeholder); }
+.menu .list { padding: 4px; display: flex; flex-direction: column; }
+.menu .add { padding: 4px; border-top: 1px solid var(--border); }
+.option { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 8px; border-radius: var(--control-radius); font-size: 14px; color: var(--foreground); width: 100%; transition: background-color 150ms; }
+.option:hover, .option[data-active] { background: var(--accent); }
+.option .grow { flex: 1; }
+.option > .i { color: var(--muted-foreground); }
+.option .glyph { color: var(--project-hue); }
+.option .gear { width: 28px; height: 28px; margin-right: -4px; flex: none; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); transition: background-color 150ms, color 150ms; }
+.option .gear:hover { background: color-mix(in srgb, var(--background) 60%, transparent); color: var(--foreground); }
+
+/* The tiles: three rows in 62 px, one shape for a root, a child and a settled thread. Row one is the project's own
+   glyph in its hue, project @ computer, and the status slot on the right, all sans one step under the title; the
+   title is the one full line; row three is the agent's mark, the branch glyph and the branch, small and quiet.
+   The status slot follows T3: an icon and a word, coloured only for act now (Needs you), in motion (Working, with the
+   elapsed time) and broken (Failed); Done is the unseen finish; a resting thread shows its age alone. */
+.list { padding-top: 4px; display: flex; flex-direction: column; min-height: 0; overflow: auto; flex: 1; }
+.tile {
+  display: flex; flex-direction: column; gap: 3px; width: 100%; height: 68px; padding: 8px; border-radius: var(--control-radius);
+  color: var(--sidebar-row-rest); transition: background-color 150ms, color 150ms;
+}
+.tile > * { flex: none; }
+.tile:hover { background: var(--sidebar-row-hover); }
+.tile[aria-current="true"] { background: var(--sidebar-row-selected); box-shadow: inset 0 0 0 1px var(--sidebar-row-edge); }
+.tile[aria-current="true"] .r2 { font-weight: 500; }
+.tile .r1 { display: flex; align-items: center; gap: 6px; height: 14px; line-height: 14px; font-size: 11px; color: var(--sidebar-muted-foreground); }
+.tile .r1 .pj { display: inline-flex; flex: none; opacity: 0.9; }
+.tile .r1 .pj .i { width: 12px; height: 12px; }
+.tile .r1 .at { flex: 1; }
+.tile .r3 .crab { margin-left: auto; }
+
+/* A thread's status, one reading everywhere a thread shows: a glyph or the crab, a word and a time in one slot, the
+   tone colouring it, a resting thread's age left in the row's muted ink. */
+.tstatus { flex: none; display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tstatus .i { width: 12px; height: 12px; }
+.tstatus[data-tone] { font-weight: 500; }
+.tstatus[data-tone="input"] { color: var(--status-input); }
+.tstatus[data-tone="working"] { color: var(--status-working); }
+.tstatus[data-tone="failed"] { color: var(--status-failed); }
+.tstatus[data-tone="done"] { color: var(--status-done); }
+.crab { display: block; flex: none; width: 16px; height: 14px; color: var(--status-working); }
+.tile .r2 { height: 18px; line-height: 18px; font-size: 14px; color: var(--sidebar-foreground); }
+.tile.idle .r2 { color: var(--sidebar-muted-foreground); }
+.tile .r3 { display: flex; align-items: center; gap: 5px; height: 14px; line-height: 14px; font-size: 11px; color: var(--sidebar-muted-foreground); }
+.tile .r3 .mark { width: 12px; height: 12px; color: var(--sidebar-muted-foreground); }
+.tile .r3 .i { width: 12px; height: 12px; color: var(--top-row-meta); }
+.tile .r3 .branch { min-width: 0; }
+
+/* The tree: a child list 12 px in with the rail today's spawned rows draw, a tick into the middle of each tile's
+   first row. The rail can be turned off in the bar to compare. */
+.children { margin-left: 12px; display: flex; flex-direction: column; min-width: 0; }
+.railitem { position: relative; padding-left: 4px; }
+body[data-rail="1"] .railitem::before { content: ""; position: absolute; top: 0; left: 0; height: 100%; width: 1px; background: var(--sidebar-rail); }
+body[data-rail="1"] .railitem:last-child::before { height: 15px; }
+body[data-rail="1"] .railitem::after { content: ""; position: absolute; top: 15px; left: 0; height: 1px; width: 4px; background: var(--sidebar-rail); }
+
+/* The first-timer nudge: a card in the tiles' grammar, the tiles' hover fill and selected edge, no shadow; the line
+   and the button sit under the title's text, past the glyph. */
+.nudge { flex: none; margin-bottom: 8px; padding: 8px 8px 10px; border-radius: var(--control-radius); background: var(--sidebar-row-hover); box-shadow: inset 0 0 0 1px var(--sidebar-row-edge); display: flex; flex-direction: column; gap: 4px; }
+.nudge .r1 { display: flex; align-items: center; gap: 6px; height: 20px; font-size: 14px; color: var(--sidebar-foreground); }
+.nudge .r1 > .i { width: 14px; height: 14px; color: var(--sidebar-muted-foreground); }
+.nudge .r1 .t { flex: 1; min-width: 0; }
+.nudge .x { width: 20px; height: 20px; margin-right: -4px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; color: var(--sidebar-muted-foreground); transition: background-color 150ms, color 150ms; }
+.nudge .x:hover { background: var(--sidebar-row-hover); color: var(--sidebar-foreground); }
+.nudge .x .i { width: 12px; height: 12px; }
+.nudge .say { min-height: 28px; font-size: 11px; line-height: 14px; color: var(--sidebar-muted-foreground); }
+.nudge .act { padding-top: 6px; }
+
+/* Settled: the app's section row, caps mono, count while shut, chevron. Space over it, no rule. */
+.fold { margin-top: 12px; flex: none; }
+.fold .row { height: 36px; color: var(--sidebar-muted-foreground); }
+.fold .row > * { white-space: nowrap; }
+.fold .row .micro { flex: 1; min-width: 0; color: var(--sidebar-muted-foreground); }
+.fold .row .chev { color: var(--sidebar-muted-foreground); }
+.fold[data-open="false"] .row .chev { transform: rotate(-90deg); }
+.fold .settled { display: none; flex-direction: column; }
+.fold[data-open="true"] .settled { display: flex; }
+.textbtn { font-family: var(--font-mono); font-size: 11px; color: var(--sidebar-muted-foreground); padding: 2px 6px; border-radius: 6px; transition: background-color 150ms, color 150ms; }
+.textbtn:hover { background: var(--sidebar-row-hover); color: var(--sidebar-foreground); }
+.foot { padding: 8px; flex: none; }
+.foot .row { color: var(--sidebar-muted-foreground); }
+.foot .row > .i { color: inherit; }
+
+/* The centre header: the mark and the breadcrumb, nothing under it. */
+.topbar { height: var(--topbar); flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 20px; }
+.crumbs { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; }
+.crumbs .up { color: var(--muted-foreground); transition: color 150ms; }
+.crumbs .up:hover { color: var(--foreground); }
+.crumbs .sep { color: color-mix(in srgb, var(--muted-foreground) 50%, transparent); }
+.crumbs .here { font-weight: 500; color: var(--foreground); }
+.crumbs .waiting { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); flex: none; }
+
+/* The conversation: the person's turn in a quiet card, the agent's as prose, one foot line of facts. */
+.messages { flex: 1; overflow: auto; padding: 8px 16px 24px; display: flex; flex-direction: column; align-items: center; }
+.messages > * { width: 100%; max-width: 768px; }
+.turns { display: flex; flex-direction: column; gap: 20px; padding: 16px 4px 0; }
+.msg.person { display: flex; justify-content: flex-end; }
+.msg.person .card { background: var(--accent); border-radius: 16px; padding: 10px 14px; max-width: 85%; font-size: 15px; line-height: 22px; }
+.msg.agent { font-size: 15px; line-height: 22.5px; }
+.msg.agent p { margin: 0 0 14px; }
+.msg.agent p:last-child { margin-bottom: 0; }
+.msg.agent code { font-family: var(--font-mono); font-size: 13px; background: var(--accent); border-radius: 6px; padding: 1px 6px; }
+.msg.agent.held { color: var(--muted-foreground); }
+.turnfoot { display: flex; align-items: center; gap: 14px; font-size: 13px; color: var(--muted-foreground); }
+.turnfoot .i { width: 14px; height: 14px; }
+.kids { display: flex; flex-direction: column; margin-top: 8px; }
+.kids .micro { height: 32px; display: flex; align-items: center; padding: 0 8px; }
+.kid { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 8px; border-radius: var(--control-radius); width: 100%; transition: background-color 150ms; }
+.kid:hover { background: var(--accent); }
+.kid .mark { width: 13px; height: 13px; color: var(--muted-foreground); }
+.kid .title { flex: 1; }
+.kid .where { flex: none; max-width: 220px; font-size: 12px; color: var(--muted-foreground); }
+.kid .tstatus { width: 88px; justify-content: flex-end; font-size: 12px; }
+.kid .tstatus:not([data-tone]) { color: var(--muted-foreground); }
+
+/* The composer: today's frame, the one boxed thing in the centre. */
+.composerwrap { padding: 0 16px 16px; display: flex; justify-content: center; flex: none; }
+.shell { width: 100%; max-width: 768px; position: relative; isolation: isolate; }
+.host {
+  position: relative; z-index: 10; border-radius: 22px; background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--composer-outline), inset 0 1px 0 var(--composer-highlight), var(--composer-shadow);
+}
+.host .grid { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 4px; padding: 8px 8px 8px 20px; }
+.host .ghost { color: var(--placeholder); font-size: 14px; min-width: 0; }
+.host .picks { display: flex; align-items: center; gap: 2px; }
+.pick { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: var(--control-radius); font-size: 13px; color: var(--muted-foreground); transition: background-color 150ms, color 150ms; white-space: nowrap; }
+.pick:hover { background: var(--accent); color: var(--foreground); }
+.pick .mark { width: 16px; height: 16px; color: var(--foreground); }
+.pick .i.small { width: 14px; height: 14px; opacity: 0.6; }
+.host .actions { display: flex; align-items: center; gap: 4px; }
+.host .ghosticon { width: 32px; height: 32px; color: var(--muted-foreground); }
+.host .ghosticon .i { width: 18px; height: 18px; }
+.send { width: 36px; height: 36px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--foreground) 22%, var(--surface-raised)); color: var(--foreground); }
+.strip {
+  position: relative; isolation: isolate; width: calc(100% - 44px); margin: -16px auto 0; display: flex; align-items: center; gap: 8px; padding: 20px 8px 4px 4px;
+}
+.strip::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; border-radius: 0 0 16px 16px; border: 1px solid var(--strip-edge); background: var(--strip-fill);
+  -webkit-mask: linear-gradient(to bottom, transparent 0 1rem, black 1rem); mask: linear-gradient(to bottom, transparent 0 1rem, black 1rem);
+}
+.strip .left { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.slot7 { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; font-size: 12px; color: var(--muted-foreground); }
+.slot7 .i { width: 12px; height: 12px; }
+.slot7.mono { font-family: var(--font-mono); }
+.slot7.btn-ish { border-radius: 6px; transition: background-color 150ms, color 150ms; }
+.slot7.btn-ish:hover { background: var(--accent); color: var(--foreground); }
+
+/* The right panel: the tab chip row, the agents manager as today, rows with 2 px between and no rule. */
+.panelbar { height: var(--topbar); flex: none; display: flex; align-items: center; gap: 4px; padding: 0 12px; }
+.tabchip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--control-radius); background: var(--accent); font-size: 13px; color: var(--foreground); }
+.tabchip .i { width: 14px; height: 14px; color: var(--muted-foreground); }
+.panelbar .spread { flex: 1; }
+.manager { display: flex; flex-direction: column; min-height: 0; flex: 1; padding-top: 16px; }
+.segments { margin: 0 16px; display: flex; padding: 4px; gap: 2px; border-radius: 10px; border: 1px solid var(--border); background: var(--input-fill); }
+.segment { flex: 1; height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 8px; font-size: 14px; color: var(--muted-foreground); transition: background-color 150ms, color 150ms; white-space: nowrap; }
+.segment:hover { color: var(--foreground); }
+.segment[aria-selected="true"] { background: var(--accent); color: var(--foreground); }
+.segment .fact { font-size: 12px; }
+.headline { display: flex; align-items: center; gap: 12px; min-height: 24px; padding: 12px 16px 0; font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.headline p { margin: 0; flex: 1; min-width: 0; }
+.headline u { color: color-mix(in srgb, var(--foreground) 80%, transparent); text-decoration-color: color-mix(in srgb, var(--foreground) 30%, transparent); text-underline-offset: 2px; }
+.headline .ghosticon { width: 24px; height: 24px; }
+.headline .ghosticon .i { width: 14px; height: 14px; }
+.rows { display: flex; flex-direction: column; gap: 2px; padding: 12px 0 8px; overflow: auto; min-height: 0; }
+.grouplabel { height: 32px; display: flex; align-items: center; padding: 0 16px; }
+.arow { position: relative; isolation: isolate; margin: 0 8px; display: flex; align-items: center; gap: 12px; padding: 0 8px; border-radius: 8px; height: 76px; }
+.arow.short { height: 60px; }
+.arow .body { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; align-self: stretch; }
+.arow .body::before { content: ""; position: absolute; inset: 0; z-index: -1; border-radius: 8px; transition: background-color 150ms; }
+.arow .body:hover::before { background: var(--accent); }
+.tilebox { width: 32px; height: 32px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid var(--border); background: color-mix(in srgb, var(--foreground) 4%, transparent); }
+.tilebox .mark { width: 20px; height: 20px; color: var(--foreground); }
+.tilebox .i { color: color-mix(in srgb, var(--foreground) 80%, transparent); }
+.arow .words { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.arow .name { font-size: 14px; line-height: 20px; font-weight: 500; }
+.arow.short .name { color: color-mix(in srgb, var(--foreground) 70%, transparent); }
+.arow .sub { font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
+.arow.short .sub { font-family: var(--font-sans); }
+.status { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; }
+.status .dot { width: 8px; height: 8px; border-radius: 999px; background: var(--success); }
+.status[data-tone="warning"] .dot { background: var(--warning); }
+.status .word { font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground); }
+.arow .step { flex: none; z-index: 1; }
+
+/* Buttons: today's outline keycap and the primary. */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px;
+  border-radius: var(--control-radius); border: 1px solid var(--input); background: var(--input-fill); color: var(--foreground);
+  font-size: 13px; font-weight: 500; white-space: nowrap; box-shadow: inset 0 1px 0 var(--keycap-top);
+  transition: background-color 150ms, color 150ms, border-color 150ms;
+}
+.btn:hover { background: color-mix(in srgb, var(--foreground) 5%, var(--input-fill)); }
+.btn .i { width: 14px; height: 14px; color: var(--muted-foreground); }
+.btn.xs { height: 24px; padding: 0 8px; font-size: 12px; gap: 4px; }
+.btn.xs .i { width: 14px; height: 14px; }
+.btn.primary { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
+.btn.primary:hover { background: color-mix(in srgb, var(--primary) 90%, var(--background)); }
+.btn.ghost { border-color: transparent; background: transparent; box-shadow: none; color: var(--muted-foreground); font-weight: 400; }
+.btn.ghost:hover { background: var(--accent); color: var(--foreground); }
+.btn.danger:hover { color: var(--destructive); border-color: color-mix(in srgb, var(--destructive) 50%, transparent); }
+.btn[disabled] { opacity: 0.64; cursor: default; }
+
+/* Settings: the sidebar's groups, the page's cards as head plus rows, grouped by space and nothing else. */
+.settings-search { display: flex; align-items: center; gap: 8px; height: 28px; margin: 12px 8px 4px; padding: 0 8px; border-bottom: 1px solid var(--sidebar-border); }
+.settings-search .i { width: 14px; height: 14px; color: var(--sidebar-muted-foreground); }
+.settings-search span { font-size: 13px; color: var(--sidebar-muted-foreground); }
+.groups { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
+.groups .row[aria-current="true"] { background: var(--sidebar-row-selected); color: var(--sidebar-foreground); font-weight: 500; box-shadow: inset 0 0 0 1px var(--sidebar-row-edge); }
+.groups .row[aria-current="true"] > .i, .groups .row.open > .i { color: var(--sidebar-foreground); }
+.groups .row.open { color: var(--sidebar-foreground); }
+.groups .subs { margin-left: 14px; display: flex; flex-direction: column; }
+.page { flex: 1; overflow: auto; }
+.pageinner { max-width: 760px; margin: 0 auto; padding: 56px 32px 48px; display: flex; flex-direction: column; gap: 40px; }
+.pagehead { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; }
+.pagehead h1 { font-size: 18px; line-height: 28px; font-weight: 500; letter-spacing: -0.01em; margin: 0; }
+.pagehead p { margin: 0; font-size: 13px; color: var(--muted-foreground); }
+.pagehead .crumbs { font-size: 13px; margin-bottom: 4px; }
+.card { display: flex; flex-direction: column; gap: 8px; }
+.card h2 { font-size: 13px; line-height: 16px; font-weight: 500; margin: 0 0 4px; }
+.card .lede { font-size: 12px; line-height: 16px; color: var(--muted-foreground); margin: -4px 0 4px; }
+.card .items { display: flex; flex-direction: column; gap: 2px; margin: 0 -8px; }
+.srow { display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 8px; border-radius: 8px; transition: background-color 150ms; }
+.srow.opens { cursor: pointer; }
+.srow.opens:hover { background: var(--accent); }
+.srow .words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.srow .t { font-size: 14px; line-height: 20px; display: flex; gap: 8px; align-items: baseline; }
+.srow .d { font-size: 12px; line-height: 16px; color: var(--muted-foreground); }
+.srow .slot { flex: none; display: flex; align-items: center; gap: 12px; max-width: 46%; }
+.srow .slot .fact { text-align: right; white-space: nowrap; }
+.srow .slot .fact.long { white-space: normal; }
+.srow .slot .i.chev { width: 14px; height: 14px; color: var(--muted-foreground); }
+.line { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 44px; padding: 0 8px; border-radius: 8px; }
+.line .label { font-size: 14px; }
+.line .right { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.line .right .fact.long { white-space: normal; text-align: right; }
+.under { display: flex; gap: 8px; align-items: center; }
+.stepper { display: inline-flex; align-items: center; height: 28px; border: 1px solid var(--input); border-radius: var(--control-radius); background: var(--input-fill); box-shadow: inset 0 1px 0 var(--keycap-top); }
+.stepper button { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); }
+.stepper button .i { width: 13px; height: 13px; }
+.stepper .n { min-width: 28px; text-align: center; font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.field { height: 28px; padding: 0 10px; border: 1px solid var(--input); border-radius: var(--control-radius); background: var(--input-fill); font-family: var(--font-mono); font-size: 12px; color: var(--foreground); outline: none; }
+.field::placeholder { color: var(--placeholder); }
+.field:focus { box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 70%, transparent); }
+.field.money { width: 84px; text-align: right; }
+.field.paste { width: 200px; }
+.readline { padding: 0 0 0 0; margin-top: -24px; }
+.segmentctl { display: inline-flex; height: 28px; border: 1px solid var(--input); border-radius: var(--control-radius); background: var(--input-fill); box-shadow: inset 0 1px 0 var(--keycap-top); padding: 2px; gap: 2px; }
+.segmentctl button { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 10px; border-radius: 6px; font-size: 12px; color: var(--muted-foreground); transition: background-color 150ms, color 150ms; }
+.segmentctl button .i { width: 13px; height: 13px; }
+.segmentctl button[aria-pressed="true"] { background: var(--accent); color: var(--foreground); }
+
+/* The Add a cloud sheet: the dialog surface, its lines grouped by space. */
+.scrim { position: fixed; inset: 0; background: color-mix(in srgb, var(--background) 60%, transparent); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 10; }
+.sheet { width: 100%; max-width: 440px; background: var(--popover); border: 1px solid var(--popover-edge); border-radius: 14px; box-shadow: var(--dialog-shadow); display: flex; flex-direction: column; }
+.sheet .shead { padding: 16px 20px 4px; }
+.sheet .shead h1 { font-size: 15px; font-weight: 500; margin: 0; line-height: 20px; }
+.sheet .body { padding: 4px 12px 0; display: flex; flex-direction: column; }
+.refusal { min-height: 36px; margin: 8px 20px 0; font-size: 13px; line-height: 18px; color: var(--destructive); }
+.refusal .fix { color: var(--foreground); }
+.refusal .held { color: var(--muted-foreground); }
+.sheet .sfoot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; }
+
+/* The computers list, direction A: a grid. One small header per section, the name in sans, every number in mono in
+   its own right-aligned column, the load as a 4 px meter with n/cap beside it, the state a short sans word on the
+   right or the action itself. Rows are 52 px and share the template with their header, so the columns line up down
+   the page; the clouds' two meters together are as wide as the computers' three facts, so the state column is one
+   line across both sections. No rule under the header, no rule between rows: space does it. */
+.gl { display: flex; flex-direction: column; gap: 2px; --cols: minmax(0, 1fr) 48px 64px 140px 100px 14px; }
+.gl .wide { grid-column: span 2; }
+.gl .gh, .gl .gr { display: grid; grid-template-columns: var(--cols); column-gap: 16px; align-items: center; padding: 0 8px; }
+.gl .gh { height: 24px; margin-bottom: 2px; }
+.gl .gh .micro { white-space: nowrap; }
+.gl .gr { height: 52px; border-radius: 8px; cursor: pointer; transition: background-color 150ms; }
+.gl .gr:hover { background: var(--accent); }
+.gl .num { text-align: right; }
+.gl .who { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.gl .who .name { font-size: 14px; line-height: 20px; }
+.gl .who .tag { font-size: 12px; color: var(--muted-foreground); margin-left: 8px; }
+.gl .chev { width: 14px; height: 14px; color: var(--muted-foreground); }
+.meter { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.track { width: 56px; height: 4px; flex: none; border-radius: 999px; background: color-mix(in srgb, var(--foreground) 10%, transparent); overflow: hidden; }
+.track .fill { display: block; height: 100%; border-radius: 999px; background: color-mix(in srgb, var(--foreground) 55%, transparent); transition: width 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+.state { display: flex; align-items: center; justify-content: flex-end; font-size: 13px; line-height: 20px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.state[data-tone="warning"] { color: var(--warning); }
+.state .btn.xs { font-weight: 500; }
+
+/* Direction B: a list, not a table. Two lines a row: the name at 500 over one quiet spec phrase, then the load as a
+   meter that labels itself ("5 of 8 threads"), then the state. One font. No header row, since each meter carries its
+   own words; the right side is fixed width so the meters and states still line up. */
+.ledger { display: flex; flex-direction: column; gap: 2px; }
+.ledger .lr { display: flex; align-items: center; gap: 16px; height: 60px; padding: 0 8px; border-radius: 8px; cursor: pointer; transition: background-color 150ms; }
+.ledger .lr:hover { background: var(--accent); }
+.ledger .who { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; }
+.ledger .words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ledger .name { font-size: 14px; line-height: 20px; font-weight: 500; }
+.ledger .name .tag { font-weight: 400; font-size: 12px; color: var(--muted-foreground); margin-left: 8px; }
+.ledger .spec { font-size: 12px; line-height: 16px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ledger .load { width: 172px; flex: none; display: flex; flex-direction: column; gap: 6px; }
+.ledger .load .track { width: 100%; }
+.ledger .load .n { font-size: 12px; line-height: 16px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ledger .state { width: 112px; flex: none; }
+.ledger .chev { width: 14px; height: 14px; flex: none; color: var(--muted-foreground); }
+
+@media (max-width: 767px) {
+  .gl { --cols: minmax(0, 1fr) 140px 14px; }
+  .gl .wide { grid-column: auto; }
+  .gl .num, .gl .gh .num, .gl .cloud-spend, .gl .state { display: none; }
+  .ledger .load { display: none; }
+}
+
+/* The Image and place pages share the grid: rows of 48 px, a quiet note under a name, words in muted sans, brand
+   marks in the same frames, a header on its own where a section's rows are not grid rows. */
+.gl.tight .gr { height: 48px; }
+.gl.img { --cols: minmax(0, 1fr) 72px 200px; }
+.gl.signin { --cols: minmax(0, 1fr) 64px 280px; }
+.gl .who .words { display: flex; flex-direction: column; min-width: 0; }
+.gl .who .name.mono { font-family: var(--font-mono); font-size: 13px; }
+.gl .note, .line .note { font-size: 11px; line-height: 14px; color: var(--muted-foreground); }
+.gl .word { font-size: 13px; color: var(--muted-foreground); }
+.gl .act { justify-self: end; display: flex; align-items: center; gap: 8px; }
+.gl .gr.left .who { opacity: 0.6; }
+.gh.solo { display: flex; align-items: center; height: 24px; padding: 0 8px; margin-bottom: 2px; }
+.tilebox .brand { width: 18px; height: 18px; }
+.btn.primary .i { color: inherit; }
+.line .label { display: flex; flex-direction: column; min-width: 0; }
+.line.tall { height: auto; min-height: 44px; padding: 8px; }
+.line.tall .note { white-space: normal; }
+.statehead { display: inline-flex; align-items: center; gap: 10px; }
+.quiet { font-size: 13px; line-height: 20px; color: var(--muted-foreground); margin: -24px 0 0; }
+
+/* An inked mark keeps its catalog ink wherever it sits, over the colour of the tile, the row or the picker it is in;
+   last in the sheet and doubled so no row rule outranks it. */
+.mark[data-inks][data-inks] { --ink-0: var(--ink-0-light); --ink-1: var(--ink-1-light); --ink-2: var(--ink-2-light); color: var(--ink-0); }
+.dark .mark[data-inks][data-inks] { --ink-0: var(--ink-0-dark); --ink-1: var(--ink-1-dark); --ink-2: var(--ink-2-dark); }
+
+/* The prototype's own bar, not the design. */
+.bar {
+  position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 20;
+  display: flex; gap: 6px; align-items: center; padding: 6px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--popover) 92%, transparent); border: 1px solid var(--border); box-shadow: var(--popover-shadow);
+  backdrop-filter: blur(12px); font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground);
+}
+.bar select { height: 24px; border-radius: 6px; border: 1px solid var(--input); background: var(--popover); color: var(--foreground); font-family: var(--font-mono); font-size: 11px; padding: 0 4px; }
+.bar label { display: inline-flex; gap: 4px; align-items: center; }
+body[data-bar="0"] .bar { display: none; }
+
+@media (max-width: 1023px) { .panel { display: none; } }
+@media (max-width: 767px) {
+  .frame { flex-direction: column; }
+  .sidebar { width: 100%; border-right: 0; flex: 1; }
+  body[data-pane="main"] .sidebar { display: none; }
+  body[data-pane="sidebar"] .centre { display: none; }
+  .pageinner { padding: 24px 16px 40px; }
+  .srow { height: 88px; flex-wrap: wrap; align-content: center; }
+  .srow .slot { flex: 1 0 100%; max-width: none; justify-content: space-between; padding-left: 44px; }
+  .srow .slot .fact, .srow .slot .fact.long { text-align: left; white-space: normal; }
+  .line { height: 56px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; }
+  .field.paste { width: 100%; }
+  .topbar .crumbs .up, .topbar .crumbs .sep { display: none; }
+}
+</style>
+</head>
+<body data-pane="sidebar" data-bar="1" data-rail="1">
+<div id="app"></div>
+<div class="bar" id="bar"></div>
+
+<script>
+// ---- icons and marks ----------------------------------------------------------------------
+const PATHS = Object.assign({}, window.ICONS, {
+  "chevron-down": '<path d="m6 9 6 6 6-6"/>',
+  "chevron-right": '<path d="m9 18 6-6-6-6"/>',
+  "chevron-up": '<path d="m18 15-6-6-6 6"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  minus: '<path d="M5 12h14"/>',
+  "circle-dashed": '<path d="M10.1 2.182a10 10 0 0 1 3.8 0"/><path d="M13.9 21.818a10 10 0 0 1-3.8 0"/><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7"/><path d="M2.182 13.9a10 10 0 0 1 0-3.8"/><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69"/><path d="M21.818 10.1a10 10 0 0 1 0 3.8"/><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69"/><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7"/>',
+  "circle-alert": '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
+  "circle-check": '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  "message-circle-question": '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  hourglass: '<path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/>',
+  "folder-code": '<path d="M10 10.5 8 13l2 2.5"/><path d="m14 10.5 2 2.5-2 2.5"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+});
+const icon = (k, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[k] || ""}</svg>`;
+const LOCKUP = `<svg class="lockup" viewBox="0 0 51 14" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="wsp"><g transform="translate(0 -1.08) scale(0.76)" stroke-width="3"><path d="M1.6 8A3.4 3.4 0 0 1 8 8A3.4 3.4 0 0 0 14.4 8"/></g><g transform="translate(17 0)" stroke-width="2"><path d="M1 1L3.5 9L6 3L8.5 9L11 1"/><path d="M20.9 3A2.4 2 0 1 0 18.5 5A2.4 2 0 1 1 16.1 7"/><path d="M26 1V13M26 1H29A4 4 0 0 1 29 9H26"/></g></svg>`;
+
+let markSeq = 0;
+/** One agent's catalog mark inline, its ids scoped per copy; the initials where the catalog has no mark (Crush). */
+function mark(id, cls = "") {
+  const m = window.MARKS[id];
+  if (!m || !m.svg) {
+    const words = (m ? m.name : id).split(/\s+/);
+    const initials = (words.length === 1 ? words[0].slice(0, 2) : words.slice(0, 2).map(w => w[0]).join("")).toUpperCase();
+    return `<svg class="mark ${cls}" viewBox="0 0 20 20" aria-hidden="true"><text x="10" y="10" text-anchor="middle" dominant-baseline="central" font-size="14">${initials}</text></svg>`;
+  }
+  const scope = `m${++markSeq}`;
+  const [, viewBox, body] = /^<svg\b[^>]*\bviewBox="([^"]+)"[^>]*>([\s\S]*)<\/svg>$/.exec(m.svg.trim());
+  const inner = body.replace(/\bid="([^"]+)"/g, `id="${scope}-$1"`).replace(/url\(#([^)]+)\)/g, `url(#${scope}-$1)`);
+  const inks = m.inks.map((ink, at) => `--ink-${at}-light:${ink.light};--ink-${at}-dark:${ink.dark}`).join(";");
+  return `<svg class="mark ${cls}" viewBox="${viewBox}" preserveAspectRatio="xMidYMid" ${m.inks.length ? `data-inks style="${inks}"` : ""} aria-hidden="true">${inner}</svg>`;
+}
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const plural = (n, w) => `${n} ${n === 1 ? w : w + "s"}`;
+
+// ---- fake data ----------------------------------------------------------------------------
+const MAC = "zingzy's MacBook Pro";
+const THREADS = [
+  {
+    id: "t1", title: "Fix the three flaky checkout tests", agent: "claude", state: "needs", project: "spoo-landing", where: MAC, branch: "fix/checkout-flakes", age: "1h",
+    path: "/Users/zingzy/spoo/spoo-landing-fix-the-three-flaky", access: "Bypass",
+    task: "The checkout suite has three tests that fail one run in four. Find why, fix them, and open a pull request.",
+    reply: [`Split into four threads: the cart rounding, the coupon expiry, the address race and an end to end run on Firefox. Two went to Solari since ${MAC} is at its cap.`, "The rounding fix is in and the coupon test is deterministic now. The address race is still open. I want your word on one thing before I merge: the Firefox run is held until Solari has room, and I can either wait or merge the three that pass."],
+    foot: { at: "9/26 1:12 PM", worked: "Worked for 4m 12s", cost: "$1.84 list price" },
+    children: [
+      { id: "t1a", title: "Cart total rounding", agent: "claude", state: "working", project: "spoo-landing", where: "Solari", branch: "fix/cart-rounding", age: "14m", path: "/root/spoo-landing", access: "Bypass",
+        task: "Find why the cart total test is flaky and fix it. Push a branch and tell me.",
+        reply: ["Found it: the total rounds per line instead of once at the end. The test's fixture has three lines at 0.335, so the per line rounding lands on 1.00 or 1.01 depending on the order the cart iterates.", "Moved the rounding to the end in cart/total.ts, added a fixture that pins the order, and pushed fix/cart-rounding, 2 files. Telling the lead."] },
+      { id: "t1b", title: "Coupon expiry test", agent: "claude", state: "idle", project: "spoo-landing", where: "Solari", branch: "fix/coupon-expiry", age: "32m", path: "/root/spoo-landing", access: "Bypass",
+        task: "The coupon expiry test reads the clock. Make it deterministic.",
+        reply: ["Pinned the clock with a fake timer and moved the expiry to a fixture. Pushed fix/coupon-expiry, 1 file."], foot: { at: "9/26 12:41 PM", worked: "Worked for 27m", cost: "$0.19 list price" } },
+      { id: "t1c", title: "Address form race", agent: "codex", state: "working", project: "spoo-landing", where: MAC, branch: "fix/address-race", age: "6m", path: "/Users/zingzy/spoo/spoo-landing-fix-the-three-flaky", access: "Bypass",
+        task: "Two requests race on the address form. Serialise them.",
+        reply: ["The second save cancels the first in flight. Adding an abort controller keyed on the form id."] },
+      { id: "t1d", title: "Checkout end to end on Firefox", agent: "claude", state: "waiting", reason: "no room on Solari, 2 of 2 machines on your plan are running", project: "spoo-landing", where: "Solari", branch: "fix/checkout-flakes", age: "3m", path: "/root/spoo-landing", access: "Bypass",
+        task: "Run the checkout suite end to end on Firefox and report what fails.", reply: null },
+    ],
+  },
+  { id: "t2", title: "Move the relay to one callback helper", agent: "claude", state: "working", project: "wsp", where: "spoo", branch: "relay-one-helper", age: "22m", path: "/home/zingzy/wsp", access: "Bypass",
+    task: "relay.ts has two callback roads. Fold them into one helper.", reply: ["Both roads parse the same frame. Folding them into readCallback and moving the tests over."], children: [] },
+  { id: "t3", title: "Rotate the relay token", agent: "claude", state: "waiting", reason: "building your image on ASCII, 3 of 5", project: "wsp", where: "ASCII", branch: "main", age: "9m", path: "/root/wsp", access: "Bypass",
+    task: "Rotate the relay token and update the two places that read it.", reply: null, children: [] },
+  { id: "t4", title: "Dark mode contrast pass", agent: "codex", state: "idle", project: "spoo-landing", where: MAC, branch: "fix/dark-contrast", age: "3h", path: "/Users/zingzy/spoo/spoo-landing-dark-mode", access: "Bypass",
+    task: "Check every text on the dark landing page reads at AA.", reply: ["Three labels were under 4.5:1. Raised them and pushed fix/dark-contrast."], foot: { at: "9/26 10:02 AM", worked: "Worked for 18m", cost: "$0.11 list price" }, children: [] },
+  { id: "t5", title: "Release notes for 0.9", agent: "claude", state: "failed", project: "wsp", where: "spoo", branch: "release-0.9", age: "2h", path: "/home/zingzy/wsp", access: "Bypass",
+    task: "Write the release notes for 0.9 from the merged pull requests.", reply: ["gh refused: the token in the vault has no read on Zingzy/wsp releases."], children: [] },
+];
+const SETTLED = [
+  { id: "s1", title: "Coupon codes at checkout", agent: "claude", word: "Merged", project: "spoo-landing", where: MAC, branch: "feat/coupons", age: "2d" },
+  { id: "s2", title: "Stop the daemon leaking ptys", agent: "claude", word: "Merged", project: "wsp", where: "spoo", branch: "fix/pty-leak", age: "3d" },
+  { id: "s3", title: "Try the new diff viewer", agent: "codex", word: "Closed", project: "wsp", where: MAC, branch: "spike/diff-viewer", age: "4d" },
+  { id: "s4", title: "Why is the sidebar slow on 400 threads", agent: "claude", word: null, project: "wsp", where: MAC, branch: "perf/sidebar", age: "6d" },
+];
+const INSTALLED = [
+  { id: "claude", version: "2.1.283", signIn: "signed in" },
+  { id: "codex", version: "0.155.1", signIn: "signed in" },
+  { id: "opencode", version: "1.18.18", signIn: "signed in" },
+  { id: "pi", version: "0.84.1", signIn: "needs sign-in" },
+  { id: "hermes", version: "0.20.0", signIn: "signed in" },
+];
+const AVAILABLE = ["gemini", "crush", "qwen", "goose", "amp"];
+const CLOUD_STATES = {
+  noroom: "no room: 2 of 2 machines on your plan are running",
+  waiting: "waiting for room: 2 of 2 machines on your plan are running",
+  spend: "spend limit reached today",
+  ready: "ready",
+  changed: "your image changed since Solari got it",
+};
+
+// ---- state off the url --------------------------------------------------------------------
+const q = new URLSearchParams(location.search);
+const S = {
+  screen: q.get("screen") || "threads",     // threads | computers | cloud | computer | image | addcloud
+  theme: q.get("theme") || "graphite",      // graphite | paper
+  open: q.get("open") || "t1a",
+  settled: q.get("settled") === "1",
+  picker: q.get("picker") || "",                 // "" | projects | computers: which filter's menu is open
+  rail: q.get("rail") !== "0",
+  nudge: q.get("nudge") || "off",             // off | first | waiting: the first-timer cloud nudge
+  cloud: q.get("cloud") || "noroom",
+  list: q.get("list") || "A",                   // A | B: the computers list's direction
+  refused: q.get("refused") === "1",
+  pane: q.get("pane") || "sidebar",
+  bar: q.get("bar") !== "0",
+};
+function go(patch) {
+  const u = new URL(location.href);
+  Object.entries(patch).forEach(([k, v]) => (v === null ? u.searchParams.delete(k) : u.searchParams.set(k, v)));
+  location.href = u.toString();
+}
+
+// ---- the sidebar --------------------------------------------------------------------------
+function framerow() {
+  return `<div class="framerow"><button class="ghosticon" aria-label="Toggle main sidebar">${icon("panel-left-close")}</button>${LOCKUP}</div>`;
+}
+/** The two filters over the tiles, each in the projects picker's grammar: a head row with the noun's glyph, "All
+ * ...", a chevron; under it the same menu, a search field, the all row with its check, one row per noun with its
+ * gear, and Add at the foot. Stacked, since side by side at 256 px cuts both labels. */
+const PICKERS = {
+  projects: { noun: "project", glyph: "folder", rows: [{ name: "wsp", glyph: icon("terminal", "glyph") }, { name: "py_spoo_url", glyph: icon("folder") }] },
+  computers: { noun: "computer", glyph: "monitor", rows: [{ name: MAC, glyph: icon("laptop") }, { name: "spoo", glyph: icon("server") }, { name: "studio", glyph: icon("server") }, { name: "Solari", glyph: icon("cloud") }, { name: "ASCII", glyph: icon("cloud") }] },
+};
+function picker(id) {
+  const p = PICKERS[id];
+  const all = `All ${p.noun}s`;
+  const open = S.picker === id;
+  const menu = `<div class="menu" role="listbox" aria-label="${esc(all)}">
+    <label class="search">${icon("search")}<input placeholder="Search ${p.noun}s" aria-label="Search ${p.noun}s"></label>
+    <div class="list">
+      <div class="option" role="option" data-active aria-selected="true">${icon(p.glyph)}<span class="truncate grow">${all}</span>${icon("check")}</div>
+      ${p.rows.map(r => `<div class="option" role="option" aria-selected="false">${r.glyph}<span class="truncate grow">${esc(r.name)}</span><button class="gear" aria-label="${esc(r.name)} settings">${icon("settings")}</button></div>`).join("")}
+    </div>
+    <div class="add"><button class="option">${icon("plus")}<span class="truncate grow">Add a ${p.noun}</span></button></div>
+  </div>`;
+  return `<div class="switcher" data-open="${open}">
+    <button class="row" aria-haspopup="listbox" aria-expanded="${open}" data-picker="${id}">${icon(p.glyph)}<span class="grow truncate">${all}</span>${icon("chevron-down", "chev")}</button>
+    ${open ? menu : ""}
+  </div>`;
+}
+function sidebarTop() {
+  return `<div class="fixed">
+    <div class="switcher"><button class="row pe" aria-label="Search">${icon("search")}<span class="grow">Search</span></button><button class="rowaction" aria-label="New thread">${icon("square-pen")}</button></div>
+    ${picker("projects")}
+    ${picker("computers")}
+  </div>`;
+}
+/** How each project is drawn, as the app's ProjectGlyph does: the glyph and hue the person picked, the folder in
+ * the row's own ink where nothing was. */
+const LOOKS = { wsp: { glyph: "terminal", hue: "var(--project-hue)" }, "spoo-landing": { glyph: "folder-code", hue: "var(--hue-orange)" } };
+const projectGlyph = id => { const l = LOOKS[id] || { glyph: "folder", hue: "currentColor" }; return `<span class="pj" style="color:${l.hue}">${icon(l.glyph)}</span>`; };
+/** The status slot's word, glyph and tone per thread state, T3's table. The top-right slot always holds a time or
+ * a word: a working thread shows its elapsed time there in the working colour, and the crab loader walks at the
+ * right end of row three, so the tile still reads right when the crab holds still. Waiting is wsp's own. */
+const STATUS = {
+  needs: { label: "Needs you", glyph: "message-circle-question", tone: "input" },
+  working: { tone: "working", timed: true },
+  failed: { label: "Failed", glyph: "circle-alert", tone: "failed" },
+  waiting: { label: "Waiting", glyph: "hourglass" },
+};
+/** One reading of a thread's status for every place a thread shows: the tone, the glyph, the word, the time, and
+ * whether the crab walks. A settled word (Merged, Closed) or a resting age comes back as plain text. */
+function threadStatus(t, word) {
+  if (word !== undefined) return { text: word || t.age };
+  const s = STATUS[t.state];
+  if (!s) return { text: t.age };
+  return { tone: s.tone, glyph: s.glyph, label: s.label, time: s.timed ? t.age : undefined, crab: t.state === "working" };
+}
+const CRAB = `<canvas class="crab" width="32" height="28" aria-hidden="true"></canvas>`;
+/** The slot that draws a status; the crab joins it only where the caller has no other row end for it. */
+function statusSlot(st, { crab = false } = {}) {
+  const inner = [st.glyph ? icon(st.glyph) : "", st.label ? `<span>${esc(st.label)}</span>` : "", st.time ? `<span>${esc(st.time)}</span>` : "", st.text ? `<span>${esc(st.text)}</span>` : "", crab && st.crab ? CRAB : ""].join("");
+  return `<span class="tstatus"${st.tone ? ` data-tone="${st.tone}"` : ""}>${inner}</span>`;
+}
+function tile(t, { current = false, word } = {}) {
+  const idle = t.state === "idle" || word !== undefined;
+  const st = threadStatus(t, word);
+  const hover = [t.title, `${t.project} @ ${t.where}`, window.MARKS[t.agent].name, t.reason].filter(Boolean).join("\n");
+  return `<button class="tile ${idle ? "idle" : ""}" aria-current="${current}" data-open="${t.id}" title="${esc(hover)}">
+    <span class="r1">${projectGlyph(t.project)}<span class="at truncate">${esc(t.project)} @ ${esc(t.where)}</span>${statusSlot(st)}</span>
+    <span class="r2 truncate">${esc(t.title)}</span>
+    <span class="r3">${mark(t.agent)}${icon("git-branch")}<span class="branch truncate">${esc(t.branch)}</span>${st.crab ? CRAB : ""}</span>
+  </button>`;
+}
+/** A thread as one line in a list: its agent's mark, its title, a muted place, and the status slot at a fixed width
+ * so times and words line up down the list. `place` is the computer in a thread's children, the project on a
+ * computer's own page. */
+function threadRow(t, place) {
+  return `<button class="kid" data-open="${t.id}">${mark(t.agent)}<span class="title truncate">${esc(t.title)}</span><span class="where truncate">${esc(place)}</span>${statusSlot(threadStatus(t), { crab: true })}</button>`;
+}
+/** The first-timer nudge, pinned in the sidebar's footer above Settings while the list scrolls: it shows only while no cloud exists and the person
+ * has not dismissed it, and is gone for good once a cloud exists. While a thread waits for room because the Mac is
+ * at its cap, the waiting words replace the first-run line. The bar's nudge switch stands in for that state here. */
+function nudge() {
+  if (S.nudge !== "first" && S.nudge !== "waiting") return "";
+  const words = S.nudge === "waiting" ? "A thread is waiting for room. A cloud would take it now." : "Add Solari or ASCII to run more at once";
+  return `<div class="nudge" role="note">
+    <span class="r1">${icon("cloud")}<span class="t truncate">Run threads in the cloud</span><button class="x" aria-label="Dismiss">${icon("x")}</button></span>
+    <span class="say">${esc(words)}</span>
+    <span class="act">${addBtn("Add a cloud", "xs", ' data-screen="addcloud"')}</span>
+  </div>`;
+}
+function threadSidebar() {
+  const tiles = THREADS.map(t => {
+    const root = tile(t, { current: S.open === t.id });
+    if (!t.children.length) return root;
+    return root + `<div class="children">${t.children.map(c => `<div class="railitem">${tile(c, { current: S.open === c.id })}</div>`).join("")}</div>`;
+  }).join("");
+  const fold = `<div class="fold" data-open="${S.settled}">
+    <button class="row" data-toggle="settled" aria-expanded="${S.settled}">
+      <span class="micro">Settled</span>
+      ${S.settled ? `<span class="textbtn" title="Frees 9.4 GB on ${MAC}">Delete copies</span>` : `<span class="meta">12 threads</span><span class="meta">9.4 GB</span>`}
+      ${icon("chevron-down", "chev")}
+    </button>
+    <div class="settled">${SETTLED.map(t => tile(t, { word: t.word })).join("")}</div>
+  </div>`;
+  return `<aside class="sidebar">
+    ${framerow()}
+    <div class="side">${sidebarTop()}<div class="list">${tiles}${fold}</div></div>
+    <div class="foot">${nudge()}<button class="row">${icon("settings")}<span class="grow">Settings</span><span class="meta">⌘,</span></button></div>
+  </aside>`;
+}
+
+// ---- the centre: the open thread, exactly today's --------------------------------------------
+function findThread(id) {
+  for (const t of THREADS) { if (t.id === id) return { t, root: null }; for (const c of t.children) if (c.id === id) return { t: c, root: t }; }
+  return { t: THREADS[0], root: null };
+}
+function threadCentre() {
+  const { t, root } = findThread(S.open);
+  const model = t.agent === "codex" ? "GPT-6 Astra" : "Opus 5.5";
+  const kids = t.children && t.children.length ? `<div class="kids"><span class="micro">Threads</span>${t.children.map(c => threadRow(c, c.where)).join("")}</div>` : "";
+  const reply = t.reply ? `<div class="msg agent">${t.reply.map(p => `<p>${esc(p)}</p>`).join("")}</div>` : `<div class="msg agent held"><p>${esc(t.reason || "")}</p></div>`;
+  const foot = t.foot ? `<div class="turnfoot">${icon("copy")}<span>${esc(t.foot.at)}</span><span>${esc(t.foot.worked)}</span><span>${esc(t.foot.cost)}</span></div>` : "";
+  return `<main class="centre">
+    <div class="topbar"><div class="crumbs">${mark(t.agent, "i")}${root ? `<button class="up truncate" data-open="${root.id}">${esc(root.title)}</button><span class="sep">/</span>` : ""}<span class="here truncate">${esc(t.title)}</span>${t.state === "waiting" ? `<span class="waiting" title="${esc(t.reason)}">waiting</span>` : ""}</div></div>
+    <div class="messages"><div class="turns">
+      <div class="msg person"><div class="card">${esc(t.task)}</div></div>
+      ${reply}${foot}${kids}
+    </div></div>
+    <div class="composerwrap"><div class="shell">
+      <div class="host"><div class="grid">
+        <span class="ghost truncate">Ask anything, or / for commands</span>
+        <span class="picks">
+          <button class="pick">${mark(t.agent)}<span>${model}</span>${icon("chevron-down", "small")}</button>
+          <button class="pick"><span>High</span>${icon("chevron-down", "small")}</button>
+        </span>
+        <span class="actions"><button class="ghosticon" aria-label="Attach">${icon("paperclip")}</button><button class="send" aria-label="Send">${icon("arrow-up")}</button></span>
+      </div></div>
+      <div class="strip">
+        <span class="left"><span class="slot7 mono truncate">${icon("folder-git")}<span class="truncate">${esc(t.path)}</span></span><button class="slot7 btn-ish">${icon("lock-open")}<span>${esc(t.access)}</span>${icon("chevron-down")}</button></span>
+        <span class="slot7 mono">${icon("git-branch")}<span>${esc(t.branch)}</span></span>
+      </div>
+    </div></div>
+  </main>`;
+}
+function agentsPanel() {
+  const { t } = findThread(S.open);
+  const installed = INSTALLED.map(a => {
+    const needs = a.signIn !== "signed in";
+    return `<div class="arow" role="listitem"><button class="body"><span class="tilebox">${mark(a.id)}</span><span class="words"><span class="name truncate">${esc(window.MARKS[a.id].name)}</span><span class="sub">${a.version}</span><span class="status" data-tone="${needs ? "warning" : "success"}"><span class="dot"></span><span class="word">${a.signIn}</span></span></span></button>
+      <span class="step">${needs ? `<button class="btn xs">${icon("log-in")}Sign in</button>` : `<button class="btn xs">${icon("square-terminal")}Open in terminal</button>`}</span></div>`;
+  }).join("");
+  const available = AVAILABLE.map(id => `<div class="arow short" role="listitem"><button class="body"><span class="tilebox">${mark(id)}</span><span class="words"><span class="name truncate">${esc(window.MARKS[id].name)}</span><span class="sub truncate">${esc(window.MARKS[id].blurb)}</span></span></button>
+      <span class="step"><button class="btn xs">${icon("download")}Install</button></span></div>`).join("");
+  return `<aside class="panel">
+    <div class="panelbar"><span class="tabchip">${icon("bot")}Agents</span><button class="ghosticon" aria-label="Add a panel">${icon("plus")}</button><span class="spread"></span><button class="ghosticon" aria-label="Toggle terminal drawer">${icon("panel-bottom")}</button><button class="ghosticon" aria-pressed="true" aria-label="Toggle right panel">${icon("panel-right")}</button></div>
+    <div class="manager">
+      <div class="segments" role="tablist">
+        <button class="segment" role="tab" aria-selected="true">${icon("bot")}<span>Agents</span><span class="fact">5</span></button>
+        <button class="segment" role="tab" aria-selected="false">${icon("plug")}<span>MCP servers</span><span class="fact">21</span></button>
+        <button class="segment" role="tab" aria-selected="false">${icon("scroll-text")}<span>Skills</span><span class="fact">371</span></button>
+      </div>
+      <div class="headline"><p>Agents on <u>${esc(t.where)}</u></p><button class="ghosticon" aria-label="Read again">${icon("refresh-cw")}</button></div>
+      <div class="rows" role="list">${installed}<div class="grouplabel micro">Available to install</div>${available}</div>
+    </div>
+  </aside>`;
+}
+
+// ---- settings -----------------------------------------------------------------------------
+function settingsSidebar(at) {
+  const group = (id, name, k, current, open = false) => `<button class="row ${open ? "open" : ""}" aria-current="${current}" data-screen="${id}">${icon(k)}<span class="grow truncate">${name}</span></button>`;
+  const sub = (id, name, k, current) => `<button class="row" aria-current="${current}" data-screen="${id}">${icon(k)}<span class="grow truncate">${name}</span></button>`;
+  const inComputers = ["computers", "cloud", "computer", "addcloud"].includes(at);
+  const onPlace = at === "cloud" || at === "computer";
+  return `<aside class="sidebar">
+    ${framerow()}
+    <div class="settings-search">${icon("search")}<span>Search settings</span></div>
+    <div class="side"><div class="groups">
+      ${group("computers", "General", "sliders-horizontal", false)}
+      ${group("computers", "Appearance", "palette", false)}
+      ${group("computers", "Computers", "monitor", inComputers && !onPlace, onPlace)}
+      <div class="subs">
+        ${sub("computers", MAC, "laptop", false)}
+        ${sub("computer", "spoo", "server", at === "computer")}
+        ${sub("computers", "studio", "server", false)}
+        ${sub("cloud", "Solari", "cloud", at === "cloud")}
+        ${sub("computers", "ASCII", "cloud", false)}
+      </div>
+      ${group("image", "Image", "file", at === "image")}
+      ${group("computers", "Projects", "folder", false)}
+      ${group("computers", "Devices", "smartphone", false)}
+      ${group("computers", "Account", "user", false)}
+      ${group("computers", "Privacy", "shield", false)}
+      ${group("computers", "Keybindings", "keyboard", false)}
+      ${group("computers", "About", "info", false)}
+    </div></div>
+    <div class="foot"><button class="row" data-screen="threads">${icon("arrow-left")}<span class="grow">Back</span><span class="meta">esc</span></button></div>
+  </aside>`;
+}
+function srow({ glyph, title, mark: m, facts = [], desc, word, long = false, control = "", opens = true }) {
+  const d = desc !== undefined ? `<span class="d truncate">${esc(desc)}</span>` : `<span class="facts">${facts.map(f => `<span class="fact">${esc(f)}</span>`).join("")}</span>`;
+  return `<div class="srow ${opens ? "opens" : ""}">
+    ${glyph ? `<span class="tilebox">${icon(glyph)}</span>` : ""}
+    <span class="words"><span class="t"><span class="truncate">${esc(title)}</span>${m ? `<span class="fact">${esc(m)}</span>` : ""}</span>${d}</span>
+    <span class="slot">${word ? `<span class="fact ${long ? "long" : ""}">${esc(word)}</span>` : ""}${control}${opens ? icon("chevron-right", "chev") : ""}</span>
+  </div>`;
+}
+const line = (label, right) => `<div class="line"><span class="label">${label}</span><span class="right">${right}</span></div>`;
+function card(head, body, { lede = "", under = "" } = {}) {
+  return `<section class="card">${head ? `<h2>${head}</h2>` : ""}${lede ? `<p class="lede">${lede}</p>` : ""}<div class="items">${body}</div>${under ? `<div class="under">${under}</div>` : ""}</section>`;
+}
+const stepper = (n, note = "") => `${note ? `<span class="fact">${esc(note)}</span>` : ""}<span class="stepper"><button aria-label="Fewer">${icon("minus")}</button><span class="n">${n}</span><button aria-label="More">${icon("plus")}</button></span>`;
+const facts = list => `<span class="facts">${list.map(f => `<span class="fact">${esc(f)}</span>`).join("")}</span>`;
+const settingsPage = (crumbs, h1, blurb, cards) => `<main class="centre"><div class="page"><div class="pageinner">
+  <div class="pagehead">${crumbs}<h1>${h1}</h1><p>${blurb}</p></div>${cards}
+</div></div></main>`;
+
+/* The computers list's facts. A state is a quiet word, a word in the attention colour, or the action itself; the
+ * full sentence rides along as the hover title and belongs on the row's own page. */
+const COMPUTERS = [
+  { glyph: "laptop", name: MAC, tag: "default", cores: 10, mem: "16 GB", running: 5, cap: 8, state: { word: "Ready" } },
+  { glyph: "server", name: "spoo", cores: 4, mem: "7.7 GB", running: 1, cap: 2, state: { button: "Update", why: "your image changed since this computer got it" } },
+  { glyph: "server", name: "studio", cores: 8, mem: "32 GB", running: 0, cap: 16, state: { button: "Sign in", why: "needs a sign-in: Codex" } },
+];
+const CLOUD_SHORT = {
+  noroom: { word: "Full", tone: "warning" },
+  waiting: { word: "Full", tone: "warning" },
+  spend: { word: "At limit", tone: "warning" },
+  ready: { word: "Ready" },
+  changed: { button: "Update" },
+};
+function clouds() {
+  const k = CLOUD_STATES[S.cloud] ? S.cloud : "noroom";
+  const full = k === "noroom" || k === "waiting";
+  return [
+    { glyph: "cloud", name: "Solari", running: full ? 2 : 1, cap: 2, spent: k === "spend" ? 10 : 2.31, limit: 10, state: Object.assign({ why: CLOUD_STATES[k] }, CLOUD_SHORT[k]) },
+    { glyph: "cloud", name: "ASCII", running: 0, cap: 3, spent: 0, limit: 10, state: { word: "Building 3/5", why: "building your image, 3 of 5" } },
+  ];
+}
+const money = (spent, limit) => `$${spent.toFixed(2)}/$${limit}`;
+const track = (n, cap) => `<span class="track"><span class="fill" style="width:${cap ? Math.min(100, (n / cap) * 100) : 0}%"></span></span>`;
+const meter = (n, cap, label) => `<span class="meter">${track(n, cap)}<span class="value">${esc(label)}</span></span>`;
+function stateCell(s) {
+  const why = s.why ? ` title="${esc(s.why)}"` : "";
+  if (s.button) return `<span class="state"><button class="btn xs"${why}>${esc(s.button)}</button></span>`;
+  return `<span class="state"${s.tone ? ` data-tone="${s.tone}"` : ""}${why}>${esc(s.word)}</span>`;
+}
+const who = r => named(icon(r.glyph), r.name, { tag: r.tag });
+
+/* Both sections share one template, so the cloud's machines meter spans the cores and memory columns and its spend
+ * meter sits under threads; the state column and the chevrons share one right edge. The header's first cell names
+ * the section, the only section label there is. */
+function computersGrid() {
+  const computers = `<div class="gl">
+    ${head([["Computer"], ["Cores", "num"], ["Memory", "num"], ["Threads"]])}
+    ${COMPUTERS.map(r => `<div class="gr">${who(r)}<span class="value num">${r.cores}</span><span class="value num">${esc(r.mem)}</span>${meter(r.running, r.cap, `${r.running}/${r.cap}`)}${stateCell(r.state)}${icon("chevron-right", "chev")}</div>`).join("")}
+  </div>`;
+  const cloud = `<div class="gl">
+    ${head([["Cloud"], ["Machines", "wide"], ["Spend today", "cloud-spend"]])}
+    ${clouds().map(r => `<div class="gr">${who(r)}<span class="wide">${meter(r.running, r.cap, `${r.running}/${r.cap}`)}</span><span class="cloud-spend">${meter(r.spent, r.limit, money(r.spent, r.limit))}</span>${stateCell(r.state)}${icon("chevron-right", "chev")}</div>`).join("")}
+  </div>`;
+  return [computers, cloud];
+}
+function computersLedger() {
+  const row = (r, spec, load) => `<div class="lr"><span class="who"><span class="tilebox">${icon(r.glyph)}</span><span class="words"><span class="name truncate">${esc(r.name)}${r.tag ? `<span class="tag">${esc(r.tag)}</span>` : ""}</span><span class="spec truncate">${esc(spec)}</span></span></span><span class="load">${track(r.running, r.cap)}<span class="n">${esc(load)}</span></span>${stateCell(r.state)}${icon("chevron-right", "chev")}</div>`;
+  const computers = `<div class="ledger">${COMPUTERS.map(r => row(r, `${r.cores} cores, ${r.mem}`, `${r.running} of ${r.cap} threads`)).join("")}</div>`;
+  const cloud = `<div class="ledger">${clouds().map(r => row(r, `$${r.spent.toFixed(2)} of $${r.limit} today`, `${r.running} of ${r.cap} machines`)).join("")}</div>`;
+  return [computers, cloud];
+}
+function computersPage() {
+  const [computers, cloud] = S.list === "B" ? computersLedger() : computersGrid();
+  const one = card("", computers, { under: addBtn("Add a computer") });
+  const two = card(S.list === "B" ? "Cloud" : "", cloud, { under: addBtn("Add a cloud", "", ' data-screen="addcloud"') });
+  return settingsPage("", "Computers", `The computers your threads run on, and the clouds that lend them machines. ${MAC} is the first one.`, one + two);
+}
+/* Brand marks for the CLIs and MCP servers the image names: simple-icons' paths inline, since the package is not in
+ * node_modules. GitHub takes the row's ink, the others their brand hue; a tool with no mark takes the terminal. */
+const BRANDS = {
+  node: { hue: "#5FA04E", d: "M11.998,24c-0.321,0-0.641-0.084-0.922-0.247l-2.936-1.737c-0.438-0.245-0.224-0.332-0.08-0.383 c0.585-0.203,0.703-0.25,1.328-0.604c0.065-0.037,0.151-0.023,0.218,0.017l2.256,1.339c0.082,0.045,0.197,0.045,0.272,0l8.795-5.076 c0.082-0.047,0.134-0.141,0.134-0.238V6.921c0-0.099-0.053-0.192-0.137-0.242l-8.791-5.072c-0.081-0.047-0.189-0.047-0.271,0 L3.075,6.68C2.99,6.729,2.936,6.825,2.936,6.921v10.15c0,0.097,0.054,0.189,0.139,0.235l2.409,1.392 c1.307,0.654,2.108-0.116,2.108-0.89V7.787c0-0.142,0.114-0.253,0.256-0.253h1.115c0.139,0,0.255,0.112,0.255,0.253v10.021 c0,1.745-0.95,2.745-2.604,2.745c-0.508,0-0.909,0-2.026-0.551L2.28,18.675c-0.57-0.329-0.922-0.945-0.922-1.604V6.921 c0-0.659,0.353-1.275,0.922-1.603l8.795-5.082c0.557-0.315,1.296-0.315,1.848,0l8.794,5.082c0.57,0.329,0.924,0.944,0.924,1.603 v10.15c0,0.659-0.354,1.273-0.924,1.604l-8.794,5.078C12.643,23.916,12.324,24,11.998,24z M19.099,13.993 c0-1.9-1.284-2.406-3.987-2.763c-2.731-0.361-3.009-0.548-3.009-1.187c0-0.528,0.235-1.233,2.258-1.233 c1.807,0,2.473,0.389,2.747,1.607c0.024,0.115,0.129,0.199,0.247,0.199h1.141c0.071,0,0.138-0.031,0.186-0.081 c0.048-0.054,0.074-0.123,0.067-0.196c-0.177-2.098-1.571-3.076-4.388-3.076c-2.508,0-4.004,1.058-4.004,2.833 c0,1.925,1.488,2.457,3.895,2.695c2.88,0.282,3.103,0.703,3.103,1.269c0,0.983-0.789,1.402-2.642,1.402 c-2.327,0-2.839-0.584-3.011-1.742c-0.02-0.124-0.126-0.215-0.253-0.215h-1.137c-0.141,0-0.254,0.112-0.254,0.253 c0,1.482,0.806,3.248,4.655,3.248C17.501,17.007,19.099,15.91,19.099,13.993z" },
+  github: { hue: "currentColor", d: "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" },
+  cloudflare: { hue: "#F38020", d: "M16.5088 16.8447c.1475-.5068.0908-.9707-.1553-1.3154-.2246-.3164-.6045-.499-1.0615-.5205l-8.6592-.1123a.1559.1559 0 0 1-.1333-.0713c-.0283-.042-.0351-.0986-.021-.1553.0283-.084.1124-.1474.2032-.1543l8.7359-.1123c1.0351-.0489 2.1601-.8868 2.5537-1.9136l.4994-1.3013c.0214-.0561.0284-.1128.0143-.169-.5626-2.5463-2.835-4.4453-5.5499-4.4453-2.5039 0-4.6284 1.6177-5.3876 3.8614-.4922-.3662-1.1187-.5625-1.794-.499-1.2026.1197-2.1665 1.0833-2.2861 2.2856-.0283.31-.0069.6128.0635.894C1.5683 13.171 0 14.7754 0 16.752c0 .1748.0142.3515.0352.5273.0141.0843.0844.1476.1687.1476h15.9814c.0909 0 .1758-.0633.2032-.1545l.1203-.4277zm2.7568-5.5654c-.0771 0-.1611 0-.2383.0112-.0566 0-.1054.0415-.127.0976l-.3378 1.1744c-.1475.5068-.0909.9707.1552 1.3154.2246.3164.6045.499 1.0616.5205l1.8437.1123c.0557 0 .1055.0283.1338.0713.0283.042.0351.1055.0214.1553-.0284.084-.1125.1474-.2032.1543l-1.921.1123c-1.0416.0489-2.1602.8868-2.5537 1.9136l-.1406.3585c-.0283.0705.0214.1406.0986.1406h6.5982c.0771 0 .1474-.0489.169-.126.1123-.4082.1757-.837.1757-1.2803 0-2.6025-2.125-4.7207-4.7343-4.7207" },
+  linear: { hue: "#5E6AD2", d: "M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.886 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12.1 12.1 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.823c-4.9-.82-8.995-4.915-9.823-9.823Z" },
+};
+const brand = id => `<svg class="mark brand" viewBox="0 0 24 24" style="color:${BRANDS[id].hue}" aria-hidden="true"><path fill="currentColor" d="${BRANDS[id].d}"/></svg>`;
+
+/* The settings grid grammar every list on these pages shares: a header row whose first cell names the section, rows
+ * with a glyph frame and a sans name, a quiet note under the name where the row has one, numbers right-aligned in
+ * mono, words in muted sans. */
+const head = cells => `<div class="gh">${cells.map(([w, cls = ""]) => `<span class="micro ${cls}">${w}</span>`).join("")}</div>`;
+const label = w => `<div class="gh solo"><span class="micro">${w}</span></div>`;
+const grid = (cls, headers, rows) => `<div class="gl ${cls}">${head(headers)}${rows.join("")}</div>`;
+const named = (glyph, name, { note = "", tag = "", mono = false } = {}) => `<span class="who"><span class="tilebox">${glyph}</span><span class="words"><span class="name truncate${mono ? " mono" : ""}">${esc(name)}${tag ? `<span class="tag">${esc(tag)}</span>` : ""}</span>${note ? `<span class="note truncate" title="${esc(note)}">${esc(note)}</span>` : ""}</span></span>`;
+const num = v => `<span class="value num">${esc(v)}</span>`;
+const word = w => `<span class="word truncate">${esc(w)}</span>`;
+/** Every Add in the prototype: the app's outline keycap with the plus before its label. */
+const addBtn = (text, cls = "", attrs = "") => `<button class="btn ${cls}"${attrs}>${icon("plus")}${text}</button>`;
+
+function imagePage() {
+  const path = card("", line(`<span class="value">~/.wsp/wsp-image.toml</span>`, `<button class="btn xs">${icon("file")}Open file</button>`));
+  const row = (glyph, name, cells, opts = {}, cls = "") => `<div class="gr ${cls}">${named(glyph, name, opts)}${cells.join("")}</div>`;
+  const agents = card("", grid("tight img", [["Agents"], ["Version", "num"], ["Source"]], [
+    row(mark("claude"), "Claude Code", [num("2.1.283"), word("catalog")]),
+    row(mark("codex"), "Codex", [num("0.155.1"), word("catalog")]),
+  ]), { under: addBtn("Add a row") });
+  const clis = card("", grid("tight img", [["CLIs"], ["Version", "num"], ["Source"]], [
+    row(brand("node"), "node", [num("22"), word("brew")]),
+    row(brand("github"), "gh", [num("2.81.0"), word("brew")]),
+    row(brand("cloudflare"), "wrangler", [num("4.42.0"), word("npm")]),
+    row(icon("terminal"), "bat", [num("0.25.0"), word("brew")]),
+    row(icon("terminal"), "just", [num("1.40.0"), word("script")], { note: "its own install and check" }),
+    row(icon("terminal"), "bat-extras", [num(""), word("")], { note: "left out: no Linux build" }, "left"),
+  ]), { under: addBtn("Add a row") });
+  const mcp = card("", grid("tight img", [["MCP servers"], [""], ["Where"]], [
+    row(brand("linear"), "linear", [num(""), word("travels")]),
+    row(brand("github"), "github", [num(""), word(`stays on ${MAC}`)]),
+  ]), { under: addBtn("Add a row") });
+  const skills = card("", grid("tight img", [["Skills"], ["Folders", "num"], ["Where"]], [
+    row(icon("folder"), "~/.claude/skills", [num("71"), word("travels")], { mono: true }),
+    row(icon("folder"), "~/.codex/skills", [num("4"), word("travels")], { mono: true }),
+    row(icon("folder"), "~/.agents/skills", [num("12"), word("travels")], { mono: true }),
+  ]), { under: addBtn("Add a folder") });
+  const read = `<p class="quiet">Last read 26 Sep, when wrangler was added.</p>`;
+  const machines = card("", grid("tight img", [["Machines"], [""], ["Image", "num"]], [
+    row(icon("laptop"), MAC, [num(""), stateCell({ word: "Source" })]),
+    row(icon("server"), "spoo", [num(""), stateCell({ button: "Update", why: "got the file built 24 Sep" })]),
+    row(icon("server"), "studio", [num(""), stateCell({ word: "Current" })]),
+    row(icon("cloud"), "Solari", [num(""), stateCell({ button: "Update", why: "got the file built 24 Sep" })]),
+    row(icon("cloud"), "ASCII", [num(""), stateCell({ word: "Building 3/5", why: "building your image, 3 of 5" })]),
+  ]), { lede: "Which of your computers and clouds have this file, and which got an older one." });
+  return settingsPage("", "Image", "Your setup as one file: agents, CLIs, MCP servers and skills. Every computer and cloud you add gets it.", path + agents + clis + mcp + skills + read + machines);
+}
+
+/** One computer's or cloud's own page: what needs a sign-in there in the image's groups, its limits, its image, the
+ * threads running there, and the way out. `id` is cloud (Solari) or computer (spoo). */
+function placeData(id) {
+  const account = `<button class="btn xs">Use a different account here</button>`;
+  const key = `<input class="field paste" placeholder="paste a Linear API key"><button class="btn xs">Save</button>`;
+  if (id === "cloud") {
+    const k = CLOUD_STATES[S.cloud] ? S.cloud : "noroom";
+    return {
+      name: "Solari", state: Object.assign({}, CLOUD_SHORT[k]), sentence: CLOUD_STATES[k],
+      agents: [
+        { glyph: mark("claude"), name: "Claude Code", version: "2.1.283", note: "Signed in as zingzy (default)", act: account },
+        { glyph: mark("codex"), name: "Codex", version: "0.155.1", note: "Can't run here: its sign-in can't be shared" },
+      ],
+      clis: [{ glyph: brand("github"), name: "gh", version: "2.81.0", note: "Signed in as Zingzy (default)", act: account }],
+      mcp: [{ glyph: brand("linear"), name: "linear", note: "Needs a sign-in", act: key }],
+      limits: [["Machines at once", "your plan takes 2", stepper(3)], ["Spend per day", "", `<input class="field money" value="$10">`]],
+      image: { note: "built 26 Sep, skipped bat-extras and just", state: { button: "Update", why: "your image changed since Solari got it" } },
+      threads: THREADS[0].children.filter(c => c.where === "Solari"),
+      remove: ["Remove Solari", "Deletes every machine wsp made there and forgets the key."],
+    };
+  }
+  return {
+    name: "spoo", state: { button: "Update" }, sentence: "your image changed since this computer got it",
+    agents: [
+      { glyph: mark("claude"), name: "Claude Code", version: "2.1.283", note: "Signed in as zingzy (default)", act: account },
+      { glyph: mark("codex"), name: "Codex", version: "0.155.1", note: "Signed in as zingzy", act: account },
+    ],
+    clis: [{ glyph: brand("github"), name: "gh", version: "2.81.0", note: "Signed in as Zingzy (default)", act: account }],
+    mcp: [{ glyph: brand("linear"), name: "linear", note: "Needs a sign-in", act: key }],
+    limits: [["Threads at once", "4 cores, 7.7 GB", stepper(2)]],
+    image: { note: "built 24 Sep; the file changed on 26 Sep", state: { button: "Update", why: "your image changed since this computer got it" } },
+    threads: THREADS.filter(t => t.where === "spoo"),
+    remove: ["Remove spoo", `wsp comes off spoo and its threads' records leave ${MAC}. Your files there stay.`],
+  };
+}
+function placePage(id) {
+  const p = placeData(id);
+  const signin = (name, rows) => rows.length ? card("", grid("tight signin", rows.some(r => r.version) ? [[name], ["Version", "num"]] : [[name]], rows.map(r => `<div class="gr">${named(r.glyph, r.name, { note: r.note })}${num(r.version || "")}<span class="act">${r.act || ""}</span></div>`))) : "";
+  const limits = card("", label("Limits") + p.limits.map(([l, note, control]) => `<div class="line"><span class="label"><span>${esc(l)}</span>${note ? `<span class="note">${esc(note)}</span>` : ""}</span><span class="right">${control}</span></div>`).join(""));
+  const image = card("", grid("tight signin", [["Image"]], [`<div class="gr">${named(icon("file"), "Your image", { note: p.image.note })}${num("")}${stateCell(p.image.state)}</div>`]));
+  const threads = card("", label("Threads running here") + p.threads.map(t => threadRow(t, t.project)).join(""));
+  const remove = card("", `<div class="line tall"><span class="label"><span>${esc(p.remove[0])}</span><span class="note">${esc(p.remove[1])}</span></span><span class="right"><button class="btn xs danger">Remove</button></span></div>`);
+  const crumbs = `<div class="crumbs"><button class="up" data-screen="computers">Computers</button><span class="sep">/</span><span>${esc(p.name)}</span></div>`;
+  const headline = `<span class="statehead">${stateCell(p.state)}<span>${esc(p.sentence)}</span></span>`;
+  return settingsPage(crumbs, p.name, headline, signin("Agents", p.agents) + signin("CLIs", p.clis) + signin("MCP servers", p.mcp) + limits + image + threads + remove);
+}
+function addCloudSheet() {
+  const refusal = S.refused
+    ? `<p class="refusal">Solari refused this key. <span class="fix">Check it on getsolari.com and paste it again.</span></p>`
+    : `<p class="refusal"><span class="held">Builds your image on Solari in the background. The row shows progress.</span></p>`;
+  return `<div class="scrim"><div class="sheet" role="dialog" aria-label="Add a cloud">
+    <div class="shead"><h1>Add a cloud</h1></div>
+    <div class="body">
+      ${line("Provider", `<span class="segmentctl"><button aria-pressed="true">${icon("cloud")}Solari</button><button aria-pressed="false">${icon("cloud")}ASCII</button></span>`)}
+      ${line("Key", `<input class="field paste" type="password" value="${S.refused ? "slr_live_9f2c" : ""}" placeholder="paste your Solari key">`)}
+      ${line("Machines at once", stepper(3))}
+      ${line("Spend per day", `<input class="field money" value="$10">`)}
+    </div>
+    ${refusal}
+    <div class="sfoot"><button class="btn" data-screen="computers">Cancel</button>${addBtn("Add", "primary", S.refused ? "" : " disabled")}</div>
+  </div></div>`;
+}
+
+// ---- the prototype's own bar ----------------------------------------------------------------
+function bar() {
+  const sel = (k, opts) => `<label>${k}<select data-q="${k}">${opts.map(([v, n]) => `<option value="${v}" ${S[k] === v ? "selected" : ""}>${n}</option>`).join("")}</select></label>`;
+  const chk = (k, n) => `<label><input type="checkbox" data-q="${k}" ${S[k] ? "checked" : ""}>${n}</label>`;
+  return [
+    sel("screen", [["threads", "threads"], ["computers", "computers"], ["cloud", "cloud page"], ["computer", "computer page"], ["image", "image"], ["addcloud", "add cloud"]]),
+    sel("theme", [["graphite", "graphite"], ["paper", "paper"]]),
+    S.screen === "threads" ? sel("picker", [["", "pickers shut"], ["projects", "projects open"], ["computers", "computers open"]]) : "",
+    S.screen === "threads" ? chk("settled", "settled open") : "",
+    S.screen === "threads" ? chk("rail", "rail") : "",
+    S.screen === "threads" ? sel("nudge", [["off", "nudge: off"], ["first", "nudge: first run"], ["waiting", "nudge: waiting"]]) : "",
+    S.screen === "computers" ? sel("cloud", Object.keys(CLOUD_STATES).map(k => [k, k])) : "",
+    S.screen === "computers" ? sel("list", [["A", "A"], ["B", "B"]]) : "",
+    S.screen === "addcloud" ? chk("refused", "key refused") : "",
+    sel("pane", [["sidebar", "phone: sidebar"], ["main", "phone: main"]]),
+  ].join("");
+}
+
+// ---- render ----------------------------------------------------------------------------------
+function render() {
+  document.documentElement.dataset.theme = S.theme;
+  document.documentElement.classList.toggle("dark", S.theme !== "paper");
+  document.body.dataset.pane = S.pane;
+  document.body.dataset.bar = S.bar ? "1" : "0";
+  document.body.dataset.rail = S.rail ? "1" : "0";
+  let html = "";
+  if (S.screen === "threads") html = `<div class="frame">${threadSidebar()}${threadCentre()}${agentsPanel()}</div>`;
+  else if (S.screen === "computers" || S.screen === "addcloud") html = `<div class="frame">${settingsSidebar(S.screen)}${computersPage()}</div>${S.screen === "addcloud" ? addCloudSheet() : ""}`;
+  else if (S.screen === "cloud" || S.screen === "computer") html = `<div class="frame">${settingsSidebar(S.screen)}${placePage(S.screen)}</div>`;
+  else if (S.screen === "image") html = `<div class="frame">${settingsSidebar("image")}${imagePage()}</div>`;
+  document.getElementById("app").innerHTML = html;
+  document.getElementById("bar").innerHTML = bar();
+  startCrabs();
+
+  document.querySelectorAll("[data-open]").forEach(el => el.addEventListener("click", e => { e.stopPropagation(); go({ open: el.dataset.open, pane: "main" }); }));
+  document.querySelectorAll("[data-screen]").forEach(el => el.addEventListener("click", e => { e.stopPropagation(); go({ screen: el.dataset.screen, pane: el.dataset.screen === "threads" ? "sidebar" : "main" }); }));
+  document.querySelectorAll("[data-toggle]").forEach(el => el.addEventListener("click", () => go({ [el.dataset.toggle]: S[el.dataset.toggle] ? "0" : "1" })));
+  document.querySelectorAll("[data-picker]").forEach(el => el.addEventListener("click", () => go({ picker: S.picker === el.dataset.picker ? null : el.dataset.picker })));
+  document.querySelectorAll(".bar [data-q]").forEach(el => el.addEventListener("change", () => go({ [el.dataset.q]: el.type === "checkbox" ? (el.checked ? "1" : "0") : el.value })));
+}
+render();
+</script>
+</body>
+</html>
