@@ -5,13 +5,14 @@
 // and the persona lab both take this road, so the environment a fixture is
 // served under is written once rather than once per harness.
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, WEB_DIR_ENV } from "@wsp/protocol";
+import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, shellQuote, WEB_DIR_ENV } from "@wsp/protocol";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { atProvider, HERE_LABEL } from "./fixture-state.mjs";
 
 const SCREENSHOTS_DIR = dirname(fileURLToPath(import.meta.url));
 export const WEB_DIR = resolve(SCREENSHOTS_DIR, "..");
@@ -37,7 +38,8 @@ export async function daemonBinaryHere(load = () => import(pathToFileURL(HOST_PA
 /** The path a fixture's host is started with: this computer's own, which is the wsp command's own reading of what a
  * machine may run, read out of that command rather than spelled a second time here. The shell that starts a lab may
  * be a harness's, and a harness puts wrappers of its own first on the path under a temp folder; a turn that ran one
- * of those dialled back into that harness and never answered. */
+ * of those dialled back into that harness and never answered. The one folder put back in front of it is the run's
+ * own under the throwaway home, holding the stand-in for this Mac's name (writeHereLabel). */
 export async function hostPath(load = () => import(pathToFileURL(HOST_PACKAGE).href)) {
   const { thisComputersPath } = await load();
   return thisComputersPath(process.env["PATH"]);
@@ -82,7 +84,7 @@ export const sleep = ms => new Promise(r => setTimeout(r, ms));
 /** The provider word a fixture's host runs under: a state holding forks or a sealed image needs a provider that
  * answers for them, and the one that answers out of memory is the only one that dials nothing. A state of local
  * machines alone runs with none, which is what that person's computer really has. */
-export const providerFor = state => (Object.values(state.workspaces ?? {}).some(w => w.kind === "cloud") || state.goldens !== undefined ? "fake" : "none");
+export const providerFor = state => (Object.values(state.workspaces ?? {}).some(atProvider) || state.goldens !== undefined ? "fake" : "none");
 
 /**
  * The whole environment a fixture's host is started with, and the only place it is written down, so the lab can
@@ -149,6 +151,17 @@ export const agentStores = home => Object.fromEntries(agentStoreRows(home).map((
  * than in the environment, since that is where the command takes it. */
 export const hostArgv = ({ statePath, port, wsPort, advertise }) => [HOST_BIN, "up", "--state", statePath, "--port", String(port), "--ws-port", String(wsPort), ...(advertise === undefined ? [] : ["--advertise", advertise])];
 
+/** A folder holding the one command a host asks for this Mac's name, answering the fixtures' label: the host reads
+ * the row's label off `scutil --get ComputerName` on its path, so the shots name one computer whichever Mac takes
+ * them. Answers the folder, which leads the host's path. */
+export function writeHereLabel(home) {
+  const bin = join(home, ".wsp-system");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "scutil"), `#!/bin/sh\nprintf '%s\\n' ${shellQuote(HERE_LABEL)}\n`);
+  chmodSync(join(bin, "scutil"), 0o755);
+  return bin;
+}
+
 /** Starts the built wsp command on a throwaway home holding one fixture state, and answers once it serves. A
  * secret is handed to the child and never written into the environment this answers with: the lab records and
  * prints what it started the host with, and a key in that record would be a key in a log. */
@@ -157,7 +170,7 @@ export async function startHost({ home, state, port, wsPort, logPath, detached =
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
   const out = logPath === undefined ? "pipe" : openSync(logPath, "a");
-  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn, records, path: await hostPath() });
+  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn, records, path: `${writeHereLabel(home)}:${await hostPath()}` });
   const child = spawn(process.execPath, hostArgv({ statePath, port, wsPort, advertise }), {
     cwd: home,
     env: { ...env, ...secrets },
@@ -169,7 +182,8 @@ export async function startHost({ home, state, port, wsPort, logPath, detached =
   child.stderr?.on("data", d => log.push(String(d)));
   const said = () => (logPath === undefined ? log.join("") : `the host's log is at ${logPath}`);
   const base = `http://127.0.0.1:${port}`;
-  const answer = { child, base, log, env, tokenPath: join(dirname(statePath), "host-token") };
+  const { hostTokenFor } = await import(pathToFileURL(HOST_PACKAGE).href);
+  const answer = { child, base, log, env, token: () => hostTokenFor(statePath) };
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`the host exited with ${child.exitCode} before it served:\n${said()}`);

@@ -51,7 +51,7 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readF
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fixtureCloud, fixtureFleet, fixtureFolders, FIXTURE_NAMES, fixtureRepos, fixtureState } from "./fixture-state.mjs";
+import { atProvider, fixtureCloud, fixtureFleet, fixtureFolders, FIXTURE_NAMES, fixtureRepos, fixtureState } from "./fixture-state.mjs";
 import { daemonBinaryHere, freePort, HOST_BIN, localReach, providerFor, sleep, startHost, whatIsNotBuilt } from "./host.mjs";
 import { AGENT_KEYS, binDir, copyApp, keyLayers, keysFound, labHome, labLogs, labShell, standInRoot, treeSha, writeAgentHome, writeKeys, writeShim, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 
@@ -215,7 +215,7 @@ export const launchDiesLine = (workspace, said) =>
 /** That sentence for this lab, or nothing when a launch lands. Run through the lab's own wsp, on the first fork the
  * fixture has running, since that is the road a tester takes; a fixture with no fork has no stand-in to ask. */
 export function whyALaunchDies(home, state, run = probeRun) {
-  const fork = Object.values(state.workspaces ?? {}).find(w => w.kind === "cloud" && w.phase === "running");
+  const fork = Object.values(state.workspaces ?? {}).find(w => atProvider(w) && w.phase === "running");
   if (fork === undefined) return undefined;
   const said = run(join(binDir(home), "wsp"), ["exec", fork.name, "--", PROBE_LINE], home);
   return said === undefined ? undefined : launchDiesLine(fork.name, said);
@@ -303,7 +303,7 @@ async function start({ name, fixture, for: keepLogIn }) {
     daemon: await daemonBinaryHere(),
     // Asked only where the fixture has one: a fixture of forks alone has no row here to read, and a word about a
     // workspace that is not in it would be a word about nothing.
-    ...(Object.values(state.workspaces).some(w => w.kind === "local") ? { reach: await localReach(host.base, readFileSync(host.tokenPath, "utf8").trim()) } : {}),
+    ...(Object.values(state.workspaces).some(w => w.kind === "local") ? { reach: await localReach(host.base, host.token()) } : {}),
     signedIn: key,
     startedAt: new Date().toISOString(),
   };

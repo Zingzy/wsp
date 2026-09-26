@@ -190,20 +190,22 @@ describe("the surfaces list this repo ships", () => {
       "settings-keybindings",
       "settings-about",
       "new-workspace",
-      "new-workspace-nowhere",
+      "first-run",
       "creating-workspace",
-      "workspace-projects",
     ]);
     // The one surface shot as a window on another computer, which is the only state the asleep line is drawn in.
     expect(read.surfaces.filter(s => s.remote).map(s => s.name)).toEqual(["host-asleep"]);
+    // The one surface that makes something on its host, which takes a host of its own for every shot.
+    expect(read.surfaces.filter(s => s.fresh).map(s => s.name)).toEqual(["creating-workspace"]);
     // Those served from a state of their own: an image that is built cannot stand in the same state file as one
     // that never was, a thread whose agent opened threads elsewhere needs the workspaces those threads run on, and
-    // a person with nowhere to put a workspace has neither computer nor provider.
+    // a person on the first run has no project added.
     expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "orchestrator", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes"]);
-    // Four are shot at the two widths a design reading is held to; the rest take every width the list shoots.
+    // The first run is shot at the two widths a design reading is held to, and New workspace at the one width whose
+    // sidebar carries its control; the rest take every width the list shoots.
     const narrowed = read.surfaces.filter(s => s.widths.length < read.widths.length);
-    expect(narrowed.map(s => s.name)).toEqual(["new-workspace", "new-workspace-nowhere", "creating-workspace", "workspace-projects"]);
-    expect(shotPlan(read)).toHaveLength((read.surfaces.length * read.widths.length - narrowed.length) * 2);
+    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]]]);
+    expect(shotPlan(read)).toHaveLength(read.surfaces.reduce((n, s) => n + s.widths.length, 0) * 2);
     // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
     expect(read.widths).toContain(1280);
     expect(read.heights[1280]).toBe(800);

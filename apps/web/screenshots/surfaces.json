@@ -144,9 +144,9 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=ws:ws_web",
+        "row-id=ws:ws_api",
         "390:key:Escape",
-        "390:sidebar=trigger",
+        "key:ControlOrMeta+n",
         "composer-folder"
       ],
       "wait": "k=folder-path",
@@ -158,9 +158,9 @@
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
-        "row-id=ws:ws_web",
+        "row-id=ws:ws_api",
         "390:key:Escape",
-        "390:sidebar=trigger",
+        "key:ControlOrMeta+n",
         "composer-folder",
         "k=folder-path",
         "type:/does/not/exist",
@@ -198,8 +198,7 @@
         "390:key:Escape",
         "390:sidebar=trigger",
         "k=settings-row",
-        "k=settings-computers",
-        "k=add-computer-button"
+        "k=settings-computers"
       ],
       "wait": "k=add-computer",
       "settleMs": 700
@@ -212,10 +211,9 @@
         "390:sidebar=trigger",
         "k=settings-row",
         "k=settings-computers",
-        "390:key:Escape",
-        "place-row=solari"
+        "place-row=p_hetzner"
       ],
-      "wait": "k=image-facts",
+      "wait": "k=image-state",
       "settleMs": 700
     },
     {
@@ -226,11 +224,10 @@
         "390:sidebar=trigger",
         "k=settings-row",
         "k=settings-computers",
-        "390:key:Escape",
-        "place-row=solari"
+        "place-row=p_hetzner"
       ],
       "fixture": "image-built",
-      "wait": "k=image-copy",
+      "wait": "k=image-holds",
       "settleMs": 700
     },
     {
@@ -241,8 +238,7 @@
         "390:sidebar=trigger",
         "k=settings-row",
         "k=settings-computers",
-        "390:key:Escape",
-        "place-row=solari",
+        "place-row=p_hetzner",
         "k=edit-recipe"
       ],
       "fixture": "image-built",
@@ -257,7 +253,6 @@
         "390:sidebar=trigger",
         "k=settings-row",
         "k=settings-computers",
-        "390:key:Escape",
         "place-row=p_hetzner"
       ],
       "wait": "settings-at=computer:p_hetzner",
@@ -271,7 +266,6 @@
         "390:sidebar=trigger",
         "k=settings-row",
         "k=settings-computers",
-        "390:key:Escape",
         "place-row=p_hetzner",
         "k=remove"
       ],
@@ -337,28 +331,23 @@
       "name": "new-workspace",
       "at": "/",
       "steps": [
-        "390:key:Escape",
-        "390:sidebar=trigger",
         "k=new-workspace"
       ],
-      "wait": "k=where-caption",
+      "wait": "k=landing",
       "settleMs": 700,
       "widths": [
-        1440,
-        390
+        1440
       ],
       "fixture": "mac-and-boxes"
     },
     {
-      "name": "new-workspace-nowhere",
+      "name": "first-run",
       "at": "/",
       "fixture": "mac-only",
       "steps": [
-        "390:key:Escape",
-        "390:sidebar=trigger",
-        "k=new-workspace"
+        "390:key:Escape"
       ],
-      "wait": "k=nowhere-here",
+      "wait": "k=first-run",
       "settleMs": 700,
       "widths": [
         1440,
@@ -370,31 +359,16 @@
       "at": "/",
       "fixture": "mac-and-boxes",
       "steps": [
-        "390:key:Escape",
-        "390:sidebar=trigger",
         "k=new-workspace",
+        "type:pricing page",
         "k=create"
       ],
       "wait": "testid=creation-log",
       "settleMs": 700,
       "widths": [
-        1440,
-        390
-      ]
-    },
-    {
-      "name": "workspace-projects",
-      "at": "/",
-      "steps": [
-        "1440:row-id=ws:ws_api",
-        "surface-launch=machine"
+        1440
       ],
-      "wait": "k=projects-note",
-      "settleMs": 700,
-      "widths": [
-        1440,
-        390
-      ]
+      "fresh": true
     }
   ]
 }
