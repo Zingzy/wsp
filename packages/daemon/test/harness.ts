@@ -193,12 +193,17 @@ export async function spawnDaemon(bin: string, args: DaemonArgs, waits: SpawnWai
     rest = parts.pop() ?? "";
     lines.push(...parts);
   });
+  const flush = (): void => {
+    if (rest !== "") lines.push(rest);
+    rest = "";
+  };
+  const stderrEnded = new Promise<void>(done => child.stderr.once("end", done));
   let gone = false;
   // exit, not close: a child of the daemon that inherited its stderr (an exec, a probe) would hold close open.
   const exited = new Promise<void>(done =>
     child.once("exit", () => {
       gone = true;
-      if (rest !== "") lines.push(rest);
+      flush();
       done();
     }),
   );
@@ -229,7 +234,12 @@ export async function spawnDaemon(bin: string, args: DaemonArgs, waits: SpawnWai
     child.once("exit", code => {
       clearTimeout(timer);
       // A child the timeout took down is reported by the timeout, with what it said.
-      if (!gaveUp) fail(new Error(`${bin} exited with ${code} before it listened:\n${said()}`));
+      if (gaveUp) return;
+      // An exit can land before the last of stderr is read; a child of its own holding stderr open waits no longer than a stop.
+      void Promise.race([stderrEnded, new Promise(r => setTimeout(r, stopMs).unref())]).then(() => {
+        flush();
+        fail(new Error(`${bin} exited with ${code} before it listened:\n${said()}`));
+      });
     });
     child.once("error", e => {
       clearTimeout(timer);

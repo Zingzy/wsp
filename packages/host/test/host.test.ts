@@ -25,6 +25,7 @@ import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { closeStandInGuests, fakeGuestAt } from "../src/fake-guest.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { createOn, projectOn } from "./verbs-fixture.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 runsFromItsOwnFolder();
 
@@ -137,7 +138,7 @@ function fixtureMachine(): { dir: string; home: string; state: string; project: 
   writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
   writeFileSync(join(home, ".claude", "projects", "s", "s1.jsonl"), `${[line("s1", ["node build.js", "node build.js", "node build.js", "pnpm install", "pnpm install", "pnpm install"]), line("s1", ["pulumi -q"])].join("\n")}\n`);
   writeFileSync(join(home, ".claude", "projects", "s", "s2.jsonl"), `${[line("s2", ["pnpm test", "pnpm test", "node build.js", "node build.js", "node build.js", "pulumi"])].join("\n")}\n`);
-  writeFileSync(join(bin, "java"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  writeStub(join(bin, "java"), "#!/bin/sh\nexit 0\n");
   // nodeHost() takes its home from HOME and answers `which` off PATH, so these two words are the whole computer
   // the verb sees: no transcript, config tree or binary of the box the suite runs on is read.
   vi.stubEnv("HOME", home);

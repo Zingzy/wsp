@@ -4,7 +4,7 @@
 // run under bash here rather than matched as text: what it is for is deciding
 // whether a command answers and at which version, which only a shell decides.
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -35,6 +35,7 @@ import { OLD_APPEND_MARKS, READS_PER_EXEC } from "../src/exec-detached.js";
 import { SERVER_MARK } from "../src/provision-files.js";
 import { tarOf } from "../src/vault.js";
 import type { ExecResult, Machine } from "../src/machine.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const ok: ExecResult = { exitCode: 0, stdout: "", stderr: "" };
 
@@ -49,8 +50,7 @@ function scratch(commands: Record<string, string>): string {
   onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
   for (const [name, body] of Object.entries(commands)) {
     const at = join(dir, name);
-    writeFileSync(at, `#!/bin/sh\n${body}\n`);
-    chmodSync(at, 0o755);
+    writeStub(at, `#!/bin/sh\n${body}\n`);
   }
   return dir;
 }
@@ -625,8 +625,7 @@ describe("the PATH every script of the job exports", () => {
     const bin = join(home, ".local/bin");
     mkdirSync(bin, { recursive: true });
     const marker = join(home, "uv-ran");
-    writeFileSync(join(bin, "uv"), `#!/bin/sh\ntouch ${marker}\n`);
-    chmodSync(join(bin, "uv"), 0o755);
+    writeStub(join(bin, "uv"), `#!/bin/sh\ntouch ${marker}\n`);
     // The tools PATH as it reads on a computer somebody owns: that home's own directory first, the system's
     // behind it; the probe list is the same with every directory under the home taken out.
     const tools = `${bin}:/usr/bin:/bin`;
@@ -693,8 +692,7 @@ describe("the PATH every script of the job exports", () => {
     // A cargo that writes its command where cargo does, into the bin folder of the home the job told it to keep.
     const system = join(dir, "system");
     mkdirSync(system);
-    writeFileSync(join(system, "cargo"), '#!/bin/sh\n[ -n "$CARGO_HOME" ] || { echo "the job told cargo no home" >&2; exit 1; }\nmkdir -p "$CARGO_HOME/bin"\nprintf \'#!/bin/sh\\necho tokei\\n\' > "$CARGO_HOME/bin/tokei"\nchmod +x "$CARGO_HOME/bin/tokei"\n');
-    chmodSync(join(system, "cargo"), 0o755);
+    writeStub(join(system, "cargo"), '#!/bin/sh\n[ -n "$CARGO_HOME" ] || { echo "the job told cargo no home" >&2; exit 1; }\nmkdir -p "$CARGO_HOME/bin"\nprintf \'#!/bin/sh\\necho tokei\\n\' > "$CARGO_HOME/bin/tokei"\nchmod +x "$CARGO_HOME/bin/tokei"\n');
     const step = toolInstallsFor([row("tools/cargo/tokei", "tools")], new Map(), [], `${system}:/usr/bin:/bin`, dir).installs.find(t => t.cmd.includes("cargo install"));
     const res = spawnSync("sh", ["-c", step!.cmd.replaceAll("/usr/local/bin", local)], { encoding: "utf8" });
     expect(res.status, res.stderr).toBe(0);
@@ -709,14 +707,12 @@ describe("the PATH every script of the job exports", () => {
     const planted = join(home, ".local/bin");
     mkdirSync(planted, { recursive: true });
     const ran = join(home, "planted-ran");
-    writeFileSync(join(planted, "uv"), `#!/bin/sh\ntouch ${ran}\n`);
-    chmodSync(join(planted, "uv"), 0o755);
+    writeStub(join(planted, "uv"), `#!/bin/sh\ntouch ${ran}\n`);
     // A uv where the job's own list looks, which writes down what the job told it.
     const system = join(home, "system");
     mkdirSync(system);
     const said = join(home, "said");
-    writeFileSync(join(system, "uv"), `#!/bin/sh\nprintf '%s %s %s\\n' "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$UV_PYTHON_INSTALL_DIR" > ${said}\n`);
-    chmodSync(join(system, "uv"), 0o755);
+    writeStub(join(system, "uv"), `#!/bin/sh\nprintf '%s %s %s\\n' "$UV_TOOL_DIR" "$UV_TOOL_BIN_DIR" "$UV_PYTHON_INSTALL_DIR" > ${said}\n`);
     const step = toolInstallsFor([row("tools/uv/ruff", "tools")], new Map(), [], `${system}:/usr/bin:/bin`, TOOL_PREFIX).installs.find(t => t.cmd.includes("uv tool install"));
     const res = spawnSync("sh", ["-c", step!.cmd], { encoding: "utf8" });
     expect(res.status, res.stderr).toBe(0);

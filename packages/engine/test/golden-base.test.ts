@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -11,6 +11,7 @@ import { TOOLS_PATH } from "../src/golden-import.js";
 import { FREE_KB_CMD, guardedRoad, reasonOf, roadLimitS } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import type { GoldenStage } from "../src/golden.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const ok: ExecResult = { exitCode: 0, stdout: "", stderr: "" };
 const mb = (n: number) => String(n * 1024);
@@ -137,8 +138,8 @@ describe("a download that fails", () => {
     // uname answers x86_64 so the script reaches its download on this Mac; the curl stand-in fails as curl 7.88 does on a 404.
     const dir = mkdtempSync(join(tmpdir(), "wsp-base-curl-"));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
-    writeFileSync(join(dir, "uname"), "#!/bin/sh\necho x86_64\n", { mode: 0o755 });
-    writeFileSync(join(dir, "curl"), '#!/bin/sh\necho "curl: (22) The requested URL returned error: 404" >&2\nexit 22\n', { mode: 0o755 });
+    writeStub(join(dir, "uname"), "#!/bin/sh\necho x86_64\n");
+    writeStub(join(dir, "curl"), '#!/bin/sh\necho "curl: (22) The requested URL returned error: 404" >&2\nexit 22\n');
     const script = [PRELUDE, ...ROAD_STEPS.script.env, UV_INSTALL].join("\n");
     const res = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { HOME: dir, PATH: `${dir}:/usr/bin:/bin` } });
     expect(res.status).toBe(22);
@@ -168,10 +169,10 @@ describe("the versions read", () => {
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
     for (const e of BASE_FLOOR) {
       for (const c of [{ bin: e.bin, version: e.major === undefined ? "9.9.9" : `${e.major.version}.0` }, ...(e.brings ?? []).map(b => ({ bin: b.bin, version: "9.9.9" }))]) {
-        writeFileSync(join(dir, c.bin), `#!/bin/sh\necho "${c.bin} ${c.version}"\n`, { mode: 0o755 });
+        writeStub(join(dir, c.bin), `#!/bin/sh\necho "${c.bin} ${c.version}"\n`);
       }
     }
-    writeFileSync(join(dir, "zip"), ["#!/bin/sh", "echo \"Copyright (c) 1990-2008 Info-ZIP - Type 'zip \\\"-L\\\"' for software license.\"", "echo 'This is Zip 3.0 (July 5th 2008), by Info-ZIP.'", ""].join("\n"), { mode: 0o755 });
+    writeStub(join(dir, "zip"), ["#!/bin/sh", "echo \"Copyright (c) 1990-2008 Info-ZIP - Type 'zip \\\"-L\\\"' for software license.\"", "echo 'This is Zip 3.0 (July 5th 2008), by Info-ZIP.'", ""].join("\n"));
     // The scratch folder goes ahead of the tools PATH the read exports, which itself carries /usr/bin: this Mac's
     // own zip would answer otherwise, and what is under test is the read, not this machine.
     const res = spawnSync("bash", ["-c", BASE_VERSIONS_CMD.replace(TOOLS_PATH, `${dir}:${TOOLS_PATH}`)], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });

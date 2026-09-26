@@ -2,7 +2,7 @@
 // The rows a recipe carries that the catalog does not: where they land in the
 // plan, what they run with, and what the tools stage records for them.
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -12,6 +12,7 @@ import { CUSTOM_PREFIX, TOOLS_PATH, customInstallsFor, customPrelude, recipeDige
 import { diffRecipes } from "../src/golden-diff.js";
 import { installTools } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 
 const just: RecipeCustomRow = { kind: "custom", id: "just", name: "just", install: ["brew install just"], check: "command -v just", why: "added by the agent" };
 const ruff: RecipeCustomRow = { kind: "custom", id: "ruff", name: "ruff", install: ["uv tool install ruff"], check: "ruff --version", why: "used in wsp" };
@@ -91,9 +92,9 @@ describe("the plan's rows outside the catalog", () => {
     // doing: the user it drops to, and that each argument arrives whole through two shells.
     const dir = mkdtempSync(join(tmpdir(), "wsp-shim-"));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
-    writeFileSync(join(dir, "su"), '#!/bin/sh\nshell=/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -s) shell="$2"; shift 2 ;; -c) script="$2"; shift 2 ;; --) shift; break ;; *) echo "[as $1]"; shift ;; esac; done\nexec "$shell" -c "$script" "$@"\n', { mode: 0o755 });
-    writeFileSync(join(dir, "brew-stub"), '#!/bin/sh\nfor a in "$@"; do echo "[$a]"; done\n', { mode: 0o755 });
-    writeFileSync(join(dir, "brew"), `${LINUXBREW_SHIM.replaceAll(BREW_REAL, join(dir, "brew-stub"))}\n`, { mode: 0o755 });
+    writeStub(join(dir, "su"), '#!/bin/sh\nshell=/bin/sh\nwhile [ $# -gt 0 ]; do case "$1" in -s) shell="$2"; shift 2 ;; -c) script="$2"; shift 2 ;; --) shift; break ;; *) echo "[as $1]"; shift ;; esac; done\nexec "$shell" -c "$script" "$@"\n');
+    writeStub(join(dir, "brew-stub"), '#!/bin/sh\nfor a in "$@"; do echo "[$a]"; done\n');
+    writeStub(join(dir, "brew"), `${LINUXBREW_SHIM.replaceAll(BREW_REAL, join(dir, "brew-stub"))}\n`);
     const out = execFileSync("bash", ["-c", 'brew install "some formula" --flag'], { encoding: "utf8", env: { ...process.env, PATH: `${dir}:${process.env["PATH"] ?? ""}` } });
     expect(out.trim().split("\n")).toEqual(["[as linuxbrew]", "[install]", "[some formula]", "[--flag]"]);
   });
