@@ -53,6 +53,7 @@ import {
   projectInstalls,
   stateListing,
   killUntilGone,
+  readGone,
   GoneWatch,
   snapshotUntilGone,
   MachineAliveError,
@@ -4675,7 +4676,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A builder made at another place is read on that place's backend; the wired one has never heard of it. A
     // joined computer that has never said what it forks with cannot be asked, and one that is not connected
     // answers absent: either way the record stays as it is until that computer dials in, and only a place that
-    // says the machine is gone drops it.
+    // reads the machine gone through readGone drops it; one it still finds is admitted at the next refresh.
     const place = stored.place ?? places.wired;
     const at = places.backend(place) ?? placeDoor?.backendOf(place);
     if (at === undefined) return;
@@ -4685,7 +4686,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     } catch (e) {
       if (isPlaceAbsent(e) || isNoProvider(e)) return;
       if (!isMissing(e)) throw e;
-      await store.delete(BUILDERS, stored.id);
+      if ((await readGone(at, stored.id)) === "gone") await store.delete(BUILDERS, stored.id);
       return;
     }
     // The view get() fetched is read once: a second read would reset the provider's idle timer again.
@@ -5704,7 +5705,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id, origin);
       const kind = entry.record.kind;
       if (!kindWords(kind).driven) throw Object.assign(new Error(forgetUndrivenRefusal(entry.record.name, machineWord(kind))), { kind: "conflict" });
-      const state = await entry.machine.state();
+      const state = await readGone(backendFor(entry.record), entry.machine.id);
       if (state !== "gone") {
         throw Object.assign(new Error(`${entry.record.name}'s machine ${entry.machine.id} is still ${state}; pause it or delete it at the provider first`), { kind: "conflict" });
       }
@@ -7479,15 +7480,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await store.delete(BUILDERS, id);
   };
 
-  /** What a stopped build does with the record of the machine its rollback tried to take: the provider is read
-   * once, and only a machine it answers gone for loses its record. One that outlived the kill, or one the provider
+  /** What a stopped build does with the record of the machine its rollback tried to take: only a machine the provider
+   * answers gone for GONE_READS reads in a row loses its record. One that outlived the kill, or one the provider
    * could not be asked about, keeps it, since a machine still running that nothing points at bills until somebody
    * lists the account by hand; a kept record is what the next build attaches to and what the doctor sweeps. */
   const forgetIfGone = async (entry: LiveBuilder, at: MachineBackend): Promise<void> => {
-    const gone = await at
-      .get(entry.record.id)
-      .then(m => m.state())
-      .then(state => state === "gone", (e: unknown) => isMissing(e));
+    const gone = await readGone(at, entry.record.id).then(
+      state => state === "gone",
+      () => false,
+    );
     if (gone) await forgetBuilder(entry.record.id);
   };
 

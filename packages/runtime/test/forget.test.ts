@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Forgetting, on both objects. A workspace whose machine the provider no longer has: the record,
 // its transcripts and its sessions leave the store and workspace.deleted
-// follows, with nothing asked of the provider; a workspace whose machine still
-// exists is refused with the reason and kept whole. A thread: a launch refused
+// follows, with nothing asked of the machine; a workspace whose machine any read still
+// finds is refused with the reason and kept whole. A thread: a launch refused
 // before the agent started writes no row anywhere, and a thread left standing
 // with no turn that ever did work is dropped, a turn the agent refused outright
 // among them, while one whose turn worked is refused in one sentence.
@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { codexNotSignedInLine, foldThreads, forgetUndrivenRefusal, HERE_PLACE_ID, THIS_COMPUTER, signInRefusalLine, threadForgetRefusal, type EventUnion, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
-import { fakeLocal, stubBackend, createOn, projectOn } from "./stub-backend.js";
+import { answersGoneOnce, fakeLocal, stubBackend, createOn, projectOn } from "./stub-backend.js";
 
 describe("workspaces.forget", () => {
   it("drops a workspace whose machine is gone: record, transcripts and sessions leave the store and workspace.deleted follows", async () => {
@@ -64,6 +64,19 @@ describe("workspaces.forget", () => {
     expect(backend.machines[0]!.killed).toBe(false);
     expect((await rt.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
     expect(await store.get("workspaces", ws.id)).toMatchObject({ id: ws.id, phase: "napping" });
+  });
+
+  it("refuses a workspace one gateway copy answers 404 for while the other still runs its machine, and keeps everything", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await createOn(rt, { golden: "snap_g", name: "split" });
+    answersGoneOnce(backend, backend.machines[0]!);
+
+    await expect(rt.workspaces.forget(ws.id)).rejects.toMatchObject({ message: "split's machine m1 is still running; pause it or delete it at the provider first", kind: "conflict" });
+
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
+    expect(await store.get("workspaces", ws.id)).toMatchObject({ id: ws.id });
   });
 });
 
