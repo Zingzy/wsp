@@ -36,7 +36,7 @@ const labelsFor = (role: Record<string, string>): Record<string, string> => ({
 });
 
 const short = (id: string): string => `${id.slice(0, 20)}...`;
-// Cleanup may run killUntilGone, two kills with a 30 s grace each, per leftover
+// Cleanup may run killUntilGone, three kills with a 30 s grace each, per leftover
 // machine plus a snapshot delete; vitest's default hook budget is 10 s.
 const CLEANUP_MS = 180_000;
 

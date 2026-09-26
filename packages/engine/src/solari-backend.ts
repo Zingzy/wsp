@@ -59,6 +59,10 @@ const STATE_MAP: Record<SandboxView["state"], MachineState> = {
   gone: "gone",
 };
 
+/** A state word the table never learned reads running: a delete that read it as gone would leave a machine billing
+ * with nobody watching it. */
+const stateOf = (state: string): MachineState => STATE_MAP[state as SandboxView["state"]] ?? "running";
+
 /** Solari changelog 2026-09-04: snapshot storage is billed from 2026-10-01, 10 GB free per organization, then $0.05 per GB-month pro-rated daily. */
 export const SNAPSHOT_STORAGE: SnapshotStoragePricing = { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" };
 
@@ -259,7 +263,7 @@ export class SolariBackend implements MachineBackend {
       { "Idempotency-Key": spec.idempotencyKey ?? crypto.randomUUID() },
     );
     // The create response has carried no createdAt (measured 2026-09-04); when it does, it rides on seen for information and nothing reads it.
-    const seen = res.createdAt !== undefined ? { state: STATE_MAP[res.state ?? "running"] ?? "running", createdAt: res.createdAt } : undefined;
+    const seen = res.createdAt !== undefined ? { state: stateOf(res.state ?? "running"), createdAt: res.createdAt } : undefined;
     return new SolariMachine(this, res.sandboxId, res.kind ?? spec.kind, res.streamUrl, spec.labels, seen, reply.headers.get("Idempotent-Replayed") === "true");
   }
 
@@ -272,7 +276,7 @@ export class SolariBackend implements MachineBackend {
   async get(id: string): Promise<Machine> {
     const view = await this.request<SandboxView>("GET", `/sandboxes/${encodeURIComponent(id)}`);
     return new SolariMachine(this, view.sandboxId ?? id, view.kind ?? "sandbox", undefined, view.metadata, {
-      state: STATE_MAP[view.state] ?? "gone",
+      state: stateOf(view.state),
       ...(view.createdAt !== undefined ? { createdAt: view.createdAt } : {}),
     });
   }
@@ -291,7 +295,7 @@ export class SolariBackend implements MachineBackend {
       for (const s of page.sandboxes ?? []) {
         out.push({
           id: s.sandboxId,
-          state: STATE_MAP[s.state] ?? "gone",
+          state: stateOf(s.state),
           labels: s.metadata ?? {},
           ...(s.cpu !== undefined && s.memMb !== undefined ? { size: { cpu: s.cpu, memMb: s.memMb } } : {}),
         });
@@ -441,7 +445,7 @@ class SolariMachine implements Machine {
   private async readState(capMs: number): Promise<MachineState | undefined> {
     try {
       const view = await this.backend.request<SandboxView>("GET", this.path(), undefined, capMs);
-      return STATE_MAP[view.state] ?? "gone";
+      return stateOf(view.state);
     } catch (e) {
       return isMissing(e) ? "gone" : undefined;
     }
@@ -454,7 +458,7 @@ class SolariMachine implements Machine {
   async state(): Promise<MachineState> {
     try {
       const view = await this.backend.request<SandboxView>("GET", this.path());
-      return STATE_MAP[view.state] ?? "gone";
+      return stateOf(view.state);
     } catch (e) {
       if (isMissing(e)) return "gone";
       throw e;

@@ -527,7 +527,7 @@ describe("interactive golden: prepare then seal", () => {
     expect(await builder.machine.state()).toBe("gone");
   });
 
-  it("seal fails with a typed error when the builder outlives two kills, and never boots the smoke fork", async () => {
+  it("seal fails with a typed error when the builder outlives three kills, and never boots the smoke fork", async () => {
     const { backend, created, timeline, deletedSnapshots } = recordingBackend({}, { ignoreKill: () => true });
     const { stages, onStage } = stageRecorder();
     const builder = await prepareBuilder({ backend, setup: "true" });
@@ -548,8 +548,8 @@ describe("interactive golden: prepare then seal", () => {
     const { manifest } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", killConfirm: FAST_KILL, onStage });
     expect(manifest.head).toBe(1);
     expect(deletedSnapshots).toEqual([]);
-    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "create m2", "kill m2", "kill m2"]);
-    expect(stages.at(-1)).toMatch(/^sealed:v1; machine m2 is still running after two kills/);
+    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1", "create m2", "kill m2", "kill m2", "kill m2"]);
+    expect(stages.at(-1)).toMatch(/^sealed:v1; machine m2 is still running after three kills/);
   });
 
   it("a backend that refuses the seal's snapshot as notFirstLife ends it with that error, and the builder is left as it was", async () => {

@@ -7,7 +7,6 @@ import {
   ADDRESS_NEXT_START,
   NOT_UP_YET,
   NO_HOSTS_LINE,
-  hostAliasHeldLine,
   hostBeatWord,
   hostDroppedLine,
   hostKeyMovedLine,
@@ -1989,28 +1988,28 @@ describe("a desktop shell and the host that served it its page", () => {
 });
 
 describe("the one listing of the hosts a computer can reach", () => {
-  it("puts the road each host is held by in a column of its own, and marks the one every line takes", () => {
+  it("prints each host on the account with its beat, and marks the one every line takes", () => {
     const cells = hostsTable([
-      { host: "macbook", address: "https://h1.singhi.me", via: "account", awayMs: 12_000, connector: "2026.8.1", hostKey: "SHA256:aaa", deviceId: "d_1", default: true },
-      { host: "attic", via: "account", awayMs: null },
-      { host: "box", address: "http://192.168.1.9:4400", via: "code", deviceId: "d_2", hostKey: "SHA256:bbb" },
+      { host: "macbook", address: "https://h1.singhi.me", awayMs: 12_000, connector: "2026.8.1", hostKey: "SHA256:aaa", deviceId: "d_1", default: true },
+      { host: "attic", awayMs: null },
+      { host: "box", address: "https://h2.singhi.me", deviceId: "d_2", hostKey: "SHA256:bbb" },
     ]);
-    expect(cells[0]).toEqual(["HOST", "ADDRESS", "VIA", "STATE", "DEVICE", "CONNECTOR", "KEY", ""]);
-    expect(cells[1]).toEqual(["macbook", "https://h1.singhi.me", "account", "up 12s", "d_1", "2026.8.1", "SHA256:aaa", "default"]);
+    expect(cells[0]).toEqual(["HOST", "ADDRESS", "STATE", "DEVICE", "CONNECTOR", "KEY", ""]);
+    expect(cells[1]).toEqual(["macbook", "https://h1.singhi.me", "up 12s", "d_1", "2026.8.1", "SHA256:aaa", "default"]);
     // A host on the account that has not said where it is: there is nothing to dial and the row says so.
-    expect(cells[2]).toEqual(["attic", NOT_UP_YET, "account", "not yet", "", "", "", ""]);
-    // A host reached by a code says nothing about itself until it is dialled, so its state is left empty rather
-    // than read as away.
-    expect(cells[3]).toEqual(["box", "http://192.168.1.9:4400", "code", "", "d_2", "", "SHA256:bbb", ""]);
+    expect(cells[2]).toEqual(["attic", NOT_UP_YET, "not yet", "", "", "", ""]);
+    // A row read off this computer's records while the relay did not answer says nothing of a beat, so its state is
+    // left empty rather than read as away.
+    expect(cells[3]).toEqual(["box", "https://h2.singhi.me", "", "d_2", "", "SHA256:bbb", ""]);
   });
 
   it("says a host that is beating with no address yet waits on its next start, so one row says one thing", () => {
     // A host on the account beating from a wsp from before it sent the key every dial holds it to: the address is
     // withheld until a beat carries the key, and the state column already calls it up.
-    const cells = hostsTable([{ host: "attic", via: "account", awayMs: 30_000, connector: "2026.7.1" }]);
-    expect(cells[1]).toEqual(["attic", ADDRESS_NEXT_START, "account", "up 30s", "", "2026.7.1", "", ""]);
+    const cells = hostsTable([{ host: "attic", awayMs: 30_000, connector: "2026.7.1" }]);
+    expect(cells[1]).toEqual(["attic", ADDRESS_NEXT_START, "up 30s", "", "2026.7.1", "", ""]);
     // A host that has never beaten is not up at all, and its row says that instead.
-    expect(hostsTable([{ host: "attic", via: "account", awayMs: null }])[1]![1]).toBe(NOT_UP_YET);
+    expect(hostsTable([{ host: "attic", awayMs: null }])[1]![1]).toBe(NOT_UP_YET);
   });
 
   it("calls a host up inside two beats and away after them, since one missed beat is a slow minute", () => {
@@ -2027,11 +2026,10 @@ describe("the one listing of the hosts a computer can reach", () => {
     expect(said).toContain("SHA256:held");
     expect(said).toContain("SHA256:listed");
     expect(said).toContain("wsp host pair");
-    expect(said).toContain("wsp host forget macbook");
-    expect(hostAliasHeldLine("box")).toContain("wsp host forget box");
+    expect(said).toContain("wsp logout, wsp login and wsp hosts");
     expect(hostDroppedLine("attic")).toContain("attic");
     expect(relayQuietLine("the relay at https://r did not answer")).toContain("the rows below");
     expect(NO_HOSTS_LINE).toContain("wsp login");
-    expect(NO_HOSTS_LINE).toContain("wsp host connect");
+    expect(NO_HOSTS_LINE).not.toContain("--code");
   });
 });

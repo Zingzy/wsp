@@ -483,7 +483,7 @@ describe("wsp status on a computer joined as a place", () => {
       "wsp status --watch reads the agent on a computer joined to somebody's wsp, and this computer is joined to none. Run wsp status without --watch for the host serving here, or wsp workspaces --watch to follow what it runs.",
     );
     joined();
-    writeHost(home, "box", { url: "http://box.example:4400", deviceId: "d1", deviceToken: "t1", hostKey: HOST_KEY, pairedAt: "2026-09-13T02:00:00.000Z" });
+    writeHost(home, "box", { url: "http://box.example:4400", deviceId: "d1", deviceToken: "t1", hostKey: HOST_KEY, pairedAt: "2026-09-13T02:00:00.000Z", via: { kind: "account", hostId: "hbox" } });
     await expect(statusCommand(io, { ...at, host: "box" }, deps(fakeDaemon(READINGS).deps))).rejects.toThrow("wsp status --watch reads the agent on the computer you are sitting at, and this line is aimed at the host on box.");
   });
 

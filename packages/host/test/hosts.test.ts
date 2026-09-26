@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The hosts file and the one rule that decides which host a line runs
 // against: a record round trips at mode 0600, a flag beats the environment
-// beats the default alias beats the lock on this computer, and a URL typed
-// where an alias goes is a host nothing is stored for.
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+// beats the lock on this computer beats the account's one host, and a URL
+// typed where an alias goes is a host nothing is stored for.
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LAUNCHED_WITH, WS_PATH, hostNoKeyLine } from "@wsp/protocol";
-import { accountHosts, aimedAlias, aimedHost, aliasFrom, checkedAlias, defaultHost, dialWindowMs, hostsDir, listHosts, noSuchHostLine, readHost, removeHost, setDefaultHost, severalAccountHostsLine, wsUrlOf, wspHome, writeHost, type HostRecord } from "../src/hosts.js";
+import { accountHosts, aimedAlias, aimedHost, aliasFrom, dialWindowMs, hostsDir, listHosts, noSuchHostLine, readHost, removeHost, severalAccountHostsLine, wsUrlOf, wspHome, writeHost, type HostRecord } from "../src/hosts.js";
 import { homeNamed } from "../src/serving-home.js";
 import { hostAddress, noHostServingLine } from "../src/verbs.js";
 
@@ -24,10 +24,10 @@ function tempDir(tag: string): string {
   return dir;
 }
 
-/** The fingerprint a pairing pinned, as every record written since wsp pinned keys carries one. */
+/** The fingerprint the account listed for a host, which every record wsp hosts writes pins. */
 const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
 
-const record = (url: string, id = "d_1a2b3c4d"): HostRecord => ({ url, deviceId: id, deviceToken: `tok-${id}`, hostKey: HOST_KEY, pairedAt: "2026-09-11T10:00:00.000Z" });
+const record = (url: string, id = "d_1a2b3c4d"): HostRecord => ({ url, deviceId: id, deviceToken: `tok-${id}`, hostKey: HOST_KEY, pairedAt: "2026-09-11T10:00:00.000Z", via: { kind: "account", hostId: `h${id}` } });
 
 /** A state folder whose lock names this process, which is a host serving it as far as every reader is concerned. */
 function servedState(port = 4400): string {
@@ -53,53 +53,44 @@ describe("the hosts file", () => {
     writeFileSync(join(hostsDir(home), "box.json"), "{}\n");
     chmodSync(join(hostsDir(home), "box.json"), 0o644);
     writeHost(home, "box", record("http://box.local:4400"));
-    setDefaultHost(home, "box");
     expect(statSync(join(hostsDir(home), "box.json")).mode & 0o777).toBe(0o600);
-    expect(statSync(join(hostsDir(home), "default")).mode & 0o777).toBe(0o600);
     expect(statSync(hostsDir(home)).mode & 0o777).toBe(0o700);
     expect(readHost(home, "box")).toEqual(record("http://box.local:4400"));
   });
 
-  it("lists every alias with its url and marks the default, and answers nothing for a home with no hosts folder", () => {
+  it("lists every alias with its url, and answers nothing for a home with no hosts folder", () => {
     const home = tempDir("hosts-home");
     expect(listHosts(home)).toEqual([]);
     writeHost(home, "box", record("http://box.local:4400", "d_1"));
     writeHost(home, "attic", record("https://attic.example", "d_2"));
-    setDefaultHost(home, "box");
     expect(listHosts(home)).toEqual([
-      { alias: "attic", url: "https://attic.example", deviceId: "d_2", default: false },
-      { alias: "box", url: "http://box.local:4400", deviceId: "d_1", default: true },
+      { alias: "attic", url: "https://attic.example", deviceId: "d_2" },
+      { alias: "box", url: "http://box.local:4400", deviceId: "d_1" },
     ]);
   });
 
-  it("removes the file and clears the default when it named the one removed", () => {
+  it("removes the file, and answers false when there was none", () => {
     const home = tempDir("hosts-home");
     writeHost(home, "box", record("http://box.local:4400"));
-    setDefaultHost(home, "box");
     expect(removeHost(home, "box")).toBe(true);
     expect(readHost(home, "box")).toBeUndefined();
-    expect(defaultHost(home)).toBeUndefined();
-    // The mark itself goes, not only its reading: a pointer left behind makes the next connect under that name
-    // read as already marked and say the wrong thing about where lines go.
-    expect(existsSync(join(hostsDir(home), "default"))).toBe(false);
     expect(removeHost(home, "box")).toBe(false);
-  });
-
-  it("leaves the default alone when another host is removed", () => {
-    const home = tempDir("hosts-home");
-    writeHost(home, "box", record("http://box.local:4400"));
-    writeHost(home, "attic", record("https://attic.example"));
-    setDefaultHost(home, "box");
-    removeHost(home, "attic");
-    expect(defaultHost(home)).toBe("box");
   });
 
   it("refuses an alias that is a path rather than a name, so nothing writes outside the hosts folder", () => {
     const home = tempDir("hosts-home");
     expect(() => writeHost(home, "../evil", record("http://x"))).toThrow(/alias/);
     expect(() => writeHost(home, "a/b", record("http://x"))).toThrow(/alias/);
-    expect(() => setDefaultHost(home, "../evil")).toThrow(/alias/);
     expect(readHost(home, "../evil")).toBeUndefined();
+  });
+
+  it("reads a file with no account behind it as no record, since nothing but wsp hosts writes one now", () => {
+    const home = tempDir("hosts-home");
+    mkdirSync(hostsDir(home), { recursive: true });
+    const { via: _gone, ...paired } = record("http://192.168.1.9:4400");
+    writeFileSync(join(hostsDir(home), "lan.json"), JSON.stringify(paired));
+    expect(readHost(home, "lan")).toBeUndefined();
+    expect(listHosts(home)).toEqual([]);
   });
 
   it("folds a name nobody typed through the same rule a typed one is held to", () => {
@@ -114,16 +105,16 @@ describe("the hosts file", () => {
     expect(aliasFrom(new URL("http://a..b:4400").hostname)).toBe("a.b");
     expect(aliasFrom("a....b")).toBe("a.b");
     expect(aliasFrom("..")).toBe("host");
-    for (const folded of ["box.local", "[::1]", "///", "a..b", "a....b", "..", "a..", ".", "-.-", "a".repeat(200)].map(aliasFrom)) expect(checkedAlias(folded)).toBe(folded);
+    const home = tempDir("hosts-folds");
+    for (const folded of ["box.local", "[::1]", "///", "a..b", "a....b", "..", "a..", ".", "-.-", "a".repeat(200)].map(aliasFrom)) {
+      writeHost(home, folded, record("http://x"));
+      expect(readHost(home, folded)).toEqual(record("http://x"));
+    }
   });
 
   it("refuses a word that could never be a file under the hosts folder, in one sentence", () => {
-    expect(() => checkedAlias("../evil")).toThrow(/not a host alias/);
-    expect(() => checkedAlias("a/b")).toThrow(/not a host alias/);
-    expect(() => checkedAlias("")).toThrow(/not a host alias/);
-    expect(() => checkedAlias("-box")).toThrow(/not a host alias/);
-    expect(() => checkedAlias("a".repeat(65))).toThrow(/not a host alias/);
-    expect(checkedAlias("box")).toBe("box");
+    const home = tempDir("hosts-refused");
+    for (const word of ["../evil", "a/b", "", "-box", "a".repeat(65)]) expect(() => writeHost(home, word, record("http://x")), word).toThrow(/not a host alias/);
   });
 
   it("reads WSP_HOME for the home the hosts folder sits in, and an empty one names no home at all", () => {
@@ -167,15 +158,12 @@ describe("how long a dial waits, by the road", () => {
 });
 
 describe("which host a line runs against", () => {
-  it("takes the flag over the environment, the environment over the default alias, and the default only when no host serves the state file", () => {
+  it("takes the flag over the environment, the environment over the lock here, and the lock over the account's one host", () => {
     const home = tempDir("hosts-home");
-    writeHost(home, "box", record("http://box.local:4400", "d_box"));
     writeHost(home, "attic", record("https://attic.example", "d_attic"));
-    setDefaultHost(home, "attic");
     const served = servedState();
     const gone = join(tempDir("hosts-empty"), "state.json");
-
-    expect(aimedHost(served, { host: "box", env: { WSP_HOST: "attic" }, home })).toMatchObject({ kind: "alias", alias: "box" });
+    expect(aimedHost(served, { host: "attic", env: { WSP_HOST: "https://box.example" }, home })).toMatchObject({ kind: "alias", alias: "attic" });
     expect(aimedHost(served, { env: { WSP_HOST: "attic" }, home })).toMatchObject({ kind: "alias", alias: "attic" });
     expect(aimedHost(served, { env: {}, home })).toEqual({ kind: "here" });
     expect(aimedHost(gone, { env: {}, home })).toMatchObject({ kind: "alias", alias: "attic" });
@@ -195,11 +183,10 @@ describe("which host a line runs against", () => {
     const gone = join(tempDir("hosts-empty"), "state.json");
     // On a machine there is no hosts folder and no host of its own, so the pair is the only road there is.
     expect(aimedHost(gone, { env: carried, home })).toEqual(aimed);
-    // The pair is the identity the launch handed this turn: a host serving the state file the line names and a
-    // default alias are both this computer's roads, and neither is what the turn was given.
+    // The pair is the identity the launch handed this turn: a host serving the state file the line names and the
+    // account's one host are both this computer's roads, and neither is what the turn was given.
     expect(aimedHost(servedState(4600), { env: carried, home })).toEqual(aimed);
     writeHost(home, "attic", record("https://attic.example", "d_attic"));
-    setDefaultHost(home, "attic");
     expect(aimedHost(gone, { env: carried, home })).toEqual(aimed);
     // What a person names on the line, or with WSP_HOST, still wins: those are typed, the pair is inherited.
     expect(aimedHost(gone, { host: "attic", env: carried, home })).toMatchObject({ kind: "alias", alias: "attic" });
@@ -221,7 +208,7 @@ describe("which host a line runs against", () => {
     const home = tempDir("hosts-home");
     const { hostKey: _gone, ...keyless } = record("https://box.example", "d_old");
     writeHost(home, "box", keyless);
-    // A record written before wsp pinned keys: the line says which record and what to do, and dials nothing.
+    // A record somebody edited the key out of: the line says which record and what to do, and dials nothing.
     expect(() => aimedHost("/nowhere/state.json", { host: "box", env: {}, home })).toThrow(hostNoKeyLine("box"));
     // A turn a host older than this one launched: the same sentence, naming the launch rather than a record.
     const carried = { WSP_HOST_URL: "https://box.example", WSP_HOST_TOKEN: "scoped-token" };
@@ -274,27 +261,21 @@ describe("the account hosts a line falls to", () => {
     expect(aimedAlias(linkedState("hbox1"), home)).toBeUndefined();
   });
 
-  it("refuses in one sentence naming them when several are on the account and none is marked", () => {
+  it("refuses in one sentence naming them when several are on the account, and a name on the line settles it", () => {
     const home = tempDir("hosts-several");
     writeHost(home, "attic", onAccount("https://hattic.example", "hattic"));
     writeHost(home, "cellar", onAccount("https://hcellar.example", "hcellar"));
     const statePath = linkedState("hbox1");
     expect(() => aimedHost(statePath, { env: {}, home })).toThrow(severalAccountHostsLine(["attic", "cellar"]));
-    expect(() => aimedHost(statePath, { env: {}, home })).toThrow(/wsp host default/);
+    expect(() => aimedHost(statePath, { env: {}, home })).toThrow(/--host <name>/);
     expect(aimedAlias(statePath, home)).toBeUndefined();
-    // The mark settles it, and the line goes there.
-    setDefaultHost(home, "cellar");
-    expect(aimedHost(statePath, { env: {}, home })).toMatchObject({ kind: "alias", alias: "cellar" });
-    expect(aimedAlias(statePath, home)).toBe("cellar");
+    expect(aimedHost(statePath, { host: "cellar", env: {}, home })).toMatchObject({ kind: "alias", alias: "cellar" });
   });
 
   it("starts a host here when this computer holds no account record, and when a host does serve the state file", () => {
     const home = tempDir("hosts-none-here");
     expect(aimedHost(linkedState("hbox1"), { env: {}, home })).toEqual({ kind: "here" });
-    // A record a code paired is no account host: it is reached by name and never falls to.
-    writeHost(home, "lan", record("http://192.168.1.9:4400"));
-    expect(aimedHost(linkedState("hbox1"), { env: {}, home })).toEqual({ kind: "here" });
-    // And a host serving this state file wins over the account, as it does over the default alias.
+    // A host serving this state file wins over the account.
     const served = servedState(4600);
     writeHost(home, "attic", onAccount("https://hattic.example", "hattic"));
     expect(aimedHost(served, { env: {}, home })).toEqual({ kind: "here" });
@@ -314,13 +295,13 @@ describe("where a verb dials", () => {
     expect(hostAddress(statePath, { env: {}, home: tempDir("hosts-none") })).toEqual({ url: "ws://127.0.0.1:4510", token: "host-token" });
   });
 
-  it("gives the alias's address with the runtime's path and the device token it was paired with", () => {
+  it("gives the alias's address with the runtime's path and the device token it holds there", () => {
     const home = tempDir("hosts-home");
     writeHost(home, "box", record("http://box.local:4400", "d_box"));
     expect(hostAddress("/nowhere/state.json", { host: "box", env: {}, home })).toEqual({ url: `ws://box.local:4400${WS_PATH}`, token: "tok-d_box" });
   });
 
-  it("gives a url typed on the line no token, which is the road wsp host connect takes and nothing else", () => {
+  it("gives a url typed on the line no token, which the dial then refuses", () => {
     expect(hostAddress("/nowhere/state.json", { host: "http://127.0.0.1:14400", env: {}, home: tempDir("hosts-none") })).toEqual({
       url: `ws://127.0.0.1:14400${WS_PATH}`,
       token: "",
@@ -342,28 +323,5 @@ describe("a hosts folder somebody hand-edited", () => {
     writeFileSync(join(hostsDir(home), "notes.txt"), "hello");
     expect(listHosts(home).map(h => h.alias)).toEqual(["box"]);
     expect(readHost(home, "broken")).toBeUndefined();
-  });
-
-  it("answers no default when the file names an alias that is gone", () => {
-    const home = tempDir("hosts-home");
-    writeHost(home, "box", record("http://box.local:4400"));
-    setDefaultHost(home, "box");
-    rmSync(join(hostsDir(home), "box.json"));
-    expect(defaultHost(home)).toBeUndefined();
-    expect(readFileSync(join(hostsDir(home), "default"), "utf8").trim()).toBe("box");
-  });
-});
-
-describe("what the desktop adds to a record", () => {
-  it("round trips the label, the road and the ssh login, and the listing carries the label and the road", () => {
-    const home = tempDir("hosts-home");
-    const ssh: HostRecord = { ...record("http://127.0.0.1:52001", "d_3"), label: "maya@box", road: "ssh", ssh: { address: "maya@box", port: 2222 } };
-    writeHost(home, "maya-box", ssh);
-    writeHost(home, "attic", record("https://attic.example", "d_2"));
-    expect(readHost(home, "maya-box")).toEqual(ssh);
-    expect(listHosts(home)).toEqual([
-      { alias: "attic", url: "https://attic.example", deviceId: "d_2", default: false },
-      { alias: "maya-box", url: "http://127.0.0.1:52001", deviceId: "d_3", default: false, label: "maya@box", road: "ssh" },
-    ]);
   });
 });
