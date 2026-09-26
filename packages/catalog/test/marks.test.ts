@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { agentMark, CATALOG_AGENTS, UNMARKED_AGENTS } from "../src/index.js";
+import { agentMark, BRAND_MARKS, CATALOG_AGENTS, UNMARKED_AGENTS, type AgentMark } from "../src/index.js";
 
 const LICENSES = ["MIT", "CC0-1.0", "Apache-2.0"];
 const HEX = /^#[0-9a-f]{6}$/i;
 const MARKED = CATALOG_AGENTS.filter(a => !UNMARKED_AGENTS.includes(a.id));
+const EVERY_MARK: readonly (readonly [string, AgentMark])[] = [...MARKED.map(a => [a.id, a.mark!] as const), ...BRAND_MARKS.map(m => [m.id, m] as const)];
 
 describe("agent marks", () => {
   it("every catalog agent but the named exceptions carries its own mark, with where it came from and under what license", () => {
@@ -18,24 +19,24 @@ describe("agent marks", () => {
   });
 
   it("a mark is one inline svg of shapes: a viewBox, no text, nothing it loads and nothing it runs", () => {
-    for (const a of MARKED) {
-      const svg = a.mark!.svg;
-      expect(svg, a.id).toMatch(/^<svg\b[^>]*\bviewBox="[\d.]+ [\d.]+ [\d.]+ [\d.]+"[^>]*>[\s\S]*<\/svg>$/);
-      expect(svg, a.id).toMatch(/<(path|rect|polygon|circle)\b/);
-      expect(svg, a.id).not.toMatch(/<(text|image|script|foreignObject|use|style)\b|\son\w+=|href=/i);
+    for (const [id, mark] of EVERY_MARK) {
+      const svg = mark.svg;
+      expect(svg, id).toMatch(/^<svg\b[^>]*\bviewBox="[\d.]+ [\d.]+ [\d.]+ [\d.]+"[^>]*>[\s\S]*<\/svg>$/);
+      expect(svg, id).toMatch(/<(path|rect|polygon|circle)\b/);
+      expect(svg, id).not.toMatch(/<(text|image|script|foreignObject|use|style)\b|\son\w+=|href=/i);
       const ids = [...svg.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
-      for (const ref of svg.matchAll(/url\(([^)]*)\)/g)) expect(ids, `${a.id} ${ref[0]}`).toContain(ref[1]!.replace(/^#/, ""));
+      for (const ref of svg.matchAll(/url\(([^)]*)\)/g)) expect(ids, `${id} ${ref[0]}`).toContain(ref[1]!.replace(/^#/, ""));
     }
   });
 
   it("inks are a light and a dark hex each; the first fills every shape without a fill, and the svg names the others by index", () => {
-    for (const a of MARKED) {
-      const inks = a.mark!.inks ?? [];
-      for (const ink of inks) expect([ink.light, ink.dark], a.id).toEqual([expect.stringMatching(HEX), expect.stringMatching(HEX)]);
-      const named = [...a.mark!.svg.matchAll(/var\(--ink-(\d+)\)/g)].map(m => Number(m[1]));
+    for (const [id, mark] of EVERY_MARK) {
+      const inks = mark.inks ?? [];
+      for (const ink of inks) expect([ink.light, ink.dark], id).toEqual([expect.stringMatching(HEX), expect.stringMatching(HEX)]);
+      const named = [...mark.svg.matchAll(/var\(--ink-(\d+)\)/g)].map(m => Number(m[1]));
       for (const at of named) {
-        expect(at, a.id).toBeGreaterThan(0);
-        expect(at, a.id).toBeLessThan(inks.length);
+        expect(at, id).toBeGreaterThan(0);
+        expect(at, id).toBeLessThan(inks.length);
       }
     }
   });

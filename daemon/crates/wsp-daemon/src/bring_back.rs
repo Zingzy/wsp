@@ -293,6 +293,7 @@ mod tests {
         let runner = Recorded::new(&[]).answering(vec![
             (0, "origin\n"),                                      // remote
             (0, "main\n"),                                        // the base the checkout reads as its default
+            (0, ""),                                              // and that branch is here
             (0, "work\n"),                                        // the branch HEAD is on
             (0, "0123456789abcdef\n"),                            // the base is here to measure against
             (0, "2\n"),                                           // commits ahead
@@ -312,16 +313,17 @@ mod tests {
         );
         // And nothing was fed on stdin: a push carries its words and reads nothing from this end.
         assert!(calls.iter().all(|call| call.stdin.is_none()), "a git call was fed stdin");
-        assert_eq!(calls.len(), 8);
+        assert_eq!(calls.len(), 9);
     }
 
-    /// The eight answers a push reads before it pushes, in order, with the push's own answer and whatever comes
-    /// after it handed in: the remote, the base, the branch, the base ref, the count ahead, the status, the
-    /// diffstat, then the push.
+    /// The answers a push reads before it pushes, in order, with the push's own answer and whatever comes after it
+    /// handed in: the remote, the base and that it is here, the branch, the base ref, the count ahead, the status,
+    /// the diffstat, then the push.
     fn push_answering(after: Vec<(i32, &str, &str)>) -> Recorded {
         let mut answers = vec![
             (0, "origin\n", ""),
             (0, "main\n", ""),
+            (0, "", ""),
             (0, "work\n", ""),
             (0, "0123456789abcdef\n", ""),
             (0, "2\n", ""),
@@ -344,9 +346,9 @@ mod tests {
         // The words a person reads name the host and the commands only they can run, and say nothing landed.
         assert!(refused.message.contains("gh auth login"), "{}", refused.message);
         assert!(refused.message.contains("nothing was pushed"), "{}", refused.message);
-        // The remote's url is read only where the push was refused for a credential: the happy road runs eight.
-        assert_eq!(runner.asked().len(), 9);
-        assert_eq!(runner.asked()[8].args, ["remote", "get-url", "origin"]);
+        // The remote's url is read only where the push was refused for a credential: the happy road runs nine.
+        assert_eq!(runner.asked().len(), 10);
+        assert_eq!(runner.asked()[9].args, ["remote", "get-url", "origin"]);
 
         // The other two sentences a host with no credential on the request answers with read the same way.
         for said in [
@@ -381,7 +383,7 @@ mod tests {
             let refused = push(&runner, Path::new("/private/tmp/proof/repo"), None).await.unwrap_err();
             assert_eq!(refused.message, format!("git push failed: {said}"));
             // Nothing beyond the push was asked: the url is read for the credential sentence alone.
-            assert_eq!(runner.asked().len(), 8);
+            assert_eq!(runner.asked().len(), 9);
         }
     }
 

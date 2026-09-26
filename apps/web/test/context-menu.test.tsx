@@ -208,6 +208,9 @@ describe("a tile's menu for the copy it runs on", () => {
     expect(refusalOf(WORKSPACE_WORDS.delete)).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.pause)).toBeNull();
     expect(item(WORKSPACE_WORDS.openTerminal).querySelector("kbd")?.textContent).toBe("⌘J");
+    const chord = item(WORKSPACE_WORDS.openTerminal).querySelector<HTMLElement>("[data-slot=menu-shortcut]")!;
+    expect(chord.className).toContain("font-mono");
+    expect(chord.className).toContain("tabular-nums");
     // The first row that can run holds focus; arrows walk every row, disabled ones too, so their refusal can be read.
     await waitFor(() => expect(document.activeElement).toBe(item(WORKSPACE_WORDS.pause)));
     fireEvent.keyDown(opened, { key: "ArrowDown" });

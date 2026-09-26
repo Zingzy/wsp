@@ -470,10 +470,8 @@ here are included or relied upon under their own licenses, reproduced below.
    modal, drawn in the row's own colour. The marks identify the companies
    whose sign-in pages the rows open and remain their owners' trademarks; no
    licence below grants trademark rights. OpenAI's mark is the one
-   codex.ts carries under item 8.
-
-   github.svg: GitHub's mark, from simple-icons/simple-icons icons/github.svg
-   (release 16.30.0). CC0 1.0 Universal.
+   codex.ts carries under item 8, GitHub's the one github.ts carries under
+   item 11.
 
    anthropic.svg: Anthropic's mark, from simple-icons/simple-icons
    icons/anthropic.svg (release 16.30.0). CC0 1.0 Universal.
@@ -496,3 +494,26 @@ here are included or relied upon under their own licenses, reproduced below.
    Loaders"). No license or written permission from the author is on
    file; the owner chose to use the crab with this credit, and each file
    names the site as its source.
+
+11. Brand marks in packages/catalog/src/marks
+
+   Each module carries one company's published mark as one inline svg,
+   path for path from simple-icons/simple-icons at release 16.30.0, drawn
+   by the app in the glyph frame of a CLI or MCP server row the company
+   makes, with its source and license in the module's own fields. The marks
+   identify the companies they belong to and remain their owners'
+   trademarks; no license below grants trademark rights.
+
+   node.ts: the Node.js mark, icons/nodedotjs.svg, in its #5fa04e on the
+   dark theme and #579348 on the light, where the published green measures
+   under 3:1 against the row's glyph frame.
+
+   github.ts: GitHub's mark, icons/github.svg, drawn in the row's ink.
+
+   cloudflare.ts: Cloudflare's mark, icons/cloudflare.svg, in its #f38020 on
+   the dark theme and #cf6d1b on the light, where the published orange
+   measures under 3:1 against the row's glyph frame.
+
+   linear.ts: Linear's mark, icons/linear.svg, in its #5e6ad2.
+
+   CC0 1.0 Universal (simple-icons): as under item 8.

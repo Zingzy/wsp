@@ -113,6 +113,16 @@ describe("the agents report off a computer you own whose daemon runs as root", (
 });
 
 describe("the agents report off this computer and off a workspace", () => {
+  it("names only the variables servers.env holds, since a literal that reads like a reference would name its own value", async () => {
+    const at = fixture();
+    mkdirSync(join(at.home, ".gemini"), { recursive: true });
+    writeFileSync(join(at.home, ".gemini", "settings.json"), JSON.stringify({ mcpServers: { lit: { httpUrl: "https://l.example", headers: { Authorization: "Bearer $ecret123", X: "${ACME_TOKEN}" } } } }));
+    const read = await agentsReader({ vault: () => ({ ACME_TOKEN: "sk_TESTONLY_held" }), here: () => here(at) }).read({ kind: "here" });
+    const row = read.servers.find(s => s.agent === "gemini" && s.name === "lit")!;
+    expect(row.envNames).toEqual(["ACME_TOKEN"]);
+    expect(JSON.stringify(read)).not.toContain("ecret123");
+  });
+
   it("asks each agent's own status and version here, falls back to the vault's word, and starts nothing", async () => {
     const at = fixture();
     const read = await agentsReader({ vault: () => ({ OPENAI_API_KEY: "sk-x" }), here: () => here(at) }).read({ kind: "here" });

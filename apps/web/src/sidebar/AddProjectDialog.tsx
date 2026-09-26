@@ -43,7 +43,7 @@ const SIDE_ROW = "flex h-9 w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5
 function Hint({ keys, word }: { keys: string; word: string }) {
   return (
     <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      <Kbd className="font-mono">{keys}</Kbd>
+      <Kbd>{keys}</Kbd>
       {word}
     </span>
   );
@@ -227,7 +227,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
           <AddButton primary data-k="add" busy={adding} held={target === null || adding} onClick={() => (target === null ? undefined : void add(target))}>
             {ADD_PROJECT_WORDS.add}
           </AddButton>
-          <Kbd className="font-mono">esc</Kbd>
+          <Kbd>esc</Kbd>
         </div>
         <div className="grid h-[400px] grid-cols-[minmax(0,1fr)_210px] max-sm:grid-cols-1">
           <div className="flex min-h-0 flex-col border-r border-border max-sm:border-r-0">

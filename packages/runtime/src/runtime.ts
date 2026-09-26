@@ -1716,6 +1716,13 @@ const SESSIONS = "sessions";
  * the sweep reads it when it records a machine whose workspace document this store lost, so a restored record keeps
  * that name rather than the one the fork stamped, which the provider takes at create and never updates. */
 const WORKSPACE_NAMES = "workspace-names";
+/** The machine of every workspace deleted here, by machine id: one listed running again is the sweep's to kill, not a
+ * lost record to report and leave billing. */
+const DROPPED = "dropped-machines";
+/** One Solari sandbox read gone after its delete listed running again 73 minutes later (measured 2026-09-26), and a
+ * durable record the provider reloads has no bound; a live record claims its machine before this set is read, so a
+ * wide window costs nothing. */
+export const DROPPED_WATCH_MS = 7 * 24 * 60 * 60_000;
 /** One record under one id: the person's view preferences. */
 const PREFERENCES = "preferences";
 const PREFERENCES_ID = "default";
@@ -1761,6 +1768,11 @@ interface NamedWorkspace {
   workspaceId: string;
   name: string;
   project?: string;
+}
+
+interface DroppedMachine {
+  machineId: string;
+  at: string;
 }
 
 interface TranscriptRecord {
@@ -3277,12 +3289,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * whose doctor says it cannot run workspaces, in the sentence its row carries; a delete, a remove and an update
    * need no copy running and never ask. */
   const placeRefuses = async (placeId: string | undefined): Promise<void> => {
-    if (placeId === undefined || placeDoor === undefined) return;
-    const report = await placeDoor.reportOf(placeId);
-    const blocked = report === undefined ? undefined : placeBlocked(placeDoor.nameOf(placeId), report);
+    const blocked = await blockedLine(placeId);
     if (blocked !== undefined) throw new Error(blocked);
   };
+  const blockedLine = async (placeId: string | undefined): Promise<string | undefined> => {
+    if (placeId === undefined || placeDoor === undefined) return undefined;
+    const report = await placeDoor.reportOf(placeId);
+    return report === undefined ? undefined : placeBlocked(placeDoor.nameOf(placeId), report);
+  };
   const copyBlocked = (entry: LiveWorkspace): Promise<void> => placeRefuses(entry.record.place);
+  /** All a channel into a copy on such a computer carries: a stopped copy's git.status reads its files, and ping is the beat a pane's link opens on. */
+  const BLOCKED_READS: ReadonlySet<string> = new Set(["git.status", "ping"]);
+  const readsOnly = (channel: DaemonChannel, said: string): DaemonChannel => ({
+    send: frame => (BLOCKED_READS.has(frame.op) ? channel.send(frame) : Promise.resolve({ id: null, ok: false, code: "unsupported", error: said })),
+    close: () => channel.close(),
+    closed: channel.closed,
+  });
 
   /** The three frames a place daemon stamps with the workspace a session was opened inside, which is the listener
    * it arrived on and never anything the guest said. */
@@ -5786,6 +5808,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               console.warn(line);
               throw Object.assign(new Error(line), { kind: e.kind });
             });
+            await store.put(DROPPED, entry.machine.id, { machineId: entry.machine.id, at: new Date(clock.now()).toISOString() } satisfies DroppedMachine);
           }
           await drop(id);
         } finally {
@@ -5901,9 +5924,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async daemonChannel(id, onEvent, origin) {
       const entry = await entryOf(id, origin);
-      await copyBlocked(entry);
+      const blocked = await blockedLine(entry.record.place);
       const served = servedByItsComputer(entry);
-      return served === undefined ? ownDaemonChannel(entry, onEvent) : servedChannel(entry, served, onEvent, WORKSPACE_FRAMES);
+      const channel = await (served === undefined ? ownDaemonChannel(entry, onEvent) : servedChannel(entry, served, onEvent, WORKSPACE_FRAMES));
+      return blocked === undefined ? channel : readsOnly(channel, blocked);
     },
 
     async guestChannel(id, onEvent) {
@@ -9114,16 +9138,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     clock,
   });
 
-  /** A workspace machine of this setup's that no record claims is recorded again, never killed: its record was lost
-   * (a store the machine outlived), and it bills until a person can see and delete it. The row is confirmed with one
+  /** A workspace machine of this setup's that no record claims is recorded again rather than killed: its record was
+   * lost (a store the machine outlived), and it bills until a person can see and delete it. A running one whose
+   * workspace was deleted here is left unclaimed, so the engine kills it. The row is confirmed with one
    * get(), so a row the listing lags on after a kill is skipped; a create in flight elsewhere is left its minute. A
    * row the provider would not confirm (a failed read, a state that is neither running nor paused) is claimed in
    * `known` all the same, so the engine spares it this sweep and the next one records it: a kill never rides on one read. */
   const adoptLost = async (listing: ListedMachine[], known: Set<string>, failed: ReapFailure[]): Promise<AdoptedMachine[]> => {
     const adopted: AdoptedMachine[] = [];
     const now = Date.now();
+    const dropped = new Set<string>();
+    for (const d of (await store.list(DROPPED)) as DroppedMachine[]) {
+      if (clock.now() - Date.parse(d.at) < DROPPED_WATCH_MS) dropped.add(d.machineId);
+      else await store.delete(DROPPED, d.machineId);
+    }
     for (const row of listing) {
-      if (known.has(row.id) || !lostWorkspace(row, owner, now)) continue;
+      // The engine kills only a running row, so a paused one stays reported rather than silently left.
+      if (known.has(row.id) || (dropped.has(row.id) && row.state === "running") || !lostWorkspace(row, owner, now)) continue;
       let machine: Machine;
       try {
         machine = observed(await backend.get(row.id));
