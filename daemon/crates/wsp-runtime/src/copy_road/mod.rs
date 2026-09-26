@@ -13,7 +13,7 @@ pub mod worktree;
 pub mod clonefile;
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use wsp_frames::{Carried, CopyAsk, CopyReport, CopyRoadName};
@@ -199,10 +199,9 @@ pub fn remove(from: &Path, to: &Path, road: CopyRoadName) -> Result<(), String> 
         return Err(NOT_THIS_COMPUTER.to_owned());
     }
     let taking = road_named(road).ok_or_else(|| no_such_road(road))?;
-    if !copy_of(from, to) {
+    let Some(at) = copy_of(from, to) else {
         return Err(not_a_copy(from, to));
-    }
-    let at = to.parent().zip(to.file_name()).map_or_else(|| to.to_path_buf(), |(parent, name)| parent.join(name));
+    };
     if std::fs::symlink_metadata(&at).is_ok_and(|m| !m.is_dir()) {
         return Err(not_a_folder(to));
     }
@@ -218,11 +217,13 @@ pub fn not_a_folder(to: &Path) -> String {
     )
 }
 
-/// Whether `to` has the shape every copy of `from` is made at: beside it, under its name with the work's on the end.
-fn copy_of(from: &Path, to: &Path) -> bool {
-    let (Some(name), Some(copy)) = (from.file_name(), to.file_name()) else { return false };
-    let (name, copy) = (name.to_string_lossy(), copy.to_string_lossy());
-    to.parent() == from.parent() && copy.len() > name.len() + 1 && copy.starts_with(&format!("{name}-"))
+/// Where `to` is when it has the shape every copy of `from` is made at: beside it, under its name with the work's on
+/// the end. Its folder joined to its name, so a trailing slash on `to` never reaches a call that would follow a link.
+fn copy_of(from: &Path, to: &Path) -> Option<PathBuf> {
+    let (Some(name), Some(copy), Some(parent)) = (from.file_name(), to.file_name(), to.parent()) else { return None };
+    let (name_str, copy_str) = (name.to_string_lossy(), copy.to_string_lossy());
+    let shaped = Some(parent) == from.parent() && copy_str.len() > name_str.len() + 1 && copy_str.starts_with(&format!("{name_str}-"));
+    shaped.then(|| parent.join(copy))
 }
 
 /// Why a path that is not a copy of the folder is not taken away.

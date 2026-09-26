@@ -5,9 +5,9 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { skillsSearchEmptyRefusal } from "@wsp/protocol";
+import { skillsSearchEmptyRefusal, type AgentsReport } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { shownText, skillHitLines } from "../src/verbs.js";
+import { addedLine, removedLine, shownText, skillHitLines, skillRowLines } from "../src/verbs.js";
 import { capped, checkSkillFiles, getSkill, searchSkills, skillArchive, skillPreview, type SkillsFetch } from "../src/skills-sh.js";
 
 const roots: string[] = [];
@@ -216,5 +216,35 @@ describe("what a skills verb prints of skills.sh's text", () => {
     expect(text.endsWith("end")).toBe(true);
     const lines = skillHitLines([{ id: "a/b/c\x1b[2J", source: "a/b", skillId: "c", name: "c\x1b]0;x\x07", installs: 1 }]).join("\n");
     expect(lines).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
+  });
+
+  it("prints a folder name and a link target in the skills table without their escapes or line breaks", () => {
+    const report: AgentsReport = {
+      target: { placeId: "local" },
+      home: "/home/me",
+      user: "me",
+      readAt: new Date(0).toISOString(),
+      refused: ["box\x1b]0;x\x07: /home/me/.claude\x9b2J could not be read"],
+      agents: [],
+      servers: [],
+      skills: [
+        { name: "pdf\x1b]0;owned\x07\x1b[2J", scope: "user" as const, paths: [{ path: "~/.claude/skills/pdf\x1b[31m\nfake  user  ~/x", linkTo: "/opt/s\x1b]52;c;cm0gLXJmIH4=\x07\r\x9b2J" }] },
+        { name: "lint", scope: "project" as const, project: { id: "p1", name: "web\x1b[2J\tapp", path: "~/web" }, paths: [{ path: "~/web/.claude/skills/lint" }] },
+      ],
+    };
+    const lines = skillRowLines(report);
+    expect(lines).toHaveLength(4);
+    for (const line of lines) expect(line).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+    expect(lines[1]).toContain("pdf]0;owned[2J");
+    expect(lines[1]).toContain("pdf[31m fake  user  ~/x");
+    expect(lines[2]).toContain("project web[2J app");
+    expect(lines[3]).toContain("refused: box]0;x: /home/me/.claude2J could not be read");
+  });
+
+  it("prints the folders skills add and skills remove answer without their escapes or line breaks", () => {
+    const added = addedLine("a/b/pdf", { path: "~/.agents/skills/pdf\x1b]0;x\x07", agents: [{ agent: "claude", path: "~/.claude/skills/pdf\x9b2J\nfake" }] });
+    const removed = removedLine("pdf\x1b[2J", ["~/.claude/skills/pdf\x1b]52;c;eA==\x07", "~/.agents/skills/pdf\r\n"]);
+    for (const line of [added, removed]) expect(line).not.toMatch(/[\x00-\x1f\x7f-\x9f]/);
+    expect(added).toContain("~/.claude/skills/pdf2J fake");
   });
 });
