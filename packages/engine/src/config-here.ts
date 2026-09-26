@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The one config write run on this computer, for a caller with no road to a
 // machine: the same line every road runs, through this computer's own sh.
-import { spawnSync } from "node:child_process";
 import { configRefusal, configWriteLine } from "@wsp/catalog";
 import type { ExecResult } from "./machine.js";
+import { spawnSyncFed } from "./spawn-fed.js";
 
 const WRITE_MS = 60_000;
 
@@ -20,8 +20,7 @@ export function configLanded(res: ExecResult, file: string, shown: (path: string
  * (configSum), absent where there was no file. */
 export function writeConfigHere(file: string, base: string, sum: string | undefined, text: string, shown?: (path: string) => string): void {
   const bytes = Buffer.from(text);
-  const res = spawnSync("/bin/sh", ["-c", configWriteLine({ file, base, bytes: bytes.length, ...(sum !== undefined ? { sum } : {}) })], {
-    input: bytes,
+  const res = spawnSyncFed("/bin/sh", ["-c", configWriteLine({ file, base, bytes: bytes.length, ...(sum !== undefined ? { sum } : {}) })], bytes, {
     encoding: "utf8",
     timeout: WRITE_MS,
     // The line runs the system's own tools, never whatever a caller's PATH puts first or leaves out.
