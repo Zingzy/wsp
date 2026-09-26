@@ -6,10 +6,12 @@
 //! again.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// Which road made a workspace's copy on a computer that copies by directory: a directory clone of the folder, a
 /// git worktree of it, or the folder itself worked where it sits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "kebab-case")]
 pub enum CopyRoadName {
     Clonefile,
@@ -45,7 +47,8 @@ impl CopyRoadName {
 
 /// What rode along in the copy: everything the folder held that git ignores (the dependencies and the config
 /// files), the config files alone, or nothing at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "kebab-case")]
 pub enum Carried {
     DepsAndConfig,
@@ -54,13 +57,15 @@ pub enum Carried {
 }
 
 /// One copy as `wsp-daemon copy make` is asked for it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyAsk {
     pub from: String,
     pub to: String,
     /// The ref the copy is reset to; the folder's default branch when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub base: Option<String>,
     /// Directories removed after the copy so they rebuild at the new path.
     pub exclude: Vec<String>,
@@ -68,11 +73,13 @@ pub struct CopyAsk {
     pub size_line_bytes: u64,
     /// A road named outright; the picker's own choice when absent. Tests and the fallback proof name one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub road: Option<CopyRoadName>,
 }
 
 /// The one JSON line the verb prints when the copy stands.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyReport {
     pub road: CopyRoadName,
@@ -94,6 +101,7 @@ pub struct CopyReport {
     pub ms: u64,
     /// Why the first road was not taken; absent when it was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub fell_back: Option<String>,
 }
 

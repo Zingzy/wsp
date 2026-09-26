@@ -16,7 +16,9 @@ function newFilesOnBranch() {
   return out.split("\n").filter(f => /\.(ts|mjs)$/.test(f));
 }
 
-const files = process.argv.length > 2 ? process.argv.slice(2) : newFilesOnBranch();
+// What daemon/scripts/ts-types.sh writes is the crate's output and carries no header of its own.
+const GENERATED = "packages/protocol/src/generated/";
+const files = (process.argv.length > 2 ? process.argv.slice(2) : newFilesOnBranch()).filter(f => !f.replace(/^\.\//, "").startsWith(GENERATED));
 let added = 0;
 for (const file of files) {
   const text = readFileSync(file, "utf8");

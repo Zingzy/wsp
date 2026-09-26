@@ -22,6 +22,9 @@ futures-util = { version = "0.3", default-features = false, features = ["sink", 
 subtle = "2"
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
+# The serde attributes ts-rs cannot read here are the bounds a field is deserialized with and the finite reading a
+# float is serialized with; each keeps the field's own type, so the warning it prints for every one says nothing.
+ts-rs = { version = "12", features = ["no-serde-warnings"] }
 
 [profile.release]
 opt-level = "z"

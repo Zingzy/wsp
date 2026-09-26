@@ -10,6 +10,7 @@ use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig, STAN
 use base64::{alphabet, Engine};
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::validate::{bounded, bounded_list, bounded_map, bounded_opt, http_url, non_empty_list, under_paths_opt};
 use crate::{CopyWord, RequestId};
@@ -68,14 +69,16 @@ pub type PlaceSignature = Base64Bytes<64>;
 /// handshake is sealed under. Fresh per attempt and never held past the socket.
 pub type PlaceEphemeral = Base64Bytes<32>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum Platform {
     Darwin,
     Linux,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSize {
     pub cpu: f64,
@@ -83,7 +86,8 @@ pub struct WorkspaceSize {
 }
 
 /// What a place says about itself on every link. agents names the catalog ids found on its login PATH.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceReport {
     #[serde(deserialize_with = "bounded::<_, 1, 200>")]
@@ -95,6 +99,7 @@ pub struct PlaceReport {
     pub os: String,
     pub shape: WorkspaceSize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub disk_free_bytes: Option<u64>,
     pub login: BTreeMap<String, String>,
     /// Whether this computer's own daemon runs workspaces here: cgroup v2 with the controllers a cap needs, an
@@ -102,6 +107,7 @@ pub struct PlaceReport {
     pub runs_workspaces: bool,
     /// When it does not, the one kernel reason, in the self check's own words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub workspaces_blocked: Option<String>,
     /// The engine a project's own containers would run on here, none until the person installs one.
     #[serde(deserialize_with = "bounded::<_, 0, 16>")]
@@ -109,9 +115,11 @@ pub struct PlaceReport {
     /// How this computer makes a workspace's copy of a checkout, read off a clone probe under the runtime's root.
     /// Absent where the computer runs no workspaces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub copies: Option<CopyWord>,
     pub daemon_version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub daemon_port: Option<NonZeroU16>,
     #[serde(deserialize_with = "non_empty_list")]
     pub wsp: Vec<String>,
@@ -127,6 +135,7 @@ pub struct PlaceReport {
     /// workspace on it shares. Absent from a report a daemon older than this field sent, which reads as unknown
     /// rather than as none.
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "under_paths_opt::<_, 200, 64>")]
+    #[ts(optional)]
     pub logins: Option<Vec<String>>,
 }
 
@@ -137,14 +146,18 @@ enum PlaceAuthTag {
 }
 
 /// The first frame of a place that already joined: names itself and challenges the host.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceAuthRequest {
     pub id: RequestId,
+    #[ts(type = "\"place.auth\"")]
     op: PlaceAuthTag,
     #[serde(deserialize_with = "bounded::<_, 0, 64>")]
     pub place_id: String,
+    #[ts(type = "string")]
     pub nonce: PlaceNonce,
+    #[ts(type = "string")]
     pub ephemeral: PlaceEphemeral,
 }
 
@@ -154,22 +167,30 @@ impl PlaceAuthRequest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceAuthReply {
+    #[ts(type = "string")]
     pub nonce: PlaceNonce,
+    #[ts(type = "string")]
     pub host_public_key: PlacePublicKey,
+    #[ts(type = "string")]
     pub signature: PlaceSignature,
+    #[ts(type = "string")]
     pub ephemeral: PlaceEphemeral,
 }
 
 /// What a host that holds no place by the id a computer named puts on its refusal of the first frame: its own
 /// key and a signature over the refusal transcript. Absent from a host older than this, which reads as a refusal
 /// that proved nothing.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceAuthRefusal {
+    #[ts(type = "string")]
     pub host_public_key: PlacePublicKey,
+    #[ts(type = "string")]
     pub signature: PlaceSignature,
 }
 
@@ -182,20 +203,26 @@ enum PlaceProveTag {
 /// The second frame, and the first one sealed: the place's answer to the host's nonce and its report as it stands
 /// now. A join's prove carries the code it spends and the window it wants too, which this daemon never sends: a
 /// join is typed on the computer being joined and its own wsp sends it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct PlaceProveRequest {
     pub id: RequestId,
+    #[ts(type = "\"place.prove\"")]
     op: PlaceProveTag,
+    #[ts(type = "string")]
     pub signature: PlaceSignature,
     pub report: PlaceReport,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "bounded_opt::<_, 64>")]
+    #[ts(optional)]
     pub code: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub client: Option<PlaceClient>,
 }
 
 /// The window a join also wants a token for.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct PlaceClient {
     #[serde(deserialize_with = "bounded::<_, 1, 200>")]
     pub name: String,
@@ -249,7 +276,8 @@ pub fn place_refusal_transcript(place_id: &str, place_nonce: &str, sentence: &st
 
 /// What a computer joined as a place keeps about the wsp it belongs to, as wsp join writes it and the agent reads
 /// it on every attempt. Fields the protocol's parse does not check are optional here for the same reason.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceFile {
     pub place_id: String,
@@ -261,6 +289,7 @@ pub struct PlaceFile {
     pub host_public_key: String,
     pub key_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub joined_at: Option<String>,
 }
 

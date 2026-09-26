@@ -70,6 +70,11 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Tests
         run: cargo test --locked
+      # The protocol package re-exports the TypeScript wsp-frames writes, checked in so a build needs no cargo. The
+      # folder is written again from nothing here, and any difference from the checkout fails: a hand edit, a file
+      # added or removed by hand, or a change to the crate whose types were not written.
+      - name: The TypeScript types are the ones the crate writes
+        run: ./scripts/ts-types.sh --check
       - name: Release build
         run: cargo build --locked --release
       - name: C compiler for the musl target, and libseccomp built against musl
