@@ -497,6 +497,32 @@ async fn workspace_road(ctx: &Ctx, machine: &str, requested: &str, asked: git::A
     Ok((Runner::Inside(git::inside::Inside::new(ops, machine, asked)), under, PathBuf::from(requested)))
 }
 
+/// A stopped workspace's copy on this computer and the path it is mounted at inside, where the folder a status
+/// frame names is in it: nothing inside a stopped workspace can run git, so its branch is read off the copy's git
+/// directory. None while it runs, and for a folder outside the copy, which then takes the road every op takes and
+/// is refused as stopped there.
+#[cfg(target_os = "linux")]
+fn copy_at_rest(ctx: &Ctx, machine: Option<&str>, cwd: &str) -> Result<Option<(PathBuf, String)>, OpError> {
+    let (Some(machine), Some(ops)) = (machine, ctx.runtime.as_ref()) else { return Ok(None) };
+    if !Path::new(cwd).is_absolute() {
+        return Ok(None);
+    }
+    let Some((copy, root)) = ops.copy_of_stopped(machine).map_err(from_runtime)? else { return Ok(None) };
+    Ok(in_copy(&root, cwd).then_some((copy, root)))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn copy_at_rest(_ctx: &Ctx, _machine: Option<&str>, _cwd: &str) -> Result<Option<(PathBuf, String)>, OpError> {
+    Ok(None)
+}
+
+/// Whether a folder is the copy's own mount point or under it, read as written: a `..` is never under anything.
+#[cfg(target_os = "linux")]
+fn in_copy(root: &str, cwd: &str) -> bool {
+    let cwd = Path::new(cwd);
+    !cwd.components().any(|part| matches!(part, std::path::Component::ParentDir)) && cwd.starts_with(root)
+}
+
 /// A pty inside one workspace this computer runs: the shell opens in the folder the frame names, which is
 /// absolute and is asked for, since this daemon has no working directory inside a workspace and a pty without one
 /// would open a shell in the computer's own home, which every workspace has bound in. The pty is held beside this
@@ -686,6 +712,9 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
         }
         DaemonOp::GitStatus { cwd, machine_id } => {
             let read = async {
+                if let Some((copy, root)) = copy_at_rest(ctx, machine_id.as_deref(), &cwd)? {
+                    return fs::blocking(move || git::stored::status(&copy, &root)).await;
+                }
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
                 git::git_status(&runner, &at).await
             };
@@ -1235,6 +1264,18 @@ mod tests {
         // always was, and nothing here reads a workspace at all.
         let outside = reply(&b, &sock, json!({"id": 2, "op": "git.status", "cwd": "/etc"})).await;
         assert_eq!(outside["code"], "outside-root");
+    }
+
+    /// A stopped workspace's branch is read for a folder in its copy and nowhere else, so a frame naming another
+    /// folder is refused as stopped rather than answered with the copy's branch.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_folder_is_in_the_copy_at_its_mount_point_or_under_it_and_never_through_a_parent() {
+        assert!(in_copy("/root/app", "/root/app"));
+        assert!(in_copy("/root/app", "/root/app/src/"));
+        assert!(!in_copy("/root/app", "/root/application"));
+        assert!(!in_copy("/root/app", "/root/app/../other"));
+        assert!(!in_copy("/root/app", "/root"));
     }
 
     #[tokio::test]

@@ -3102,7 +3102,9 @@ export const FsReadReply = z.object({ content: z.string(), size: z.number(), tru
 export type FsReadReply = z.infer<typeof FsReadReply>;
 
 /** Porcelain v2 branch header: head is "(detached)" off a branch, oid
- * "(initial)" before the first commit; ahead/behind are 0 without an upstream. */
+ * "(initial)" before the first commit; without an upstream, or with one whose
+ * tracking ref is gone, upstream is absent and ahead/behind count against the
+ * default branch. */
 export const GitBranch = z.object({
   oid: z.string(),
   head: z.string(),
@@ -3115,8 +3117,15 @@ export type GitBranch = z.infer<typeof GitBranch>;
  * an unchanged side); origPath is set for renames and copies. */
 export const GitStatusEntry = z.object({ xy: z.string(), path: z.string(), origPath: z.string().optional() });
 export type GitStatusEntry = z.infer<typeof GitStatusEntry>;
-/** root is the working tree's top-level directory, absolute on the guest. */
-export const GitStatusReply = z.object({ branch: GitBranch, entries: z.array(GitStatusEntry), root: z.string() });
+/** root is the working tree's top-level directory, absolute on the guest.
+ * editsUnread: a stopped workspace's branch was read and its entries were not,
+ * so an empty list says nothing about edits never committed. */
+export const GitStatusReply = z.object({
+  branch: GitBranch,
+  entries: z.array(GitStatusEntry),
+  root: z.string(),
+  editsUnread: z.boolean().optional(),
+});
 export type GitStatusReply = z.infer<typeof GitStatusReply>;
 
 /** branch: working tree against the merge-base with the default branch;
@@ -3962,6 +3971,7 @@ const DAEMON_CONTENTS = [
   "7a1d4e70b470d3f404c987c4300756615bfca9f904f0ef12e74f26497775d72d",
   "c76e7e2a3b9a767beaa281b973a409e1bc8869969255fa6c9fdeb6211b38ce3d",
   "be3d9077764035f8bf2b96ab6b50c018017046ec74a30827404f64752ef19bdf",
+  "7bc19db3cae102d6a7c374754625a6d2ecf461ec58d1fb084f169a894b280953",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4173,7 +4183,8 @@ const DAEMON_CONTENTS = [
  * Version 76 answers as 75 does: a directory clone's removal takes the copy's own path off the shape check, and a test pins that a path with a trailing slash sets aside the link it names.
  * Version 77 forwards a guest's `wsp mcp` to the running host over the daemon's link, so a thread's MCP server needs no host process of its own on the machine.
  * Version 78 changes no behaviour: the pty broker's cases moved to a test binary of their own, and the file they left is hashed.
- * Version 79 changes no behaviour: every wire type in the protocol crate derives the TypeScript the protocol package re-exports, which moves the crate's sources and the lock. */
+ * Version 79 changes no behaviour: every wire type in the protocol crate derives the TypeScript the protocol package re-exports, which moves the crate's sources and the lock.
+ * Version 80 answers git.status on a stopped workspace with the branch alone, read off its copy's git directory with no program run, and says the edits were not read; running or stopped, a branch with no upstream counts ahead and behind against the default branch. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
