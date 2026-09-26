@@ -18,7 +18,7 @@ const LONG = LIVE && process.env.WSP_LIVE_LONG === "1";
 const READ_AT_MIN = [2, 10, 65];
 
 interface View { state: string; createdAt?: string; expiresAt?: string }
-// Cleanup may run killUntilGone, two kills with a 30 s grace each; vitest's
+// Cleanup may run killUntilGone, three kills with a 30 s grace each; vitest's
 // default hook budget is 10 s.
 const CLEANUP_MS = 180_000;
 

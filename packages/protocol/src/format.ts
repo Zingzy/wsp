@@ -1765,9 +1765,9 @@ export function nameDeletingRefusal(name: string): string {
   return `${name} is being deleted; wait for the delete to finish, then fork it again`;
 }
 
-/** A delete whose machine the provider still reads after two asks: the record stays, so the machine is still named. */
+/** A delete whose machine the provider still reads after three asks: the record stays, so the machine is still named. */
 export function deleteRefusedLine(name: string, machineId: string, state: MachineState): string {
-  return `${name}'s machine ${machineId} is still ${state} after two asks; run wsp delete again or delete it at the provider`;
+  return `${name}'s machine ${machineId} is still ${state} after three asks; run wsp delete again or delete it at the provider`;
 }
 
 /** The refusal a fork or a rename gets for a blank name: a person and an agent both address a workspace by its name. */
