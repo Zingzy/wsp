@@ -2568,6 +2568,14 @@ export const guestSessionHeldLine = "this socket already holds a guest session";
  * a link that ended, leaves the machine's daemon holding a session nothing on this side can answer. */
 export const guestNoSessionLine = "the host holds no such session";
 
+/** What a scoped wsp tool server says when the turn that launched it handed it no pair: its agent dropped the
+ * environment, and serving on this computer's own token would act as the person. */
+export const scopedNoPairLine = "this thread's tools were launched without its own host token, so they refuse rather than act as the person; the agent did not pass WSP_HOST_URL and WSP_HOST_TOKEN to its MCP server";
+
+/** What a session is ended with on a host bound to one address beyond loopback: its wsp dials this host's loopback,
+ * and nothing answers there. */
+export const guestNoLoopbackLine = "this host listens on no loopback address, so a thread's wsp has nowhere on this computer to reach it; run wsp up with --listen 0.0.0.0 or 127.0.0.1";
+
 /** What a line from inside a machine is told when it names a path: the path would be resolved and read on the
  * person's computer, and the file the caller means is on the machine the line was typed on. */
 export const guestNoFileLine = "a path on this line would be read on the person's computer, not on the machine the line was typed on";

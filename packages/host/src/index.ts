@@ -47,7 +47,7 @@ export { accountAim, accountHosts, accountRecords, aimedAlias, aimedHost, aliasF
 export { addLines, hostNameHere, joinPlace, leavePlace, placeNameHere, placeStanding, placeWiring, type JoinPlaceOptions, type JoinedPlace } from "./places.js";
 export { placeFilePath, placeKeyPath, placeReport, readPlaceFile, writePlaceFile, type PlaceSelfReport } from "./place-report.js";
 export { DAEMON_BIN, DAEMON_TARGETS, GUEST_DAEMON_TARGETS, daemonArtifactName, daemonBinaryIn, daemonTargetHere, type DaemonTarget } from "./daemon-binary.js";
-export { reachAddresses } from "./pairing.js";
+export { reachAddresses, type HereAt } from "./pairing.js";
 export { dialHost, NO_PROJECT_YET } from "./verbs.js";
 export {
   startCallbackRelay,

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LAUNCH_ENV, TURN_TOKEN_ENV } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { buildCommand, buildEnv } from "../src/command.js";
 
@@ -27,6 +28,25 @@ describe("buildCommand", () => {
   it("runs codex exec with JSONL events, outside a git checkout allowed, no sandbox, the prompt on stdin, in the guest home", () => {
     const command = buildCommand({ prompt: "Reply with exactly the word ok." });
     expect(command).toBe(`cd ~ && codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox - <<'WSP_PROMPT_END'\nReply with exactly the word ok.\nWSP_PROMPT_END`);
+  });
+
+  it("hands each server named on the launch to codex whole, and the wsp one the launch pair by name alone", () => {
+    const command = buildCommand({ prompt: "x", mcpServers: { wsp: { command: "/opt/wsp/bin/wsp", args: ["mcp"] }, docs: { command: "npx", args: ["-y", "docs-mcp"] } } });
+    // A whole entry per server: codex refuses to start on an override that names env_vars for a server its config
+    // does not hold (measured on codex-cli 0.155.1: "invalid transport in mcp_servers.wsp").
+    expect(command).toContain(`-c mcp_servers.wsp.command='"/opt/wsp/bin/wsp"'`);
+    expect(command).toContain(`-c mcp_servers.wsp.args='["mcp"]'`);
+    // Codex clears a server's environment down to its own short list, so the pair is named for it to pass through.
+    expect(command).toContain(`-c mcp_servers.wsp.env_vars='${JSON.stringify(LAUNCH_ENV)}'`);
+    expect([...LAUNCH_ENV].sort()).toEqual([HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV].sort());
+    expect(command).toContain(`-c mcp_servers.docs.args='["-y","docs-mcp"]'`);
+    expect(command).not.toContain("mcp_servers.docs.env_vars");
+    // The overrides come before the prompt's own dash, which ends the flags.
+    expect(command.indexOf("mcp_servers.wsp.command")).toBeLessThan(command.indexOf(" - <<'WSP_PROMPT_END'"));
+  });
+
+  it("refuses a server name that is not one plain word of a config key", () => {
+    expect(() => buildCommand({ prompt: "x", mcpServers: { "a.b": { command: "x", args: [] } } })).toThrow("server name");
   });
 
   it("asks nothing of codex login: a provider configured on the machine needs none, so the turn's own 401 says it", () => {

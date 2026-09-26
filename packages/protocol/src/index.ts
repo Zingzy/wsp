@@ -6022,5 +6022,5 @@ export * from "./app-ports.js";
 export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
-export { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
+export { LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
 export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

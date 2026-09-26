@@ -76,7 +76,7 @@ const HELD_REFUSALS = (): ReadonlyArray<string | null> => [
   actionRefusal("paused", "import"),
   actionRefusal("waking", "import"),
   actionRefusal("unreachable", "export"),
-  agentsKindRefusal("local"),
+  agentsKindRefusal("ssh"),
   imageMoveRefusal("api", "running", { knownVersion: false, projectImage: false }),
   imageMoveRefusal("api", "running", { knownVersion: true, projectImage: true }),
   imageMoveRefusal("api", "paused", { knownVersion: true, projectImage: false }),

@@ -210,8 +210,8 @@ describe("the pages wsp prints", () => {
     expect(await cli(["mcp", "install", "--help"], install, undefined, {}, false)).toBe(0);
     expect(install.lines[0]).toContain("usage: wsp mcp install");
     for (const flag of ["--agent", "--remove", "--json", "--state", "--host"]) expect(install.lines[0], flag).toContain(flag);
-    // Every flag its parse reads has a line; --help is the flag that prints the page and is not one of them.
-    for (const name of Object.keys(MCP_OPTIONS).filter(n => n !== "help")) expect(install.lines[0], name).toContain(`--${name}`);
+    // Every flag its parse reads has a line on one of the two pages; --help is the flag that prints the page.
+    for (const name of Object.keys(MCP_OPTIONS).filter(n => n !== "help")) expect(`${serve.lines[0]}\n${install.lines[0]}`, name).toContain(`--${name}`);
   });
 
   it("every flag a command of the shared parse reads has a row naming the commands that read it", () => {

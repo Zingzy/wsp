@@ -3715,7 +3715,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Turns the workspace's agents switch on or off and names its caps. With it on, a turn on this workspace is launched with a token into this host scoped to its own thread: that thread may open threads and fork machines under itself, up to maxMachines machines at once under one root thread and maxDepth levels deep, and may touch no other workspace, delete nothing, pause nothing and pair no computer. Off, which is what every workspace reads as until this is called, its agents reach this host not at all. A caller that is itself a thread on a machine is refused: what agents may do is the person's to decide.",
+        "Turns the workspace's agents switch on or off and names its caps. With it on, a turn on this workspace is launched with a token into this host scoped to its own thread: that thread may open threads and fork machines under itself, up to maxMachines machines at once under one root thread and maxDepth levels deep, and may touch no other workspace, delete nothing, pause nothing and pair no computer. On this Mac the token is identity, not confinement: a thread there runs as the person and can read the host's own token file. Off, which is what every workspace reads as until this is called, its agents reach this host not at all. A caller that is itself a thread on a machine is refused: what agents may do is the person's to decide.",
       input: { workspace: WorkspaceIn, spawn: z.enum(["on", "off"]), max_machines: MaxMachinesIn, max_depth: MaxDepthIn },
       output: { workspace: WorkspaceOut },
       call: async ({ workspace: ref, spawn, max_machines: maxMachines, max_depth: maxDepth }, deps) => {

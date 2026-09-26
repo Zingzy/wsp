@@ -5,7 +5,7 @@
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
 import { RUN_EXIT_MS, codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, endAfterResult, endRun, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, McpServerSpec, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
@@ -22,6 +22,8 @@ export interface CodexStartOptions {
   /** Images for this turn, read off their paths: this CLI reads each off the machine's disk, where the runtime
    * landed it under the thread's images folder before the start. */
   images?: readonly TurnImage[];
+  /** MCP servers this turn gets besides the ones its config names, each rendered as a config override. */
+  mcpServers?: Readonly<Record<string, McpServerSpec>>;
   onEvent: (event: AdapterEvent) => void;
 }
 
@@ -72,9 +74,8 @@ export interface CodexAdapter {
   readonly steers: false;
   /** The CLI takes images as files on `-i`, so each one lands on the machine before the turn starts. */
   readonly attachments: "file";
-  // No mcpServers: this CLI reads its servers from `mcp_servers` in the config under CODEX_HOME, and no per-launch
-  // road for them is pinned off a help read of the binary, so a start that names servers is refused in this agent's
-  // name rather than launching a turn without them.
+  /** Servers ride the launch as `-c mcp_servers.<name>...` overrides over the config under CODEX_HOME. */
+  readonly mcpServers: true;
   /** Makes the binary describe itself under the same home as a session, without running a turn. */
   probeCatalog(exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer>;
   /** What the CLI's thread index calls a thread: the name the person gave it, or the title it derived. */
@@ -355,6 +356,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       effort: options.effort,
       permissionMode: options.permissionMode,
       ...(options.images !== undefined ? { images: options.images.map(image => imagePathOf(image)) } : {}),
+      ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}),
     });
     return follow({
       stream: deps.exec(command, { env: { ...env } }),
@@ -394,6 +396,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       : {}),
     sessions,
     steers: false,
+    mcpServers: true,
     probeCatalog,
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
     renameSession: (threadId, title, exec) => exec(renameCommand({ home: deps.home, threadId, title })).then(parseRename),

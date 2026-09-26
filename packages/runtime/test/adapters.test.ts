@@ -34,9 +34,9 @@ describe("the agents wsp can open a thread on", () => {
     // The mode a row calls its bypass is the one its adapter knows as a launch flag: one slug, pinned to the module
     // that owns it, so the table and the launch cannot drift apart.
     expect(HARNESS_CATALOGS.find(c => c.harness === "claude")?.bypassMode).toBe(SKIP_PROMPTS_MODE);
-    // Where the two stand today: Claude Code takes the servers on its launch, Codex has no per-launch road yet.
+    // Both take the servers on their launch: Claude Code as --mcp-config, Codex as config overrides.
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "claude"))).toBe(true);
-    expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "codex"))).toBe(false);
+    expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "codex"))).toBe(true);
   });
 
   it("every adapter exports the login env the runtime hands it, so a turn carries the golden's PATH onto the machine", () => {

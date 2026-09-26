@@ -26,6 +26,11 @@ export const HOST_TOKEN_ENV = "WSP_HOST_TOKEN";
  * no such host prints nothing and is left to the wsp the forwarder runs next. */
 export const FORWARD_ENV = "WSP_FORWARD";
 
+/** The word the host puts on the wsp tool server a scoped turn on this computer launches: an argument and not a
+ * variable, since an agent that strips its servers' environment would strip a variable with the pair. A server
+ * that carries it and finds no pair refuses rather than dialling the host on this computer's own token. */
+export const SCOPED_MCP_ARG = "--scoped";
+
 /** The fingerprint of the key that host proves, beside the two above: the turn pins it before it sends the token,
  * so a relay that carries the bytes or names another host at that address gets nothing. A launch that carries the
  * address and the token without it is refused rather than dialled, since nothing there says which host it is. */
@@ -69,3 +74,7 @@ export const UPDATE_CHECK_ENV = "WSP_UPDATE_CHECK";
 /** The base the host asks for the newest release instead of GitHub's API, for a smoke serving a release of its
  * own. Unset everywhere else. */
 export const RELEASE_API_ENV = "WSP_RELEASE_API";
+
+/** Every variable a turn's launch hands its agent for reaching this host, the one list of them: an agent that hands
+ * its servers only the variables it is told to pass is told these. */
+export const LAUNCH_ENV = [HOST_URL_ENV, HOST_TOKEN_ENV, HOST_KEY_ENV, TURN_TOKEN_ENV] as const;

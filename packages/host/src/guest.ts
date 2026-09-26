@@ -9,7 +9,7 @@
 // One concern per interface: this door binds a session to the workspace its
 // link serves and picks the kind; each kind is one module, and adding a kind is
 // one module and one row in the table below.
-import { agentsOffRefusal, type DaemonEvent, guestNoKindLine, guestNoSessionLine, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV, UNAUTHORIZED, type GuestKind } from "@wsp/protocol";
+import { agentsOffRefusal, type DaemonEvent, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV, UNAUTHORIZED, type GuestKind } from "@wsp/protocol";
 import type { Authed, GuestKindModule, GuestSession } from "@wsp/runtime";
 
 /** The road back down to one machine's daemon, and which workspace that machine is. */
@@ -29,8 +29,9 @@ export interface GuestDoor {
 export interface GuestDoorOptions {
   /** Who a token names, read through the same door every other road into this host reads it through. */
   authorize(token: string): Promise<Authed | undefined>;
-  /** Where this host answers on its own loopback, which is what a session's verbs dial. */
-  hostUrl(): string;
+  /** Where this host answers on its own loopback, which is what a session's verbs dial; nothing on a host that
+   * listens on no loopback address, where a session has nowhere to dial and is ended in so many words. */
+  hostUrl(): string | undefined | Promise<string | undefined>;
   /** One module per kind; a kind with no module here is closed with the same refusal an unknown one would be. */
   kinds: Readonly<Record<GuestKind, GuestKindModule>>;
 }
@@ -99,8 +100,11 @@ export function guestDoor(o: GuestDoorOptions): GuestDoor {
     // A kind nobody built here is not a token nobody holds, so it says so in its own words.
     const module = o.kinds[e.kind];
     if (module === undefined) return endHere(held, e.session, guestNoKindLine(e.kind));
+    const hostUrl = await o.hostUrl();
+    if (held.ended) return;
+    if (hostUrl === undefined) return endHere(held, e.session, guestNoLoopbackLine);
     const env: Record<string, string> = {
-      [HOST_URL_ENV]: o.hostUrl(),
+      [HOST_URL_ENV]: hostUrl,
       [HOST_TOKEN_ENV]: e.token,
       ...(e.turnToken !== undefined ? { [TURN_TOKEN_ENV]: e.turnToken } : {}),
     };

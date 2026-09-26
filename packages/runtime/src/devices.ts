@@ -5,7 +5,7 @@
 // once and never stored: only its sha256 is kept, and every reading of it is a
 // timing safe compare of that hash.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { DeviceView, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, type DeviceVia, type ThreadScope } from "@wsp/protocol";
+import { DeviceView, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, type DeviceVia, type ThreadScope, type WorkspaceOrigin } from "@wsp/protocol";
 import type { Store } from "./store.js";
 
 /** One document per paired computer, keyed by its id. */
@@ -26,6 +26,21 @@ export function safeEqual(a: string, b: string): boolean {
   return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
+/** The road a thread's token reaches this host by: this computer's own loopback for a turn beside the host, a
+ * machine's road for every other. Never the paired road, which is a computer of the person's and holds no scope. */
+export type ScopedRoad = Exclude<WorkspaceOrigin, "paired">;
+
+/** A device as the host reads it off a token: what the listing shows, and the road its scope was minted for, which
+ * the listing leaves out since it is the host's reading and nothing a person acts on. */
+export type HeldDevice = DeviceView & { road?: ScopedRoad };
+
+/** The thread a device's token is, and the road the host stamps on its requests; nothing for a device that is no
+ * thread. A scoped record with no road is one an older host wrote for a machine, so it reads as a machine's. The
+ * one reading, taken by the socket door and the JSON routes alike. */
+export function threadOf(device: HeldDevice): { by: ThreadScope; road: ScopedRoad } | undefined {
+  return device.scope === undefined ? undefined : { by: device.scope, road: device.road ?? "relayed" };
+}
+
 /** What the store keeps for a device: never the token, only the digest a presented one is compared against. */
 interface DeviceRecord {
   id: string;
@@ -36,6 +51,8 @@ interface DeviceRecord {
   /** Set on a token the host minted into one turn's launch rather than one a person's computer redeemed a code
    * for: what that token may drive. */
   scope?: ThreadScope;
+  /** Set beside `scope` at the mint, and on no other road: where the turn that holds the token runs. */
+  road?: ScopedRoad;
   /** Set on the browser wsp init opened here, whose code init itself minted: read as the owner. */
   here?: true;
   /** Set on a device admitted through the account rather than by a code: which computer it is there, the key it
@@ -88,6 +105,8 @@ const viewOf = (record: DeviceRecord): DeviceView => ({
   ...(record.via !== undefined ? { via: record.via } : {}),
 });
 
+const heldOf = (record: DeviceRecord): HeldDevice => ({ ...viewOf(record), ...(record.road !== undefined ? { road: record.road } : {}) });
+
 /** What a redeem hands back: the token, once, and the record every later listing shows. */
 export interface PairedDevice {
   deviceId: string;
@@ -122,12 +141,12 @@ export interface DeviceDoor {
   /** A device with no pairing code behind it: the host itself minting a token for a turn it is about to launch,
    * scoped to that turn's thread. The same door as a redeem, so a scoped token is revoked, listed and read by the
    * one road every other token takes. */
-  mint(name: string, scope: ThreadScope, now: number): Promise<PairedDevice>;
+  mint(name: string, scope: ThreadScope, now: number, road?: ScopedRoad): Promise<PairedDevice>;
   /** The device this token names, or nothing when no device holds it. Reads only: the JSON routes read a token on
    * every request, and a write there would rewrite the whole state file each time. */
-  match(token: string): Promise<DeviceView | undefined>;
+  match(token: string): Promise<HeldDevice | undefined>;
   /** Moves a device's last seen. The auth frame is the one road that calls this; a redeem stamps its own. */
-  seen(id: string, now: number): Promise<DeviceView | undefined>;
+  seen(id: string, now: number): Promise<HeldDevice | undefined>;
   list(): Promise<DeviceView[]>;
   /** True when a device of that id was there to take away. */
   revoke(id: string): Promise<boolean>;
@@ -152,7 +171,7 @@ export function makeDevices(store: Store): DeviceDoor {
 
   /** One device record and the one token it will ever hand over. Both roads that make a device come through here,
    * so a scoped token is stored, hashed and named by exactly the rule a paired computer's is. */
-  const admit = async (name: string, scope: ThreadScope | undefined, now: number, more: { here?: true; via?: DeviceVia } = {}): Promise<PairedDevice> => {
+  const admit = async (name: string, scope: ThreadScope | undefined, now: number, more: { here?: true; via?: DeviceVia; road?: ScopedRoad } = {}): Promise<PairedDevice> => {
     const deviceToken = randomBytes(24).toString("base64url");
     const at = new Date(now).toISOString();
     const record: DeviceRecord = {
@@ -164,6 +183,7 @@ export function makeDevices(store: Store): DeviceDoor {
       createdAt: at,
       lastSeenAt: at,
       ...(scope !== undefined ? { scope } : {}),
+      ...(scope !== undefined && more.road !== undefined ? { road: more.road } : {}),
       ...(more.here === true ? { here: true } : {}),
       ...(more.via !== undefined ? { via: more.via } : {}),
     };
@@ -199,7 +219,7 @@ export function makeDevices(store: Store): DeviceDoor {
     spend: (code, now) => oneAtATime(async () => (await spendCode(code, now)) !== undefined),
     admit: (name, now) => oneAtATime(() => admit(name, undefined, now)),
     admitAccount: (name, via, now) => oneAtATime(() => admit(name, undefined, now, { via })),
-    mint: (name, scope, now) => oneAtATime(() => admit(name, scope, now)),
+    mint: (name, scope, now, road) => oneAtATime(() => admit(name, scope, now, road !== undefined ? { road } : {})),
     refuses: async fingerprint => isRevoked(await store.get(REVOKED, fingerprint)),
     match: async token => {
       const digest = tokenDigest(token);
@@ -207,7 +227,7 @@ export function makeDevices(store: Store): DeviceDoor {
       // say by its own duration how far down the list the token sat.
       let found: DeviceRecord | undefined;
       for (const record of await devices()) if (safeEqual(digest, record.tokenHash) && found === undefined) found = record;
-      return found === undefined ? undefined : viewOf(found);
+      return found === undefined ? undefined : heldOf(found);
     },
     // A read and a write with an await between them: through the chain, so a revoke that lands in that gap is not
     // undone by this write. A device redialing with backoff while somebody revokes it hits exactly that.
@@ -217,7 +237,7 @@ export function makeDevices(store: Store): DeviceDoor {
         if (!isDevice(held)) return undefined;
         const moved: DeviceRecord = { ...held, lastSeenAt: new Date(now).toISOString() };
         await store.put(DEVICES, id, moved);
-        return viewOf(moved);
+        return heldOf(moved);
       }),
     list: async () => (await devices()).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(viewOf),
     revoke: id =>

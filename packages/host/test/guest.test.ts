@@ -7,7 +7,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentsOffRefusal, EXIT_CODES, guestHostFlagLine, guestNamesWorkspaceLine, guestNoFileLine, guestNoKindLine, guestNoSessionLine, guestPersonsComputerLine, LOOPBACK, UNAUTHORIZED, type DaemonEvent } from "@wsp/protocol";
+import { agentsOffRefusal, EXIT_CODES, guestHostFlagLine, guestNamesWorkspaceLine, guestNoFileLine, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestPersonsComputerLine, LOOPBACK, UNAUTHORIZED, type DaemonEvent } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type GuestKindModule, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
@@ -139,6 +139,21 @@ describe("a guest session on the host", () => {
       await settled(() => closes().length > 0);
       expect(closes()[0]!.params).toEqual({ session: "g0", error: UNAUTHORIZED });
       expect(replies()).toEqual([]);
+    });
+
+    it("ends a session on a host that listens on no loopback address in so many words, and opens nothing", async () => {
+      const token = await tokenOn(workspaceId);
+      const lines: string[][] = [];
+      const kind: GuestKindModule = { open: o => (lines.push([...o.argv]), { message: () => undefined, close: () => undefined }) };
+      const bound = guestDoor({
+        authorize: t => rt.devices.match(t).then(device => (device === undefined ? undefined : { kind: "device", device })),
+        hostUrl: () => undefined,
+        kinds: { mcp: kind, cli: kind },
+      });
+      bound.event(link, opened({ token }));
+      await settled(() => closes().length > 0);
+      expect(closes()[0]!.params).toEqual({ session: "g0", error: guestNoLoopbackLine });
+      expect(lines).toEqual([]);
     });
 
     it("closes a kind this host serves no module for in its own words, not the token's", async () => {
