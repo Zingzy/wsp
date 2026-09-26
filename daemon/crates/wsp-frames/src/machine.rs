@@ -7,71 +7,90 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU16;
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::validate::{bounded, plain_path, plain_path_opt, positive};
 use crate::{RequestId, WorkspaceSize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum MachineKind {
     Sandbox,
     Desktop,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum OnIdle {
     Pause,
     Kill,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineSpec {
     pub kind: MachineKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub from_snapshot: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub cpu: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub mem_mb: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub disk_gb: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub envs: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub labels: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub on_idle: Option<OnIdle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub idle_timeout_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub idempotency_key: Option<String>,
     /// The workspace gets the box's container engine through this daemon's fenced socket; refused where the box has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub engine: Option<bool>,
     /// The project this workspace is made with, on a computer the person owns: a checkout on that computer, copied
     /// once for this workspace and mounted read-write inside it at the project's real path. Absent is a workspace
     /// of the computer with no project in it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub copy: Option<WorkspaceCopy>,
     /// The logins this computer holds for every workspace on it, each mounted into this one. Absent is a
     /// workspace that shares none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub shares: Option<Vec<Share>>,
     /// Folders this computer holds, each mounted into the workspace at `target`: a project's memory folder rides
     /// this, so every workspace of one project reads and writes the memory the computer keeps for it. Absent is a
     /// workspace with none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub binds: Option<Vec<Bind>>,
 }
 
 /// One folder the computer running a workspace mounts into it, read-write unless the bind says otherwise. Both
 /// paths are absolute and are read as paths by the wire itself, as a share's are: a bind mount lands on the
 /// workspace's own files and is the one thing a slip cannot be taken back.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct Bind {
     #[serde(deserialize_with = "plain_path")]
@@ -86,7 +105,8 @@ pub struct Bind {
 /// a login signed in once on that computer, read-write, so a refresh inside one workspace is the computer's own
 /// refresh rather than a copy going stale. `source` lives under the daemon's logins directory and a create
 /// refuses one that does not; `target` is where the tool reads it inside, both absolute.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Share {
     #[serde(deserialize_with = "plain_path")]
     pub source: String,
@@ -96,7 +116,8 @@ pub struct Share {
 
 /// Where a workspace's copy comes from and where it lands inside: both absolute paths, the first on the computer,
 /// the second in the workspace.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct WorkspaceCopy {
     #[serde(deserialize_with = "plain_path")]
     pub from: String,
@@ -106,7 +127,8 @@ pub struct WorkspaceCopy {
 
 /// How a computer makes a workspace's copy of a checkout: a reflink shares blocks with it, a snapshot is a btrfs
 /// subvolume snapshot of it, a plain copy writes every byte.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum CopyWord {
     Reflink,
@@ -126,7 +148,8 @@ impl CopyWord {
 }
 
 /// The engine's own error kinds, carried on a refused frame; absent is the link's own: the place is not connected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub enum MachineErrorKind {
     Concurrency,
@@ -140,14 +163,16 @@ pub enum MachineErrorKind {
     Absent,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct MachineLinkRequest {
     pub id: RequestId,
     #[serde(flatten)]
     pub op: MachineOp,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(tag = "op")]
 pub enum MachineOp {
     #[serde(rename = "machine.backend")]
@@ -163,6 +188,7 @@ pub enum MachineOp {
     #[serde(rename = "machine.list")]
     List {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         labels: Option<BTreeMap<String, String>>,
     },
     #[serde(rename = "machine.exec", rename_all = "camelCase")]
@@ -171,6 +197,7 @@ pub enum MachineOp {
         #[serde(deserialize_with = "bounded::<_, 0, { crate::numbers::EXEC_BODY_MAX }>")]
         cmd: String,
         #[serde(default, deserialize_with = "positive", skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         timeout_ms: Option<u32>,
     },
     #[serde(rename = "machine.pause", rename_all = "camelCase")]
@@ -191,6 +218,7 @@ pub enum MachineOp {
     DaemonAnswers {
         machine_id: String,
         #[serde(default, deserialize_with = "positive", skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         timeout_ms: Option<u32>,
     },
     #[serde(rename = "machine.previewUrl", rename_all = "camelCase")]
@@ -209,6 +237,7 @@ pub enum MachineOp {
         last: bool,
         data: String,
         #[serde(default, deserialize_with = "positive", skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         timeout_ms: Option<u32>,
     },
 }
@@ -242,7 +271,8 @@ pub const MACHINE_OPS: [&str; 19] = [
 pub const MACHINE_OPS_ON_ANY_ROAD: [&str; 2] = ["machine.list", "machine.metrics"];
 
 /// The provider word for a machine's state: a napping workspace's machine reads `paused` here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum MachineState {
     Starting,
@@ -252,21 +282,24 @@ pub enum MachineState {
 }
 
 /// How a backend pauses: memory keeps the processes and every byte they hold, disk is a stop and a saved copy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum PauseMode {
     Memory,
     Disk,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum DaemonSupervisor {
     Systemd,
     Entrypoint,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineSizeOffer {
     pub cpu: f64,
@@ -275,11 +308,13 @@ pub struct MachineSizeOffer {
 }
 
 /// The backend's own flags, as the protocol's Capabilities carries them; the app degrades on these, never on probing.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     pub live_clone_forks: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub pause_mode: Option<PauseMode>,
     pub replaces_machine: bool,
     pub preview_urls: bool,
@@ -302,7 +337,8 @@ pub struct Capabilities {
     pub own_network: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotStoragePricing {
     pub free_gb: f64,
@@ -311,66 +347,79 @@ pub struct SnapshotStoragePricing {
 }
 
 /// Pricing as a wire carries it: the numbers, never the function the engine builds from them.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct BackendPricing {
     pub default_size: WorkspaceSize,
     pub snapshot_storage: SnapshotStoragePricing,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub builder_disk_gb: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ResumeAsks {
     pub every_ms: u64,
     pub for_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct LifecycleBudgets {
     pub wake_attempts: u32,
     pub daemon_answers_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub resume_asks: Option<ResumeAsks>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Lifecycle {
     pub budgets: LifecycleBudgets,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct BaseTemplates {
     pub sandbox: String,
     pub desktop: String,
 }
 
 /// What a backend says about itself once, when a link opens: the machine.backend reply.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct BackendFacts {
     pub offer: String,
     pub capabilities: Capabilities,
     pub pricing: BackendPricing,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub lifecycle: Option<Lifecycle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub base_templates: Option<BaseTemplates>,
     /// Where this computer keeps the logins every workspace on it shares, absolute. Absent from a backend that
     /// shares none, which is every provider: a machine somebody else runs has no file of this person's on it.
     #[serde(default, deserialize_with = "plain_path_opt", skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub logins: Option<String>,
     /// Where this computer keeps the project checkouts it holds and each project's own memory, absolute. Absent
     /// from a backend that keeps none, which is every provider: what a project is there lives in an image.
     #[serde(default, deserialize_with = "plain_path_opt", skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub projects: Option<String>,
 }
 
 /// Which optional calls a handle carries, so the client builds a machine whose methods are present exactly where
 /// the backend's are.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineRoads {
     pub preview_url: bool,
@@ -381,47 +430,59 @@ pub struct MachineRoads {
     pub metrics: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineSeen {
     pub state: MachineState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub created_at: Option<String>,
 }
 
 /// One machine as the place hands it over.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineHandle {
     pub id: String,
     pub kind: MachineKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub stream_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub labels: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub seen: Option<MachineSeen>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub replayed: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub daemon_supervisor: Option<DaemonSupervisor>,
     /// One sentence on a create or a fork whose size the computer would not give as asked, naming what it gave
     /// instead; the record holds the size itself, so this is said once and never read back for a number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub notice: Option<String>,
     pub roads: MachineRoads,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct MachineListRow {
     pub id: String,
     pub state: MachineState,
     pub labels: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub size: Option<WorkspaceSize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecResult {
     pub exit_code: i32,
@@ -429,19 +490,25 @@ pub struct ExecResult {
     pub stderr: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineShape {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub cpu: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub mem_mb: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub disk_gb: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub created_at: Option<String>,
     /// What the machine has written since it booted, where the backend can read that: a workspace's upper directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub used_bytes: Option<u64>,
 }
 
@@ -449,57 +516,70 @@ pub struct MachineShape {
 /// holds of them now, and where its processes, its files and its address are. Every figure is read at the moment of
 /// the ask rather than sampled, so a row drawn from it is true of that moment and of no moment since; a workspace
 /// that is not running carries the sizes and the paths and none of the live figures.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineReading {
     pub state: MachineState,
     /// The cores and the memory the workspace was given, as they were applied rather than as they were asked for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub cpu: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub mem_mb: Option<u64>,
     /// What its cgroup holds this moment, against the cap memMb names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub mem_bytes: Option<u64>,
     /// The processor time its cgroup has spent since the workspace booted; a rate is the difference between two
     /// readings, which is the caller's to take.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub cpu_usage_usec: Option<u64>,
     /// How long its first process has been running, which a wake starts again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub uptime_ms: Option<u64>,
     /// Every process in its cgroup and in the cgroups under it, which is what a container engine inside it makes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub procs: Option<u64>,
     /// Milliseconds since this computer last saw the workspace do anything on its own: a byte through a published
     /// port, or a command run in it. Counts from the boot until something happens. Absent when it is not running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub quiet_for_ms: Option<u64>,
     /// The address it answers on inside the computer's own network.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub address: Option<String>,
     pub cgroup: String,
     /// The overlay directory holding everything it has written since it was made, which is what a snapshot saves.
     pub upper: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceImage {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub name: Option<String>,
     pub size_bytes: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct MachineCounts {
     pub running: u64,
     pub paused: u64,
 }
 
 /// What the computer holding a backend has left for one more machine: the machine.capacity reply.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceCapacity {
     pub cores: u64,
@@ -509,52 +589,62 @@ pub struct PlaceCapacity {
     /// What the workspaces on this computer hold of it right now, summed over the ones that are not stopped:
     /// the cores their quotas name and the memory their caps name. Absent from a backend that counts neither.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub cpu_taken: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub mem_taken_mb: Option<u64>,
     pub disk_free_bytes: u64,
     pub images: Vec<PlaceImage>,
     pub machines: MachineCounts,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct MachineHandleReply {
     pub machine: MachineHandle,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct MachineListReply {
     pub machines: Vec<MachineListRow>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct MachineExecReply {
     pub result: ExecResult,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct MachineStateReply {
     pub state: MachineState,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct MachineShapeReply {
     pub shape: MachineShape,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct MachineReadingReply {
     pub reading: MachineReading,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct MachineAnswersReply {
     pub answers: bool,
 }
 
 /// Where a host dials one port of a machine: a URL, the token the route wants and when it expires. A route on a
 /// place's own loopback carries no token and never expires, which the two empty values say.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewReach {
     pub url: String,
@@ -567,7 +657,8 @@ impl PreviewReach {
     pub const NEVER: u64 = 9_007_199_254_740_991;
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct MachineReachReply {
     pub reach: PreviewReach,
 }

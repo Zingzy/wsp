@@ -4,9 +4,11 @@
 //! relays and reads nothing of what rides here; the token is the thread's and only the host reads it.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// What a guest session carries: the tool server's JSON-RPC messages, or one command line and its streams.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum GuestKind {
     Mcp,
@@ -14,7 +16,8 @@ pub enum GuestKind {
 }
 
 /// The reply to guest.open: the id both sides name the session by. Every other guest op answers the empty ok.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct GuestOpenReply {
     pub session: String,
 }
@@ -30,7 +33,8 @@ pub struct GuestOpen {
 }
 
 /// Which of the two streams a command line's text belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum GuestStream {
     Out,
@@ -39,7 +43,8 @@ pub enum GuestStream {
 
 /// What a cli session's messages carry: text for one of the two streams, then the code the line ended with. The
 /// tool server's messages are the harness's own JSON-RPC and have no shape of ours.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(untagged)]
 pub enum GuestCliMessage {
     Text { stream: GuestStream, text: String },

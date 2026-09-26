@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use serde::{Deserialize, Serialize, Serializer};
+use ts_rs::TS;
 
 use crate::validate::http_url;
 use crate::{GuestKind, PtyMode, RelayPort};
@@ -10,7 +11,8 @@ fn finite<S: Serializer>(value: &f64, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_f64(if value.is_finite() { *value } else { 0.0 })
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Usage {
     pub used: u64,
     pub total: u64,
@@ -18,7 +20,8 @@ pub struct Usage {
 
 /// One process as /proc/[pid] shows it. cpu is its busy share of one core over the interval; rss in bytes;
 /// startedAt epoch milliseconds; pty names the daemon pty whose shell this is.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcEntry {
     pub pid: u32,
@@ -32,11 +35,13 @@ pub struct ProcEntry {
     pub rss: u64,
     pub started_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub pty: Option<String>,
 }
 
 /// Every frame the daemon pushes without being asked, keyed on `type` as the zod union is.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(tag = "type")]
 pub enum DaemonEvent {
     /// The first frame after the auth reply: root is the directory every fs and git path resolves inside.
@@ -44,6 +49,7 @@ pub enum DaemonEvent {
     DaemonHello {
         root: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         version: Option<u32>,
     },
     #[serde(rename = "pty.data", rename_all = "camelCase")]
@@ -53,31 +59,40 @@ pub enum DaemonEvent {
         pty_id: String,
         exit_code: i32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         signal: Option<i32>,
     },
     #[serde(rename = "port.open")]
     PortOpen {
         port: u16,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         pid: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         process: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         loopback: Option<bool>,
     },
     #[serde(rename = "port.close")]
     PortClose {
         port: u16,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         pid: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         process: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         command: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         exited: Option<bool>,
         /// When the close was seen, as the node daemon stamps it: an ISO date, never a number.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         at: Option<String>,
     },
     #[serde(rename = "inbox.file")]
@@ -89,6 +104,7 @@ pub enum DaemonEvent {
         #[serde(deserialize_with = "http_url")]
         url: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         port: Option<RelayPort>,
     },
     #[serde(rename = "callback.port")]
@@ -119,6 +135,7 @@ pub enum DaemonEvent {
         /// arrived on is what names it, never anything the guest said. Absent on a daemon inside a machine, where
         /// the machine is the one the host dialled.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         machine_id: Option<String>,
         /// The run of the daemon that named this session. Session names start from the beginning on every run, so
         /// this and the name together are what a host tells a session it already holds from a session of the same
@@ -127,6 +144,7 @@ pub enum DaemonEvent {
         kind: GuestKind,
         token: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         turn_token: Option<String>,
         argv: Vec<String>,
         cwd: String,
@@ -136,8 +154,10 @@ pub enum DaemonEvent {
     #[serde(rename = "guest.message", rename_all = "camelCase")]
     GuestMessage {
         session: String,
+        #[ts(type = "unknown")]
         message: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         machine_id: Option<String>,
     },
     /// The session ended; this goes to whichever side did not end it.
@@ -145,8 +165,10 @@ pub enum DaemonEvent {
     GuestClosed {
         session: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         error: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
         machine_id: Option<String>,
     },
 }

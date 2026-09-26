@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 /// zod's .max counts UTF-16 code units, which is what a JavaScript string's length is.
 fn js_len(s: &str) -> usize {
@@ -220,8 +221,9 @@ where
 }
 
 /// A port the host may forward: the protocol's RelayPort, 1024 to 65535.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(transparent)]
+#[ts(export)]
 pub struct RelayPort(u16);
 
 impl RelayPort {
