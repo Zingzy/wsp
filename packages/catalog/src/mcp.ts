@@ -127,11 +127,15 @@ export interface McpFormat {
   remove(text: string, names: readonly string[], project?: string): McpRemoved;
   /** The text with every header and every command variable of its servers written as the name of a variable, in
    * the syntax this format's agent expands from its environment, and each value that left the text under the name
-   * it now reads. A value that already names a variable stands as the person wrote it. `only` names one server of
+   * it now reads. A value that is one reference to a name `held` holds, or the text just wrote, stands as the person
+   * wrote it, its default dropped where it has one; one that only reads like a reference is a value, and a reference
+   * to a name nobody holds travels as its default where it has one and leaves its server `unread` where it has none,
+   * in an address always. `only` names one server of
    * the file's own table and leaves every other as it is. A `known` value standing whole in an argument or the
-   * address is written as its variable's reference too, and throws where the agent expands none there. Throws when
+   * address is written as its variable's reference too, and throws where the agent expands none there. `held` names
+   * what servers.env holds and an earlier file of the same copy wrote, the names a reference may read. Throws when
    * the text is not the format. */
-  refer(text: string, only?: string, known?: readonly KnownValue[]): Promise<McpReferred>;
+  refer(text: string, only?: string, known?: readonly KnownValue[], held?: ReadonlySet<string>): Promise<McpReferred>;
   /** The server's transport as its agent starts it, every reference this format writes read from `value`, and each
    * value read that way; or the first variable it reads that has no value and no default. A command's name and
    * arguments stand as written, since whatever is put there is on the process list. */
@@ -139,18 +143,28 @@ export interface McpFormat {
   /** A variable written as this format's agent expands it inside a server's arguments and address; absent where the
    * agent expands none there. */
   argRef?(variable: string): string;
-  /** Whether a string is one reference in the syntax this format's agent expands and nothing else; absent where the
-   * agent expands none. */
-  whole?(value: string): boolean;
+  /** The string as one reference in the syntax this format's agent expands and nothing else; absent where the agent
+   * expands none. */
+  named?(value: string): WholeRef | undefined;
+}
+
+/** A string that is one reference and nothing else: the variable it names, the bearer's scheme word before it where
+ * one is read, and its default where it has one. */
+export interface WholeRef {
+  name: string;
+  scheme: string;
+  fallback?: string;
 }
 
 export type McpResolved = { transport: McpTransport; values: string[] } | { missing: string };
 
 /** What a reference writer came to: the text, and per server the values it no longer holds, by variable name.
- * `project` is the folder whose own servers it sits under, for a format that keeps servers per folder. */
+ * `project` is the folder whose own servers it sits under, for a format that keeps servers per folder. `unread` says
+ * where a server reads a variable nobody holds, so it could not start on another computer; such a server's text is
+ * left as it was and it travels nowhere. */
 export interface McpReferred {
   text: string;
-  servers: { name: string; project?: string; values: Record<string, string> }[];
+  servers: { name: string; project?: string; values: Record<string, string>; unread?: string }[];
   /** Every server definition the returned text holds, parsed. */
   entries: unknown[];
 }
@@ -170,27 +184,38 @@ export const valueForms = (v: string): string[] => [v, ...(/^(?:bearer|basic|tok
 /** A key's name with case, `_` and `-` taken out, so every spelling of one field reads the same. */
 const squashed = (key: string): string => key.toLowerCase().replace(/[-_]/g, "");
 
+/** Whether a value stands as written: one whole reference, by `named`, with no default, to a variable `held` says
+ * servers.env holds or the copy writes. Anything else is a literal, however it reads. */
+const refers = (v: string, named: (v: string) => WholeRef | undefined, held: (name: string) => boolean): boolean => {
+  const ref = named(v);
+  return ref !== undefined && ref.fallback === undefined && held(ref.name);
+};
+
+/** Why a server that reads a variable nobody holds at `path` travels nowhere; never the variable, which for a
+ * literal that reads like a reference is its value. */
+const unreadLine = (path: readonly (string | number)[]): string => `reads a variable servers.env does not hold in ${path.join(".")}, so it could not start there`;
+
 const OAUTH_SECRETS = new Set(["clientsecret", "refreshtoken", "accesstoken", "idtoken"]);
 
 /** The keys of a server's `oauth` table that hold a secret, however the file spells them. */
 const oauthSecretKeys = (oauth: Record<string, unknown>): string[] => Object.keys(oauth).filter(k => OAUTH_SECRETS.has(squashed(k)));
 
 /** Where a definition still holds an OAuth secret, at any depth and in any spelling, as a dotted path inside it; an
- * empty string and a whole reference the agent expands hold none. */
-function oauthSecretsIn(v: unknown, whole: (s: string) => boolean, at: readonly string[] = []): string[] {
-  if (Array.isArray(v)) return v.flatMap((x, i) => oauthSecretsIn(x, whole, [...at, String(i)]));
+ * empty string and a value that stands as a reference hold none. */
+function oauthSecretsIn(v: unknown, reference: (s: string) => boolean, at: readonly string[] = []): string[] {
+  if (Array.isArray(v)) return v.flatMap((x, i) => oauthSecretsIn(x, reference, [...at, String(i)]));
   if (!isObject(v)) return [];
   return Object.entries(v).flatMap(([k, x]) => {
     const here = [...at, k];
-    return [...(squashed(k) === "oauth" ? heldIn(x, whole, here) : []), ...oauthSecretsIn(x, whole, here)];
+    return [...(squashed(k) === "oauth" ? heldIn(x, reference, here) : []), ...oauthSecretsIn(x, reference, here)];
   });
 }
 
 /** The secrets an `oauth` value holds, written as a table or as a list of tables. */
-function heldIn(x: unknown, whole: (s: string) => boolean, at: readonly string[]): string[] {
-  if (Array.isArray(x)) return x.flatMap((y, i) => heldIn(y, whole, [...at, String(i)]));
+function heldIn(x: unknown, reference: (s: string) => boolean, at: readonly string[]): string[] {
+  if (Array.isArray(x)) return x.flatMap((y, i) => heldIn(y, reference, [...at, String(i)]));
   if (!isObject(x)) return [];
-  return oauthSecretKeys(x).filter(s => !(typeof x[s] === "string" && (x[s] === "" || whole(x[s])))).map(s => [...at, s].join("."));
+  return oauthSecretKeys(x).filter(s => !(typeof x[s] === "string" && (x[s] === "" || reference(x[s])))).map(s => [...at, s].join("."));
 }
 
 /** A query value decoded as a server reads it; the raw text where it is not valid percent-encoding. */
@@ -358,7 +383,8 @@ const clashLine = (name: string, by: string | readonly string[]): string => {
  * value is its rotation. A copy whose definitions still carry an OAuth secret is refused whole. */
 export async function serversByName(format: McpFormat, text: string, held: Map<string, { value: string; by: string }>, rowOf: (name: string) => string | undefined, known: Readonly<Record<string, { value: string; by: readonly string[] }>> = {}): Promise<{ text: string; dropped: { name: string; reason: string }[] }> {
   const knownValues = Object.entries(known).map(([name, at]): KnownValue => [name, at.value]);
-  const found = (await format.refer(text, undefined, knownValues)).servers;
+  const outside = new Set([...Object.keys(known), ...held.keys()]);
+  const found = (await format.refer(text, undefined, knownValues, outside)).servers;
   const dropped: { name: string; reason: string; project?: string }[] = [];
   const kept = new Map<string, { value: string; by: string }>();
   for (const s of found) {
@@ -371,7 +397,8 @@ export async function serversByName(format: McpFormat, text: string, held: Map<s
       return vault !== undefined && vault.value !== value && !(vault.by.length === 1 && vault.by[0] === s.name);
     });
     const tall = values.find(([, value]) => crossesLines(value));
-    if (owned !== undefined) dropped.push({ name: s.name, reason: rowVariableLine(owned[0], owned[1]!), ...(s.project !== undefined ? { project: s.project } : {}) });
+    if (s.unread !== undefined) dropped.push({ name: s.name, reason: s.unread, ...(s.project !== undefined ? { project: s.project } : {}) });
+    else if (owned !== undefined) dropped.push({ name: s.name, reason: rowVariableLine(owned[0], owned[1]!), ...(s.project !== undefined ? { project: s.project } : {}) });
     else if (clash !== undefined) dropped.push({ name: s.name, reason: clashLine(clash[0], (held.get(clash[0]) ?? kept.get(clash[0]))?.by ?? known[clash[0]]!.by.filter(b => b !== s.name)), ...(s.project !== undefined ? { project: s.project } : {}) });
     else if (tall !== undefined) dropped.push({ name: s.name, reason: `sets ${tall[0]} to a value on more than one line, which cannot travel by name`, ...(s.project !== undefined ? { project: s.project } : {}) });
     else for (const [name, value] of values) if (!held.has(name) && !kept.has(name)) kept.set(name, { value, by: s.name });
@@ -379,9 +406,19 @@ export async function serversByName(format: McpFormat, text: string, held: Map<s
   let out = text;
   for (const d of dropped) out = format.remove(out, [d.name], d.project).text;
   if (found.length === 0) return { text, dropped: [] };
-  const final = await format.refer(out, undefined, knownValues);
+  let final = await format.refer(out, undefined, knownValues, outside);
+  // A server whose reference named what a dropped server wrote reads nothing now, and goes too.
+  for (let lost = final.servers.filter(s => s.unread !== undefined); lost.length > 0; lost = final.servers.filter(s => s.unread !== undefined)) {
+    for (const s of lost) {
+      dropped.push({ name: s.name, reason: s.unread!, ...(s.project !== undefined ? { project: s.project } : {}) });
+      out = format.remove(out, [s.name], s.project).text;
+      for (const [name, at] of kept) if (at.by === s.name) kept.delete(name);
+    }
+    final = await format.refer(out, undefined, knownValues, outside);
+  }
   stillStands(final.entries, found);
-  const secret = oauthSecretsIn(final.entries, format.whole ?? (() => false)).map(p => p.slice(p.indexOf(".") + 1))[0];
+  const written = (n: string): boolean => outside.has(n) || final.servers.some(s => s.values[n] !== undefined);
+  const secret = oauthSecretsIn(final.entries, v => refers(v, format.named ?? (() => undefined), written)).map(p => p.slice(p.indexOf(".") + 1))[0];
   if (secret !== undefined) throw new Error(`a server still carries an OAuth secret in ${secret} after it was written by name, so the file stays on this computer`);
   const result = final.text;
   for (const [name, at] of kept) held.set(name, at);
@@ -850,8 +887,20 @@ interface JsonShape {
   oauthSecrets?: readonly string[];
 }
 
-/** Whether a string is one reference in `ref`'s syntax and nothing else. */
-const wholeRef = (ref: RegExp) => (v: string): boolean => new RegExp(`^(?:${ref.source})$`).test(v);
+/** What `${X:-d}` reads as where X has no value: `d`; nothing for a reference with no default. */
+const fallbackOf = (ref: string): string | undefined => /^\$\{[^}]*?:-(.*)\}$/.exec(ref)?.[1];
+
+/** The string as one reference in `ref`'s syntax and nothing else, a bearer's included where `bearer`. */
+const wholeRef =
+  (ref: RegExp, bearer = false) =>
+  (v: string): WholeRef | undefined => {
+    const scheme = bearer ? (/^Bearer\s+/i.exec(v)?.[0] ?? "") : "";
+    const rest = v.slice(scheme.length);
+    const m = new RegExp(`^(?:${ref.source})$`).exec(rest);
+    if (m === null) return undefined;
+    const fallback = fallbackOf(rest);
+    return { name: (m[1] ?? m[2])!, scheme, ...(fallback !== undefined ? { fallback } : {}) };
+  };
 
 /** The reference writer for a JSON file: each server's header and command variable values put in place by name,
  * every other key and comment where it was. */
@@ -867,48 +916,102 @@ function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
       : []),
   ];
   const names = (v: string): boolean => new RegExp(shape.ref.source).test(v);
-  /** A value that is one reference and nothing else, a bearer's included. */
-  const whole = (v: string): boolean => new RegExp(`^(?:Bearer\\s+)?(?:${shape.ref.source})$`, "i").test(v);
+  const whole = wholeRef(shape.ref, true);
   const bare = wholeRef(shape.ref);
-  return async (text, only, known = []) => {
+  /** The names a server's literal headers, variables and OAuth secrets travel under. */
+  const literalNames = (name: string, def: Tree): string[] => {
+    const oauth = tree(def.oauth);
+    const secrets = oauth === undefined ? [] : oauthSecretKeys(oauth).filter(k => typeof oauth[k] === "string" && oauth[k] !== "" && bare(oauth[k] as string) === undefined);
+    const headers = Object.entries(dict(def.headers)).filter(([, v]) => v !== "" && whole(v) === undefined);
+    return [
+      ...headers.map(([h]) => mcpHeaderVariable(name, h)),
+      ...Object.entries(dict(def[shape.envKey])).flatMap(([k, v]) => (v !== "" && whole(v) === undefined ? [k] : [])),
+      ...secrets.map(k => mcpHeaderVariable(name, `oauth.${k}`)),
+    ];
+  };
+  return async (text, only, known = [], outside = new Set()) => {
     const root = jsonObject(text);
     const tables = serverTables(root, only === undefined);
     const edits: JsonEdit[] = [];
     const servers: McpReferred["servers"] = [];
     const defs: { at: JSONPath; name: string; def: Tree; values: Record<string, string> }[] = [];
-    for (const table of tables) {
-      for (const [name, raw] of Object.entries(table.servers)) {
-        const def = tree(raw);
-        if (def === undefined || (only !== undefined && name !== only)) continue;
-        const values: Record<string, string> = {};
-        const put = (key: string, entries: Record<string, string>, variable: (k: string) => string, bearer: boolean): void => {
-          for (const [k, v] of Object.entries(entries)) {
-            if (v === "" || whole(v)) continue;
-            if (names(v)) throw new Error(`${name}'s ${k} mixes a value with a variable, so it cannot travel by name; make it one or the other`);
-            const n = variable(k);
-            const token = bearer ? bearerToken(k, v) : undefined;
-            values[n] = token ?? v;
-            edits.push([[...table.at, name, key, k], token !== undefined ? `Bearer ${shape.refOf(n)}` : shape.refOf(n)]);
-          }
-        };
-        const oauth = def.oauth;
-        if (oauth !== undefined && oauth !== false && !isObject(oauth)) throw new Error(`${[...table.at, name].join(".")} is written in a shape wsp does not read, so its values cannot be written by name`);
-        const secrets = isObject(oauth) ? oauthSecretKeys(oauth) : [];
-        const minted = headerVariables(name, [...Object.keys(dict(def.headers)), ...secrets.map(k => `oauth.${k}`)]);
-        put("headers", dict(def.headers), h => minted.get(h)!, true);
-        put(shape.envKey, dict(def[shape.envKey]), k => k, false);
-        for (const k of secrets) {
-          const v = (oauth as Tree)[k];
-          if (typeof v === "string" && (v === "" || bare(v))) continue;
-          if (typeof v !== "string" || !(shape.oauthSecrets ?? []).includes(k)) throw new Error(`${name} keeps an OAuth secret in ${[...table.at, name, "oauth", k].join(".")}, and its agent reads no variable there, so the file stays on this computer`);
-          if (names(v)) throw new Error(`${name}'s oauth.${k} mixes a value with a variable, so it cannot travel by name; make it one or the other`);
-          const n = minted.get(`oauth.${k}`)!;
-          values[n] = v;
-          edits.push([[...table.at, name, "oauth", k], shape.refOf(n)]);
+    const asked = tables.flatMap(table => Object.entries(table.servers).flatMap(([name, raw]) => (tree(raw) === undefined || (only !== undefined && name !== only) ? [] : [{ table, name, def: tree(raw)! }])));
+    // What the file writes is read before any reference is weighed, so the order of its keys and servers decides nothing.
+    const writes = new Set(asked.flatMap(({ name, def }) => literalNames(name, def)));
+    const held = (n: string): boolean => outside.has(n) || writes.has(n);
+    for (const { table, name, def } of asked) {
+      const values: Record<string, string> = {};
+      const mine: JsonEdit[] = [];
+      let unread: string | undefined;
+      /** The value that travels for `v`: undefined where it stands as written, is written bare, or the server reads
+       * a variable nobody holds; the default where it is a reference to such a variable with one. */
+      const literalOf = (v: string, path: JSONPath, form: (v: string) => WholeRef | undefined, where: string): string | undefined => {
+        const ref = form(v);
+        if (refers(v, form, held)) return undefined;
+        if (ref !== undefined && held(ref.name)) {
+          mine.push([[...table.at, name, ...path], ref.scheme + shape.refOf(ref.name)]);
+          return undefined;
         }
-        servers.push({ name, ...(table.project !== undefined ? { project: table.project } : {}), values });
-        defs.push({ at: [...table.at, name], name, def, values });
+        if (ref !== undefined && ref.fallback === undefined) {
+          unread ??= unreadLine([...table.at, name, ...path]);
+          return undefined;
+        }
+        if (ref === undefined && names(v)) throw new Error(`${name}'s ${where} mixes a value with a variable, so it cannot travel by name; make it one or the other`);
+        return ref === undefined ? v : ref.scheme + ref.fallback;
+      };
+      const put = (key: string, entries: Record<string, string>, variable: (k: string) => string, bearer: boolean): void => {
+        for (const [k, v] of Object.entries(entries)) {
+          const literal = v === "" ? undefined : literalOf(v, [key, k], whole, k);
+          if (literal === undefined) continue;
+          if (literal === "") {
+            mine.push([[...table.at, name, key, k], ""]);
+            continue;
+          }
+          const n = variable(k);
+          const token = bearer ? bearerToken(k, literal) : undefined;
+          values[n] = token ?? literal;
+          mine.push([[...table.at, name, key, k], token !== undefined ? `Bearer ${shape.refOf(n)}` : shape.refOf(n)]);
+        }
+      };
+      const oauth = def.oauth;
+      if (oauth !== undefined && oauth !== false && !isObject(oauth)) throw new Error(`${[...table.at, name].join(".")} is written in a shape wsp does not read, so its values cannot be written by name`);
+      const secrets = isObject(oauth) ? oauthSecretKeys(oauth) : [];
+      const minted = headerVariables(name, [...Object.keys(dict(def.headers)), ...secrets.map(k => `oauth.${k}`)]);
+      put("headers", dict(def.headers), h => minted.get(h)!, true);
+      put(shape.envKey, dict(def[shape.envKey]), k => k, false);
+      for (const k of secrets) {
+        const v = (oauth as Tree)[k];
+        const literal = typeof v !== "string" ? v : v === "" ? undefined : literalOf(v, ["oauth", k], bare, `oauth.${k}`);
+        if (literal === undefined || literal === "") {
+          if (literal === "") mine.push([[...table.at, name, "oauth", k], ""]);
+          continue;
+        }
+        if (typeof literal !== "string" || !(shape.oauthSecrets ?? []).includes(k)) throw new Error(`${name} keeps an OAuth secret in ${[...table.at, name, "oauth", k].join(".")}, and its agent reads no variable there, so the file stays on this computer`);
+        const n = minted.get(`oauth.${k}`)!;
+        values[n] = literal;
+        mine.push([[...table.at, name, "oauth", k], shape.refOf(n)]);
       }
+      const shown: Tree = { ...def };
+      for (const key of ["url", "httpUrl"]) {
+        const url = def[key];
+        if (typeof url !== "string") continue;
+        const bared = url.replace(new RegExp(shape.ref.source, "g"), m => {
+          const ref = bare(m)!;
+          if (!held(ref.name)) unread ??= unreadLine([...table.at, name, key]);
+          return refers(m, bare, held) ? m : shape.refOf(ref.name);
+        });
+        if (bared === url) continue;
+        shown[key] = bared;
+        mine.push([[...table.at, name, key], bared]);
+      }
+      const project = table.project !== undefined ? { project: table.project } : {};
+      if (unread !== undefined) {
+        servers.push({ name, ...project, values: {}, unread });
+        continue;
+      }
+      edits.push(...mine);
+      servers.push({ name, ...project, values });
+      defs.push({ at: [...table.at, name], name, def: shown, values });
     }
     for (const { at, name, def, values } of defs) {
       const written: string[] = [];
@@ -945,7 +1048,7 @@ function jsonResolver(ref: RegExp): McpFormat["resolve"] {
           values.push(got);
           return got;
         }
-        const fallback = /^\$\{[^}]*?:-(.*)\}$/.exec(m)?.[1];
+        const fallback = fallbackOf(m);
         if (fallback === undefined) missing ??= name;
         return fallback ?? m;
       });
@@ -994,7 +1097,7 @@ function jsonFormat(shape: JsonShape): McpFormat {
     refer: jsonReferrer(shape),
     resolve: jsonResolver(shape.ref),
     argRef: shape.refOf,
-    whole: wholeRef(shape.ref),
+    named: wholeRef(shape.ref),
     ...(shape.flip === undefined ? {} : { enable: jsonEnabler(shape.key, shape.flip) }),
   };
 }
@@ -1492,7 +1595,7 @@ function referCodexLines(text: string, only?: string): string {
  * comment; any other spelling is written out from the tree. An OAuth secret refuses the file, since Codex reads
  * `oauth.client_secret` only as written and names no variable for it. The parser is loaded on the first call: every host
  * process carries this module and the host's memory has a budget, so nothing that never writes a Codex file pays it. */
-async function referCodex(text: string, only?: string, known: readonly KnownValue[] = []): Promise<McpReferred> {
+async function referCodex(text: string, only?: string, known: readonly KnownValue[] = [], outside: ReadonlySet<string> = new Set()): Promise<McpReferred> {
   const { parse: parseToml, stringify: stringifyToml } = await import("smol-toml");
   let tree: Record<string, unknown>;
   try {
@@ -1507,6 +1610,8 @@ async function referCodex(text: string, only?: string, known: readonly KnownValu
   const servers: McpReferred["servers"] = [];
   const next: Record<string, unknown> = { ...table };
   let changed = false;
+  const writes = new Set(Object.entries(table).flatMap(([name, raw]) => (!isObject(raw) || (only !== undefined && name !== only) ? [] : [...Object.keys(dict(raw["http_headers"])).map(h => mcpHeaderVariable(name, h)), ...Object.keys(dict(raw["env"]))])));
+  const held = (n: string): boolean => outside.has(n) || writes.has(n);
   for (const [name, raw] of Object.entries(table)) {
     if (!isObject(raw)) throw unread(`mcp_servers.${name}`);
     for (const key of ["http_headers", "env"]) {
@@ -1518,6 +1623,12 @@ async function referCodex(text: string, only?: string, known: readonly KnownValu
     if (only !== undefined && name !== only) continue;
     const secret = oauth === undefined ? undefined : oauthSecretKeys(oauth)[0];
     if (secret !== undefined) throw new Error(`${name} keeps an OAuth secret in mcp_servers.${name}.oauth.${secret}, and Codex reads no variable there, so the file stays on this computer`);
+    const reads: [string[], unknown][] = [[["bearer_token_env_var"], raw["bearer_token_env_var"]], ...Object.entries(dict(raw["env_http_headers"])).map(([h, n]): [string[], unknown] => [["env_http_headers", h], n])];
+    const lost = reads.find(([, n]) => typeof n === "string" && !held(n));
+    if (lost !== undefined) {
+      servers.push({ name, values: {}, unread: unreadLine(["mcp_servers", name, ...lost[0]]) });
+      continue;
+    }
     const headers = dict(raw["http_headers"]);
     const env = dict(raw["env"]);
     const values: Record<string, string> = {};
@@ -1547,7 +1658,7 @@ async function referCodex(text: string, only?: string, known: readonly KnownValu
     changed = true;
   }
   for (const [name, raw] of Object.entries(table)) {
-    if (only !== undefined && name !== only) continue;
+    if ((only !== undefined && name !== only) || servers.some(s => s.name === name && s.unread !== undefined)) continue;
     const strings = argStrings(raw as Record<string, unknown>);
     for (const [, v, where] of strings) {
       const hit = knownHits(v, where, known, servers, name, servers.find(s => s.name === name)?.values ?? {})[0];

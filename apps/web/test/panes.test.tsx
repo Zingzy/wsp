@@ -22,7 +22,7 @@ const SURFACES: RightPanelSurface[] = [
 
 function tabs(surfaces: RightPanelSurface[], onAdd = vi.fn()) {
   render(
-    <RightPanelTabs mode="inline" surfaces={surfaces} activeSurfaceId={surfaces[0]?.id ?? null} pendingSurfaceIds={new Set()} previewSessions={{}} terminalLabelsById={new Map()} onActivate={vi.fn()} onCloseSurface={vi.fn()} onAdd={onAdd} available={ALL}>
+    <RightPanelTabs mode="inline" surfaces={surfaces} activeSurfaceId={surfaces[0]?.id ?? null} previewSessions={{}} terminalLabelsById={new Map()} onActivate={vi.fn()} onCloseSurface={vi.fn()} onAdd={onAdd} available={ALL}>
       <div />
     </RightPanelTabs>,
   );

@@ -8,8 +8,9 @@ import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 import WebSocket from "ws";
+import { refusedPort } from "../../runtime/test/held-port.js";
 import { fakeProcTree, setListeners } from "./fake-proc.js";
 import { daemonUnderTest, type DaemonUnderTest } from "./harness.js";
 import { rejectedEvents } from "./wire-events.js";
@@ -81,20 +82,6 @@ async function listenV6Only(server: Server): Promise<number> {
     const port = (server.address() as { port: number }).port;
     if (await canBind(port, "127.0.0.1")) return port;
     await new Promise<void>(r => server.close(() => r()));
-  }
-}
-
-/** A port nothing listens on, on either loopback address the daemon dials. */
-async function refusedPort(): Promise<number> {
-  for (;;) {
-    const port = await new Promise<number>(r => {
-      const s = createServer();
-      s.listen(0, "127.0.0.1", () => {
-        const p = (s.address() as { port: number }).port;
-        s.close(() => r(p));
-      });
-    });
-    if (await canBind(port, "::1")) return port;
   }
 }
 
@@ -221,7 +208,9 @@ describe("daemon: browser.open, callback.port and tunnels", () => {
     await start();
     const c = await client(daemon!.port);
     expect((await c.request("tunnel.open", { tunnelId: "x", port: 0 })).ok).toBe(false);
-    const refused = await c.request("tunnel.open", { tunnelId: "x", port: await refusedPort() });
+    const { port: dark, close: closeDark } = await refusedPort(["127.0.0.1", "::1"]);
+    onTestFinished(closeDark);
+    const refused = await c.request("tunnel.open", { tunnelId: "x", port: dark });
     expect(refused.ok).toBe(false);
     expect(String(refused["error"])).toMatch(/ECONNREFUSED/);
     echo = createServer(s => s.end());
