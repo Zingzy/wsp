@@ -167,6 +167,12 @@ describe("a host's own keys, the ones the app's setup reads", () => {
       expect(vaultNow(state)).toEqual({});
       writeFileSync(join(home, ".env"), `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TESTONLYfromthefile\nSOLARI_API_KEY=${SOLARI}\n`);
       expect(vaultNow(state)).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-TESTONLYfromthefile" });
+      // The servers' values beside it come whole, under the names their definitions on other computers read; a
+      // row's own variable there never outranks the row's.
+      writeFileSync(join(home, "servers.env"), "WSP_MCP_CONTEXT7_AUTHORIZATION=c7_TESTONLY\nnotion_token=ntn_TESTONLY\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TESTONLYstale\n");
+      expect(vaultNow(state)).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-TESTONLYfromthefile", WSP_MCP_CONTEXT7_AUTHORIZATION: "c7_TESTONLY", notion_token: "ntn_TESTONLY" });
+      writeFileSync(join(home, ".env"), `SOLARI_API_KEY=${SOLARI}\n`);
+      expect(vaultNow(state)).toEqual({ WSP_MCP_CONTEXT7_AUTHORIZATION: "c7_TESTONLY", notion_token: "ntn_TESTONLY" });
     } finally {
       process.chdir(here);
       delete process.env["CLAUDE_CODE_OAUTH_TOKEN"];

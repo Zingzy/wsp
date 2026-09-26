@@ -6,9 +6,10 @@
 // file keeps its mode, a new one is the login's alone, a file that is a link
 // out of the folder it belongs to is never written through, and a file the
 // agent wrote between the read and the write is left as the agent left it. The
-// values a person typed go into that file and are never said anywhere else.
+// values a person typed go into this computer's own file as typed; another
+// computer's file names a variable for each, and the value goes to the vault.
 import { posix } from "node:path";
-import { CONFIG_LINK_EXIT, MCP_AGENTS, agentName, catalogEntry, configRefusal, configWriteLine, insideBase, type McpAgent, type McpTransport } from "@wsp/catalog";
+import { CONFIG_LINK_EXIT, MCP_AGENTS, agentName, rowVariableLine, catalogEntry, configRefusal, configWriteLine, insideBase, type McpAgent, type McpTransport } from "@wsp/catalog";
 import { expand, nodeHost, tilde, type Host } from "@wsp/collect";
 import { configLanded } from "@wsp/engine";
 import {
@@ -25,6 +26,7 @@ import {
   type ServerAsk,
 } from "@wsp/protocol";
 import { projectOf, type AgentsOn, type ServersActs } from "@wsp/runtime";
+import { rowOwning } from "./env-keys.js";
 import { firstLine, roadOf, type Road } from "./target-road.js";
 
 const usage = (sentence: string): Error => Object.assign(new Error(sentence), { kind: "usage" });
@@ -162,6 +164,8 @@ const defines = (config: Config, text: string, home: string, ask: ServerAsk): { 
 export interface ServersActsOptions {
   /** This computer's Host; the node one, over this login's home, unless a test names another. */
   here?: () => Host;
+  /** Where a value typed for another computer is kept, by the variable its file names instead. */
+  vault?: (values: Readonly<Record<string, string>>) => void;
 }
 
 export function serversActs(o: ServersActsOptions = {}): ServersActs {
@@ -190,7 +194,26 @@ export function serversActs(o: ServersActsOptions = {}): ServersActs {
       const shown = tilde(road.host.home, read.file);
       if (read.text !== undefined && defines(config, read.text, road.host.home, { agent: ask.agent, name: ask.name }) !== undefined) throw usage(serverThereRefusal(ask.name, shown));
       const placed = formatted(shown, () => config.agent.mcp.format.place(read.text, ask.name, transport));
-      await writeConfig(road, config, read, placed.text);
+      // This computer's own file is the person's and holds the value as they typed it; every other holds names.
+      if (on.kind === "here") {
+        await writeConfig(road, config, read, placed.text);
+        return { file: shown };
+      }
+      const named = await config.agent.mcp.format.refer(placed.text, ask.name).catch((e: unknown) =>
+        formatted(shown, () => {
+          throw e;
+        }),
+      );
+      const values = Object.fromEntries(named.servers.flatMap(sv => Object.entries(sv.values)));
+      for (const name of Object.keys(values)) {
+        const row = rowOwning(name);
+        if (row !== undefined) throw usage(`${rowVariableLine(name, row)}.`);
+      }
+      if (Object.keys(values).length > 0) {
+        if (o.vault === undefined) throw new Error("There is no vault here to hold the server's values, so nothing was written.");
+        o.vault(values);
+      }
+      await writeConfig(road, config, read, named.text);
       return { file: shown };
     },
     remove: (on, ask) => change(on, ask, (config, text, shown) => formatted(shown, () => config.agent.mcp.format.remove(text, [ask.name], config.folder)).text),

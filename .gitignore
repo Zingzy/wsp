@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+servers.env
 .dev.vars
 .wrangler/
 docs/plans/

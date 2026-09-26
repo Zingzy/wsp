@@ -1634,7 +1634,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "servers.remove":
             case "servers.toggle": {
               // A server in an agent's config on one of the person's computers is theirs to change, and the values an
-              // add carries go into that file alone.
+              // add carries go into that file or the vault, never into an answer.
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
                 return;

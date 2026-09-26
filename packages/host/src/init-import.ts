@@ -39,9 +39,10 @@ import {
   withApiKeyHelper,
   withImagePaths,
 } from "@wsp/engine";
-import { baseNote, CATALOG_AGENTS, CLAUDE_CONFIG_REL, CLAUDE_SETTINGS_FILE, GUEST_HOME, MCP_AGENTS } from "@wsp/catalog";
+import { baseNote, CATALOG_AGENTS, CLAUDE_CONFIG_REL, CLAUDE_SETTINGS_FILE, GUEST_HOME, MCP_AGENTS, serversByName } from "@wsp/catalog";
 import type { GoldenLeftBehind, RecipeCustomRow } from "@wsp/protocol";
 import { tarPackCommand } from "./doctor.js";
+import { rowOwning } from "./env-keys.js";
 
 const execFileAsync = promisify(execFile);
 /** The largest file read whole here: an rc file or a login's own settings, never anything bigger. */
@@ -263,6 +264,8 @@ export interface PackOptions {
   onImage?: ReadonlySet<string>;
   /** Every command the recipe or the catalog knows a tool for (see toolNames); an oh-my-zsh plugin by one of these names, off the image, leaves the plugin list. */
   tools?: ReadonlySet<string>;
+  /** Where the values the copy's MCP servers now read by name are kept. */
+  vault?: (values: Readonly<Record<string, string>>) => void;
   /** Asked once the staged tree is what would land, before it is tarred: which of those files need not travel at
    * all. Left out, every staged file is packed, which is the image. */
   leaveOut?: LeaveOut;
@@ -440,6 +443,27 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       if (carried.text !== text) writeFileSync(staged, carried.text);
     }
     skipped.push(...left);
+    // Every agent's MCP servers name a variable for each header and command variable, and the values go to the vault:
+    // no machine a copy lands on holds one in a file. A config that cannot be written that way stays here whole.
+    const held = new Map<string, { value: string; by: string }>();
+    for (const a of MCP_AGENTS) {
+      for (const file of a.mcp.files) {
+        const found = stagedFor(file);
+        if (found === undefined || !existsSync(found.staged) || !statSync(found.staged).isFile()) continue;
+        const text = readFileSync(found.staged, "utf8");
+        let named: Awaited<ReturnType<typeof serversByName>>;
+        try {
+          named = await serversByName(a.mcp.format, text, held, rowOwning);
+        } catch (e) {
+          rmSync(found.staged, { force: true });
+          skipped.push({ id: found.owner.id, path: file, note: `left out of the copy: its MCP servers could not be written by name (${e instanceof Error ? e.message : String(e)})` });
+          continue;
+        }
+        for (const d of named.dropped) skipped.push({ id: found.owner.id, path: file, note: `${d.name} left out of the copy: ${d.reason}` });
+        if (named.text !== text) rewriteStaged(found.staged, named.text);
+      }
+    }
+    if (held.size > 0) opts.vault?.(Object.fromEntries([...held].map(([name, at]) => [name, at.value])));
     // Last over the staged tree, so a hook's script and a login's own file are repointed too and nothing written
     // after this can put a Mac path back.
     const repoint = (dir: string): void => {
@@ -515,6 +539,8 @@ export interface ImportOptions {
   /** The folder of wsp's own the managers install under, told to each of them on that same line; absent for the
    * image, where every manager keeps its own folder under the machine's home. */
   prefix?: string;
+  /** Where the pack keeps the values the copied MCP servers read by name. */
+  vault?: PackOptions["vault"];
 }
 
 /** What is at a laptop path: a link is followed and reports where it lands. */
@@ -669,7 +695,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     });
   const hash = recipeHash(recipeDigest(bring, digested, custom, brew));
   const settingsSource = join(home, CLAUDE_SETTINGS_FILE.slice(2));
-  const packOpts: PackOptions = { secrets: opts.secrets, home, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)), onImage: imageCommands(bring, tools, brew), tools: toolNames(opts.rows ?? bring, brew) };
+  const packOpts: PackOptions = { secrets: opts.secrets, home, settingsPlanned: plan.files.some(f => f.source === settingsSource || f.source === dirname(settingsSource)), onImage: imageCommands(bring, tools, brew), tools: toolNames(opts.rows ?? bring, brew), ...(opts.vault !== undefined ? { vault: opts.vault } : {}) };
   const packWith = (files: FilesPlan): PackFiles => leaveOut => packPlan(files, { ...packOpts, ...(leaveOut !== undefined ? { leaveOut } : {}) });
   const pack = packWith(plan);
   const volatileFiles = files.filter(f => f.volatile);

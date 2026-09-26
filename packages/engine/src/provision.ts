@@ -6,7 +6,7 @@
 // the computer is reached: it drives a Machine, which for a box is that
 // computer over the link its daemon holds.
 import { ROAD_MODULES } from "@wsp/catalog";
-import { agentOfRow, plural, presentElsewhereLine, provisionServersLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
+import { agentOfRow, plural, presentElsewhereLine, provisionServersLine, provisionSkippedLine, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { markersOf, pagedReads } from "./exec-detached.js";
 import { installBase } from "./golden-base.js";
 import { TOOLS_PATH, agentSteps, pathLine, type SkippedPath, type ToolInstall } from "./golden-import.js";
@@ -285,6 +285,9 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
     stage(`${FILES_LABEL}: ${plural(files.lands.length, "path")}`, round(FILES_LABEL));
     const landed = await provisionFiles(machine, { home: on.home, lands: files.lands, pack: files.pack, say: line => stage(line, round(FILES_LABEL)) });
     skippedFiles = landed.skipped;
+    // The document on that computer names these too, but the person reads the job: a server left out of the copy
+    // says why here, as the image's build says it.
+    for (const s of landed.skipped) stage(provisionSkippedLine(s.path, s.note), round(FILES_LABEL));
     landedNow = landed.owned;
     for (const row of landed.rows) say(row, round(FILES_LABEL));
     done++;

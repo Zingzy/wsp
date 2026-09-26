@@ -22,6 +22,8 @@ export interface BuildContext {
   platform: Platform;
   brew: BrewTable;
   secrets: ReadonlyMap<string, string>;
+  /** Where the values the copied MCP servers read by name are kept. */
+  vault?: ImportOptions["vault"];
 }
 
 /** What the ticked rows come to on the builder: the files plan, the installs and the MCP plan. `picked` is the rows
@@ -33,6 +35,7 @@ export function planImport(picked: readonly ManifestEntry[], o: BuildContext & {
     ...(o.path !== undefined ? { path: o.path } : {}),
     ...(o.prefix !== undefined ? { prefix: o.prefix } : {}),
     secrets: o.secrets,
+    ...(o.vault !== undefined ? { vault: o.vault } : {}),
     platform: o.platform,
     rows: o.rows,
     brew: o.brew,
@@ -72,7 +75,7 @@ export async function brewTableFor(manifest: Manifest, brew: (() => Promise<Brew
 
 /** What a copy's build reads off this computer: the collector and the Homebrew table where there is one. The same
  * readers wsp init takes, minus the ones that only a person's screens use. */
-export interface CopyReaders extends Pick<BuildContext, "home" | "platform"> {
+export interface CopyReaders extends Pick<BuildContext, "home" | "platform" | "vault"> {
   collect(): Promise<Manifest>;
   brew?: () => Promise<BrewTable>;
   deployDaemon?: (machine: Machine) => Promise<void | string>;
@@ -136,6 +139,7 @@ export async function copyGoldenRecipe(image: SealedImage, o: CopyReaders): Prom
     // Nothing of the Keychain travels to a copy: what a sign-in left on the builder is in the vault already, and
     // reading the Keychain again would raise macOS's consent dialog for a build nobody is sitting at.
     secrets: new Map(),
+    ...(o.vault !== undefined ? { vault: o.vault } : {}),
     ...(o.deployDaemon !== undefined ? { deployDaemon: o.deployDaemon } : {}),
   }).recipe;
 }

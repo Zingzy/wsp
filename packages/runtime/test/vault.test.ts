@@ -16,7 +16,8 @@ import { secretsOf } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, copyingFake, createOn, tempRepo, testPlatform } from "./stub-backend.js";
-import type { TurnResult } from "@wsp/protocol";
+import { TURN_TOKEN_ENV, type TurnResult } from "@wsp/protocol";
+import { buildEnv } from "@wsp/adapter-claude";
 
 /** A folder with a first commit in it, which is what a project on this computer is made of. */
 function repoAt(): string {
@@ -59,6 +60,21 @@ describe("the vault a turn launches with", () => {
     held = { CLAUDE_CODE_OAUTH_TOKEN: TOKEN };
     await (await rt.sessions.start(ws.id, { prompt: "two" })).finished;
     expect(contexts.at(-1)!.vault).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: TOKEN });
+  });
+
+  it("sets every name an MCP server's definition reads in the turn's environment, and a row's token only through the row", async () => {
+    const { factory, contexts } = recording();
+    const held = { CLAUDE_CODE_OAUTH_TOKEN: TOKEN, WSP_MCP_LINEAR_AUTHORIZATION: "lin_api_TESTONLY", NOTION_TOKEN: "ntn_TESTONLY" };
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, vault: () => held });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
+    await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
+    const env = contexts.find(c => TURN_TOKEN_ENV in c.env)!.env;
+    // Every other road an adapter is built for starts no agent, so no server value rides it.
+    for (const c of contexts.filter(c => !(TURN_TOKEN_ENV in c.env))) expect(c.env["WSP_MCP_LINEAR_AUTHORIZATION"]).toBeUndefined();
+    expect(env).toMatchObject({ WSP_MCP_LINEAR_AUTHORIZATION: "lin_api_TESTONLY", NOTION_TOKEN: "ntn_TESTONLY" });
+    expect(env["CLAUDE_CODE_OAUTH_TOKEN"]).toBeUndefined();
+    // Claude Code's own environment is the one it expands ${WSP_MCP_LINEAR_AUTHORIZATION} out of.
+    expect(buildEnv({ base: env })).toMatchObject({ WSP_MCP_LINEAR_AUTHORIZATION: "lin_api_TESTONLY", NOTION_TOKEN: "ntn_TESTONLY" });
   });
 
   it("is empty for a host that wired none, so a turn carries nothing of one", async () => {

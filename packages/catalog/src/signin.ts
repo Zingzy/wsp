@@ -501,9 +501,15 @@ export const NEVER_IN_IMAGE: readonly string[] = [
 
 /** Every variable the vault hands a turn: each row's token variable and each row's key variable, derived from the
  * rows and nowhere else, so a tool that reads a new one declares it on its own row and the vault carries it. */
-export const VAULT_VARIABLES: ReadonlySet<string> = new Set(
-  Object.values(SIGN_IN_ROWS as Record<string, SignIn>).flatMap(s => {
-    const key = keyEnvOf(s);
-    return [...(mintsToken(s) ? [s.tokenEnv] : []), ...(key !== undefined ? [key] : [])];
-  }),
-);
+const rowVariables = (s: SignIn): string[] => {
+  const key = keyEnvOf(s);
+  return [...(mintsToken(s) ? [s.tokenEnv] : []), ...(key !== undefined ? [key] : [])];
+};
+
+export const VAULT_VARIABLES: ReadonlySet<string> = new Set(Object.values(SIGN_IN_ROWS as Record<string, SignIn>).flatMap(rowVariables));
+
+/** The part of a record no catalog row declares: the values MCP servers' definitions read by name. */
+export const serverValuesOf = (record: Readonly<Record<string, string>>): Record<string, string> => Object.fromEntries(Object.entries(record).filter(([name]) => !VAULT_VARIABLES.has(name)));
+
+/** The id of the row that keeps its token or key under `name`; nothing for a name no row declares. */
+export const vaultVariableRow = (name: string): string | undefined => Object.entries(SIGN_IN_ROWS as Record<string, SignIn>).find(([, s]) => rowVariables(s).includes(name))?.[0];
