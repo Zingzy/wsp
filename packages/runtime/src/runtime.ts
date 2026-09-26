@@ -224,7 +224,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, IN_PLACE_ROAD, inPlaceRecordLine, CopyRoad, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, threadRunsOnLine, resumeNotOfThreadLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, stateWriterWords, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -3264,6 +3264,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return behindLine(placeId, await placeDoor.reportOf(placeId));
   };
 
+  /** Refuses whatever runs inside a copy (a create, a turn, a command, a pane, a port, a bring back) on a computer
+   * whose doctor says it cannot run workspaces, in the sentence its row carries; a delete, a remove and an update
+   * need no copy running and never ask. */
+  const placeRefuses = async (placeId: string | undefined): Promise<void> => {
+    if (placeId === undefined || placeDoor === undefined) return;
+    const report = await placeDoor.reportOf(placeId);
+    const blocked = report === undefined ? undefined : placeBlocked(placeDoor.nameOf(placeId), report);
+    if (blocked !== undefined) throw new Error(blocked);
+  };
+  const copyBlocked = (entry: LiveWorkspace): Promise<void> => placeRefuses(entry.record.place);
+
   /** The three frames a place daemon stamps with the workspace a session was opened inside, which is the listener
    * it arrived on and never anything the guest said. */
   const GUEST_EVENTS = ["guest.opened", "guest.message", "guest.closed"];
@@ -5028,6 +5039,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // Where this fork lands is the project's computer and nothing else: one workspace is one project's copy, so
     // no flag and no default place has a say in it.
     const { placeId } = await landingPlace(project.computer);
+    await placeRefuses(placeId);
     const at = await landingBackend(placeId);
     // What this project's computer mounts into every workspace of it, off the road that landed the project there.
     // Where this project's computer keeps its memory, off that computer's own road, read again here because the
@@ -5455,6 +5467,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async wake(id, origin) {
       const entry = await entryOf(id, origin);
+      await copyBlocked(entry);
       if (entry.waking) return entry.waking;
       if (entry.record.phase === "gone") {
         const left = await recoverGone(entry);
@@ -5756,11 +5769,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async exec(id, cmd, o, origin) {
       const entry = await entryOf(id, origin);
+      await copyBlocked(entry);
       return entry.machine.exec(cmd, o);
     },
 
     async execStream(id, argv, cwd, origin) {
       const entry = await entryOf(id, origin);
+      await copyBlocked(entry);
       const { adapter } = adapterFor(entry);
       // Only the socket or the machine going away ends a command; a build may outlive the deadline a harness turn gets.
       const ranIn = await threadFolder(entry, { cwd });
@@ -5797,6 +5812,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async bringBack({ workspaceId, title, body }, origin) {
       spawnGuard("bring_back", origin);
       const entry = await entryOf(workspaceId, origin);
+      await copyBlocked(entry);
       const cwd = checkoutOf(entry.record);
       // The branch this copy started from, off its own record: for a child that is the branch its parent was on at
       // the fork, which is the code it was cut from and so where its work goes back, and nothing is asked of the
@@ -5828,6 +5844,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async daemonChannel(id, onEvent, origin) {
       const entry = await entryOf(id, origin);
+      await copyBlocked(entry);
       const served = servedByItsComputer(entry);
       return served === undefined ? ownDaemonChannel(entry, onEvent) : servedChannel(entry, served, onEvent, WORKSPACE_FRAMES);
     },
@@ -5852,12 +5869,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async portReach(id, port, origin) {
       const entry = await entryOf(id, origin);
+      await copyBlocked(entry);
       const reach = await entry.ws.portReach(port);
       return { url: reach.url, expiresAt: reach.expiresAt };
     },
 
     async portProbe(id, port, origin) {
       const entry = await entryOf(id, origin);
+      await copyBlocked(entry);
       const reach = await entry.ws.portReach(port);
       // A followed redirect would refetch without the token or the edge's cookies and report the edge's 401 for a page the frame loads fine.
       const res = await fetch(reach.url, { redirect: "manual", signal: AbortSignal.timeout(PORT_PROBE_TIMEOUT_MS) });
@@ -6949,6 +6968,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (refusal !== null) throw new Error(refusal);
       };
       refuse();
+      await copyBlocked(entry);
       const title = o.title === undefined ? undefined : titleLine(o.title);
       if (title === "") throw new Error(EMPTY_TITLE_LINE);
       spawnGuard(opens ? "thread_new" : "send", origin);
@@ -7356,6 +7376,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (entry === undefined) return { outcome: "not-found" };
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "rename", entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
+      await copyBlocked(entry);
       const write = adapterFor(entry, s.view.harness).adapter.renameSession;
       if (write === undefined) return { outcome: "unsupported" };
       // The store is keyed by the harness's own id, so a thread whose harness never announced one has nothing to name.
@@ -8882,6 +8903,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(o.workspaceId, origin);
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "import", entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
+      await copyBlocked(entry);
       const began = clock.now();
       const report: ImportReport = (stage, message, progress) => {
         bus.emit({ type: "project.import", workspaceId: o.workspaceId, source: o.source, dest: o.dest, stage, message, elapsedMs: clock.now() - began, ...progress });
@@ -8904,6 +8926,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(o.workspaceId, origin);
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "export", entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
+      await copyBlocked(entry);
       const began = clock.now();
       const report = (stage: ProjectExportStage, message: string, progress?: { bytes: number; total: number }): void => {
         bus.emit({ type: "project.export", workspaceId: o.workspaceId, source: o.source, dest: o.dest, stage, message, elapsedMs: clock.now() - began, ...progress });

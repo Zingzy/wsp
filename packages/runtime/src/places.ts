@@ -31,7 +31,7 @@ import {
   noSuchPlaceRefusal,
   placeHoldsForksRefusal, placeHoldsProjectsRefusal,
   placeForksNowhereLine,
-  placeCannotBootLine,
+  placeBlocked,
   placeNoDaemonPortLine,
   placeNoLinkLine,
   placeStillInstalledLine,
@@ -1294,51 +1294,49 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     }
   };
 
-  const viewOf = (record: PlaceRecord, defaulted: string | undefined): PlaceView => ({
-    id: record.id,
-    kind: "computer",
-    name: record.name,
-    default: defaulted === record.id,
-    os: record.report.os,
-    shape: record.report.shape,
-    ...(record.report.diskFreeBytes !== undefined ? { diskFreeBytes: record.report.diskFreeBytes } : {}),
-    engine: record.report.engine,
-    ...(record.report.copies !== undefined ? { copies: record.report.copies } : {}),
-    present: live.has(record.id),
-    joinedAt: record.joinedAt,
-    lastSeenAt: record.lastSeenAt,
-    daemonVersion: record.report.daemonVersion,
-    agents: record.report.agents,
-    ...(record.report.agentVersions !== undefined ? { agentVersions: record.report.agentVersions } : {}),
-    // One word per agent for whether a turn there needs a sign-in first, worked out from what that computer listed
-    // under its logins folder and what this host's vault holds. Nothing from a daemon that lists neither.
-    ...((): { signIns?: Record<string, AgentSignInState> } => {
-      const words = signInsOf(record.report, opts.vault?.() ?? {});
-      return words === undefined ? {} : { signIns: words };
-    })(),
-    ...(record.backendFacts?.logins !== undefined ? { logins: record.backendFacts.logins } : {}),
-    // A joined computer boots the image or it never joined: the daemon's self check is the gate at the join, so
-    // every computer on this list forks.
-    takesForks: true,
-    // Field by field rather than spread: the key file on the record is a path on this computer and no client's
-    // business, and a road copied whole would hand it over.
-    ...(record.road === undefined
-      ? {}
-      : { road: { ...(record.road.ssh !== undefined ? { ssh: record.road.ssh } : {}), ...(record.road.from !== undefined ? { from: record.road.from } : {}), ...(record.road.back !== undefined ? { back: record.road.back } : {}) } }),
-    // The folder a turn there starts in and how long it had been up: read off the same report the system name is
-    // read from, so a computer that stopped answering shows what it last was rather than nothing at all.
-    ...(record.report.login["HOME"] !== undefined ? { home: record.report.login["HOME"] } : {}),
-    ...(record.report.uptimeMs !== undefined ? { uptimeMs: record.report.uptimeMs } : {}),
-    ...(record.reportedAt !== undefined ? { reportedAt: record.reportedAt } : {}),
-    ...(record.dialled !== undefined ? { dialled: record.dialled } : {}),
-    ...(record.provision !== undefined ? { provision: record.provision } : {}),
-  });
-
-  /** Whether this computer can be a place at all, by the daemon's own self check, and the one sentence when it
-   * cannot. Read on the join and on every link after it: a box is turned down the moment it says its kernel no
-   * longer boots the image, rather than staying a forking place nothing can fork on. */
-  const cannotBoot = (report: PlaceReport): string | undefined =>
-    report.runsWorkspaces ? undefined : placeCannotBootLine(report.name, report.workspacesBlocked);
+  const viewOf = (record: PlaceRecord, defaulted: string | undefined): PlaceView => {
+    const blocked = placeBlocked(record.name, record.report);
+    return {
+      id: record.id,
+      kind: "computer",
+      name: record.name,
+      default: defaulted === record.id,
+      os: record.report.os,
+      shape: record.report.shape,
+      ...(record.report.diskFreeBytes !== undefined ? { diskFreeBytes: record.report.diskFreeBytes } : {}),
+      engine: record.report.engine,
+      ...(record.report.copies !== undefined ? { copies: record.report.copies } : {}),
+      present: live.has(record.id),
+      joinedAt: record.joinedAt,
+      lastSeenAt: record.lastSeenAt,
+      daemonVersion: record.report.daemonVersion,
+      agents: record.report.agents,
+      ...(record.report.agentVersions !== undefined ? { agentVersions: record.report.agentVersions } : {}),
+      // One word per agent for whether a turn there needs a sign-in first, worked out from what that computer listed
+      // under its logins folder and what this host's vault holds. Nothing from a daemon that lists neither.
+      ...((): { signIns?: Record<string, AgentSignInState> } => {
+        const words = signInsOf(record.report, opts.vault?.() ?? {});
+        return words === undefined ? {} : { signIns: words };
+      })(),
+      ...(record.backendFacts?.logins !== undefined ? { logins: record.backendFacts.logins } : {}),
+      // A joined computer boots the image or it never joined: the daemon's self check is the gate at the join, so
+      // every computer on this list forks.
+      takesForks: true,
+      // Field by field rather than spread: the key file on the record is a path on this computer and no client's
+      // business, and a road copied whole would hand it over.
+      ...(record.road === undefined
+        ? {}
+        : { road: { ...(record.road.ssh !== undefined ? { ssh: record.road.ssh } : {}), ...(record.road.from !== undefined ? { from: record.road.from } : {}), ...(record.road.back !== undefined ? { back: record.road.back } : {}) } }),
+      // The folder a turn there starts in and how long it had been up: read off the same report the system name is
+      // read from, so a computer that stopped answering shows what it last was rather than nothing at all.
+      ...(record.report.login["HOME"] !== undefined ? { home: record.report.login["HOME"] } : {}),
+      ...(record.report.uptimeMs !== undefined ? { uptimeMs: record.report.uptimeMs } : {}),
+      ...(record.reportedAt !== undefined ? { reportedAt: record.reportedAt } : {}),
+      ...(record.dialled !== undefined ? { dialled: record.dialled } : {}),
+      ...(blocked !== undefined ? { blocked } : {}),
+      ...(record.provision !== undefined ? { provision: record.provision } : {}),
+    };
+  };
 
   /** What a join has told this host before its prove: the key it will sign with and when it opened. The record is
    * written on the prove, so a join whose prove never arrives leaves nothing behind but this, and the next join
@@ -1365,7 +1363,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     }
     // A computer that cannot boot the image is not a place: the daemon's own doctor says why in one sentence and
     // the join stops on it, before the code is spent and before a record exists.
-    const blocked = cannotBoot(taken);
+    const blocked = placeBlocked(taken.name, taken);
     if (blocked !== undefined) return { refusal: blocked };
     if (req.code === undefined || !(await devices.spend(req.code, at))) return { refusal: PLACE_CODE_REFUSAL };
     const stamp = new Date(at).toISOString();
@@ -1452,14 +1450,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       } catch (e) {
         return { refusal: e instanceof Error ? e.message : String(e) };
       }
-      const blocked = cannotBoot(taken);
-      if (blocked === undefined) return { report: taken };
-      // A box that can no longer boot the image stops being reachable here and says why: the link is cut, the row
-      // keeps the sentence where every other refusal of a dial is kept, and nothing attaches.
-      await keep({ ...held, dialled: { at: new Date(clockNow()).toISOString(), answered: false, said: blocked } });
-      cut(placeId, blocked);
-      emit({ type: "place.absent", placeId, said: blocked });
-      return { refusal: blocked };
+      return { report: taken };
     },
 
     async attach(placeId, socket, report, from, at, seal) {

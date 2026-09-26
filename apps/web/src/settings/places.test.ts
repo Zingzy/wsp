@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { DAEMON_VERSION, JOINED_COMPUTER, absentComputer, placeDaemonBehind, type PlaceProvision, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, type PlaceProvision, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
 import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, copiesWord, outcomeWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereSegments } from "./places.js";
 
@@ -152,6 +152,13 @@ describe("the one word the slot beside a row's name carries", () => {
   it("says a computer that is not answering first, since nothing can be put on a computer that is off", () => {
     const away = absentComputer("hetzner", 32 * 60 * 1000);
     expect(placeStateWord({ ...hetzner, daemonVersion: DAEMON_VERSION - 5, present: false }, away)).toBe(away.away);
+  });
+
+  it("says a computer that cannot run workspaces can't run threads first, before not answering and before behind", () => {
+    const blocked = { ...hetzner, daemonVersion: DAEMON_VERSION - 5, blocked: "hetzner cannot run wsp workspaces: it mounts cgroup v1 at /sys/fs/cgroup" };
+    expect(placeStateWord(blocked, null)).toBe(PLACE_BLOCKED_WORD);
+    const away = absentComputer("hetzner", 32 * 60 * 1000);
+    expect(placeStateWord({ ...blocked, present: false }, away)).toBe(PLACE_BLOCKED_WORD);
   });
 
   it("says nothing of a computer that is answering on this wsp's own daemon, or one that has never reported", () => {
