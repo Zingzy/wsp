@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The daemon's wire, mirrored from the protocol package's zod schemas: every
-//! request, reply and event as serde types, plus the words and numbers the
-//! protocol owns. The contract test under `tests/` reads one fixture set that
-//! the protocol's own test reads too, so the two halves cannot drift quietly.
+//! The daemon's wire: every request, reply and event as serde types, plus the
+//! words and numbers the protocol owns. Each wire type writes its TypeScript
+//! into the protocol package, which re-exports it (`scripts/ts-types.sh`); a
+//! zod schema there that still parses a frame is held to the type written
+//! here. The contract test under `tests/` reads one fixture set that the
+//! protocol's own test reads too, so the two halves cannot drift quietly.
 
 mod auth;
 mod copy;

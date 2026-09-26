@@ -4,3 +4,8 @@
 [env]
 LIBSECCOMP_LINK_TYPE = "static"
 LIBSECCOMP_LIB_PATH = { value = "target/libseccomp", relative = true }
+# Where wsp-frames writes the TypeScript the protocol package re-exports. JSON carries every integer as a number,
+# and the package resolves imports as NodeNext does, which wants the extension.
+TS_RS_EXPORT_DIR = { value = "../packages/protocol/src/generated", relative = true }
+TS_RS_LARGE_INT = "number"
+TS_RS_IMPORT_EXTENSION = "js"
