@@ -5041,11 +5041,11 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
   /** A workspace forked on srv while it ran workspaces, then srv dialling back with its doctor saying it no longer
    * can, as it does after a reboot into a kernel line without cgroup v2. */
   const blockedFork = async (
-    opts: { update?: PlaceUpdater; before?: (id: string) => Promise<void> } = {},
+    opts: { update?: PlaceUpdater; before?: (id: string) => Promise<void>; adapter?: HarnessAdapterFactory } = {},
   ): Promise<{ place: () => ForkingPlace; placeId: string; made: { id: string; machineId: string }; turns: string[]; renamed: string[] }> => {
     const turns: string[] = [];
     const renamed: string[] = [];
-    const factory: HarnessAdapterFactory = () => ({
+    const factory: HarnessAdapterFactory = opts.adapter ?? (() => ({
       steers: false,
       renameSession: async (_id, title) => (renamed.push(title), { kind: "written" }),
       start: ({ onEvent }) => {
@@ -5057,7 +5057,7 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
         onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
         return { localId: sessionId, finished: Promise.resolve(result), interrupt: async () => {} };
       },
-    });
+    }));
     const hostKey = newPlaceKeyPair();
     runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }, opts.update), placeRelinkWaitMs: 50, killConfirm: { graceMs: 40, pollMs: 1 } });
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
@@ -5098,6 +5098,59 @@ describe("a computer that turns unable to run workspaces keeps its link, and ref
     await expect(runtime!.sessions.start(made.id, { prompt: "one", harness: "claude" })).rejects.toThrow(SAID);
     expect(turns).toEqual([]);
     expect(place().asked["machine.exec"] ?? 0).toBe(execs);
+  });
+
+  /** A turn opened while srv ran workspaces, still running once it cannot, as the daemon keeps containers across a restart. */
+  const runningThrough = (steers: boolean) => {
+    const steered: string[] = [];
+    const opened: ((r: TurnResult) => void)[] = [];
+    let thread = "";
+    const adapter: HarnessAdapterFactory = () => ({
+      steers,
+      start: ({ onEvent, resume }) => {
+        const sessionId = resume ?? randomUUID();
+        queueMicrotask(() => onEvent({ type: "session.start", sessionId }));
+        let end!: (r: TurnResult) => void;
+        const finished = new Promise<TurnResult>(r => {
+          end = result => {
+            onEvent({ type: "turn.done", sessionId, result });
+            onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+            r(result);
+          };
+        });
+        opened.push(end);
+        return { localId: sessionId, finished, interrupt: async () => end({ status: "interrupted" }), steer: async (prompt: string) => (steered.push(prompt), "accepted" as const) };
+      },
+    });
+    const before = async (id: string): Promise<void> => {
+      const started = await runtime!.sessions.start(id, { prompt: "one", harness: "claude" });
+      thread = started.view().threadId!;
+      await until(async () => (await runtime!.sessions.list(id))[0]?.claudeSessionId !== undefined);
+    };
+    return { adapter, before, steered, opened, thread: () => thread };
+  };
+
+  it("lets a send into a turn still running there join it, as a steer does, so the person can still steer or stop it", async () => {
+    const through = runningThrough(true);
+    const { made } = await blockedFork({ adapter: through.adapter, before: through.before });
+    const joined = await runtime!.sessions.start(made.id, { prompt: "two", thread: through.thread() });
+    expect(joined.outcome).toBe("steered");
+    expect(through.steered).toEqual(["two"]);
+    expect(through.opened).toHaveLength(1);
+  });
+
+  it("refuses a send queued behind a turn running there once that turn ends, in the doctor's sentence, and starts no turn", async () => {
+    const through = runningThrough(false);
+    const { made } = await blockedFork({ adapter: through.adapter, before: through.before });
+    const queued = runtime!.sessions.start(made.id, { prompt: "two", thread: through.thread() });
+    const settled = queued.then(
+      () => undefined,
+      (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    );
+    await new Promise(r => setTimeout(r, 20));
+    through.opened[0]!({ status: "completed", text: "ok" });
+    expect(await settled).toBe(SAID);
+    expect(through.opened).toHaveLength(1);
   });
 
   it("refuses the panes' road, Terminal, Files and Diff, in the doctor's sentence, before a frame reaches that computer", async () => {

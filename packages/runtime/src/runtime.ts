@@ -6971,7 +6971,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (refusal !== null) throw new Error(refusal);
       };
       refuse();
-      await copyBlocked(entry);
+      // A blocked computer refuses a new turn but never a message joining one still running there, so a busy thread asks once it frees.
+      let cleared = !threadRuns(threadId);
+      if (cleared) await copyBlocked(entry);
       const title = o.title === undefined ? undefined : titleLine(o.title);
       if (title === "") throw new Error(EMPTY_TITLE_LINE);
       spawnGuard(opens ? "thread_new" : "send", origin);
@@ -7153,6 +7155,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               outcome = "queued";
               await launching.launch;
               refuse();
+              cleared = false;
+              continue;
+            }
+            if (!cleared) {
+              cleared = true;
+              await copyBlocked(entry);
               continue;
             }
             hold();
@@ -7174,6 +7182,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           outcome = "queued";
           await running.handle.finished.catch(() => {});
           refuse();
+          cleared = false;
         }
         const picks = picksFor(resume);
         const cwd = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? folder;
