@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { copyPathFor, gitOnThisMacRefusal, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, copyTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { copyPathFor, gitOnThisMacRefusal, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, copyTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type Caller, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
 import { createRuntime, NO_SEED_WIRING, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, fakeLocal, projectOn, stubBackend, tempRepo, type StubBackend, type StubMachine } from "./stub-backend.js";
@@ -381,6 +381,14 @@ describe("naming a workspace", () => {
     await expect(rt.workspaces.resolve("ws_1a2b")).rejects.toThrow(idPrefixRefusal("ws_1a2b", ["ws_1a2b3c4d", "ws_1a2bffff"]));
     // Three characters is under the floor, so it is read as a name and nothing else, however many ids open with it.
     await expect(rt.workspaces.resolve("ws_")).rejects.toThrow(noWorkspaceRefusal("ws_"));
+  });
+
+  it("a thread whose reach holds one of the two reads their shared start as that one, exactly as if the other were absent", async () => {
+    const rt = twoSharing();
+    const thread: Caller = { origin: "relayed", by: { kind: "thread", threadId: "t_root", workspaceId: "ws_1a2b3c4d", rootThreadId: "t_root" } };
+    // Counting the hidden one would refuse the word as ambiguous, and that refusal is how a thread learns it is there.
+    expect((await rt.workspaces.resolve("ws_1a2b", thread)).id).toBe("ws_1a2b3c4d");
+    await expect(rt.workspaces.resolve("ws_1a2bf", thread)).rejects.toThrow(noWorkspaceRefusal("ws_1a2bf"));
   });
 
   it("a workspace whose name is the start of two ids is its name, since a whole word wins over a prefix", async () => {
