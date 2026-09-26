@@ -217,6 +217,10 @@ export async function readAgents(host: Host, o: { user: string; vault: Readonly<
   };
 }
 
+/** What a read or a tools ask answers once its reader is closed, one cut short among them: the commands it ran were
+ * ended, so what they left says nothing of the agents. */
+export const READER_CLOSED = "this host is closing; it reads no agents and asks no server for its tools";
+
 /** The reader the runtime is wired with: this computer's own Host for this computer and a workspace on it, and
  * machineHost for everything else, after one read of who its lines run as. A computer you joined hands a command
  * its stdin, so the variables a started server is given ride there. Each server's tools answer is kept here. */
@@ -230,15 +234,23 @@ export function agentsReader(o: {
   loginEnv?: () => Promise<Readonly<Record<string, string>>>;
   /** Each agent's newest version by id as this host last read it off its vendor; none leaves every row without one. */
   latest?: () => Promise<Readonly<Record<string, string>>>;
-}): AgentsReader & { forget(key: string): void } {
+}): AgentsReader & { forget(key: string): void; close(): void } {
   const kept = serverTools({ now: o.now ?? Date.now, log: o.log ?? (line => console.warn(line)), ...(o.toolsMs !== undefined ? { deadlineMs: o.toolsMs } : {}) });
+  const closing = new AbortController();
+  const refuseClosed = (): void => {
+    if (closing.signal.aborted) throw new Error(READER_CLOSED);
+  };
+  const here = (): Host => {
+    const host = o.here?.() ?? nodeHost();
+    return { ...host, exec: { ...host.exec, run: (cmd, args, opts) => host.exec.run(cmd, args, { ...opts, signal: closing.signal }) } };
+  };
   const hostOf = async (on: Exclude<AgentsOn, { kind: "here" }>): Promise<{ host: MachineHost; user: string; runAs?: string }> => {
     const login = await targetLogin(on.machine, on.kind === "box" ? on.login : {});
     return { host: machineHost(on.machine, login, on.kind === "box" ? { stdin: true } : { land: on.machine }), user: login.user, ...(login.runAs !== undefined ? { runAs: login.runAs } : {}) };
   };
   const readOn = async (on: AgentsOn): Promise<AgentsRead> => {
     if (on.kind === "here") {
-      const host = o.here?.() ?? nodeHost();
+      const host = here();
       return readAgents(host, { user: userInfo().username, vault: o.vault(), ...(on.projects !== undefined ? { projects: on.projects } : {}) });
     }
     const { host, user, runAs } = await hostOf(on);
@@ -248,13 +260,16 @@ export function agentsReader(o: {
   };
   return {
     read: async (on: AgentsOn, ask?: { latest?: boolean }) => {
+      refuseClosed();
       // A failed ask costs the newest version alone, and the person's switch off asks nothing.
       const none: Readonly<Record<string, string>> = {};
       const [read, latest] = await Promise.all([readOn(on), ask?.latest === false ? none : (o.latest?.().catch(() => none) ?? none)]);
+      refuseClosed();
       return { ...read, agents: read.agents.map(a => (latest[a.id] === undefined ? a : { ...a, latest: latest[a.id] })) };
     },
     tools: async (on, ask) => {
-      const host = on.kind === "here" ? (o.here?.() ?? nodeHost()) : (await hostOf(on)).host;
+      refuseClosed();
+      const host = on.kind === "here" ? here() : (await hostOf(on)).host;
       const project = projectOf(on);
       const env = on.kind === "here" ? await o.loginEnv?.() : undefined;
       // A turn gets the servers' values under its own environment, so a reference reads them the same way here.
@@ -262,5 +277,6 @@ export function agentsReader(o: {
       return kept.tools(host, ask, { values, ...(project !== undefined ? { project } : {}), ...(env !== undefined ? { env } : {}) });
     },
     forget: key => kept.forget(key),
+    close: () => closing.abort(),
   };
 }
