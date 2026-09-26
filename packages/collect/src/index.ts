@@ -22,7 +22,7 @@ export * from "./history/index.js";
 export { type CommandCount, type RecipeOptions, computeRecipe, floorApplies, unknownCommands, withProject } from "./recipe.js";
 export { PROJECT_READERS, type ProjectNeed, type ProjectScan, scanProject } from "./project/index.js";
 export type { ProjectFile, ProjectFinding, ProjectReader } from "./project/reader.js";
-export { MCP_BIN_DIRS, MCP_REMOTE_ID, MCP_REMOTE_LABEL, detectMcp, homePaths, linuxFit, mcpRemoteHash, stdioLine, type LinuxFit } from "./detect/mcp.js";
+export { MCP_BIN_DIRS, MCP_REMOTE_ID, MCP_REMOTE_LABEL, detectMcp, homePaths, linuxFit, mcpRemoteHash, secretNamed, stdioLine, type LinuxFit } from "./detect/mcp.js";
 export { SKILL_HEAD_BYTES, detectSkills, skillFrontmatter, skillMdFrontmatter, skillRoots, type SkillRootAt, type SkillsRead } from "./detect/skills.js";
 export { CLAUDE_KEY_ENV, apiKeyHelperOf, detectLogins } from "./detect/logins.js";
 export { FISH_CONF_D, RC_NAMES, RC_PATHS, isRcPath, isSecretName, rcFiles, simpleCommands, sourcedPaths, stripExports } from "./detect/shell-rc.js";

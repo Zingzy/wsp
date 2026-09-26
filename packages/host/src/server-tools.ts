@@ -15,13 +15,15 @@
 // headers go only to its own URL, with no redirect followed. A server whose
 // address wants a sign-in is asked of
 // its harness, which keeps the token wsp never reads, two at a time and once
-// per server per sign-in or per ten minutes. Values reach the child through
-// its environment or a private file, never a command line another login can
-// read.
+// per server per sign-in or per ten minutes. A reference in the definition is
+// read from the values the caller hands over, as the agent reads it from its
+// turn's environment. Values reach the child through its environment or a
+// private file, never a command line another login can read, and every secret
+// handed to a server is hidden in what it says back.
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
-import { MCP_AGENTS, MCP_AGENT_IDS, type McpAgent, type McpServer, type McpTransport } from "@wsp/catalog";
-import { expand, type Host } from "@wsp/collect";
+import { MCP_AGENTS, MCP_AGENT_IDS, valueForms, type McpAgent, type McpServer, type McpTransport } from "@wsp/catalog";
+import { expand, secretNamed, type Host } from "@wsp/collect";
 import type { ServerToolsAsk } from "@wsp/runtime";
 import { lastLine, serverToolsLateRefusal, shellQuote, withoutControlChars, type McpAuth, type McpTool, type McpToolParam, type ServerToolsAnswer } from "@wsp/protocol";
 
@@ -125,6 +127,23 @@ const curlSaid = (err: string): string | undefined =>
     ?.replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]*@/gi, "$1")
     .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^\s?#]*)[?#]\S*/gi, "$1");
 
+const WORD = /[A-Za-z0-9_]/;
+
+/** The text with each secret starred where it stands as a whole word, longest first, so a secret `1` leaves `10`. */
+function starred(text: string, secrets: readonly string[]): string {
+  for (const v of secrets) {
+    let out = "";
+    let from = 0;
+    for (let at = text.indexOf(v); at >= 0; at = text.indexOf(v, at + 1)) {
+      if (at < from || WORD.test(text[at - 1] ?? "") || WORD.test(text[at + v.length] ?? "")) continue;
+      out += `${text.slice(from, at)}***`;
+      from = at + v.length;
+    }
+    text = out + text.slice(from);
+  }
+  return text;
+}
+
 /** A server's own words with every control character gone, each line kept, so no escape of theirs reaches a terminal. */
 const clean = (v: string): string => v.split("\n").map(withoutControlChars).join("\n");
 
@@ -186,7 +205,7 @@ const RUN_MARGIN_MS = 10_000;
 const SHELL_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 export const variableNameRefusal = (name: string): string => `its variable ${JSON.stringify(name)} is not a name a shell takes, so it was not started`;
 
-async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>, cwd: string, deadlineMs: number, now: () => number, log: (said: string) => void, env: Readonly<Record<string, string>> = {}): Promise<Asked> {
+async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>, cwd: string, deadlineMs: number, now: () => number, log: (said: string) => void, hide: (said: string) => string, env: Readonly<Record<string, string>> = {}): Promise<Asked> {
   const bad = Object.keys(t.env).find(k => !SHELL_NAME.test(k));
   if (bad !== undefined) return { auth: "failed", refused: variableNameRefusal(bad) };
   const began = now();
@@ -201,20 +220,21 @@ async function askStdio(host: Host, t: Extract<McpTransport, { kind: "stdio" }>,
   if (outcome !== "0" && err.trim() !== "") log(`it said on stderr: ${err.trim()}`);
   if (outcome === "2") return { auth: "failed", refused: serverToolsLateRefusal(deadlineMs) };
   if (outcome === "1") return { auth: "failed", refused: `it exited with ${exit ?? "no code"} before it answered` };
-  return read(rest.join("\n"), log);
+  return read(rest.join("\n"), log, hide);
 }
 
-/** The tools answer as the page takes it, with a server's own words sent to the log. */
-function read(body: string, log: (said: string) => void): Asked {
+/** The tools answer as the page takes it, every word of the server's hidden by `hide`, with its own words sent to the log. */
+function read(body: string, log: (said: string) => void, hide: (said: string) => string): Asked {
   const got = toolsOf(body);
-  if ("tools" in got) return { auth: "connected", tools: got.tools };
+  const param = (p: McpToolParam): McpToolParam => ({ ...p, name: hide(p.name), ...(p.type !== undefined ? { type: hide(p.type) } : {}), ...(p.description !== undefined ? { description: hide(p.description) } : {}) });
+  if ("tools" in got) return { auth: "connected", tools: got.tools.map(t => ({ ...t, name: hide(t.name), ...(t.description !== undefined ? { description: hide(t.description) } : {}), ...(t.params !== undefined ? { params: t.params.map(param) } : {}) })) };
   if (got.said !== undefined) log(got.said);
   return { auth: "failed", refused: got.refused };
 }
 
 type HttpAsked = Asked | { unauthorized: true };
 
-async function askHttp(host: Host, t: Extract<McpTransport, { kind: "http" }>, deadlineMs: number, log: (said: string) => void): Promise<HttpAsked> {
+async function askHttp(host: Host, t: Extract<McpTransport, { kind: "http" }>, deadlineMs: number, log: (said: string) => void, hide: (said: string) => string): Promise<HttpAsked> {
   const env: Record<string, string> = { WSP_MCP_URL: t.url };
   Object.entries(t.headers).forEach(([name, value], i) => (env[`WSP_MCP_H_${i}`] = `${name}: ${value}`));
   const out = await host.exec.run("bash", ["-c", httpScript(Math.max(1, Math.ceil(deadlineMs / 1000))), "bash"], { env, timeoutMs: deadlineMs * 3 + RUN_MARGIN_MS });
@@ -224,11 +244,11 @@ async function askHttp(host: Host, t: Extract<McpTransport, { kind: "http" }>, d
   if (status === "nocurl") return { auth: "unknown", refused: "curl is not there to ask its address with" };
   const [first = "", listed = ""] = status.trim().split(" ");
   if (first === "401" || first === "403") return { unauthorized: true };
-  if (first === "000") return { auth: "failed", refused: /timed out/i.test(err) ? serverToolsLateRefusal(deadlineMs) : (curlSaid(err) ?? "its address did not answer") };
+  if (first === "000") return { auth: "failed", refused: /timed out/i.test(err) ? serverToolsLateRefusal(deadlineMs) : hide(curlSaid(err) ?? "its address did not answer") };
   if (first !== "200") return { auth: "failed", refused: `its address answered initialize with ${first}` };
   if (listed === "401" || listed === "403") return { unauthorized: true };
   if (listed !== "200") return { auth: "failed", refused: `its address answered tools/list with ${listed === "" ? "nothing" : listed}` };
-  return read(rest.join("\n"), log);
+  return read(rest.join("\n"), log, hide);
 }
 
 /** The harness's own word on a server whose address wants a sign-in wsp does not hold. */
@@ -268,6 +288,7 @@ async function findServer(host: Host, agent: McpAgent, name: string, project: st
   return undefined;
 }
 
+export const unsetReferenceRefusal = (name: string): string => `its config reads ${name}, which has no value there`;
 export const noSuchServerRefusal = (name: string, agent: string): string => `no MCP server called ${name} is in ${agent}'s config there; wsp servers lists them`;
 export const noMcpAgentRefusal = (agent: string): string => `${agent} is no agent whose MCP config wsp reads; one of ${MCP_AGENT_IDS}`;
 
@@ -302,8 +323,9 @@ function atMost(n: number): <T>(f: () => Promise<T>) => Promise<T> {
 
 export interface ServerTools {
   /** One server's tools and state there, off the connect kept for it or a new one. */
-  /** `env` is the environment a command server starts with under its config's own: the login shell's, on this computer. */
-  tools(host: Host, ask: ServerToolsAsk, o?: { project?: string; env?: Readonly<Record<string, string>> }): Promise<ServerToolsAnswer>;
+  /** `env` is the environment a command server starts with under its config's own: the login shell's, on this computer.
+   * `values` are what the definition's references are read from. */
+  tools(host: Host, ask: ServerToolsAsk, o?: { project?: string; env?: Readonly<Record<string, string>>; values?: Readonly<Record<string, string>> }): Promise<ServerToolsAnswer>;
   /** Drops every answer and harness word kept for the target, which a sign-in there has just changed. */
   forget(key: string): void;
 }
@@ -336,16 +358,22 @@ export function serverTools(o: { now: () => number; deadlineMs?: number; log: (l
       const found = await findServer(host, agent, ask.name, at.project);
       if (found === undefined) throw new Error(noSuchServerRefusal(ask.name, agent.name));
       const cwd = found.project && at.project !== undefined ? at.project : host.home;
-      const t = found.server.transport;
       const now = o.now();
+      const resolved = agent.mcp.format.resolve(found.server, n => at.values?.[n]);
+      if ("missing" in resolved) return { auth: "failed", refused: unsetReferenceRefusal(resolved.missing), readAt: new Date(now).toISOString() };
+      const t = resolved.transport;
+      // Every header is a secret, as a --header argument is in the report's rows; a variable is one by its name.
+      const given = t.kind === "stdio" ? Object.entries(t.env).flatMap(([k, v]) => (secretNamed(k) ? [v] : [])) : Object.values(t.headers);
+      const secrets = [...new Set([...resolved.values, ...given].flatMap(valueForms))].filter(v => v !== "").sort((a, b) => b.length - a.length);
+      const hide = (said: string): string => starred(said, secrets);
       for (const [k, v] of connects) if (now - v.at >= TOOLS_KEPT_MS) connects.delete(k);
       for (const [k, v] of words) if (now - v.at >= HARNESS_KEPT_MS) words.delete(k);
       const runIn = t.kind === "stdio" ? (t.cwd ?? cwd) : "";
       const key = `${ask.key}\0${createHash("sha256").update(JSON.stringify([t, runIn])).digest("hex")}`;
       let held = connects.get(key);
       if (ask.refresh === true || held === undefined) {
-        const log = (said: string): void => o.log(`servers tools: ${agent.id} ${ask.name} on ${ask.key}: ${said}`);
-        const mine: { at: number; asked: Promise<HttpAsked> } = { at: now, asked: asking(() => (t.kind === "stdio" ? askStdio(host, t, runIn, deadlineMs, o.now, log, at.env) : askHttp(host, t, deadlineMs, log))) };
+        const log = (said: string): void => o.log(`servers tools: ${agent.id} ${ask.name} on ${ask.key}: ${hide(said)}`);
+        const mine: { at: number; asked: Promise<HttpAsked> } = { at: now, asked: asking(() => (t.kind === "stdio" ? askStdio(host, t, runIn, deadlineMs, o.now, log, hide, at.env) : askHttp(host, t, deadlineMs, log, hide))) };
         // A connect that threw is not an answer, so the next ask makes its own.
         mine.asked.catch(() => connects.get(key) === mine && connects.delete(key));
         connects.set(key, mine);

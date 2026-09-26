@@ -23,6 +23,10 @@ export interface McpServer {
   /** Variables the definition reads from the environment at run time (Codex's bearer_token_env_var, a header's
    * reference in the format's own syntax); names only. */
   envRefs: string[];
+  /** What the agent hands the server from its own environment outside the definition's strings: each command
+   * variable passed through by name, each header with the variable its value is read from, and the variable a bearer
+   * token is read from (Codex's env_vars, env_http_headers and bearer_token_env_var). */
+  reads?: { env: string[]; headers: Record<string, string>; bearer?: string };
   /** The file keeps the definition and switches it off: OpenCode's `enabled: false`, Codex's `enabled = false`. */
   disabled?: true;
 }
@@ -126,7 +130,13 @@ export interface McpFormat {
    * it now reads. A value that already names a variable stands as the person wrote it. `only` names one server of
    * the file's own table and leaves every other as it is. Throws when the text is not the format. */
   refer(text: string, only?: string): Promise<McpReferred>;
+  /** The server's transport as its agent starts it, every reference this format writes read from `value`, and each
+   * value read that way; or the first variable it reads that has no value and no default. A command's name and
+   * arguments stand as written, since whatever is put there is on the process list. */
+  resolve(server: McpServer, value: (name: string) => string | undefined): McpResolved;
 }
+
+export type McpResolved = { transport: McpTransport; values: string[] } | { missing: string };
 
 /** What a reference writer came to: the text, and per server the values it no longer holds, by variable name.
  * `project` is the folder whose own servers it sits under, for a format that keeps servers per folder. */
@@ -146,14 +156,16 @@ export const crossesLines = (value: string): boolean => /[\n\r]/.test(value);
 /** Every string inside the given server definitions, at any depth. */
 const stringsIn = (v: unknown): string[] => (typeof v === "string" ? [v] : Array.isArray(v) ? v.flatMap(stringsIn) : isObject(v) ? Object.values(v).flatMap(stringsIn) : []);
 
-/** Refuses a copy whose server definitions still hold a value that was taken out of them, each side read whole and
- * with its scheme word (`Bearer`, `Basic`, `token`) taken off. Only the definitions are read, since
+/** A value whole, and with its scheme word (`Bearer`, `Basic`, `token`) taken off where it carries one. */
+export const valueForms = (v: string): string[] => [v, ...(/^(?:bearer|basic|token)\s+(.+)$/i.exec(v)?.slice(1) ?? [])];
+
+/** Refuses a copy whose server definitions still hold a value that was taken out of them, each side read in every
+ * form. Only the definitions are read, since
  * the values come from nowhere else, and the rest of an agent's file is prose and counters a value may match by chance. */
 function stillStands(entries: readonly unknown[], servers: McpReferred["servers"]): void {
-  const forms = (v: string): string[] => [v, ...(/^(?:bearer|basic|token)\s+(.+)$/i.exec(v)?.slice(1) ?? [])];
-  const held = new Set(stringsIn(entries).flatMap(forms));
+  const held = new Set(stringsIn(entries).flatMap(valueForms));
   for (const s of servers) {
-    if (Object.values(s.values).some(v => forms(v).some(f => held.has(f)))) throw new Error(`${s.name}'s value still stands in the file after it was written by name, so the file stays on this computer`);
+    if (Object.values(s.values).some(v => valueForms(v).some(f => held.has(f)))) throw new Error(`${s.name}'s value still stands in the file after it was written by name, so the file stays on this computer`);
   }
 }
 
@@ -717,6 +729,33 @@ function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
   };
 }
 
+const mapped = (d: Record<string, string>, f: (v: string) => string): Record<string, string> => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, f(v)]));
+
+/** The resolver for a format whose references sit inside its strings: each one in a command variable, a header or
+ * the address replaced by its value, or by the default `${X:-d}` names. */
+function jsonResolver(ref: RegExp): McpFormat["resolve"] {
+  return (server, value) => {
+    const values: string[] = [];
+    let missing: string | undefined;
+    const fill = (v: string): string =>
+      v.replace(new RegExp(ref.source, "g"), m => {
+        const hit = new RegExp(ref.source).exec(m)!;
+        const name = (hit[1] ?? hit[2])!;
+        const got = value(name);
+        if (got !== undefined) {
+          values.push(got);
+          return got;
+        }
+        const fallback = /^\$\{[^}]*?:-(.*)\}$/.exec(m)?.[1];
+        if (fallback === undefined) missing ??= name;
+        return fallback ?? m;
+      });
+    const t = server.transport;
+    const transport: McpTransport = t.kind === "stdio" ? { ...t, env: mapped(t.env, fill) } : { ...t, url: fill(t.url), headers: mapped(t.headers, fill) };
+    return missing !== undefined ? { missing } : { transport, values };
+  };
+}
+
 function jsonFormat(shape: JsonShape): McpFormat {
   return {
     read: (text, home) => {
@@ -754,6 +793,7 @@ function jsonFormat(shape: JsonShape): McpFormat {
     merge: jsonMerger(shape.key),
     remove: jsonRemover(shape),
     refer: jsonReferrer(shape),
+    resolve: jsonResolver(shape.ref),
     ...(shape.flip === undefined ? {} : { enable: jsonEnabler(shape.key, shape.flip) }),
   };
 }
@@ -957,10 +997,13 @@ function readCodex(text: string): McpServer[] {
     const bearer = str(t.values.bearer_token_env_var);
     const envRefs = [...(bearer !== undefined ? [bearer] : []), ...Object.values({ ...dict(t.values.env_http_headers), ...t.envHeaders })];
     const off = t.disabled === true ? { disabled: true as const } : {};
+    const passed = strs(t.values.env_vars);
+    const envHeaders = { ...dict(t.values.env_http_headers), ...t.envHeaders };
+    const reads = passed.length > 0 || Object.keys(envHeaders).length > 0 || bearer !== undefined ? { reads: { env: passed, headers: envHeaders, ...(bearer !== undefined ? { bearer } : {}) } } : {};
     if (command !== undefined) {
-      out.push({ name, scope: "user", transport: { kind: "stdio", command, args: strs(t.values.args), env: { ...dict(t.values.env), ...t.env } }, envRefs, ...off });
+      out.push({ name, scope: "user", transport: { kind: "stdio", command, args: strs(t.values.args), env: { ...dict(t.values.env), ...t.env } }, envRefs, ...reads, ...off });
     } else if (url !== undefined) {
-      out.push({ name, scope: "user", transport: { kind: "http", url, headers: { ...dict(t.values.http_headers), ...t.headers } }, envRefs, ...off });
+      out.push({ name, scope: "user", transport: { kind: "http", url, headers: { ...dict(t.values.http_headers), ...t.headers } }, envRefs, ...reads, ...off });
     }
   }
   return out;
@@ -1308,6 +1351,37 @@ async function referCodex(text: string, only?: string): Promise<McpReferred> {
   return { text: out, servers, entries };
 }
 
+/** Codex reads nothing inside its strings: a command's env_vars pass through where they have a value, and a header
+ * named by env_http_headers or bearer_token_env_var is sent with its variable's value, which it must have. */
+function resolveCodex(server: McpServer, value: (name: string) => string | undefined): McpResolved {
+  const t = server.transport;
+  const r = server.reads;
+  if (r === undefined) return { transport: t, values: [] };
+  const values: string[] = [];
+  const read = (name: string): string | undefined => {
+    const got = value(name);
+    if (got !== undefined) values.push(got);
+    return got;
+  };
+  if (t.kind === "stdio") {
+    const env = { ...t.env };
+    for (const name of r.env) {
+      const got = read(name);
+      if (got !== undefined) env[name] = got;
+    }
+    return { transport: { ...t, env }, values };
+  }
+  const headers = { ...t.headers };
+  const sent = Object.entries(r.headers).map(([header, name]) => ({ header, name, bearer: false }));
+  if (r.bearer !== undefined) sent.push({ header: "Authorization", name: r.bearer, bearer: true });
+  for (const { header, name, bearer } of sent) {
+    const got = read(name);
+    if (got === undefined) return { missing: name };
+    headers[header] = bearer ? `Bearer ${got}` : got;
+  }
+  return { transport: { ...t, headers }, values };
+}
+
 export const CODEX_TOML: McpFormat = {
   read: readCodex,
   place: (text, name, server) => ({ text: placeCodex(text, name, server) }),
@@ -1321,4 +1395,5 @@ export const CODEX_TOML: McpFormat = {
   remove: removeCodex,
   enable: enableCodex,
   refer: referCodex,
+  resolve: resolveCodex,
 };

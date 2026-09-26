@@ -99,7 +99,7 @@ export function mcpRemoteHash(args: readonly string[]): string | undefined {
 // --- rows ----------------------------------------------------------------------------
 
 /** isSecretName's words plus the ones a file-valued variable tends to carry. */
-function secretNamed(name: string): boolean {
+export function secretNamed(name: string): boolean {
   return isSecretName(name) || name.toUpperCase().split("_").some(w => ["CREDENTIAL", "CREDENTIALS", "AUTH", "CERT", "PASSWD"].includes(w));
 }
 

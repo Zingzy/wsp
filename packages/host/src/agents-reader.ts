@@ -7,7 +7,7 @@
 // state is what its tools connect answers, asked apart from the read.
 import { userInfo } from "node:os";
 import { posix } from "node:path";
-import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
+import { CATALOG_AGENTS, MCP_AGENTS, TOOL_PREFIX, serverValuesOf, signInRoadOf, versionOf, type AgentEntry, type McpAgent, type McpServer } from "@wsp/catalog";
 import { detectSkills, expand, nodeHost, skillRoots, stdioLine, tilde, type Host } from "@wsp/collect";
 import { landedServersScript, mcpRowId, NO_DIGEST, parseLandedServers, targetLogin } from "@wsp/engine";
 import { MCP_SERVER_NAME, agentVersionWord, controlNameRefusal, hasControlChar, shellQuote, strictVersion, type AgentRow, type AgentSignInState, type AgentsProject, type McpRow } from "@wsp/protocol";
@@ -256,7 +256,9 @@ export function agentsReader(o: {
       const host = on.kind === "here" ? (o.here?.() ?? nodeHost()) : (await hostOf(on)).host;
       const project = projectOf(on);
       const env = on.kind === "here" ? await o.loginEnv?.() : undefined;
-      return kept.tools(host, ask, { ...(project !== undefined ? { project } : {}), ...(env !== undefined ? { env } : {}) });
+      // A turn gets the servers' values under its own environment, so a reference reads them the same way here.
+      const values = { ...serverValuesOf(o.vault()), ...env };
+      return kept.tools(host, ask, { values, ...(project !== undefined ? { project } : {}), ...(env !== undefined ? { env } : {}) });
     },
     forget: key => kept.forget(key),
   };

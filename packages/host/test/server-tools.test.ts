@@ -78,7 +78,7 @@ async function remote(): Promise<{ url: string; posts: string[] }> {
     req.on("data", c => (body += c));
     req.on("end", () => {
       posts.push(`${req.url} ${req.headers["mcp-session-id"] ?? "-"} ${body.includes("tools/list") ? "list" : body.includes("initialized") ? "initialized" : "initialize"}`);
-      if (req.url === "/oauth" || req.headers["x-key"] !== SECRET) return void res.writeHead(401).end();
+      if (req.url === "/oauth" || (req.headers["x-key"] !== SECRET && req.headers.authorization !== `Bearer ${SECRET}`)) return void res.writeHead(401).end();
       if (body.includes('"method":"initialize"')) return void res.writeHead(200, { "content-type": "application/json", "mcp-session-id": "s-1" }).end(JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} }));
       if (body.includes("notifications/initialized")) return void res.writeHead(202).end();
       res.writeHead(200, { "content-type": "text/event-stream" }).end(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 2, result: { tools: [{ name: "search", description: "Search the workspace" }] } })}\n\n`);
@@ -527,14 +527,15 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(most).toBeLessThanOrEqual(1024 * 1024 + 1);
   }, 20_000);
 
-  it("names a server's error by its code alone, and its message goes to the host's log", async () => {
+  it("names a server's error by its code alone, and its message goes to the host's log with the values it was handed hidden", async () => {
     const f = fixture();
     f.config({ refuses: { command: join(f.bin, "refuses"), args: [], env: { FAKE_TOKEN: SECRET } } });
     const logged: string[] = [];
     const answer = await agentsReader({ vault: () => ({}), here: () => here(f), log: line => logged.push(line) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "refuses" });
     expect(answer).toMatchObject({ auth: "failed", refused: "it answered tools/list with error -32001" });
     expect(JSON.stringify(answer)).not.toContain(SECRET);
-    expect(logged.join("\n")).toContain(`bad key ${SECRET}`);
+    expect(logged.join("\n")).toContain("bad key ***");
+    expect(logged.join("\n")).not.toContain(SECRET);
   }, 20_000);
 
   it("strips control characters from every tool's name, description and parameters, keeping a description's lines", async () => {
@@ -578,6 +579,132 @@ describe("one MCP server's tools, on the person's ask", () => {
     expect(await agentsReader({ vault: () => ({}), here: () => here(f), toolsMs: 1_000 }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "silent" })).toMatchObject({ refused: serverToolsLateRefusal(1_000) });
     expect(existsSync(join(f.home, "grep-args"))).toBe(true);
     expect(readFileSync(join(f.home, "grep-args"), "utf8")).not.toContain("WSP_TOOLS_RUN=");
+  }, 20_000);
+});
+
+describe("a server whose definition names its values by reference", () => {
+  const vault = (): Record<string, string> => ({ FAKE_TOKEN: SECRET, WSP_MCP_NOTION_X_KEY: SECRET, WSP_MCP_LINEAR_AUTHORIZATION: SECRET, CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-x-row" });
+  const codex = (f: Fixture, text: string): void => {
+    mkdirSync(join(f.home, ".codex"), { recursive: true });
+    writeFileSync(join(f.home, ".codex", "config.toml"), text);
+  };
+
+  it("on a computer you joined, starts a copied Claude Code server with its references read from the servers' values, none on a line", async () => {
+    const f = fixture();
+    const { url } = await remote();
+    f.config({ airtable: { command: join(f.bin, "server"), args: [], env: { FAKE_TOKEN: "${FAKE_TOKEN}" } }, notion: { type: "http", url: `${url}/mcp`, headers: { "X-Key": "${WSP_MCP_NOTION_X_KEY}" } }, linear: { type: "http", url: `${url}/mcp`, headers: { Authorization: "Bearer ${WSP_MCP_LINEAR_AUTHORIZATION}" } } });
+    const { machine, lines } = box(f);
+    const reader = agentsReader({ vault });
+    const on = { kind: "box" as const, machine, login: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin` } };
+    expect(await reader.tools(on, { key: "p_srv", agent: "claude", name: "airtable" })).toMatchObject({ auth: "connected", tools: [{ name: "list_records" }, { name: `token_${SECRET.length}` }] });
+    expect(await reader.tools(on, { key: "p_srv", agent: "claude", name: "notion" })).toMatchObject({ auth: "connected", tools: [{ name: "search" }] });
+    expect(await reader.tools(on, { key: "p_srv", agent: "claude", name: "linear" })).toMatchObject({ auth: "connected", tools: [{ name: "search" }] });
+    for (const line of lines) expect(line).not.toContain(SECRET);
+  }, 20_000);
+
+  it("on a fork, starts a copied Codex server with its env_vars, env_http_headers and bearer_token_env_var read from the servers' values, none on a line", async () => {
+    const f = fixture();
+    const { url } = await remote();
+    codex(f, `[mcp_servers.airtable]\ncommand = "${join(f.bin, "server")}"\nenv_vars = ["FAKE_TOKEN"]\n\n[mcp_servers.notion]\nurl = "${url}/mcp"\nenv_http_headers = { "X-Key" = "WSP_MCP_NOTION_X_KEY" }\n\n[mcp_servers.linear]\nurl = "${url}/mcp"\nbearer_token_env_var = "WSP_MCP_LINEAR_AUTHORIZATION"\n`);
+    const { machine, lines } = fork(f);
+    const reader = agentsReader({ vault });
+    const on = { kind: "machine" as const, machine };
+    expect(await reader.tools(on, { key: "w_1", agent: "codex", name: "airtable" })).toMatchObject({ auth: "connected", tools: [{ name: "list_records" }, { name: `token_${SECRET.length}` }] });
+    expect(await reader.tools(on, { key: "w_1", agent: "codex", name: "notion" })).toMatchObject({ auth: "connected", tools: [{ name: "search" }] });
+    expect(await reader.tools(on, { key: "w_1", agent: "codex", name: "linear" })).toMatchObject({ auth: "connected", tools: [{ name: "search" }] });
+    for (const line of lines) expect(line).not.toContain(SECRET);
+  }, 20_000);
+
+  it("hands a server only the values its definition names, never a catalog row's key", async () => {
+    const f = fixture();
+    writeFileSync(join(f.bin, "envdump"), `#!/bin/bash\nenv > "$HOME/env.seen"\nexec "$(dirname "$0")/server"\n`);
+    chmodSync(join(f.bin, "envdump"), 0o755);
+    f.config({ airtable: { command: join(f.bin, "envdump"), args: [], env: { FAKE_TOKEN: "${FAKE_TOKEN}", ROW: "${CLAUDE_CODE_OAUTH_TOKEN}" } } });
+    const { machine } = box(f);
+    const on = { kind: "box" as const, machine, login: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin` } };
+    expect(await agentsReader({ vault }).tools(on, { key: "p_srv", agent: "claude", name: "airtable" })).toMatchObject({ auth: "failed", refused: "its config reads CLAUDE_CODE_OAUTH_TOKEN, which has no value there" });
+    expect(existsSync(join(f.home, "env.seen")), "a server was started with a reference unread").toBe(false);
+    f.config({ airtable: { command: join(f.bin, "envdump"), args: [], env: { FAKE_TOKEN: "${FAKE_TOKEN}" } } });
+    await agentsReader({ vault }).tools(on, { key: "p_srv", agent: "claude", name: "airtable" });
+    const seen = readFileSync(join(f.home, "env.seen"), "utf8");
+    expect(seen).toContain(`FAKE_TOKEN=${SECRET}`);
+    expect(seen).not.toContain("WSP_MCP_NOTION_X_KEY");
+    expect(seen).not.toContain("sk-ant-x-row");
+  }, 20_000);
+
+  it("refuses a reference with no value there and no default before anything starts, and takes a default where one is written", async () => {
+    const f = fixture();
+    f.config({ gone: { command: join(f.bin, "server"), args: [], env: { FAKE_TOKEN: "${NOT_SET}" } }, fallback: { command: join(f.bin, "server"), args: [], env: { FAKE_TOKEN: "${NOT_SET:-abcd}" } } });
+    const { machine, lines } = box(f);
+    const on = { kind: "box" as const, machine, login: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin` } };
+    const reader = agentsReader({ vault });
+    expect(await reader.tools(on, { key: "p_srv", agent: "claude", name: "gone" })).toMatchObject({ auth: "failed", refused: "its config reads NOT_SET, which has no value there" });
+    expect(starts(f)).toBe(0);
+    expect(lines.filter(l => l.includes(join(f.bin, "server")))).toEqual([]);
+    expect(((await reader.tools(on, { key: "p_srv", agent: "claude", name: "fallback" })).tools ?? []).map(t => t.name)).toContain("token_4");
+  }, 20_000);
+
+  it("leaves a reference in a command's arguments as written, so no value reaches the process list", async () => {
+    const f = fixture();
+    writeFileSync(join(f.bin, "argdump"), `#!/bin/bash\nprintf '%s\\n' "$@" > "$HOME/args.seen"\nexec "$(dirname "$0")/server"\n`);
+    chmodSync(join(f.bin, "argdump"), 0o755);
+    f.config({ airtable: { command: join(f.bin, "argdump"), args: ["--token", "${FAKE_TOKEN}"], env: { FAKE_TOKEN: "${FAKE_TOKEN}" } } });
+    const { machine, lines } = box(f);
+    const on = { kind: "box" as const, machine, login: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin` } };
+    expect(await agentsReader({ vault }).tools(on, { key: "p_srv", agent: "claude", name: "airtable" })).toMatchObject({ auth: "connected" });
+    expect(readFileSync(join(f.home, "args.seen"), "utf8")).toBe("--token\n${FAKE_TOKEN}\n");
+    for (const line of lines) expect(line).not.toContain(SECRET);
+  }, 20_000);
+
+  it("keeps every value it handed a server out of the host's log and off the page, whatever the server says", async () => {
+    const f = fixture();
+    writeFileSync(join(f.bin, "blurts"), `#!/bin/bash\necho "bad token $FAKE_TOKEN" >&2\nexit 1\n`);
+    chmodSync(join(f.bin, "blurts"), 0o755);
+    writeFileSync(join(f.bin, "curl"), `#!/bin/bash\necho "curl: (6) Could not resolve host: ${SECRET}.example.test" >&2\nexit 6\n`);
+    chmodSync(join(f.bin, "curl"), 0o755);
+    f.config({ blurts: { command: join(f.bin, "blurts"), args: [], env: { FAKE_TOKEN: "${FAKE_TOKEN}" } }, refuses: { command: join(f.bin, "refuses"), args: [], env: { FAKE_TOKEN: SECRET } }, host: { type: "http", url: "https://${FAKE_TOKEN}.example.test/mcp" } });
+    const logged: string[] = [];
+    const { machine } = box(f);
+    const on = { kind: "box" as const, machine, login: { HOME: f.home, PATH: `${f.bin}:/usr/bin:/bin` } };
+    const reader = agentsReader({ vault, log: line => logged.push(line) });
+    const answers = [];
+    for (const name of ["blurts", "refuses", "host"]) answers.push(await reader.tools(on, { key: "p_srv", agent: "claude", name }));
+    expect(answers.map(a => a.auth)).toEqual(["failed", "failed", "failed"]);
+    expect(answers[2]!.refused).toBe("curl: (6) Could not resolve host: ***.example.test");
+    expect(logged.join("\n")).toContain("bad token ***");
+    expect(logged.join("\n")).toContain("bad key ***");
+    expect(JSON.stringify(answers)).not.toContain(SECRET);
+    expect(logged.join("\n")).not.toContain(SECRET);
+  }, 20_000);
+
+  it("stars a handed secret in the tools list a server answers with, on the page and in every tool's words", async () => {
+    const f = fixture();
+    writeFileSync(join(f.bin, "echoes"), `#!/bin/bash
+while IFS= read -r line; do
+  case "$line" in
+    *'"method":"initialize"'*) printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{}}' ;;
+    *'"method":"tools/list"'*) printf '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"search-%s","description":"Searches %s for you","inputSchema":{"type":"object","properties":{"%s":{"type":"%s","description":"token %s"}}}}]}}\\n' "$FAKE_TOKEN" "$FAKE_TOKEN" "$FAKE_TOKEN" "$FAKE_TOKEN" "$FAKE_TOKEN" ;;
+  esac
+done
+`);
+    chmodSync(join(f.bin, "echoes"), 0o755);
+    f.config({ echoes: { command: join(f.bin, "echoes"), args: [], env: { FAKE_TOKEN: "${FAKE_TOKEN}" } } });
+    const answer = await agentsReader({ vault, here: () => here(f) }).tools({ kind: "here" }, { key: "here", agent: "claude", name: "echoes" });
+    expect(answer).toMatchObject({ auth: "connected", tools: [{ name: "search-***", description: "Searches *** for you", params: [{ name: "***", type: "***", required: false, description: "token ***" }] }] });
+    expect(JSON.stringify(answer)).not.toContain(SECRET);
+  }, 20_000);
+
+  it("stars a short secret as a whole word and leaves a value that is no secret readable", async () => {
+    const f = fixture();
+    writeFileSync(join(f.bin, "says"), `#!/bin/bash\necho "token \${FAKE_TOKEN:-none} debug \${DEBUG:-none} at port 10" >&2\nexit 1\n`);
+    chmodSync(join(f.bin, "says"), 0o755);
+    f.config({ short: { command: join(f.bin, "says"), args: [], env: { FAKE_TOKEN: "${SHORT}" } }, plain: { command: join(f.bin, "says"), args: ["1"], env: { DEBUG: "1" } } });
+    const logged: string[] = [];
+    const reader = agentsReader({ vault: () => ({ SHORT: "1" }), here: () => here(f), log: line => logged.push(line) });
+    await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "short" });
+    await reader.tools({ kind: "here" }, { key: "here", agent: "claude", name: "plain" });
+    expect(logged.find(l => l.includes(" short "))).toContain("token *** debug none at port 10");
+    expect(logged.find(l => l.includes(" plain "))).toContain("token none debug 1 at port 10");
   }, 20_000);
 });
 
