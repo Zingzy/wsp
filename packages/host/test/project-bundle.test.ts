@@ -8,6 +8,7 @@ import { gunzipSync } from "node:zlib";
 import { CACHE_DIRS } from "@wsp/collect";
 import { PROJECT_STATE_RESOLVERS, agentHomes, folderExportScript } from "@wsp/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { tarRead } from "../../engine/test/tar-read.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { CACHE_RULE, isCacheDir, packProject, planProject, projectBundler } from "../src/project-bundle.js";
 
@@ -89,11 +90,11 @@ function fixture(): string {
 const extract = (tgz: Buffer): string => {
   const dir = mkdtempSync(join(tmpdir(), "wsp-proj-out-"));
   dirs.push(dir);
-  execFileSync("tar", ["-xzf", "-", "-C", dir], { input: tgz });
+  tarRead(["-xzf", "-", "-C", dir], tgz);
   return dir;
 };
 
-const listed = (tgz: Buffer): string[] => execFileSync("tar", ["-tzf", "-"], { input: tgz }).toString().trim().split("\n").filter(l => l !== "").sort();
+const listed = (tgz: Buffer): string[] => tarRead(["-tzf", "-"], tgz).toString().trim().split("\n").filter(l => l !== "").sort();
 
 describe("planProject", () => {
   it("carries the tracked tree, the untracked and ignored state and the repository, and leaves every cache shape behind", async () => {
