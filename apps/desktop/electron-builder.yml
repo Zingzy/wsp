@@ -11,6 +11,8 @@ files:
   - assets/**
   - package.json
 afterPack: scripts/after-pack.mjs
+# The app is written in en-US alone, and Chromium falls back to it; the other 219 locale folders were 47 MB unpacked.
+electronLanguages: [en-US]
 mac:
   # One bundle for both chips: reading the chip from a browser is unreliable, and a wrong pick is a dead first run.
   target:
