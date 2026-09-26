@@ -4,6 +4,7 @@ import { ExecFailedError, fetchCapMs, isCapped, isMissing, MachineUnreachableErr
 import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_INLINE_MAX_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend, type MoveBudgets } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { EXEC_ENV } from "../src/golden-import.js";
+import { GONE_READS, MachineAliveError, killUntilGone } from "../src/golden.js";
 
 interface Reply {
   status: number;
@@ -920,5 +921,70 @@ describe("SolariBackend error bodies", () => {
     const refused = (await b.create({ kind: "sandbox" }).then(() => null, (e: unknown) => e)) as Error;
     expect(refused.message).not.toBe("");
     expect(refused.message).toContain("500");
+  });
+});
+
+/** The gateway as it answered on 2026-09-26: two copies behind one address, one holding a running sandbox and one
+ * that never heard of it, each call after the create landing on whichever copy `route` names. The empty copy
+ * answers a delete with the same 200 and every read with a 404; only a delete that lands on the holder ends it. */
+function splitGateway(route: (call: number, method: string) => "holder" | "empty") {
+  const holder = new Map<string, string>();
+  let call = 0;
+  const f = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    if (method === "POST") {
+      holder.set("sb1", "running");
+      return new Response(JSON.stringify({ sandboxId: "sb1", kind: "sandbox" }), { status: 201 });
+    }
+    const id = decodeURIComponent(new URL(String(url)).pathname.split("/")[2] ?? "");
+    const known = route(call++, method) === "holder" && holder.has(id);
+    if (method === "DELETE") {
+      if (known) holder.delete(id);
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    return known
+      ? new Response(JSON.stringify({ sandboxId: id, kind: "sandbox", state: holder.get(id) }), { status: 200 })
+      : new Response(JSON.stringify({ error: "Not found" }), { status: 404 });
+  });
+  return { f, holder };
+}
+
+describe("a delete read back through a gateway whose copies disagree", () => {
+  const confirm = { graceMs: 50, pollMs: 1 };
+
+  it("a delete that lands on the copy that never held the machine is not gone: the read that finds it running asks again, and gone waits for the reads to agree", async () => {
+    const { f, holder } = splitGateway(call => (call < 2 ? "empty" : "holder"));
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    await killUntilGone(b, await b.create({ kind: "sandbox" }), { graceMs: 60_000, pollMs: 1 });
+    expect([...holder.keys()]).toEqual([]);
+    const calls = f.mock.calls.map(c => c[1]?.method ?? "GET").slice(1);
+    // Asked again on the read that found it running, not when a minute's grace ran out.
+    expect(calls.slice(0, 4)).toEqual(["DELETE", "GET", "GET", "DELETE"]);
+    expect(calls.slice(4)).toEqual(Array(GONE_READS).fill("GET"));
+  });
+
+  it("a state the provider names that the table never learned reads running on the handle, the machine and the listing, so a delete never reads it gone", async () => {
+    const view = { sandboxId: "sb1", kind: "sandbox", state: "archiving" };
+    const f = fakeFetch({
+      "POST /sandboxes": { status: 201, body: { sandboxId: "sb1", kind: "sandbox" } },
+      "GET /sandboxes/sb1": { status: 200, body: view },
+      "GET /sandboxes": { status: 200, body: { sandboxes: [view] } },
+      "DELETE /sandboxes/sb1": { status: 200, body: { ok: true } },
+    });
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const m = await b.create({ kind: "sandbox" });
+    expect((await b.get("sb1")).seen?.state).toBe("running");
+    expect(await m.state()).toBe("running");
+    expect((await b.list()).map(r => r.state)).toEqual(["running"]);
+    await expect(killUntilGone(b, m, { graceMs: 5, pollMs: 1 })).rejects.toMatchObject({ kind: "machineAlive", state: "running" });
+  });
+
+  it("copies that disagree on every read end in one sentence naming the machine still running", async () => {
+    const { f, holder } = splitGateway((call, method) => (method === "DELETE" ? "empty" : call % 2 === 0 ? "holder" : "empty"));
+    const b = new SolariBackend({ apiKey: "k", fetch: f });
+    const err = await killUntilGone(b, await b.create({ kind: "sandbox" }), confirm).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MachineAliveError);
+    expect(err).toMatchObject({ machineId: "sb1", state: "running", message: expect.stringContaining("sb1 is still running") });
+    expect([...holder.keys()]).toEqual(["sb1"]);
   });
 });

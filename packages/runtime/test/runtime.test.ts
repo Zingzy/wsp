@@ -9,7 +9,7 @@ import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
 import { execFailedLine, machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape, type ThreadScope } from "@wsp/protocol";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
-import { BUILDER_IDLE_MS, DISK_SYNC_CMD, ExecFailedError, GuestUnusableError, MachineUnreachableError, TOOLS_PATH, type ExecResult, type GoldenDelta, type GoldenImport } from "@wsp/engine";
+import { BUILDER_IDLE_MS, DISK_SYNC_CMD, ExecFailedError, GuestUnusableError, KILL_ASKS, MachineUnreachableError, TOOLS_PATH, type ExecResult, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
@@ -402,7 +402,7 @@ describe("runtime", () => {
     };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, killConfirm: { graceMs: 20, pollMs: 1 } });
     const ws = await createOn(rt, { golden: "snap_g", name: "x" });
-    const said = "x's machine m1 is still running after two asks; run wsp delete again or delete it at the provider";
+    const said = "x's machine m1 is still running after three asks; run wsp delete again or delete it at the provider";
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await expect(rt.workspaces.delete(ws.id)).rejects.toMatchObject({ kind: "machineAlive", message: said });
@@ -426,7 +426,7 @@ describe("runtime", () => {
     };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, killConfirm: { graceMs: 20, pollMs: 1 } });
     const ws = await createOn(rt, { golden: "snap_g", name: "x" });
-    const said = "x's machine m1 is still running after two asks; run wsp delete again or delete it at the provider";
+    const said = "x's machine m1 is still running after three asks; run wsp delete again or delete it at the provider";
     const reason = async (): Promise<string | undefined> => (await rt.status.list()).find(s => s.id === ws.id)?.reason;
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -461,7 +461,7 @@ describe("runtime", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, killConfirm: { graceMs: 20, pollMs: 1 } });
     const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
-    const said = "x's machine m1 is still paused after two asks; run wsp delete again or delete it at the provider";
+    const said = "x's machine m1 is still paused after three asks; run wsp delete again or delete it at the provider";
     const row = async (): Promise<WorkspaceStatus | undefined> => (await rt.status.list()).find(s => s.id === ws.id);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
@@ -3772,7 +3772,7 @@ describe("runtime golden builders", () => {
     expect(await rt.golden.get()).toBeUndefined();
   });
 
-  it("a seal whose builder outlives two kills fails with kind machineAlive, forks nothing, writes no manifest and keeps the builder in the record", async () => {
+  it("a seal whose builder outlives three kills fails with kind machineAlive, forks nothing, writes no manifest and keeps the builder in the record", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, killConfirm: { graceMs: 20, pollMs: 1 } });
     const b = await rt.golden.prepare();
@@ -3780,7 +3780,7 @@ describe("runtime golden builders", () => {
     let kills = 0;
     machine.kill = async () => { kills++; };
     await expect(rt.golden.seal(b.id)).rejects.toMatchObject({ kind: "machineAlive", machineId: b.id });
-    expect(kills).toBe(2);
+    expect(kills).toBe(KILL_ASKS);
     expect(backend.machines).toHaveLength(1);
     expect(await rt.golden.get()).toBeUndefined();
     // The provider still has the machine, so the record still names it: a builder dropped here would bill with

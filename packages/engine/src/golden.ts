@@ -32,7 +32,7 @@ export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifes
 export type StageListener = (stage: GoldenStage, detail?: string, step?: GoldenStep, left?: readonly string[]) => void;
 
 /** How long to wait for the provider to report a killed machine gone before
- * killing again; two rounds, then the caller fails. Tests shrink both. */
+ * killing again; KILL_ASKS rounds, then the caller fails. Tests shrink both. */
 export interface KillConfirm {
   graceMs?: number;
   pollMs?: number;
@@ -41,7 +41,7 @@ export interface KillConfirm {
 /** How long a delete is read back for when the caller names no window. */
 export const KILL_GRACE_MS = 30_000;
 
-/** A machine that answered two kills with a success status and is still there.
+/** A machine that answered KILL_ASKS kills with a success status and is still there.
  * Typed so the wizard can say "still billing, reap it" rather than "try again". */
 export class MachineAliveError extends Error {
   readonly kind = "machineAlive" as const;
@@ -49,7 +49,7 @@ export class MachineAliveError extends Error {
     readonly machineId: string,
     readonly state: MachineState,
   ) {
-    super(`machine ${machineId} is still ${state} after two kills; it bills until reap or a kill by hand takes`);
+    super(`machine ${machineId} is still ${state} after three kills; it bills until reap or a kill by hand takes`);
     this.name = "MachineAliveError";
   }
 }
@@ -105,28 +105,44 @@ const readState = async (machine: Machine): Promise<{ state: BuilderReading; rea
   }
 };
 
+/** How many reads in a row must answer gone before a kill is done, and how often the kill is asked. Measured
+ * 2026-09-26: the gateway's copies disagreed call to call, and seven of eleven machines wsp had read gone once kept
+ * running; at that skew twelve reads and three asks let fewer than one delete in sixty say gone wrongly. */
+export const GONE_READS = 12;
+export const KILL_ASKS = 3;
+
 /** The provider's kill acknowledges the request, not the machine's death: a live
  * wizard run reported its seal done and the builder was still running 25 minutes
- * later, so a kill is only done once get(id) reads the machine gone. */
+ * later, so a kill is only done once the machine reads gone GONE_READS times in a
+ * row. The copies disagree per call, not per second, so those reads follow each
+ * other straight away; one that reads the machine alive after a gone one means the
+ * ask went to a copy that never held it, and the kill is asked again at once. */
 export async function killUntilGone(backend: MachineBackend, machine: Machine, confirm: KillConfirm = {}): Promise<void> {
   const graceMs = confirm.graceMs ?? KILL_GRACE_MS;
   const pollMs = confirm.pollMs ?? 1_000;
-  let state: MachineState = "running";
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let alive: MachineState = "running";
+  for (let attempt = 0; attempt < KILL_ASKS; attempt++) {
     await machine.kill().catch((e: unknown) => {
       if (!isMissing(e)) throw e;
     });
     const deadline = Date.now() + graceMs;
+    let gone = 0;
     do {
-      state = await backend.get(machine.id).then(
-        m => m.state(),
+      // One call per read: a second call for the state can land on the other copy and read gone.
+      const state = await backend.get(machine.id).then(
+        m => m.seen?.state ?? m.state(),
         (e: unknown) => (isMissing(e) ? "gone" : Promise.reject(e)),
       );
-      if (state === "gone") return;
+      if (state === "gone") {
+        if (++gone >= GONE_READS) return;
+        continue;
+      }
+      alive = state;
+      if (gone > 0) break;
       await new Promise(r => setTimeout(r, pollMs));
-    } while (Date.now() < deadline);
+    } while (Date.now() < deadline || gone > 0);
   }
-  throw new MachineAliveError(machine.id, state);
+  throw new MachineAliveError(machine.id, alive);
 }
 
 /** What a snapshot's delete came to once read back: gone off the listing, already lost at the provider, or still
