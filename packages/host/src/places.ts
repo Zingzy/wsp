@@ -249,7 +249,7 @@ export function addableProviders(): string[] {
 }
 
 /** What a provider that just became a place reads as. */
-export const providerPlaceLine = (id: string, rateUsdPerHour: number): string => `place ${id} · ${fmtPrice(rateUsdPerHour)} · forks your image`;
+export const providerPlaceLine = (id: string, rateUsdPerHour: number): string => `place ${id}, ${fmtPrice(rateUsdPerHour)}, forks your image`;
 
 /** The refusal for a word that is neither a provider wsp holds a key for nor an ssh address, naming all three roads. */
 export function addRefusal(word: string): string {
@@ -1406,7 +1406,7 @@ export function stageLines(event: PlaceStageEvent): string[] {
  * it against the computer in front of them, and what it can do. */
 export function addedLines(place: PlaceView, hostKey: string | undefined): string[] {
   return [
-    `${place.name} joined this wsp${place.shape === undefined ? "" : ` · ${fmtSize(place.shape, "cores")}`}${place.diskFreeBytes === undefined ? "" : ` · ${fmtBytes(place.diskFreeBytes)} free`}`,
+    `${place.name} joined this wsp${place.shape === undefined ? "" : `, ${fmtSize(place.shape, "cores")}`}${place.diskFreeBytes === undefined ? "" : `, ${fmtBytes(place.diskFreeBytes)} free`}`,
     ...(hostKey === undefined ? [] : [`its ssh key      ${hostKey}`]),
     ...[placeEngineLine(place)].filter((line): line is string => line !== undefined),
     `wsp remove ${place.name} takes it back out and sweeps wsp off it.`,

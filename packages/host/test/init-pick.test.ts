@@ -393,7 +393,7 @@ describe("the tools screen drawn", () => {
     expect(t).toMatch(/▾ Installed here, never used\s+1 of 1\s+40 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40 MB\n/);
     expect(t).toContain("On: 3 tools, 284 MB");
     expect(t).toContain("Disk: 1.4 GB of 15.2 GB on the 20 GB builder");
-    expect(t).toContain("┗  space on or off • ← → fold • enter next • esc back");
+    expect(t).toContain("┗  space on or off   ← → fold   enter next   esc back");
     // The two lines he struck out are gone with the all row.
     expect(t).not.toContain("every row on this screen that can be ticked");
     expect(t).not.toContain("left as it is");
@@ -575,7 +575,7 @@ describe("the whole flow", () => {
     const at = () => o.text().slice(o.text().lastIndexOf("◆  Sign-ins"));
     expect(at()).toMatch(/▾ Agents\s+0 API key\s+0 skip\s+1 token\n┃\s+Claude Code login\s+Keychain: Claude Code-credentials\s+token from this computer\n/);
     expect(at()).toMatch(/▾ Developer CLIs\s+0 copy\s+0 during the build\s+1 when you need it\s+0 skip\n/);
-    expect(at()).toContain("┗  ← → choose • enter next • esc back");
+    expect(at()).toContain("┗  ← → choose   enter next   esc back");
     expect(at()).not.toMatch(/[●○] all/);
     // A sign-in row carries no box: its answer is the word, and one of the words is skip.
     expect(at()).not.toMatch(/[●○] Claude Code login/);

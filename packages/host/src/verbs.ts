@@ -1069,7 +1069,7 @@ export async function buildImageAt(client: HostClient, out: Out, word: string, f
     f => {
       const e = f as unknown as GoldenStageEvent;
       const words = e.stage === "failed" ? "Failed" : GOLDEN_STAGE_WORDS[e.stage];
-      out.stream(`${[`${place.name}: ${words}`, ...(e.detail !== undefined ? [e.detail] : [])].join(" · ")}\n`);
+      out.stream(`${[`${place.name}: ${words}`, ...(e.detail !== undefined ? [e.detail] : [])].join("  ")}\n`);
     },
   );
   try {
@@ -2238,7 +2238,7 @@ const openedThreadLine = (threadId: string, opened: ((threadId: string) => strin
 
 /** The same line at a terminal, where a person has to retype the id to say anything else to the thread. The tool
  * door prints it without the clause: an agent holding the id passes it whole. */
-const openedThreadSaid = (threadId: string, opened: ((threadId: string) => string) | undefined): string => `${openedThreadLine(threadId, opened)} · ${THREAD_PREFIX_WORD}`;
+const openedThreadSaid = (threadId: string, opened: ((threadId: string) => string) | undefined): string => `${openedThreadLine(threadId, opened)}  ${THREAD_PREFIX_WORD}`;
 
 
 /** What a followed turn says about itself beyond the reply: the line that names the thread it opened where the

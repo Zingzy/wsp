@@ -157,7 +157,7 @@ describe("rungSelect", () => {
     expect(frame).toMatch(/\n┃\s{5}○ rectangle/);
     // The screen being answered runs the thick bar down its left and ends with the help line; nothing under the title keeps the thin one.
     expect(frame.split("\n").slice(1, -1).every(l => l.startsWith("┃"))).toBe(true);
-    expect(frame.split("\n").at(-1)).toBe("┗  space on or off • ← → fold • enter next • esc back");
+    expect(frame.split("\n").at(-1)).toBe("┗  space on or off   ← → fold   enter next   esc back");
     expect(frame).not.toContain("macOS app, no Linux build");
     expect(frame).not.toMatch(/—|\p{Emoji_Presentation}/u);
     // Space on the heading the cursor starts on clears its group.
@@ -185,7 +185,7 @@ describe("rungSelect", () => {
     const p = rungSelect({ title: "Agents", counter: "1/6", top: "Which coding agents go on your machine image.", items: flat, initial: new Set(["claude"]), input, output });
     await settle();
     expect(text()).toContain("┃  Which coding agents go on your machine image.");
-    expect(text().split("\n").at(-1)).toBe("┗  space on or off • enter next • esc back");
+    expect(text().split("\n").at(-1)).toBe("┗  space on or off   enter next   esc back");
     expect(text()).toMatch(/● Claude Code\s+used here, 151 sessions\s+208\.0 MB/);
     await press(input, KEY.ctrlC);
     await p;
@@ -275,7 +275,7 @@ describe("rungSelect", () => {
       const p = rungSelect({ title: "Tools", counter: "5/7", items: ITEMS, initial: new Set(["gh"]), input, output });
       await settle();
       expect([...raw().matchAll(/\x1b\[([0-9;]*)m/g)]).toEqual([]);
-      expect(text().split("\n").at(-1)).toBe("┗  space on or off • ← → fold • enter next • esc back");
+      expect(text().split("\n").at(-1)).toBe("┗  space on or off   ← → fold   enter next   esc back");
       await press(input, KEY.enter);
       await p;
     } finally {
