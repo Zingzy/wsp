@@ -100,6 +100,8 @@ export const SERVER_TOOLS: Readonly<Record<string, ServerToolsAnswer>> = {
     ],
   },
   github: { auth: "failed", refused: "Did not answer in 20 s.", readAt: "2026-09-24T12:00:00.000Z" },
+  linear: { auth: "needs-sign-in", holder: "claude", readAt: "2026-09-24T12:00:00.000Z" },
+  notion: { auth: "signed-in", holder: "claude", readAt: "2026-09-24T12:00:00.000Z" },
 };
 
 const FRONTEND_DESIGN_MD = `---

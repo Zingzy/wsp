@@ -6,10 +6,11 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RightPanelTabs } from "./RightPanelTabs";
 import type { RightPanelSurface } from "../rightPanelStore";
+import { PANE_KINDS, type RightPanelKind } from "../panes";
 
 const NONE: ReadonlySet<string> = new Set();
 
-function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string | null; diffAvailable?: boolean; processesAvailable?: boolean; onAddAgents?: () => void } = {}) {
+function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string | null; diffAvailable?: boolean; processesAvailable?: boolean; onAdd?: (kind: RightPanelKind) => void } = {}) {
   return render(
     <RightPanelTabs
       mode="inline"
@@ -20,18 +21,8 @@ function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string |
       terminalLabelsById={new Map()}
       onActivate={vi.fn()}
       onCloseSurface={vi.fn()}
-      onAddBrowser={vi.fn()}
-      onAddTerminal={vi.fn()}
-      onAddDiff={vi.fn()}
-      onAddMachine={vi.fn()}
-      onAddProcesses={vi.fn()}
-      onAddAgents={over.onAddAgents ?? vi.fn()}
-      browserAvailable
-      terminalAvailable
-      diffAvailable={over.diffAvailable ?? true}
-      machineAvailable
-      processesAvailable={over.processesAvailable ?? true}
-      agentsAvailable
+      onAdd={over.onAdd ?? vi.fn()}
+      available={{ ...Object.fromEntries(PANE_KINDS.map(k => [k, true])), diff: over.diffAvailable ?? true, processes: over.processesAvailable ?? true } as Record<RightPanelKind, boolean>}
     >
       <div data-pane />
     </RightPanelTabs>,
@@ -45,7 +36,7 @@ afterEach(cleanup);
 describe("the right panel's launcher", () => {
   it("offers Browser, Terminal, Diff, Computer, Processes and Agents and nothing else", () => {
     draw();
-    expect(cards()).toEqual(["browser", "terminal", "diff", "machine", "processes", "agents"]);
+    expect(cards()).toEqual(["preview", "terminal", "diff", "machine", "processes", "agents"]);
     for (const label of ["Browser", "Terminal", "Diff", "Computer", "Processes", "Agents"]) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.queryByText("Files")).toBeNull();
     expect(screen.queryByText("Screen")).toBeNull();
@@ -60,7 +51,7 @@ describe("the right panel's launcher", () => {
 
   it("keeps a pane it cannot open drawn, held, with the one line that says why", () => {
     draw({ diffAvailable: false });
-    expect(cards()).toEqual(["browser", "terminal", "diff", "machine", "processes", "agents"]);
+    expect(cards()).toEqual(["preview", "terminal", "diff", "machine", "processes", "agents"]);
     const diff = document.querySelector<HTMLElement>('[data-surface-launch="diff"]')!;
     expect(diff.dataset["available"]).toBe("false");
     expect(diff.textContent).toContain("Review changes once the task is running.");
@@ -83,14 +74,14 @@ describe("the right panel's launcher", () => {
   });
 
   it("says what the Agents pane holds, and its letter opens it", () => {
-    const onAddAgents = vi.fn();
-    draw({ onAddAgents });
+    const onAdd = vi.fn();
+    draw({ onAdd });
     const agents = document.querySelector<HTMLElement>('[data-surface-launch="agents"]')!;
     expect(agents.textContent).toContain("Agents");
     expect(agents.textContent).toContain("Agents, skills and servers on this task.");
     expect(agents.querySelector("kbd")?.textContent).toBe("A");
     fireEvent.keyDown(window, { key: "a" });
-    expect(onAddAgents).toHaveBeenCalledTimes(1);
+    expect(onAdd.mock.calls).toEqual([["agents"]]);
   });
 
   it("names the Agents pane on the tab strip once it is open", () => {

@@ -3731,6 +3731,18 @@ export const placeServesDaemonLine = (workspace: string, computer: string): stri
 export const placeWatchesItselfLine = (computer: string): string =>
   `${computer} watches its own ports and load, which are that computer's rather than one workspace's`;
 
+/** What a watch, read or signal of processes is refused with on a workspace whose computer answers its daemon
+ * frames: that daemon acts on any pid on the computer, the computer's own and every other workspace's, so none of
+ * them goes up its link from one workspace's channel. The Processes pane shows it in place of the table. */
+export const forkProcsUnreadLine = (workspace: string, computer: string): string =>
+  `${workspace}'s processes on ${computer} are not readable from here yet`;
+
+/** What every other op is refused with on that workspace's channel: the frames that computer's daemon answers
+ * inside the workspace they name are its shells, its files and its git, and every other op there runs on the
+ * computer itself. */
+export const forkOpRefusedLine = (op: string, workspace: string, computer: string): string =>
+  `${computer} answers ${workspace}'s shells, files and git from here, not ${op}`;
+
 /** What a person asking for a second workspace on the computer the app itself runs on is told. Its local mode is
  * one workspace, the one it already has; every other workspace is forked at a place. */
 export const localRunsOneLine = (workspace: string): string => `${THIS_COMPUTER} is already a workspace, ${workspace}, the only one it can be`;
@@ -3948,6 +3960,8 @@ const DAEMON_CONTENTS = [
   "83b228f3e824311abc08d0ff81538122bc5a0028655198ef6abba17f7daeaf0c",
   "ba2f7c6846cfc3d7ce66ff15f554d8b87dc20f5683931777d244e142709815dc",
   "de414be04f6f1b5142c2e5e718f4acd0a0526558dc96bed3a02b31f7acd924ba",
+  "15f43fcf51b6d460b6e1acfa2ed0ce279a6645647834a10174bd9d249c2b2e6e",
+  "7a1d4e70b470d3f404c987c4300756615bfca9f904f0ef12e74f26497775d72d",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4155,7 +4169,8 @@ const DAEMON_CONTENTS = [
  * Version 74 removes a directory clone by renaming it to a hidden sibling and removing that in a process of its own,
  * so a delete answers at once, sweeps any such sibling a stop cut short at start and on the next copy made or
  * removed beside that project, and refuses to remove a path that is not a copy of the project it names.
- * Version 75 takes back what a failed ssh add put on a box: before the add lands anything it asks which of its paths already exist, and after a failed deploy it removes only what this add wrote, stops a unit this add started, and leaves the box as it found it when another add took it meanwhile. */
+ * Version 75 takes back what a failed ssh add put on a box: before the add lands anything it asks which of its paths already exist, and after a failed deploy it removes only what this add wrote, stops a unit this add started, and leaves the box as it found it when another add took it meanwhile.
+ * Version 76 answers as 75 does: a directory clone's removal takes the copy's own path off the shape check, and a test pins that a path with a trailing slash sets aside the link it names. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5097,6 +5112,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * written on it, so a window opened later reads the same thing. Nothing is installed and nothing is left
    * running either way. */
   z.object({ id: reqId, op: z.literal("places.dial"), placeId: z.string() }),
+  /** A sign-in run at a terminal on one computer landed, as the tool's own status there said: the host notes the
+   * file that agent's shared login writes, as the app's own sign-in does, so the listing says signed in before
+   * that computer next reports. Answers `{}`. The person's own road only, as every other place op is. */
+  z.object({ id: reqId, op: z.literal("places.loginLanded"), placeId: z.string(), agent: z.string() }),
   /** Opens the door computers you own dial, when this host binds loopback alone, and answers where it is; a host
    * already bound beyond loopback answers its own port and opens nothing. Answers a PlaceDoorView. The person's
    * own road only, as every other place op is. */

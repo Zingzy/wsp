@@ -30,7 +30,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authRefusal, FORWARD_ENV, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authRefusal, FORWARD_ENV, jsonLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -43,7 +43,7 @@ import { ANTHROPIC_KEY, KEY_LAYER_WORDS, envFileFor, keyIn, parseEnvFile, savedE
 // that already had it from this module.
 export { writeEnvFile } from "./env-keys.js";
 import { keychainReader } from "./init-import.js";
-import { adoptLoginPath } from "./login-path.js";
+import { adoptLoginPath, loginEnv } from "./login-path.js";
 import { CACHE_RULE } from "./project-bundle.js";
 import { packSeed } from "./project-seed.js";
 import { readBrewTable } from "./init-brew.js";
@@ -101,7 +101,6 @@ import { skillsActs } from "./skills-acts.js";
 import { serverIcons } from "./server-icons.js";
 import { agentLatest } from "./agent-latest.js";
 import { serversActs } from "./servers-acts.js";
-import { knock } from "./server-check.js";
 import { hostActs } from "./agents-signin.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
 import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
@@ -784,7 +783,7 @@ export function makeRuntime(
     vault: () => vaultNow(statePath),
     // The same vault stands behind the sign-in word of an agent whose own login is not on the computer read.
     // Each agent's newest version is asked of its vendor from this host, never from a machine, and kept a day.
-    agentsReader: agentsReader({ vault: () => vaultNow(statePath), knock, latest: agentLatest({ statePath, running: VERSION }).read }),
+    agentsReader: agentsReader({ vault: () => vaultNow(statePath), loginEnv, latest: agentLatest({ statePath, running: VERSION }).read }),
     // A key pasted in the app lands in the same vault, and the wsp tools an agent's config gets are the entry an
     // install writes: this same wsp against this state file.
     agentsActs: hostActs({ vaultFile: envFileFor(statePath), home: homedir, wspServer: () => mcpServerSpec(statePath, agents?.run ?? runningWsp()) }),
@@ -904,7 +903,7 @@ export function terminalInitIO(json = false): InitIO {
     signals: process,
     exit: code => process.exit(code),
     atExit: fn => void process.once("exit", fn),
-    ...(json ? { json: (record: Record<string, unknown>) => void process.stdout.write(`${JSON.stringify(record)}\n`) } : {}),
+    ...(json ? { json: (record: Record<string, unknown>) => void process.stdout.write(`${jsonLine(record)}\n`) } : {}),
   };
 }
 
@@ -2358,7 +2357,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   const project = process.cwd();
   if (values.remove === true) {
     const gone = removeEach(agents, project);
-    if (json) io.log(JSON.stringify(gone));
+    if (json) io.log(jsonLine(gone));
     else {
       for (const agent of gone.removed) for (const line of removeLines(agent)) io.log(line);
       for (const failed of gone.failures) io.error(`wsp mcp install: ${failed.error}`);
@@ -2366,7 +2365,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     return gone.failures.length > 0 ? 1 : 0;
   }
   const report = installEach(agents, mcpServerSpec(statePath, run, values.host !== undefined ? { host: values.host } : {}), homedir(), project);
-  if (json) io.log(JSON.stringify(report));
+  if (json) io.log(jsonLine(report));
   else {
     for (const placed of report.installed) for (const line of installLines(placed)) io.log(line);
     const registered = registeredLine(report);

@@ -138,6 +138,9 @@ export interface ServeOptions {
    * to it. Without it every road is the host's own, which is what a runtime served with no host in front of it
    * means. */
   ownRoad?: (req: IncomingMessage) => boolean;
+  /** Where a socket came from, as the app shows it beside a computer that joined, read by the host that serves this
+   * runtime, which knows which of its roads carry a peer's address for it. Without it, the socket's own peer. */
+  peerOf?: (req: IncomingMessage) => string;
   /** The door computers you own dial, when the host that serves this runtime opens one; without it places.door is
    * refused rather than answering a port nothing listens on. */
   door?: PlaceDoorControl;
@@ -485,7 +488,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const onConnection = (ws: WebSocket, req: IncomingMessage): void => {
     const url = new URL(req.url ?? "/", "ws://localhost");
     // Where this socket came from, as the app shows it beside a computer that just joined.
-    const from = peerAddress(req.socket.remoteAddress);
+    const from = opts.peerOf?.(req) ?? peerAddress(req.socket.remoteAddress);
     // A frame wrong at the wire is an error event on this socket, and one nobody listens for is thrown out of the
     // library's read, ending a process with no handler. The library has begun closing the socket when it emits;
     // terminating spares the wait on a peer that sent such bytes to answer the close.
@@ -921,6 +924,15 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 return;
               }
               send({ id: msg.id, ok: true, ...(await places().dial(msg.placeId, now())) });
+              return;
+            }
+            case "places.loginLanded": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              await places().loginLanded(msg.placeId, msg.agent);
+              send({ id: msg.id, ok: true });
               return;
             }
             case "places.doctor": {

@@ -94,8 +94,8 @@
 //                    panel at the widths its shape changes over (520, 480,
 //                    380 and its 360 floor)
 //   agents-states    the manager on this Mac at the panel's floor and the
-//                    page's card, its servers in every state the report
-//                    reads, a Sign in waiting on the browser
+//                    page's card, its servers in every state a connect
+//                    answers, a Sign in waiting on the browser
 //   panel-agents     the task on the box selected, its panel open on Agents
 //                    (&fork=solari: the same task a fork at Solari, whose one
 //                    act is Edit image)
@@ -564,7 +564,9 @@ const api = {
   hostTerminalConfig: async () => ({ files: [] }),
   agentsRead: async () => (params.get("projects") === "1" ? AGENTS_PAGE_REPORT : AGENTS_REPORT),
   serversIcon: async (host: string) => SERVER_ICON[host]?.() ?? null,
-  serversTools: async (_target: unknown, _agent: string, name: string) => SERVER_TOOLS[name] ?? { auth: "open", tools: [], readAt: AGENTS_REPORT.readAt },
+  // wsp's own server is still being asked, so a row reads checking; any other server answers with one tool.
+  serversTools: async (_target: unknown, _agent: string, name: string) =>
+    name === "wsp" ? new Promise<never>(() => {}) : (SERVER_TOOLS[name] ?? { auth: "connected", tools: [{ name: "search", description: "Search the workspace" }], readAt: AGENTS_REPORT.readAt }),
   // A sign-in whose tool prints its page at once: a device code for an agent, a page whose answer is pasted back for a server.
   // On this Mac a server's harness opens the browser itself and nothing is pasted back.
   agentsSignIn: async (target: { placeId?: string }, agent: string, server: string | undefined, onStep: (step: AgentsSignInEvent) => void) => {
@@ -701,7 +703,7 @@ function AgentsWidths() {
         <div key={w.width} data-agents-width={w.width} data-shell={w.shell} style={{ width: w.width }}>
           <AgentsManager
             shell={w.shell}
-            head={w.shell === "panel" ? { title: "On spoo, for wsp", manage: { computer: "spoo", open: () => {} } } : { line: "Agents, MCP servers and skills on spoo." }}
+            head={w.shell === "panel" ? { computer: "spoo", project: { name: "wsp", path: "~/wsp" }, open: () => {} } : { line: "Agents, MCP servers and skills on spoo." }}
             report={AGENTS_REPORT}
             reading={false}
             on="spoo"
@@ -715,14 +717,9 @@ function AgentsWidths() {
   );
 }
 
-/** This Mac's report with a server in every state the report reads: no sign-in needed, connected, signed in by its
- * harness, needs sign-in and failed. */
-const STATES_REPORT = {
-  ...AGENTS_REPORT,
-  target: { placeId: "here" },
-  reach: "here" as const,
-  servers: AGENTS_REPORT.servers.map(s => (s.name === "github" ? { ...s, auth: "connected" as const } : s.name === "linear" ? { ...s, auth: "signed-in" as const } : s.name === "sentry" ? { ...s, enabled: true, auth: "failed" as const } : s)),
-};
+/** This Mac's report, its servers answering in every state a connect gives: connected with its tools, failed, needs
+ * sign-in, signed in by its harness, and still checking, beside one turned off and a project's never asked. */
+const STATES_REPORT = { ...AGENTS_REPORT, target: { placeId: "here" }, reach: "here" as const };
 function AgentsStates() {
   const tools = useServerTools(STATES_REPORT.target);
   const acts = useAgentActs(STATES_REPORT.target);
@@ -732,7 +729,7 @@ function AgentsStates() {
         <div key={w.width} data-agents-width={w.width} data-shell={w.shell} style={{ width: w.width }}>
           <AgentsManager
             shell={w.shell}
-            head={w.shell === "panel" ? { title: "On this Mac, for wsp" } : { line: "Agents, MCP servers and skills on this Mac." }}
+            head={w.shell === "panel" ? { computer: "this Mac", project: { name: "wsp", path: "~/wsp" } } : { line: "Agents, MCP servers and skills on this Mac." }}
             report={STATES_REPORT}
             reading={false}
             on="this Mac"

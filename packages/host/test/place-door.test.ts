@@ -260,19 +260,42 @@ describe("a request that arrives on the door", () => {
     expect(((await made.json()) as { workspace: { rootThreadId?: string } }).workspace.rootThreadId).toBe("t_1");
   });
 
-  it("refuses a thread's token on a socket the door let in before it closed", async () => {
-    const runtime = testRuntime();
-    const h = await up({ door: "open", runtime });
-    const port = h.port;
-    const token = await threadToken(runtime);
-    const early = await WsClient.connectTo(`ws://127.0.0.1:${port + PLACE_PORT_OFFSET}${WS_PATH}`);
-    // The listener's close waits on the upgraded socket, so it is not awaited until that socket ends.
+  it("ends every socket the door let in when it closes, and opens again after", async () => {
+    const h = await up({ door: "open" });
+    const at = h.door.port()!;
+    const early = await WsClient.connectTo(`ws://127.0.0.1:${at}${WS_PATH}`);
+    const ended = early.closed();
     const closing = h.door.close();
-    expect(h.door.port()).toBeUndefined();
-    const refused = await early.request("auth", { token });
-    expect(refused["error"]).toBe(SCOPED_TOKEN_ROAD_REFUSAL);
-    expect(await early.closed()).toBe(4401);
+    await h.door.open();
+    const late = await WsClient.connectTo(`ws://127.0.0.1:${at}${WS_PATH}`);
+    await h.door.close();
     await closing;
+    await ended;
+    await late.closed();
+    expect(h.door.port()).toBeUndefined();
+  });
+
+  it("names a joining computer by the address the connector carried, and never by one a box on the door wrote", async () => {
+    const runtime = testRuntime();
+    const seen: string[] = [];
+    const door = runtime.places!;
+    const join = door.join.bind(door);
+    door.join = (req, from, now) => {
+      seen.push(from);
+      return join(req, from, now);
+    };
+    const { port } = await up({ door: "open", runtime });
+    const joinFrom = async (at: number, headers: Record<string, string>): Promise<void> => {
+      const joining = await WsClient.connectTo(`ws://127.0.0.1:${at}${WS_PATH}`, { headers });
+      await joining.request("place.join", { publicKey: newPlaceKeyPair().publicKey, nonce: randomBytes(PLACE_LINK_NONCE_BYTES).toString("base64"), ephemeral: freshEphemeral().publicKey });
+      joining.close();
+    };
+    await joinFrom(port, { "cf-connecting-ip": "203.0.113.7", "cf-ray": "8e0f4a1b2c3d4e5f-BOM" });
+    await joinFrom(port, { "cf-connecting-ip": "2001:db8::7" });
+    // A reverse forward from a box lands on the door from the loopback, and the box writes every header it sends.
+    await joinFrom(port + PLACE_PORT_OFFSET, { "cf-connecting-ip": "203.0.113.9" });
+    await joinFrom(port, { "cf-connecting-ip": "evil.example · dials in" });
+    expect(seen).toEqual(["203.0.113.7", "2001:db8::7", "127.0.0.1", "127.0.0.1"]);
   });
 
   it("still answers the door's own ops from 127.0.0.1: a pairing code, a join and a place's dial back", async () => {

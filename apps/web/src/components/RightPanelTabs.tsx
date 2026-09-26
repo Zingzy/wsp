@@ -1,5 +1,5 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/RightPanelTabs.tsx at 57a66608 (MIT).
-import { Activity, Bot, Cpu, FileDiff, Globe2, Plus, TerminalSquare } from "lucide-react";
+import { Plus, type LucideIcon } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import type { RightPanelSurface } from "../rightPanelStore";
+import { PANE_KINDS, paneOf, paneTitle, type RightPanelKind } from "../panes";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -44,35 +45,13 @@ interface RightPanelTabsProps {
   terminalLabelsById: ReadonlyMap<string, string>;
   onActivate: (surface: RightPanelSurface) => void;
   onCloseSurface: (surface: RightPanelSurface) => void;
-  onAddBrowser: () => void;
-  onAddTerminal: () => void;
-  onAddDiff: () => void;
-  onAddMachine: () => void;
-  onAddProcesses: () => void;
-  onAddAgents: () => void;
-  browserAvailable: boolean;
-  terminalAvailable: boolean;
-  diffAvailable: boolean;
-  machineAvailable: boolean;
-  processesAvailable: boolean;
-  agentsAvailable: boolean;
+  onAdd: (kind: RightPanelKind) => void;
+  available: Readonly<Record<RightPanelKind, boolean>>;
   /** Why each unavailable surface is greyed out; shown on its card and menu item. */
-  unavailableReasons?: Partial<Record<SurfaceKey, string>>;
+  unavailableReasons?: Partial<Record<RightPanelKind, string>>;
   /** Set when every panel waits on one thing: the launcher says it once, in this line, and its cards carry no reason. */
   children: ReactNode;
 }
-
-type SurfaceKey = "browser" | "terminal" | "diff" | "machine" | "processes" | "agents";
-
-/** One-line unavailability hints for the empty-state cards and the add menu. */
-const SURFACE_UNAVAILABLE_HINTS: Record<SurfaceKey, string> = {
-  browser: "Available while the task is running.",
-  terminal: "Available while the task is running.",
-  diff: "Review changes once the task is running.",
-  machine: "Available when a task is selected.",
-  processes: "Available while the task is running.",
-  agents: "Available when a task is selected.",
-};
 
 /** Overlays that must win over the launcher's letter shortcuts. */
 const LAUNCHER_SHORTCUT_BLOCKING_LAYERS = [
@@ -152,10 +131,10 @@ function SurfaceMenuItem(props: {
 }
 
 interface SurfaceAction {
-  key: SurfaceKey;
+  key: RightPanelKind;
   label: string;
   description: string;
-  icon: typeof Globe2;
+  icon: LucideIcon;
   shortcut: string;
   available: boolean;
   disabledReason: string;
@@ -163,86 +142,21 @@ interface SurfaceAction {
 }
 
 function surfaceActions(
-  props: Pick<
-    RightPanelTabsProps,
-    | "onAddBrowser"
-    | "onAddTerminal"
-    | "onAddDiff"
-    | "onAddMachine"
-    | "onAddProcesses"
-    | "onAddAgents"
-    | "browserAvailable"
-    | "terminalAvailable"
-    | "diffAvailable"
-    | "machineAvailable"
-    | "processesAvailable"
-    | "agentsAvailable"
-    | "unavailableReasons"
-  >,
+  props: Pick<RightPanelTabsProps, "onAdd" | "available" | "unavailableReasons">,
 ): readonly SurfaceAction[] {
-  const reason = (key: SurfaceKey) => props.unavailableReasons?.[key] ?? SURFACE_UNAVAILABLE_HINTS[key];
-  return [
-    {
-      key: "browser",
-      label: "Browser",
-      description: "Open your dev server or a URL.",
-      icon: Globe2,
-      shortcut: "B",
-      available: props.browserAvailable,
-      disabledReason: reason("browser"),
-      onClick: props.onAddBrowser,
-    },
-    {
-      key: "terminal",
-      label: "Terminal",
-      description: "Start a shell in this task.",
-      icon: TerminalSquare,
-      shortcut: "T",
-      available: props.terminalAvailable,
-      disabledReason: reason("terminal"),
-      onClick: props.onAddTerminal,
-    },
-    {
-      key: "diff",
-      label: "Diff",
-      description: "Review changes in this task.",
-      icon: FileDiff,
-      shortcut: "D",
-      available: props.diffAvailable,
-      disabledReason: reason("diff"),
-      onClick: props.onAddDiff,
-    },
-    {
-      key: "machine",
-      label: "Computer",
-      description: "Load, memory and disk.",
-      icon: Cpu,
-      shortcut: "M",
-      available: props.machineAvailable,
-      disabledReason: reason("machine"),
-      onClick: props.onAddMachine,
-    },
-    {
-      key: "processes",
-      label: "Processes",
-      description: "Inspect and kill what runs.",
-      icon: Activity,
-      shortcut: "P",
-      available: props.processesAvailable,
-      disabledReason: reason("processes"),
-      onClick: props.onAddProcesses,
-    },
-    {
-      key: "agents",
-      label: "Agents",
-      description: "Agents, skills and servers on this task.",
-      icon: Bot,
-      shortcut: "A",
-      available: props.agentsAvailable,
-      disabledReason: reason("agents"),
-      onClick: props.onAddAgents,
-    },
-  ];
+  return PANE_KINDS.map((key) => {
+    const pane = paneOf(key);
+    return {
+      key,
+      label: pane.label,
+      description: pane.description,
+      icon: pane.icon,
+      shortcut: pane.shortcut,
+      available: props.available[key],
+      disabledReason: props.unavailableReasons?.[key] ?? pane.hint,
+      onClick: () => props.onAdd(key),
+    };
+  });
 }
 
 /**
@@ -412,50 +326,9 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
   );
 }
 
-function surfaceTitle(
-  surface: RightPanelSurface,
-  sessions: Readonly<Record<string, PreviewTabSnapshot>>,
-  terminalLabelsById: ReadonlyMap<string, string>,
-): string {
-  switch (surface.kind) {
-    case "diff":
-      return "Diff";
-    case "machine":
-      return "Computer";
-    case "processes":
-      return "Processes";
-    case "agents":
-      return "Agents";
-    case "terminal":
-      return terminalLabelsById.get(surface.activeTerminalId) ?? "Terminal";
-    case "preview": {
-      const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
-      if (!snapshot || !snapshot.url) return "Browser";
-      if (snapshot.title.trim().length > 0) return snapshot.title;
-      try {
-        return new URL(snapshot.url).host || "Browser";
-      } catch {
-        return "Browser";
-      }
-    }
-  }
-}
-
 function SurfaceIcon({ surface }: { surface: RightPanelSurface }) {
-  switch (surface.kind) {
-    case "preview":
-      return <Globe2 className="size-3 shrink-0" />;
-    case "diff":
-      return <FileDiff className="size-3 shrink-0" />;
-    case "machine":
-      return <Cpu className="size-3 shrink-0" />;
-    case "processes":
-      return <Activity className="size-3 shrink-0" />;
-    case "agents":
-      return <Bot className="size-3 shrink-0" />;
-    case "terminal":
-      return <TerminalSquare className="size-3 shrink-0" />;
-  }
+  const Icon = paneOf(surface.kind).icon;
+  return <Icon className="size-3 shrink-0" />;
 }
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
@@ -520,7 +393,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
-              const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
+              const title = paneTitle(surface, props);
               return (
                 <div
                   key={surface.id}

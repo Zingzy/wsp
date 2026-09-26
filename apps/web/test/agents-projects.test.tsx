@@ -179,14 +179,14 @@ describe("a computer's page over its projects", () => {
     tab("MCP servers");
     const detail = open("server-project-pr_app-db-stdio-npx db-mcp");
     fireEvent.click(detail.querySelector<HTMLButtonElement>("[data-detail-acts] [data-k=act-list-tools]")!);
-    expect(h.tools.map(t => [t.target, t.name])).toEqual([[{ placeId: "p_spoo", project: "pr_app" }, "db"]]);
-    h.tools[0]!.answer({
+    const db = h.tools.filter(t => t.name === "db");
+    expect(db.map(t => [t.target, t.name])).toEqual([[{ placeId: "p_spoo", project: "pr_app" }, "db"]]);
+    db[0]!.answer({
       auth: "connected",
       tools: [{ name: "query", description: "Runs one query", params: [{ name: "sql", type: "string", required: true, description: "The query to run" }, { name: "limit", type: "integer", required: false }, { name: "raw", required: false }] }],
       readAt: READ_AT,
     });
     await settle();
-    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-agents-detail] [data-k=act-view-tools]")!);
     fireEvent.click(document.querySelector<HTMLButtonElement>("[data-under-row=query] button")!);
     const level = document.querySelector<HTMLElement>("[data-agents-under-row]")!;
     expect(level.querySelector("[data-k=under-list] h4")?.textContent).toBe(W.parameters);
@@ -224,7 +224,7 @@ describe("a computer's page over its projects", () => {
     await settle();
     fireEvent.click(document.querySelector<HTMLButtonElement>('[data-add-row="anthropics/skills/pdf"] [data-row-trigger]')!);
     const detail = (): HTMLElement => document.querySelector<HTMLElement>("[data-agents-detail]")!;
-    const status = (): string | null | undefined => detail().querySelector("[data-fact=status] [data-fact-value]")?.textContent;
+    const status = (): string | null | undefined => detail().querySelector("[data-fact=status] [data-status-word]")?.textContent;
     expect(status()).toBe(W.installed);
     await pickWhere("app");
     expect(status()).toBe(W.notInstalled);

@@ -11,13 +11,13 @@ import { ScrollTextIcon } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentsReport, SealedImage, ServerToolsAnswer } from "@wsp/protocol";
 import { AgentsManager, type AgentsManagerProps } from "../src/components/agents/AgentsManager.js";
-import { AGENTS_LIST_WORDS as W, imageAgentsReport, recipeMissLines, refusedLines, type ServerTools, type ToolsState } from "../src/components/agents/agentsRows.js";
+import { AGENTS_LIST_WORDS as W, imageAgentsReport, recipeMissLines, refusedLines, type RowsContext, type ServerTools, type ToolsState } from "../src/components/agents/agentsRows.js";
 import { kind, type KindModule } from "../src/components/agents/kinds/kind.js";
 import { foldServers, rowState } from "../src/components/agents/kinds/servers.js";
 import { AGENTS_REPORT, SERVER_TOOLS } from "./fixtures/agents-report.js";
 
 const NOW = Date.parse("2026-09-24T12:03:00.000Z");
-const HEAD = { title: "On spoo, for wsp" };
+const HEAD = { computer: "spoo", project: { name: "wsp", path: "~/wsp" } };
 
 afterEach(cleanup);
 
@@ -29,48 +29,74 @@ const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[d
 const rowEl = (key: string): HTMLElement => document.querySelector<HTMLElement>(`[data-agents-row="${key}"]`)!;
 const titles = (): string[] => rows().map(r => r.querySelector("[data-row-title]")!.textContent ?? "");
 const subtext = (key: string): string | undefined => rowEl(key).querySelector("[data-row-subtext]")?.textContent ?? undefined;
-const stateLine = (key: string): string | undefined => rowEl(key).querySelector("[data-row-state]")?.textContent ?? undefined;
+const stateLine = (key: string): string | undefined => rowEl(key).querySelector("[data-row-status] [data-status-word]")?.textContent ?? undefined;
 const quick = (key: string): HTMLButtonElement | null => rowEl(key).querySelector<HTMLButtonElement>("[data-row-slot] button");
-const badge = (el: ParentNode): HTMLElement => el.querySelector<HTMLElement>("[data-k=server-status]")!;
+const badge = (el: ParentNode): HTMLElement => el.querySelector<HTMLElement>("[data-k=status]")!;
+/** A status as it reads: its word, and the figure after it where it has one. */
+const said = (b: HTMLElement | null): string => [b?.querySelector("[data-status-word]")?.textContent, b?.querySelector("[data-status-count]")?.textContent].filter(w => w !== undefined).join(" ");
 const dotOf = (el: HTMLElement): string | undefined => el.querySelector("[data-status-dot]")?.getAttribute("class")?.match(/bg-[a-z]+(\/\d+)?/)?.[0];
 const tab = (name: string): void => void fireEvent.click(screen.getByRole("radio", { name: new RegExp(`^${name}`) }));
 const openRow = (key: string): HTMLElement => {
   fireEvent.click(rowEl(key).querySelector<HTMLButtonElement>("[data-row-trigger]")!);
   return document.querySelector<HTMLElement>("[data-agents-detail]")!;
 };
-const facts = (el: ParentNode): [string, string][] => [...el.querySelectorAll<HTMLElement>("[data-fact]")].map(f => [f.querySelector("[data-fact-label]")!.textContent ?? "", f.querySelector("[data-fact-value]")?.textContent ?? f.querySelector("[data-copy-row] [data-k]")?.textContent ?? f.querySelector("[data-k=server-status]")?.textContent ?? ""]);
+const facts = (el: ParentNode): [string, string][] => [...el.querySelectorAll<HTMLElement>("[data-fact]")].map(f => [f.querySelector("[data-fact-label]")!.textContent ?? "", f.querySelector("[data-fact-value]")?.textContent ?? f.querySelector("[data-copy-row] [data-k]")?.textContent ?? said(f.querySelector<HTMLElement>("[data-k=status]"))]);
 const acts = (el: ParentNode): string[] => [...el.querySelectorAll<HTMLElement>("[data-detail-acts] button")].map(b => b.textContent ?? "");
 const groupLabels = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-group-label]")].map(l => l.textContent ?? "");
 const SERVER = { notion: "server-global-notion-http-mcp.notion.com", airtable: "server-global-airtable-stdio-npx -y airtable-mcp-server", github: "server-global-github-stdio-npx -y @modelcontextprotocol/server-github", linear: "server-global-linear-http-mcp.linear.app", sentry: "server-global-sentry-http-mcp.sentry.dev", wsp: "server-global-wsp-stdio-wsp mcp" };
 
 /** A tools road the test answers by hand, as the hook would hold its answers. */
 function fakeTools(): ServerTools & { asks: [string, string, boolean][]; answer(name: string, a: ServerToolsAnswer): void } {
-  const states = new Map<string, ToolsState>();
+  const answers = new Map<string, ServerToolsAnswer>();
+  const listing = new Set<string>();
   const asks: [string, string, boolean][] = [];
+  const keyOf = (row: { agent: string; name: string }): string => `${row.agent}\0${row.name}`;
   return {
     asks,
-    of: row => states.get(row.name),
+    of: (row): ToolsState | undefined => {
+      const answer = answers.get(row.name);
+      return answer === undefined && !listing.has(keyOf(row)) ? undefined : { listing: listing.has(keyOf(row)), ...(answer === undefined ? {} : { answer }) };
+    },
+    // An answer that stands for the server is the host's kept one, handed back at once unless refreshed.
     list: (row, refresh = false) => {
       asks.push([row.agent, row.name, refresh]);
-      states.set(row.name, { listing: true });
+      if (!answers.has(row.name) || refresh) listing.add(keyOf(row));
     },
-    answer: (name, a) => states.set(name, { listing: false, answer: a }),
+    answer: (name, a) => {
+      answers.set(name, a);
+      for (const k of [...listing]) if (k.endsWith(`\0${name}`)) listing.delete(k);
+    },
   };
 }
 
 describe("the head and the tabs", () => {
-  it("says whose these are in one line with no sentence under it, and links the panel to the computer's page", () => {
+  it("says under the tabs what each tab holds on which computer, the computer's name opening its page, with nothing over the tabs", () => {
     const open = vi.fn();
-    draw({ head: { ...HEAD, manage: { computer: "spoo", open } } });
+    draw({ head: { ...HEAD, open } });
     expect(screen.getByRole("region", { name: W.section }).tagName).toBe("SECTION");
-    expect(document.querySelector("[data-k=agents-title]")?.textContent).toBe("On spoo, for wsp");
-    expect(document.querySelector("[data-k=agents-line]")).toBeNull();
-    const manage = document.querySelector<HTMLButtonElement>("[data-k=agents-manage]")!;
-    expect(manage.textContent).toBe("Manage all on spoo");
-    expect(manage.querySelector("svg")).not.toBeNull();
-    fireEvent.click(manage);
+    const line = (): string | undefined => document.querySelector("[data-k=agents-line]")?.textContent ?? undefined;
+    expect(line()).toBe("Agents on spoo");
+    tab("MCP servers");
+    expect(line()).toBe("MCP servers on spoo, for wsp");
+    tab("Skills");
+    expect(line()).toBe("Skills on spoo, for wsp");
+    expect(document.querySelector("[data-k=agents-project]")?.getAttribute("title")).toBe("~/wsp");
+    // The line stands under the tabs, and no head or Manage all stands over them.
+    const top = document.querySelector<HTMLElement>("[data-agents-top]")!;
+    expect(top.querySelector("[data-agents-head]")).toBeNull();
+    expect(top.querySelector("[data-k=agents-manage]")).toBeNull();
+    expect(screen.getByRole("radiogroup").compareDocumentPosition(top.querySelector("[data-agents-line]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(top.querySelector("[data-agents-line] [data-k=agents-read-again]")).not.toBeNull();
+    const computer = screen.getByRole("button", { name: "Open spoo in Settings" });
+    expect(computer.textContent).toBe("spoo");
+    expect(computer.className).toContain("underline");
+    fireEvent.click(computer);
     expect(open).toHaveBeenCalledTimes(1);
-    expect(document.querySelector("[data-k=agents-manage-glyph]")?.getAttribute("aria-label")).toBe("Manage all on spoo");
+    cleanup();
+    draw({ head: { computer: "this Mac" } });
+    tab("MCP servers");
+    expect(line()).toBe("MCP servers on this Mac");
+    expect(document.querySelector("[data-agents-line] button[data-k=agents-computer]"), "a computer with no page of its own is no link").toBeNull();
   });
 
   it("draws the page's head as its one line beside Read again", () => {
@@ -99,17 +125,38 @@ describe("the head and the tabs", () => {
     expect(document.querySelector("[data-k=agents-add]")).toBeNull();
     tab("MCP servers");
     const add = document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!;
-    expect(add.textContent).toBe("Add");
+    expect(add.textContent).toBe("Add MCP server");
     expect(add.querySelector("svg")).not.toBeNull();
     expect(add.disabled).toBe(true);
     expect(add.parentElement?.getAttribute("title")).toBe(W.notYet);
     expect(document.querySelector("[data-k=agents-count]")?.textContent).toBe("7 servers");
     expect(document.querySelector<HTMLInputElement>("[data-k=agents-search]")?.placeholder).toBe("Search MCP servers");
     expect(document.querySelector("[data-k=agents-view]")?.getAttribute("aria-label")).toBe("Group and sort");
-    expect(document.querySelector("[data-k=agents-add]")?.getAttribute("aria-label")).toBe("Add an MCP server");
+    expect(document.querySelector("[data-k=agents-add]")?.getAttribute("aria-label")).toBe("Add MCP server");
     tab("Skills");
     expect(document.querySelector<HTMLInputElement>("[data-k=agents-search]")?.placeholder).toBe("Search skills");
-    expect(document.querySelector("[data-k=agents-add]")?.getAttribute("aria-label")).toBe("Add a skill");
+    expect(document.querySelector("[data-k=agents-add]")?.getAttribute("aria-label")).toBe("Add skill");
+    expect(document.querySelector("[data-k=agents-add]")?.textContent).toBe("Add skill");
+  });
+
+  it("stands the search row over the list alone: a detail or an add level draws its own head in its place, and Back finds the query kept", () => {
+    const searches = (): number => document.querySelectorAll("[data-agents-manager] input[type=search], [data-agents-manager] input[data-k$=search]").length;
+    const skills = { busyOf: () => false, toggle: () => {}, remove: () => {}, previewOf: () => undefined, loadPreview: () => {}, refusedOf: () => undefined, search: () => {}, searchOf: () => undefined, remoteOf: () => undefined, loadRemote: () => {}, picksOf: () => ({ agents: [] }), setPicks: () => {}, add: () => {} } as unknown as RowsContext["skills"];
+    draw({ ctx: { where: "box", ...(skills === undefined ? {} : { skills }) } });
+    tab("Skills");
+    fireEvent.change(document.querySelector<HTMLInputElement>("[data-k=agents-search]")!, { target: { value: "front" } });
+    expect(searches()).toBe(1);
+    openRow("skill-user-frontend-design");
+    expect(document.querySelector("[data-agents-toolbar]")).toBeNull();
+    expect(searches()).toBe(0);
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-agents-detail] [data-k=agents-back]")!);
+    expect(document.querySelector<HTMLInputElement>("[data-k=agents-search]")?.value).toBe("front");
+    fireEvent.click(document.querySelector<HTMLButtonElement>("[data-k=agents-add]")!);
+    expect(document.querySelector("[data-agents-add]")).not.toBeNull();
+    expect(document.querySelector("[data-agents-toolbar]")).toBeNull();
+    expect(searches()).toBe(1);
+    expect(document.querySelector<HTMLInputElement>("[data-k=add-search]")?.placeholder).toBe("Search skills on skills.sh");
+    expect(document.querySelector("[data-k=add-empty]")?.textContent).toBe("Type a name or a topic to find a skill.");
   });
 });
 
@@ -130,7 +177,8 @@ describe("the list grammar", () => {
     expect([subtext("agent-claude"), stateLine("agent-claude")]).toEqual(["2.1.281", "signed in"]);
     expect([subtext("agent-codex"), stateLine("agent-codex")]).toEqual(["0.62.0", "needs sign-in"]);
     expect([subtext("agent-opencode"), stateLine("agent-opencode")]).toEqual(["1.14.2", "not checked"]);
-    expect(rowEl("agent-claude").querySelector("[data-row-state]")?.className).toContain("font-mono");
+    expect(rowEl("agent-claude").querySelector("[data-row-status] [data-status-word]")?.className).toContain("font-mono");
+    expect(["agent-claude", "agent-codex", "agent-opencode"].map(k => dotOf(badge(rowEl(k))))).toEqual(["bg-success", "bg-warning", "bg-foreground/30"]);
     expect(document.querySelector("[data-row-word]")).toBeNull();
     const tile = rowEl("agent-claude").querySelector<HTMLElement>("[data-k=lead-tile]")!;
     expect(tile.className).toContain("size-8");
@@ -150,7 +198,7 @@ describe("the list grammar", () => {
     expect(quick("agent-pi")?.closest("[title]")?.getAttribute("title")).toBe(W.notYet);
     // One fact under an agent not installed: who it is, in the catalog's words.
     expect(subtext("agent-pi")).toBe("A small coding agent for the terminal with read, bash, edit and write tools and saved sessions.");
-    expect(pi.querySelector("[data-row-state]")).toBeNull();
+    expect(pi.querySelector("[data-row-status]")).toBeNull();
     expect(within(document.querySelector<HTMLElement>("[data-agents-group=installed]")!).queryByText("Pi")).toBeNull();
   });
 
@@ -169,32 +217,39 @@ describe("the list grammar", () => {
   });
 
   it("says each server's state as a dot carrying the hue and a muted word, with no box, border or glyph, and a step only where one is needed", () => {
-    const report: AgentsReport = { ...AGENTS_REPORT, servers: AGENTS_REPORT.servers.map(s => (s.name === "wsp" ? { ...s, transport: { kind: "http", host: "wsp.example" }, auth: "connected" } : s)) };
+    const report: AgentsReport = { ...AGENTS_REPORT, servers: AGENTS_REPORT.servers.map(s => (s.name === "wsp" ? { ...s, transport: { kind: "http", host: "wsp.example" }, auth: "unknown" } : s)) };
     const tools = fakeTools();
     tools.answer("github", { auth: "connected", tools: Array.from({ length: 33 }, (_, i) => ({ name: `t${i}` })), readAt: AGENTS_REPORT.readAt });
+    tools.answer("linear", { auth: "needs-sign-in", holder: "claude", readAt: AGENTS_REPORT.readAt });
+    tools.answer("wsp", { auth: "connected", readAt: AGENTS_REPORT.readAt });
     draw({ report, ctx: { where: "box", tools } });
     tab("MCP servers");
     const read = (key: string) => {
       const b = badge(rowEl(key));
-      return [b.dataset["state"], b.textContent, dotOf(b)];
+      return [b.dataset["state"], said(b), dotOf(b)];
     };
-    // A server that needs no sign-in and was never checked says so, never "open".
-    expect(read(SERVER.airtable)).toEqual(["open", "no sign-in needed", "bg-foreground/30"]);
+    // A command on a joined computer waits for Check; an address asked and not yet answered reads checking.
+    expect(read(SERVER.airtable)).toEqual(["unknown", "not checked", "bg-foreground/30"]);
+    expect(read(SERVER.notion)).toEqual(["checking", "checking", "bg-foreground/30"]);
     expect(read(SERVER.linear)).toEqual(["needs-sign-in", "needs sign-in", "bg-warning"]);
     expect(read(SERVER.sentry)).toEqual(["off", "off", "bg-foreground/30"]);
     expect(read("server-global-wsp-http-wsp.example")).toEqual(["connected", "connected", "bg-success"]);
-    // Once its tools are known, the count alone beside the green dot.
-    expect(read(SERVER.github)).toEqual(["connected", "33 tools", "bg-success"]);
-    for (const b of document.querySelectorAll<HTMLElement>("[data-k=server-status]")) {
+    // A call that went through reads connected, its tools' count beside the word.
+    expect(read(SERVER.github)).toEqual(["connected", "connected 33 tools", "bg-success"]);
+    for (const b of document.querySelectorAll<HTMLElement>("[data-agents-row] [data-k=status]")) {
       expect(b.className).not.toMatch(/\bborder\b|rounded-md|\bpx-/);
       expect(b.querySelector("svg")).toBeNull();
       expect(b.querySelector("[data-status-word]")?.className).toMatch(/font-mono.*text-\[11px\].*text-muted-foreground/);
+      expect(b.querySelector("[data-status-word]")?.className).toContain("min-w-[13ch]");
       expect(b.querySelector("[data-status-dot]")?.className).toMatch(/size-2.*rounded-full/);
     }
-    expect(quick(SERVER.airtable)).toBeNull();
+    expect(quick(SERVER.airtable)?.textContent).toBe("Check");
     expect(quick(SERVER.sentry)?.textContent).toBe("Turn on");
     // The command as the file writes it, its placeholder kept as text.
     expect(subtext("server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}")).toBe("node scripts/metrics-mcp.js --token ${METRICS_TOKEN}");
+    // A project's server is what a repo names: never asked when the tab shows it, it keeps its config's word.
+    expect(read("server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}")).toEqual(["open", "no sign-in needed", "bg-foreground/30"]);
+    expect(tools.asks.map(a => a[1]).sort()).toEqual(["linear", "notion", "notion", "wsp"]);
   });
 
   it("reads a server whose token comes from the environment as the environment's key, with a quiet dot and no Sign in", () => {
@@ -221,7 +276,7 @@ describe("the list grammar", () => {
     expect([github.dataset["state"], github.textContent, github.getAttribute("title")]).toEqual(["failed", "failed", "Did not answer in 20 s."]);
     expect(dotOf(github)).toBe("bg-destructive");
     fireEvent.click(quick(SERVER.github)!);
-    expect(tools.asks).toEqual([["opencode", "github", true]]);
+    expect(tools.asks.filter(a => a[2])).toEqual([["opencode", "github", true]]);
     // Pressing the step opens the detail under it.
     expect(document.querySelector("[data-agents-detail] [data-k=detail-title]")?.textContent).toBe("github");
   });
@@ -263,12 +318,6 @@ describe("the list grammar", () => {
     expect(titles()).toEqual(["frontend-design"]);
     fireEvent.change(search, { target: { value: "zzz" } });
     expect(document.querySelector("[data-k=agents-empty]")?.textContent).toBe('Nothing matches "zzz".');
-    // Typing from a detail brings the list back, since the search filters the list.
-    fireEvent.change(search, { target: { value: "" } });
-    openRow("skill-plugin-pdf");
-    fireEvent.change(search, { target: { value: "pdf" } });
-    expect(document.querySelector("[data-agents-detail]")).toBeNull();
-    expect(titles()).toEqual(["pdf"]);
   });
 });
 
@@ -406,7 +455,7 @@ describe("the detail", () => {
       ["", "~/.claude.json"],
       ["Tools", W.signInToSee],
     ]);
-    expect([...detail.querySelectorAll("[data-fact^=config-] [data-fact-note]")].map(n => n.textContent)).toEqual(["not checked", "needs sign-in"]);
+    expect([...detail.querySelectorAll<HTMLElement>("[data-fact^=config-] [data-k=status]")].map(said)).toEqual(["not checked", "needs sign-in"]);
     expect([...detail.querySelectorAll("[data-fact^=config-] [data-harness-mark]")].map(m => m.getAttribute("data-harness-mark"))).toEqual(["codex", "claude"]);
     expect(acts(detail)).toEqual(["Sign in", "Turn off", "Remove"]);
     // Each agent that needs its own sign-in has it at the end of its line.
@@ -414,36 +463,97 @@ describe("the detail", () => {
     expect(detail.querySelector("[data-fact=reach] [data-k=fact-copy]")).not.toBeNull();
   });
 
-  it("lists a server's tools on a click, reads their count on the badge, then opens the tools and one tool as levels with Back", () => {
+  it("lists a project server's tools in one press, opening the tools level at once in its loading state, then its tools and one tool as levels with Back", () => {
     const tools = fakeTools();
+    const METRICS = "server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
     const { rerender } = draw({ ctx: { where: "box", tools } });
     tab("MCP servers");
-    let detail = openRow(SERVER.airtable);
+    let detail = openRow(METRICS);
     expect(facts(detail).find(f => f[0] === "Tools")).toEqual(["Tools", W.notListed]);
     expect(acts(detail)).toEqual(["List tools", "Turn off", "Remove"]);
+    const before = tools.asks.length;
     fireEvent.click(detail.querySelector<HTMLButtonElement>("[data-k=act-list-tools]")!);
-    expect(tools.asks).toEqual([["claude", "airtable", false]]);
-    tools.answer("airtable", SERVER_TOOLS["airtable"]!);
+    expect(tools.asks.slice(before)).toEqual([["claude", "spoo-metrics", false]]);
     rerender(<AgentsManager shell="panel" head={HEAD} report={{ ...AGENTS_REPORT }} reading={false} on="spoo" ctx={{ where: "box", tools }} onRefresh={() => {}} now={NOW} />);
-    detail = document.querySelector<HTMLElement>("[data-agents-detail]")!;
-    expect(facts(detail)[0]).toEqual(["Status", "3 tools"]);
-    expect(acts(detail)).toEqual(["View tools", "Reconnect", "Turn off", "Remove"]);
-    fireEvent.click(detail.querySelector<HTMLButtonElement>("[data-k=act-view-tools]")!);
-    const level = document.querySelector<HTMLElement>("[data-agents-under]")!;
-    expect(level.querySelector("[data-k=detail-title]")?.textContent).toBe("Tools of airtable");
+    let level = document.querySelector<HTMLElement>("[data-agents-under]")!;
+    expect(level.querySelector("[data-k=detail-title]")?.textContent).toBe("Tools of spoo-metrics");
+    expect(level.querySelectorAll("[data-k=under-skeleton]")).toHaveLength(3);
+    tools.answer("spoo-metrics", SERVER_TOOLS["airtable"]!);
+    rerender(<AgentsManager shell="panel" head={HEAD} report={{ ...AGENTS_REPORT }} reading={false} on="spoo" ctx={{ where: "box", tools }} onRefresh={() => {}} now={NOW} />);
+    level = document.querySelector<HTMLElement>("[data-agents-under]")!;
+    expect(level.querySelectorAll("[data-k=under-skeleton]")).toHaveLength(0);
     expect([...level.querySelectorAll("[data-under-row]")].map(t => t.getAttribute("data-under-row"))).toEqual(["list_records", "create_record", "list_bases"]);
     fireEvent.click(level.querySelector<HTMLButtonElement>("[data-under-row=list_records] button")!);
     const one = document.querySelector<HTMLElement>("[data-agents-under-row]")!;
     expect(one.querySelector("[data-k=detail-title]")?.textContent).toBe("list_records");
     expect(one.querySelector("p")?.textContent).toContain("the offset for the next page");
-    expect(one.querySelector("[data-k=agents-back]")?.getAttribute("aria-label")).toBe("Back to Tools of airtable");
+    expect(one.querySelector("[data-k=agents-back]")?.getAttribute("aria-label")).toBe("Back to Tools of spoo-metrics");
     fireEvent.keyDown(one, { key: "Escape" });
     expect(document.querySelector("[data-agents-under]")).not.toBeNull();
     fireEvent.keyDown(document.querySelector("[data-agents-under]")!, { key: "Escape" });
-    expect(document.querySelector("[data-agents-detail]")).not.toBeNull();
+    detail = document.querySelector<HTMLElement>("[data-agents-detail]")!;
+    expect(facts(detail)[0]).toEqual(["Status", "connected"]);
+    expect(facts(detail).find(f => f[0] === "Tools")).toEqual(["Tools", "3 tools"]);
+    expect(acts(detail)).toEqual(["View tools", "Reconnect", "Turn off", "Remove"]);
     // The list stays behind the levels: back to the tab's rows, off the server's row.
-    fireEvent.keyDown(document.querySelector("[data-agents-detail]")!, { key: "Escape" });
-    expect(document.activeElement?.closest("[data-agents-row]")?.getAttribute("data-agents-row")).toBe(SERVER.airtable);
+    fireEvent.keyDown(detail, { key: "Escape" });
+    expect(document.activeElement?.closest("[data-agents-row]")?.getAttribute("data-agents-row")).toBe(METRICS);
+  });
+
+  it("offers no List tools to a server that needs a sign-in, and its tools once it is signed in", () => {
+    const tools = fakeTools();
+    tools.answer("linear", { auth: "needs-sign-in", holder: "claude", readAt: AGENTS_REPORT.readAt });
+    const { rerender } = draw({ ctx: { where: "box", tools } });
+    tab("MCP servers");
+    let detail = openRow(SERVER.linear);
+    expect(acts(detail)).toEqual(["Sign in", "Turn off", "Remove"]);
+    tools.answer("linear", { auth: "connected", tools: [{ name: "search" }], readAt: AGENTS_REPORT.readAt });
+    rerender(<AgentsManager shell="panel" head={HEAD} report={{ ...AGENTS_REPORT }} reading={false} on="spoo" ctx={{ where: "box", tools }} onRefresh={() => {}} now={NOW} />);
+    detail = document.querySelector<HTMLElement>("[data-agents-detail]")!;
+    expect(acts(detail)).toEqual(["View tools", "Reconnect", "Turn off", "Remove"]);
+    expect(acts(detail)).not.toContain("List tools");
+  });
+
+  it("says why a harness-held server's tools are not listed, and why a sign-in is needed, in the level's quiet sentence and never the red refusal", () => {
+    const tools = fakeTools();
+    tools.answer("notion", { auth: "signed-in", holder: "claude", readAt: AGENTS_REPORT.readAt });
+    draw({ ctx: { where: "box", tools } });
+    tab("MCP servers");
+    fireEvent.click(openRow(SERVER.notion).querySelector<HTMLButtonElement>("[data-k=act-view-tools]")!);
+    const level = document.querySelector<HTMLElement>("[data-agents-under]")!;
+    expect(level.querySelector("[data-k=under-refused]")).toBeNull();
+    const quiet = level.querySelector<HTMLElement>("[data-k=under-empty]")!;
+    expect(quiet.textContent).toBe(W.keepsSignIn("Claude Code"));
+    expect(quiet.className).toContain("text-muted-foreground");
+    expect(quiet.className).not.toContain("destructive");
+  });
+
+  it("holds a command server on a joined computer or a fork for Check, its grey dot saying why on its hover", () => {
+    for (const [where, extra, on] of [["box", {}, "spoo"], ["fork", { editImage: () => {} }, "wsp-fork (Solari)"]] as const) {
+      const tools = fakeTools();
+      draw({ on, ctx: { where, ...extra, tools } });
+      tab("MCP servers");
+      const status = badge(rowEl(SERVER.airtable));
+      expect([status.dataset["state"], said(status), status.getAttribute("title")], where).toEqual(["unknown", "not checked", W.checkStarts(on)]);
+      expect(acts(openRow(SERVER.airtable))[0], where).toBe("Check");
+      fireEvent.click(document.querySelector<HTMLButtonElement>("[data-agents-detail] [data-k=agents-back]")!);
+      fireEvent.click(quick(SERVER.airtable)!);
+      expect(tools.asks.filter(a => a[1] === "airtable"), where).toEqual([["claude", "airtable", false]]);
+      expect(document.querySelector("[data-agents-detail]"), "Check checks in place").toBeNull();
+      cleanup();
+    }
+  });
+
+  it("opens a server's tools from a task on a box, where every other act is that box's page's", () => {
+    const tools = fakeTools();
+    tools.answer("airtable", SERVER_TOOLS["airtable"]!);
+    draw({ ctx: { where: "box-task", computer: "spoo", tools } });
+    tab("MCP servers");
+    const detail = openRow(SERVER.airtable);
+    expect(detail.querySelector<HTMLButtonElement>("[data-k=act-view-tools]")?.disabled).toBe(false);
+    expect(detail.querySelector<HTMLButtonElement>("[data-k=act-reconnect]")?.disabled).toBe(true);
+    fireEvent.click(detail.querySelector<HTMLButtonElement>("[data-k=act-view-tools]")!);
+    expect(document.querySelectorAll("[data-agents-under] [data-under-row]")).toHaveLength(3);
   });
 
   it("lets any kind open a level of rows under its detail and one row's body under that, each with Back", () => {
@@ -454,6 +564,7 @@ describe("the detail", () => {
       word: "Notes",
       noun: n => `${n} notes`,
       add: "Add a note",
+      line: () => ["Notes on ", ""],
       rowHeight: "h-14",
       groupings: [],
       defaultGroup: () => "none",
@@ -535,21 +646,21 @@ describe("the detail", () => {
     tools.answer("linear", { auth: "signed-in", holder: "claude", readAt: AGENTS_REPORT.readAt });
     draw({ ctx: { where: "box", tools } });
     tab("MCP servers");
-    expect(badge(rowEl(SERVER.linear)).textContent).toBe("signed in");
+    expect(said(badge(rowEl(SERVER.linear)))).toBe("signed in");
     expect(dotOf(badge(rowEl(SERVER.linear)))).toBe("bg-success");
     const detail = openRow(SERVER.linear);
     expect(detail.querySelector("[data-fact=tools] [data-fact-value]")?.textContent).toBe("Claude Code keeps this server's sign-in, so wsp cannot list its tools yet.");
   });
 
-  it("reads the newer of the report and a server's last connect, and a report that checked nothing never hides a listed count", () => {
+  it("reads a server's state off its connect alone, whatever word its config gave the report", () => {
     const tools = fakeTools();
     tools.answer("linear", { auth: "needs-sign-in", holder: "claude", readAt: "2026-09-24T11:00:00.000Z" });
     tools.answer("airtable", { ...SERVER_TOOLS["airtable"]!, readAt: "2026-09-24T11:00:00.000Z" });
     const report: AgentsReport = { ...AGENTS_REPORT, servers: AGENTS_REPORT.servers.map(s => (s.name === "linear" ? { ...s, auth: "signed-in" } : s)) };
     draw({ report, ctx: { where: "box", tools } });
     tab("MCP servers");
-    expect(badge(rowEl(SERVER.linear)).textContent).toBe("signed in");
-    expect(badge(rowEl(SERVER.airtable)).textContent).toBe("3 tools");
+    expect(said(badge(rowEl(SERVER.linear)))).toBe("needs sign-in");
+    expect(said(badge(rowEl(SERVER.airtable)))).toBe("connected 3 tools");
   });
 
   it("says what a skill wsp writes, a plugin's and a project's can and cannot do", () => {
@@ -599,16 +710,17 @@ describe("the keyboard", () => {
   });
 
   it("focuses Back when a detail opens, steps to the first act it can take on ArrowDown, and goes back to the opened row on Escape", () => {
+    const METRICS = "server-project-pr_wsp-spoo-metrics-stdio-node scripts/metrics-mcp.js --token ${METRICS_TOKEN}";
     draw({ ctx: { where: "box", tools: fakeTools() } });
     tab("MCP servers");
-    openRow(SERVER.airtable);
+    openRow(METRICS);
     const back = document.querySelector<HTMLButtonElement>("[data-k=agents-back]")!;
     expect(document.activeElement).toBe(back);
     fireEvent.keyDown(back, { key: "ArrowDown" });
     expect(document.activeElement?.getAttribute("data-k")).toBe("act-list-tools");
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     expect(document.querySelector("[data-agents-detail]")).toBeNull();
-    expect(document.activeElement?.closest("[data-agents-row]")?.getAttribute("data-agents-row")).toBe(SERVER.airtable);
+    expect(document.activeElement?.closest("[data-agents-row]")?.getAttribute("data-agents-row")).toBe(METRICS);
     expect((document.activeElement as HTMLButtonElement).tabIndex).toBe(0);
   });
 
@@ -660,7 +772,7 @@ describe("the states", () => {
     tab("Skills");
     const page = document.querySelector<HTMLElement>("[data-k=agents-empty]")!;
     expect(page.querySelector(".border-dashed")?.textContent).toBe("no skills");
-    expect(page.querySelector("button")?.textContent).toBe("Add a skill");
+    expect(page.querySelector("button")?.textContent).toBe("Add skill");
   });
 
   it("draws each refusal as a line under the list, the reader then the reason, and the recipe's missing rows", () => {
@@ -748,6 +860,56 @@ describe("a cloud's page", () => {
   });
 });
 
+describe("the status dots", () => {
+  const WORDS = new Set<string>([W.signedIn, W.connected, W.checking, W.failed, W.noSignInNeeded, W.keyFromEnvironment, W.needsSignIn, W.yourKey, W.notChecked, W.notInstalled, W.on, W.off, W.alwaysOn, W.waitingOnYou]);
+  /** Every text in the manager that is a status word, and whether a dot stands right before it. */
+  const walk = (): [string, boolean][] => {
+    const found: [string, boolean][] = [];
+    const texts = document.createTreeWalker(document.querySelector("[data-agents-manager]")!, NodeFilter.SHOW_TEXT);
+    for (let n = texts.nextNode(); n !== null; n = texts.nextNode()) {
+      const word = n.textContent?.trim() ?? "";
+      if (!WORDS.has(word)) continue;
+      // A word inside a longer value is part of a sentence, not a status.
+      const value = n.parentElement?.closest("[data-fact-value], [data-row-subtext]");
+      if (value !== null && value !== undefined && value.textContent?.trim() !== word) continue;
+      const holder = n.parentElement?.closest("[data-status-word]");
+      found.push([word, holder?.previousElementSibling?.hasAttribute("data-status-dot") === true]);
+    }
+    return found;
+  };
+
+  it("stands a dot before every status word in every row and every detail on all three tabs", () => {
+    const tools = fakeTools();
+    tools.answer("airtable", SERVER_TOOLS["airtable"]!);
+    tools.answer("github", SERVER_TOOLS["github"]!);
+    tools.answer("linear", { auth: "needs-sign-in", holder: "claude", readAt: AGENTS_REPORT.readAt });
+    const report: AgentsReport = {
+      ...AGENTS_REPORT,
+      servers: [...AGENTS_REPORT.servers, { agent: "codex", name: "posthog", scope: "user", file: "~/.codex/config.toml", transport: { kind: "http", host: "mcp.posthog.com" }, envNames: ["POSTHOG_TOKEN"], auth: "env-key", enabled: true }],
+    };
+    draw({ report, ctx: { where: "box", tools } });
+    const seen = new Set<string>();
+    for (const name of ["Agents", "MCP servers", "Skills"]) {
+      tab(name);
+      const keys = rows().map(r => r.dataset["agentsRow"]!);
+      for (const [word, dotted] of walk()) {
+        seen.add(word);
+        expect(dotted, `${name} list: ${word}`).toBe(true);
+      }
+      for (const key of keys) {
+        openRow(key);
+        for (const [word, dotted] of walk()) {
+          seen.add(word);
+          expect(dotted, `${key}: ${word}`).toBe(true);
+        }
+        fireEvent.click(document.querySelector<HTMLButtonElement>("[data-agents-detail] [data-k=agents-back]")!);
+      }
+    }
+    // The walk met every kind of word the tabs draw, so a word drawn without its dot could not hide.
+    expect([...seen].sort()).toEqual([W.alwaysOn, W.checking, W.connected, W.failed, W.keyFromEnvironment, W.needsSignIn, W.noSignInNeeded, W.notChecked, W.notInstalled, W.off, W.on, W.signedIn].sort());
+  });
+});
+
 describe("the pure rules", () => {
   it("folds servers by scope, name and reach, and reads each agent's state off its connect before its config", () => {
     const entries = foldServers(AGENTS_REPORT.servers);
@@ -764,12 +926,19 @@ describe("the pure rules", () => {
     expect(renamed).toHaveLength(2);
     const project = foldServers([AGENTS_REPORT.servers[2]!, { ...AGENTS_REPORT.servers[2]!, agent: "claude", scope: "project" }]);
     expect(project).toHaveLength(2);
-    const linear = AGENTS_REPORT.servers.find(s => s.name === "linear")!;
-    expect(rowState(linear, undefined)).toBe("needs-sign-in");
-    expect(rowState(linear, { auth: "signed-in", readAt: "" })).toBe("signed-in");
-    expect(rowState(linear, { auth: "signed-in", readAt: "2026-09-24T11:00:00.000Z" }, "2026-09-24T12:00:00.000Z")).toBe("needs-sign-in");
-    expect(rowState({ ...linear, auth: "open" }, undefined)).toBe("open");
-    expect(rowState({ ...linear, enabled: false }, { auth: "signed-in", readAt: "" })).toBe("off");
+    const linear = { ...AGENTS_REPORT.servers.find(s => s.name === "linear")!, auth: "unknown" } as const;
+    const box = { where: "box" } as const;
+    const checked = { where: "box", tools: fakeTools() } as const;
+    expect(rowState(linear, undefined, box)).toBe("unknown");
+    expect(rowState(linear, undefined, checked)).toBe("checking");
+    expect(rowState(linear, undefined, { ...checked, heldWhy: "away 5 min" }), "nothing is asked while the computer is away").toBe("unknown");
+    expect(rowState(linear, { listing: true }, box)).toBe("checking");
+    expect(rowState(linear, { listing: false, answer: { auth: "signed-in", readAt: "" } }, checked)).toBe("signed-in");
+    expect(rowState(linear, { listing: true, answer: { auth: "failed", readAt: "" } }, checked), "the last answer stands while the next is asked").toBe("failed");
+    expect(rowState(linear, { listing: false, error: "spoo is not answering" }, checked)).toBe("failed");
+    expect(rowState({ ...linear, scope: "project" }, undefined, checked)).toBe("unknown");
+    expect(rowState({ ...linear, auth: "env-key" }, undefined, checked)).toBe("env-key");
+    expect(rowState({ ...linear, enabled: false }, { listing: false, answer: { auth: "signed-in", readAt: "" } }, checked)).toBe("off");
   });
 
   it("maps the report's flat refusals to lines", () => {
