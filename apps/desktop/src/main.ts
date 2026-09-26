@@ -10,7 +10,7 @@ import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js"
 import { bundleShell, type BundleShell } from "./get-bundle.js";
 import { appRestartRoad } from "./restart-road.js";
 import { locateHost, openHost, statePathIn, userDataIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
-import { hostSwitcher, parseConnectAsk, type HostSwitcher } from "./host-switch.js";
+import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { sayNeedsYou, type Notifier } from "./needs-you.js";
 import { allowed, fromAppPage, fromOnboardingPage, hostsViewFor, notForThisPage } from "./origin.js";
@@ -18,7 +18,6 @@ import { guardWorkers, loadHostPage } from "./page-session.js";
 import { pagePreviews } from "./previews.js";
 import { checkSetup, openThisComputer } from "./setup.js";
 import { installShim, shimText } from "./shim.js";
-import { sshRoad, systemSshDeps } from "./ssh-road.js";
 import { windowOptions } from "./window.js";
 import { isShellZoomChord, shellChordOf } from "./zoom.js";
 
@@ -165,10 +164,10 @@ answer("bundle:open", () => bundles().open());
 // rides in the page the host served.
 answer("hosts:token", () => switcher?.token());
 // A page on a host somewhere else is shown this computer and the host it came from; the shell's own Hosts menu
-// reads the whole list, so the owner still moves from one saved host to another through it.
+// reads the whole list, so the owner still moves from one host to another through it.
 answer("hosts:list", () => (switcher === undefined || session === undefined ? undefined : hostsViewFor(session, switcher.view())));
-// A move, a connect and a disconnect answer with what the host said rather than throwing: a thrown refusal reaches the
-// page wrapped in the channel's own words, and the sheet puts the host's sentence under a field as it is.
+// A move answers with what the host said rather than throwing: a thrown refusal reaches the page wrapped in the
+// channel's own words.
 answer("hosts:switch", async (_event, alias) => {
   const to = typeof alias === "string" ? alias : null;
   // The move a page on a host somewhere else may ask for is the one home: a box that named another alias would
@@ -178,40 +177,16 @@ answer("hosts:switch", async (_event, alias) => {
   refreshMenu();
   return moved;
 });
-answer("hosts:connect", async (_event, raw) => {
-  if (switcher === undefined) throw new Error(notForThisPage("hosts:connect"));
-  const ask = parseConnectAsk(raw);
-  if (ask === undefined) throw new Error("hosts:connect: not the sheet's ask");
-  const made = await switcher.connect(ask);
-  refreshMenu();
-  return made;
-});
-answer("hosts:disconnect", async (_event, alias) => {
-  if (switcher === undefined) throw new Error(notForThisPage("hosts:disconnect"));
-  const dropped = await switcher.disconnect(typeof alias === "string" ? alias : "");
-  refreshMenu();
-  return dropped;
-});
 
 /** The shell's own menu bar: the platform's rows by their roles, and Hosts, drawn from the same list the sidebar's
- * foot draws its menu from, so a host saved by either shows in both. Rebuilt whenever the list or the current host
- * moves, since a native menu is a copy. */
+ * foot draws its menu from. Rebuilt whenever the list or the current host moves, since a native menu is a copy. */
 function refreshMenu(): void {
   const hostsHeld = switcher;
   if (hostsHeld === undefined) return;
   const hosts = contextMenuTemplate(hostsMenuItems(hostsHeld.view()), id => {
     const action = hostMenuAction(id);
     if (action === undefined) return;
-    if (action.kind === "connect") {
-      // On a host somewhere else the sheet belongs to this computer's own page, so the window moves home loaded on
-      // the fragment that opens it; nothing is sent, since a message would race the load.
-      if (session?.remote === true) void hostsHeld.to(null, HOST_WORDS.connectHash).then(() => refreshMenu());
-      else win?.webContents.send("hosts:connect-open");
-      return;
-    }
-    if (action.kind !== "switch" && action.kind !== "disconnect") return;
-    const moved = action.kind === "switch" ? hostsHeld.to(action.alias) : hostsHeld.disconnect(action.alias);
-    void moved.then(answer => {
+    void hostsHeld.to(action.alias).then(answer => {
       if (!answer.ok) io.error(answer.error);
       refreshMenu();
     });
@@ -275,7 +250,6 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
       await loadHostPage(page, `${next.url}${hash ?? ""}`, { log: io.error });
     },
     log: io.log,
-    ssh: sshRoad(systemSshDeps()),
   });
   refreshMenu();
   // A link the page opens (a workspace's sign-in page, a preview in a new tab) belongs in the default browser, not a second window.
@@ -353,11 +327,9 @@ async function showOnboarding(located: Located): Promise<void> {
 }
 
 let stopping: Promise<void> | undefined;
-// The forwards the ssh road holds go with the app; the app's own host is stopped only when this process started it,
-// whichever host the window was on.
+// The app's own host is stopped only when this process started it, whichever host the window was on.
 app.on("before-quit", event => {
   if (stopping !== undefined) return;
-  switcher?.closeAll();
   if (local === undefined || !local.owned) return;
   event.preventDefault();
   stopping = local
