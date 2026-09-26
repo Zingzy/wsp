@@ -1744,6 +1744,14 @@ export const ALREADY_RUNNING = "already running at the provider";
  * state read by id decides, so the record is gone no more and no rebuild abandoned a healthy machine. */
 export const NOT_GONE = "not gone at the provider after all; the record follows the state read";
 
+/** The machine row's line when a 404 was to be confirmed and the reads that followed failed: nothing is known
+ * either way, so the record keeps its word and the next sweep asks again. */
+export const GONE_UNCHECKED = "not known to be gone; wsp could not reach the provider to check it";
+
+/** What a record held on one 404 at host start answers until the provider has been read again. */
+export const goneUnconfirmedLine = (machineId: string, answer: string): string =>
+  `machine ${machineId} answered ${answer} when this host started; wsp is asking the provider again before it calls it gone`;
+
 /** The machine row's line on a workspace the sweep recorded from the provider's listing: a machine of this setup's
  * that no record claimed, kept rather than killed, since a machine nobody records bills unseen. */
 export const RECORD_RESTORED = "record restored from the provider's listing";

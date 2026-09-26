@@ -8,14 +8,15 @@
 // not a vanish.
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { goneRefusal, goneWords, napRefusedLine, NOT_GONE, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
-import { NapRefusedError } from "@wsp/engine";
+import { GONE_UNCHECKED, goneRefusal, goneWords, napRefusedLine, NOT_GONE, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
+import { GONE_READS, NapRefusedError, SolariBackend, type MachineBackend } from "@wsp/engine";
 import { backstopMs } from "../src/idle.js";
 import { createRuntime, type RuntimeOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
+import { splitGateway } from "../../engine/test/split-gateway.js";
 
 const WINDOW = 5 * 60_000;
 const POLL = 15_000;
@@ -26,14 +27,15 @@ const T0 = Date.parse("2026-09-07T01:20:00Z");
 
 type Cost = EventUnion & { type: "workspace.cost" };
 
-type Seed = { backend?: ReturnType<typeof stubBackend>; store?: ReturnType<typeof memoryStore> };
+/** `provider` serves the runtime in place of the stub, for a test whose machines live behind a real backend. */
+type Seed = { backend?: ReturnType<typeof stubBackend>; provider?: MachineBackend; store?: ReturnType<typeof memoryStore> };
 
 function testRuntime(extra: Partial<RuntimeOptions> = {}, seed: Seed = {}) {
   const backend = seed.backend ?? stubBackend();
   const store = seed.store ?? memoryStore();
   const fc = fakeClock(T0);
   const rt = createRuntime({
-    backend,
+    backend: seed.provider ?? backend,
     store,
     adapters: {},
     clock: fc.clock,
@@ -115,6 +117,7 @@ describe("a 404 settles the record gone through one road", () => {
         expect(costs.at(-1)).toMatchObject({ phase: "running", awakeMs: COST });
         expect(costs.at(-1)!.rateUsdPerHour).toBeCloseTo(0.11);
 
+        const gets = vi.spyOn(backend, "get");
         m.killed = true;
         fc.advance(POLL);
         const seenAt = fc.clock.now();
@@ -138,10 +141,11 @@ describe("a 404 settles the record gone through one road", () => {
         // The poll left in flight lands now, a minute on: its reach failed, it asks the provider and hears gone, and
         // the row it built on the running record it read is dropped, so nothing after the gone row says running.
         const rows = statuses.length;
-        // The kill pass read the state twice: the poll's read and the one that confirmed its verdict.
-        expect(reads.n).toBe(polls + 2);
+        // The kill pass read the state once, the poll's read, and confirmed its verdict with GONE_READS reads of the machine.
+        expect(reads.n).toBe(polls + 1);
+        expect(gets.mock.calls.filter(c => c[0] === m.id)).toHaveLength(GONE_READS);
         edge.drop(edge.held.shift()!);
-        await until(() => reads.n >= polls + 3);
+        await until(() => reads.n >= polls + 2);
         await new Promise(r => setImmediate(r));
         expect(statuses.slice(rows)).toEqual([]);
         expect(edge.held.length).toBe(0);
@@ -243,6 +247,11 @@ describe("a 404 settles the record gone through one road", () => {
       const readsB = countReads(mb);
       mc.state = async () => {
         throw missing("Sandbox not found");
+      };
+      const get = backend.get.bind(backend);
+      backend.get = async id => {
+        if (id === mc.id) throw missing("Sandbox not found");
+        return get(id);
       };
       await rt.reap();
 
@@ -522,7 +531,7 @@ describe("a gone verdict is checked against the state read before it ends a turn
         expect(reads.n).toBe(1);
 
         fc.advance(CONFIRM);
-        await until(() => reads.n >= 2);
+        await until(() => warn.mock.calls.length >= 1);
         await new Promise(r => setImmediate(r));
         const saw = goneWords("m1", { by: "status poll", at: seenAt, answer: "404 Sandbox not found" });
         expect(warn.mock.calls.map(c => String(c[0]))).toEqual([`workspace ${ws.id} is not gone: ${saw}, and the state read that followed said running`]);
@@ -636,6 +645,216 @@ describe("a gone verdict is checked against the state read before it ends a turn
       ]);
       // The row carries the provider's answer, as any refused pause does.
       expect(statuses.at(-1)).toMatchObject({ phase: "running", machineState: "running", reason: "Sandbox not found" });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("a 404 settles nothing until the provider answers gone twelve reads in a row", () => {
+  /** A record made on the stub, then served by the Solari backend over the split gateway, whose holder runs its
+   * machine; the next `lies.n` reads of it land on the copy that never held it. */
+  const onSplitGateway = async () => {
+    const t = testRuntime();
+    const ws = await createOn(t.rt, { golden: "snap_g", name: "a" });
+    await t.rt.close();
+    const lies = { n: 0 };
+    const gw = splitGateway((_call, method) => (method === "GET" && lies.n > 0 && lies.n-- > 0 ? "empty" : "holder"));
+    gw.holder.set(ws.machineId, "running");
+    const solari: MachineBackend = new SolariBackend({ apiKey: "k", fetch: gw.f });
+    return { ws, store: t.store, gw, lies, solari };
+  };
+
+  it("the record load: two 404s over a machine the holder runs leave the record running, never gone at rate 0", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { ws, store, lies, solari } = await onSplitGateway();
+      lies.n = 2;
+      const t = testRuntime({}, { store, provider: solari });
+      try {
+        const record = await t.rt.workspaces.get(ws.id);
+        expect(record.phase).toBe("running");
+        expect(record.gone).toBeUndefined();
+        expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "running" });
+        expect(t.events.filter(e => e.type === "workspace.gone")).toEqual([]);
+        expect(t.costs.filter(c => c.phase === "gone")).toEqual([]);
+        expect(goneLines(warn)).toEqual([]);
+      } finally {
+        await t.rt.close();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("the record load: a machine the provider answers 404 for twelve reads in a row settles gone once the host serves, through the one road to gone", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { ws, store, gw, solari } = await onSplitGateway();
+      gw.holder.delete(ws.machineId);
+      const t = testRuntime({}, { store, provider: solari });
+      try {
+        await until(async () => (await t.rt.workspaces.get(ws.id)).phase === "gone");
+        expect(gw.f.mock.calls.filter(c => (c[1]?.method ?? "GET") === "GET").length).toBeGreaterThanOrEqual(1 + GONE_READS);
+        const words = (await t.rt.workspaces.get(ws.id)).gone!;
+        expect(words).toMatch(/^machine m1 is gone at the provider: the record load found it gone at \S+Z \(404 [^)]*\)$/);
+        expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "gone", gone: words });
+        // The event, the row and the meter move with the record, as they do on every other road to gone.
+        const gone = t.events.filter(e => e.type === "workspace.gone");
+        expect(gone).toHaveLength(1);
+        expect(gone[0]).toMatchObject({ workspaceId: ws.id, machineId: "m1", reason: words });
+        expect(t.statuses.at(-1)).toMatchObject({ id: ws.id, phase: "gone", reason: words });
+        await until(() => t.costs.some(c => c.workspaceId === ws.id && c.phase === "gone"));
+        expect(t.costs.filter(c => c.phase === "gone").every(c => c.rateUsdPerHour === 0)).toBe(true);
+        expect(goneLines(warn)).toEqual([`workspace ${ws.id} is gone: ${words}`]);
+      } finally {
+        await t.rt.close();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a host start over records whose machines answer 404 serves at once, and confirms them after", async () => {
+    const t = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const made = [];
+      for (const name of ["a", "b", "c"]) made.push(await createOn(t.rt, { golden: "snap_g", name }));
+      await t.rt.close();
+      // Every machine is gone, and every read after the first one of each waits until the test lets it answer.
+      for (const m of t.backend.machines) m.killed = true;
+      let release!: () => void;
+      const held = new Promise<void>(r => (release = r));
+      const first = new Set<string>();
+      const get = t.backend.get.bind(t.backend);
+      t.backend.get = async id => {
+        if (first.has(id)) await held;
+        first.add(id);
+        return get(id);
+      };
+      const second = testRuntime({}, { store: t.store, backend: t.backend });
+      try {
+        const listed = await second.rt.workspaces.list();
+        expect(listed.map(w => w.phase)).toEqual(["running", "running", "running"]);
+        expect(second.events.filter(e => e.type === "workspace.gone")).toEqual([]);
+        release();
+        await until(async () => (await second.rt.workspaces.list()).every(w => w.phase === "gone"));
+        expect(second.events.filter(e => e.type === "workspace.gone").map(e => (e as { workspaceId: string }).workspaceId).sort()).toEqual(made.map(w => w.id).sort());
+      } finally {
+        await second.rt.close();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("a wake's read: two 404s over a machine the holder runs leave the record running and the wake answers running", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { ws, store, lies, solari } = await onSplitGateway();
+      const t = testRuntime({}, { store, provider: solari });
+      try {
+        expect((await t.rt.workspaces.get(ws.id)).phase).toBe("running");
+        lies.n = 2;
+        expect(await t.rt.workspaces.wake(ws.id)).toMatchObject({ phase: "running", machineId: ws.machineId });
+        const record = await t.rt.workspaces.get(ws.id);
+        expect(record.phase).toBe("running");
+        expect(record.gone).toBeUndefined();
+        expect(t.events.filter(e => e.type === "workspace.gone")).toEqual([]);
+        expect(t.costs.filter(c => c.phase === "gone")).toEqual([]);
+        expect(t.statuses.filter(s => s.phase === "gone")).toEqual([]);
+      } finally {
+        await t.rt.close();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it.each([
+    ["a 404 and then reads that fail", 1],
+    ["a first read that fails", 0],
+  ])("the record load: %s leave the host serving and the record as it was, and the next sweep reads it again", async (_, lies) => {
+    const t = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(t.rt, { golden: "snap_g", name: "a" });
+      const other = await createOn(t.rt, { golden: "snap_g", name: "b" });
+      await t.rt.close();
+      const m = t.backend.machines[0]!;
+      const get = t.backend.get.bind(t.backend);
+      let left = lies;
+      let down = true;
+      t.backend.get = async id => {
+        if (id === m.id && left > 0) {
+          left--;
+          throw missing("Sandbox not found");
+        }
+        if (id === m.id && down) throw Object.assign(new Error("Bad gateway"), { kind: "provider", status: 502 });
+        return get(id);
+      };
+      const second = testRuntime({}, { store: t.store, backend: t.backend });
+      try {
+        expect(await second.rt.workspaces.get(ws.id)).toMatchObject({ phase: "running", machineId: m.id });
+        expect(await second.rt.workspaces.get(other.id)).toMatchObject({ phase: "running" });
+        expect(await t.store.get("workspaces", ws.id)).toMatchObject({ phase: "running" });
+        expect(second.events.filter(e => e.type === "workspace.gone")).toEqual([]);
+
+        // The sweep's read finds the machine, and the record is served on it: a pause reaches the provider.
+        down = false;
+        await second.rt.reap();
+        expect(await second.rt.workspaces.nap(ws.id)).toMatchObject({ phase: "napping", machineId: m.id });
+        expect(m.paused).toBe(true);
+      } finally {
+        await second.rt.close();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("reads that fail after the 404 leave the machine claimed and running, and the next sweep asks again", async () => {
+    const { rt, backend, statuses } = testRuntime();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      const m = backend.machines[0]!;
+      const state = m.state.bind(m);
+      m.state = async () => {
+        m.state = state;
+        throw missing("Sandbox not found");
+      };
+      // Every read after the wake's 404 fails as a gateway that answers nothing.
+      const get = backend.get.bind(backend);
+      let down = true;
+      backend.get = async id => {
+        if (down && id === m.id) throw Object.assign(new Error("Bad gateway"), { kind: "provider", status: 502 });
+        return get(id);
+      };
+      expect(await rt.workspaces.wake(ws.id)).toMatchObject({ phase: "running" });
+      expect((await rt.workspaces.get(ws.id)).gone).toBeUndefined();
+      expect(warn.mock.calls.map(c => String(c[0]))).toEqual([
+        `workspace ${ws.id} is not gone: ${goneWords("m1", { by: "wake", at: T0, answer: "404 Sandbox not found" })}, and the reads that followed failed: Bad gateway`,
+      ]);
+
+      // The sweep meets the same: its row says nothing was learned, not that the machine was found.
+      const list = backend.list.bind(backend);
+      backend.list = async labels => (await list(labels)).filter(r => r.id !== m.id);
+      m.state = async () => {
+        m.state = state;
+        throw missing("Sandbox not found");
+      };
+      await rt.reap();
+      expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+      expect(statuses.at(-1)).toMatchObject({ id: ws.id, phase: "running", reason: GONE_UNCHECKED });
+      down = false;
+      const swept = await rt.reap();
+      expect(swept.reaped).toEqual([]);
+      expect((await rt.workspaces.get(ws.id)).phase).toBe("running");
+      m.killed = true;
+      await rt.reap();
+      expect((await rt.workspaces.get(ws.id)).gone).toMatch(/^machine m1 is gone at the provider: the sweep found it gone at \S+Z/);
     } finally {
       warn.mockRestore();
     }
