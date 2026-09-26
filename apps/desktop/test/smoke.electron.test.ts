@@ -556,7 +556,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await page.$$eval("#rows input:disabled", els => els.length)).toBe(CATALOG_AGENTS.length - here.length);
     expect(await page.textContent("#line")).toBe("Agents you install later get the tools from Settings.");
     expect(await page.textContent("#open")).toContain("Open wsp");
-    // The column is the SetupScreen's, and nothing scrolls.
+    // The column is the sheet screen's, and nothing scrolls.
     expect(await page.$eval("#agents", el => el.getBoundingClientRect().width)).toBe(560);
     expect(await fits()).toBe(true);
     await page.waitForFunction(() => document.getAnimations().length === 0);

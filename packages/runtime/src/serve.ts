@@ -1563,7 +1563,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, setup: await init().keys({ ...(msg.provider !== undefined ? { provider: msg.provider } : {}), ...(msg.key !== undefined ? { key: msg.key } : {}), ...(msg.rows !== undefined ? { rows: msg.rows } : {}) }) });
               return;
             case "init.start":
-              send({ id: msg.id, ok: true, job: await init().start({ road: msg.road, ...(msg.harness !== undefined ? { harness: msg.harness } : {}) }) });
+              send({ id: msg.id, ok: true, job: await init().start({ road: msg.road, ...(msg.harness !== undefined ? { harness: msg.harness } : {}), ...(msg.on !== undefined ? { on: msg.on } : {}) }) });
               return;
             case "init.answer":
               send({ id: msg.id, ok: true, job: await init().answer({ screen: msg.screen, ...(msg.ticks !== undefined ? { ticks: msg.ticks } : {}), ...(msg.answers !== undefined ? { answers: msg.answers } : {}) }) });

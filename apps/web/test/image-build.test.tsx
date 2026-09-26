@@ -3,17 +3,17 @@
 // on: its stages, the sign-ins with their page, code and field, Retry, Cancel
 // asked once and able to stop the build while it still waits on the place, a
 // stopped build saying what was left running, and Change the key where the
-// provider refused the saved one. Nothing here opens the setup sheet.
+// provider refused the saved one.
 import { act, cleanup, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CLOUD_SETUP_WORDS, DEFAULT_PREFERENCES, INIT_ROW_STATES, KEY_REFUSED, MACHINE_ROW_LABEL, PROVIDER_KEY_WORDS, STOP_LEFT_MACHINE_LINE, keyRefusedLine, savedKeyRefusedLine, signInWaitLine, type InitJob, type InitRow, type InitScreen, type InitSetup, type PlaceView, type SealedImageView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, DEFAULT_PREFERENCES, INIT_ROW_STATES, KEY_REFUSED, MACHINE_ROW_LABEL, PROVIDER_KEY_WORDS, STOP_LEFT_MACHINE_LINE, keyRefusedLine, savedKeyRefusedLine, type InitJob, type InitRow, type InitScreen, type InitSetup, type PlaceView, type SealedImageView } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ADD_COMPUTER_WORDS } from "../src/settings/format.js";
 import { IMAGE_WORDS } from "../src/settings/image.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
-import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./cloud-setup/keyRefusedJob.js";
+import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./fixtures/keyRefusedJob.js";
 
 const AGENTS: InitScreen = { id: "agents", title: "Agents", top: "Which agents go on the image", items: [{ id: "claude", label: "Claude Code", detail: [] }], ticks: ["claude"], answers: {}, footer: [], tally: "agents" };
 const SETUP: InitSetup = { keys: { solari: true }, home: "/Users/dev", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, place: { id: "p_2", name: "hetzner" }, job: null };
@@ -98,10 +98,10 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("the first build in the Image card", () => {
-  it("draws the build's stages under the card of the computer it runs on, the running stage open on its lines, and never opens the sheet", async () => {
+  it("draws the build's stages under the card of the computer it runs on, the running stage open on its lines", async () => {
     useStore.setState({ initJob: BUILDING });
     await open(host(BUILDING).api, "p_2");
-    expect(stateRow().getAttribute("data-state")).toBe("building");
+    expect(card().querySelector("[data-k='image-state']"), "the build stands in the state row's place").toBeNull();
     expect(build()?.getAttribute("data-step")).toBe("building");
     expect(k("build-title")?.textContent).toBe(CLOUD_SETUP_WORDS.build.headline);
     expect([...card().querySelectorAll("[data-k='build'] [data-k='row']")].map(r => [r.getAttribute("data-row"), r.getAttribute("data-state")])).toEqual([
@@ -113,7 +113,6 @@ describe("the first build in the Image card", () => {
     expect(k("progress")?.getAttribute("aria-valuenow")).toBe("33");
     // While it runs the build is the page's one act: the recipe's presses stand held with where it builds.
     expect(k("recipe")).toBeNull();
-    expect(useStore.getState().setupOpen).toBe(false);
   });
 
   it("is drawn on no other computer's card, which holds its presses with where the image is building", async () => {
@@ -129,9 +128,7 @@ describe("the first build in the Image card", () => {
     await open(fake.api, "p_2");
     expect(build()?.getAttribute("data-step")).toBe("slide");
     expect(k("build-title")?.textContent).toBe(CLOUD_SETUP_WORDS.build.slideHeadline);
-    expect(stateRow().querySelector("[data-settings-description]")?.textContent).toBe(signInWaitLine("GitHub CLI login"));
-    // The stopgap that opened the sheet at this step is gone.
-    expect(stateRow().querySelector("[data-k='image-press']")).toBeNull();
+    expect(card().querySelector("[data-k='image-state']")).toBeNull();
     const row = card().querySelector<HTMLElement>("[data-k='signin'][data-row='sign-in/gh']")!;
     expect(row.querySelector("[data-k='code']")?.textContent).toBe("ABCD-1234");
     const page = row.querySelector<HTMLAnchorElement>("[data-k='open']")!;
@@ -146,7 +143,6 @@ describe("the first build in the Image card", () => {
     expect(row.querySelector<HTMLInputElement>("[data-k='code-field']")?.value).toBe("");
     expect(JSON.stringify(useStore.getState())).not.toContain("gho_code_x");
     expect(JSON.stringify(useSettingsStore.getState())).not.toContain("gho_code_x");
-    expect(useStore.getState().setupOpen).toBe(false);
   });
 
   it("a sign-in that ran out offers Retry, which runs it again for that tool", async () => {

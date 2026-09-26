@@ -8,6 +8,7 @@
 // the image, so its one act is Edit image.
 import { HERE_PLACE_ID, isLocalWorkspace, type WorkspaceView } from "@wsp/protocol";
 import { useAbsentComputer, useStore, useWorkspace } from "../../protocol/store.js";
+import { openImageRecipe } from "../../settings/openAt.js";
 import { placeName, placeOf, THIS_COMPUTER_WORD } from "../../settings/places.js";
 import { useSettingsStore } from "../../settings/settingsStore.js";
 import { openPanelTerminalWith } from "../../shell/shellCommands.js";
@@ -74,7 +75,7 @@ export function AgentsSurface({ workspaceId }: { workspaceId: string }) {
           where,
           ...(where === "box-task" && cloud !== undefined ? { computer: cloud } : {}),
           heldWhy: absent?.away ?? null,
-          ...(where === "fork" ? { editImage: () => useStore.getState().openSetup() } : {}),
+          ...(where === "fork" && placeId !== undefined ? { editImage: () => openImageRecipe(placeId) } : {}),
           ...(tools === undefined ? {} : { tools }),
           ...(acts === undefined ? {} : { acts }),
           ...(skills === undefined ? {} : { skills }),

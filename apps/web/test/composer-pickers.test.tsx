@@ -280,7 +280,7 @@ describe("composer pickers", () => {
     // context, and the mode under the word for what it sets.
     expect(picker("model")?.textContent).toBe("Opus 5");
     const triggerMark = picker("model")?.querySelector('svg[data-harness-mark="claude"]');
-    expect(triggerMark?.classList.contains("text-agent-claude")).toBe(true);
+    expect(triggerMark?.classList.contains("text-(--ink-0)")).toBe(true);
     // A monochrome mark would take the foreground from this span rather than the button's muted label colour.
     expect(triggerMark?.parentElement?.tagName).toBe("SPAN");
     expect(triggerMark?.parentElement?.classList.contains("text-foreground")).toBe(true);
@@ -516,7 +516,7 @@ describe("composer pickers", () => {
     const codex = () => menu.querySelector<HTMLButtonElement>('[data-composer-harness="codex"]')!;
     expect(menu.querySelector<HTMLButtonElement>('[data-composer-harness="claude"]')?.getAttribute("aria-selected")).toBe("true");
     // The rail draws each agent's own mark: Claude's in its hue, OpenAI's monochrome as published in the tab's own colour, both bare.
-    expect(menu.querySelector('[data-composer-harness="claude"] svg[data-harness-mark="claude"]')?.classList.contains("text-agent-claude")).toBe(true);
+    expect(menu.querySelector('[data-composer-harness="claude"] svg[data-harness-mark="claude"]')?.classList.contains("text-(--ink-0)")).toBe(true);
     expect([...codex().querySelector('svg[data-harness-mark="codex"]')!.classList].filter(c => c.startsWith("text-"))).toEqual([]);
     expect(codex().textContent).toBe("");
     fireEvent.click(codex());

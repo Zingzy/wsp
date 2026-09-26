@@ -37,7 +37,7 @@
       }
       @keyframes halo { from { opacity: 0; scale: 0.7; } }
 
-      /* ---- the screen: cloud-setup/SetupScreen.tsx, at its numbers ---- */
+      /* ---- the screen: the app's hosts/SheetScreen.tsx, at its numbers ---- */
       .setup { margin: 0 auto; display: flex; height: 100%; width: 560px; max-width: 100%; flex-direction: column; align-items: center; }
       /* Two flex items sharing what the bands leave, so the screen stands centred and each stops at its least. */
       .margin { flex: 1 1 0; min-height: 48px; width: 100%; }
@@ -79,7 +79,7 @@
         #welcome .tilde .body, #welcome .tilde .lit, #welcome .foot, #welcome .hero::before, #agents .head, #agents .content, #agents .foot { animation: none; }
       }
 
-      /* ---- the card and its one row: cloud-setup/rows.tsx CARD, ROW, NAME, Slot, STATE_WORD ---- */
+      /* ---- the card and its one row: the app's settings/recipe/rows.tsx CARD, ROW, NAME, Slot, STATE_WORD ---- */
       .card { width: 100%; overflow: hidden; border-radius: 10px; border: 1px solid var(--border); background: var(--card); text-align: left; }
       .row { display: flex; height: 48px; align-items: center; gap: 12px; padding: 0 10px 0 16px; }
       .row + .row { border-top: 1px solid var(--border); }
@@ -122,7 +122,7 @@
       .primary:disabled { opacity: 0.64; pointer-events: none; }
       :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
-      /* The refusal slot, SetupScreen's own: inside the footer's 56 px gap, out of the flow at 18 px from its top, so
+      /* The refusal slot: inside the footer's 56 px gap, out of the flow at 18 px from its top, so
          it stands two lines tall and its arrival moves neither the head, the card nor the keycap. What happened in the
          destructive ink, then what to do in the foreground ink; every refusal here is written to fit two lines at
          560 px, so nothing is ever cut. */

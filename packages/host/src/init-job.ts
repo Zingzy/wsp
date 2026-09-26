@@ -16,7 +16,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry, loginSignIn, mintsToken, tokenIn } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, pasteHereLine, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, startPicks, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobBuilding, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, namesPlace, noSuchPlaceRefusal, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, pasteHereLine, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, startPicks, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobBuilding, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { vaultOf } from "./env-keys.js";
@@ -300,6 +300,14 @@ export class InitJobs implements InitDoor {
     };
   }
 
+  /** The place a word names among those this host lists, by id and name; a word naming none is refused. */
+  private async placeNamed(word: string): Promise<{ id: string; name: string }> {
+    const listed = (await this.deps.rt.places?.list(Date.now())) ?? [];
+    const hit = listed.find(p => namesPlace(p, word));
+    if (hit === undefined) throw new Error(noSuchPlaceRefusal(word, listed.map(p => p.name)));
+    return { id: hit.id, name: hit.name };
+  }
+
   /** Where the build boots and what a builder there costs, the runtime's one reading: the place named, else the
    * default place. The same call gates the build and prices the screens, so they cannot disagree. */
   private buildPlace(on?: string): Promise<{ place: string; name: string; backend: MachineBackend }> {
@@ -343,12 +351,23 @@ export class InitJobs implements InitDoor {
     return this.get();
   }
 
-  async start(o: { road: InitRoad; harness?: string }): Promise<InitJob> {
+  async start(o: { road: InitRoad; harness?: string; on?: string }): Promise<InitJob> {
     if (this.starting || (this.state !== undefined && !initJobOver(this.state.phase))) throw new Error(JOB_RUNNING);
+    // A job started from a computer's card is that computer's from its first view, so whatever it meets before a
+    // build is said where it was started; the build still goes where buildPlace says.
+    let place: { id: string; name: string } | undefined;
+    if (o.on !== undefined) {
+      this.starting = true;
+      try {
+        place = await this.placeNamed(o.on);
+      } finally {
+        this.starting = false;
+      }
+    }
     this.count += 1;
     // A sweep that ended stays on the job it belonged to and no further; one still trying rides on.
     for (const [id, row] of this.sweeps) if (row.state !== STATE.retrying) this.sweeps.delete(id);
-    const state: State = { id: `init_${this.count}`, road: o.road, phase: o.road === "agent" ? "agent" : "reading", screens: [], step: 0, drafts: new Map(), facts: [], rows: [], frames: [], building: false, log: [], signals: new EventEmitter(), cancelled: false, keys: this.held(), watching: [] };
+    const state: State = { id: `init_${this.count}`, road: o.road, phase: o.road === "agent" ? "agent" : "reading", screens: [], step: 0, drafts: new Map(), facts: [], rows: [], frames: [], building: false, log: [], signals: new EventEmitter(), cancelled: false, keys: this.held(), watching: [], ...(place !== undefined ? { place } : {}) };
     if (o.road === "agent") {
       const path = smallRecipePath(this.deps.statePath);
       // Read before the thread is launched: whatever recipe is beside the state now is not this thread's.

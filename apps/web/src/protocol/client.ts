@@ -568,22 +568,23 @@ export interface Api {
    * events, this resolves with what landed. An existing dest is refused (kind "exists") unless replace. Optional so
    * fixtures that never export need not fake it; the sidebar offers no export without it. */
   exportProject?(opts: ExportProjectOptions): Promise<ProjectExportResult>;
-  /** The cloud setup as the host serves it: which keys it holds (never their values), the agents on this computer,
-   * what a machine costs, and the init job when one runs or ran. Optional so fixtures without the modal need not fake
-   * it; without it the sidebar's cloud row opens nothing that can start a build. */
+  /** The image's setup as the host serves it: which keys it holds (never their values), the agents on this computer,
+   * what a machine costs, and the init job when one runs or ran. Optional so fixtures that build no image need not
+   * fake it; without it the Image card's recipe has nothing to draw. */
   initGet?(o?: { on?: string }): Promise<InitSetup>;
   /** Saves keys into the wsp home's .env on the host's computer: the provider key, checked with the provider named
    * before it is written and saved under the variable that provider's module reads, and an agent's API key by the
    * sign-in row that took it. The provider is the word WSP_PROVIDER holds; absent, the key is the wired provider's.
    * The reply says a key is held and never carries it back. */
   initKeys?(keys: { provider?: string; key?: string; rows?: Record<string, string> }): Promise<InitSetup>;
-  /** Starts the init job on a road; every change after rides init.job events. */
-  initStart?(o: { road: InitRoad; harness?: string }): Promise<InitJob>;
+  /** Starts the init job on a road; `on` names the computer whose card started it, which the job carries from its
+   * first view. Every change after rides init.job events. */
+  initStart?(o: { road: InitRoad; harness?: string; on?: string }): Promise<InitJob>;
   /** Answers one of the screens; the reply carries the screens recomputed and the step moved on. */
   initAnswer?(o: { screen: InitScreenId; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   /** Moves the job to a screen the person went back to, so a setup shut there reopens there. */
   initStep?(o: { at: number }): Promise<InitJob>;
-  /** Keeps what a step has ticked, picked or typed and not sent, so a sheet shut mid-step reopens on it. */
+  /** Keeps what a step has ticked, picked or typed and not sent, so a recipe closed mid-step reopens on it. */
   initDraft?(o: { at: string; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   /** Runs a sign-in that ran out or failed again on the machine while the build goes on. */
   initRetry?(o: { tool: string }): Promise<InitJob>;

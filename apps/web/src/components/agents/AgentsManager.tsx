@@ -190,7 +190,8 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   const headRow =
     head.line === undefined ? null : (
       <div data-agents-head className="flex min-h-6 items-center gap-3 px-4 pb-3">
-        <p data-k="agents-line" className="min-w-0 flex-1 truncate text-xs leading-4 text-muted-foreground" title={head.line}>
+        {/* Under a phone's width the line wraps rather than cut, since its hover is not there to read. */}
+        <p data-k="agents-line" className="min-w-0 flex-1 truncate text-xs leading-4 text-muted-foreground max-sm:whitespace-normal" title={head.line}>
           {head.line}
         </p>
         {staleMark}

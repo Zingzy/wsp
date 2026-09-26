@@ -59,6 +59,9 @@ export const AGENTS_LIST_WORDS = {
   signInToSee: "sign in to see its tools",
   notListed: "not listed yet",
   editImage: "Edit image",
+  /** Why Edit image is held on a fork: the image is edited from its cloud's page, which a host with no key for it has
+   * none of. */
+  editImageHeld: "This host holds no key for its cloud",
   waitingOnYou: "waiting on you",
   openInTerminal: "Open in terminal",
   open: "Open",
@@ -364,7 +367,7 @@ export const holdAll = (acts: RowAct[], ctx: RowsContext): RowAct[] => {
 export const onImage = (ctx: RowsContext): boolean => ctx.where === "fork" || ctx.where === "provider";
 
 /** The one act a copy of the image offers: editing the image every copy is made from. */
-export const editImageAct = (ctx: RowsContext): RowAct => ({ id: "edit-image", label: AGENTS_LIST_WORDS.editImage, icon: PencilIcon, ...(ctx.editImage === undefined ? {} : { run: ctx.editImage }) });
+export const editImageAct = (ctx: RowsContext): RowAct => ({ id: "edit-image", label: AGENTS_LIST_WORDS.editImage, icon: PencilIcon, ...(ctx.editImage === undefined ? { hover: AGENTS_LIST_WORDS.editImageHeld } : { run: ctx.editImage }) });
 
 /** An act whose road is a later build: drawn where it will stand, held with the reason. */
 export const notYet = (id: string, label: string, icon: LucideIcon, over: Partial<RowAct> = {}): RowAct => ({ id, label, icon, hover: AGENTS_LIST_WORDS.notYet, ...over });

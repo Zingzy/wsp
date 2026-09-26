@@ -7,8 +7,8 @@
 // tally: the step's count and the whole image so far against the disk,
 // coloured by its share, with the disk meter inline after it on the steps that
 // change the image's size. The ticks, answers and typed keys live in one draft
-// until Continue sends them. The setup sheet and the Image card's recipe both
-// draw a screen with this, each in its own frame.
+// until Continue sends them. The Image card's recipe draws each screen with
+// this.
 import { CLOUD_SETUP_WORDS, UNKNOWN_SIZE, diskTone, fmtBytes, initSizeTone, initTallyCount, fmtBytesOfTotal, initTallyOf, initTicksOf, type InitDraft, type InitScreen, type InitScreenItem } from "@wsp/protocol";
 import { Checkbox } from "../../components/ui/checkbox.js";
 import { Input } from "../../components/ui/input.js";

@@ -135,7 +135,7 @@ const HERE_PROJECT: ProjectView = { id: "pr_2", name: "wsp", computer: "here", s
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ places: [], projects: [], placesRefused: null, projectsRefused: null, api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, setupOpen: false, selectedId: null, selectedThreadId: null, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ places: [], projects: [], placesRefused: null, projectsRefused: null, api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, selectedThreadId: null, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
   clearNotices();
 });
 
@@ -299,16 +299,16 @@ describe("rows from the fixture wire", () => {
       const row = rowOf(title);
       const lead = row.firstElementChild!;
       const mark = lead.querySelector("[data-harness-mark]")!;
-      // The brand hue is a token of its own; a monochrome mark inherits the row's ink from the lead it sits in.
+      // A mark with inks wears its first as its colour; a monochrome mark inherits the row's ink from the lead it sits in.
       const tone = [...mark.classList].find(c => c.startsWith("text-"));
       expect(lead.getAttribute("aria-hidden")).toBe("true");
       expect(lead.nextElementSibling!.hasAttribute("data-thread-title")).toBe(true);
       return { label: row.getAttribute("title"), text: row.textContent, mark: mark.getAttribute("data-harness-mark"), svg: mark.tagName, tone, size: [...mark.classList].find(c => c.startsWith("size-")) };
     };
-    expect(reads("fix the port list")).toEqual({ label: "Claude Code · the-project · cli", text: "fix the port listWorking", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
+    expect(reads("fix the port list")).toEqual({ label: "Claude Code · the-project · cli", text: "fix the port listWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
     expect(reads("upgrade node")).toEqual({ label: "Codex · the-project · you", text: "upgrade nodeWorking", mark: "codex", svg: "svg", tone: undefined, size: "size-[13px]" });
-    expect(reads("before provenance")).toEqual({ label: "Claude Code · the-project · you", text: "before provenanceWorking", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
-    expect(reads("from the director")).toEqual({ label: "Claude Code · the-project · agent", text: "from the directorWorking", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
+    expect(reads("before provenance")).toEqual({ label: "Claude Code · the-project · you", text: "before provenanceWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
+    expect(reads("from the director")).toEqual({ label: "Claude Code · the-project · agent", text: "from the directorWorking", mark: "claude", svg: "svg", tone: "text-(--ink-0)", size: "size-[13px]" });
     // Nothing on the face but the title and the slot: no second line, no dots drawn as text, no opener word.
     for (const title of ["fix the port list", "upgrade node"]) {
       expect(rowOf(title).querySelector("[data-thread-meta], [data-thread-provenance]")).toBeNull();

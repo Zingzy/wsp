@@ -74,7 +74,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], projects: [], places: [], placesRead: false, projectsRead: false, placesRefused: null, projectsRefused: null, statuses: {}, costs: {}, spending: {}, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], projects: [], places: [], placesRead: false, projectsRead: false, placesRefused: null, projectsRefused: null, statuses: {}, costs: {}, spending: {}, selectedId: null, selectedThreadId: null, freshThread: false, projectHome: null, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
   clearNotices();
 });
 
@@ -754,6 +754,21 @@ describe("store connection", () => {
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_b"]);
     expect(Object.keys(useStore.getState().statuses)).toEqual(["ws_a", "ws_b"]);
     expect(useStore.getState().selectedId).toBe("ws_a");
+  });
+
+  it("a setup read that answers after a newer job's view never puts the older job back", async () => {
+    const ended = { id: "init_1", road: "manual", phase: "cancelled", keys: {}, step: 0, stoppable: true, screens: [], rows: [], progress: { done: 0, total: 0 }, log: [] } as InitJob;
+    const fresh: InitJob = { ...ended, id: "init_2", phase: "reading" };
+    const { api, emit } = fakeApi([], []);
+    let answer: () => void = () => {};
+    api.initGet = () => new Promise(r => (answer = () => r({ keys: {}, home: "/Users/dev", agents: [], pricing: null, job: ended })));
+    useStore.getState().bind(api);
+    // Start over ended one job and the next one is already reading, so its view lands before the read of the setup.
+    emit({ type: "init.job", job: fresh });
+    expect(useStore.getState().initJob?.id).toBe("init_2");
+    answer();
+    await flush();
+    expect(useStore.getState().initJob?.id).toBe("init_2");
   });
 
   it("live before anything is bound pulls nothing", () => {

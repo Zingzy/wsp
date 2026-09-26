@@ -15,9 +15,6 @@ import { APP_LOCALE, daysBack, parseTimestampDate } from "../lib/timestampFormat
 
 export const IMAGE_WORDS = {
   title: "Image",
-  edit: "Edit image",
-  /** The sheet the six init screens are drawn in, opened from Edit. */
-  sheet: "Your image",
   copies: "Copies",
   /** The chips of a copy standing on a computer's card. */
   builtChip: (when: string): string => `built ${when}`,
