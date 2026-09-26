@@ -3,7 +3,12 @@
 // from the ones the live spike recorded on 2026-09-11. Nothing here dials the
 // real API.
 
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { writeStub } from "../../protocol/test/stub-script.js";
 import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, isMissing, type RetryClock } from "../src/errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS } from "../src/exec-detached.js";
 import { EXEC_ENV } from "../src/golden-import.js";
@@ -820,6 +825,36 @@ describe("BoxBackend against a fake Box API", () => {
     expect(joined).toContain(`[ "$(stat -c %s '/root/wsp-daemon.tgz')" = 2 ]`);
   });
 
+  it("a join over a file already at the new bytes' size still writes them, and one sent again after its pieces are gone is done", async () => {
+    const api = new FakeBox()
+      .on("PUT", "/boxes/bx_tumrjngm/files", { status: 200, body: { ok: true } })
+      .on("POST", "/boxes/bx_tumrjngm/commands", COMMAND(""));
+    const { machine } = machineOn(api);
+    await machine.putBytes("/root/.wsp/daemon-token", new TextEncoder().encode("new-token"));
+    const staged = (api.seen.at(-2)!.body as { path: string }).path;
+    const script = inner((api.seen.at(-1)!.body as { command: string }).command);
+    const dir = mkdtempSync(join(tmpdir(), "wsp-join-"));
+    try {
+      const bin = join(dir, "bin");
+      mkdirSync(bin);
+      // The machine's GNU stat, which this Mac's lacks: -c %s is a file's size.
+      writeStub(join(bin, "stat"), '#!/bin/sh\n[ -e "$3" ] && wc -c < "$3" | tr -d " " || exit 1\n');
+      const at = (p: string): string => join(dir, p);
+      mkdirSync(at("root/.wsp"), { recursive: true });
+      mkdirSync(at("tmp"));
+      writeFileSync(at("root/.wsp/daemon-token"), "old-token");
+      writeFileSync(at(staged), "new-token");
+      const local = script.replaceAll(staged, at(staged)).replaceAll("/root/.wsp/daemon-token", at("root/.wsp/daemon-token")).replaceAll("'/root/.wsp'", `'${at("root/.wsp")}'`);
+      const run = (): number => spawnSync("sh", ["-c", local], { env: { PATH: `${bin}:/usr/bin:/bin` } }).status ?? -1;
+      expect(run()).toBe(0);
+      expect(readFileSync(at("root/.wsp/daemon-token"), "utf8")).toBe("new-token");
+      expect(run()).toBe(0);
+      expect(readFileSync(at("root/.wsp/daemon-token"), "utf8")).toBe("new-token");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("bytes past the files endpoint's cap go up in pieces under the cap and are joined into place, the size read back; a join that fails says why", async () => {
     const api = new FakeBox()
       .on("PUT", "/boxes/bx_tumrjngm/files", { status: 200, body: { ok: true } })
@@ -835,9 +870,9 @@ describe("BoxBackend against a fake Box API", () => {
     const joined = inner((api.seen.at(-1)!.body as { command: string }).command);
     expect(joined).toContain(`cat '${puts[0]!.path}' '${puts[1]!.path}' '${puts[2]!.path}' > '/tmp/big.tgz'`);
     expect(joined).toContain(`= ${2 * FILE_PUT_MAX + 7} ]`);
-    // Sent again after a 502 that may have run it once already, the join finds the target at its size and is done
-    // before it opens the target or misses the pieces.
-    expect(joined.split("\n")[2]).toBe(`[ "$(stat -c %s '/tmp/big.tgz' 2>/dev/null)" = ${2 * FILE_PUT_MAX + 7} ] && exit 0`);
+    // Sent again after a 502 that may have run it once already, the join finds its pieces gone and the target at its
+    // size, and is done before it opens the target or misses the pieces.
+    expect(joined.split("\n")[2]).toBe(`[ ! -e '${puts[0]!.path}' ] && [ "$(stat -c %s '/tmp/big.tgz' 2>/dev/null)" = ${2 * FILE_PUT_MAX + 7} ] && exit 0`);
     await expect(machine.putBytes("/root/x", new Uint8Array(FILE_PUT_MAX + 1))).rejects.toThrow(/\/root\/x did not land on bx_tumrjngm \(exit 1\): WSP_SHORT 5242880/);
   });
 
