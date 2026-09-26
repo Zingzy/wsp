@@ -6911,9 +6911,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (isHeldAway(entry.record.id)) return;
     const sweep = execFactoryFor(entry).sweep;
     if (sweep === undefined) return;
+    // Every running row's run and not this workspace's alone: the workspaces on one computer share its run folder,
+    // so a sweep that kept only its own would end the turns of the others.
     const held: string[] = [];
     for (const s of sessions.values()) {
-      if (s.view.workspaceId === entry.record.id && s.view.status === "running" && s.run !== undefined) held.push(s.run);
+      if (s.view.status === "running" && s.run !== undefined) held.push(s.run);
     }
     const swept = await sweep(held).catch((e: unknown) => {
       console.warn(`the runs on ${entry.record.id} were left as they are: ${e instanceof Error ? e.message : String(e)}`);
