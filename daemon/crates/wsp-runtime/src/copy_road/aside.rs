@@ -134,6 +134,25 @@ mod tests {
         assert!(!to.exists() && asides(dir.path()).is_empty());
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_path_written_with_a_trailing_slash_sets_aside_the_link_it_names_and_not_the_folder_behind_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        copy_at(&elsewhere);
+        let link = dir.path().join("work-feature");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        let mut handed = None;
+        set_aside_then(&PathBuf::from(format!("{}/", link.display())), |aside| {
+            handed = Some(aside.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+        let aside = handed.unwrap();
+        assert!(fs::symlink_metadata(&aside).unwrap().file_type().is_symlink(), "the folder behind the link was set aside");
+        assert!(elsewhere.join("node_modules/pkg/index.js").is_file(), "the folder behind the link moved");
+    }
+
     #[test]
     fn the_sweep_takes_only_leftover_copies_and_follows_no_link() {
         let dir = tempfile::tempdir().unwrap();
