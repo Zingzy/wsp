@@ -109,8 +109,6 @@ interface State {
   spending: Record<string, number>;
   /** Guest ports the host forwards to localhost here, from the host's list and its forward events. */
   forwards: PortForward[];
-  /** Whether the connect sheet stands open: the shell's menu, the sidebar's foot and a first launch all open one sheet. */
-  connectOpen: boolean;
   /** Every computer this wsp runs on, as the Settings table shows them; the four place events keep it current. */
   places: PlaceView[];
   /** Every project this wsp holds, which is what a workspace is made of; the two project events keep it current. */
@@ -218,8 +216,6 @@ interface State {
    * anything about what is in it. */
   /** The row leaves on the host's forward.close; a refusal is a toast. */
   stopForward(workspaceId: string, port: number): Promise<void>;
-  openConnect(): void;
-  closeConnect(): void;
   /** Opens Settings with the Add a computer sheet over it: the palette row and the table's button take one road. */
   openAddComputer(): void;
   closeAddComputer(): void;
@@ -500,7 +496,6 @@ export const useStore = create<State>((set, get) => {
     costs: {},
     spending: {},
     forwards: [],
-    connectOpen: false,
     places: [],
     projects: [],
     broughtBack: {},
@@ -806,8 +801,6 @@ export const useStore = create<State>((set, get) => {
         noticeFailure(e, said => `localhost:${port}: ${said}`);
       }
     },
-    openConnect() { set({ connectOpen: true }); },
-    closeConnect() { set({ connectOpen: false }); },
     openAddComputer() { set({ settingsOpen: true, addComputerOpen: true }); },
     closeAddComputer() { set({ addComputerOpen: false }); },
     async saveKeys(keys) {

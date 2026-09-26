@@ -6,13 +6,13 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dialHost, hostTokenFor, localWiring, localWorkFolder, makeRuntime, setDefaultHost, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord } from "@wsp/host";
+import { dialHost, hostTokenFor, localWiring, localWorkFolder, makeRuntime, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord } from "@wsp/host";
 import { WS_PATH, hostNoKeyLine } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { copyingFake, fakeDaemonStart } from "../../../packages/host/test/verbs-fixture.js";
-import { hostTokenMatches, locateHost, openHost, probeHost, statePathIn, userDataIn, type HostSession } from "../src/host-lifecycle.js";
+import { hostTokenMatches, locateHost, openHost, statePathIn, userDataIn, type HostSession } from "../src/host-lifecycle.js";
 import { checkSetup } from "../src/setup.js";
 
 const PAGE = `<!doctype html>
@@ -106,42 +106,14 @@ async function refused(url: string): Promise<boolean> {
   }
 }
 
-describe("probeHost", () => {
-  it("reports a free port", async () => {
+/** Whether nothing holds this port on loopback: a server of our own binds it and lets it go. */
+function portFree(port: number): Promise<boolean> {
+  return new Promise(resolve => {
     const probe = createTcpServer();
-    const port = await listen(probe);
-    await closeServer(probe);
-    expect(await probeHost(port)).toBe("free");
+    probe.once("error", () => resolve(false));
+    probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
   });
-
-  it("reports a port held by something that is not a wsp host", async () => {
-    const other = createServer((_req, res) => res.end("<html>hello</html>"));
-    const port = await listen(other);
-    try {
-      expect(await probeHost(port)).toBe("other");
-    } finally {
-      await closeServer(other);
-    }
-  });
-
-  it("recognises a running wsp host by its boot line", async () => {
-    const handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
-    try {
-      expect(await probeHost(handle.port)).toBe("wsp");
-    } finally {
-      await handle.close();
-    }
-  });
-
-  it("recognises a host listening beyond this computer, whose page says nothing of this computer", async () => {
-    const handle = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "0.0.0.0", statePath: join(mkdtempSync(join(tmpdir(), "wsp-desktop-state-")), "state.json") });
-    try {
-      expect(await probeHost(handle.port)).toBe("wsp");
-    } finally {
-      await handle.close();
-    }
-  });
-});
+}
 
 describe("openHost", () => {
   let home: string;
@@ -274,7 +246,7 @@ describe("openHost", () => {
     expect(session.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   }, 20_000);
 
-  it("starts a host here and says why when the account names several hosts and none of them is marked", async () => {
+  it("starts a host here and says why when the account names several hosts", async () => {
     writeHost(home, "box", accountRecord());
     writeHost(home, "attic", accountRecord({ url: "https://hattic.boxes.example", hostKey: "SHA256:attic", via: { kind: "account", hostId: "hattic" } }));
     const lines: string[] = [];
@@ -285,35 +257,14 @@ describe("openHost", () => {
     expect(lines.join("\n")).toContain(severalAccountHostsLine(["attic", "box"]));
   }, 20_000);
 
-  it("opens on the marked host when the account names several, which is where every line with no name goes", async () => {
-    writeHost(home, "box", accountRecord());
-    writeHost(home, "attic", accountRecord({ url: "https://hattic.boxes.example", hostKey: "SHA256:attic", via: { kind: "account", hostId: "hattic" } }));
-    setDefaultHost(home, "attic");
-    const { dial, dialled } = admittingDial({ deviceId: "d_3", deviceToken: "tok-attic" });
-    session = await openWith(dial);
-    expect(dialled).toEqual(["attic"]);
-    expect(session).toMatchObject({ url: "https://hattic.boxes.example", owned: false, remote: true, alias: "attic", deviceToken: "tok-attic" });
-    expect(existsSync(join(home, "host.lock"))).toBe(false);
-  });
-
-  it("starts a host here for a record paired with a code, which is no host on the account", async () => {
-    writeHost(home, "lan", { url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "tok-lan", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
+  it("starts a host here over a record a pairing code left, which names no account and is read as no record", async () => {
+    mkdirSync(join(home, "hosts"), { recursive: true });
+    writeFileSync(join(home, "hosts", "lan.json"), JSON.stringify({ url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "tok-lan", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" }));
     const { dial, dialled } = admittingDial();
     session = await openWith(dial);
     expect(dialled).toEqual([]);
     expect(session).toMatchObject({ owned: true, remote: false });
   }, 20_000);
-
-  it("opens on the marked host when a code paired it, since the mark is the mark whichever road it came by", async () => {
-    writeHost(home, "lan", { url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "tok-lan", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" });
-    setDefaultHost(home, "lan");
-    const { dial, dialled } = admittingDial();
-    session = await openWith(dial);
-    expect(dialled).toEqual(["lan"]);
-    // The record already holds the token a code bought, so the dial admits nothing and the page is handed that one.
-    expect(session).toMatchObject({ url: "http://192.168.1.9:4400", owned: false, remote: true, alias: "lan", deviceToken: "tok-lan" });
-    expect(existsSync(join(home, "host.lock"))).toBe(false);
-  });
 
   it("starts a host here and prints the host's own sentence when the account's host refuses this computer", async () => {
     writeHost(home, "box", accountRecord());
@@ -463,7 +414,7 @@ describe("openHost", () => {
     const port = await freePort();
     await expect(open(port, 0)).rejects.toThrow(/holds .*host\.lock on port \d+ but the page it serves carries another token's digest/);
     // Nothing of this window's is on that port, and the lock is the one the other process wrote.
-    expect(await probeHost(port)).toBe("free");
+    expect(await portFree(port)).toBe(true);
     expect((JSON.parse(readFileSync(join(home, "host.lock"), "utf8")) as { port: number }).port).toBe(existing.port);
 
     // A page with the boot line and no digest at all: what a host bound beyond this computer serves, standing on a

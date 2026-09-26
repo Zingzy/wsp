@@ -215,7 +215,7 @@ describe("a verb starts the host when none serves", () => {
     expect(here.calls).toEqual([statePath]);
 
     const there = servingStarter();
-    const nowhere = { kind: "alias" as const, alias: "box", record: { url: "http://127.0.0.1:1", deviceToken: "tok", deviceId: "d1", hostKey: HOST_KEY, pairedAt: new Date().toISOString() } };
+    const nowhere = { kind: "alias" as const, alias: "box", record: { url: "http://127.0.0.1:1", deviceToken: "tok", deviceId: "d1", hostKey: HOST_KEY, pairedAt: new Date().toISOString(), via: { kind: "account" as const, hostId: "hbox" } } };
     await expect(dialHost(statePath, { aim: nowhere, start: there.start, deadlineMs: 500 })).rejects.toThrow();
     expect(there.calls).toEqual([]);
 

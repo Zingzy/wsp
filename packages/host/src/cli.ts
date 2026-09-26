@@ -89,7 +89,6 @@ import {
 } from "./service.js";
 import { serviceServesState, starterFor, type HostStarter } from "./host-start.js";
 import { restartRoads, type RestartingHost, type RestartRoad } from "./restart.js";
-import { connectCommand, disconnectCommand, hostDefaultCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { admittedDevices, hostsCommand, loginCommand, logoutCommand, publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { aimAddress, aimedHost, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
@@ -663,7 +662,7 @@ export interface SharedOpts extends ServeAsked {
 }
 
 /** The environment the caller runs in decides the home, the same reading the verbs take, so a run with its own
- * environment cannot send wsp host connect to one folder and --host to another. It is also what the provider words
+ * environment cannot send wsp hosts to one folder and --host to another. It is also what the provider words
  * stand in front of, so one run picks its folder and its provider out of the same environment. */
 export function optsFor(
   values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "advertise" | "state" | "provider" | "no-relay">,
@@ -1036,7 +1035,7 @@ async function besideHost(lock: HostLock, opts: SharedOpts, upCommand: string, o
   const refuse = (why: string): Error => Object.assign(new Error(initRefusal(lock, statePath, why)), { kind: "conflict" });
   let client: HostClient;
   try {
-    // The host holding this state file's lock and no other: WSP_HOST and the default alias aim a verb at another
+    // The host holding this state file's lock and no other: WSP_HOST and the account's one host aim a verb at another
     // computer, and the build belongs to the process that writes this file.
     // No starter is handed in: the lock was read before this call, and an init that started a host under itself
     // would be building through a host it is about to replace.
@@ -1825,7 +1824,7 @@ interface SharedFlags {
 /** What a word of the shared parse does with --host. `aimed`: the line runs against the host it names. `refused`:
  * the line reads this computer's own files, so the parse refuses the flag rather than take it and aim nowhere.
  * `hostSide`: the line runs at the host's own terminal, so it takes the flag and answers the one sentence that says
- * so, which is the same answer WSP_HOST and the default alias already get. */
+ * so, which is the same answer WSP_HOST and the account's one host already get. */
 export type HostFlag = "aimed" | "refused" | "hostSide";
 
 interface Command {
@@ -1997,38 +1996,11 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   "host devices": {
     page: "host",
     usage: "wsp host devices [revoke <id>]",
-    about: "the computers paired with a host and what each token is read as; revoke takes one back out. --host reads a host on another computer this one is paired with",
+    about: "the computers paired with a host and what each token is read as; revoke takes one back out. --host reads a host on your account from another computer signed in to it",
     json: false,
     host: "aimed",
     cliOnly: "lists and takes away the computers that may drive a host, from that host's terminal or from a computer paired with it; which computers hold a token is the person's to read and cut, never a thread's",
     run: (io, opts, values, args) => devicesCommand(io, aimPick(opts, values), args),
-  },
-  "host connect": {
-    page: "host",
-    usage: "wsp host connect <url> --code <code> [--name <alias>]",
-    about: "redeem a code from a host outside your account for a token of this computer's own; --name is what every later line calls that host, and a host on your account needs no code at all",
-    json: false,
-    host: "refused",
-    cliOnly: "spends a pairing code and keeps the token it buys in this person's own files; where their wsp points is theirs to say",
-    run: (io, opts, values, args) => connectCommand(io, opts, values, args),
-  },
-  "host default": {
-    page: "host",
-    usage: "wsp host default <alias>",
-    about: "move which host every line on this computer runs against",
-    json: false,
-    host: "refused",
-    cliOnly: "moves which host every line on this computer runs against, which no thread decides for the person",
-    run: (io, opts, _values, args) => hostDefaultCommand(io, opts, args),
-  },
-  "host forget": {
-    page: "host",
-    usage: "wsp host forget <alias>",
-    about: "hand that host its token back and forget it here",
-    json: false,
-    host: "refused",
-    cliOnly: "hands a host back the token this computer drives it by, which belongs with the terminal that took it",
-    run: (io, opts, _values, args) => disconnectCommand(io, opts, args),
   },
   "host link": {
     page: "host",
@@ -2060,7 +2032,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   logout: {
     page: "front",
     usage: "wsp logout [<id>]",
-    about: "sign this computer out of your account, which drops the hosts it reached through it and keeps the ones it paired with a code; with an id it signs another of your computers out, and every host drops what it admitted for that one",
+    about: "sign this computer out of your account, which drops the hosts it reached through it; with an id it signs another of your computers out, and every host drops what it admitted for that one",
     json: false,
     host: "refused",
     cliOnly: "takes away a token of this person's and the access it bought, which belongs with the person whose account it is",
@@ -2069,7 +2041,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   hosts: {
     page: "front",
     usage: "wsp hosts",
-    about: "every host this computer can reach, the ones on your account and the ones it paired with a code, with a live beat for the account's and the one every line takes marked",
+    about: "every host on your account this computer can reach, with a live beat for each and the one every line takes marked",
     json: false,
     host: "refused",
     cliOnly: "reads which hosts this computer can reach and writes the account's into its own files, which no thread decides for the person",
@@ -2223,7 +2195,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
           handles(computer?.kind === "provider" ? "the cloud road" : "the local road");
         }
       };
-      // This computer's own host and no other: the word in the environment and the default alias name hosts that
+      // This computer's own host and no other: the word in the environment and the account's one host name hosts that
       // hold no link to the computers this line proves, and --host is refused on this line for the same reason.
       const dialling = dialHere(io, opts);
       // With no word: this computer first, on a runtime of this terminal's own and closed before anything else,
@@ -2512,7 +2484,7 @@ export function hostPage(): string {
     pageLines("host"),
     "",
     ...wrap(
-      "You need these only for a host on a computer that is not the one you are sitting at: wsp login signs this computer in to your account and wsp hosts lists the hosts on it, which need no code at all. pair hands out the code that lets a computer outside your account drive a host, and it runs at that host's own terminal; devices lists the computers that hold a token for a host and takes one back out, from that terminal or from any computer paired with it; connect, default and forget hold the hosts this computer reaches by a code; link and unlink put the host on this computer onto your account, so it is reachable with no port open to the world.",
+      "You need these only for a host on a computer that is not the one you are sitting at: wsp login signs this computer in to your account and wsp hosts lists the hosts on it, which need no code at all. pair hands out the code a browser on another computer types to open a host, and it runs at that host's own terminal; devices lists the computers that hold a token for a host and takes one back out, from that terminal or from any computer signed in to it; link and unlink put the host on this computer onto your account, so it is reachable with no port open to the world.",
       HELP_WIDTH,
       "",
     ),
@@ -2554,10 +2526,10 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "no-relay", on: ["up"], says: "serve without the tunnel, on a computer that is linked to a relay" },
   { name: "service", on: ["up"], says: "install the host as a launchd agent on a Mac or a systemd user unit on Linux, which serves now and again at every login. The keys are not written into it: it reads the same .env a terminal run reads, so they have to be in a file" },
   { name: "provider", on: ["up", "init"], says: "which machine provider this computer forks on; without it, a key saved under a provider's own variable wires that provider" },
-  { name: "code", on: ["host connect", "join"], says: "the code the other computer printed: wsp host pair for a host, wsp add for a place" },
+  { name: "code", on: ["join"], says: "the code the other computer printed: wsp add on the host" },
   { name: "code-file", on: ["join"], says: "read the code off this file and delete the file before dialing, so a code never sits on a disk" },
   { name: "watch", on: ["status"], says: "draw the same rows again every second where they stand, until Ctrl-C; it needs a terminal to redraw on, and reads nothing but this computer's own agent" },
-  { name: "name", on: ["host connect", "host link", "add", "join"], says: "the name to call the computer by here; what its address calls it without one" },
+  { name: "name", on: ["host link", "add", "join"], says: "the name to call the computer by here; what its address calls it without one" },
   { name: "ssh-port", on: ["add"], says: "the port ssh dials that computer on (default 22)" },
   { name: "ssh-key", on: ["add"], says: "the key file ssh logs in with; whatever your own ssh config and agent already use without it" },
   { name: "host-key", on: ["add"], says: "the host key of a computer this one has never dialled, as you read it on that computer; without it the add shows you the key that computer answers with and asks, and off a terminal it refuses rather than trusting whatever answers" },
@@ -2605,7 +2577,7 @@ const MCP_FLAG_WORDS: Readonly<Record<string, string>> = {
   remove: "take the server, the skill and that section back out of those agents instead",
   json: "print what each agent took as one JSON object",
   state: COMMON_FLAG_WORDS.state,
-  host: "write the server against a host on another computer, by the name wsp host connect gave it, so the tools drive that host",
+  host: "write the server against a host on your account, by the name wsp hosts lists it under, so the tools drive that host",
 };
 
 /** The tool server's own two pages, each with the flags it reads. `wsp mcp` alone serves; `wsp mcp install` writes

@@ -611,7 +611,7 @@ describe("the agent contract on the command line and the tool door", () => {
   it("dials the host on this computer for that road, whatever the environment names and whatever alias is the default", async () => {
     const host = fakeDoctorHost();
     const fresh = join(dir, "aimed-here.json");
-    // A turn's launch environment names the host that started it, and a person may have set a default alias; this
+    // A turn's launch environment names the host that started it, and a person may have named one in WSP_HOST; this
     // line proves a computer whose link only the host on this computer holds, so neither moves where it dials.
     expect(await cli(["doctor", "spoo", "--state", fresh], captured(), undefined, { ...process.env, WSP_HOST: "somewhere-else" }, false, {}, host.deps)).toBe(0);
     expect(host.dialled).toEqual([{ statePath: fresh, aim: { kind: "here" } }]);
@@ -737,7 +737,7 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(VerbFailure.parse(JSON.parse(usage.stderr))).toMatchObject({ class: "usage", exit: 3 });
     // A host on another computer, which no line on this one starts: the road carries nothing and the failure is
     // the provider's. A state file nothing serves is no longer a failure at all, since the verb starts a host.
-    writeHost(join(dir, "home"), "nowhere", { url: "http://127.0.0.1:1", deviceToken: "tok", deviceId: "d1", hostKey: HOST_KEY, pairedAt: new Date().toISOString() });
+    writeHost(join(dir, "home"), "nowhere", { url: "http://127.0.0.1:1", deviceToken: "tok", deviceId: "d1", hostKey: HOST_KEY, pairedAt: new Date().toISOString(), via: { kind: "account", hostId: "hnowhere" } });
     const noHost = await outcome(["threads", "--json", "--host", "nowhere"]);
     expect(noHost.code).toBe(1);
     expect(noHost.stdout).toBe("");
