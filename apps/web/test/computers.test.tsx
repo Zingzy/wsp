@@ -551,16 +551,13 @@ describe("a computer's own page", () => {
 
   it("draws a refused remove in the refusal slot, the host's fix in the fix ink, and a remove the host did not make in that same slot", async () => {
     useStore.setState({ places: [here, { ...laptop, present: true }] });
-    let answer: () => Promise<unknown> = async () => Promise.reject(new RequestError("old-macbook still holds a running workspace. Stop it first, then remove again.", undefined, "Stop it first, then remove again."));
+    // The refusal comes back a moment later, as a host's does over its socket; the slot stands empty until it lands.
+    let answer: () => Promise<unknown> = async () => new Promise((_, no) => setTimeout(() => no(new RequestError("old-macbook still holds a running workspace. Stop it first, then remove again.", undefined, "Stop it first, then remove again.")), 50));
     await mountComputers(computersApi({ removePlace: async () => answer() } as unknown as Partial<Api>).api, { kind: "computer", id: "p_1" });
     fireEvent.click(document.querySelector("[data-settings-page] [data-k='remove']")!);
     fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
-    const slot = await waitFor(() => {
-      const found = document.querySelector("[data-k='remove-refusal']");
-      expect(found).not.toBeNull();
-      return found!;
-    });
-    expect(slot.textContent).toBe("old-macbook still holds a running workspace. Stop it first, then remove again.");
+    await waitFor(() => expect(document.querySelector("[data-k='remove-refusal']")?.textContent).toBe("old-macbook still holds a running workspace. Stop it first, then remove again."));
+    const slot = document.querySelector("[data-k='remove-refusal']")!;
     expect(slot.className).toContain("text-destructive-foreground");
     expect(slot.querySelector("span.text-foreground")?.textContent?.trim()).toBe("Stop it first, then remove again.");
     answer = async () => ({ removed: false, swept: [], note: "old-macbook was not removed: its record is locked" });
