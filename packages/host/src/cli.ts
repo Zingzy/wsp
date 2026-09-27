@@ -91,10 +91,10 @@ import {
 import { serviceServesState, starterFor, type HostStarter } from "./host-start.js";
 import { restartRoads, type RestartingHost, type RestartRoad } from "./restart.js";
 import { stopRecordedConnector } from "./connector.js";
-import { admittedDevices, hostsCommand, loginCommand, logoutCommand, publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
+import { admittedDevices, hostsCommand, loginCommand, logoutCommand, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { aimAddress, aimedHost, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
-import { advertiseWord, devicesCommand, hereUrl, hostReach, pairCommand, type HereAt } from "./pairing.js";
+import { advertiseWord, devicesCommand, hereUrl, pairCommand, type HereAt } from "./pairing.js";
 import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { agentsReader } from "./agents-reader.js";
 import { skillsActs } from "./skills-acts.js";
@@ -614,9 +614,9 @@ export function sshWiring(): SshWiring {
  * what the service starts is the line that was typed. */
 export interface ServeAsked extends ListenAsked {
   statePath: string;
-  /** The address the person named with --advertise, as they named it: the address every machine dials this host
-   * at, whatever kind it is. Absent leaves each kind to answer for its own machines, which is the default, so only
-   * a word the person typed is spelled back into a service's unit. */
+  /** The address the person named with --advertise, as they named it: the address a computer being joined dials
+   * this host at. Absent leaves the join to what this computer answers on, which is the default, so only a word the
+   * person typed is spelled back into a service's unit. */
   advertise?: string;
   /** The machine provider this host forks on, as `--provider` named it. */
   provider?: string;
@@ -726,19 +726,12 @@ export function swapProvider(rt: Runtime, keys: Readonly<Record<string, string |
   }
 }
 
-/** What a host serving this line tells a turn about where it answers: the address and port it binds, and the
- * address the person named with --advertise. The kind of the machine a turn runs on picks from it. */
-const agentsReachOf = (opts: { address?: string; port: number; advertise?: string }): { at: { address: string; port: number }; advertise?: string } => ({
-  at: { address: opts.address ?? LOOPBACK, port: opts.port },
-  ...(opts.advertise !== undefined ? { advertise: opts.advertise } : {}),
-});
-
 export function makeRuntime(
   keys: Keys,
   statePath: string,
   recipe: GoldenRecipe = goldenRecipe(),
   env: ProviderEnv = process.env,
-  agents?: { at?: { address: string; port: number }; advertise?: string; run?: RunningWsp; here?: HereAt },
+  agents?: { advertise?: string; run?: RunningWsp; here?: HereAt },
   /** This computer as a workspace, where the caller built the wiring itself and holds a reader off it: the doctor
    * reads the daemon beside this host through the same wiring the copy road runs it from. */
   local: LocalWiring = localWiring(homedir(), process.env, undefined, statePath),
@@ -763,11 +756,10 @@ export function makeRuntime(
       () => pick.env,
     ),
     backend: slot.backend,
-    // What a turn's own agent needs to reach back in: what this host knows about where it answers, which each kind
-    // reads for its own machines, and the same wsp command an agent's config on this computer is given, so a thread
-    // on the local workspace and one on a fork run the same wsp against the same host.
+    // What a turn on this computer needs to reach back in: the loopback this host fills once it binds, and the same
+    // wsp command an agent's config on this computer is given. A fork's turn needs neither, its wsp rides its daemon.
     agents: {
-      ...(agents?.at !== undefined ? { reach: hostReach(agents.at, agents.advertise, () => publicHostname(statePath), undefined, agents.here) } : {}),
+      ...(agents?.here !== undefined ? { here: agents.here } : {}),
       wspMcp: mcpServerCommand(agents?.run ?? runningWsp()),
     },
     local,
@@ -1187,7 +1179,7 @@ async function init(
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
         upCommand: flags.upCommand,
-        runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, agentsReachOf(opts), undefined, links),
+        runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, undefined, undefined, links),
         roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor()),
         host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv, links }, say),
       },
@@ -1231,7 +1223,7 @@ async function init(
         platform: hostPlatform(),
         brew: () => readBrewTable(nodeHost()),
         scan: alsoHere,
-        runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }, providerEnv, agentsReachOf(opts), undefined, links),
+        runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }, providerEnv, undefined, undefined, links),
         bundleFile: () => missingBundleFile(),
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
@@ -1269,9 +1261,9 @@ export interface ServeOptions {
   wsPort: number;
   /** The address the host binds; this computer alone when absent. */
   address?: string;
-  /** The address the person named with --advertise: every machine dials this host there, whatever kind it is.
-   * Absent leaves each kind to answer for its own machines, which is where a turn's address comes from by
-   * default, and a host no kind can reach hands its turns no token. */
+  /** The address the person named with --advertise: a computer being joined dials this host there. Absent leaves
+   * the join to the relay's name or what this computer answers on. A fork's turn dials nothing, its wsp rides its
+   * daemon's link. */
   advertise?: string;
   statePath: string;
   /** What this host picks its machine provider out of; this process's own environment when the caller names none. */
@@ -1304,7 +1296,7 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
   // reads come from the same place.
   const links = placeWiring(opts.statePath, opts.advertise);
   const here = opts.here ?? {};
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), here, ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links);
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { here, ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links);
   return hostFor(rt, keys, { ...opts, providerEnv, links, here }, io, opts.running);
 }
 
@@ -1338,7 +1330,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   const store = await readOnce(opts.statePath);
   const links = placeWiring(opts.statePath, opts.advertise);
   const here = opts.here ?? {};
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), here, ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, store);
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { here, ...(opts.running !== undefined ? { run: opts.running } : {}) }, undefined, links, store);
   try {
     // A state with nothing in it serves as it is: a workspace is one project's copy, so a host with no project has
     // no workspace to record, and wsp add is the road. The host listens for pairing either way.
@@ -2546,7 +2538,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "port", on: ["up"], says: `the app port (default ${DEFAULT_PORT}); the runtime websocket port follows ${WS_PORT_OFFSET} above it` },
   { name: "ws-port", on: ["up"], says: `the runtime websocket port on its own (default ${DEFAULT_WS_PORT}); --port alone moves both` },
   { name: "listen", on: ["up"], says: `the address to bind (default ${LOOPBACK}, this computer alone). No page carries the host's token on any address: the desktop attaches by the token file beside the state, the browser wsp init opens is let in by init, and every other browser pairs for a device token of its own` },
-  { name: "advertise", on: ["up"], says: "the address every machine dials this host at, whatever kind it is; each kind answers for its own machines without it" },
+  { name: "advertise", on: ["up"], says: "the address a computer being joined dials this host at; without it, the relay's name or what this computer answers on" },
   { name: "no-relay", on: ["up"], says: "serve without the tunnel, on a computer that is linked to a relay" },
   { name: "service", on: ["up"], says: "install the host as a launchd agent on a Mac or a systemd user unit on Linux, which serves now and again at every login. The keys are not written into it: it reads the same .env a terminal run reads, so they have to be in a file" },
   { name: "provider", on: ["up", "init"], says: "which machine provider this computer forks on; without it, a key saved under a provider's own variable wires that provider" },
