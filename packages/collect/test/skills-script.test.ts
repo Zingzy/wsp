@@ -8,7 +8,8 @@ import type { Host } from "../src/host.js";
 import { nodeHost } from "../src/live-host.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
-// The reader as it stood with one head and one awk per SKILL.md, less a line's trailing CR: the new one must print exactly what this prints.
+// The reader as it stood with one find, one head and one awk per SKILL.md, less a line's trailing CR: the new one must print
+// every record of this one that names a skill folder under its root, and nothing else.
 const PER_FILE_SCRIPT = [
   'for r in "$@"; do',
   '  [ -d "$r" ] || continue',
@@ -97,20 +98,34 @@ function recording(shell: string, env?: Record<string, string>): { host: Host; s
   return { host: { ...live, exec: { ...live.exec, run } }, said };
 }
 
+/** The records that name a folder under their root, in order; the rest are the pieces of a name with a newline in it. */
+const records = (said: string): string[] =>
+  said
+    .split("\x1e")
+    .slice(1, -1)
+    .filter(r => {
+      const [root = "", dir = ""] = r.split("\x1f");
+      return dir.startsWith(`${root}/`);
+    });
+
 const shells = ["sh", "/bin/dash"].filter(s => s === "sh" || existsSync(s));
 
 describe("the skills script", () => {
   for (const shell of shells) {
     it(`prints the same records as one head and awk per file did, under ${shell}`, async () => {
-      const roots = tree(temp(), 300);
+      const base = temp();
+      const roots = tree(base, 300);
       const env = { LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8", QUOTING_STYLE: "shell-always" };
       const { host, said } = recording(shell, env);
       await detectSkills(host, roots);
       const before = await nodeHost().exec.run(shell, ["-c", PER_FILE_SCRIPT, "sh", ...roots.map(r => r.dir)], { timeoutMs: 60_000, env });
       expect(before).toBeDefined();
       expect(before!.split("\x1e").length).toBeGreaterThan(300);
-      expect(said[0]!.split("\x1e").length).toBe(before!.split("\x1e").length);
-      expect(said[0]).toBe(before);
+      expect(said[0]!.endsWith("\x1eEND\n")).toBe(true);
+      expect(records(said[0]!).sort()).toEqual(records(before!).sort());
+      // One root sits inside the other under cats, and the one find reaches each file there once, so only the rest keep their order.
+      const apart = (rs: string[]): string[] => rs.filter(r => !r.startsWith(join(base, "cats")));
+      expect(apart(records(said[0]!))).toEqual(apart(records(before!)));
     }, 60_000);
 
     it(`reads an awk that dies as a list cut short, under ${shell}`, async () => {
@@ -124,10 +139,14 @@ describe("the skills script", () => {
       expect(await detectSkills(host, roots)).toEqual({ skills: [], refused: ["skills: the folders could not be read"] });
     });
 
-    it(`starts as many processes for 300 skills as for 10, under ${shell}`, async () => {
-      const count = async (n: number): Promise<number> => {
+    it(`starts as many processes for 300 skills as for 10, and for 25 roots as for 5, under ${shell}`, async () => {
+      const count = async (n: number, more = 0): Promise<number> => {
         const base = temp();
         const roots = tree(join(base, "home"), n);
+        for (let i = 0; i < more; i++) {
+          skill(join(base, `more ${i}`, "one"), front(`more-${i}`));
+          roots.push({ dir: join(base, `more ${i}`), scope: "user" });
+        }
         const stubs = join(base, "stubs");
         const log = join(base, "log");
         mkdirSync(stubs);
@@ -143,6 +162,7 @@ describe("the skills script", () => {
         return readFileSync(log, "utf8").split("\n").filter(l => l !== "").length;
       };
       expect(await count(300)).toBe(await count(10));
+      expect(await count(10, 20)).toBe(await count(10));
     }, 60_000);
   }
 });
