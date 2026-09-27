@@ -685,8 +685,8 @@ usage: wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>]
                  attaches by the token file beside the state, the browser wsp
                  init opens is let in by init, and every other browser pairs for
                  a device token of its own
-  --advertise    the address every machine dials this host at, whatever kind it
-                 is; each kind answers for its own machines without it
+  --advertise    the address a computer being joined dials this host at; without
+                 it, the relay's name or what this computer answers on
   --no-relay     serve without the tunnel, on a computer that is linked to a
                  relay
   --service      install the host as a launchd agent on a Mac or a systemd user
