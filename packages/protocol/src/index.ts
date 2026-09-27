@@ -3111,7 +3111,7 @@ export type HostItemKind = z.infer<typeof HostItemKind>;
 export const HostItem = z.object({ kind: HostItemKind, number: z.number().int(), title: z.string(), body: z.string(), url: z.string() });
 export type HostItem = z.infer<typeof HostItem>;
 /** The repository's open pull requests, then its open issues; empty with the note where nothing can be listed. */
-export const GitPrListReply = z.object({ items: z.array(HostItem), note: z.string().optional() });
+export const GitPrListReply = z.object({ items: z.array(HostItem), note: z.string().optional(), noCliFor: z.string().optional() });
 export type GitPrListReply = WireGitPrListReply;
 type GitPrListReplyHeld = Held<Same<z.infer<typeof GitPrListReply>, GitPrListReply>>;
 
@@ -4001,7 +4001,7 @@ const DAEMON_CONTENTS = [
   "be3d9077764035f8bf2b96ab6b50c018017046ec74a30827404f64752ef19bdf",
   "837e923920b718c42e372f7d84dd08d4d51add8e7b86de1ab4afb4a156afb8ae",
   "69559f24eb63363f130e96d07548df1e6cffed939d08d5df760e5ac9948f240e",
-  "b0bbe24e11505ca999c0bd3bb95241f2ee0d74c22d4a0a3fadfc5a1ac157a029",
+  "d5de0914cf3087d4c05f6d04551cafe936c69eb908d2095e259a247a159b4184",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers

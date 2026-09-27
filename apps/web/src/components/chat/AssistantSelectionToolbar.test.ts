@@ -11,8 +11,8 @@ afterEach(() => {
 function timeline(): HTMLElement {
   document.body.innerHTML = `
     <div id="viewport">
-      <div data-quote-reply-to="fix the login"><p id="one">Safari drops the cookie on redirect.</p></div>
-      <div data-quote-reply-to=""><p id="two">A reply to nothing typed.</p></div>
+      <div data-quote-message="reply-1"><p id="one">Safari drops the cookie on redirect.</p></div>
+      <div data-quote-message="reply-2"><p id="two">A second reply.</p></div>
       <p id="outside">A user's own message.</p>
     </div>`;
   return document.getElementById("viewport")!;
@@ -29,12 +29,12 @@ function select(from: Node, fromOffset: number, to: Node, toOffset: number): Sel
 }
 
 describe("readQuotedSelection", () => {
-  it("reads a selection inside one reply as its text with the prompt that reply answered", () => {
+  it("reads a selection inside one reply as its text and that reply's id, carrying no prompt on the row", () => {
     const viewport = timeline();
     const text = document.getElementById("one")!.firstChild!;
-    expect(readQuotedSelection(viewport, select(text, 0, text, 6))).toMatchObject({ text: "Safari", replyTo: "fix the login" });
-    const bare = document.getElementById("two")!.firstChild!;
-    expect(readQuotedSelection(viewport, select(bare, 2, bare, 7))).toMatchObject({ text: "reply", replyTo: null });
+    expect(readQuotedSelection(viewport, select(text, 0, text, 6))).toMatchObject({ text: "Safari", messageId: "reply-1" });
+    const second = document.getElementById("two")!.firstChild!;
+    expect(readQuotedSelection(viewport, select(second, 2, second, 8))).toMatchObject({ text: "second", messageId: "reply-2" });
   });
 
   it("quotes nothing that runs across two replies or starts outside one", () => {

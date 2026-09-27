@@ -133,9 +133,6 @@ interface TimelineRowSharedState {
   workGroupViewState: WorkGroupViewState;
   lastReplyId: MessageId | null;
   replyMeta: React.ReactNode;
-  /** The prompt a reply answered, which a quote out of that reply names it by. Read through a ref, so a streaming
-   * chunk that moves the rows re-renders no settled one. */
-  replyToOf: (id: MessageId) => string;
 }
 
 /** The workspace cannot run the turn right now: what the working row says instead, the wake to offer where one
@@ -408,19 +405,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const rows = useStableRows(rawRows);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
-  const replyToByAssistantId = useMemo(() => {
-    const byId = new Map<MessageId, string>();
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const replyToOf = useCallback((id: string) => {
     let asked = "";
-    for (const row of rows) {
+    for (const row of rowsRef.current) {
       if (row.kind !== "message") continue;
       if (row.message.role === "user") asked = row.message.text;
-      else byId.set(row.message.id, asked);
+      else if (row.message.id === id) return asked;
     }
-    return byId;
-  }, [rows]);
-  const replyToRef = useRef(replyToByAssistantId);
-  replyToRef.current = replyToByAssistantId;
-  const replyToOf = useCallback((id: MessageId) => replyToRef.current.get(id) ?? "", []);
+    return "";
+  }, []);
   const lastReplyId = useMemo(() => {
     const last = rows.findLast(row => row.kind === "message");
     return last?.kind === "message" && last.message.role === "assistant" ? last.message.id : null;
@@ -544,7 +539,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupViewState,
       lastReplyId,
       replyMeta,
-      replyToOf,
     }),
     [
       timestampFormat,
@@ -566,7 +560,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupViewState,
       lastReplyId,
       replyMeta,
-      replyToOf,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -640,7 +633,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               </>
             }
           />
-          {onQuote !== undefined ? <AssistantSelectionToolbar viewport={timelineViewportElement} onQuote={onQuote} /> : null}
+          {onQuote !== undefined ? <AssistantSelectionToolbar viewport={timelineViewportElement} replyToOf={replyToOf} onQuote={onQuote} /> : null}
           <TimelineMinimap
             items={minimapItems}
             hasPersistentGutter={minimapHasPersistentGutter}
@@ -1099,7 +1092,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
 
   return (
     <>
-      <div className="relative min-w-0 px-1 py-0.5" {...{ [QUOTE_SOURCE_ATTRIBUTE]: ctx.replyToOf(row.message.id) }}>
+      <div className="relative min-w-0 px-1 py-0.5" {...{ [QUOTE_SOURCE_ATTRIBUTE]: row.message.id }}>
         <ChatMarkdown
           text={messageText}
           cwd={ctx.markdownCwd}

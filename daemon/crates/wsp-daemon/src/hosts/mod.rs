@@ -139,21 +139,21 @@ pub(crate) async fn open<R: Runs>(
 
 /// The repository's open pull requests, then its open issues. A project with no remote has none to list; a host with
 /// no signed-in command line here is an empty list with the note saying so; a list the command line refused for any
-/// other reason, such as a repository with issues turned off, is left out with what it said as the note, and the
-/// other list still stands.
+/// other reason, such as a repository with issues turned off, is left out with the first line it said as the note,
+/// which the composer shows in a one-line slot, and the other list still stands.
 pub(crate) async fn list<R: Runs>(runner: &R, cwd: &Path) -> Result<GitPrListReply, OpError> {
     let Some((_, remote_url)) = crate::bring_back::remote_if_any(runner, cwd).await? else {
-        return Ok(GitPrListReply { items: Vec::new(), note: None });
+        return Ok(GitPrListReply { items: Vec::new(), note: None, no_cli_for: None });
     };
     let named = host_name(&remote_url).unwrap_or_else(|| remote_url.clone());
-    let unlisted = || GitPrListReply { items: Vec::new(), note: Some(words::no_host_list(&named)) };
+    let unlisted = || GitPrListReply { items: Vec::new(), note: None, no_cli_for: Some(named.clone()) };
     let ask = Ask { cwd, remote_url: &remote_url, branch: "" };
     let host = match cli_for(runner, &ask).await {
         Ok(host) => host,
         Err(e) if e.code == Some(DaemonErrorCode::NoHostCli) => return Ok(unlisted()),
         Err(e) => return Err(e),
     };
-    let mut reply = GitPrListReply { items: Vec::new(), note: None };
+    let mut reply = GitPrListReply { items: Vec::new(), note: None, no_cli_for: None };
     for kind in [HostItemKind::PullRequest, HostItemKind::Issue] {
         let (code, stdout, stderr) = match run_cli(runner, host, &ask, &host.list_argv(kind)).await {
             Ok(done) => done,
@@ -163,8 +163,9 @@ pub(crate) async fn list<R: Runs>(runner: &R, cwd: &Path) -> Result<GitPrListRep
         match (code, host.read_list(kind, &stdout)) {
             (Some(0), Some(items)) => reply.items.extend(items),
             _ if reply.note.is_none() => {
-                let said = stderr.trim();
-                reply.note = Some(format!("{} said: {}", host.program(), if said.is_empty() { stdout.trim() } else { said }));
+                let first = |text: &str| text.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_owned);
+                let said = first(&stderr).or_else(|| first(&stdout)).unwrap_or_default();
+                reply.note = Some(format!("{} said: {said}", host.program()));
             }
             _ => {}
         }
@@ -358,11 +359,11 @@ mod tests {
             Recorded::new(&["gh"]).answering_said(vec![(0, "origin\n", ""), (0, "https://github.com/o/r\n", ""), (4, "", SIGN_IN_SAID)]);
         let listed = list(&runner, Path::new("/private/tmp/proof/repo")).await.unwrap();
         assert!(listed.items.is_empty());
-        assert_eq!(listed.note.as_deref(), Some(words::no_host_list("github.com").as_str()));
+        assert_eq!((listed.no_cli_for.as_deref(), listed.note), (Some("github.com"), None));
         // No gh on the PATH reads the same, and nothing is run for it.
         let bare = Recorded::new(&[]).answering(vec![(0, "origin\n"), (0, "git@github.com:o/r.git\n")]);
         let listed = list(&bare, Path::new("/private/tmp/proof/repo")).await.unwrap();
-        assert_eq!(listed.note.as_deref(), Some(words::no_host_list("github.com").as_str()));
+        assert_eq!((listed.no_cli_for.as_deref(), listed.note), (Some("github.com"), None));
         assert!(bare.asked().iter().all(|c| c.program == "git"));
     }
 
@@ -378,6 +379,18 @@ mod tests {
         let listed = list(&runner, Path::new("/private/tmp/proof/repo")).await.unwrap();
         assert_eq!(listed.items.len(), 1);
         assert_eq!(listed.note, Some(format!("gh said: {said}")));
+    }
+
+    #[tokio::test]
+    async fn a_list_gh_refused_in_two_lines_is_noted_by_its_first() {
+        let runner = Recorded::new(&["gh"]).answering_said(vec![
+            (0, "origin\n", ""),
+            (0, "git@github.com:o/r.git\n", ""),
+            (1, "", "\nerror connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n"),
+            (1, "", "error connecting to api.github.com\n"),
+        ]);
+        let listed = list(&runner, Path::new("/private/tmp/proof/repo")).await.unwrap();
+        assert_eq!(listed.note.as_deref(), Some("gh said: error connecting to api.github.com"));
     }
 
     #[tokio::test]

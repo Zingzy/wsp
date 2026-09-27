@@ -10,7 +10,7 @@ import { clickIntoEditor, composerEditor, isEditable, press, typeInto } from "./
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
-import { composerSendBlock, MENU_LIST_UNSERVED } from "../src/components/chat/ChatComposer.js";
+import { composerSendBlock, FILES_CUT_LINE, menuListUnserved, noHostListLine } from "../src/components/chat/ChatComposer.js";
 import { provideDaemonWire } from "../src/files/wire.js";
 import { SEND_LABEL, WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions.js";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
@@ -502,13 +502,51 @@ describe("composer @ menu", () => {
     expect(started[0]?.prompt).toBe("open @src/components/ChatView.tsx please");
   });
 
-  it("says in the person's words that a computer whose wsp predates the list has none yet", async () => {
-    provideDaemonWire(WS, { request: async () => Promise.reject(Object.assign(new Error("fs.files is not served by this daemon yet"), { code: "unsupported" })) });
+  it("undo right after a pick takes the chip back to the words that were typed", async () => {
+    provideDaemonWire(WS, { request: async () => ({ files: ["src/components/ChatView.tsx"], truncated: false }) });
     const { api } = fixtureApi([workspace]);
     await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "open @chatv");
+    const row = await waitFor(() => document.querySelector<HTMLElement>("[data-composer-item-id='path:src/components/ChatView.tsx']")!);
+    act(() => row.click());
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")).not.toBeNull());
+    await press(editor, "z", { ctrlKey: true });
+    await waitFor(() => expect(draft()).toBe("open @chatv"));
+    expect(editor.querySelector("[data-composer-mention-chip]")).toBeNull();
+  });
+
+  /** The composer on a copy on a computer somebody owns, which the menu's lines name as the rest of the app does. */
+  const COMPUTER = "old-laptop";
+  async function onComputer() {
+    await setup(fixtureApi([{ ...workspace, place: "p_oldlaptop" }]).api);
+    act(() => useStore.setState({ places: [{ id: "p_oldlaptop", kind: "computer", name: COMPUTER, default: true, present: true }] }));
+  }
+
+  it("says in the person's words that a computer whose wsp predates the list has none yet", async () => {
+    provideDaemonWire(WS, { request: async () => Promise.reject(Object.assign(new Error("fs.files is not served by this daemon yet"), { code: "unsupported" })) });
+    await onComputer();
     await typeInto(composerEditor(), "@c");
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(MENU_LIST_UNSERVED));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(menuListUnserved(COMPUTER)));
     expect(document.body.textContent).not.toContain("daemon");
+    expect(document.body.textContent).not.toContain("this computer");
+  });
+
+  it("names the computer the copy is on where no signed-in command line lists its pull requests", async () => {
+    provideDaemonWire(WS, { request: async () => ({ items: [], noCliFor: "github.com" }) });
+    await onComputer();
+    await typeInto(composerEditor(), "#4");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(noHostListLine("github.com", COMPUTER)));
+    expect(document.body.textContent).not.toContain("this computer");
+  });
+
+  it("says in the slot that a checkout past the cap is listed only as far as the cap", async () => {
+    provideDaemonWire(WS, { request: async () => ({ files: ["src/components/ChatView.tsx"], truncated: true }) });
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    await typeInto(composerEditor(), "@chatv");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(FILES_CUT_LINE));
+    expect(document.querySelector("[data-composer-item-id='path:src/components/ChatView.tsx']")).not.toBeNull();
   });
 });
 

@@ -3,6 +3,7 @@ import type { HostItem } from "./HostItem.js";
 
 /**
  * The repository's open pull requests, then its open issues. Where nothing can be listed, since no signed-in
- * command line for the host is on the computer, the list is empty and the note says so in one sentence.
+ * command line for the host is on the computer, the list is empty and `noCliFor` names the host, for the client to
+ * say on which computer; a list the command line refused otherwise is left out with its first line as the note.
  */
-export type GitPrListReply = { items: Array<HostItem>, note?: string, };
+export type GitPrListReply = { items: Array<HostItem>, note?: string, noCliFor?: string, };

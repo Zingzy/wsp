@@ -5,6 +5,7 @@
 // announced is drawn once, under Skills, and goes as the command the harness
 // knows; one it did not announce goes as $name.
 import type { HostItem, SkillRow } from "@wsp/protocol";
+import { baseName } from "../../files/entries";
 import type { ProviderSlashCommand } from "./adapt";
 import { composerCommandGroups, SKILLS_SOURCE, type ComposerCommandGroup } from "./composerCommandGroups";
 import type { ComposerCommandItem, ComposerSlashItem } from "./ComposerCommandMenu";
@@ -54,7 +55,7 @@ export function skillGroups(input: { harness: string; skills: ReadonlyArray<Skil
 export function fileGroups(files: ReadonlyArray<string>, query: string): ComposerCommandGroup[] {
   const items: ComposerCommandItem[] = searchComposerFiles(files, query).map(path => {
     const cut = path.lastIndexOf("/");
-    return { id: `path:${path}`, type: "path", path, label: path.slice(cut + 1), description: cut > 0 ? path.slice(0, cut) : "" };
+    return { id: `path:${path}`, type: "path", path, label: baseName(path), description: cut > 0 ? path.slice(0, cut) : "" };
   });
   return items.length > 0 ? [{ value: "files", label: "Files", items }] : [];
 }

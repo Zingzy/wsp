@@ -62,7 +62,8 @@ import {
   useRef,
 } from "react";
 
-import { clampCollapsedComposerCursor, collapseExpandedComposerCursor, expandCollapsedComposerCursor, isCollapsedCursorAdjacentToInlineToken } from "../composer-logic";
+import { baseName } from "../files/entries";
+import { clampCollapsedComposerCursor, clampCursor, collapseExpandedComposerCursor, expandCollapsedComposerCursor, isCollapsedCursorAdjacentToInlineToken } from "../composer-logic";
 import { collectPastedBlockTokens, selectionTouchesMentionBoundary, splitPromptIntoComposerSegments, type ComposerTokenSegment } from "../composer-editor-mentions";
 import { cn, isMacPlatform } from "../lib/utils";
 import { COMPOSER_INLINE_CHIP_CLASS_NAME, COMPOSER_INLINE_CHIP_DECORATOR_CLASS_NAME, COMPOSER_INLINE_CHIP_ICON_CLASS_NAME, COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME, SKILL_CHIP_ICON_SVG } from "./composerInlineChip";
@@ -92,12 +93,10 @@ type SerializedComposerMentionNode = Spread<{ path: string; source: string; type
 type SerializedComposerSkillNode = Spread<{ skillName: string; source: string; type: "composer-skill"; version: 1 }, SerializedLexicalNode>;
 type SerializedComposerTerminalContextNode = Spread<{ label: string; text: string; source: string; type: "composer-terminal-context"; version: 1 }, SerializedLexicalNode>;
 
-const basenameOf = (path: string): string => path.replace(/\/+$/, "").split("/").at(-1) ?? path;
-
 function ComposerMentionDecorator(props: { path: string }) {
   const chip = (
     <span className={FILE_TAG_CHIP_CLASS_NAME} contentEditable={false} spellCheck={false} data-composer-mention-chip="true">
-      <FileTagChipContent path={props.path} label={basenameOf(props.path)} theme={resolvedThemeFromDocument()} />
+      <FileTagChipContent path={props.path} label={baseName(props.path)} theme={resolvedThemeFromDocument()} />
     </span>
   );
   return (
@@ -310,11 +309,6 @@ function $createTokenNode(segment: ComposerTokenSegment): LexicalNode {
 
 function resolvedThemeFromDocument(): "light" | "dark" {
   return document.documentElement.classList.contains("dark") ? "dark" : "light";
-}
-
-function clampExpandedCursor(value: string, cursor: number): number {
-  if (!Number.isFinite(cursor)) return value.length;
-  return Math.max(0, Math.min(value.length, Math.floor(cursor)));
 }
 
 function getComposerInlineTokenTextLength(_node: ComposerInlineTokenNode): 1 {
@@ -689,7 +683,7 @@ interface ComposerPromptEditorProps {
   disabled: boolean;
   placeholder: string;
   className?: string;
-  onChange: (nextValue: string, nextCursor: number, expandedCursor: number, cursorAdjacentToChip: boolean) => void;
+  onChange: (nextValue: string, nextCursor: number) => void;
   onCommandKeyDown?: (key: ComposerCommandKey, event: KeyboardEvent) => boolean;
   editorRef: React.RefObject<ComposerPromptEditorHandle | null>;
 }
@@ -1381,7 +1375,7 @@ function ComposerPromptEditorInner({ value, cursor, disabled, placeholder, class
       });
       const current = snapshotRef.current.value;
       snapshotRef.current = { value: current, cursor: boundedCursor, expandedCursor: expandCollapsedComposerCursor(current, boundedCursor) };
-      onChangeRef.current(current, boundedCursor, snapshotRef.current.expandedCursor, false);
+      onChangeRef.current(current, boundedCursor);
     },
     [editor],
   );
@@ -1389,7 +1383,7 @@ function ComposerPromptEditorInner({ value, cursor, disabled, placeholder, class
   const $readSnapshot = useCallback((): ComposerSnapshot => {
     const nextValue = $getRoot().getTextContent();
     const nextCursor = clampCollapsedComposerCursor(nextValue, $readSelectionOffsetFromEditorState(clampCollapsedComposerCursor(nextValue, snapshotRef.current.cursor)));
-    const nextExpandedCursor = clampExpandedCursor(nextValue, $readExpandedSelectionOffsetFromEditorState(clampExpandedCursor(nextValue, snapshotRef.current.expandedCursor)));
+    const nextExpandedCursor = clampCursor(nextValue, $readExpandedSelectionOffsetFromEditorState(clampCursor(nextValue, snapshotRef.current.expandedCursor)));
     return { value: nextValue, cursor: nextCursor, expandedCursor: nextExpandedCursor };
   }, []);
 
@@ -1429,8 +1423,7 @@ function ComposerPromptEditorInner({ value, cursor, disabled, placeholder, class
           return;
         }
         snapshotRef.current = next;
-        const adjacent = isCollapsedCursorAdjacentToInlineToken(next.value, next.cursor, "left") || isCollapsedCursorAdjacentToInlineToken(next.value, next.cursor, "right");
-        onChangeRef.current(next.value, next.cursor, next.expandedCursor, adjacent);
+        onChangeRef.current(next.value, next.cursor);
       });
     },
     [$readSnapshot],

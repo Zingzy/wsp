@@ -292,7 +292,6 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("nothingAhead", words::nothing_ahead("{branch}", "{base}"));
     m.insert("noRemote", words::NO_REMOTE.to_owned());
     m.insert("noHostCli", words::no_host_cli("{host}"));
-    m.insert("noHostList", words::no_host_list("{host}"));
     m.insert("noGitCredential", words::no_git_credential("{host}", Some("{fix}")));
     m.insert("noGitCredentialNoFix", words::no_git_credential("{host}", None));
     m.insert("hostKeyRefusal", words::host_key_refusal("{url}"));

@@ -1,7 +1,7 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/AssistantSelectionToolbar.tsx at 57a66608 (MIT).
 // Differs from upstream: the selection is quoted as its text with the prompt
-// the reply answered, read off the reply's own row, rather than cited by a
-// selector into the message; there is no length cap, since the quote is the
+// the reply answered, looked up by the reply's id when Quote is shown, rather
+// than cited by a selector into the message; there is no length cap, since the quote is the
 // text itself; the button says Quote.
 import { QuoteIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -10,16 +10,16 @@ import { createPortal } from "react-dom";
 import { observeSelectionActions, resolveSelectionActionPosition, type SelectionActionPoint } from "../../lib/selectionActions";
 import { Button } from "../ui/button";
 
-/** The attribute an assistant reply's row carries, holding the prompt that reply answered. */
-export const QUOTE_SOURCE_ATTRIBUTE = "data-quote-reply-to";
+/** The attribute an assistant reply's row carries, holding that reply's message id. */
+export const QUOTE_SOURCE_ATTRIBUTE = "data-quote-message";
 
 export interface QuotedSelection {
   readonly text: string;
   readonly replyTo: string | null;
 }
 
-/** The selection as a quote: its text and the reply it sits inside, where it starts and ends inside one reply. */
-export function readQuotedSelection(viewport: HTMLElement, selection: Selection | null): (QuotedSelection & { range: Range }) | null {
+/** The selection's text and the id of the reply it sits inside, where it starts and ends inside one reply. */
+export function readQuotedSelection(viewport: HTMLElement, selection: Selection | null): { text: string; messageId: string; range: Range } | null {
   if (selection === null || selection.rangeCount === 0 || selection.isCollapsed) return null;
   const range = selection.getRangeAt(0);
   const sourceOf = (node: Node | null) => (node instanceof Element ? node : (node?.parentElement ?? null))?.closest<HTMLElement>(`[${QUOTE_SOURCE_ATTRIBUTE}]`) ?? null;
@@ -27,11 +27,10 @@ export function readQuotedSelection(viewport: HTMLElement, selection: Selection 
   if (source === null || !viewport.contains(source) || sourceOf(range.endContainer) !== source) return null;
   const text = selection.toString().trim();
   if (text.length === 0) return null;
-  const replyTo = source.getAttribute(QUOTE_SOURCE_ATTRIBUTE) ?? "";
-  return { text, replyTo: replyTo.length > 0 ? replyTo : null, range };
+  return { text, messageId: source.getAttribute(QUOTE_SOURCE_ATTRIBUTE) ?? "", range };
 }
 
-export function AssistantSelectionToolbar({ viewport, onQuote }: { viewport: HTMLElement | null; onQuote: (quote: QuotedSelection) => void }) {
+export function AssistantSelectionToolbar({ viewport, replyToOf, onQuote }: { viewport: HTMLElement | null; replyToOf: (messageId: string) => string; onQuote: (quote: QuotedSelection) => void }) {
   const [selection, setSelection] = useState<{ quote: QuotedSelection; position: SelectionActionPoint } | null>(null);
   const toolbarRef = useRef<HTMLButtonElement>(null);
   const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
@@ -60,8 +59,9 @@ export function AssistantSelectionToolbar({ viewport, onQuote }: { viewport: HTM
         return;
       }
       const rects = read.range.getClientRects();
+      const replyTo = replyToOf(read.messageId);
       setSelection({
-        quote: { text: read.text, replyTo: read.replyTo },
+        quote: { text: read.text, replyTo: replyTo.length > 0 ? replyTo : null },
         position: resolveSelectionActionPosition({
           bounds: viewportRect,
           selectionRect: rects.item(rects.length - 1) ?? rect,
@@ -78,7 +78,7 @@ export function AssistantSelectionToolbar({ viewport, onQuote }: { viewport: HTM
       actions.dispose();
       actionsRef.current = null;
     };
-  }, [viewport]);
+  }, [viewport, replyToOf]);
 
   if (!selection) return null;
   const dismiss = () => {

@@ -62,7 +62,7 @@
 import { cn } from "../../lib/utils";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
-import { composerHeldLine, foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { composerHeldLine, foldThreads, FS_FILES_CAP_ENTRIES, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -99,13 +99,19 @@ import type { ChatThreadHandle } from "./useChatThread";
 
 const noop = () => {};
 
-/** What the @ and # menus say where the computer's wsp predates the lists they read. */
-export const MENU_LIST_UNSERVED = "this computer's wsp is older than this app, so the list is not there yet; it arrives with its next update";
+/** What the @ and # menus say where the wsp on the computer the copy is on predates the lists they read. */
+export const menuListUnserved = (computer: string): string => `${computer}'s wsp is older than this app, so the list is not there yet; it arrives with its next update`;
+
+/** What an empty # menu says where no signed-in command line for the project's git host is on that computer. */
+export const noHostListLine = (host: string, computer: string): string => `no signed-in command line for ${host} is on ${computer}, so its pull requests and issues are not listed`;
+
+/** What the @ menu says under a checkout with more files than one list carries. */
+export const FILES_CUT_LINE = `this checkout has more than ${FS_FILES_CAP_ENTRIES.toLocaleString("en-US")} files; the menu lists the first ${FS_FILES_CAP_ENTRIES.toLocaleString("en-US")}`;
 
 /** A list read whose refusal is the computer's wsp not knowing the read yet reads as that, in the person's words. */
-const inPersonsWords = <T,>(read: Promise<T>): Promise<T> =>
+const inPersonsWords = <T,>(read: Promise<T>, computer: string): Promise<T> =>
   read.catch((e: unknown) => {
-    throw e instanceof DaemonOpError && e.code === "unsupported" ? new Error(MENU_LIST_UNSERVED) : e;
+    throw e instanceof DaemonOpError && e.code === "unsupported" ? new Error(menuListUnserved(computer)) : e;
   });
 
 /** The draft as the height mirror measures it: a chip draws on one line whatever its text holds, so each one stands
@@ -312,8 +318,8 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const folder = pickable ? startFolder : (viewCwd ?? startFolder);
   const listed = onStart === undefined && unavailable === null && wire !== null && folder !== null;
   const session = trigger === null ? "" : `${trigger.kind}:${trigger.rangeStart}`;
-  const files = useComposerList(listed && trigger?.kind === "path" ? `${workspaceId}\0files\0${folder}` : null, session, () => inPersonsWords(fsFiles(wire!, folder!)).then(reply => reply.files));
-  const references = useComposerList(listed && trigger?.kind === "pull-request" ? `${workspaceId}\0items\0${folder}` : null, session, () => inPersonsWords(gitPrList(wire!, folder!)));
+  const files = useComposerList(listed && trigger?.kind === "path" ? `${workspaceId}\0files\0${folder}` : null, session, () => inPersonsWords(fsFiles(wire!, folder!), computer));
+  const references = useComposerList(listed && trigger?.kind === "pull-request" ? `${workspaceId}\0items\0${folder}` : null, session, () => inPersonsWords(gitPrList(wire!, folder!), computer));
   const skillsWanted = onStart === undefined && (trigger?.kind === "slash-command" || trigger?.kind === "skill");
   const skills = useAgentsReport(skillsWanted ? { workspaceId } : null).report?.skills;
   const groups = useMemo<ComposerCommandGroup[]>(() => {
@@ -325,13 +331,19 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
       case "skill":
         return skillGroups({ harness: catalog.harness, skills: skills ?? [], query: trigger.query });
       case "path":
-        return files.data === null ? [] : fileGroups(files.data, trigger.query);
+        return files.data === null ? [] : fileGroups(files.data.files, trigger.query);
       case "pull-request":
         return references.data === null ? [] : referenceGroups(references.data.items, trigger.query);
     }
   }, [catalog, files.data, references.data, skills, trigger, unavailable]);
   // A list the menu could not read, or one its host could not answer, says why in the slot while its token stands.
-  const menuLine = trigger?.kind === "path" ? files.error : trigger?.kind === "pull-request" ? (references.error ?? (groups.length === 0 ? (references.data?.note ?? null) : null)) : null;
+  const unlisted = references.data?.noCliFor;
+  const menuLine =
+    trigger?.kind === "path"
+      ? (files.error ?? (files.data?.truncated === true ? FILES_CUT_LINE : null))
+      : trigger?.kind === "pull-request"
+        ? (references.error ?? (groups.length === 0 ? (unlisted !== undefined ? noHostListLine(unlisted, computer) : (references.data?.note ?? null)) : null))
+        : null;
   // The keyboard walks the menu as it is drawn, so the groups decide the order the arrows take and not the other way round.
   const items = useMemo<ComposerCommandItem[]>(() => groups.flatMap(group => group.items), [groups]);
   // A token that matched nothing draws no menu: the slot above the box already holds the one line that says so, and

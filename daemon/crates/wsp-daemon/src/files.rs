@@ -42,10 +42,16 @@ impl FileLists {
                 return Ok(list.reply.clone());
             }
         }
+        let changed = Arc::new(AtomicBool::new(false));
+        let watcher = watcher(&under, &changed);
+        #[cfg(target_os = "linux")]
+        let since = std::time::SystemTime::now() - std::time::Duration::from_secs(1);
         let reply = list(runner, at).await?;
+        #[cfg(target_os = "linux")]
+        let watcher = watcher.and_then(|w| watch_listed(w, &under, &reply.files, &changed, since));
         let mut kept = self.kept.lock().unwrap_or_else(|e| e.into_inner());
         kept.remove(&under);
-        if let Some((watcher, changed)) = watch(&under, &reply.files) {
+        if let Some(watcher) = watcher {
             if kept.len() >= KEPT_CAP {
                 let dropped = kept.keys().next().cloned();
                 if let Some(dropped) = dropped {
@@ -71,42 +77,54 @@ pub(crate) async fn list<R: Runs>(runner: &R, at: &Path) -> Result<FsFilesReply,
     Ok(FsFilesReply { files, truncated })
 }
 
-/// A watcher that marks the list changed at the first change under the folder; none where the platform refuses one,
-/// and then the list is not kept. On Linux each folder holding a listed file is watched on its own, so an ignored
-/// tree such as node_modules takes no inotify watch; elsewhere the platform watches the whole tree in one go.
-fn watch(under: &Path, files: &[String]) -> Option<(notify::RecommendedWatcher, Arc<AtomicBool>)> {
-    let changed = Arc::new(AtomicBool::new(false));
-    let marks = Arc::clone(&changed);
+/// A watcher that marks `changed` at the first change under the folder, installed before the folder is listed so a
+/// file landing meanwhile is not missed; none where the platform refuses one, and then the list is not kept. Off
+/// Linux the platform watches the whole tree in one go.
+fn watcher(under: &Path, changed: &Arc<AtomicBool>) -> Option<notify::RecommendedWatcher> {
+    let marks = Arc::clone(changed);
     let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| match event {
         Ok(event) if matches!(event.kind, notify::EventKind::Access(_)) => {}
         _ => marks.store(true, Ordering::Relaxed),
     })
     .ok()?;
     #[cfg(target_os = "linux")]
-    {
-        let mut dirs: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::from([under.to_path_buf()]);
-        for file in files {
-            let mut dir = Path::new(file).parent();
-            while let Some(parent) = dir.filter(|d| !d.as_os_str().is_empty()) {
-                if !dirs.insert(under.join(parent)) {
-                    break;
-                }
-                dir = parent.parent();
-            }
-            if dirs.len() > WATCHED_DIRS_CAP {
-                return None;
-            }
-        }
-        for dir in &dirs {
-            watcher.watch(dir, RecursiveMode::NonRecursive).ok()?;
-        }
-    }
+    watcher.watch(under, RecursiveMode::NonRecursive).ok()?;
     #[cfg(not(target_os = "linux"))]
-    {
-        let _ = files;
-        watcher.watch(under, RecursiveMode::Recursive).ok()?;
+    watcher.watch(under, RecursiveMode::Recursive).ok()?;
+    Some(watcher)
+}
+
+/// On Linux each folder holding a listed file is watched on its own, so an ignored tree such as node_modules takes
+/// no inotify watch. Those watches can only follow the listing, so a folder whose entries changed since it began
+/// marks the list changed.
+#[cfg(target_os = "linux")]
+fn watch_listed(
+    mut watcher: notify::RecommendedWatcher,
+    under: &Path,
+    files: &[String],
+    changed: &AtomicBool,
+    since: std::time::SystemTime,
+) -> Option<notify::RecommendedWatcher> {
+    let mut dirs: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::from([under.to_path_buf()]);
+    for file in files {
+        let mut dir = Path::new(file).parent();
+        while let Some(parent) = dir.filter(|d| !d.as_os_str().is_empty()) {
+            if !dirs.insert(under.join(parent)) {
+                break;
+            }
+            dir = parent.parent();
+        }
+        if dirs.len() > WATCHED_DIRS_CAP {
+            return None;
+        }
     }
-    Some((watcher, changed))
+    for dir in &dirs {
+        watcher.watch(dir, RecursiveMode::NonRecursive).ok()?;
+        if std::fs::metadata(dir).and_then(|m| m.modified()).map_or(true, |at| at >= since) {
+            changed.store(true, Ordering::Relaxed);
+        }
+    }
+    Some(watcher)
 }
 
 #[cfg(test)]
@@ -177,5 +195,46 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
         assert!(seen, "a new file never reached the kept list");
+    }
+
+    /// Git through the real runner, with a file landing in the checkout the moment ls-files has answered.
+    struct LandsAfterListing(PathBuf);
+
+    impl Runs for LandsAfterListing {
+        async fn run(
+            &self,
+            cwd: &Path,
+            program: &str,
+            args: &[&str],
+            input: Option<&[u8]>,
+            max_bytes: Option<usize>,
+        ) -> Result<crate::git::GitResult, OpError> {
+            let res = Here::new().run(cwd, program, args, input, max_bytes).await;
+            std::fs::write(&self.0, "").unwrap();
+            res
+        }
+
+        async fn on_path(&self, program: &str) -> Result<bool, OpError> {
+            Here::new().on_path(program).await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_file_that_lands_while_git_lists_reaches_the_kept_list() {
+        let dir = checkout();
+        let lists = FileLists::default();
+        let under = dir.path().canonicalize().unwrap();
+        let landed = under.join("src/components/Composer.tsx");
+        let first = lists.of(&LandsAfterListing(landed), under.clone(), &under).await.unwrap();
+        assert!(!first.files.iter().any(|f| f == "src/components/Composer.tsx"));
+        let mut seen = false;
+        for _ in 0..40 {
+            if lists.of(&Here::new(), under.clone(), &under).await.unwrap().files.iter().any(|f| f == "src/components/Composer.tsx") {
+                seen = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(seen, "a file that landed between the listing and the watch never reached the kept list");
     }
 }

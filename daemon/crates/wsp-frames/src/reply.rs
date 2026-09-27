@@ -381,7 +381,8 @@ pub struct HostItem {
 }
 
 /// The repository's open pull requests, then its open issues. Where nothing can be listed, since no signed-in
-/// command line for the host is on the computer, the list is empty and the note says so in one sentence.
+/// command line for the host is on the computer, the list is empty and `noCliFor` names the host, for the client to
+/// say on which computer; a list the command line refused otherwise is left out with its first line as the note.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "camelCase")]
@@ -390,6 +391,9 @@ pub struct GitPrListReply {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub no_cli_for: Option<String>,
 }
 
 /// What a push carried: the branch, the branch it is measured against, the remote it went to, how many commits it

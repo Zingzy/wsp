@@ -31,7 +31,7 @@ export function composerSubmissionIntentForEnter(input: {
 
 const isInlineTokenSegment = (segment: ComposerPromptSegment): boolean => segment.type !== "text";
 
-function clampCursor(text: string, cursor: number): number {
+export function clampCursor(text: string, cursor: number): number {
   if (!Number.isFinite(cursor)) return text.length;
   return Math.max(0, Math.min(text.length, Math.floor(cursor)));
 }

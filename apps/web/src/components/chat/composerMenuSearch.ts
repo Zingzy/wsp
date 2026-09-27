@@ -4,12 +4,11 @@
 // requests and issues by number or by title, and the person's skills the
 // thread's agent loads. Ranked with the same scorer the slash menu uses.
 import type { HostItem, SkillRow } from "@wsp/protocol";
+import { baseName } from "../../files/entries";
 import { insertRankedSearchResult, normalizeSearchQuery, scoreQueryMatch } from "../../lib/searchRanking";
 
 /** Rows one @ or # menu draws. */
 export const COMPOSER_MENU_ROWS = 30;
-
-const basename = (path: string): string => path.split("/").at(-1) ?? path;
 
 export function searchComposerFiles(files: ReadonlyArray<string>, query: string, limit = COMPOSER_MENU_ROWS): string[] {
   const wanted = normalizeSearchQuery(query);
@@ -18,7 +17,7 @@ export function searchComposerFiles(files: ReadonlyArray<string>, query: string,
   for (const path of files) {
     const lower = path.toLowerCase();
     const scores = [
-      scoreQueryMatch({ value: basename(lower), query: wanted, exactBase: 0, prefixBase: 2, boundaryBase: 4, includesBase: 6, fuzzyBase: 100, boundaryMarkers: ["-", "_", "."] }),
+      scoreQueryMatch({ value: baseName(lower), query: wanted, exactBase: 0, prefixBase: 2, boundaryBase: 4, includesBase: 6, fuzzyBase: 100, boundaryMarkers: ["-", "_", "."] }),
       scoreQueryMatch({ value: lower, query: wanted, exactBase: 10, prefixBase: 20, boundaryBase: 22, includesBase: 24, fuzzyBase: 200 }),
     ].filter((score): score is number => score !== null);
     if (scores.length > 0) insertRankedSearchResult(ranked, { item: path, score: Math.min(...scores), tieBreaker: path }, limit);
