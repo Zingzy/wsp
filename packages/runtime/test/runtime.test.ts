@@ -6806,7 +6806,7 @@ describe("create idempotency keys", () => {
       if (dead) {
         dead = false;
         // The backend deleted the box it could not use before throwing; a key that outlived it would name it again.
-        throw new GuestUnusableError("bx_dead", "Box by ASCII", "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24", 200);
+        throw new GuestUnusableError("bx_dead", "Boat", "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24", 200);
       }
       return real(spec);
     });

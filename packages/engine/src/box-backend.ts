@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The backend for Box by ASCII: a persistent Ubuntu VM per box, billed while
+// The backend for ASCII's Boat: a persistent Ubuntu VM per box, billed while
 // it runs and free while stopped. It sits behind the same MachineBackend seam
 // Solari does. A nap is a stop that snapshots the disk and kills every process;
 // a wake is a resume onto a fresh machine that streams the disk back
@@ -9,7 +9,7 @@
 // is a declaration through the seam or an internal of this file.
 
 import { createHash, randomBytes } from "node:crypto";
-import { moveTimedOutLine, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
+import { moveTimedOutLine, providerKeyName, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
 import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
@@ -111,7 +111,7 @@ export const FILE_PUT_MAX = 5 * 1024 * 1024;
 export const BOX_INLINE_MAX_MS = 30_000;
 
 /** Whose machine a box is, in the words a person reads when the provider left one unusable. */
-const BOX_PROVIDER = "Box by ASCII";
+const BOX_PROVIDER = providerKeyName("box");
 
 /** The dynamic loader's own wording for EMFILE, anchored to the two programs every command starts in, the shell and
  * the sudo that wraps it: a child of a command that hits the limit prints the same line under its own name, and that

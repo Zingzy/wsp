@@ -380,7 +380,7 @@ describe("a provider as a place", () => {
     const put: MachineBackend[] = [];
     const refusing = { ...systemPlaceDeps, checkKey: async (b: MachineBackend): Promise<KeyCheck> => (put.push(b), { state: "refused", said: "box said 401 invalid token" }) };
     const io = captured();
-    expect(await addCommand(io, opts(home, { BOX_API_KEY: "sk-ant-x" }), ["box"], {}, refusing)).toBe(1);
+    expect(await addCommand(io, opts(home, { BOAT_API_KEY: "sk-ant-x" }), ["box"], {}, refusing)).toBe(1);
     expect(io.errors.join("\n")).toContain("401");
     expect(existsSync(join(home, ".env"))).toBe(false);
     // The key is put to the provider being added, built out of the environment that carries every row's key under
@@ -390,7 +390,7 @@ describe("a provider as a place", () => {
     // A key the provider took sets this computer up for it and nothing of the key is written or printed.
     const taking = { ...systemPlaceDeps, checkKey: async () => ({ state: "taken" }) as const };
     const good = captured();
-    expect(await addCommand(good, opts(home, { BOX_API_KEY: "sk-ant-x" }), ["box"], {}, taking)).toBe(0);
+    expect(await addCommand(good, opts(home, { BOAT_API_KEY: "sk-ant-x" }), ["box"], {}, taking)).toBe(0);
     expect(good.lines.join("\n")).toContain("place box");
     expect(readFileSync(join(home, ".env"), "utf8")).toBe("WSP_PROVIDER=box\n");
     expect(good.lines.join("\n") + good.errors.join("\n")).not.toContain("sk-ant-x");
@@ -400,7 +400,7 @@ describe("a provider as a place", () => {
     const home = tmp("add-provider-beside");
     const folder = join(home, "elsewhere");
     mkdirSync(folder, { recursive: true });
-    const beside = { ...opts(home, { BOX_API_KEY: "sk-ant-x" }), statePath: join(folder, "state.json") };
+    const beside = { ...opts(home, { BOAT_API_KEY: "sk-ant-x" }), statePath: join(folder, "state.json") };
     const io = captured();
     expect(await addCommand(io, beside, ["box"], {}, systemPlaceDeps)).toBe(0);
     expect(readFileSync(join(folder, ".env"), "utf8")).toBe("WSP_PROVIDER=box\n");

@@ -1817,7 +1817,7 @@ export const SOLARI_CONSOLE = "console.getsolari.com";
  * screen that asks for a key and the terminal that asks for it say one thing. A provider that takes no key has no
  * row. */
 export const PROVIDER_KEY_WORDS: Record<string, { name: string; keyName: string; keyConsole?: string }> = {
-  box: { name: "Box by ASCII", keyName: "Box API key", keyConsole: "ascii.dev" },
+  box: { name: "Boat", keyName: "Boat API key", keyConsole: "boat.dev/dashboard" },
   solari: { name: "Solari", keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
 };
 

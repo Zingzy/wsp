@@ -316,12 +316,12 @@ describe("the tree a thread's own threads make", () => {
 describe("where a workspace runs", () => {
   const runs = (over: Partial<WorkspaceStatus>, view: Partial<WorkspaceView> = {}) => ({ status: status(over), workspace: { ...status(over), ...view } });
 
-  it("where a workspace runs: the provider the record carries, the kind's own word where it has one, and the name wsp holds for the machine where it has neither", () => {
+  it("where a workspace runs: the provider the record carries, by its own name, the kind's own word where it has one, and the name wsp holds for the machine where it has neither", () => {
     expect(computerName([], runs({}, { kind: "local" }))).toBe("");
     // A fork runs at the provider its own record names, never the opaque id that provider minted for the machine,
     // and never a word read off the kind: this host is wired to one provider of several and only the record says which.
-    expect(computerName([], runs({ machineId: "sb_9f2c1d8a", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "solari" }))).toBe("solari");
-    expect(computerName([], runs({ machineId: "bx_4c11e0", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "box" }))).toBe("box");
+    expect(computerName([], runs({ machineId: "sb_9f2c1d8a", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "solari" }))).toBe("Solari");
+    expect(computerName([], runs({ machineId: "bx_4c11e0", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "box" }))).toBe("Boat");
     expect(computerName([], runs({ machineId: "wsp-api", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "docker" }))).toBe("docker");
     // A record from before the provider rode the wire says what the machine is; the id the provider minted for it
     // names nothing to the person reading the row, and no row anywhere shows one.

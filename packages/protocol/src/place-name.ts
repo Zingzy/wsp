@@ -41,5 +41,7 @@ export function workspaceComputerName(places: readonly PlaceView[], workspace: P
   const at = placeOf(places, workspace);
   if (at !== undefined) return placeName(at);
   if (isLocalWorkspace(workspace)) return hereName(places);
-  return whereWord(workspace);
+  // A provider's rows arrive a moment after a host restarts: until then it goes by the name its words row gives it,
+  // never by the id its record holds.
+  return whereWord(workspace, workspace.provider === undefined ? undefined : PROVIDER_KEY_WORDS[workspace.provider]?.name);
 }
