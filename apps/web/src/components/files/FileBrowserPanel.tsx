@@ -120,7 +120,7 @@ export default function FileBrowserPanel({
     fileTreeSearchMode: "hide-non-matches",
     flattenEmptyDirectories: false,
     initialExpansion: "closed",
-    icons: { set: "complete", colored: true },
+    icons: { set: "complete", colored: false },
     onSelectionChange: (selectedPaths) => {
       const selected = selectedPaths.at(-1)?.replace(/\/$/, "");
       if (selected && rowsRef.current.kinds.get(selected) === "file") openRef.current.onOpenFile(joinPath(openRef.current.root, selected));
@@ -181,7 +181,7 @@ export default function FileBrowserPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background" data-file-browser-panel={projectName} data-file-browser-root={root} onContextMenu={onContextMenu}>
       <div
-        className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
+        className="flex h-10 min-h-10 shrink-0 items-center gap-1 bg-background px-2 in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7"
         data-surface-subheader
       >
         <RefreshFilesButton isPending={rootLevel?.isPending ?? false} onRefresh={() => onRefresh(rows.loaded.length > 0 ? rows.loaded : [root])} />
@@ -207,7 +207,7 @@ export default function FileBrowserPanel({
         />
       )}
       {rows.errors.map(error => (
-        <p key={error.dir} className="shrink-0 truncate border-t border-border/70 px-3 py-1.5 font-mono text-[11px] text-destructive" title={error.message} data-files-error={error.dir}>
+        <p key={error.dir} className="shrink-0 truncate px-3 py-1.5 font-mono text-[11px] text-destructive" title={error.message} data-files-error={error.dir}>
           {error.dir}: {error.message}
         </p>
       ))}

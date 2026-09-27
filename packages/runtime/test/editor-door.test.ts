@@ -66,7 +66,7 @@ describe("the editor ops over the wire", () => {
     expect(asked).toEqual([]);
   });
 
-  it("refuses a socket a ticket let in, since the program starts on this computer", async () => {
+  it("refuses both ops on a socket a ticket let in, since the program starts on this computer", async () => {
     const { port, asked } = await serving();
     const host = await WsClient.connect(port, { token: "t" });
     const { ticket } = (await host.request("ticket.issue", { purpose: "relay" })) as { ticket: string };
@@ -74,6 +74,7 @@ describe("the editor ops over the wire", () => {
     const relayed = await WsClient.connect(port, { ticket });
     try {
       expect(await relayed.request("editor.open", { workspaceId: COPY.id, path: "/Users/dev/web-codex-reviews/src/a.ts" })).toMatchObject({ ok: false, error: EDITOR_TICKET_REFUSAL });
+      expect(await relayed.request("editor.list")).toMatchObject({ ok: false, error: EDITOR_TICKET_REFUSAL, kind: "ticket" });
     } finally {
       relayed.close();
     }

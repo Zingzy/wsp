@@ -1686,11 +1686,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
               return;
             case "editor.list":
-              send({ id: msg.id, ok: true, editors: await editor().list() });
-              return;
             case "editor.open": {
+              // A program starts on this computer for its own window alone, and the list of what could start is read on the same terms.
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: EDITOR_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              if (msg.op === "editor.list") {
+                send({ id: msg.id, ok: true, editors: await editor().list() });
                 return;
               }
               const workspace = await rt.workspaces.get(msg.workspaceId, origin);

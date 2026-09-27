@@ -1894,8 +1894,9 @@ export type EditorChoice = z.infer<typeof EditorChoice>;
 
 /** What Open in editor says for a workspace whose files are on another machine, named as the person reads it. */
 export const editorOpensHereLine = (name: string): string => `These files are on ${name}, so they open here.`;
-/** The refusal for an editor.open on a socket let in on a ticket: a program starts only for this computer's own window. */
-export const EDITOR_TICKET_REFUSAL = "a socket let in on a ticket cannot open an editor on this computer; open it from the app on the computer the host runs on";
+/** The refusal for editor.list and editor.open on a socket let in on a ticket: a program starts only for this computer's
+ * own window, and the list of what could start is read on the same terms. */
+export const EDITOR_TICKET_REFUSAL = "a socket let in on a ticket cannot list or open the editors on this computer; use the app on the computer the host runs on";
 
 export const Preferences = z.object({
   theme: ThemePreference,
@@ -5545,7 +5546,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * light:...,dark:... value and is dark when absent. */
   z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
   /** Replies with { editors: EditorChoice[] }: the editors installed on the computer running the host, in the
-   * table's order. None where the host runs on a computer it keeps no table for. */
+   * table's order. None where the host runs on a computer it keeps no table for. Only this computer's own window may
+   * ask, as with editor.open below. */
   z.object({ id: reqId, op: z.literal("editor.list") }),
   /** Opens a file or a folder of one workspace in the person's editor on the computer running the host and replies
    * with { editor }, the one it opened in: the preference's, else the first installed. The path must resolve inside
