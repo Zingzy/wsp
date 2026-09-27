@@ -10,7 +10,7 @@ describe("the preferences record", () => {
     expect(preferencesFrom({})).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom({ theme: "sepia" })).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom("nonsense")).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, keybindings: {}, appFont: "", codeFont: "", labs: false });
+    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false });
   });
 
   it("a stored record keeps what it has and takes the defaults for the rest", () => {
@@ -19,11 +19,11 @@ describe("the preferences record", () => {
 
   it("a patch lands field by field, a null width clears the width, and the zoom lands per workspace, a null entry dropping that workspace's", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark", sidebarWidth: 300, terminalZoom: { ws_a: 2 } });
-    expect(one).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, keybindings: {}, appFont: "", codeFont: "", labs: false });
+    expect(one).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false });
     const two = applyPreferencesPatch(one, { terminalZoom: { ws_b: -1 } });
     expect(two.terminalZoom).toEqual({ ws_a: 2, ws_b: -1 });
     const three = applyPreferencesPatch(two, { sidebarWidth: null, terminalZoom: { ws_a: null } });
-    expect(three).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, keybindings: {}, appFont: "", codeFont: "", labs: false });
+    expect(three).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false });
     expect(applyPreferencesPatch(one, {})).toEqual(one);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
   });
@@ -175,5 +175,18 @@ describe("the last target on the preferences record", () => {
     expect(PreferencesPatch.safeParse({ project: { ws_a: "spoo" } }).success).toBe(false);
     expect(PreferencesPatch.safeParse({ target: { workspace: "ws_a", project: "spoo" } }).success).toBe(false);
     expect(PreferencesPatch.safeParse({ target: { project: "spoo" } }).success).toBe(false);
+  });
+});
+
+describe("the sound and the project order on the preferences record", () => {
+  it("the sound switch lands as a flag, and a project order lands whole, the list the person dragged", () => {
+    const quiet = applyPreferencesPatch(DEFAULT_PREFERENCES, { notifySound: false });
+    expect(quiet.notifySound).toBe(false);
+    const ordered = applyPreferencesPatch(quiet, { projectOrder: ["pr_b", "pr_a"] });
+    expect(ordered).toEqual({ ...quiet, projectOrder: ["pr_b", "pr_a"] });
+    expect(applyPreferencesPatch(ordered, { projectOrder: ["pr_a"] }).projectOrder).toEqual(["pr_a"]);
+    expect(applyPreferencesPatch(ordered, { theme: "dark" }).projectOrder).toEqual(["pr_b", "pr_a"]);
+    expect(PreferencesPatch.safeParse({ projectOrder: [3] }).success).toBe(false);
+    expect(PreferencesPatch.safeParse({ notifySound: "loud" }).success).toBe(false);
   });
 });

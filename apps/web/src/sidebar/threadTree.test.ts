@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
-import { projectGroups, rootHolding, settleableRoots, sidebarTiles, threadTree, treeSettle, type TileNode } from "./threadTree";
+import { dropMarks, nextNeedsYou, placementFor, projectGroups, rootHolding, settleableRoots, sidebarTiles, threadTree, treeSettle, type TileNode } from "./threadTree";
 
 const project = (id: string, name: string, computer = "here"): ProjectView => ({
   id,
@@ -21,7 +21,7 @@ const NOW = Date.parse("2026-09-26T12:00:00.000Z");
 const ago = (hours: number): string => new Date(NOW - hours * 3_600_000).toISOString();
 
 const thread = (id: string, workspaceId: string, parentThreadId: string | null = null, over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot =>
-  ({ id, threadId: id, sessionId: `s_${id}`, workspaceId, title: id, status: "running", startedAt: ago(1), endedAt: null, parentThreadId, asking: null, unread: false, readAt: null, settledAt: null, ...over }) as unknown as SidebarProjectSnapshot["threads"][number];
+  ({ id, threadId: id, sessionId: `s_${id}`, workspaceId, title: id, status: "running", startedAt: ago(1), endedAt: null, parentThreadId, asking: null, unread: false, needsYou: false, readAt: null, settledAt: null, pinnedAt: null, snoozedUntil: null, section: null, ...over }) as unknown as SidebarProjectSnapshot["threads"][number];
 /** A thread that finished `hours` ago and that a window showed as it finished. */
 const done = (id: string, workspaceId: string, hours: number, parentThreadId: string | null = null, over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot =>
   thread(id, workspaceId, parentThreadId, { status: "completed", startedAt: ago(hours + 0.1), endedAt: ago(hours), readAt: ago(hours), ...over });
@@ -36,15 +36,21 @@ const row = (id: string, projectId: string, threads: SidebarThreadSnapshot[] = [
 
 describe("the projects the sidebar draws", () => {
   it("keeps the host's own order, holds every project's workspaces under it, and keeps a project nobody has started work on", () => {
-    const groups = projectGroups([project("pr_1", "spoo"), project("pr_2", "wsp")], [row("ws_a", "pr_1"), row("ws_b", "pr_1")]);
+    const groups = projectGroups([project("pr_1", "spoo"), project("pr_2", "wsp")], [row("ws_a", "pr_1"), row("ws_b", "pr_1")], []);
     expect(groups.map(g => [g.project.name, g.workspaces.map(w => w.id)])).toEqual([
       ["spoo", ["ws_a", "ws_b"]],
       ["wsp", []],
     ]);
   });
 
+  it("orders the projects the way the person dragged them, skips an id the host no longer holds, and follows with the rest in the host's order", () => {
+    const recorded = [project("pr_1", "spoo"), project("pr_2", "wsp"), project("pr_3", "docs")];
+    expect(projectGroups(recorded, [row("ws_a", "pr_2")], ["pr_3", "pr_gone", "pr_1"]).map(g => g.project.id)).toEqual(["pr_3", "pr_1", "pr_2"]);
+    expect(projectGroups(recorded, [], []).map(g => g.project.id)).toEqual(["pr_1", "pr_2", "pr_3"]);
+  });
+
   it("keeps a workspace whose project the host's list has not answered for, off the record the row itself carries", () => {
-    const groups = projectGroups([], [row("ws_a", "pr_1")]);
+    const groups = projectGroups([], [row("ws_a", "pr_1")], []);
     expect(groups.map(g => [g.project.id, g.workspaces.map(w => w.id)])).toEqual([["pr_1", ["ws_a"]]]);
   });
 
@@ -111,7 +117,7 @@ describe("the sidebar's tiles", () => {
       row("ws_b", "pr_1", [done("stale", "ws_b", 40), thread("busy-child", "ws_b", "stale"), done("failed", "ws_b", 5, null, { status: "failed" })]),
     ];
     const { live, settled } = sidebarTiles(rows, { picked: null, nowMs: NOW });
-    expect(shape(live)).toEqual(["recent", "failed", ["stale", ["busy-child"]]]);
+    expect(shape(live)).toEqual(["failed", ["stale", ["busy-child"]], "recent"]);
     expect(shape(settled)).toEqual([["quiet", ["quiet-child"]]]);
   });
 
@@ -120,7 +126,7 @@ describe("the sidebar's tiles", () => {
       row("ws_a", "pr_1", [done("lead", "ws_a", 30), done("builder", "ws_a", 29, "lead", read ? {} : { readAt: ago(40), unread: true })]),
       row("ws_b", "pr_1", [done("broke", "ws_b", 31, null, { status: "failed", readAt: read ? ago(20) : null })]),
     ];
-    expect(shape(sidebarTiles(unseen(false), { picked: null, nowMs: NOW }).live)).toEqual([["lead", ["builder"]], "broke"]);
+    expect(shape(sidebarTiles(unseen(false), { picked: null, nowMs: NOW }).live)).toEqual(["broke", ["lead", ["builder"]]]);
     const opened = sidebarTiles(unseen(true), { picked: null, nowMs: NOW });
     expect(shape(opened.settled)).toEqual([["lead", ["builder"]]]);
     expect(shape(opened.live)).toEqual(["broke"]);
@@ -171,5 +177,106 @@ describe("the sidebar's tiles", () => {
     ];
     expect(shape(sidebarTiles(rows, { picked: "pr_1", nowMs: NOW }).live)).toEqual([["lead", ["helper"]]]);
     expect(shape(sidebarTiles(rows, { picked: "pr_2", nowMs: NOW }).live)).toEqual(["other"]);
+  });
+});
+
+/** Each section of the live list by its id, with its roots drawn as shape draws them. */
+const sections = (rows: SidebarProjectSnapshot[], o: Partial<Parameters<typeof sidebarTiles>[1]> = {}) =>
+  sidebarTiles(rows, { picked: null, nowMs: NOW, ...o }).sections.map(section => [section.id, shape(section.roots)]);
+
+describe("the sections the live list is drawn in", () => {
+  it("files each root tree under Needs you, Working, Done or Idle by the most pressing thread in it, newest first inside each, and the live list reads them in that order", () => {
+    const rows = [
+      row("ws_a", "pr_1", [
+        thread("asks", "ws_a", null, { asking: "Permission for Bash", needsYou: true, startedAt: ago(0.1) }),
+        thread("works", "ws_a", null, { startedAt: ago(0.2) }),
+        done("unseen", "ws_a", 0.3, null, { readAt: null, unread: true, needsYou: true }),
+        done("read", "ws_a", 0.4),
+        done("broke", "ws_a", 0.5, null, { status: "failed" }),
+        done("lead", "ws_a", 0.6),
+        thread("builder", "ws_a", "lead", { startedAt: ago(0.55) }),
+      ]),
+      row("ws_b", "pr_1"),
+    ];
+    expect(sections(rows)).toEqual([
+      ["needs-you", ["asks", "broke"]],
+      ["working", ["works", ["lead", ["builder"]]]],
+      ["done", ["unseen"]],
+      ["idle", ["read", "ws:ws_b"]],
+    ]);
+    expect(shape(sidebarTiles(rows, { picked: null, nowMs: NOW }).live)).toEqual(["asks", "broke", "works", ["lead", ["builder"]], "unseen", "read", "ws:ws_b"]);
+  });
+
+  it("puts pinned trees first whatever their state, the latest pin on top; a pinned tree never folds by time, and a settle by hand folds it all the same", () => {
+    const rows = [
+      row("ws_a", "pr_1", [
+        thread("works", "ws_a", null, { pinnedAt: ago(3) }),
+        done("old", "ws_a", 30, null, { pinnedAt: ago(1) }),
+        done("put-away", "ws_a", 30, null, { pinnedAt: ago(2), settledAt: ago(29) }),
+        done("other", "ws_a", 0.2),
+      ]),
+    ];
+    const { settled } = sidebarTiles(rows, { picked: null, nowMs: NOW });
+    expect(sections(rows)).toEqual([
+      ["pinned", ["old", "works"]],
+      ["idle", ["other"]],
+    ]);
+    expect(shape(settled)).toEqual(["put-away"]);
+  });
+
+  it("holds a tree where it was dragged while its state is the one it was dragged in, and files it by its state again once that moves", () => {
+    const working = thread("works", "ws_a");
+    const placed = placementFor(sidebarTiles([row("ws_a", "pr_1", [working])], { picked: null, nowMs: NOW }).live[0]!, "done");
+    expect(sections([row("ws_a", "pr_1", [{ ...working, section: placed }])])).toEqual([["done", ["works"]]]);
+    // The turn ended: a new state, so the placement no longer holds and the finish nobody saw reads as Done anyway.
+    const ended = done("works", "ws_a", 0.1, null, { section: placed });
+    expect(sections([row("ws_a", "pr_1", [ended])])).toEqual([["idle", ["works"]]]);
+    // A new turn on the thread is a new state too, even back in the section it was dragged out of.
+    const again = thread("works", "ws_a", null, { sessionId: "s_again", section: placed });
+    expect(sections([row("ws_a", "pr_1", [again])])).toEqual([["working", ["works"]]]);
+  });
+
+  it("a drop on another section places the tree there, a drop on Pinned pins it, a pinned tree dropped elsewhere loses its pin, and a drop on its own section clears a placement", () => {
+    const [works, pinned, placed, idle] = sidebarTiles(
+      [row("ws_a", "pr_1", [thread("works", "ws_a"), done("pinned", "ws_a", 0.2, null, { pinnedAt: ago(1) }), thread("placed", "ws_a", null, { section: { name: "done", whileState: "working:s_placed" } }), done("idle", "ws_a", 0.3)])],
+      { picked: null, nowMs: NOW },
+    ).live.sort((a, b) => ["works", "pinned", "placed", "idle"].indexOf(a.thread.id) - ["works", "pinned", "placed", "idle"].indexOf(b.thread.id));
+    expect(dropMarks(works!, "done")).toEqual({ section: { name: "done", whileState: "working:s_works" } });
+    expect(dropMarks(works!, "pinned")).toEqual({ pinned: true });
+    expect(dropMarks(works!, "working")).toBeNull();
+    expect(dropMarks(pinned!, "pinned")).toBeNull();
+    expect(dropMarks(pinned!, "idle")).toEqual({ pinned: false, section: null });
+    expect(dropMarks(pinned!, "needs-you")).toEqual({ pinned: false, section: { name: "needs-you", whileState: "idle:s_pinned" } });
+    expect(dropMarks(placed!, "working")).toEqual({ section: null });
+    expect(dropMarks(idle!, "idle")).toBeNull();
+  });
+
+  it("leaves a snoozed tree out of the list and the fold, and brings it back early when a thread in it needs the person", () => {
+    const snoozedUntil = new Date(NOW + 3_600_000).toISOString();
+    const quiet = [row("ws_a", "pr_1", [done("away", "ws_a", 30, null, { snoozedUntil }), done("child", "ws_a", 30, "away"), done("here", "ws_a", 0.1)])];
+    const tiles = sidebarTiles(quiet, { picked: null, nowMs: NOW });
+    expect([shape(tiles.live), shape(tiles.settled)]).toEqual([["here"], []]);
+    const asked = [row("ws_a", "pr_1", [done("away", "ws_a", 30, null, { snoozedUntil }), thread("child", "ws_a", "away", { asking: "Permission for Bash", needsYou: true })])];
+    expect(sections(asked)).toEqual([["needs-you", [["away", ["child"]]]]]);
+  });
+
+  it("the next thread that needs the person is the first after the open one in the drawn order, children included, wrapping to the top", () => {
+    const rows = [
+      row("ws_a", "pr_1", [
+        thread("asks", "ws_a", null, { asking: "Permission for Bash", needsYou: true, startedAt: ago(0.1) }),
+        thread("lead", "ws_a", null, { startedAt: ago(0.2) }),
+        done("child", "ws_a", 0.15, "lead", { readAt: null, unread: true, needsYou: true }),
+        done("unseen", "ws_a", 0.3, null, { readAt: null, unread: true, needsYou: true }),
+        done("read", "ws_a", 0.4),
+      ]),
+    ];
+    const { live } = sidebarTiles(rows, { picked: null, nowMs: NOW });
+    const next = (from: string | null) => nextNeedsYou(live, from)?.thread?.id ?? null;
+    expect(next(null)).toBe("asks");
+    expect(next("asks")).toBe("child");
+    expect(next("child")).toBe("unseen");
+    expect(next("unseen")).toBe("asks");
+    expect(next("read")).toBe("asks");
+    expect(nextNeedsYou(sidebarTiles([row("ws_a", "pr_1", [done("read", "ws_a", 0.4)])], { picked: null, nowMs: NOW }).live, null)).toBeUndefined();
   });
 });

@@ -54,9 +54,13 @@ export function useThreadVerbs(): ThreadVerbs {
   const api = useStore(s => s.api);
   const forgetThread = useStore(s => s.forgetThread);
   const settleThreads = useStore(s => s.settleThreads);
+  const restoreThreads = useStore(s => s.restoreThreads);
+  const markThreads = useStore(s => s.markThreads);
   const stop = api?.interruptSession;
   const canForget = api?.forgetThread !== undefined;
   const canSettle = api?.settleThreads !== undefined;
+  const canRestore = api?.restoreThreads !== undefined;
+  const canMark = api?.markThreads !== undefined;
   return useMemo<ThreadVerbs>(
     () => ({
       stop:
@@ -67,8 +71,10 @@ export function useThreadVerbs(): ThreadVerbs {
             },
       forget: canForget ? thread => void forgetThread(thread) : undefined,
       settle: canSettle ? settleThreads : undefined,
+      restore: canRestore ? restoreThreads : undefined,
+      mark: canMark ? markThreads : undefined,
       copyText,
     }),
-    [canForget, canSettle, forgetThread, settleThreads, stop],
+    [canForget, canMark, canRestore, canSettle, forgetThread, markThreads, restoreThreads, settleThreads, stop],
   );
 }

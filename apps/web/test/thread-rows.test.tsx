@@ -27,6 +27,10 @@ const thread = (id: string, over: Partial<SidebarThreadSnapshot> = {}): SidebarT
   unread: false,
   readAt: null,
   settledAt: null,
+  needsYou: false,
+  pinnedAt: null,
+  snoozedUntil: null,
+  section: null,
   ...over,
 });
 

@@ -307,7 +307,7 @@ describe("thread actions", () => {
     ran = true,
   ): ThreadTarget =>
     threadTarget(
-      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null },
+      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null },
       { catalog: machine.catalog === undefined ? row(harness) : machine.catalog, state: machine.state ?? "running", ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}) },
     );
   const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), forget: vi.fn(), copyText: vi.fn(async () => {}), ...over });
@@ -339,7 +339,7 @@ describe("thread actions", () => {
 
   it("a root thread offers Settle on its shortcut, which takes its whole tree and is held while one of it works; a thread under a root offers none", async () => {
     const settle = vi.fn(async () => {});
-    const root = (working: boolean): ThreadTarget => ({ ...thread("completed"), settle: { threadIds: ["thr_1", "thr_2"], working } });
+    const root = (working: boolean): ThreadTarget => ({ ...thread("completed"), root: { threadIds: ["thr_1", "thr_2"], working, pinned: false, settled: false } });
     const actions = resolveActions(threadActions, root(false), threadVerbs({ settle }));
     expect(actionById(actions, "settle")).toMatchObject({ title: THREAD_WORDS.settle, refusal: null, shortcutCommand: "thread.settle" });
     await actionById(actions, "settle").run();
@@ -347,6 +347,31 @@ describe("thread actions", () => {
     expect(actionById(resolveActions(threadActions, root(true), threadVerbs({ settle })), "settle").refusal).toBe("A thread in it is still working");
     expect(actionById(resolveActions(threadActions, root(false), threadVerbs()), "settle").refusal).toBe("This client cannot settle a thread");
     expect(actionIfAny(resolveActions(threadActions, thread("completed"), threadVerbs({ settle })), "settle")).toBeUndefined();
+  });
+
+  it("a live root offers Pin or Unpin and Snooze after Rename, each on the root alone; a folded root offers Restore where Settle stood", async () => {
+    const mark = vi.fn(async () => {});
+    const snooze = vi.fn();
+    const restore = vi.fn(async () => {});
+    const root = (over: Partial<NonNullable<ThreadTarget["root"]>>): ThreadTarget => ({ ...thread("completed"), root: { threadIds: ["thr_1", "thr_2"], working: false, pinned: false, settled: false, ...over } });
+    const live = resolveActions(threadActions, root({}), threadVerbs({ mark, snooze, restore, settle: vi.fn(async () => {}) }));
+    expect(titles(live)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.settle, THREAD_WORDS.rename, THREAD_WORDS.pin, THREAD_WORDS.snooze, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
+    await actionById(live, "pin").run();
+    expect(mark).toHaveBeenCalledWith(["thr_1"], { pinned: true });
+    await actionById(live, "snooze").run();
+    expect(snooze).toHaveBeenCalledWith("thr_1");
+    const pinned = resolveActions(threadActions, root({ pinned: true }), threadVerbs({ mark, snooze }));
+    expect(actionById(pinned, "pin").title).toBe(THREAD_WORDS.unpin);
+    await actionById(pinned, "pin").run();
+    expect(mark).toHaveBeenLastCalledWith(["thr_1"], { pinned: false });
+    const folded = resolveActions(threadActions, root({ settled: true }), threadVerbs({ mark, snooze, restore }));
+    expect(titles(folded)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.restore, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
+    await actionById(folded, "restore").run();
+    expect(restore).toHaveBeenCalledWith(["thr_1", "thr_2"]);
+    // A client with no road to the marks says so, and a thread under a root offers none of them.
+    expect(actionById(resolveActions(threadActions, root({}), threadVerbs()), "pin").refusal).toBe("This client cannot pin or snooze a thread");
+    expect(actionById(resolveActions(threadActions, root({ settled: true }), threadVerbs()), "restore").refusal).toBe("This client cannot restore a thread");
+    expect(["pin", "snooze", "restore"].map(id => actionIfAny(resolveActions(threadActions, thread("completed"), threadVerbs({ mark, snooze, restore })), id))).toEqual([undefined, undefined, undefined]);
   });
 
   it("the Settled row's Settle all read takes every read tree it is handed, and says so when there is none", async () => {

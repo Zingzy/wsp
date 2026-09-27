@@ -2,7 +2,7 @@
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { adoptLoginPath, agentsHere, computerNameHere, daemonBinaryHere, installEach, mcpServerSpec, runningWsp, shimPath, systemService, wspHome, type CliIO } from "@wsp/host";
-import { HOST_WORDS, InitNeedsYou, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
+import { HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { deepLinks, linkInArgv } from "./deep-link.js";
@@ -11,7 +11,7 @@ import { bundleShell, type BundleShell } from "./get-bundle.js";
 import { firstLaunch, homeOf, openHost, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
-import { sayNeedsYou, type Notifier } from "./needs-you.js";
+import { sayOutside, showBadge, type Notifier } from "./needs-you.js";
 import { allowed, fromAppPage, fromOnboardingPage, hostsViewFor, notForThisPage } from "./origin.js";
 import { guardWorkers, loadHostPage } from "./page-session.js";
 import { pagePreviews } from "./previews.js";
@@ -152,15 +152,17 @@ function raiseWindow(win: BrowserWindow): void {
   win.focus();
 }
 
-// A build waiting on the person, or a machine that came up, said over the system while the window is not the one they
-// are looking at. Only the page of the host the window is on speaks here, and only its own sentence: what a
-// notification says is whatever the field holds.
-listen("needs-you:say", (event, need) => {
-  const parsed = InitNeedsYou.safeParse(need);
+// A line the page says outside the app, over the system while the window is not the one they are looking at. Only the
+// page of the host the window is on speaks here, and only its own sentence: what a notification says is whatever the
+// fields hold.
+listen("outside:say", (event, line) => {
+  const parsed = OutsideLine.safeParse(line);
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!parsed.success || win === null) return;
-  sayNeedsYou(parsed.data, { focused: () => win.isFocused(), raise: () => raiseWindow(win), open: () => win.webContents.send("needs-you:open") }, NOTIFIER);
+  sayOutside(parsed.data, { focused: () => win.isFocused(), raise: () => raiseWindow(win), open: () => win.webContents.send("needs-you:open") }, NOTIFIER);
 });
+
+listen("badge:set", (_event, count) => showBadge(count, app));
 
 // The one bridge call the preload answers itself, off the shell's own webUtils: it asks here first, so a page a
 // computer this one does not own serves is handed no path from this computer's desktop.
