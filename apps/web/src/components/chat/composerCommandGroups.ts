@@ -6,13 +6,16 @@
 // announcement instead. What is shared is the drawing, through CommandGroup
 // and CommandGroupLabel.
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
-import type { ComposerCommandItem } from "./ComposerCommandMenu";
+import type { ComposerCommandItem, ComposerSlashItem } from "./ComposerCommandMenu";
 
 export interface ComposerCommandGroup {
   readonly value: string;
   readonly label: string;
   readonly items: ReadonlyArray<ComposerCommandItem>;
 }
+
+/** The heading the person's skills are drawn under, below whatever the harness announced. */
+export const SKILLS_SOURCE = "Skills";
 
 /** The heading over every command whose announcement named no source. It says no more than that, because the
  * announcement says no more than that: nothing in a bare name tells a CLI's own command from a person's skill. */
@@ -25,8 +28,8 @@ const UNSOURCED_VALUE = "commands";
  * the group holding the best row in front, and four heads reordered under `/re` on a real catalog. Groups nothing
  * matched go; the ranking inside the ones left is the one the search has always given.
  */
-export function composerCommandGroups(items: ReadonlyArray<ComposerCommandItem>, query: string): ComposerCommandGroup[] {
-  const bySource = new Map<string, ComposerCommandItem[]>();
+export function composerCommandGroups(items: ReadonlyArray<ComposerSlashItem>, query: string): ComposerCommandGroup[] {
+  const bySource = new Map<string, ComposerSlashItem[]>();
   for (const item of items) {
     const source = item.command.source ?? "";
     const held = bySource.get(source);

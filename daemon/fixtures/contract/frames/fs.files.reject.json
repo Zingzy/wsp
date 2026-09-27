@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "op": "fs.files"
+  },
+  {
+    "id": 1,
+    "op": "fs.files",
+    "cwd": null
+  },
+  {
+    "id": 1,
+    "op": "fs.files",
+    "cwd": "/root/repo",
+    "machineId": 1
+  }
+]

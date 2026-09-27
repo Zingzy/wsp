@@ -80,6 +80,12 @@ export const TUNNEL_CAP = 64;
 export const FS_READ_CAP_BYTES = 2 * 1024 * 1024;
 /** Entries one fs.list carries; total counts the rest. */
 export const FS_LIST_CAP_ENTRIES = 10_000;
+/** Paths one fs.files carries; truncated says there were more. */
+export const FS_FILES_CAP_ENTRIES = 20_000;
+/** Open pull requests, and open issues, one git.prList asks its host for. */
+export const GIT_PR_LIST_CAP = 50;
+/** Characters of an item's body a git.prList carries. */
+export const GIT_PR_LIST_BODY_CAP = 4000;
 /** Paths one fs.search in files mode carries, and hits one in text mode carries; truncated says the walk stopped there. */
 export const FS_SEARCH_CAP_FILES = 5_000;
 export const FS_SEARCH_CAP_HITS = 500;

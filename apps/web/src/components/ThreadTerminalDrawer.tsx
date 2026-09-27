@@ -49,6 +49,8 @@ import { type GhosttyColor, type GhosttyTheme } from "../terminal/ghostty/core";
 import type { TerminalIo } from "../terminal/pty-io";
 import { SHELL_ENDED_LINE, terminalEmptyLine, terminalInputRefusal, terminalPaneTitle, type TerminalPaneState } from "../adapt/index";
 import { StartDaemonButton } from "./DaemonDown";
+import { insertIntoComposer } from "./chat/composerInsert";
+import { terminalExcerptText } from "../composer-editor-mentions";
 import { isTerminalLinkActivation, isTerminalUrl } from "../terminal-links";
 import {
   DEFAULT_THREAD_TERMINAL_HEIGHT,
@@ -62,7 +64,10 @@ const MAX_DRAWER_HEIGHT_RATIO = 0.75;
 const CLEAR_SCREEN = "\x1b[H\x1b[2J\x1b[3J";
 
 /** The verbs that act on the pane's arrangement rather than one surface; the surface adds copy, paste and clear. */
-export type TerminalPaneVerbs = Pick<TerminalVerbs, "split" | "splitVertical" | "newTerminal" | "close">;
+export type TerminalPaneVerbs = Pick<TerminalVerbs, "split" | "splitVertical" | "newTerminal" | "close"> & {
+  /** Puts one terminal's selected lines into the workspace's draft. */
+  readonly addExcerpt?: (terminalId: string, text: string) => void;
+};
 
 /** The terminal's chords are the ones bound while a terminal has focus. */
 const TERMINAL_SHORTCUTS = { context: { terminalFocus: true } };
@@ -262,6 +267,7 @@ export function TerminalViewport({
     const verbs: TerminalVerbs = {
       ...paneVerbs,
       copy: () => copyText(terminal.getSelection()),
+      addToChat: paneVerbs.addExcerpt === undefined ? undefined : () => paneVerbs.addExcerpt?.(terminalId, terminal.getSelection()),
       paste: clipboard !== undefined && typeof clipboard.readText === "function" ? () => terminal.pasteFromClipboard(() => clipboard.readText()) : undefined,
       clear: () => terminal.write(CLEAR_SCREEN),
     };
@@ -817,8 +823,14 @@ export default function ThreadTerminalDrawer({
     return next;
   }, [normalizedTerminalIds, terminalLabelsById]);
   const paneVerbs = useMemo<TerminalPaneVerbs>(
-    () => ({ split: onSplitTerminal, splitVertical: onSplitTerminalVertical, newTerminal: onNewTerminal, close: () => onCloseTerminal(resolvedActiveTerminalId) }),
-    [onCloseTerminal, onNewTerminal, onSplitTerminal, onSplitTerminalVertical, resolvedActiveTerminalId],
+    () => ({
+      split: onSplitTerminal,
+      splitVertical: onSplitTerminalVertical,
+      newTerminal: onNewTerminal,
+      close: () => onCloseTerminal(resolvedActiveTerminalId),
+      addExcerpt: (terminalId: string, text: string) => insertIntoComposer(workspaceId, terminalExcerptText({ label: terminalLabelById.get(terminalId) ?? getTerminalLabel(terminalId), text })),
+    }),
+    [onCloseTerminal, onNewTerminal, onSplitTerminal, onSplitTerminalVertical, resolvedActiveTerminalId, terminalLabelById, workspaceId],
   );
   const toolbar = resolveActions(terminalActions, { hasSelection: false, atSplitLimit: hasReachedSplitLimit }, paneVerbs);
   const splitAction = actionById(toolbar, "split");

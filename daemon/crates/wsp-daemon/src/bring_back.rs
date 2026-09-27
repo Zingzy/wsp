@@ -13,25 +13,28 @@ use crate::paths::OpError;
 /// thing a person reads rather than a whole tree.
 const STAT_FILES: &str = "--stat-count=50";
 
-/// The remote a push goes to: origin where there is one, else the first the checkout names.
-async fn remote_name<R: Runs>(runner: &R, cwd: &Path) -> Result<String, OpError> {
+/// The remote a push goes to: origin where there is one, else the first the checkout names, else none.
+async fn remote_name<R: Runs>(runner: &R, cwd: &Path) -> Result<Option<String>, OpError> {
     let listed = run_git(runner, cwd, &["remote"], None, None).await?;
     check(&listed, "remote")?;
     let text = stdout_text(&listed);
     let mut names = text.lines().map(str::trim).filter(|n| !n.is_empty());
     let first = names.next().map(str::to_owned);
-    match first {
-        None => Err(OpError::plain(words::NO_REMOTE)),
-        Some(one) => Ok(if text.lines().any(|n| n.trim() == "origin") { "origin".to_owned() } else { one }),
-    }
+    Ok(first.map(|one| if text.lines().any(|n| n.trim() == "origin") { "origin".to_owned() } else { one }))
 }
 
-/// Where that remote points, which is what says which git host this project lives on.
-pub(crate) async fn remote_url<R: Runs>(runner: &R, cwd: &Path) -> Result<(String, String), OpError> {
-    let name = remote_name(runner, cwd).await?;
+/// That remote and where it points, which is what says which git host this project lives on; none for a project
+/// with no remote at all.
+pub(crate) async fn remote_if_any<R: Runs>(runner: &R, cwd: &Path) -> Result<Option<(String, String)>, OpError> {
+    let Some(name) = remote_name(runner, cwd).await? else { return Ok(None) };
     let url = run_git(runner, cwd, &["remote", "get-url", &name], None, None).await?;
     check(&url, "remote get-url")?;
-    Ok((name, stdout_text(&url).trim().to_owned()))
+    Ok(Some((name, stdout_text(&url).trim().to_owned())))
+}
+
+/// The same for a push, which a project with no remote has nowhere to go.
+pub(crate) async fn remote_url<R: Runs>(runner: &R, cwd: &Path) -> Result<(String, String), OpError> {
+    remote_if_any(runner, cwd).await?.ok_or_else(|| OpError::plain(words::NO_REMOTE))
 }
 
 /// The branch this checkout is on; a detached head is on none, and there is nothing to bring back from one.
@@ -124,7 +127,7 @@ async fn no_credential<R: Runs>(runner: &R, cwd: &Path, remote: &str, said: &str
 
 /// Pushes the branch this checkout is on, with the base guard ahead of it and the counts a person reads beside it.
 pub(crate) async fn push<R: Runs>(runner: &R, cwd: &Path, named: Option<&str>) -> Result<GitPushReply, OpError> {
-    let remote = remote_name(runner, cwd).await?;
+    let remote = remote_name(runner, cwd).await?.ok_or_else(|| OpError::plain(words::NO_REMOTE))?;
     let base = base_of(runner, cwd, &remote, named).await?;
     let branch = head_for(runner, cwd, &base).await?;
     let from = base_ref(runner, cwd, &remote, &base).await?;

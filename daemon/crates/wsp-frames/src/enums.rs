@@ -98,6 +98,15 @@ pub enum PullRequestState {
     Closed,
 }
 
+/// Which of a git host's two open lists an item came off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostItemKind {
+    PullRequest,
+    Issue,
+}
+
 /// The slave termios ICANON bit as a word: line when set, raw when not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]

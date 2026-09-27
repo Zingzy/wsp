@@ -51,6 +51,9 @@ import {
   EXEC_OUTPUT_MAX,
   EXEC_TIMEOUT_DEFAULT_MS,
   FS_LIST_CAP_ENTRIES,
+  FS_FILES_CAP_ENTRIES,
+  GIT_PR_LIST_CAP,
+  GIT_PR_LIST_BODY_CAP,
   FS_READ_CAP_BYTES,
   FS_SEARCH_CAP_FILES,
   FS_SEARCH_CAP_HITS,
@@ -76,6 +79,8 @@ import {
   GUEST_WSP_PATH,
   GitPrReply,
   GitPrStateReply,
+  GitPrListReply,
+  FsFilesReply,
   GitPushReply,
   GuestCliMessage,
   GuestOpenReply,
@@ -304,6 +309,9 @@ const numbers = (): Record<string, number | string | readonly string[]> => ({
   tunnelCap: TUNNEL_CAP,
   fsReadCapBytes: FS_READ_CAP_BYTES,
   fsListCapEntries: FS_LIST_CAP_ENTRIES,
+  fsFilesCapEntries: FS_FILES_CAP_ENTRIES,
+  gitPrListCap: GIT_PR_LIST_CAP,
+  gitPrListBodyCap: GIT_PR_LIST_BODY_CAP,
   fsSearchCapFiles: FS_SEARCH_CAP_FILES,
   fsSearchCapHits: FS_SEARCH_CAP_HITS,
   gitDiffCapBytes: GIT_DIFF_CAP_BYTES,
@@ -502,6 +510,19 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
     schema: GitPrStateReply,
     samples: [{ pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "closed", host: "github.com" } }, {}],
   },
+  GitPrListReply: {
+    schema: GitPrListReply,
+    samples: [
+      {
+        items: [
+          { kind: "pull-request", number: 42, title: "Login breaks on Safari", body: "Safari drops the cookie.", url: "https://github.com/o/r/pull/42" },
+          { kind: "issue", number: 7, title: "Add dark mode", body: "", url: "https://github.com/o/r/issues/7" },
+        ],
+      },
+      { items: [], note: "no signed-in command line for github.com is on this computer, so its pull requests and issues are not listed" },
+    ],
+  },
+  FsFilesReply: { schema: FsFilesReply, samples: [{ files: ["README.md", "src/ChatView.tsx"], truncated: false }, { files: [], truncated: true }] },
   GuestOpenReply: { schema: GuestOpenReply, samples: [{ session: "g1" }] },
   HostFolderListing: {
     schema: HostFolderListing,

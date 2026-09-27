@@ -110,6 +110,34 @@ export const HERE_AGENTS = {
     },
     { name: "linear", agents: ["claude"], transport: { kind: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer ${LINEAR_API_KEY}" } } },
   ],
+  /** Skills in an agent's own folder, one the seeded session announces and one it does not, so the / menu shows a
+   * skill sent as the command Claude knows and one sent as $name. */
+  skills: [
+    { name: "why", agent: "claude", description: "Why a decision was made, from the history behind it." },
+    { name: "release-notes", agent: "claude", description: "Draft the release notes for what merged since the last tag." },
+  ],
+};
+
+/** The files a project on this computer holds beyond its first two, as the composer's @ menu lists them: the ones the
+ * seeded transcripts talk about, so a picked file is one the thread already names. */
+export const HERE_PROJECT_FILES = [
+  "apps/api/src/redirect.ts",
+  "apps/api/src/middleware.ts",
+  "apps/api/src/routes/links.ts",
+  "apps/api/test/redirect.test.ts",
+  "apps/web/src/pages/Links.tsx",
+  "apps/web/src/components/LinkChart.tsx",
+  "package.json",
+];
+
+/** What `gh` answers for a project on this computer: its open pull requests and issues, as the # menu lists them.
+ * The stand-in answers these in gh's own JSON, so the daemon reads them exactly as it reads the real command's. */
+export const HERE_HOST_ITEMS = {
+  pr: [
+    { number: 41, title: "Run the canonical host check after the slash rewrite", body: "Every request to /r/abc/ bounced once through /r/abc. The rewrite runs first now.", url: "https://github.com/you/spoo/pull/41" },
+    { number: 38, title: "Rate limit the redirect endpoint", body: "Caps each client at 60 redirects a minute.", url: "https://github.com/you/spoo/pull/38" },
+  ],
+  issue: [{ number: 36, title: "Short links with a trailing slash bounce twice", body: "Seen on /r/abc/ in Safari.", url: "https://github.com/you/spoo/issues/36" }],
 };
 
 /** A project as the host records one: one computer, the source that computer sees and the folder a workspace of it
