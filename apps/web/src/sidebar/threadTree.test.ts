@@ -170,6 +170,13 @@ describe("the sidebar's tiles", () => {
     expect(settled).toEqual([]);
   });
 
+  it("orders roots that started in the same millisecond by id, whatever order the rows arrive in", () => {
+    const at = ago(1);
+    const tie = (ids: string[]) => shape(sidebarTiles([row("ws_a", "pr_1", ids.map(id => thread(id, "ws_a", null, { startedAt: at })))], { picked: null, nowMs: NOW }).live);
+    expect(tie(["th_one", "th_two"])).toEqual(["th_one", "th_two"]);
+    expect(tie(["th_two", "th_one"])).toEqual(["th_one", "th_two"]);
+  });
+
   it("under a picked project lists that project's roots alone, each keeping its children on other projects", () => {
     const rows = [
       row("ws_a", "pr_1", [thread("lead", "ws_a")]),
