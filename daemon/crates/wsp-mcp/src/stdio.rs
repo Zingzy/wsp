@@ -87,13 +87,13 @@ fn take(line: &[u8], host: &Arc<Host>, answer: &mpsc::UnboundedSender<String>, c
     let id = id.to_string();
     match method.as_str() {
         "initialize" => {
-            let _ = answer.send(result(&id, &greeting(params.as_ref())));
+            let _ = answer.send(result(&id, &greeting(params.as_ref(), host.cloud())));
         }
         "ping" => {
             let _ = answer.send(result(&id, "{}"));
         }
         "tools/list" => {
-            let listed: Vec<String> = tools::TOOLS.iter().map(|tool| compact(tool.listed)).collect();
+            let listed: Vec<String> = tools::listed(host.cloud()).map(compact).collect();
             let _ = answer.send(result(&id, &format!(r#"{{"tools":[{}]}}"#, listed.join(","))));
         }
         "tools/call" => {
@@ -113,8 +113,9 @@ fn take(line: &[u8], host: &Arc<Host>, answer: &mpsc::UnboundedSender<String>, c
     }
 }
 
-/// The version the client asked for where this server speaks it, else the newest it speaks.
-fn greeting(params: Option<&Value>) -> String {
+/// The version the client asked for where this server speaks it, else the newest it speaks, and the instructions for
+/// the state WSP_CLOUD names.
+fn greeting(params: Option<&Value>, cloud: bool) -> String {
     let server = record::server();
     let asked = params.and_then(|p| p["protocolVersion"].as_str());
     let version = asked.filter(|v| server.protocol_versions.iter().any(|s| s == v)).unwrap_or(&server.latest_protocol_version);
@@ -122,16 +123,16 @@ fn greeting(params: Option<&Value>) -> String {
         protocol_version: version,
         capabilities: serde_json::json!({ "tools": { "listChanged": true } }),
         server_info: serde_json::json!({ "name": server.name, "version": server.version }),
-        instructions: &server.instructions,
+        instructions: if cloud { &server.instructions.cloud_on } else { &server.instructions.cloud_off },
     };
     serde_json::to_string(&greeting).unwrap_or_default()
 }
 
 async fn called(host: Arc<Host>, asked: CallParams) -> String {
-    let Some(tool) = tools::named(&asked.name) else {
+    let Some((tool, entry)) = tools::named(&asked.name, host.cloud()) else {
         return refused_text(&format!("MCP error -32602: Tool {} not found", asked.name));
     };
-    let arguments = match refused_before_call(tool.name, tool.listed, asked.arguments) {
+    let arguments = match refused_before_call(tool.name, entry, asked.arguments) {
         Ok(arguments) => arguments,
         Err(said) => return refused_text(&said),
     };
@@ -206,7 +207,7 @@ mod tests {
 
     #[test]
     fn a_call_is_refused_before_its_tool_runs_as_the_sdk_refuses_it() {
-        let listed = include_str!("../record/tools/exec.json");
+        let listed = tools::entry_in(include_str!("../record/tools/exec.json"), false).unwrap();
         let refused = refused_before_call("exec", listed, Some(json!({ "workspace": 5, "argv": [] }))).unwrap_err();
         assert_eq!(refused, "MCP error -32602: Input validation error: Invalid arguments for tool exec: Expected string, received number at workspace\nArray must contain at least 1 element(s) at argv");
         let refused = refused_before_call("exec", listed, None).unwrap_err();

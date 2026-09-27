@@ -13,7 +13,15 @@
     "url": "WSP_HOST_URL",
     "token": "WSP_HOST_TOKEN",
     "key": "WSP_HOST_KEY",
-    "startedBy": "WSP_STARTED_BY"
+    "startedBy": "WSP_STARTED_BY",
+    "cloud": "WSP_CLOUD"
+  },
+  "clouds": {
+    "0": false,
+    "1": true,
+    "": false,
+    "true": false,
+    " 1": false
   },
   "startedBy": "verb",
   "wsPath": "/ws",

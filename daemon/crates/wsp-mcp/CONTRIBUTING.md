@@ -4,7 +4,7 @@
 
 ## 1. Record its answers
 
-The tool's entry (name, description, both schemas) is already in `record/tools/<name>.json`: the record test writes every tool the TypeScript server lists. What you add is what the host answers.
+The tool's entry (name, description, both schemas) is already in `record/tools/<name>.json`, once as the TypeScript server lists it with `WSP_CLOUD` off and once with it on, null in a state that lists no such tool. The record test writes every tool, and the server serves the state its own environment names. What you add is what the host answers.
 
 In `packages/host/test/mcp-record.test.ts`, add the tool to `ANSWERED`: one case per shape worth holding, each with the arguments and the frame the host answers every op the tool asks. Put the awkward bytes in the frames (a C1 control, a quote, text past ASCII, a fraction), and include one refusal. Run the test; it fails and prints a folder. Copy it over as it says. `tests/contract.rs` now fails on your tool with `Tool <name> not found`.
 

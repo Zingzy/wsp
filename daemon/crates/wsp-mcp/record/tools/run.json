@@ -1,105 +1,212 @@
 {
-  "name": "run",
-  "description": "Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names, else the workspace's own project, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. A turn ends when the agent process exits, not at its reply, and the thread reads running until then. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. The notify line goes once, at the reply, and a reply given with background tasks still running goes once they are done. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "workspace": {
-        "type": "string",
-        "description": "the workspace's name, or its id when two share a name; absent, the thread goes to the workspace holding the project the client's own folder is a repo of, in that project, and the reply's first line says where it went"
-      },
-      "task": {
-        "type": "string"
-      },
-      "agent": {
-        "type": "string",
-        "description": "the agent to run in the thread, one of claude, codex; absent means the host's default"
-      },
-      "model": {
-        "type": "string",
-        "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"
-      },
-      "effort": {
-        "type": "string",
-        "description": "the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"
-      },
-      "access": {
-        "type": "string",
-        "description": "the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"
-      },
-      "cwd": {
-        "type": "string",
-        "description": "the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise"
-      },
-      "notify": {
-        "type": "array",
-        "items": {
+  "cloudOff": {
+    "name": "run",
+    "description": "Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names, else the workspace's own project, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. A turn ends when the agent process exits, not at its reply, and the thread reads running until then. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. The notify line goes once, at the reply, and a reply given with background tasks still running goes once they are done. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name; absent, the thread goes to the workspace holding the project the client's own folder is a repo of, in that project, and the reply's first line says where it went"
+        },
+        "task": {
           "type": "string"
         },
-        "minItems": 1,
-        "description": "who is told each time a turn of the new thread ends, each one a thread (by id, or a prefix of it) the line goes into as a message carrying that turn's whole reply, or me, which is the thread this call came out of when it came out of one and otherwise the person's app, where the line is its last reply line alone. Several targets each get the line once, which is how a builder's end reaches its orchestrator and a reviewer together; a target whose thread is gone by then falls back to the person, and the new thread's own id is refused. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report."
+        "agent": {
+          "type": "string",
+          "description": "the agent to run in the thread, one of claude, codex; absent means the host's default"
+        },
+        "model": {
+          "type": "string",
+          "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"
+        },
+        "effort": {
+          "type": "string",
+          "description": "the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"
+        },
+        "access": {
+          "type": "string",
+          "description": "the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise"
+        },
+        "notify": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "who is told each time a turn of the new thread ends, each one a thread (by id, or a prefix of it) the line goes into as a message carrying that turn's whole reply, or me, which is the thread this call came out of when it came out of one and otherwise the person's app, where the line is its last reply line alone. Several targets each get the line once, which is how a builder's end reaches its orchestrator and a reviewer together; a target whose thread is gone by then falls back to the person, and the new thread's own id is refused. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report."
+        },
+        "title": {
+          "type": "string",
+          "description": "the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it"
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: PNG, JPEG, GIF or WebP, at most 5 and 10 MB each. The host reads each file and sends its bytes, so the machine never reaches back for this computer’s files; a message to an agent that reads no image is refused naming that agent."
+        },
+        "detach": {
+          "type": "boolean",
+          "description": "true answers with the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever notify named; for a turn that runs for minutes or an hour, so this call does not block for it. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report."
+        }
       },
-      "title": {
-        "type": "string",
-        "description": "the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it"
-      },
-      "images": {
-        "type": "array",
-        "items": {
+      "required": [
+        "task"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "threadId": {
           "type": "string"
         },
-        "description": "paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: PNG, JPEG, GIF or WebP, at most 5 and 10 MB each. The host reads each file and sends its bytes, so the machine never reaches back for this computer’s files; a message to an agent that reads no image is refused naming that agent."
+        "workspaceId": {
+          "type": "string"
+        },
+        "harness": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string",
+          "description": "the reply, complete; absent under detach, where the turn is still running and its end reaches whoever the start's notify named"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "started",
+            "steered",
+            "queued"
+          ]
+        },
+        "afterCut": {
+          "type": "boolean",
+          "const": true
+        }
       },
-      "detach": {
-        "type": "boolean",
-        "description": "true answers with the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever notify named; for a turn that runs for minutes or an hour, so this call does not block for it. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report."
-      }
+      "required": [
+        "threadId",
+        "workspaceId",
+        "harness",
+        "outcome"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     },
-    "required": [
-      "task"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   },
-  "outputSchema": {
-    "type": "object",
-    "properties": {
-      "threadId": {
-        "type": "string"
+  "cloudOn": {
+    "name": "run",
+    "description": "Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names, else the workspace's own project, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. A turn ends when the agent process exits, not at its reply, and the thread reads running until then. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. The notify line goes once, at the reply, and a reply given with background tasks still running goes once they are done. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name; absent, the thread goes to the workspace holding the project the client's own folder is a repo of, in that project, and the reply's first line says where it went"
+        },
+        "task": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string",
+          "description": "the agent to run in the thread, one of claude, codex; absent means the host's default"
+        },
+        "model": {
+          "type": "string",
+          "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"
+        },
+        "effort": {
+          "type": "string",
+          "description": "the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"
+        },
+        "access": {
+          "type": "string",
+          "description": "the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"
+        },
+        "cwd": {
+          "type": "string",
+          "description": "the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise"
+        },
+        "notify": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "who is told each time a turn of the new thread ends, each one a thread (by id, or a prefix of it) the line goes into as a message carrying that turn's whole reply, or me, which is the thread this call came out of when it came out of one and otherwise the person's app, where the line is its last reply line alone. Several targets each get the line once, which is how a builder's end reaches its orchestrator and a reviewer together; a target whose thread is gone by then falls back to the person, and the new thread's own id is refused. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report."
+        },
+        "title": {
+          "type": "string",
+          "description": "the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it"
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: PNG, JPEG, GIF or WebP, at most 5 and 10 MB each. The host reads each file and sends its bytes, so the machine never reaches back for this computer’s files; a message to an agent that reads no image is refused naming that agent."
+        },
+        "detach": {
+          "type": "boolean",
+          "description": "true answers with the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever notify named; for a turn that runs for minutes or an hour, so this call does not block for it. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report."
+        }
       },
-      "workspaceId": {
-        "type": "string"
-      },
-      "harness": {
-        "type": "string"
-      },
-      "text": {
-        "type": "string",
-        "description": "the reply, complete; absent under detach, where the turn is still running and its end reaches whoever the start's notify named"
-      },
-      "outcome": {
-        "type": "string",
-        "enum": [
-          "started",
-          "steered",
-          "queued"
-        ]
-      },
-      "afterCut": {
-        "type": "boolean",
-        "const": true
-      }
+      "required": [
+        "task"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     },
-    "required": [
-      "threadId",
-      "workspaceId",
-      "harness",
-      "outcome"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
-  },
-  "execution": {
-    "taskSupport": "forbidden"
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "harness": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string",
+          "description": "the reply, complete; absent under detach, where the turn is still running and its end reaches whoever the start's notify named"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "started",
+            "steered",
+            "queued"
+          ]
+        },
+        "afterCut": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "threadId",
+        "workspaceId",
+        "harness",
+        "outcome"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   }
 }

@@ -1,32 +1,98 @@
 {
-  "name": "setup",
-  "description": "The cloud setup on this host, as the app's Set up cloud machines modal reads it: which keys the host holds (their presence, never a value), the agents on this computer and whether each carries the wsp tools, what a machine costs, and the init job when one runs or ran: its road, phase, screens, rows and progress. The rows are the image's stages, each sign-in with the page the person opens on this computer and the code it asks for while it waits, then its state, and the first workspace once forked. Read it to tell the person where the build is and which sign-in waits for them; the build is started from the app's sidebar row, and wsp init --recipe from a shell is the same run.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {},
-    "$schema": "http://json-schema.org/draft-07/schema#"
-  },
-  "outputSchema": {
-    "type": "object",
-    "properties": {
-      "setup": {
-        "type": "object",
-        "properties": {
-          "keys": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "boolean"
-            }
-          },
-          "keyProvider": {
-            "type": "string"
-          },
-          "home": {
-            "type": "string"
-          },
-          "agents": {
-            "type": "array",
-            "items": {
+  "cloudOff": {
+    "name": "setup",
+    "description": "The setup on this host, as the app's Settings reads it: which keys the host holds (their presence, never a value), the agents on this computer and whether each carries the wsp tools, and the init job when one runs or ran: its road, phase, screens, rows and progress. The rows are the image's stages, each sign-in with the page the person opens on this computer and the code it asks for while it waits, then its state, and the first workspace once forked. Read it to tell the person where the build is and which sign-in waits for them; the build is started from the app's Settings, and wsp init --recipe from a shell is the same run.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "setup": {
+          "type": "object",
+          "properties": {
+            "keys": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "boolean"
+              }
+            },
+            "keyProvider": {
+              "type": "string"
+            },
+            "home": {
+              "type": "string"
+            },
+            "agents": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "configured": {
+                    "type": "boolean"
+                  },
+                  "takesTools": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "configured",
+                  "takesTools"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "pricing": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "size": {
+                      "type": "object",
+                      "properties": {
+                        "cpu": {
+                          "type": "number"
+                        },
+                        "memMb": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "cpu",
+                        "memMb"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rateUsdPerHour": {
+                      "type": "number"
+                    },
+                    "builderDiskGb": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "size",
+                    "rateUsdPerHour"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "place": {
               "type": "object",
               "properties": {
                 "id": {
@@ -34,572 +100,1113 @@
                 },
                 "name": {
                   "type": "string"
-                },
-                "configured": {
-                  "type": "boolean"
-                },
-                "takesTools": {
-                  "type": "boolean"
                 }
               },
               "required": [
                 "id",
-                "name",
-                "configured",
-                "takesTools"
+                "name"
               ],
               "additionalProperties": false
-            }
-          },
-          "pricing": {
-            "anyOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "size": {
-                    "type": "object",
-                    "properties": {
-                      "cpu": {
-                        "type": "number"
+            },
+            "forksOn": {
+              "type": "string"
+            },
+            "buildRefusal": {
+              "type": "string"
+            },
+            "job": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "road": {
+                      "type": "string",
+                      "enum": [
+                        "manual",
+                        "agent",
+                        "terminal"
+                      ]
+                    },
+                    "phase": {
+                      "type": "string",
+                      "enum": [
+                        "agent",
+                        "reading",
+                        "answering",
+                        "building",
+                        "signing-in",
+                        "sealing",
+                        "finishing",
+                        "done",
+                        "failed",
+                        "cancelled"
+                      ]
+                    },
+                    "keys": {
+                      "$ref": "#/properties/setup/properties/keys"
+                    },
+                    "step": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "stoppable": {
+                      "type": "boolean"
+                    },
+                    "disk": {
+                      "type": "object",
+                      "properties": {
+                        "fixed": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "total": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
                       },
-                      "memMb": {
-                        "type": "number"
+                      "required": [
+                        "fixed",
+                        "total"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "screens": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "enum": [
+                              "agents",
+                              "tools",
+                              "also",
+                              "logins",
+                              "wsp"
+                            ]
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "top": {
+                            "type": "string"
+                          },
+                          "items": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "size": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number",
+                                      "minimum": 0
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "why": {
+                                  "type": "string"
+                                },
+                                "group": {
+                                  "type": "string"
+                                },
+                                "detail": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "lock": {
+                                  "type": "string",
+                                  "enum": [
+                                    "on",
+                                    "off"
+                                  ]
+                                },
+                                "choices": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "label"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "key": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "saved": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "name",
+                                    "saved"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "state": {
+                                  "type": "string"
+                                },
+                                "mark": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label",
+                                "detail"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "ticks": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "answers": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "footer": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "text": {
+                                  "type": "string"
+                                },
+                                "tone": {
+                                  "type": "string",
+                                  "enum": [
+                                    "yellow",
+                                    "yellowBright",
+                                    "red"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "text"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "tally": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "title",
+                          "top",
+                          "items",
+                          "ticks",
+                          "answers",
+                          "footer"
+                        ],
+                        "additionalProperties": false
                       }
                     },
-                    "required": [
-                      "cpu",
-                      "memMb"
-                    ],
-                    "additionalProperties": false
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "fact",
+                              "stage",
+                              "sign-in",
+                              "secret",
+                              "agent",
+                              "workspace",
+                              "project",
+                              "machine"
+                            ]
+                          },
+                          "tool": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "login": {
+                            "type": "string",
+                            "enum": [
+                              "signed-in",
+                              "not-signed-in",
+                              "not-verified",
+                              "skipped",
+                              "copied",
+                              "deferred"
+                            ]
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "page": {
+                            "type": "string"
+                          },
+                          "code": {
+                            "type": "string"
+                          },
+                          "finish": {
+                            "type": "string",
+                            "enum": [
+                              "callback",
+                              "code",
+                              "none"
+                            ]
+                          },
+                          "ms": {
+                            "type": "number"
+                          },
+                          "since": {
+                            "type": "number"
+                          },
+                          "lines": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "kind",
+                          "label",
+                          "state"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "progress": {
+                      "type": "object",
+                      "properties": {
+                        "done": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "done",
+                        "total"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "needsYou": {
+                      "type": "object",
+                      "properties": {
+                        "what": {
+                          "type": "string"
+                        },
+                        "since": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "what",
+                        "since"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "drafts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "at": {
+                            "type": "string"
+                          },
+                          "ticks": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "answers": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "at",
+                          "ticks",
+                          "answers"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "log": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "thread": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "workspaceId": {
+                          "type": "string"
+                        },
+                        "session": {
+                          "type": "string"
+                        },
+                        "harness": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "workspaceId",
+                        "session",
+                        "harness"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "line": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "keyRefused": {
+                      "type": "boolean"
+                    },
+                    "golden": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "version"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "workspace": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "place": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    }
                   },
-                  "rateUsdPerHour": {
-                    "type": "number"
-                  },
-                  "builderDiskGb": {
-                    "type": "number",
-                    "exclusiveMinimum": 0
-                  }
+                  "required": [
+                    "id",
+                    "road",
+                    "phase",
+                    "keys",
+                    "step",
+                    "stoppable",
+                    "screens",
+                    "rows",
+                    "progress",
+                    "log"
+                  ],
+                  "additionalProperties": false
                 },
-                "required": [
-                  "size",
-                  "rateUsdPerHour"
-                ],
-                "additionalProperties": false
-              },
-              {
-                "type": "null"
-              }
-            ]
+                {
+                  "type": "null"
+                }
+              ]
+            }
           },
-          "place": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
+          "required": [
+            "keys",
+            "home",
+            "agents",
+            "pricing",
+            "job"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "setup"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "setup",
+    "description": "The setup on this host, as the app's Settings reads it: which keys the host holds (their presence, never a value), the agents on this computer and whether each carries the wsp tools, what a machine costs, and the init job when one runs or ran: its road, phase, screens, rows and progress. The rows are the image's stages, each sign-in with the page the person opens on this computer and the code it asks for while it waits, then its state, and the first workspace once forked. Read it to tell the person where the build is and which sign-in waits for them; the build is started from the app's Settings, and wsp init --recipe from a shell is the same run.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "setup": {
+          "type": "object",
+          "properties": {
+            "keys": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "boolean"
               }
             },
-            "required": [
-              "id",
-              "name"
-            ],
-            "additionalProperties": false
-          },
-          "forksOn": {
-            "type": "string"
-          },
-          "buildRefusal": {
-            "type": "string"
-          },
-          "job": {
-            "anyOf": [
-              {
+            "keyProvider": {
+              "type": "string"
+            },
+            "home": {
+              "type": "string"
+            },
+            "agents": {
+              "type": "array",
+              "items": {
                 "type": "object",
                 "properties": {
                   "id": {
                     "type": "string"
                   },
-                  "road": {
-                    "type": "string",
-                    "enum": [
-                      "manual",
-                      "agent",
-                      "terminal"
-                    ]
-                  },
-                  "phase": {
-                    "type": "string",
-                    "enum": [
-                      "agent",
-                      "reading",
-                      "answering",
-                      "building",
-                      "signing-in",
-                      "sealing",
-                      "finishing",
-                      "done",
-                      "failed",
-                      "cancelled"
-                    ]
-                  },
-                  "keys": {
-                    "$ref": "#/properties/setup/properties/keys"
-                  },
-                  "step": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "stoppable": {
-                    "type": "boolean"
-                  },
-                  "disk": {
-                    "type": "object",
-                    "properties": {
-                      "fixed": {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      "total": {
-                        "type": "number",
-                        "exclusiveMinimum": 0
-                      }
-                    },
-                    "required": [
-                      "fixed",
-                      "total"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "screens": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "enum": [
-                            "agents",
-                            "tools",
-                            "also",
-                            "logins",
-                            "wsp"
-                          ]
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "top": {
-                          "type": "string"
-                        },
-                        "items": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "label": {
-                                "type": "string"
-                              },
-                              "size": {
-                                "anyOf": [
-                                  {
-                                    "type": "number",
-                                    "minimum": 0
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "why": {
-                                "type": "string"
-                              },
-                              "group": {
-                                "type": "string"
-                              },
-                              "detail": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
-                              },
-                              "lock": {
-                                "type": "string",
-                                "enum": [
-                                  "on",
-                                  "off"
-                                ]
-                              },
-                              "choices": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "value": {
-                                      "type": "string"
-                                    },
-                                    "label": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "value",
-                                    "label"
-                                  ],
-                                  "additionalProperties": false
-                                }
-                              },
-                              "key": {
-                                "type": "object",
-                                "properties": {
-                                  "name": {
-                                    "type": "string"
-                                  },
-                                  "saved": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "required": [
-                                  "name",
-                                  "saved"
-                                ],
-                                "additionalProperties": false
-                              },
-                              "state": {
-                                "type": "string"
-                              },
-                              "mark": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "label",
-                              "detail"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "ticks": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
-                        },
-                        "answers": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "type": "string"
-                          }
-                        },
-                        "footer": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "text": {
-                                "type": "string"
-                              },
-                              "tone": {
-                                "type": "string",
-                                "enum": [
-                                  "yellow",
-                                  "yellowBright",
-                                  "red"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "text"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "tally": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "title",
-                        "top",
-                        "items",
-                        "ticks",
-                        "answers",
-                        "footer"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "rows": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string"
-                        },
-                        "kind": {
-                          "type": "string",
-                          "enum": [
-                            "fact",
-                            "stage",
-                            "sign-in",
-                            "secret",
-                            "agent",
-                            "workspace",
-                            "project",
-                            "machine"
-                          ]
-                        },
-                        "tool": {
-                          "type": "string"
-                        },
-                        "label": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "type": "string"
-                        },
-                        "login": {
-                          "type": "string",
-                          "enum": [
-                            "signed-in",
-                            "not-signed-in",
-                            "not-verified",
-                            "skipped",
-                            "copied",
-                            "deferred"
-                          ]
-                        },
-                        "detail": {
-                          "type": "string"
-                        },
-                        "page": {
-                          "type": "string"
-                        },
-                        "code": {
-                          "type": "string"
-                        },
-                        "finish": {
-                          "type": "string",
-                          "enum": [
-                            "callback",
-                            "code",
-                            "none"
-                          ]
-                        },
-                        "ms": {
-                          "type": "number"
-                        },
-                        "since": {
-                          "type": "number"
-                        },
-                        "lines": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "kind",
-                        "label",
-                        "state"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "progress": {
-                    "type": "object",
-                    "properties": {
-                      "done": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "total": {
-                        "type": "integer",
-                        "minimum": 0
-                      }
-                    },
-                    "required": [
-                      "done",
-                      "total"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "needsYou": {
-                    "type": "object",
-                    "properties": {
-                      "what": {
-                        "type": "string"
-                      },
-                      "since": {
-                        "type": "integer",
-                        "minimum": 0
-                      }
-                    },
-                    "required": [
-                      "what",
-                      "since"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "drafts": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "at": {
-                          "type": "string"
-                        },
-                        "ticks": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
-                        },
-                        "answers": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "type": "string"
-                          }
-                        }
-                      },
-                      "required": [
-                        "at",
-                        "ticks",
-                        "answers"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "log": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "thread": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "workspaceId": {
-                        "type": "string"
-                      },
-                      "session": {
-                        "type": "string"
-                      },
-                      "harness": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "workspaceId",
-                      "session",
-                      "harness"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "line": {
+                  "name": {
                     "type": "string"
                   },
-                  "error": {
-                    "type": "string"
-                  },
-                  "keyRefused": {
+                  "configured": {
                     "type": "boolean"
                   },
-                  "golden": {
-                    "type": "object",
-                    "properties": {
-                      "version": {
-                        "type": "integer"
-                      }
-                    },
-                    "required": [
-                      "version"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "workspace": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "name"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "place": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "id",
-                      "name"
-                    ],
-                    "additionalProperties": false
+                  "takesTools": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "id",
-                  "road",
-                  "phase",
-                  "keys",
-                  "step",
-                  "stoppable",
-                  "screens",
-                  "rows",
-                  "progress",
-                  "log"
+                  "name",
+                  "configured",
+                  "takesTools"
                 ],
                 "additionalProperties": false
-              },
-              {
-                "type": "null"
               }
-            ]
-          }
-        },
-        "required": [
-          "keys",
-          "home",
-          "agents",
-          "pricing",
-          "job"
-        ],
-        "additionalProperties": false
-      }
+            },
+            "pricing": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "size": {
+                      "type": "object",
+                      "properties": {
+                        "cpu": {
+                          "type": "number"
+                        },
+                        "memMb": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "cpu",
+                        "memMb"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rateUsdPerHour": {
+                      "type": "number"
+                    },
+                    "builderDiskGb": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "size",
+                    "rateUsdPerHour"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "place": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "forksOn": {
+              "type": "string"
+            },
+            "buildRefusal": {
+              "type": "string"
+            },
+            "job": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "road": {
+                      "type": "string",
+                      "enum": [
+                        "manual",
+                        "agent",
+                        "terminal"
+                      ]
+                    },
+                    "phase": {
+                      "type": "string",
+                      "enum": [
+                        "agent",
+                        "reading",
+                        "answering",
+                        "building",
+                        "signing-in",
+                        "sealing",
+                        "finishing",
+                        "done",
+                        "failed",
+                        "cancelled"
+                      ]
+                    },
+                    "keys": {
+                      "$ref": "#/properties/setup/properties/keys"
+                    },
+                    "step": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "stoppable": {
+                      "type": "boolean"
+                    },
+                    "disk": {
+                      "type": "object",
+                      "properties": {
+                        "fixed": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "total": {
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": [
+                        "fixed",
+                        "total"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "screens": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "enum": [
+                              "agents",
+                              "tools",
+                              "also",
+                              "logins",
+                              "wsp"
+                            ]
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "top": {
+                            "type": "string"
+                          },
+                          "items": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "size": {
+                                  "anyOf": [
+                                    {
+                                      "type": "number",
+                                      "minimum": 0
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "why": {
+                                  "type": "string"
+                                },
+                                "group": {
+                                  "type": "string"
+                                },
+                                "detail": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "lock": {
+                                  "type": "string",
+                                  "enum": [
+                                    "on",
+                                    "off"
+                                  ]
+                                },
+                                "choices": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "value": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "value",
+                                      "label"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "key": {
+                                  "type": "object",
+                                  "properties": {
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "saved": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "name",
+                                    "saved"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "state": {
+                                  "type": "string"
+                                },
+                                "mark": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label",
+                                "detail"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "ticks": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "answers": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          },
+                          "footer": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "text": {
+                                  "type": "string"
+                                },
+                                "tone": {
+                                  "type": "string",
+                                  "enum": [
+                                    "yellow",
+                                    "yellowBright",
+                                    "red"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "text"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "tally": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "title",
+                          "top",
+                          "items",
+                          "ticks",
+                          "answers",
+                          "footer"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "fact",
+                              "stage",
+                              "sign-in",
+                              "secret",
+                              "agent",
+                              "workspace",
+                              "project",
+                              "machine"
+                            ]
+                          },
+                          "tool": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string"
+                          },
+                          "login": {
+                            "type": "string",
+                            "enum": [
+                              "signed-in",
+                              "not-signed-in",
+                              "not-verified",
+                              "skipped",
+                              "copied",
+                              "deferred"
+                            ]
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "page": {
+                            "type": "string"
+                          },
+                          "code": {
+                            "type": "string"
+                          },
+                          "finish": {
+                            "type": "string",
+                            "enum": [
+                              "callback",
+                              "code",
+                              "none"
+                            ]
+                          },
+                          "ms": {
+                            "type": "number"
+                          },
+                          "since": {
+                            "type": "number"
+                          },
+                          "lines": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "kind",
+                          "label",
+                          "state"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "progress": {
+                      "type": "object",
+                      "properties": {
+                        "done": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "done",
+                        "total"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "needsYou": {
+                      "type": "object",
+                      "properties": {
+                        "what": {
+                          "type": "string"
+                        },
+                        "since": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "what",
+                        "since"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "drafts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "at": {
+                            "type": "string"
+                          },
+                          "ticks": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "answers": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "at",
+                          "ticks",
+                          "answers"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "log": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "thread": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "workspaceId": {
+                          "type": "string"
+                        },
+                        "session": {
+                          "type": "string"
+                        },
+                        "harness": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "workspaceId",
+                        "session",
+                        "harness"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "line": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "keyRefused": {
+                      "type": "boolean"
+                    },
+                    "golden": {
+                      "type": "object",
+                      "properties": {
+                        "version": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "version"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "workspace": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "place": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "road",
+                    "phase",
+                    "keys",
+                    "step",
+                    "stoppable",
+                    "screens",
+                    "rows",
+                    "progress",
+                    "log"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "keys",
+            "home",
+            "agents",
+            "pricing",
+            "job"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "setup"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     },
-    "required": [
-      "setup"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
-  },
-  "execution": {
-    "taskSupport": "forbidden"
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   }
 }

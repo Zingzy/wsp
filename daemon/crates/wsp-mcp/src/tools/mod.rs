@@ -9,7 +9,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use serde_json::Value;
 
 use crate::failure::Failure;
@@ -18,7 +19,8 @@ use crate::json::js_line;
 
 pub struct Tool {
     pub name: &'static str,
-    /// The entry tools/list serves, as the TypeScript server lists it: name, description, both schemas.
+    /// The entries tools/list serves, as the TypeScript server lists them with WSP_CLOUD off and on: name,
+    /// description, both schemas, and null in a state that lists no such tool.
     pub listed: &'static str,
     pub call: fn(Arc<Host>, Value) -> Call,
 }
@@ -27,8 +29,29 @@ pub type Call = Pin<Box<dyn Future<Output = Result<Answer, Refused>> + Send>>;
 
 pub const TOOLS: &[Tool] = &[computers::TOOL];
 
-pub fn named(name: &str) -> Option<&'static Tool> {
-    TOOLS.iter().find(|tool| tool.name == name)
+/// The tool of that name the state lists, with its entry there; none where that state lists no such tool, which the
+/// TypeScript server does not register.
+pub fn named(name: &str, cloud: bool) -> Option<(&'static Tool, &'static str)> {
+    TOOLS.iter().filter(|tool| tool.name == name).find_map(|tool| Some((tool, entry_in(tool.listed, cloud)?)))
+}
+
+/// Every tool the state lists, by its entry there.
+pub fn listed(cloud: bool) -> impl Iterator<Item = &'static str> {
+    TOOLS.iter().filter_map(move |tool| entry_in(tool.listed, cloud))
+}
+
+/// A recorded file's entry for one state of WSP_CLOUD, in the bytes it was recorded in.
+pub fn entry_in(listed: &str, cloud: bool) -> Option<&str> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Entries<'a> {
+        #[serde(borrow)]
+        cloud_off: Option<&'a RawValue>,
+        #[serde(borrow)]
+        cloud_on: Option<&'a RawValue>,
+    }
+    let entries: Entries = serde_json::from_str(listed).ok()?;
+    (if cloud { entries.cloud_on } else { entries.cloud_off }).map(RawValue::get)
 }
 
 /// What a tool answers with: the text the agent reads and the same value as the structured copy, compact JSON.
@@ -112,10 +135,13 @@ pub(crate) mod held {
         }
     }
 
+    /// Held to the entry of every state that lists the tool.
     pub fn to_the_record<In: JsonSchema, Out: JsonSchema>(listed: &str) {
-        let listed: Value = serde_json::from_str(listed).unwrap();
-        same_shape("input", &schema_of::<In>(), &listed["inputSchema"]);
-        same_shape("output", &schema_of::<Out>(), &listed["outputSchema"]);
+        for entry in [false, true].into_iter().filter_map(|cloud| super::entry_in(listed, cloud)) {
+            let entry: Value = serde_json::from_str(entry).unwrap();
+            same_shape("input", &schema_of::<In>(), &entry["inputSchema"]);
+            same_shape("output", &schema_of::<Out>(), &entry["outputSchema"]);
+        }
     }
 }
 
@@ -126,8 +152,11 @@ mod tests {
     #[test]
     fn every_tool_is_its_recorded_entry_under_its_own_name() {
         for tool in TOOLS {
-            let listed: Value = serde_json::from_str(tool.listed).unwrap();
-            assert_eq!(listed["name"], tool.name);
+            let entries: Vec<&str> = [false, true].into_iter().filter_map(|cloud| entry_in(tool.listed, cloud)).collect();
+            assert!(!entries.is_empty(), "{} is listed in neither state", tool.name);
+            for entry in entries {
+                assert_eq!(serde_json::from_str::<Value>(entry).unwrap()["name"], tool.name);
+            }
         }
     }
 }

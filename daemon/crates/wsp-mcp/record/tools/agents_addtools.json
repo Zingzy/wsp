@@ -1,34 +1,70 @@
 {
-  "name": "agents_addtools",
-  "description": "Writes the wsp server into one agent's own MCP config on the computer the app runs on, the same entry wsp mcp install writes, with the wsp skill beside it, and answers the file. The wsp tools go into an agent's config on this computer; a thread on any other computer is handed them with every turn.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "agent": {
-        "type": "string",
-        "description": "the catalog id of the agent, as agents lists it"
-      }
+  "cloudOff": {
+    "name": "agents_addtools",
+    "description": "Writes the wsp server into one agent's own MCP config on the computer the app runs on, the same entry wsp mcp install writes, with the wsp skill beside it, and answers the file. The wsp tools go into an agent's config on this computer; a thread on any other computer is handed them with every turn.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent, as agents lists it"
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     },
-    "required": [
-      "agent"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
-  },
-  "outputSchema": {
-    "type": "object",
-    "properties": {
-      "file": {
-        "type": "string"
-      }
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     },
-    "required": [
-      "file"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   },
-  "execution": {
-    "taskSupport": "forbidden"
+  "cloudOn": {
+    "name": "agents_addtools",
+    "description": "Writes the wsp server into one agent's own MCP config on the computer the app runs on, the same entry wsp mcp install writes, with the wsp skill beside it, and answers the file. The wsp tools go into an agent's config on this computer; a thread on any other computer is handed them with every turn.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent, as agents lists it"
+        }
+      },
+      "required": [
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   }
 }

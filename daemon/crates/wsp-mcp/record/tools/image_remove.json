@@ -1,101 +1,104 @@
 {
-  "name": "image_remove",
-  "description": "Deletes a project image's snapshot at the provider its place names and then drops its record, so no later fork starts from it; the id is the one the image tool lists each project image under, never a project's name. The provider's listing is read back until the id has left it: a snapshot the provider had already lost drops its record and answers `alreadyGone` true, a listing that still holds the id after the wait keeps the record and says to ask again, and any other refusal of the provider's keeps the record and carries the provider's own words. Refused in one line while any workspace stands on the image, whatever its state, naming them: delete those first, or forget one whose machine is gone. Called without confirm it removes nothing and answers with what would go, which is the line to put to the person.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "image": {
-        "type": "string",
-        "description": "the project image's snapshot id, as the image tool lists it"
+  "cloudOff": null,
+  "cloudOn": {
+    "name": "image_remove",
+    "description": "Deletes a project image's snapshot at the provider its place names and then drops its record, so no later fork starts from it; the id is the one the image tool lists each project image under, never a project's name. The provider's listing is read back until the id has left it: a snapshot the provider had already lost drops its record and answers `alreadyGone` true, a listing that still holds the id after the wait keeps the record and says to ask again, and any other refusal of the provider's keeps the record and carries the provider's own words. Refused in one line while any workspace stands on the image, whatever its state, naming them: delete those first, or forget one whose machine is gone. Called without confirm it removes nothing and answers with what would go, which is the line to put to the person.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "image": {
+          "type": "string",
+          "description": "the project image's snapshot id, as the image tool lists it"
+        },
+        "confirm": {
+          "type": "boolean",
+          "description": "true deletes the snapshot; absent or false answers with what would go and deletes nothing, so a person can be asked first"
+        }
       },
-      "confirm": {
-        "type": "boolean",
-        "description": "true deletes the snapshot; absent or false answers with what would go and deletes nothing, so a person can be asked first"
-      }
+      "required": [
+        "image"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     },
-    "required": [
-      "image"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
-  },
-  "outputSchema": {
-    "type": "object",
-    "properties": {
-      "projectGolden": {
-        "type": "object",
-        "properties": {
-          "snapshotId": {
-            "type": "string"
-          },
-          "projects": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "name": {
-                  "type": "string"
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "projectGolden": {
+          "type": "object",
+          "properties": {
+            "snapshotId": {
+              "type": "string"
+            },
+            "projects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "dest": {
+                    "type": "string"
+                  },
+                  "importedAt": {
+                    "type": "string"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
                 },
-                "dest": {
-                  "type": "string"
-                },
-                "importedAt": {
-                  "type": "string"
-                },
-                "size": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              },
-              "required": [
-                "name",
-                "dest",
-                "importedAt"
-              ],
-              "additionalProperties": false
+                "required": [
+                  "name",
+                  "dest",
+                  "importedAt"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "golden": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "workspaceName": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "place": {
+              "type": "string"
             }
           },
-          "golden": {
-            "type": "string"
-          },
-          "version": {
-            "type": "integer"
-          },
-          "workspaceId": {
-            "type": "string"
-          },
-          "workspaceName": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string"
-          },
-          "place": {
-            "type": "string"
-          }
+          "required": [
+            "snapshotId",
+            "projects",
+            "golden",
+            "workspaceId",
+            "workspaceName",
+            "createdAt"
+          ],
+          "additionalProperties": false
         },
-        "required": [
-          "snapshotId",
-          "projects",
-          "golden",
-          "workspaceId",
-          "workspaceName",
-          "createdAt"
-        ],
-        "additionalProperties": false
+        "alreadyGone": {
+          "type": "boolean"
+        }
       },
-      "alreadyGone": {
-        "type": "boolean"
-      }
+      "required": [
+        "projectGolden",
+        "alreadyGone"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     },
-    "required": [
-      "projectGolden",
-      "alreadyGone"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
-  },
-  "execution": {
-    "taskSupport": "forbidden"
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   }
 }

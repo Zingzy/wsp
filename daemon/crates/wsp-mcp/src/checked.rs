@@ -70,7 +70,7 @@ enum Step<'a> {
     Index(usize),
 }
 
-/// A tool's recorded entry's input schema, read once per call.
+/// A tool's entry's input schema, read once per call.
 pub fn input_schema(listed: &str) -> Schema {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -230,7 +230,9 @@ mod tests {
         let recorded: Vec<Refusal> = serde_json::from_str(&crate_file("tests/refusals.json")).unwrap();
         assert!(!recorded.is_empty());
         for refusal in recorded {
-            let said = issues(&input_schema(&crate_file(&format!("record/tools/{}.json", refusal.tool))), &refusal.arguments);
+            // Recorded with the cloud off, which is the state the suite runs the TypeScript server in.
+            let listed = crate_file(&format!("record/tools/{}.json", refusal.tool));
+            let said = issues(&input_schema(crate::tools::entry_in(&listed, false).unwrap()), &refusal.arguments);
             assert_eq!(input_refusal(&refusal.tool, &said.join("\n")), refusal.text, "{} {}", refusal.tool, refusal.arguments);
         }
     }
@@ -251,14 +253,16 @@ mod tests {
     fn every_recorded_input_schema_uses_only_the_keywords_this_reads() {
         for file in std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("record/tools")).unwrap() {
             let listed: Value = serde_json::from_str(&std::fs::read_to_string(file.unwrap().path()).unwrap()).unwrap();
-            let mut used = Vec::new();
-            keywords(&listed["inputSchema"], &mut used);
-            for keyword in used {
-                assert!(
-                    READ.contains(&keyword) || PASSED_OVER.contains(&keyword),
-                    "{}: {keyword} is not read; add it with a refusal it words",
-                    listed["name"]
-                );
+            for entry in [&listed["cloudOff"], &listed["cloudOn"]].into_iter().filter(|entry| !entry.is_null()) {
+                let mut used = Vec::new();
+                keywords(&entry["inputSchema"], &mut used);
+                for keyword in used {
+                    assert!(
+                        READ.contains(&keyword) || PASSED_OVER.contains(&keyword),
+                        "{}: {keyword} is not read; add it with a refusal it words",
+                        entry["name"]
+                    );
+                }
             }
         }
     }

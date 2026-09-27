@@ -15,14 +15,14 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { EXIT_CODES, jsonLine, scopedNoPairLine } from "@wsp/protocol";
+import { CLOUD_ENV, EXIT_CODES, jsonLine, scopedNoPairLine } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
 import { dialer, mcpServer } from "../src/mcp.js";
 import { placeWiring } from "../src/places.js";
 import type { HostHandle } from "../src/server.js";
-import { c1Escaped, VERBS, hasTool, toolName } from "../src/verbs.js";
+import { c1Escaped } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { ownEnv, served } from "./stdio-session.js";
 import { stubBackend } from "./stub-backend.js";
@@ -36,29 +36,38 @@ const INITIALIZE = { jsonrpc: "2.0", id: 0, method: "initialize", params: { prot
 const INITIALIZED = { jsonrpc: "2.0", method: "notifications/initialized" };
 const callOf = (id: number, name: string, args: Record<string, unknown> = {}) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
 
-async function listedHere(): Promise<Record<string, unknown>[]> {
-  const server = mcpServer("/nonexistent/state.json", { env: {} });
-  const [toClient, toServer] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: "binary", version: "0" });
-  await server.connect(toServer);
-  await client.connect(toClient);
+/** This package's server in one state of WSP_CLOUD: what it lists, the tools its verb table holds, and the line it
+ * greets with on stdio. The flag is read once as each module loads, so the modules are loaded afresh under it. */
+async function hereIn(cloud: boolean): Promise<{ listed: Record<string, unknown>[]; table: string[]; greeting: string }> {
+  vi.resetModules();
+  vi.stubEnv(CLOUD_ENV, cloud ? "1" : "");
   try {
-    return (await client.listTools()).tools as Record<string, unknown>[];
-  } finally {
+    const { mcpServer: fresh } = await import("../src/mcp.js");
+    const verbs = await import("../src/verbs.js");
+    const server = fresh("/nonexistent/state.json", { env: {} });
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "binary", version: "0" });
+    await server.connect(toServer);
+    await client.connect(toClient);
+    const listed = (await client.listTools()).tools as Record<string, unknown>[];
     await client.close();
     await server.close();
+    const [greeting] = await answeredHere("/nonexistent/state.json", [INITIALIZE], fresh, verbs.c1Escaped);
+    return { listed, table: verbs.VERBS.filter(verbs.hasTool).map(v => verbs.toolName(v.name)), greeting: greeting! };
+  } finally {
+    vi.unstubAllEnvs();
   }
 }
 
 /** What this package's server writes on stdio for each line, one written line per request, through the same escaping
  * `wsp mcp` writes through. No starter: a call with nothing serving reads the refusal. */
-async function answeredHere(statePath: string, lines: readonly Record<string, unknown>[]): Promise<string[]> {
-  const server = mcpServer(statePath, { env: {}, dial: dialer(statePath) });
+async function answeredHere(statePath: string, lines: readonly Record<string, unknown>[], serverOf = mcpServer, escaped = c1Escaped): Promise<string[]> {
+  const server = serverOf(statePath, { env: {}, dial: dialer(statePath) });
   const input = new PassThrough();
   const output = new PassThrough();
   let written = "";
   output.on("data", (chunk: Buffer) => (written += chunk.toString("utf8")));
-  await server.connect(new StdioServerTransport(input, c1Escaped(output)));
+  await server.connect(new StdioServerTransport(input, escaped(output)));
   const requests = lines.filter(line => "id" in line).length;
   for (const line of lines) input.write(`${JSON.stringify(line)}\n`);
   await vi.waitFor(() => expect(written.split("\n").length - 1).toBe(requests), { timeout: 15_000, interval: 20 });
@@ -87,19 +96,17 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("lists verb table entries alone, each as this package lists it, and greets in the same words, with no host", async () => {
-    const here = await listedHere();
-    const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], env, [INITIALIZE, INITIALIZED, { jsonrpc: "2.0", id: 1, method: "tools/list" }]);
+  it.each([false, true])("lists verb table entries alone, each as this package lists it, and greets in the same words, with no host (cloud on: %s)", async cloud => {
+    const here = await hereIn(cloud);
+    const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], { ...env, [CLOUD_ENV]: cloud ? "1" : "" }, [INITIALIZE, INITIALIZED, { jsonrpc: "2.0", id: 1, method: "tools/list" }]);
     expect(code).toBe(0);
     const [greeted, listed] = out.map(line => JSON.parse(line) as { result: Record<string, unknown> });
-    const [hereGreeting] = await answeredHere(statePath, [INITIALIZE]);
-    expect(greeted).toEqual(JSON.parse(hereGreeting!));
+    expect(greeted).toEqual(JSON.parse(here.greeting));
     const tools = listed!.result["tools"] as Record<string, unknown>[];
-    const table = VERBS.filter(hasTool).map(v => toolName(v.name));
     expect(tools.length).toBeGreaterThan(0);
     for (const tool of tools) {
-      expect(table, `${String(tool["name"])} is not in the verb table`).toContain(tool["name"]);
-      expect(tool, String(tool["name"])).toEqual(here.find(t => t["name"] === tool["name"]));
+      expect(here.table, `${String(tool["name"])} is not in the verb table`).toContain(tool["name"]);
+      expect(tool, String(tool["name"])).toEqual(here.listed.find(t => t["name"] === tool["name"]));
     }
     expect(tools.map(t => t["name"])).toContain("computers");
   });

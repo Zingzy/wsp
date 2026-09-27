@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What the tool server in the daemon binary serves and says, recorded off this
-// package: the handshake's words, every tool as this server lists it, the
-// sentences its dial and its aim refuse with, the exit classes, the words it
-// refuses bad arguments in, and one answer per tool it serves, byte for byte,
-// for its own contract test to replay. The
-// Rust side reads these files and never a build of this package, so a verb's
+// package: the handshake's words and every tool as this server lists it, each
+// with WSP_CLOUD off and on, the sentences its dial and its aim refuse with,
+// the exit classes, the words it refuses bad arguments in, and one answer per
+// tool it serves, byte for byte, for its own contract test to replay. The Rust
+// side reads these files and never a build of this package, so a verb's
 // description or a refusal keeps one home, here, and a change to either fails
 // this suite until the record is written again.
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -16,8 +16,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
-import { EXIT_CODES, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, LAUNCHED_WITH, LOOPBACK, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, refusalLine, scopedNoPairLine, type PlaceSpend, type PlaceView } from "@wsp/protocol";
-import { describe, expect, it } from "vitest";
+import { CLOUD_ENV, cloudFromEnv, EXIT_CODES, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, LAUNCHED_WITH, LOOPBACK, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, refusalLine, scopedNoPairLine, type PlaceSpend, type PlaceView } from "@wsp/protocol";
+import { describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
 import { relayRecordPath } from "../src/account.js";
@@ -25,7 +25,6 @@ import { PROBE_MS } from "../src/service.js";
 import { defaultHomeIn } from "../src/serving-home.js";
 import { addressNotPairedLine, aliasOk, deviceRefusedLine, dialWindowMs, hostsDir, NAME_ONE_HOST, noAnswerRefusal, noAnswerWithin, noSuchHostAmong, READ_THE_HOSTS, severalAccountHostsLine } from "../src/hosts.js";
 import { mcpServer, type Dialer } from "../src/mcp.js";
-import { INSTRUCTIONS } from "../src/skill.js";
 import { c1Escaped, CLOSE_GRACE_MS, hostTokenMissingLine, noHostServingLine, UNAUTHORIZED_CLOSE, type HostClient } from "../src/verbs.js";
 import { VERSION } from "../src/version.js";
 
@@ -53,7 +52,27 @@ async function withServer<T>(use: (client: Client) => Promise<T>): Promise<T> {
   }
 }
 
-const listedTools = (): Promise<Record<string, unknown>[]> => withServer(async client => (await client.listTools()).tools as Record<string, unknown>[]);
+/** What this package's server lists and greets with in one state of WSP_CLOUD. The flag is read once as each module
+ * loads, so the modules are loaded afresh under it. */
+async function servedIn(cloud: boolean): Promise<{ instructions: string; tools: Record<string, unknown>[] }> {
+  vi.resetModules();
+  vi.stubEnv(CLOUD_ENV, cloud ? "1" : "");
+  try {
+    const { mcpServer: fresh } = await import("../src/mcp.js");
+    const { INSTRUCTIONS: instructions } = await import("../src/skill.js");
+    const server = fresh("/nonexistent/state.json", { env: {} });
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "record", version: "0" });
+    await server.connect(toServer);
+    await client.connect(toClient);
+    const tools = (await client.listTools()).tools as Record<string, unknown>[];
+    await client.close();
+    await server.close();
+    return { instructions, tools };
+  } finally {
+    vi.unstubAllEnvs();
+  }
+}
 
 /** Arguments the validator refuses before a tool runs, one per shape the tools' inputs take: a wrong type on each kind
  * of field, a missing required field, a list too short, an item of the wrong type, an integer that is a fraction or
@@ -127,7 +146,8 @@ function host(): Record<string, unknown> {
   const beside = (path: string): string => relative("/state", path);
   return {
     files: { lock: beside(lockPathFor("/state/state.json")), token: beside(hostTokenPath("/state/state.json")), log: beside(hostLogPath("/state/state.json")), relay: beside(relayRecordPath("/state/state.json")), hosts: relative("/home", hostsDir("/home")), home: relative("/user", defaultHomeIn("/user")) },
-    env: { host: "WSP_HOST", home: "WSP_HOME", url: HOST_URL_ENV, token: HOST_TOKEN_ENV, key: HOST_KEY_ENV, startedBy: STARTED_BY_ENV },
+    env: { host: "WSP_HOST", home: "WSP_HOME", url: HOST_URL_ENV, token: HOST_TOKEN_ENV, key: HOST_KEY_ENV, startedBy: STARTED_BY_ENV, cloud: CLOUD_ENV },
+    clouds: Object.fromEntries(["1", "", "0", "true", " 1"].map(word => [word, cloudFromEnv({ [CLOUD_ENV]: word })])),
     startedBy: "verb",
     wsPath: WS_PATH,
     nearWindowMs: dialWindowMs({ kind: "here" }),
@@ -214,12 +234,15 @@ const ANSWERED: Record<string, { case: string; arguments: Record<string, unknown
 
 async function regenerated(): Promise<Files> {
   const files: Files = new Map();
-  files.set("record/server.json", fileText({ name: "wsp", version: VERSION, instructions: INSTRUCTIONS, protocolVersions: SUPPORTED_PROTOCOL_VERSIONS, latestProtocolVersion: LATEST_PROTOCOL_VERSION }));
+  const [off, on] = [await servedIn(false), await servedIn(true)];
+  files.set("record/server.json", fileText({ name: "wsp", version: VERSION, instructions: { cloudOff: off.instructions, cloudOn: on.instructions }, protocolVersions: SUPPORTED_PROTOCOL_VERSIONS, latestProtocolVersion: LATEST_PROTOCOL_VERSION }));
   files.set("record/exit.json", fileText({ codes: EXIT_CODES, kinds: KIND_CLASS }));
   files.set("record/words.json", fileText(words()));
   files.set("record/host.json", fileText(host()));
   files.set("tests/refusals.json", fileText(await refusals()));
-  for (const tool of await listedTools()) files.set(`record/tools/${String(tool["name"])}.json`, fileText(tool));
+  // Each tool as it is listed with the cloud off and on, and null in the state that lists no such tool.
+  const entry = (tools: Record<string, unknown>[], name: string): Record<string, unknown> | null => tools.find(t => t["name"] === name) ?? null;
+  for (const name of new Set([...off.tools, ...on.tools].map(t => String(t["name"])))) files.set(`record/tools/${name}.json`, fileText({ cloudOff: entry(off.tools, name), cloudOn: entry(on.tools, name) }));
   for (const [tool, cases] of Object.entries(ANSWERED)) {
     const answered = [];
     for (const c of cases) answered.push({ ...c, line: await answeredLine(tool, c.arguments, c.replies) });

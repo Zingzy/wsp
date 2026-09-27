@@ -1,117 +1,236 @@
 {
-  "name": "servers_tools",
-  "description": "One MCP server's tools with their descriptions, and its sign-in as that one connect found it (open, signed in, needs a sign-in, failed, or unknown), with why nothing came back where nothing did. Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "name": {
-        "type": "string",
-        "description": "the server's name, as servers lists it"
-      },
-      "agent": {
-        "type": "string",
-        "description": "the catalog id of the agent whose config names it, as servers lists it"
-      },
-      "workspace": {
-        "type": "string",
-        "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
-      },
-      "on": {
-        "type": "string",
-        "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
-      },
-      "project": {
-        "type": "string",
-        "description": "the project on that computer whose server it is, by the name projects lists, with on; a workspace finds its own project's servers"
-      },
-      "refresh": {
-        "type": "boolean",
-        "description": "start it again even where an answer from the last three minutes stands"
-      }
-    },
-    "required": [
-      "name",
-      "agent"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
-  },
-  "outputSchema": {
-    "type": "object",
-    "properties": {
-      "auth": {
-        "type": "string",
-        "enum": [
-          "open",
-          "env-key",
-          "connected",
-          "signed-in",
-          "needs-sign-in",
-          "failed",
-          "unknown"
-        ]
-      },
-      "tools": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "name": {
-              "type": "string"
-            },
-            "description": {
-              "type": "string"
-            },
-            "params": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string"
-                  },
-                  "type": {
-                    "type": "string"
-                  },
-                  "required": {
-                    "type": "boolean"
-                  },
-                  "description": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "name",
-                  "required"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "name"
-          ],
-          "additionalProperties": false
+  "cloudOff": {
+    "name": "servers_tools",
+    "description": "One MCP server's tools with their descriptions, and its sign-in as that one connect found it (open, signed in, needs a sign-in, failed, or unknown), with why nothing came back where nothing did. Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "the server's name, as servers lists it"
+        },
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent whose config names it, as servers lists it"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+        },
+        "project": {
+          "type": "string",
+          "description": "the project on that computer whose server it is, by the name projects lists, with on; a workspace finds its own project's servers"
+        },
+        "refresh": {
+          "type": "boolean",
+          "description": "start it again even where an answer from the last three minutes stands"
         }
       },
-      "holder": {
-        "type": "string"
-      },
-      "refused": {
-        "type": "string"
-      },
-      "readAt": {
-        "type": "string"
-      }
+      "required": [
+        "name",
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     },
-    "required": [
-      "auth",
-      "readAt"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "auth": {
+          "type": "string",
+          "enum": [
+            "open",
+            "env-key",
+            "connected",
+            "signed-in",
+            "needs-sign-in",
+            "failed",
+            "unknown"
+          ]
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "params": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "required"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "holder": {
+          "type": "string"
+        },
+        "refused": {
+          "type": "string"
+        },
+        "readAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "auth",
+        "readAt"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   },
-  "execution": {
-    "taskSupport": "forbidden"
+  "cloudOn": {
+    "name": "servers_tools",
+    "description": "One MCP server's tools with their descriptions, and its sign-in as that one connect found it (open, signed in, needs a sign-in, failed, or unknown), with why nothing came back where nothing did. Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "the server's name, as servers lists it"
+        },
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent whose config names it, as servers lists it"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+        },
+        "project": {
+          "type": "string",
+          "description": "the project on that computer whose server it is, by the name projects lists, with on; a workspace finds its own project's servers"
+        },
+        "refresh": {
+          "type": "boolean",
+          "description": "start it again even where an answer from the last three minutes stands"
+        }
+      },
+      "required": [
+        "name",
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "auth": {
+          "type": "string",
+          "enum": [
+            "open",
+            "env-key",
+            "connected",
+            "signed-in",
+            "needs-sign-in",
+            "failed",
+            "unknown"
+          ]
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "params": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "required"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "holder": {
+          "type": "string"
+        },
+        "refused": {
+          "type": "string"
+        },
+        "readAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "auth",
+        "readAt"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   }
 }

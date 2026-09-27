@@ -1,45 +1,92 @@
 {
-  "name": "skills_disable",
-  "description": "Turns one skill off on one computer or workspace by its name, as the login it was added with: its SKILL.md is renamed SKILL.md.off in each folder it really lives in, which every link to it follows, and no agent config is edited. A project's skill lives in the repo and is refused. The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "name": {
-        "type": "string",
-        "description": "the skill's name, as skills lists it"
-      },
-      "workspace": {
-        "type": "string",
-        "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
-      },
-      "on": {
-        "type": "string",
-        "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
-      }
-    },
-    "required": [
-      "name"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
-  },
-  "outputSchema": {
-    "type": "object",
-    "properties": {
-      "paths": {
-        "type": "array",
-        "items": {
-          "type": "string"
+  "cloudOff": {
+    "name": "skills_disable",
+    "description": "Turns one skill off on one computer or workspace by its name, as the login it was added with: its SKILL.md is renamed SKILL.md.off in each folder it really lives in, which every link to it follows, and no agent config is edited. A project's skill lives in the repo and is refused. The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "the skill's name, as skills lists it"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
         }
-      }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     },
-    "required": [
-      "paths"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   },
-  "execution": {
-    "taskSupport": "forbidden"
+  "cloudOn": {
+    "name": "skills_disable",
+    "description": "Turns one skill off on one computer or workspace by its name, as the login it was added with: its SKILL.md is renamed SKILL.md.off in each folder it really lives in, which every link to it follows, and no agent config is edited. A project's skill lives in the repo and is refused. The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "the skill's name, as skills lists it"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   }
 }

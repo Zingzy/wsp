@@ -24,9 +24,17 @@ fn read<T: for<'de> Deserialize<'de>>(name: &str, text: &str) -> T {
 pub struct Server {
     pub name: String,
     pub version: String,
-    pub instructions: String,
+    pub instructions: Instructions,
     pub protocol_versions: Vec<String>,
     pub latest_protocol_version: String,
+}
+
+/// What the server greets with, with WSP_CLOUD off and on: the TypeScript server words it for the state it runs in.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Instructions {
+    pub cloud_off: String,
+    pub cloud_on: String,
 }
 
 pub fn server() -> Server {
@@ -100,6 +108,8 @@ pub struct Host {
     pub urls: HashMap<String, UrlProbe>,
     #[cfg(test)]
     pub aliases: HashMap<String, bool>,
+    #[cfg(test)]
+    pub clouds: HashMap<String, bool>,
 }
 
 #[cfg(test)]
@@ -132,6 +142,7 @@ pub struct EnvNames {
     pub token: String,
     pub key: String,
     pub started_by: String,
+    pub cloud: String,
 }
 
 pub fn host() -> Host {

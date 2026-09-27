@@ -20,6 +20,12 @@ use crate::{Args, Env};
 const SEALED_ROAD: &str =
     "the host at {where} pins the key it proves, and this tool server opens no sealed road; run wsp mcp from the wsp command to reach it";
 
+/// Whether the cloud is on, read off the variable as the protocol's cloudFromEnv reads it: the greeting and the list
+/// are the TypeScript server's for that state.
+pub fn cloud_on(env: &Env) -> bool {
+    env.get(&record::host().env.cloud).is_some_and(|value| value == "1")
+}
+
 pub struct Host {
     args: Args,
     env: Env,
@@ -28,6 +34,10 @@ pub struct Host {
 }
 
 impl Host {
+    pub fn cloud(&self) -> bool {
+        cloud_on(&self.env)
+    }
+
     pub fn new(args: &Args, env: &Env) -> Host {
         Host { args: args.clone(), env: env.clone(), home: aim::wsp_home(env), held: Mutex::new(None) }
     }
@@ -78,4 +88,18 @@ impl Host {
 
 fn ws_url(url: &str) -> Result<String, Failure> {
     aim::ws_url_of(url).ok_or_else(|| Failure::new(fill(&record::words().no_answer, &[("where", url), ("why", "not an address")])))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_cloud_flag_as_the_protocol_does() {
+        for (word, want) in record::host().clouds {
+            let env: Env = [("WSP_CLOUD".to_owned(), word.clone())].into_iter().collect();
+            assert_eq!(cloud_on(&env), want, "WSP_CLOUD={word:?}");
+        }
+        assert!(!cloud_on(&Env::new()));
+    }
 }

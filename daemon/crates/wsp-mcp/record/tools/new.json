@@ -1,364 +1,726 @@
 {
-  "name": "new",
-  "description": "A workspace for one piece of work: a copy of the project's computer with the project inside, named by the work. The project decides where it lands, so nothing else says where. On the computer the app runs on the workspace is a copy of the project's folder beside it, with a port of its own. With from, it forks a project image instead of the computer's own image head.",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "project": {
-        "type": "string",
-        "description": "the project this work is on, by the name or the id projects lists; needed once you have more than one project"
-      },
-      "name": {
-        "type": "string",
-        "description": "what you are working on, which is the workspace's name and what run and every other verb take"
-      },
-      "from": {
-        "type": "string",
-        "description": "a project image: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"
-      },
-      "size": {
-        "type": "string",
-        "description": "the machine size as <cpu>x<memGb>, like 2x4; absent takes the image's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered"
-      },
-      "engine": {
-        "type": "boolean",
-        "description": "give the workspace the computer's container engine (Docker or podman) through a socket at the path a Docker client expects, which sees that workspace's containers alone; a computer with no engine refuses it, and absent takes what the image's recipe says"
-      },
-      "spawn": {
-        "type": "string",
-        "enum": [
-          "on",
-          "off"
-        ],
-        "description": "whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is off, which is what every workspace made without it reads as"
-      },
-      "max_machines": {
-        "type": "integer",
-        "minimum": 0,
-        "description": "how many machines may stand at once under one root thread when spawn is on; needs spawn on beside it, and defaults to 3"
-      },
-      "max_depth": {
-        "type": "integer",
-        "minimum": 1,
-        "description": "how many levels deep the tree under a root thread may go when spawn is on; 1 is the root's own children and no further, which is the default, and it needs spawn on beside it"
-      }
-    },
-    "required": [
-      "name"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
-  },
-  "outputSchema": {
-    "type": "object",
-    "properties": {
-      "workspace": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "machineId": {
-            "type": "string"
-          },
-          "phase": {
-            "type": "string",
-            "enum": [
-              "running",
-              "pausing",
-              "napping",
-              "waking",
-              "gone"
-            ]
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "cloud",
-              "local"
-            ]
-          },
-          "golden": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string"
-          },
-          "project": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "path": {
-                "type": "string"
-              },
-              "computer": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "name",
-              "path",
-              "computer"
-            ],
-            "additionalProperties": false
-          },
-          "folder": {
-            "type": "string"
-          },
-          "home": {
-            "type": "string"
-          },
-          "claudeSessionId": {
-            "type": "string"
-          },
-          "gone": {
-            "type": "string"
-          },
-          "theme": {
-            "type": "object",
-            "properties": {
-              "dots": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "angle": {
-                      "type": "number",
-                      "minimum": 0,
-                      "maximum": 360
-                    },
-                    "radius": {
-                      "type": "number",
-                      "minimum": 0,
-                      "maximum": 1
-                    }
-                  },
-                  "required": [
-                    "angle",
-                    "radius"
-                  ],
-                  "additionalProperties": false
-                },
-                "minItems": 1,
-                "maxItems": 3
-              },
-              "harmony": {
-                "type": "string",
-                "enum": [
-                  "single",
-                  "complementary",
-                  "analogous",
-                  "splitComplementary",
-                  "triadic",
-                  "analogousThree"
-                ]
-              },
-              "grain": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1
-              },
-              "opacity": {
-                "type": "number",
-                "minimum": 0.1,
-                "maximum": 1
-              },
-              "mode": {
-                "type": "string",
-                "enum": [
-                  "auto",
-                  "light",
-                  "dark"
-                ]
-              }
-            },
-            "required": [
-              "dots",
-              "harmony",
-              "grain",
-              "opacity",
-              "mode"
-            ],
-            "additionalProperties": false
-          },
-          "glyph": {
-            "type": "string",
-            "enum": [
-              "terminal",
-              "code",
-              "bug",
-              "wrench",
-              "hammer",
-              "rocket",
-              "flask",
-              "database",
-              "cloud",
-              "globe",
-              "compass",
-              "map",
-              "book",
-              "feather",
-              "palette",
-              "leaf",
-              "star",
-              "bolt",
-              "key",
-              "shield",
-              "box",
-              "folder",
-              "chip",
-              "lamp"
-            ]
-          },
-          "daemonNote": {
-            "type": "string"
-          },
-          "daemonRefusedAt": {
-            "type": "object",
-            "properties": {
-              "machineId": {
-                "type": "string"
-              },
-              "at": {
-                "type": "string"
-              },
-              "why": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "machineId",
-              "at",
-              "why"
-            ],
-            "additionalProperties": false
-          },
-          "vaultedAt": {
-            "type": "string"
-          },
-          "vaultRefused": {
-            "type": "string"
-          },
-          "wakeRefused": {
-            "type": "string"
-          },
-          "agents": {
-            "type": "object",
-            "properties": {
-              "spawn": {
-                "type": "boolean"
-              },
-              "maxMachines": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "maxDepth": {
-                "type": "integer",
-                "minimum": 1
-              }
-            },
-            "required": [
-              "spawn",
-              "maxMachines",
-              "maxDepth"
-            ],
-            "additionalProperties": false
-          },
-          "parentThreadId": {
-            "type": "string"
-          },
-          "rootThreadId": {
-            "type": "string"
-          },
-          "parentWorkspaceId": {
-            "type": "string"
-          },
-          "place": {
-            "type": "string"
-          },
-          "provider": {
-            "type": "string"
-          },
-          "copy": {
-            "type": "object",
-            "properties": {
-              "path": {
-                "type": "string"
-              },
-              "base": {
-                "type": "string"
-              },
-              "branch": {
-                "type": "string"
-              },
-              "carried": {
-                "type": "string",
-                "enum": [
-                  "deps-and-config",
-                  "config-only",
-                  "nothing"
-                ]
-              },
-              "fellBack": {
-                "type": "string"
-              },
-              "road": {
-                "type": "string",
-                "enum": [
-                  "clonefile",
-                  "worktree"
-                ]
-              },
-              "source": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "path",
-              "base",
-              "branch",
-              "carried",
-              "road",
-              "source"
-            ],
-            "additionalProperties": false
-          },
-          "portBase": {
-            "type": "integer",
-            "exclusiveMinimum": 0
-          }
+  "cloudOff": {
+    "name": "new",
+    "description": "A workspace for one piece of work: a copy of the project's computer with the project inside, named by the work. The project decides where it lands, so nothing else says where. On the computer the app runs on the workspace is a copy of the project's folder beside it, with a port of its own.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "the project this work is on, by the name or the id projects lists; needed once you have more than one project"
         },
-        "required": [
-          "id",
-          "name",
-          "machineId",
-          "phase",
-          "golden",
-          "createdAt",
-          "project"
-        ],
-        "additionalProperties": false
+        "name": {
+          "type": "string",
+          "description": "what you are working on, which is the workspace's name and what run and every other verb take"
+        },
+        "size": {
+          "type": "string",
+          "description": "the machine size as <cpu>x<memGb>, like 2x4; absent takes the image's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered"
+        },
+        "engine": {
+          "type": "boolean",
+          "description": "give the workspace the computer's container engine (Docker or podman) through a socket at the path a Docker client expects, which sees that workspace's containers alone; a computer with no engine refuses it, and absent takes what the image's recipe says"
+        },
+        "spawn": {
+          "type": "string",
+          "enum": [
+            "on",
+            "off"
+          ],
+          "description": "whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is off, which is what every workspace made without it reads as"
+        },
+        "max_machines": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "how many machines may stand at once under one root thread when spawn is on; needs spawn on beside it, and defaults to 3"
+        },
+        "max_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "how many levels deep the tree under a root thread may go when spawn is on; 1 is the root's own children and no further, which is the default, and it needs spawn on beside it"
+        }
       },
-      "notice": {
-        "type": "string"
-      }
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     },
-    "required": [
-      "workspace"
-    ],
-    "additionalProperties": false,
-    "$schema": "http://json-schema.org/draft-07/schema#"
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "machineId": {
+              "type": "string"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "running",
+                "pausing",
+                "napping",
+                "waking",
+                "gone"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "cloud",
+                "local"
+              ]
+            },
+            "golden": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "project": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "computer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "path",
+                "computer"
+              ],
+              "additionalProperties": false
+            },
+            "folder": {
+              "type": "string"
+            },
+            "home": {
+              "type": "string"
+            },
+            "claudeSessionId": {
+              "type": "string"
+            },
+            "gone": {
+              "type": "string"
+            },
+            "theme": {
+              "type": "object",
+              "properties": {
+                "dots": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "angle": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 360
+                      },
+                      "radius": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "angle",
+                      "radius"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 3
+                },
+                "harmony": {
+                  "type": "string",
+                  "enum": [
+                    "single",
+                    "complementary",
+                    "analogous",
+                    "splitComplementary",
+                    "triadic",
+                    "analogousThree"
+                  ]
+                },
+                "grain": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "opacity": {
+                  "type": "number",
+                  "minimum": 0.1,
+                  "maximum": 1
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "light",
+                    "dark"
+                  ]
+                }
+              },
+              "required": [
+                "dots",
+                "harmony",
+                "grain",
+                "opacity",
+                "mode"
+              ],
+              "additionalProperties": false
+            },
+            "glyph": {
+              "type": "string",
+              "enum": [
+                "terminal",
+                "code",
+                "bug",
+                "wrench",
+                "hammer",
+                "rocket",
+                "flask",
+                "database",
+                "cloud",
+                "globe",
+                "compass",
+                "map",
+                "book",
+                "feather",
+                "palette",
+                "leaf",
+                "star",
+                "bolt",
+                "key",
+                "shield",
+                "box",
+                "folder",
+                "chip",
+                "lamp"
+              ]
+            },
+            "daemonNote": {
+              "type": "string"
+            },
+            "daemonRefusedAt": {
+              "type": "object",
+              "properties": {
+                "machineId": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string"
+                },
+                "why": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "machineId",
+                "at",
+                "why"
+              ],
+              "additionalProperties": false
+            },
+            "vaultedAt": {
+              "type": "string"
+            },
+            "vaultRefused": {
+              "type": "string"
+            },
+            "wakeRefused": {
+              "type": "string"
+            },
+            "agents": {
+              "type": "object",
+              "properties": {
+                "spawn": {
+                  "type": "boolean"
+                },
+                "maxMachines": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "maxDepth": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "spawn",
+                "maxMachines",
+                "maxDepth"
+              ],
+              "additionalProperties": false
+            },
+            "parentThreadId": {
+              "type": "string"
+            },
+            "rootThreadId": {
+              "type": "string"
+            },
+            "parentWorkspaceId": {
+              "type": "string"
+            },
+            "place": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "copy": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "base": {
+                  "type": "string"
+                },
+                "branch": {
+                  "type": "string"
+                },
+                "carried": {
+                  "type": "string",
+                  "enum": [
+                    "deps-and-config",
+                    "config-only",
+                    "nothing"
+                  ]
+                },
+                "fellBack": {
+                  "type": "string"
+                },
+                "road": {
+                  "type": "string",
+                  "enum": [
+                    "clonefile",
+                    "worktree"
+                  ]
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "base",
+                "branch",
+                "carried",
+                "road",
+                "source"
+              ],
+              "additionalProperties": false
+            },
+            "portBase": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "machineId",
+            "phase",
+            "golden",
+            "createdAt",
+            "project"
+          ],
+          "additionalProperties": false
+        },
+        "notice": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   },
-  "execution": {
-    "taskSupport": "forbidden"
+  "cloudOn": {
+    "name": "new",
+    "description": "A workspace for one piece of work: a copy of the project's computer with the project inside, named by the work. The project decides where it lands, so nothing else says where. On the computer the app runs on the workspace is a copy of the project's folder beside it, with a port of its own. With from, it forks a project image instead of the computer's own image head.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "the project this work is on, by the name or the id projects lists; needed once you have more than one project"
+        },
+        "name": {
+          "type": "string",
+          "description": "what you are working on, which is the workspace's name and what run and every other verb take"
+        },
+        "from": {
+          "type": "string",
+          "description": "a project image: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"
+        },
+        "size": {
+          "type": "string",
+          "description": "the machine size as <cpu>x<memGb>, like 2x4; absent takes the image's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered"
+        },
+        "engine": {
+          "type": "boolean",
+          "description": "give the workspace the computer's container engine (Docker or podman) through a socket at the path a Docker client expects, which sees that workspace's containers alone; a computer with no engine refuses it, and absent takes what the image's recipe says"
+        },
+        "spawn": {
+          "type": "string",
+          "enum": [
+            "on",
+            "off"
+          ],
+          "description": "whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is off, which is what every workspace made without it reads as"
+        },
+        "max_machines": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "how many machines may stand at once under one root thread when spawn is on; needs spawn on beside it, and defaults to 3"
+        },
+        "max_depth": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "how many levels deep the tree under a root thread may go when spawn is on; 1 is the root's own children and no further, which is the default, and it needs spawn on beside it"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "machineId": {
+              "type": "string"
+            },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "running",
+                "pausing",
+                "napping",
+                "waking",
+                "gone"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "cloud",
+                "local"
+              ]
+            },
+            "golden": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "project": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "computer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "path",
+                "computer"
+              ],
+              "additionalProperties": false
+            },
+            "folder": {
+              "type": "string"
+            },
+            "home": {
+              "type": "string"
+            },
+            "claudeSessionId": {
+              "type": "string"
+            },
+            "gone": {
+              "type": "string"
+            },
+            "theme": {
+              "type": "object",
+              "properties": {
+                "dots": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "angle": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 360
+                      },
+                      "radius": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "required": [
+                      "angle",
+                      "radius"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "minItems": 1,
+                  "maxItems": 3
+                },
+                "harmony": {
+                  "type": "string",
+                  "enum": [
+                    "single",
+                    "complementary",
+                    "analogous",
+                    "splitComplementary",
+                    "triadic",
+                    "analogousThree"
+                  ]
+                },
+                "grain": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "opacity": {
+                  "type": "number",
+                  "minimum": 0.1,
+                  "maximum": 1
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "light",
+                    "dark"
+                  ]
+                }
+              },
+              "required": [
+                "dots",
+                "harmony",
+                "grain",
+                "opacity",
+                "mode"
+              ],
+              "additionalProperties": false
+            },
+            "glyph": {
+              "type": "string",
+              "enum": [
+                "terminal",
+                "code",
+                "bug",
+                "wrench",
+                "hammer",
+                "rocket",
+                "flask",
+                "database",
+                "cloud",
+                "globe",
+                "compass",
+                "map",
+                "book",
+                "feather",
+                "palette",
+                "leaf",
+                "star",
+                "bolt",
+                "key",
+                "shield",
+                "box",
+                "folder",
+                "chip",
+                "lamp"
+              ]
+            },
+            "daemonNote": {
+              "type": "string"
+            },
+            "daemonRefusedAt": {
+              "type": "object",
+              "properties": {
+                "machineId": {
+                  "type": "string"
+                },
+                "at": {
+                  "type": "string"
+                },
+                "why": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "machineId",
+                "at",
+                "why"
+              ],
+              "additionalProperties": false
+            },
+            "vaultedAt": {
+              "type": "string"
+            },
+            "vaultRefused": {
+              "type": "string"
+            },
+            "wakeRefused": {
+              "type": "string"
+            },
+            "agents": {
+              "type": "object",
+              "properties": {
+                "spawn": {
+                  "type": "boolean"
+                },
+                "maxMachines": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "maxDepth": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "spawn",
+                "maxMachines",
+                "maxDepth"
+              ],
+              "additionalProperties": false
+            },
+            "parentThreadId": {
+              "type": "string"
+            },
+            "rootThreadId": {
+              "type": "string"
+            },
+            "parentWorkspaceId": {
+              "type": "string"
+            },
+            "place": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "copy": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "base": {
+                  "type": "string"
+                },
+                "branch": {
+                  "type": "string"
+                },
+                "carried": {
+                  "type": "string",
+                  "enum": [
+                    "deps-and-config",
+                    "config-only",
+                    "nothing"
+                  ]
+                },
+                "fellBack": {
+                  "type": "string"
+                },
+                "road": {
+                  "type": "string",
+                  "enum": [
+                    "clonefile",
+                    "worktree"
+                  ]
+                },
+                "source": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "base",
+                "branch",
+                "carried",
+                "road",
+                "source"
+              ],
+              "additionalProperties": false
+            },
+            "portBase": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "machineId",
+            "phase",
+            "golden",
+            "createdAt",
+            "project"
+          ],
+          "additionalProperties": false
+        },
+        "notice": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspace"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
   }
 }
