@@ -1585,7 +1585,7 @@ const joinDeps = (): JoinDeps => ({
  * dial, as catalog id and command. Only the list of ids is fixed at the join; PATH is read at every dial. */
 export function placeDaemonFlags(home: string, file: string, run: RunningWsp = runningWsp()): string[] {
   return [
-    ...daemonFlags({ ...sshDaemonPlace({ home, path: "" }), kind: "place" }),
+    ...daemonFlags(sshDaemonPlace({ home, path: "" })),
     "--home",
     home,
     "--work-folder",

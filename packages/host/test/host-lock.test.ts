@@ -17,7 +17,7 @@ runsFromItsOwnFolder();
 const PAGE = `<!doctype html>
 <html><head><script type="module" crossorigin src="/assets/app.js"></script></head>
 <body><div id="root"></div>
-<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>
+<script>window.__WSP__ = window.__WSP__ || { token: "" };</script>
 </body></html>
 `;
 
@@ -31,7 +31,6 @@ function testRuntime(): Runtime {
 interface Lock {
   pid: number;
   port: number;
-  wsPort: number;
   startedAt: string;
   startedBy?: "verb";
 }
@@ -75,18 +74,17 @@ describe("serve takes host.lock next to the state file", () => {
   });
 
   async function start(dir: string = webDir): Promise<HostHandle> {
-    const h = await serve(quietIO, { port: 0, wsPort: 0, statePath, webDir: dir, runtime: testRuntime() });
+    const h = await serve(quietIO, { port: 0, statePath, webDir: dir, runtime: testRuntime() });
     handles.push(h);
     return h;
   }
 
-  it("writes pid, ports and start time, and removes the lock on close", async () => {
+  it("writes pid, port and start time, and removes the lock on close", async () => {
     const before = Date.now();
     const h = await start();
     const lock = readLock(lockPath);
     expect(lock.pid).toBe(process.pid);
     expect(lock.port).toBe(h.port);
-    expect(lock.wsPort).toBe(h.wsPort);
     expect(Date.parse(lock.startedAt)).toBeGreaterThanOrEqual(before - 1000);
     expect(Date.parse(lock.startedAt)).toBeLessThanOrEqual(Date.now());
 
@@ -105,10 +103,10 @@ describe("serve takes host.lock next to the state file", () => {
     handles.splice(0);
   });
 
-  it("refuses a second host on the same state file, naming the running pid and ports", async () => {
+  it("refuses a second host on the same state file, naming the running pid and port", async () => {
     const first = await start();
     await expect(start()).rejects.toThrow(
-      new RegExp(`pid ${process.pid}\\b.*\\b${first.port}\\b.*\\b${first.wsPort}\\b`),
+      new RegExp(`pid ${process.pid}\\b.*\\b${first.port}\\b`),
     );
     // The loser must not take the winner's lock with it.
     expect(readLock(lockPath).port).toBe(first.port);
@@ -133,7 +131,7 @@ describe("serve takes host.lock next to the state file", () => {
 
   it("removes a lock whose pid is no longer alive and starts", async () => {
     mkdirSync(join(home, "state"));
-    const stale = { pid: deadPid(), port: 1, wsPort: 2, startedAt: "2026-09-01T00:00:00.000Z" };
+    const stale = { pid: deadPid(), port: 1, startedAt: "2026-09-01T00:00:00.000Z" };
     writeFileSync(lockPath, JSON.stringify(stale));
 
     const h = await start();
@@ -157,7 +155,7 @@ describe("serve takes host.lock next to the state file", () => {
     // A lock a live process holds whose host answers nowhere: the build cannot go through its door, so the run says
     // how to take that host down. A host that does answer takes the build instead; that road is init-beside's test.
     mkdirSync(join(home, "state"), { recursive: true });
-    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, port: 1, wsPort: 1, address: "127.0.0.1", startedAt: new Date().toISOString() }));
+    writeFileSync(lockPath, JSON.stringify({ pid: process.pid, port: 1, address: "127.0.0.1", startedAt: new Date().toISOString() }));
     writeFileSync(join(home, "state", "host-token"), "tok");
     // A host somewhere else is where every other verb would go; the build belongs to the process holding this lock.
     vi.stubEnv("WSP_HOST", "elsewhere");

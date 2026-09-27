@@ -111,7 +111,7 @@ describe("wsp verbs over the host", () => {
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
     daemon = fakeGitDaemon();
     rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), daemonChannel: daemon.open });
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every line that makes one needs a project first; one project here, so
     // wsp new takes the work alone.
     cloud = await projectOn(rt);
@@ -181,7 +181,7 @@ describe("wsp verbs over the host", () => {
     handle = undefined;
     rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), ...(places !== undefined ? { places } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt, ...(restart !== undefined ? { restart } : {}) });
+    handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt, ...(restart !== undefined ? { restart } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "");
     // A restart on a fresh store holds no project, and a workspace is one project's copy; one that kept the store
     // keeps the project it already had, since a second would make every wsp new ambiguous.
@@ -1148,15 +1148,8 @@ describe("wsp verbs over the host", () => {
     expect(missing.io.errors).toEqual(["wsp forget: no workspace nope"]);
   });
 
-  it("the delete question and its line say what the delete does to this kind's machine, the ssh sweep included", () => {
-    const workspace = { id: "ws_mine", name: "box", machineId: "ssh://dev@box:22", phase: "running", kind: "ssh", golden: "", createdAt: "2026-09-08T00:00:00.000Z", project: { id: "pr_1", name: "api", path: "/root/api", computer: "default" } } as const;
-    // What wsp put on a machine somebody owns comes off with the record; the machine is theirs and stays.
-    expect(deleteQuestion({ workspace, threads: 1 })).toBe(
-      "Delete box?\nIts daemon, its unit and its login line come off the computer, which is otherwise left as it is; its record and 1 thread leave this computer.",
-    );
-    expect(deletedLine({ workspace, threads: 1 })).toBe(
-      "deleted box ws_mine: its daemon, its unit and its login line come off the computer, which is otherwise left as it is, and its record and 1 thread are gone from this computer",
-    );
+  it("the delete question and its line say what the delete does to this kind's machine", () => {
+    const workspace = { id: "ws_mine", name: "box", machineId: "m_ab12", phase: "running", kind: "cloud", golden: "", createdAt: "2026-09-08T00:00:00.000Z", project: { id: "pr_1", name: "api", path: "/root/api", computer: "default" } } as const;
     // This computer took no daemon of wsp's and no line in a login file, so nothing comes off it.
     const here = { ...workspace, kind: "local", machineId: "local" } as const;
     expect(deleteQuestion({ workspace: here, threads: 1 })).toBe("Delete box?\nIts computer is left as it is; its record and 1 thread leave this computer.");
@@ -1166,8 +1159,7 @@ describe("wsp verbs over the host", () => {
     expect(deleteQuestion({ workspace: copied, threads: 1 })).toBe("Delete box?\nIts copy at /Users/dev/api-fix is removed and the project folder is left as it is; its record and 1 thread leave this computer.");
     expect(deletedLine({ workspace: copied, threads: 1 })).toBe("deleted box ws_mine: its copy at /Users/dev/api-fix is removed and the project folder is left as it is, and its record and 1 thread are gone from this computer");
     // A fork is wsp's to take away, and its line still names the machine that goes.
-    const fork = { ...workspace, kind: "cloud", machineId: "m_ab12" } as const;
-    expect(deletedLine({ workspace: fork, threads: 0 })).toBe("deleted box ws_mine: computer m_ab12 is gone in the cloud, and its record and 0 threads are gone from this computer");
+    expect(deletedLine({ workspace, threads: 0 })).toBe("deleted box ws_mine: computer m_ab12 is gone in the cloud, and its record and 0 threads are gone from this computer");
   });
 
   it("delete asks once in the words the app shows, kills the machine at the provider, and drops the record and its threads", async () => {
@@ -3133,7 +3125,7 @@ describe("wsp verbs over the host", () => {
      * to the thread, which is the pair a wsp line inside a turn dials with. Every line after this runs as that thread. */
     async function asThread(workspace: WorkspaceView, threadId: string): Promise<void> {
       const scoped = await rt.devices.mint(`thread ${threadId}`, { kind: "thread", threadId, workspaceId: workspace.id, rootThreadId: threadId }, Date.now());
-      env[HOST_URL_ENV] = `ws://127.0.0.1:${handle!.wsPort}`;
+      env[HOST_URL_ENV] = `ws://127.0.0.1:${handle!.port}`;
       env[HOST_TOKEN_ENV] = scoped.deviceToken;
       // The fingerprint of the key this host proves rides the launch beside them, and the line holds the host to
       // it before the token crosses: a turn on a machine reaches this host over a road somebody else carries.
@@ -3347,9 +3339,9 @@ describe("wsp verbs over the host", () => {
     handle = undefined;
     const old = new WebSocketServer({ port: 0, host: "127.0.0.1" });
     await new Promise<void>(r => old.once("listening", r));
-    const wsPort = (old.address() as AddressInfo).port;
+    const port = (old.address() as AddressInfo).port;
     writeFileSync(hostTokenPath(statePath), "tok\n");
-    writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: wsPort, wsPort, startedAt: new Date().toISOString() }));
+    writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }));
     const workspace = { id: "ws_1", name: "alpha", machineId: "m1", phase: "running", golden: "snap_gold", createdAt: "2026-09-06T00:00:00.000Z" };
     const session = { id: "s_1", workspaceId: "ws_1", harness: "claude", status: "running", threadId: "t_1" };
     old.on("connection", socket => {
@@ -3385,9 +3377,9 @@ describe("wsp verbs over the host", () => {
     handle = undefined;
     const old = new WebSocketServer({ port: 0, host: "127.0.0.1" });
     await new Promise<void>(r => old.once("listening", r));
-    const wsPort = (old.address() as AddressInfo).port;
+    const port = (old.address() as AddressInfo).port;
     writeFileSync(hostTokenPath(statePath), "tok\n");
-    writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: wsPort, wsPort, startedAt: new Date().toISOString() }));
+    writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }));
     const workspace = { id: "ws_1", name: "alpha", machineId: "m1", phase: "running", golden: "snap_gold", createdAt: "2026-09-06T00:00:00.000Z", project: { id: "pr_1", name: "api", path: "/root/api", computer: "default" } };
     // The validator's own words, off the very schema the host parses a request with.
     let refusal = RuntimeRequest.safeParse({ id: 1, op: "workspaces.exec" }).error!.message;
@@ -3431,9 +3423,9 @@ describe("wsp verbs over the host", () => {
     writeFileSync(hostTokenPath(statePath), "tok\n");
     try {
       for (const server of [silent, mute]) {
-        const wsPort = (server.address() as AddressInfo).port;
-        writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: wsPort, wsPort, startedAt: new Date().toISOString() }));
-        await expect(dialHost(statePath, { deadlineMs: 200 })).rejects.toThrow(`the host at 127.0.0.1:${wsPort} did not answer: nothing came back within 200 ms`);
+        const port = (server.address() as AddressInfo).port;
+        writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }));
+        await expect(dialHost(statePath, { deadlineMs: 200 })).rejects.toThrow(`the host at 127.0.0.1:${port} did not answer: nothing came back within 200 ms`);
       }
     } finally {
       for (const client of mute.clients) client.terminate();
@@ -3930,11 +3922,10 @@ describe("wsp verbs over the host", () => {
 
 describe("messageTo", () => {
   const row: ThreadView = { id: "row_1", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "hello", sessionId: "row_1", turns: 1, ran: false };
-  it("names the thread when the row has one, resumes by session when it has only that, and refuses a row with neither instead of minting a thread in silence", () => {
+  it("names the thread by its runtime id, and a row with none by its own id, which is the fold key the listing gave it", () => {
     expect(messageTo({ ...row, threadId: "thr_1", claudeSessionId: "sess_1" }, "again")).toEqual({ workspaceId: "ws_1", prompt: "again", harness: "claude", thread: "thr_1" });
     expect(messageTo({ ...row, threadId: "thr_1" }, "again")).toEqual({ workspaceId: "ws_1", prompt: "again", harness: "claude", thread: "thr_1" });
-    expect(messageTo({ ...row, claudeSessionId: "sess_1" }, "again")).toEqual({ workspaceId: "ws_1", prompt: "again", harness: "claude", resume: "sess_1" });
-    expect(() => messageTo(row, "again")).toThrow("thread row_1 has no session to resume yet");
+    expect(messageTo({ ...row, claudeSessionId: "sess_1" }, "again")).toEqual({ workspaceId: "ws_1", prompt: "again", harness: "claude", thread: "row_1" });
   });
 });
 

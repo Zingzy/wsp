@@ -87,15 +87,15 @@ describe("a verb starts the host when none serves", () => {
         // Wired for this computer as well as for the stub provider: wsp add on a folder here records a project on
         // this computer, and a host with no local backend refuses that rather than the dial.
         rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, local: localWiring(join(dir, "home")) });
-        handles.push(await serve(captured(), { port: 0, wsPort: 0, statePath: path, webDir, runtime: rt }));
+        handles.push(await serve(captured(), { port: 0, statePath: path, webDir, runtime: rt }));
         return servingHost(path)!;
       },
     };
   }
 
-  it("spawns this same wsp on free ports, detached, with the verb's word in its environment, and says where its log is", async () => {
+  it("spawns this same wsp on a free port, detached, with the verb's word in its environment, and says where its log is", async () => {
     const calls: { command: string; args: readonly string[]; opts: Record<string, unknown> }[] = [];
-    const lock: HostLock = { pid: process.pid, port: 1, wsPort: 2, startedAt: new Date().toISOString() };
+    const lock: HostLock = { pid: process.pid, port: 1, startedAt: new Date().toISOString() };
     mkdirSync(join(dir, "state"), { recursive: true });
     // The child takes the lock, as a real one does, and the wait finds it there.
     const fake = fakeSpawn(call => {
@@ -114,24 +114,24 @@ describe("a verb starts the host when none serves", () => {
     expect(await start(statePath, line => said.push(line))).toEqual(lock);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.command).toBe("/usr/local/bin/wsp");
-    expect(calls[0]!.args).toEqual(["up", "--state", statePath, "--port", "0", "--ws-port", "0"]);
+    expect(calls[0]!.args).toEqual(["up", "--state", statePath, "--port", "0"]);
     expect(calls[0]!.opts["detached"]).toBe(true);
     expect((calls[0]!.opts["env"] as Record<string, string>)[STARTED_BY_ENV]).toBe("verb");
     expect(fake.unrefs()).toBe(1);
     expect(said).toEqual([`starting the host for ${statePath}; its log is ${hostLogPath(statePath)}, and wsp down stops it`]);
   });
 
-  it("a host that restarts itself on the verb's road starts its child on the ports it held, so a tab on them reconnects", async () => {
+  it("a host that restarts itself on the verb's road starts its child on the port it held, so a tab on it reconnects", async () => {
     const calls: { args: readonly string[] }[] = [];
-    const lock: HostLock = { pid: process.pid, port: 7101, wsPort: 7102, startedAt: new Date().toISOString() };
+    const lock: HostLock = { pid: process.pid, port: 7101, startedAt: new Date().toISOString() };
     mkdirSync(join(dir, "state"), { recursive: true });
     const fake = fakeSpawn(call => {
       calls.push(call);
       writeFileSync(lockPathFor(statePath), JSON.stringify(lock));
     });
     const start = hostStarter({ spawn: fake.spawn, wsp: { command: "wsp", args: [] }, env: {}, waitMs: 2_000, answers: () => Promise.resolve(true), registered: () => undefined });
-    expect(await start(statePath, () => undefined, { port: 7101, wsPort: 7102 })).toEqual(lock);
-    expect(calls[0]!.args).toEqual(["up", "--state", statePath, "--port", "7101", "--ws-port", "7102"]);
+    expect(await start(statePath, () => undefined, { port: 7101 })).toEqual(lock);
+    expect(calls[0]!.args).toEqual(["up", "--state", statePath, "--port", "7101"]);
   });
 
   it("a child that never serves is one refusal naming the state file, the log's last lines under it, of the provider class", async () => {
@@ -308,7 +308,7 @@ describe("a verb starts the host when none serves", () => {
     vi.stubEnv(STARTED_BY_ENV, "verb");
     expect(startedByEnv(process.env)).toBe("verb");
     rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
-    handles.push(await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt }));
+    handles.push(await serve(captured(), { port: 0, statePath, webDir, runtime: rt }));
     expect((JSON.parse(readFileSync(lockPathFor(statePath), "utf8")) as HostLock).startedBy).toBe("verb");
     for (const h of handles.splice(0)) await h.close();
     await rt.close();
@@ -316,7 +316,7 @@ describe("a verb starts the host when none serves", () => {
     vi.stubEnv(STARTED_BY_ENV, "");
     expect(startedByEnv(process.env)).toBeUndefined();
     rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
-    handles.push(await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt }));
+    handles.push(await serve(captured(), { port: 0, statePath, webDir, runtime: rt }));
     expect(JSON.parse(readFileSync(lockPathFor(statePath), "utf8")) as HostLock).not.toHaveProperty("startedBy");
 
     // The unit this computer's manager holds starts a host too, and its lock says which road that was, so wsp
@@ -326,7 +326,7 @@ describe("a verb starts the host when none serves", () => {
     vi.stubEnv(STARTED_BY_ENV, "service");
     expect(startedByEnv(process.env)).toBe("service");
     rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
-    handles.push(await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt }));
+    handles.push(await serve(captured(), { port: 0, statePath, webDir, runtime: rt }));
     expect((JSON.parse(readFileSync(lockPathFor(statePath), "utf8")) as HostLock).startedBy).toBe("service");
   });
 
@@ -354,7 +354,7 @@ describe("a verb starts the host when none serves", () => {
     // A state file no unit of this computer's names is started for as it always was.
     const other = join(dir, "other", "state.json");
     mkdirSync(join(dir, "other"), { recursive: true });
-    const lock: HostLock = { pid: process.pid, port: 1, wsPort: 2, startedAt: new Date().toISOString() };
+    const lock: HostLock = { pid: process.pid, port: 1, startedAt: new Date().toISOString() };
     const free = fakeSpawn(() => writeFileSync(lockPathFor(other), JSON.stringify(lock)));
     const starter = hostStarter({
       spawn: free.spawn,

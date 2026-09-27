@@ -9,11 +9,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, markedDefault, OVER_SSH, type TurnResult } from "@wsp/protocol";
+import { HERE_PLACE_ID, markedDefault, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
-import { fakeSsh } from "./fake-ssh.js";
 import { stubBackend, copyingFake, createOn, projectOn, testPlatform } from "./stub-backend.js";
 
 /** A harness that answers at once and keeps every start it was handed, so a case reads the access the runtime
@@ -66,8 +65,8 @@ describe("the access a thread starts at, on each kind of workspace", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  const runtime = (ssh?: Parameters<typeof createRuntime>[0]["ssh"]): Runtime => {
-    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring, ...(ssh !== undefined ? { ssh } : {}) });
+  const runtime = (): Runtime => {
+    rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring });
     return rt;
   };
 

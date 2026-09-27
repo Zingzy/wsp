@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One restart road per way a host comes up: the service exits and its manager
-// brings it back, a verb's host starts its successor on its own ports and
+// brings it back, a verb's host starts its successor on its own port and
 // exits, and a host wsp up holds in a terminal refuses, since nothing would
 // bring it back.
 import { UP_RESTART_LINE } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { restartRoads, type RestartingHost } from "../src/restart.js";
 
-function recorded(respawn: (ports: { port: number; wsPort: number }) => Promise<unknown> = async () => undefined, close: () => Promise<void> = async () => undefined) {
+function recorded(respawn: (ports: { port: number }) => Promise<unknown> = async () => undefined, close: () => Promise<void> = async () => undefined) {
   const steps: string[] = [];
   const host: RestartingHost = {
     port: 7101,
-    wsPort: 7102,
     close: async () => {
       steps.push("close");
       await close();
@@ -20,7 +19,7 @@ function recorded(respawn: (ports: { port: number; wsPort: number }) => Promise<
   const roads = restartRoads({
     exit: code => void steps.push(`exit ${code}`),
     respawn: async ports => {
-      steps.push(`respawn ${ports.port} ${ports.wsPort}`);
+      steps.push(`respawn ${ports.port}`);
       await respawn(ports);
     },
     log: line => void steps.push(`log ${line}`),
@@ -36,11 +35,11 @@ describe("the restart roads", () => {
     expect(steps).toEqual(["close", "exit 0"]);
   });
 
-  it("a verb's host closes, then starts its successor on the ports it held, then exits", async () => {
+  it("a verb's host closes, then starts its successor on the port it held, then exits", async () => {
     const { steps, host, roads } = recorded();
     expect(roads.verb.refusal).toBeUndefined();
     await roads.verb.restart(host);
-    expect(steps).toEqual(["close", "respawn 7101 7102", "exit 0"]);
+    expect(steps).toEqual(["close", "respawn 7101", "exit 0"]);
   });
 
   it("a verb's host whose successor never served says so in its log and exits 1, since nothing serves now", async () => {
@@ -48,7 +47,7 @@ describe("the restart roads", () => {
       throw new Error("no host answered within 30 s");
     });
     await roads.verb.restart(host);
-    expect(steps).toEqual(["close", "respawn 7101 7102", "log the host that was to replace this one did not serve: no host answered within 30 s", "exit 1"]);
+    expect(steps).toEqual(["close", "respawn 7101", "log the host that was to replace this one did not serve: no host answered within 30 s", "exit 1"]);
   });
 
   it("a service whose close failed still exits, so its manager brings a host back rather than a process that serves nothing", async () => {

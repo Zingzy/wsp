@@ -24,8 +24,8 @@ describe("the install a project's own root picks", () => {
 
 describe("the line an install runs as", () => {
   it("runs in the project folder and writes its output to a log outside it", () => {
-    const script = installScript({ row: "node", command: "npm ci" }, { dir: "/root/wsp", log: "/var/lib/wsp/run/add-pr_1/install.log" });
-    expect(script).toBe("mkdir -p '/var/lib/wsp/run/add-pr_1' && cd '/root/wsp' && npm ci >> '/var/lib/wsp/run/add-pr_1/install.log' 2>&1");
+    const script = installScript({ row: "node", command: "npm ci" }, { dir: "/root/wsp", log: "/wsp/run/add-pr_1/install.log" });
+    expect(script).toBe("mkdir -p '/wsp/run/add-pr_1' && cd '/root/wsp' && npm ci >> '/wsp/run/add-pr_1/install.log' 2>&1");
     expect(script).not.toContain("/root/wsp/install.log");
   });
 });

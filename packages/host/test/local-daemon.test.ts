@@ -111,7 +111,7 @@ describe("local daemon", () => {
   });
 
   it("binds a free ephemeral port the host's own port check never sees as a clash, and leaves nothing of its own beside the host's files", async () => {
-    // Two ports of the host's own, free right now, standing in for its app and runtime ports.
+    // A port of the host's own, free right now, standing in for the one it serves on.
     const free = async (): Promise<number> =>
       new Promise(resolve => {
         const s = createServer();
@@ -120,11 +120,11 @@ describe("local daemon", () => {
           s.close(() => resolve(port));
         });
       });
-    const hostPorts = [await free(), await free()];
+    const hostPort = await free();
     daemon = await startLocal();
-    expect(hostPorts).not.toContain(daemon.port);
-    // The host's own pick, with both ports named: it binds exactly the pair asked for, nothing taken, nothing stepped over.
-    expect(await choosePorts({ port: hostPorts[0]!, wsPort: hostPorts[1]!, named: true })).toEqual({ ports: { port: hostPorts[0], wsPort: hostPorts[1] } });
+    expect(daemon.port).not.toBe(hostPort);
+    // The host's own pick, with its port named: it binds exactly the port asked for, nothing taken, nothing stepped over.
+    expect(await choosePorts({ port: hostPort, named: true })).toEqual({ ports: { port: hostPort } });
     // The browse root holds the host's own folder and nothing else: the token file and the manifest sit in a folder
     // of the daemon's own under the system's temp dir, and the flags name both, so nothing falls back to a path
     // under /root.

@@ -63,7 +63,7 @@ describe("the login shell PATH and the runtime built over it", () => {
     // The runtime the desktop's host builds, with the copy road alone faked, since every workspace here is a copy
     // and this checkout stages no daemon binary; its environment is read at every call, so the PATH the read moves
     // is the one a turn runs under.
-    handle = await serve(io, { port: 0, wsPort: 0, statePath, webDir, runtime: makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(homedir(), process.env, fakeDaemonStart, statePath, copyingFake())) });
+    handle = await serve(io, { port: 0, statePath, webDir, runtime: makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(homedir(), process.env, fakeDaemonStart, statePath, copyingFake())) });
     const folder = mkdtempSync(join(tmpdir(), "wsp-login-path-"));
     execFileSync("git", ["init", "-q", folder]);
     const project = await handle.addProject(folder);

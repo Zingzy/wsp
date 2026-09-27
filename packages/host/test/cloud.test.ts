@@ -34,7 +34,7 @@ const CLOUD_ALLOWED: string[] = [
   '"server","cloud","cpu"',
   // The wire's word for a workspace on a provider's machine, in the schemas that carry a workspace: no record with the
   // cloud off holds it, and a wire value is not renamed by a flag.
-  '"enum":["cloud","local","ssh"]',
+  '"enum":["cloud","local"]',
 ];
 
 /** The tool list as an agent reads it: every name, description and field description. */

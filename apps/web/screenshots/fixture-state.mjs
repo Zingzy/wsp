@@ -21,7 +21,7 @@
 // first minute working out whose Mac they were on, and a project folder under
 // the person's own home put a tester's turn inside the person's real
 // repository.
-import { HERE_PLACE_ID as HERE } from "@wsp/protocol";
+import { DAEMON_VERSION, HERE_PLACE_ID as HERE, STATE_SHAPE } from "@wsp/protocol";
 import { createHash } from "node:crypto";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
@@ -78,6 +78,7 @@ const workspace = (id, name, extra = {}) => ({
   kind: "local",
   golden: "",
   createdAt: new Date(ago(60 * 26)).toISOString(),
+  size: { cpu: 10, memMb: 32768 },
   home: HOME,
   folder: HOME,
   spec: {},
@@ -113,7 +114,7 @@ export const HERE_AGENTS = {
 
 /** A project as the host records one: one computer, the source that computer sees and the folder a workspace of it
  * works in. A project here is a folder under the work folder; anywhere else it is a repo the computer cloned into
- * `path`. Every field the add writes is written, since a record missing one is filled and written back at load. */
+ * `path`. Every field the add writes is written, as the add writes it. */
 const project = (name, computer, minutes, path = computer === HERE ? projectDest(name) : `/root/${name}`) => {
   const remote = `https://github.com/you/${name}.git`;
   const memoryKey = path.replace(/[^A-Za-z0-9]/g, "-");
@@ -473,7 +474,7 @@ const FORK_RATE = 0.16;
  * reviewer nothing.
  *
  * Three rows and not five: one workspace stands on one machine, and this computer is one machine, so the four
- * local rows this fixture used to carry are a sidebar wsp refuses to make (`alreadyRecorded`). The ids stay where
+ * local rows this fixture used to carry are a sidebar wsp never makes. The ids stay where
  * they were, since the surfaces list names rows by id: ws_api is this computer now, and ws_web the workspace on
  * the old MacBook. The threads that stood on the rows that went stand on this computer, which is where a person
  * with one Mac would have run them. */
@@ -505,8 +506,8 @@ const thisComputer = () => store({ projects: [], workspaces: [] });
  * workspace standing on that computer, and the laptop itself in the places collection with the shape it reported,
  * four cores and 8 GB. It was a workspace of the local kind until a tester met his own ThinkPad claiming this Mac's
  * ten cores and a folder on this Mac: a joined computer is a place, and a local workspace is this computer alone.
- * One row for this Mac and not two, because one workspace stands on one machine and this computer is one machine
- * (`alreadyRecorded`): a tester read "the only one it can be" beside three rows and could not tell which computer
+ * One row for this Mac and not two, because one workspace stands on one machine and this computer is one machine:
+ * a tester read "the only one it can be" beside three rows and could not tell which computer
  * two of them were on. No thread on either, since nothing has been run here yet. */
 const macAndLaptop = () =>
   store({
@@ -895,7 +896,8 @@ const fixtureRow = name => {
 export function fixtureState(name = "mac-in-use", { home = homedir() } = {}) {
   HOME = resolve(home);
   CLOUD = fixtureRow(name).cloud;
-  return fixtureRow(name).build();
+  // A host reads a state file in its own shape alone, so a fixture carries the document this build writes.
+  return { ...fixtureRow(name).build(), $shape: { shape: STATE_SHAPE, wsp: "fixture", daemon: DAEMON_VERSION, bin: "fixture-state.mjs", at: new Date(AT).toISOString() } };
 }
 
 /** How big every snapshot in a fixture's image reads. Two of them sit inside the stand-in's ten free GB, so the

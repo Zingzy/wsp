@@ -978,7 +978,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // A person at a terminal gets the app served at the end, --yes or not; --non-interactive says an agent is driving,
   // and off a terminal nobody is here, so neither serves anything. Only a run that serves needs the ports.
   const serves = io.isTTY && opts.nonInteractive !== true && opts.handOff === undefined;
-  let ports: AppPorts = { port: opts.ports.port, wsPort: opts.ports.wsPort };
+  let ports: AppPorts = { port: opts.ports.port };
   if (serves) {
     const chosen = await pickPorts({ ports: opts.ports, statePath: opts.statePath, output: io.output });
     if (chosen === undefined) return { code: 1 };

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV } from "@wsp/protocol";
-import { BoxBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, landsBytes, type MachineBackend } from "@wsp/engine";
+import { BoxBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, landsBytes, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { keysOf } from "../src/env-keys.js";
 import { BOX_KEY_ENV, PROVIDER_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, isPlace, placeIdOf, placeProviders, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderModule } from "../src/providers.js";
@@ -72,25 +72,25 @@ describe("provider modules", () => {
     expect(PROVIDER_MODULES.at(-1)!.selects(pick())).toBe(true);
   });
 
-  it.runIf(CLOUD_ON)("every registered backend, and the two kinds outside the registry, declares a pause mode and a lifecycle together or neither, and says on its own whether it copies a disk and replaces a machine", () => {
+  it.runIf(CLOUD_ON)("every registered backend, and the local kind outside the registry, declares a pause mode and a lifecycle together or neither, and says on its own whether it copies a disk and replaces a machine", () => {
     // Built the way the host builds them, with fake picks: a key that looks fake, a daemon nothing dials.
     const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { BOX_API_KEY: "box_x" }))] as const);
-    const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })], ["ssh", new SshBackend()]];
+    const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })]];
     const modes = Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.pauseMode]));
-    expect(modes).toEqual({ box: "disk", solari: "memory", fake: "memory", none: undefined, local: undefined, ssh: undefined });
+    expect(modes).toEqual({ box: "disk", solari: "memory", fake: "memory", none: undefined, local: undefined });
     for (const [, b] of all) expect(b.capabilities.pauseMode === undefined || ["memory", "disk"].includes(b.capabilities.pauseMode)).toBe(true);
     // The runtime reads the budgets only where a pause exists, so the two are declared together or not at all.
     for (const [id, b] of all) expect([id, b.lifecycle !== undefined]).toEqual([id, b.capabilities.pauseMode !== undefined]);
     // Which providers copy a machine's disk into an image, the one fact the snapshot verb reads: a fork that boots
     // cold is still snapshotted, so this row is its own and never liveCloneForks.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false });
     // Which life a copy may be taken from is each provider's own row: Solari refuses a machine that was resumed,
     // and a box's named snapshot reads the disk as it stands.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.snapshotsAnyLife]))).toEqual({ box: true, solari: false, fake: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.snapshotsAnyLife]))).toEqual({ box: true, solari: false, fake: true, none: false, local: false });
     // Which providers stand a fresh machine in for one a workspace is on, the fact the rebuild and the image move
     // read. Each verb has its own row here, so a provider added tomorrow answers for every road rather than being
     // read off a neighbour's flag.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.replacesMachine]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.replacesMachine]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false });
     for (const [, b] of all) if (b.lifecycle !== undefined) {
       expect(b.lifecycle.budgets.wakeAttempts).toBeGreaterThanOrEqual(1);
       expect(b.lifecycle.budgets.daemonAnswersMs).toBeGreaterThan(0);

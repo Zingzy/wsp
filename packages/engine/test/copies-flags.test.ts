@@ -11,16 +11,14 @@ import { FakeBackend } from "../src/fake-backend.js";
 import { LocalBackend } from "../src/local-backend.js";
 import { NoProviderBackend } from "../src/no-provider-backend.js";
 import { SolariBackend } from "../src/solari-backend.js";
-import { SshBackend } from "../src/ssh-backend.js";
 
 /** Every backend a host can wire, with what each says about copies. A computer the person owns copies a folder of
- * theirs and shares its ports; a fork of an image is its own machine with its own network; a machine wsp only
- * reaches copies nothing, and neither does a host with no provider at all. */
+ * theirs and shares its ports; a fork of an image is its own machine with its own network; a host with no provider
+ * at all copies nothing. */
 const ROWS: readonly { name: string; capabilities: Capabilities; copies: boolean; ownNetwork: boolean }[] = [
   { name: "this computer", capabilities: new LocalBackend({ root: "/tmp/wsp-flags" }).capabilities, copies: true, ownNetwork: false },
   { name: "box", capabilities: new BoxBackend({ apiKey: "sk-ant-x" }).capabilities, copies: true, ownNetwork: true },
   { name: "solari", capabilities: new SolariBackend({ apiKey: "sk-ant-x" }).capabilities, copies: true, ownNetwork: true },
-  { name: "ssh", capabilities: new SshBackend({}).capabilities, copies: false, ownNetwork: false },
   { name: "no provider", capabilities: new NoProviderBackend().capabilities, copies: false, ownNetwork: false },
   { name: "the stand-in", capabilities: new FakeBackend().capabilities, copies: true, ownNetwork: true },
 ];
@@ -34,6 +32,6 @@ describe("every backend answers both flags", () => {
   }
 
   it("is the whole list: a backend module with no row here is a computer nothing asked about copies", () => {
-    expect(ROWS.map(r => r.name).sort()).toEqual(["box", "no provider", "solari", "ssh", "the stand-in", "this computer"]);
+    expect(ROWS.map(r => r.name).sort()).toEqual(["box", "no provider", "solari", "the stand-in", "this computer"]);
   });
 });

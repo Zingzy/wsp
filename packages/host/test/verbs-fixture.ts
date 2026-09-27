@@ -22,7 +22,7 @@ export const fakeDaemonStart: LocalDaemonStart = async () =>
 export const PAGE = `<!doctype html>
 <html><head><script type="module" crossorigin src="/assets/app.js"></script></head>
 <body><div id="root"></div>
-<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>
+<script>window.__WSP__ = window.__WSP__ || { token: "" };</script>
 </body></html>
 `;
 

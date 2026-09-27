@@ -38,21 +38,21 @@ describe("help", () => {
 
 describe("the wsp up an init names", () => {
   it("carries the serving flags the init was given, resolved and quoted, and none it was not", () => {
-    const opts = { port: 4500, wsPort: 4510, named: true, address: LOOPBACK, statePath: "/tmp/wsp test/state.json" };
+    const opts = { port: 4500, named: true, address: LOOPBACK, statePath: "/tmp/wsp test/state.json" };
     expect(upCommandFor(opts, {})).toBe("wsp up");
     expect(upCommandFor(opts, { state: "state.json" })).toBe("wsp up --state '/tmp/wsp test/state.json'");
     // Every value the line hands over is quoted, as the unit spells the same words: a path with a space in it and a
     // port read the same way, and the person pastes the line whole.
-    expect(upCommandFor(opts, { port: "4500", "ws-port": "4510" })).toBe("wsp up --port '4500' --ws-port '4510'");
+    expect(upCommandFor(opts, { port: "4500" })).toBe("wsp up --port '4500'");
     // The line the init hands over starts the host the init built: a run told which provider to fork on says so
     // again, or the host that line starts picks no provider and forks nothing.
     const named = { ...opts, address: "0.0.0.0", advertise: "http://10.0.0.9:4500", provider: "box", relay: false };
     expect(upCommandFor(named, { provider: "box" })).toBe("wsp up --provider 'box'");
     expect(upCommandFor(named, { listen: "0.0.0.0", advertise: "http://10.0.0.9:4500", "no-relay": true })).toBe("wsp up --listen '0.0.0.0' --advertise 'http://10.0.0.9:4500' --no-relay");
     // Every row of the table, so one added tomorrow is spelled here too rather than dropped from the handover.
-    const all = upCommandFor(named, { state: "s", port: "4500", "ws-port": "4510", listen: "0.0.0.0", advertise: "http://10.0.0.9:4500", provider: "box", "no-relay": true });
+    const all = upCommandFor(named, { state: "s", port: "4500", listen: "0.0.0.0", advertise: "http://10.0.0.9:4500", provider: "box", "no-relay": true });
     for (const flag of SERVE_FLAGS) expect(all, `--${flag.name} in the line an init hands over`).toContain(`--${flag.name}`);
-    // The fork runs against the host wsp up started, so it needs the state and not the ports.
+    // The fork runs against the host wsp up started, so it needs the state and not the port.
     expect(forkCommandFor(opts, {})).toBe("wsp new first");
     expect(forkCommandFor(opts, { state: "state.json" })).toBe("wsp new first --state '/tmp/wsp test/state.json'");
   });
@@ -548,7 +548,7 @@ describe("the key a run is asked for is the one its own provider reads", () => {
     setup();
     // The build beside a serving host runs in that host's own init job, on the provider that host started on: the
     // word on this line reaches no runtime of this run's, so it is refused rather than dropped.
-    const lock = { pid: 4242, port: 3000, wsPort: 3001, startedAt: "2026-09-22T00:00:00.000Z" };
+    const lock = { pid: 4242, port: 3000, startedAt: "2026-09-22T00:00:00.000Z" };
     const asked = (values: { provider?: string }, env: Record<string, string> = {}): string | undefined => {
       const opts = optsFor({ ...values, state }, { ...env, WSP_HOME: home });
       return providerBesideRefusal(lock, opts, "solari", upCommandFor(opts, { ...values, state }))?.message;

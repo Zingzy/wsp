@@ -61,7 +61,7 @@ export async function runLocalInit(opts: LocalInitOptions, io: InitIO): Promise<
   const interactive = io.isTTY && !opts.yes && opts.nonInteractive !== true;
   const serves = io.isTTY && opts.nonInteractive !== true;
   log.info(noKeyLines(opts.upCommand).join("\n"), out);
-  let ports: AppPorts = { port: opts.ports.port, wsPort: opts.ports.wsPort };
+  let ports: AppPorts = { port: opts.ports.port };
   if (serves) {
     const chosen = await pickPorts({ ports: opts.ports, statePath: opts.statePath, output: io.output });
     if (chosen === undefined) return { code: 1 };
