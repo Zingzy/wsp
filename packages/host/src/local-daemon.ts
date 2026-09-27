@@ -21,7 +21,7 @@ import { connectDaemon, type DaemonReach } from "@wsp/runtime";
 import { ownFolder } from "@wsp/own-file";
 // LOOPBACK is the protocol's, which every road that binds or dials this computer reads. Here the reason is also
 // that a firewall prompt on macOS or Windows is a wall a local workspace must never hit.
-import { LOOPBACK, daemonListeningLine, daemonVersionOf, type DaemonEvent, type DaemonReachView, type SysSample } from "@wsp/protocol";
+import { LOOPBACK, daemonListeningLine, type DaemonEvent, type DaemonReachView, type SysSample } from "@wsp/protocol";
 import { daemonBinaryHere } from "./assets.js";
 import { pidAlive } from "./host-lock.js";
 
@@ -109,7 +109,7 @@ async function helloVersion(url: string, token: string, said: () => string): Pro
         onEvent: e => {
           if (e.type !== "daemon.hello") return;
           clearTimeout(timer);
-          done(daemonVersionOf(e));
+          done(e.version);
         },
       });
       link.ready.catch((e: unknown) => {

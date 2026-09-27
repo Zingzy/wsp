@@ -37,7 +37,7 @@ it("stamps its own id and op over any the caller's params carry, so a request ca
   dir = mkdtempSync(join(tmpdir(), "wsp-dial-envelope-"));
   const statePath = join(dir, "state", "state.json");
   mkdirSync(join(dir, "state"), { recursive: true });
-  const lock: HostLock = { pid: process.pid, port: 1, wsPort: (server.address() as { port: number }).port, startedAt: new Date().toISOString() };
+  const lock: HostLock = { pid: process.pid, port: (server.address() as { port: number }).port, startedAt: new Date().toISOString() };
   writeFileSync(lockPathFor(statePath), JSON.stringify(lock));
   writeFileSync(hostTokenPath(statePath), "host-token");
 

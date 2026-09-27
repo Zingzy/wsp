@@ -18,7 +18,7 @@ import { checkSetup } from "../src/setup.js";
 const PAGE = `<!doctype html>
 <html><head><title>wsp</title></head>
 <body><div id="root"></div>
-<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>
+<script>window.__WSP__ = window.__WSP__ || { token: "" };</script>
 </body></html>
 `;
 
@@ -51,10 +51,10 @@ function closeServer(server: Server | TcpServer): Promise<void> {
   return new Promise(resolve => server.close(() => resolve()));
 }
 
-async function bootOf(url: string): Promise<{ wsPort: number; tokenHash?: string; token?: string } | undefined> {
+async function bootOf(url: string): Promise<{ tokenHash?: string; token?: string } | undefined> {
   const html = await (await fetch(url)).text();
   const m = html.match(/window\.__WSP__ = (\{[^<]*\});<\/script>/);
-  return m ? (JSON.parse(m[1]!) as { wsPort: number; tokenHash?: string; token?: string }) : undefined;
+  return m ? (JSON.parse(m[1]!) as { tokenHash?: string; token?: string }) : undefined;
 }
 
 /** A sha256 in hex, which is what the loopback page carries of the host's token. */
@@ -119,10 +119,9 @@ describe("openHost", () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  function open(port: number, wsPort: number): Promise<HostSession> {
+  function open(port: number): Promise<HostSession> {
     return openHost({
       port,
-      wsPort,
       statePath: join(home, "state.json"),
       webDir: fakeWebDir(),
       io: quietIO(),
@@ -133,7 +132,7 @@ describe("openHost", () => {
   it("the host inside the app writes every line it says, and one per refused frame, to host.log beside the state file", async () => {
     const lines: string[] = [];
     const statePath = join(home, "state.json");
-    session = await openHost({ port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), io: quietIO(lines), runtime: testRuntime() });
+    session = await openHost({ port: 0, statePath, webDir: fakeWebDir(), io: quietIO(lines), runtime: testRuntime() });
     const ws = new WebSocket(`${session.url.replace(/^http/, "ws")}${WS_PATH}`);
     const replies: { id?: number; ok?: boolean }[] = [];
     ws.onmessage = m => replies.push(JSON.parse(String(m.data)) as { id?: number; ok?: boolean });
@@ -198,7 +197,7 @@ describe("openHost", () => {
   }
 
   function openWith(dial: typeof dialHost, lines: string[] = [], runtime: Runtime = testRuntime()): Promise<HostSession> {
-    return openHost({ port: 0, wsPort: 0, statePath: join(home, "state.json"), webDir: fakeWebDir(), io: quietIO(lines), runtime, dial });
+    return openHost({ port: 0, statePath: join(home, "state.json"), webDir: fakeWebDir(), io: quietIO(lines), runtime, dial });
   }
 
   it("opens on the one host the account names, after one dial that admits this computer there, and starts no host here", async () => {
@@ -274,18 +273,17 @@ describe("openHost", () => {
   }, 20_000);
 
   it("starts the host on a free port and serves the app with the digest of its token, never the token", async () => {
-    session = await open(0, 0);
+    session = await open(0);
     expect(session.owned).toBe(true);
     expect(session.port).toBeGreaterThan(0);
     expect(session.url).toBe(`http://127.0.0.1:${session.port}`);
     const boot = await bootOf(session.url);
     expect(boot?.tokenHash).toMatch(DIGEST);
     expect(boot?.token).toBeUndefined();
-    expect(boot?.wsPort).toBeGreaterThan(0);
   });
 
   it("stops the host it started when closed", async () => {
-    session = await open(0, 0);
+    session = await open(0);
     const url = session.url;
     await session.close();
     session = undefined;
@@ -295,18 +293,18 @@ describe("openHost", () => {
   it("starts its own host rather than attaching to a wsp host on the port no lock beside this state file names", async () => {
     // Any login on this computer can bind a port and serve a page with the boot line in it; the lock beside the
     // state file is what says a host of the owner's is serving, and there is none here.
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
-    session = await open(existing.port, 0);
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    session = await open(existing.port);
     expect(session.owned).toBe(true);
     expect(session.port).not.toBe(existing.port);
     expect((await bootOf(session.url))?.tokenHash).toMatch(DIGEST);
   });
 
-  it("falls back to free ports when the defaults are held by something else", async () => {
+  it("falls back to a free port when the one asked for is held by something else", async () => {
     const other = createServer((_req, res) => res.end("nope"));
     const port = await listen(other);
     try {
-      session = await open(port, 0);
+      session = await open(port);
       expect(session.owned).toBe(true);
       expect(session.port).not.toBe(port);
       expect((await bootOf(session.url))?.tokenHash).toBeDefined();
@@ -315,33 +313,17 @@ describe("openHost", () => {
     }
   });
 
-  it("falls back to free ports when only the websocket port is taken", async () => {
-    const taken = createTcpServer();
-    const wsPort = await listen(taken);
-    const free = createTcpServer();
-    const port = await listen(free);
-    await closeServer(free);
-    try {
-      session = await open(port, wsPort);
-      expect(session.owned).toBe(true);
-      const boot = await bootOf(session.url);
-      expect(boot?.wsPort).not.toBe(wsPort);
-    } finally {
-      await closeServer(taken);
-    }
-  });
-
   it("attaches to the host named in host.lock when its page carries the digest of the token beside this state file, whatever port it was asked for, and sends that page nothing", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
     // The page passes through a recorder standing where the lock says the host is, so what the window sent to
     // settle the question is read: a squatter on that port would read the same bytes.
     const seen = await recording(existing.port);
     try {
-      const lock = { pid: process.pid, port: seen.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() };
+      const lock = { pid: process.pid, port: seen.port, startedAt: new Date().toISOString() };
       writeFileSync(join(home, "host.lock"), JSON.stringify(lock));
       writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
 
-      session = await open(0, 0);
+      session = await open(0);
       expect(session.owned).toBe(false);
       expect(session.url).toBe(`http://127.0.0.1:${seen.port}`);
       await session.close();
@@ -375,7 +357,7 @@ describe("openHost", () => {
     // The two steps main.ts takes, over the runtime the gate built rather than a fixture's.
     const state = await checkSetup({ statePath });
     expect(state.ready).toBe(true);
-    session = await openHost({ port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), io: quietIO(), ...(state.ready ? { runtime: state.runtime } : {}) });
+    session = await openHost({ port: 0, statePath, webDir: fakeWebDir(), io: quietIO(), ...(state.ready ? { runtime: state.runtime } : {}) });
     expect(session.owned).toBe(true);
     expect((await bootOf(session.url))?.tokenHash).toMatch(DIGEST);
     // The workspace is a copy of a folder on this computer, so the folder its commands start in is here.
@@ -392,10 +374,10 @@ describe("openHost", () => {
   });
 
   it("refuses a loopback lock whose page carries another token's digest than the file beside the state, or none, and starts nothing", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
-    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() }));
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, startedAt: new Date().toISOString() }));
     writeFileSync(join(home, "host-token"), "a-token-of-some-other-host\n");
-    await expect(open(0, 0)).rejects.toThrow(/holds .*host\.lock on port \d+ but the page it serves carries another token's digest/);
+    await expect(open(0)).rejects.toThrow(/holds .*host\.lock on port \d+ but the page it serves carries another token's digest/);
     // The lock is the one the other process wrote: a host this window started would have taken it.
     expect((JSON.parse(readFileSync(join(home, "host.lock"), "utf8")) as { port: number }).port).toBe(existing.port);
 
@@ -405,8 +387,8 @@ describe("openHost", () => {
     const barePort = await listen(bare);
     try {
       writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
-      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: barePort, wsPort: 0, startedAt: new Date().toISOString() }));
-      await expect(open(0, 0)).rejects.toThrow(/but the page it serves carries another token's digest/);
+      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: barePort, startedAt: new Date().toISOString() }));
+      await expect(open(0)).rejects.toThrow(/but the page it serves carries another token's digest/);
     } finally {
       await closeServer(bare);
     }
@@ -416,8 +398,8 @@ describe("openHost", () => {
     const squatter = createServer((_req, res) => res.end("<html>hello</html>"));
     const port = await listen(squatter);
     try {
-      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, wsPort: 0, startedAt: new Date().toISOString() }));
-      await expect(open(0, 0)).rejects.toThrow(/but no wsp host answers there/);
+      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }));
+      await expect(open(0)).rejects.toThrow(/but no wsp host answers there/);
     } finally {
       await closeServer(squatter);
     }
@@ -426,36 +408,36 @@ describe("openHost", () => {
   it.runIf(ipv6Loopback)("dials a loopback lock where its address says that host answers, not this computer's other loopback name", async () => {
     // A host up with --listen ::1 binds a loopback address, so its page carries its token's digest, and it answers
     // there and nowhere else.
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "::1", statePath: join(home, "state.json") });
-    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, address: "::1", startedAt: new Date().toISOString() }));
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, listen: "::1", statePath: join(home, "state.json") });
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, address: "::1", startedAt: new Date().toISOString() }));
     writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
-    session = await open(0, 0);
+    session = await open(0);
     expect(session.owned).toBe(false);
     expect(session.url).toBe(`http://[::1]:${existing.port}`);
   });
 
   it("attaches through the lock alone to a host bound beyond this computer, whose page carries no digest by design", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "0.0.0.0", statePath: join(home, "state.json") });
-    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, address: "0.0.0.0", startedAt: new Date().toISOString() }));
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, listen: "0.0.0.0", statePath: join(home, "state.json") });
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, address: "0.0.0.0", startedAt: new Date().toISOString() }));
     // No token file is written and none is asked for: that page inlines no digest, and the lock is the whole reading.
-    session = await open(0, 0);
+    session = await open(0);
     expect(session.owned).toBe(false);
     expect(session.url).toBe(`http://127.0.0.1:${existing.port}`);
   });
 
   it.runIf(process.getuid !== undefined && process.getuid() !== 0)("refuses a lock naming a process of another login, whatever answers on its port", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
-    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: 1, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() }));
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: 1, port: existing.port, startedAt: new Date().toISOString() }));
     writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
-    await expect(open(0, 0)).rejects.toThrow(/but that process is not this login's/);
+    await expect(open(0)).rejects.toThrow(/but that process is not this login's/);
   });
 
   it("ignores a host.lock whose pid is gone and starts its own host", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
-    const stale = { pid: deadPid(), port: existing.port, wsPort: existing.wsPort, startedAt: "2026-09-01T00:00:00.000Z" };
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    const stale = { pid: deadPid(), port: existing.port, startedAt: "2026-09-01T00:00:00.000Z" };
     writeFileSync(join(home, "host.lock"), JSON.stringify(stale));
 
-    session = await open(0, 0);
+    session = await open(0);
     expect(session.owned).toBe(true);
     expect(session.port).not.toBe(existing.port);
     const lock = JSON.parse(readFileSync(join(home, "host.lock"), "utf8")) as { pid: number; port: number };
@@ -468,7 +450,7 @@ describe("locateHost", () => {
   let user: string;
   let cwd: string;
   let existing: HostHandle | undefined;
-  const alive = (h: HostHandle): string => JSON.stringify({ pid: process.pid, port: h.port, wsPort: h.wsPort, startedAt: new Date().toISOString() });
+  const alive = (h: HostHandle): string => JSON.stringify({ pid: process.pid, port: h.port, startedAt: new Date().toISOString() });
 
   beforeEach(() => {
     user = mkdtempSync(join(tmpdir(), "wsp-desktop-user-"));
@@ -484,7 +466,7 @@ describe("locateHost", () => {
   });
 
   function fixture(): Promise<HostHandle> {
-    return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
   }
 
   /** A home with a lock naming the fixture and the token it serves, the way a host serving it leaves things. */

@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, workspaceAccess, OVER_SSH, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, workspaceAccess, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -540,8 +540,9 @@ describe("composer pickers", () => {
   });
 
   it("a send into a thread that has run carries the effort picked on it and neither the agent nor the access, which stay the thread's own", async () => {
-    const ran: SessionView = { id: "s0", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: "sess_0001", model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" };
-    const { api, started, moved } = fixtureApi({ table: [CLAUDE, CODEX], history: CHAT_STREAM, sessions: [ran], access: "set" });
+    const ran: SessionView = { id: "s0", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: "sess_0001", threadId: "thr_a", model: "claude-opus-5", effort: "high", permissionMode: "bypassPermissions" };
+    const history = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
+    const { api, started, moved } = fixtureApi({ table: [CLAUDE, CODEX], history, sessions: [ran], access: "set" });
     // An agent picked on the rail is the workspace's pick for its next thread; this thread runs on Claude and stays
     // pinned to it, so the pick stands in what the composer resolved and must not reach the wire.
     useComposerOptionsStore.setState({ byWorkspaceId: { [WS]: { harness: "codex" } } });
@@ -560,7 +561,7 @@ describe("composer pickers", () => {
     await typeInto(editor, "go");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ resume: "sess_0001", effort: "low" });
+    expect(started[0]).toMatchObject({ thread: "thr_a", effort: "low" });
     expect(started[0]).not.toHaveProperty("harness");
     expect(started[0]).not.toHaveProperty("permissionMode");
   });
@@ -629,22 +630,6 @@ describe("composer pickers", () => {
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, access: { [WS]: "plan" } } });
     await waitFor(() => expect(picked("access")).toBe("plan"));
     expect(picker("access")?.textContent).toBe("Plan");
-  });
-
-  it("on a computer the person owns the access button wears the mode's short form and its menu row names the machine", async () => {
-    const kept = workspaceAccess({ ...CLAUDE, keptMode: "plan", bypassMode: "bypassPermissions" }, "ssh");
-    const { api } = fixtureApi({ table: [kept] });
-    await setup(api);
-    await waitFor(() => expect(picked("access")).toBe("plan"));
-    expect(picker("access")?.textContent).toBe("Plan");
-    fireEvent.click(picker("access")!);
-    expect(option("bypassPermissions")?.textContent).toContain(`Bypass on ${OVER_SSH}`);
-    fireEvent.click(option("bypassPermissions")!);
-    await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
-    // The button says the CLI's own word for the mode; whose computer it is stays in the menu row, which is where
-    // the long name has the room to be read.
-    expect(picker("access")?.textContent).toBe("Bypass");
-    expect(picker("access")?.getAttribute("aria-label")).toBe("Access: Bypass");
   });
 
   it("says what a pick does to the turn running now, over the list, while a turn runs and not before", async () => {

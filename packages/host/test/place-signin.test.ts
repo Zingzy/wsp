@@ -35,7 +35,7 @@ describe("which logins live on the computer that runs the workspaces", () => {
 });
 
 describe("the sign-in the host planned, run on that computer's terminal and shown here", () => {
-  const CODEX = { command: "codex login --device-auth", env: { CODEX_HOME: "/var/lib/wsp/logins/codex" }, prepare: "mkdir -p '/var/lib/wsp/logins/codex'", status: "codex login status" };
+  const CODEX = { command: "codex login --device-auth", env: { CODEX_HOME: "/wsp/logins/codex" }, prepare: "mkdir -p '/wsp/logins/codex'", status: "codex login status" };
   const signIn = async (script: (link: ReturnType<typeof fakePtyLink>, pty: FakePty, line: string) => void, line: SignInLine = CODEX, agent: string | undefined = "codex") => {
     const link = fakePtyLink();
     link.script = (pty, typed) => script(link, pty, typed);
@@ -54,12 +54,12 @@ describe("the sign-in the host planned, run on that computer's terminal and show
       l.data(pty, "Open https://auth.openai.com/device and enter CODE-1234\r\n");
       l.exit(pty, 0);
     });
-    expect(execsBeside(link).map(o => o.extra["cmd"])).toEqual(["mkdir -p '/var/lib/wsp/logins/codex'"]);
+    expect(execsBeside(link).map(o => o.extra["cmd"])).toEqual(["mkdir -p '/wsp/logins/codex'"]);
     expect([...link.staged.values()].every(s => s.cleared)).toBe(true);
     const [flow, status] = link.ptys;
-    expect(flow!.created["env"]).toEqual({ CODEX_HOME: "/var/lib/wsp/logins/codex" });
+    expect(flow!.created["env"]).toEqual({ CODEX_HOME: "/wsp/logins/codex" });
     expect(flow!.ran).toBe("codex login --device-auth");
-    expect(status!.created["env"]).toMatchObject({ CODEX_HOME: "/var/lib/wsp/logins/codex" });
+    expect(status!.created["env"]).toMatchObject({ CODEX_HOME: "/wsp/logins/codex" });
     expect(status!.ran).toBe("codex login status");
     expect(answer).toEqual({ signedIn: true });
   });
