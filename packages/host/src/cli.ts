@@ -3,6 +3,7 @@
 // on loopback. There is no control plane; the Solari key is read here
 // and used only for direct calls from this process to the machine API.
 
+import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -1398,8 +1399,16 @@ async function hostFor(
           restart: () => (serving === undefined ? Promise.reject(new Error("the host is still starting")) : road.restart(serving)),
         };
   try {
+    // Minted and written before the host binds: startHost binds the page, then sweeps and lists at the provider
+    // before it returns, and a client that read the page in that gap had no token file to hold it to (the app's
+    // first launch after installing the service waited out a slow listing and quit). Other local tools read it off the
+    // disk; the socket never sees it in a URL.
+    const authToken = randomBytes(24).toString("base64url");
+    const tokenPath = hostTokenPath(opts.statePath);
+    writeOwn(dirname(tokenPath), basename(tokenPath), authToken);
     const handle = await startHost({
       runtime: rt,
+      authToken,
       port: opts.port,
       listen: address,
       ...(opts.advertise !== undefined ? { advertise: opts.advertise } : {}),
@@ -1431,9 +1440,6 @@ async function hostFor(
       ...(restart !== undefined ? { restart } : {}),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, address }));
-    // Other local tools read the token from disk; the WS never sees it in a URL.
-    const tokenPath = hostTokenPath(opts.statePath);
-    writeOwn(dirname(tokenPath), basename(tokenPath), handle.authToken);
     const home = resolve(wspHome());
     // A skill copy an install wrote once falls behind the binary at the next release, and the agent reading it
     // calls verbs that are gone. The copies that are there are brought up to this wsp's, and none is written where

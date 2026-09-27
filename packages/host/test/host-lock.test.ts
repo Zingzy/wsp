@@ -3,10 +3,12 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
+import { createServer } from "node:net";
+import { bootLineOf } from "@wsp/protocol";
+import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, hostRoadWord, hostStoppedLine, serve, type CliIO } from "../src/cli.js";
-import { ownPid, pidAlive } from "../src/host-lock.js";
+import { hostTokenFor, ownPid, pidAlive } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { stubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
@@ -78,6 +80,41 @@ describe("serve takes host.lock next to the state file", () => {
     handles.push(h);
     return h;
   }
+
+  it("the token file beside the state opens the page as soon as the page answers, before the host has swept its provider", async () => {
+    // A host bound its page, then listed its provider's machines before it wrote the token file, and a client that
+    // read the page in that gap found no token to hold it to: the app's first launch after installing the service
+    // waited out a slow listing and gave up.
+    const port = await new Promise<number>(resolve => {
+      const probe = createServer();
+      probe.listen(0, "127.0.0.1", () => {
+        const addr = probe.address();
+        probe.close(() => resolve(typeof addr === "object" && addr !== null ? addr.port : 0));
+      });
+    });
+    const rt = testRuntime();
+    let release = (): void => {};
+    const held = new Promise<void>(resolve => (release = resolve));
+    const reap = rt.reap.bind(rt);
+    Object.assign(rt, { reap: async (...args: Parameters<Runtime["reap"]>) => (await held, reap(...args)) });
+    const serving = serve(quietIO, { port, statePath, webDir, runtime: rt });
+    try {
+      const boot = await vi.waitFor(
+        async () => {
+          const line = bootLineOf(await (await fetch(`http://127.0.0.1:${port}/`)).text());
+          expect(line?.tokenHash).toBeDefined();
+          return line!;
+        },
+        { timeout: 5_000, interval: 50 },
+      );
+      const token = hostTokenFor(statePath);
+      expect(token, "no token file while the host sweeps").toBeDefined();
+      expect(tokenDigest(token!)).toBe(boot.tokenHash);
+    } finally {
+      release();
+      handles.push(await serving);
+    }
+  });
 
   it("writes pid, port and start time, and removes the lock on close", async () => {
     const before = Date.now();

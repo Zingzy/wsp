@@ -427,6 +427,9 @@ app
     else await showOnboarding();
   })
   .catch((e: unknown) => {
-    dialog.showErrorBox("wsp could not start", e instanceof Error ? e.message : String(e));
+    const why = e instanceof Error ? e.message : String(e);
+    // Said to the log as well: a launch nobody is watching read as one that quit with no reason.
+    io.error(`wsp could not start: ${why}`);
+    dialog.showErrorBox("wsp could not start", why);
     app.quit();
   });
