@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, computerNameHere, placeWiring, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { GET_THE_APP_WORD, HOST_WORDS } from "@wsp/protocol";
-import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runtime";
+import { DAEMON_VERSION, GET_THE_APP_WORD, HOST_WORDS, STATE_SHAPE } from "@wsp/protocol";
+import { createRuntime, memoryStore, STATE_SHAPE_KEY, tokenDigest, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
@@ -44,9 +44,13 @@ const GOLDEN = {
   ],
 };
 
+/** A state file's text as this build writes one: the collections and the shape document a host reads a file by. */
+const stateText = (collections: Record<string, unknown>): string =>
+  JSON.stringify({ ...collections, [STATE_SHAPE_KEY]: { shape: STATE_SHAPE, wsp: "smoke", daemon: DAEMON_VERSION, bin: "smoke", at: "2026-09-01T00:00:00.000Z" } });
+
 /** What wsp init leaves behind once a golden is sealed, in the store's on-disk shape. */
 function seedGolden(home: string): void {
-  writeFileSync(join(home, "state.json"), JSON.stringify({ goldens: { default: GOLDEN } }));
+  writeFileSync(join(home, "state.json"), stateText({ goldens: { default: GOLDEN } }));
 }
 
 /** One local workspace record as wsp add and wsp new --local leave it, in the store's on-disk shape: a project of
@@ -76,11 +80,14 @@ function seedLocalWorkspace(home: string): void {
     computer: "here",
     source: { kind: "folder", path: folder },
     path: folder,
+    remote: "",
     defaultBranch: "main",
+    memoryKey: folder.replace(/[^A-Za-z0-9]/g, "-"),
+    memoryDir: join(home, ".claude", "projects", folder.replace(/[^A-Za-z0-9]/g, "-"), "memory"),
     createdAt: LOCAL_WORKSPACE.createdAt,
   };
   const workspace = { ...LOCAL_WORKSPACE, copy: { road: "clonefile", path: `${folder}-first`, source: folder, base: "", branch: "main", carried: "deps-and-config" }, portBase: 3100 };
-  writeFileSync(join(home, "state.json"), JSON.stringify({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
+  writeFileSync(join(home, "state.json"), stateText({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
 }
 
 /** A second workspace of the same project on this computer, beside the seeded one. */
