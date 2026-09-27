@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, statfsSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir, arch as osArch, platform, release, type as osType, uptime as upSeconds, userInfo } from "node:os";
+import { spawnRun } from "@wsp/collect";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS, configSum } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, writeConfigHere, localShape, ownMarks, plainPath, readValues, serversOutLines, unmergeServers, type ServerPort } from "@wsp/engine";
@@ -105,13 +106,13 @@ function diskFree(folder: string): number | undefined {
  * as, the PATH a login shell here gives, and the folder each harness keeps its own sessions in where the person
  * points it somewhere. Every path is held to the rule every machine's home is held to, since what is here lands in
  * the commands the host runs on this computer. */
-export function placeLogin(env: Readonly<Record<string, string | undefined>> = process.env, home = homedir()): Record<string, string> {
+export async function placeLogin(env: Readonly<Record<string, string | undefined>> = process.env, home = homedir()): Promise<Record<string, string>> {
   // A login shell, and the same read a machine over ssh answers: the PATH a turn runs under here is the one this
   // person's own shell gives, not the one the shell that typed wsp join happened to hold. The agent runs under a
   // service with almost no environment, so reading its own would leave every tool they installed unfindable.
   // HOME is handed in whatever this process holds: a service starts with almost none, and a login shell with no HOME
   // reads no login file of theirs at all, so the read would answer the service's own PATH and call it the person's.
-  const values = loginShellRead({ ...env, HOME: home });
+  const values = await loginShellRead({ ...env, HOME: home });
   const stores: Record<string, string> = {};
   for (const name of SSH_STORE_VARS) {
     const folder = values[`store:${name}`] ?? env[name];
@@ -127,12 +128,9 @@ export function placeLogin(env: Readonly<Record<string, string | undefined>> = p
  * turn wants, so looking the shell up on that PATH would be reading the answer to find the question. */
 const LOGIN_SHELL = "/bin/bash";
 
-function loginShellRead(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
-  try {
-    return readValues(execFileSync(LOGIN_SHELL, ["-lc", LOGIN_READ], { encoding: "utf8", timeout: LOGIN_READ_MS, env: env as NodeJS.ProcessEnv }));
-  } catch {
-    return {};
-  }
+async function loginShellRead(env: Readonly<Record<string, string | undefined>>): Promise<Record<string, string>> {
+  const out = await spawnRun(LOGIN_SHELL, ["-lc", LOGIN_READ], env as NodeJS.ProcessEnv, { timeoutMs: LOGIN_READ_MS });
+  return out === undefined ? {} : readValues(out);
 }
 
 /** How long that shell gets. A person's login file can be slow; a report that waits on it forever is a link that
@@ -199,9 +197,9 @@ export function placeFacts(opts: Omit<PlaceReportOptions, "run">): Pick<PlaceSel
 
 /** What this computer says about itself on every link. Read at each dial rather than once: a laptop gains an
  * engine, loses a disk and is upgraded under wsp rather than by it. */
-export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
+export async function placeReport(opts: PlaceReportOptions): Promise<PlaceSelfReport> {
   const home = opts.home ?? homedir();
-  const login = placeLogin(opts.env ?? process.env, home);
+  const login = await placeLogin(opts.env ?? process.env, home);
   return {
     ...placeFacts({ ...opts, home }),
     login,
