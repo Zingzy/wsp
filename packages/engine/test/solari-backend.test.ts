@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { execFailedLine, machineUnreachableLine, napRefusedLine, RESUME_UNANSWERED } from "@wsp/protocol";
+import { execFailedLine, machineUnreachableLine, napRefusedLine, offeredSize, RESUME_UNANSWERED, sizeRefusal, snapshotListedRefusedLine, snapshotListedWaitLine } from "@wsp/protocol";
 import { ExecFailedError, fetchCapMs, isCapped, isMissing, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, type RetryClock } from "../src/errors.js";
 import { IDLE_TIMEOUT_MAX_MS, PREVIEW_TTL_MS, previewTokenExpiry, REQUEST_ID_HEADER, RESUME_CAP_MS, SOLARI_INLINE_MAX_MS, SOLARI_LIFECYCLE, SOLARI_PRICING, SolariBackend, type MoveBudgets } from "../src/solari-backend.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
@@ -44,10 +44,7 @@ describe("SolariBackend", () => {
       // A fork of the image with the project cloned into it, and the machine's localhost and ports are its own.
       copies: true,
       ownNetwork: true,
-      sizes: [
-        { cpu: 2, memMb: 4096, rateUsdPerHour: expect.closeTo(0.11, 10) },
-        { cpu: 2, memMb: 8192, rateUsdPerHour: expect.closeTo(0.15, 10) },
-      ],
+      sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: expect.closeTo(0.11, 10) }],
     });
     // The offers' rates are the pricing's own, and the default size is the first offer.
     for (const s of b.capabilities.sizes) expect(s.rateUsdPerHour).toBeCloseTo(b.pricing.rateUsdPerHour(s), 10);
@@ -56,6 +53,12 @@ describe("SolariBackend", () => {
     // pricing rather than off a constant of its own, and the reason the estimate has a room to be over at all.
     expect(b.pricing.builderDiskGb).toBe(20);
     expect(SOLARI_PRICING.builderDiskGb).toBe(BUILDER_DISK_GB);
+  });
+
+  it("offers no size its forks have not come up at: a 2x8 ask is refused naming 2x4", () => {
+    const { sizes } = new SolariBackend({ apiKey: "k", fetch: fakeFetch({}) }).capabilities;
+    expect(offeredSize(sizes, { cpu: 2, memMb: 8192 })).toBe(false);
+    expect(sizeRefusal("2x8", sizes)).toBe("2x8 is not a size this provider offers; the sizes are 2x4 ($0.11/hr)");
   });
 
   it("declares its lifecycle: two wake attempts, half a minute for the daemon, half an hour of asking once a minute, and a resume cap of half a minute", () => {
@@ -377,6 +380,67 @@ describe("SolariBackend list", () => {
       { id: "c", state: "gone", labels: { poc: "p1" } },
     ]);
     expect(f).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("SolariBackend create from a snapshot the provider answers not found", () => {
+  /** A clock the waits move, so the bound is spent in no time. */
+  const movingClock = (): RetryClock & { waits: number[] } => {
+    let t = 0;
+    const waits: number[] = [];
+    return { waits, now: () => t, sleep: async ms => void (waits.push(ms), (t += ms)) };
+  };
+  /** POST /sandboxes refuses `refusals` times, then boots; the listing holds `listed`. */
+  const forking = (refusals: number, listed: string[]) => {
+    const keys: string[] = [];
+    const f = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/snapshots") return new Response(JSON.stringify({ snapshots: listed.map(id => ({ id, sizeBytes: 1 })) }), { status: 200 });
+      keys.push(new Headers(init?.headers).get("Idempotency-Key") ?? "");
+      if (keys.length <= refusals) return new Response(JSON.stringify({ error: "Snapshot not found" }), { status: 404 });
+      return new Response(JSON.stringify({ sandboxId: "sbx_1", kind: "sandbox" }), { status: 201 });
+    });
+    return { f, keys };
+  };
+  const spec = { kind: "sandbox" as const, fromSnapshot: "snap_1", idempotencyKey: "ws/1:k" };
+
+  it("asks again under a fresh key while the listing holds the snapshot, and says each wait", async () => {
+    const { f, keys } = forking(2, ["snap_1"]);
+    const clock = movingClock();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const m = await new SolariBackend({ apiKey: "k", fetch: f, clock }).create(spec);
+      expect(m.id).toBe("sbx_1");
+      expect(keys[0]).toBe("ws/1:k");
+      expect(new Set(keys).size).toBe(3);
+      const [every] = clock.waits;
+      expect(warn.mock.calls.map(c => String(c[0]))).toEqual([snapshotListedWaitLine("snap_1", every!, 0), snapshotListedWaitLine("snap_1", every!, every!)]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("is missing at once where the listing does not hold the snapshot", async () => {
+    const { f, keys } = forking(1, ["snap_other"]);
+    const e = await new SolariBackend({ apiKey: "k", fetch: f, clock: movingClock() }).create(spec).catch((err: unknown) => err);
+    expect(isMissing(e)).toBe(true);
+    expect(e).toMatchObject({ message: "Snapshot not found", status: 404 });
+    expect(keys).toHaveLength(1);
+  });
+
+  it("is not missing where the listing still holds the snapshot once the wait runs out", async () => {
+    const { f, keys } = forking(Infinity, ["snap_1"]);
+    const clock = movingClock();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const e = await new SolariBackend({ apiKey: "k", fetch: f, clock }).create(spec).catch((err: unknown) => err);
+      expect(isMissing(e)).toBe(false);
+      expect(e).toMatchObject({ message: snapshotListedRefusedLine("snap_1", clock.now()), status: 404 });
+      expect(keys.length).toBe(clock.waits.length + 1);
+      expect(keys.length).toBeGreaterThan(2);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

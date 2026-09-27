@@ -178,7 +178,7 @@ describe("workspace creation view", () => {
     await act(() => useStore.getState().createWorkspace("pr_1", "beta"));
     const view = await screen.findByTestId("workspace-creation");
     expect(view.getAttribute("aria-busy")).toBe("false");
-    expect(view.textContent).toContain("Creation failed");
+    expect(view.textContent).toContain("Couldn't start");
     const wave = within(view).getByRole("progressbar", { name: "Creation stopped" });
     expect(wave.querySelector("svg")!.getAttribute("data-state")).toBe("stopped");
     const lines = within(within(view).getByRole("list", { name: "Creation log" })).getAllByRole("listitem");
@@ -187,7 +187,7 @@ describe("workspace creation view", () => {
     expect(lines[1]!.className).toContain("text-destructive-foreground");
     expect(lines[0]!.className).not.toContain("text-destructive-foreground");
     // The runtime's words are the refusal: they appear once, on the failing line, and no second wording follows the title.
-    const lead = within(view).getByText("The provider refused: no more tasks can run there now");
+    const lead = within(view).getByText("Couldn't start beta: the provider has no room to start another now");
     expect(lead.nextElementSibling).toBeNull();
     expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);
 

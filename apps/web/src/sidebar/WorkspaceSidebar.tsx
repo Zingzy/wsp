@@ -15,7 +15,7 @@
 // here; the tiles are ThreadTile beside this file. The surface itself is the
 // shell's sidebar-glass: nothing here paints a background.
 import { openProjectSettings } from "../settings/openAt.js";
-import { ChevronDownIcon, PlusIcon, SquarePenIcon } from "lucide-react";
+import { ChevronDownIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, computerOffline, creationAwaits, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
@@ -116,6 +116,7 @@ export function WorkspaceSidebar() {
   const statuses = useStore(s => s.statuses);
   const select = useStore(s => s.select);
   const creations = useStore(s => s.creations);
+  const dismissCreation = useStore(s => s.dismissCreation);
   // Until the first list lands an empty group is unknown rather than empty, and the design spec gives this group no
   // waiting state of its own, so it holds nothing at all.
   const ready = useReady();
@@ -309,6 +310,8 @@ export function WorkspaceSidebar() {
       </li>
     );
   };
+  /** The one verb a failed create's tile carries: the row goes, and the runtime's hold on it with it. */
+  const deleteCreation = (key: string): ResolvedAction => ({ id: "delete", group: "remove", icon: Trash2Icon, destructive: true, searchTerms: [], title: "Delete", rowLabel: null, buttonWord: "Delete", hint: null, refusal: null, run: async () => dismissCreation(key) });
   /** A workspace being made, where it will run once it is one. */
   const creationItem = (creation: Creation) => {
     const project = recorded.find(p => p.id === creation.project);
@@ -325,6 +328,7 @@ export function WorkspaceSidebar() {
           failed={failed}
           active={selectedId === creation.key}
           onSelect={() => select(creation.key)}
+          {...(failed ? { onContextMenu: event => void openContextMenu(event, [deleteCreation(creation.key)]) } : {})}
         />
       </li>
     );

@@ -1205,6 +1205,21 @@ describe("wsp verbs over the host", () => {
     expect(missing.io.errors).toEqual(["wsp delete: no workspace nope"]);
   });
 
+  it("delete by name takes away a create the provider refused, in words that name no computer going", async () => {
+    backend.create = async () => {
+      throw Object.assign(new Error("Snapshot not found"), { kind: "missing", status: 404 });
+    };
+    expect((await run("new", "fleet-check")).code).not.toBe(0);
+    const kept = await answer("no", "delete", "fleet-check");
+    expect(kept.code).toBe(1);
+    expect(asked).toEqual(["Delete fleet-check?\nIts create failed before any computer was made, so there is none to delete; its record and 0 threads leave this computer."]);
+
+    const deleted = await run("delete", "fleet-check", "--yes");
+    expect(deleted.code).toBe(0);
+    expect(deleted.io.lines).toEqual([expect.stringMatching(/^deleted fleet-check ws_[0-9a-f]+: its create had made no computer, and its record and 0 threads are gone from this computer$/)]);
+    expect((await run("delete", "fleet-check", "--yes")).io.errors).toEqual(["wsp delete: no workspace fleet-check"]);
+  });
+
   it("forget on a workspace that runs on a computer sends the person to delete, the one road that takes it away", async () => {
     await macProject("mac");
     const here = (await rt.workspaces.list())[0]!;
