@@ -13,6 +13,7 @@ import { agentHome, type AgentHome } from "../../collect/test/agent-home.js";
 import { serverVault, type ServerVault } from "../src/env-keys.js";
 import { serverTransport, serversActs } from "../src/servers-acts.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -180,7 +181,7 @@ describe("adding an MCP server", () => {
     expect(json(join(at.home, ".claude.json")).mcpServers!.acme).toMatchObject({ args: ["--token=sk_TESTONLY_arg"], env: { ACME_TOKEN: "sk_TESTONLY_arg" } });
   });
 
-  it("refuses a catalog row's or a provider's key as a server's variable, on this computer and on another, naming whose key it is, and writes nothing", async () => {
+  it.runIf(CLOUD_ON)("refuses a catalog row's or a provider's key as a server's variable, on this computer and on another, naming whose key it is, and writes nothing", async () => {
     const at = fixture();
     const files = [".claude.json", ".codex/config.toml"].map(f => join(at.home, f));
     const before = files.map(f => readFileSync(f, "utf8"));

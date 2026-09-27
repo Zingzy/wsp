@@ -81,6 +81,7 @@ import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, 
   twoPlacesRefusal,
   relayUrlOf,
   usageRefusal,
+  cloudOffRefusal,
   wsUrlOf,
   PLACE_NEEDS_ROOT_LINE,
   SignInLine,
@@ -100,7 +101,7 @@ import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
 import { joinStanding, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writeExclusive, writePlaceFile, wspArgvOf } from "./place-report.js";
-import { PROVIDER_ENV, addedProviders, providerBackendFor, type ProviderEnv } from "./providers.js";
+import { PROVIDER_ENV, addedProviders, providerBackendFor, unregisteredCloud, type ProviderEnv } from "./providers.js";
 import { placeLink, relaySignIn, type BoxSignIn, type BoxSignedIn, type PlaceLink } from "./place-signin.js";
 import { publicHostname } from "./relay-link.js";
 import { systemOpener } from "./relay.js";
@@ -242,7 +243,7 @@ export function addLines(token: string, expiresAt: number, now: number, urls: re
     ...joinRoads(token, urls, publicAt === undefined ? undefined : relayUrlOf(publicAt)).map(road => `  ${road.line}${road.note === undefined ? "" : `      (${road.note})`}`),
     `The code is spent by the first join and stops working in ${fmtDuration(Math.max(0, expiresAt - now))}. The computer shows in wsp places within a minute of joining.`,
     "Over ssh instead: wsp add user@host --name <name> installs the agent there and joins it for you, and an alias from your ssh config works in place of user@host.",
-    `A provider instead: ${addableProviders().map(id => `wsp add ${id}`).join(", ")}.`,
+    ...(addableProviders().length === 0 ? [] : [`A provider instead: ${addableProviders().map(id => `wsp add ${id}`).join(", ")}.`]),
   ];
 }
 
@@ -257,7 +258,9 @@ export const providerPlaceLine = (id: string, rateUsdPerHour: number): string =>
 
 /** The refusal for a word that is neither a provider wsp holds a key for nor an ssh address, naming all three roads. */
 export function addRefusal(word: string): string {
-  return `wsp add ${word}: that is neither a provider this wsp can be set up for (${addableProviders().join(", ")}) nor an address over ssh (user@host, or an alias your ssh config gives a HostName), and wsp add with no argument prints the line to type on a computer you are sitting at.`;
+  const ssh = "an address over ssh (user@host, or an alias your ssh config gives a HostName)";
+  const what = addableProviders().length === 0 ? `that is not ${ssh}` : `that is neither a provider this wsp can be set up for (${addableProviders().join(", ")}) nor ${ssh}`;
+  return `wsp add ${word}: ${what}, and wsp add with no argument prints the line to type on a computer you are sitting at.`;
 }
 
 /** The one line `--name`, `--ssh-port` and `--ssh-key` get when no address was typed beside them. All three belong
@@ -1055,7 +1058,7 @@ function aimHere(word: string, opts: PlaceOpts): HostAim {
 
 export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly string[], flags: AddFlags = {}, deps: PlaceDeps = systemDeps): Promise<number> {
   const [word] = args;
-  if (args.length > 1) throw usageRefusal("wsp add takes one provider or one address, or nothing at all.", ADD_USAGE);
+  if (args.length > 1) throw usageRefusal(`wsp add takes ${addedProviders().length === 0 ? "" : "one provider or "}one address, or nothing at all.`, ADD_USAGE);
   const aim = aimHere("add", opts);
   if (flags.signIn !== undefined) {
     if (word === undefined) throw usageRefusal("wsp add --sign-in names the computer to sign the agent in on.", ADD_USAGE);
@@ -1090,6 +1093,8 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
     return 1;
   }
   if (provider) return addProvider(io, opts, word!, deps);
+  // Read after the ssh road, so a computer the person's ssh config calls by a cloud's word still joins.
+  if (unregisteredCloud(word)) throw cloudOffRefusal(`wsp add ${word!}`);
   if (word !== undefined) {
     io.error(addRefusal(word));
     return 1;
@@ -1124,7 +1129,7 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
 /** The whole of what this verb answers to, printed by every refusal it has about its own shape. */
 const ADD_USAGE = [
   "usage: wsp add",
-  "       wsp add <provider>",
+  ...(addedProviders().length === 0 ? [] : ["       wsp add <provider>"]),
   "       wsp add <user@host|ssh alias> [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
   "       wsp add <place> --update",
   "       wsp add <place> --sign-in <agent>",

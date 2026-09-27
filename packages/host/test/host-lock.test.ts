@@ -10,6 +10,7 @@ import { ownPid, pidAlive } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { stubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 runsFromItsOwnFolder();
 
@@ -170,7 +171,7 @@ describe("serve takes host.lock next to the state file", () => {
     expect(readLock(lockPath).pid).toBe(process.pid);
   });
 
-  it("wsp init --provider beside a serving host is refused, naming the provider that host forks on and the wsp up that moves it", async () => {
+  it.runIf(CLOUD_ON)("wsp init --provider beside a serving host is refused, naming the provider that host forks on and the wsp up that moves it", async () => {
     // The host serving this state file is the process that runs the build, on the provider it started on: a
     // provider named on this line reaches no runtime of this run's, so it is said out loud rather than dropped.
     vi.stubEnv("WSP_PROVIDER", "solari");

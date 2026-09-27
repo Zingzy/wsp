@@ -11,6 +11,7 @@ import { agentName, vaultVariableRow } from "@wsp/catalog";
 import { BoxBackend, FakeBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
 import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PROVIDER_KEY_WORDS, providerKeyName, standInRecordsPath } from "@wsp/protocol";
 import type { PlaceBackends } from "@wsp/runtime";
+import { CLOUD_ON } from "./cloud.js";
 import { keyIn } from "./env-keys.js";
 import { fakeGuestAt } from "./fake-guest.js";
 
@@ -57,7 +58,8 @@ export const BOX_KEY_ENV = "BOX_API_KEY";
 /** The Solari key. */
 export const SOLARI_KEY_ENV = "SOLARI_API_KEY";
 
-export const PROVIDER_MODULES: readonly ProviderModule[] = [
+/** The clouds, which are registered only with the cloud on. */
+const CLOUD_MODULES: readonly ProviderModule[] = [
   {
     id: "box",
     envNames: [PROVIDER_ENV],
@@ -69,6 +71,22 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     selects: env => env[PROVIDER_ENV] === "box",
     build: env => new BoxBackend({ apiKey: env[BOX_KEY_ENV] ?? "" }),
   },
+  {
+    id: "solari",
+    envNames: [PROVIDER_ENV],
+    keyEnv: SOLARI_KEY_ENV,
+    keyName: PROVIDER_KEY_WORDS["solari"]!.keyName,
+    keyConsole: PROVIDER_KEY_WORDS["solari"]!.keyConsole,
+    // Named, or taken by its key alone: this is the cloud a computer that names no provider is offered, so a key
+    // saved on its own is the whole answer.
+    selects: env => env[PROVIDER_ENV] === "solari" || keyIn(env, SOLARI_KEY_ENV) !== undefined,
+    build: env => new SolariBackend({ apiKey: env[SOLARI_KEY_ENV] ?? "" }),
+  },
+];
+
+/** The providers this process answers for: with the cloud off the clouds are not among them, and everything read off
+ * this table (the words `wsp add` takes, the keys, the places, the Add a cloud sheet) goes with them. The one gate. */
+export const PROVIDER_MODULES: readonly ProviderModule[] = [
   {
     id: "fake",
     // No way of being added, so `wsp add` takes neither the word nor a key for it: a provider that answers out of
@@ -95,17 +113,7 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
       return new FakeBackend({ records, ...(root === undefined ? {} : { guest: fakeGuestAt(root) }) });
     },
   },
-  {
-    id: "solari",
-    envNames: [PROVIDER_ENV],
-    keyEnv: SOLARI_KEY_ENV,
-    keyName: PROVIDER_KEY_WORDS["solari"]!.keyName,
-    keyConsole: PROVIDER_KEY_WORDS["solari"]!.keyConsole,
-    // Named, or taken by its key alone: this is the cloud a computer that names no provider is offered, so a key
-    // saved on its own is the whole answer.
-    selects: env => env[PROVIDER_ENV] === "solari" || keyIn(env, SOLARI_KEY_ENV) !== undefined,
-    build: env => new SolariBackend({ apiKey: env[SOLARI_KEY_ENV] ?? "" }),
-  },
+  ...(CLOUD_ON ? CLOUD_MODULES : []),
   {
     id: NO_PROVIDER,
     // No machine behind it, so no place to add and none to show: it is the row that refuses every road in one line.
@@ -114,6 +122,11 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     build: () => new NoProviderBackend(),
   },
 ];
+
+/** Whether a word names a cloud that is not registered here, which is a line to refuse by the flag rather than one
+ * nobody answers to. */
+export const unregisteredCloud = (word: string | undefined, modules: readonly ProviderModule[] = PROVIDER_MODULES): boolean =>
+  word !== undefined && !modules.some(m => m.id === word) && CLOUD_MODULES.some(m => m.id === word);
 
 /** Every variable the rows select on, each once: what a service carries over from the shell that installed it, so
  * a provider added tomorrow travels with its row rather than with a list somebody remembered to edit. */

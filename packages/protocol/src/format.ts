@@ -1370,10 +1370,10 @@ export const IDLE_REASON = {
   windowIn: (reason: string | undefined): string | undefined => (reason === undefined ? undefined : (/^idle (\d+ min)$/.exec(reason)?.[1] ?? undefined)),
 } as const;
 
-/** The one line the sidebar puts above the rows while the probes fail before leaving this computer; the rows keep
- * their last word. It names what could not be reached, not the computer: the road out was up and every other name
- * resolved while this one did not (measured 2026-09-07). */
-export const PROVIDER_UNREACHED_LINE = "Solari cannot be reached from this computer";
+/** The one line the sidebar puts above the rows while a probe fails before leaving this computer; the rows keep
+ * their last word. It names neither the computer nor a provider: the road out can be up while one machine's name
+ * does not resolve (measured 2026-09-07), and the probe knows the machine it asked and nothing else. */
+export const MACHINE_UNREACHED_LINE = "A machine cannot be reached from this computer";
 
 /** What a window on another computer says while the wsp it shows has gone quiet: the computer that host runs on is
  * asleep or off, and the workspaces on every other computer keep working. It reads as a fact in the sidebar's own

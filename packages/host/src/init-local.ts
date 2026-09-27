@@ -14,17 +14,21 @@ import { hostRunDir } from "./host-lock.js";
 import { openApp, pickPorts } from "./init-serve.js";
 import type { PortProbes } from "./ports.js";
 import type { HostHandle, WorkspaceRoads } from "./server.js";
+import { CLOUD_ON } from "./cloud.js";
 import { KEY_LAYER_WORDS } from "./env-keys.js";
 import type { InitIO, InitResult } from "./init.js";
 
-/** What this run does and does not do, said before it does any of it: no key, so no image and no machine, and the
- * one command that adds the cloud later. */
+/** What this run does and does not do, said before it does any of it: no key, so no image and no machine, and, with
+ * the cloud on, the one command that adds it later. */
 export function noKeyLines(upCommand: string): string[] {
+  const copy = `It makes your first workspace a copy of a folder on ${THIS_COMPUTER}: threads run in it, under your own sign-ins, with the agents already on your PATH.`;
+  const started = `${upCommand} starts the app again after this terminal is closed.`;
+  if (!CLOUD_ON) return [copy, started];
   return [
     NO_PROVIDER_LINE,
-    `So this run seals nothing and boots nothing. It makes your first workspace a copy of a folder on ${THIS_COMPUTER}: threads run in it, under your own sign-ins, with the agents already on your PATH.`,
+    `So this run seals nothing and boots nothing. ${copy}`,
     `Put a Solari API key in ${KEY_LAYER_WORDS} and run wsp init again for the cloud half: an image of this computer, and machines forked from it. This workspace stays as it is.`,
-    `${upCommand} starts the app again after this terminal is closed.`,
+    started,
   ];
 }
 

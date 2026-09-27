@@ -33,6 +33,7 @@ import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 /** The fingerprint a pairing pinned, which every record written since wsp pinned keys carries. */
 const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
@@ -547,7 +548,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     ]);
   });
 
-  it("refuses before writing anything when the key is only in this shell, since the service starts without it", async () => {
+  it.runIf(CLOUD_ON)("refuses before writing anything when the key is only in this shell, since the service starts without it", async () => {
     vi.stubEnv("SOLARI_API_KEY", KEY);
     const fake = svc();
     const errors: string[] = [];
@@ -559,7 +560,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(keyOnlyInThisShell({ env: {}, cwd: home, statePath })).toBeUndefined();
   });
 
-  it("weighs the key of the row that .env beside the state names, which is the row the host it installs wires", async () => {
+  it.runIf(CLOUD_ON)("weighs the key of the row that .env beside the state names, which is the row the host it installs wires", async () => {
     // The reading this is from: the pick written beside the state file said box, the box key was exported in the
     // installing shell alone, and the preflight read the row off the shell, saw no provider and let the unit
     // through. The host it started wired box, its key gone with the shell, and forked with an empty one.
@@ -576,7 +577,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(fake.ran).toEqual([]);
   });
 
-  it("names the .env beside the state file the unit will serve, not the wsp home's", async () => {
+  it.runIf(CLOUD_ON)("names the .env beside the state file the unit will serve, not the wsp home's", async () => {
     // A service installed for a state file somewhere else reads its key from beside that file, so the line that
     // says where to put the key names the file its host will read.
     const folder = join(home, "elsewhere");
@@ -590,7 +591,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(fake.ran).toEqual([]);
   });
 
-  it("names the wired provider's own variable, and says nothing where that provider reads no key", () => {
+  it.runIf(CLOUD_ON)("names the wired provider's own variable, and says nothing where that provider reads no key", () => {
     const sources = (env: Record<string, string | undefined>) => ({ env, cwd: home, statePath });
     // The row the run is wired to is the one the line is about: a host being installed for Box with the Box key
     // only in the installing shell loses that key, and the line names it rather than another provider's.
@@ -933,7 +934,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(claudeKeyOnlyInThisShell({ env: {}, cwd: home, statePath })).toBeUndefined();
   });
 
-  it("reads the keys off the sources it was handed, not off whatever .env sits in the folder wsp was run from", async () => {
+  it.runIf(CLOUD_ON)("reads the keys off the sources it was handed, not off whatever .env sits in the folder wsp was run from", async () => {
     const checkout = join(home, "checkout");
     mkdirSync(checkout, { recursive: true });
     writeFileSync(join(checkout, ".env"), `SOLARI_API_KEY=${KEY}\n`);

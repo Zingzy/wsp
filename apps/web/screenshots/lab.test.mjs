@@ -2,7 +2,7 @@
 // What a lab is made of, checked without a host, a build or a browser: the
 // fixtures a tester picks between, the provider and the environment each one
 // needs, the lines a lab prints, and the rules the driver reads a page with.
-import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
+import { CLOUD_ENV, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { TRANSCRIPT_LOADING } from "../src/transcript-words.js";
 import { spawnSync } from "node:child_process";
@@ -1146,6 +1146,8 @@ describe("the environment a fixture's host is started with", () => {
   it("tells the stand-in which cloud it is standing in for, and only where a stand-in is serving", () => {
     const forks = fixtureState("ascii-only");
     expect(hostEnv({ home, state: forks, cloud: "box" })[FAKE_AS_ENV]).toBe("box");
+    expect(hostEnv({ home, state: forks, cloud: "box" })[CLOUD_ENV]).toBe("1");
+    expect(hostEnv({ home, state: fixtureState("mac-only") })[CLOUD_ENV]).toBeUndefined();
     // A fixture of this computer's own machines runs under no provider at all, so there is nothing to stand in for.
     expect(hostEnv({ home, state: fixtureState("mac-only"), cloud: "box" })[FAKE_AS_ENV]).toBeUndefined();
   });

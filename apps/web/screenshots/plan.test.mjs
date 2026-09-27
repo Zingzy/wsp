@@ -243,7 +243,7 @@ describe("the surfaces list this repo ships", () => {
     // Those served from a state of their own: an image that is built cannot stand in the same state file as one
     // that never was, a thread whose agent opened threads elsewhere needs the workspaces those threads run on, and
     // a person on the first run has no project added.
-    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "orchestrator", "image-built", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "tiles", "tiles", "tiles", "tiles", "mac-and-boxes", "mac-and-boxes", "long-prompt", "tiles", "tiles"]);
+    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "orchestrator", "ascii-only", "image-built", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "tiles", "tiles", "tiles", "tiles", "mac-and-boxes", "mac-and-boxes", "long-prompt", "tiles", "tiles"]);
     // The first run and the Add surfaces are shot at the two widths a design reading is held to, New workspace at the
     // one width whose sidebar carries its control, and the thread status, the two switchers, the threads list, the
     // palette, the panel launcher and the tiles at the widest alone; the rest take every width the list shoots.

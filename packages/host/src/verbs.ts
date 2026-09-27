@@ -274,6 +274,7 @@ import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
 import type { RelayTerminal } from "./signin-relay.js";
 import { gitRootOf } from "./repo-root.js";
+import { CLOUD_ON } from "./cloud.js";
 import { dialAddress, heldOrStarted, hostTokenFor, hostTokenPath, servingHost } from "./host-lock.js";
 import type { HostStarter } from "./host-start.js";
 import { addressNotPairedLine, aimAddress, aimHolds, aimName, aimedHost, deviceRefusedLine, dialWindowMs, hostSideOnlyFix, hostSideOnlyLine, noAnswerRefusal, noAnswerWithin, READ_THE_HOSTS, stateIgnoredLine, wsUrlOf, wspHome, writeHost, type HostAim, type HostPick } from "./hosts.js";
@@ -840,6 +841,12 @@ export interface CliVerb {
   run(ctx: VerbContext): Promise<number>;
   tool: Tool;
   readsHere?: string;
+  /** Only means something on a cloud: with none registered the line prints on no page, its tool is not served, and
+   * typing it is refused by the flag. */
+  cloud?: true;
+  /** The flags that only mean something on a cloud, each named as the tool's input is too: with none registered they
+   * leave the verb's table, usage and tool, and typing one is refused by the flag. */
+  cloudFlags?: readonly string[];
 }
 
 /** A verb the tool door alone offers, with why the command line has no such line. */
@@ -2987,7 +2994,8 @@ const AgentsOnIn = z.string().optional().describe("the computer to read, by the 
 const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
 const AGENTS_READ_WORDS = "Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.";
 
-export const VERBS: readonly Verb[] = [
+/** Every verb, the cloud's among them; VERBS below is the table this process answers. */
+export const ALL_VERBS: readonly Verb[] = [
   {
     name: "computers",
     usage: "wsp computers",
@@ -3692,6 +3700,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "new",
+    cloudFlags: ["from"],
     usage: 'wsp new [<project>] "<what you are working on>" [--from <project image>] [--size <cpu>x<memGb>] [--engine] [--spawn on|off] [--max-machines <n>] [--max-depth <n>]',
     about: "a workspace: a copy of the project's computer with the project inside, named by the work; with one project the name of it is not needed, and --engine gives the copy the computer's Docker or podman through a socket that sees its own containers alone",
     page: "front",
@@ -3706,7 +3715,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "A workspace for one piece of work: a copy of the project's computer with the project inside, named by the work. The project decides where it lands, so nothing else says where. On the computer the app runs on the workspace is a copy of the project's folder beside it, with a port of its own. With from, it forks a project image instead of the computer's own image head.",
+        "A workspace for one piece of work: a copy of the project's computer with the project inside, named by the work. The project decides where it lands, so nothing else says where. On the computer the app runs on the workspace is a copy of the project's folder beside it, with a port of its own." + (CLOUD_ON ? " With from, it forks a project image instead of the computer's own image head." : ""),
       input: {
         project: z.string().optional().describe("the project this work is on, by the name or the id projects lists; needed once you have more than one project"),
         name: z.string().describe("what you are working on, which is the workspace's name and what run and every other verb take"),
@@ -3778,6 +3787,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "snapshot",
+    cloud: true,
     usage: "wsp snapshot <workspace>",
     about: "a project image of the workspace: your image plus the project as it is now, ready to fork",
     page: "agent",
@@ -3798,6 +3808,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "fork",
+    cloud: true,
     usage: 'wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>] [--send "<task>" [run\'s flags]]',
     about: "a new machine from the source's image version, not a copy of its live disk; --size as new's",
     page: "agent",
@@ -3932,6 +3943,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "rebuild",
+    cloud: true,
     usage: "wsp rebuild <workspace>",
     about: "replaces a gone workspace's machine from its image and prints the state of the new one",
     page: "app",
@@ -3979,6 +3991,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "image build",
+    cloud: true,
     usage: "wsp image build <place> [--force]",
     about: "builds this host's image at a place from the record, its sign-ins coming from the vault and no sign-in run again",
     page: "agent",
@@ -4003,6 +4016,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "image export",
+    cloud: true,
     usage: "wsp image export <file>",
     about: "writes the image record and your sign-ins to one encrypted file, sealed to a passphrase you type",
     page: "agent",
@@ -4020,6 +4034,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "image move",
+    cloud: true,
     usage: "wsp image move <workspace>",
     about: "moves the workspace onto the newest version of its image and prints what of the image's own files it kept",
     page: "app",
@@ -4049,6 +4064,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "image remove",
+    cloud: true,
     usage: "wsp image remove <snapshot id> [--yes]",
     about: "deletes a project image's snapshot at the provider and drops its record; refused while a workspace stands on it",
     page: "app",
@@ -4508,6 +4524,35 @@ export const VERBS: readonly Verb[] = [
     }),
   },
 ];
+
+const isCloudVerb = (v: Verb): boolean => "cloud" in v && v.cloud === true;
+
+/** A verb with its cloud flags gone from its table, its usage and its tool, for a process with no cloud registered. */
+function withoutCloudFlags(v: Verb): Verb {
+  const dropped = "cloudFlags" in v ? (v.cloudFlags ?? []) : [];
+  if (dropped.length === 0 || !("run" in v)) return v;
+  const options = Object.fromEntries(Object.entries(v.options).filter(([name]) => !dropped.includes(name)));
+  const usage = dropped.reduce((line, name) => line.replace(new RegExp(` \\[--${name}\\b[^\\]]*\\]`), ""), v.usage);
+  if (!hasTool(v)) return { ...v, options, usage };
+  const input = Object.fromEntries(Object.entries(v.tool.input).filter(([name]) => !dropped.includes(name.replaceAll("_", "-"))));
+  return { ...v, options, usage, tool: { ...v.tool, input } };
+}
+
+/** The verbs this process answers: every one where a cloud is registered, and with none, every one but the cloud's,
+ * each without its cloud flags. What the pages, the tool server and the skill's rows are all built from. */
+export const VERBS: readonly Verb[] = CLOUD_ON ? ALL_VERBS : ALL_VERBS.filter(v => !isCloudVerb(v)).map(withoutCloudFlags);
+
+/** The line a person typed, as the cloud line it is when no cloud is registered here: the verb it opens, or that
+ * verb with the cloud flag it carries. Nothing where the line means something without one. */
+export function cloudLineOf(argv: ReadonlyArray<string>): string | undefined {
+  if (CLOUD_ON) return undefined;
+  const opens = (v: Verb): boolean => v.name.split(" ").every((w, i) => argv[i] === w);
+  const verb = [...ALL_VERBS].sort((a, b) => b.name.length - a.name.length).find(opens);
+  if (verb === undefined) return undefined;
+  if (isCloudVerb(verb)) return `wsp ${verb.name}`;
+  const typed = ("cloudFlags" in verb ? (verb.cloudFlags ?? []) : []).find(name => argv.some(w => w === `--${name}` || w.startsWith(`--${name}=`)));
+  return typed === undefined ? undefined : `wsp ${verb.name} --${typed}`;
+}
 
 /** The entries the command line answers, in the help's order. */
 export const CLI_VERBS: readonly (CliVerb | CliOnlyVerb)[] = VERBS.filter((v): v is CliVerb | CliOnlyVerb => "run" in v);
