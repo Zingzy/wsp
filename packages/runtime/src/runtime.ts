@@ -203,8 +203,8 @@ import type {
   ThreadMarks,
   TitleSource,
   SnapshotStorage,
-  ImageAttachment,
-  ImageRecord,
+  Attachment,
+  AttachmentRecord,
   McpServerSpec,
   TurnImage,
   TurnResult,
@@ -226,7 +226,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -313,6 +313,8 @@ export interface HarnessStartOptions {
   effort?: string;
   permissionMode?: string;
   contextWindow?: string;
+  /** The model's faster output for this turn, where the catalog marks the model as having one. */
+  fast?: boolean;
   /** The name the thread is opened under, for a CLI that takes one at launch; every harness is told it again through
    * renameSession once its session is announced, so an adapter whose CLI cannot take it here need not. */
   title?: string;
@@ -1445,6 +1447,8 @@ export interface Runtime {
         effort?: string;
         permissionMode?: string;
         contextWindow?: string;
+        /** The model's faster output; refused naming the model where its catalog row offers none. */
+        fast?: boolean;
         /** Absent means a person asked. */
         startedBy?: SessionOrigin;
         /** The client's id for this send, stamped on the turn's session.start as sent. */
@@ -1465,7 +1469,7 @@ export interface Runtime {
         title?: string;
         /** The images the message carries. Rejects over the caps, and rejects naming the agent when that agent's
          * adapter reads no image, both before the machine is asked for anything. */
-        attachments?: readonly ImageAttachment[];
+        attachments?: readonly Attachment[];
         /** MCP servers the thread this start opens gets besides the ones the harness's own config names, by the name
          * each takes in a config: what a caller that needs a tool loaded whatever the person's config says hands
          * over (the cloud setup's own thread, which calls the wsp recipe tools). */
@@ -2533,7 +2537,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * roads that launch a process through this runtime read it here, the turn and the exec verb, so the folder a
    * turn opens in and the one a command runs in cannot differ, and the app, the command line and the tool need
    * not restate it. */
-  const threadFolder = async (entry: LiveWorkspace, o: { cwd?: string | undefined }): Promise<string | undefined> => {
+  const threadFolder = async (entry: LiveWorkspace, o: { cwd?: string | undefined }): Promise<string> => {
     return o.cwd ?? moduleOf(entry.record.kind).folder(entry.record) ?? projectHeld(entry.record.project).path;
   };
   /** What a start that opened a thread leaves on the preferences record: the project the thread landed in, by
@@ -6189,7 +6193,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const markDefault = (c: HarnessCatalog): HarnessCatalog => ({ ...c, ...(c.harness === DEFAULT_AGENT.id ? { isDefault: true } : {}) });
 
   /**
-   * The turn's images on the road its adapter declared, imagesBlocked having already turned away what cannot go. An
+   * The turn's images on the road its adapter declared, filesBlocked having already turned away what cannot go. An
    * inline adapter is handed the bytes and nothing lands anywhere, so there is no folder to answer with. A file
    * adapter is handed paths inside this send's own folder under the thread's images dir: two sends on one thread
    * would otherwise write the same paths and the first turn would be handed the second's picture, since the landing
@@ -6200,13 +6204,33 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     entry: LiveWorkspace,
     road: AttachmentRoad | undefined,
     dir: string,
-    images: readonly ImageAttachment[],
+    images: readonly Attachment[],
   ): Promise<{ images: TurnImage[]; dir?: string }> => {
     if (images.length === 0 || road === undefined) return { images: [] };
     if (road === "inline") return { images: images.map(({ mediaType, bytes }) => ({ mediaType, bytes })) };
     const landed = images.map((image, index) => ({ ...image, path: imagePathIn(dir, index, image.mediaType) }));
     await importInto(entry.machine, tarOf(landed.map(i => ({ path: i.path, mode: 0o600, content: Buffer.from(i.bytes, "base64") }))), "/", { overlay: true });
     return { images: landed.map(({ mediaType, bytes, path }) => ({ mediaType, bytes, path })), dir };
+  };
+
+  /**
+   * The turn's files that are not images, landed in the folder the thread works in, where its agent reads them at
+   * any access and the person's copy holds them: one command readies this send's own folder, then each file goes by
+   * the machine's byte road. Answers the paths, which the agent's prompt names. They stay once the turn ends, since
+   * a later turn of the thread may read them again, and git lists none of them.
+   */
+  const landFiles = async (entry: LiveWorkspace, folder: string, dir: string, files: readonly Attachment[]): Promise<string[]> => {
+    if (files.length === 0) return [];
+    const ready = await entry.machine.exec(landFilesLine(folder, dir), { timeoutMs: INLINE_EXEC_MS });
+    if (ready.exitCode !== 0) throw new Error(filesNotLandedLine(folder));
+    const taken = new Set<string>();
+    const paths: string[] = [];
+    for (const file of files) {
+      const path = filePathIn(dir, file.name, taken);
+      await landBytes(entry.machine, path, Buffer.from(file.bytes, "base64"));
+      paths.push(path);
+    }
+    return paths;
   };
 
   /** Takes one send's images off the machine once the turn they were sent for is over, whatever it came to: the
@@ -6527,7 +6551,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     scopeDeviceId?: string;
     outcome: SessionStartOutcome;
     /** What this turn's own session.start row carries, for the road that still has to write it. */
-    opening: { prompt: string; requestId?: string; afterCut?: boolean; title?: string; attachments?: readonly ImageRecord[] };
+    opening: { prompt: string; requestId?: string; afterCut?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
     /** The harness session this turn resumes, so the row it takes over keeps who opened the thread and with what. */
     resume?: string;
     /** What the row already knows of this turn's reply: a re-opened turn whose result landed before the restart is
@@ -7149,8 +7173,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         scoped !== undefined && reach?.wsp !== undefined && adapter.mcpServers === true
           ? { [MCP_SERVER_NAME]: reach.wsp, ...o.mcpServers }
           : o.mcpServers;
-      const records = (o.attachments ?? []).map(imageRecord);
-      const blocked = imagesBlocked(records, adapter.attachments, harness) ?? mcpServersBlocked(o.mcpServers, adapter.mcpServers, harness);
+      const records = (o.attachments ?? []).map(attachmentRecord);
+      const blocked = filesBlocked(records, adapter.attachments, harness) ?? mcpServersBlocked(o.mcpServers, adapter.mcpServers, harness);
       if (blocked !== null) {
         dropScope();
         throw new Error(blocked);
@@ -7197,6 +7221,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let outcome: SessionStartOutcome = "started";
       let images: TurnImage[] = [];
       let imagesDir: string | undefined;
+      let filePaths: string[] = [];
       let landed = (o.attachments?.length ?? 0) === 0;
       // This send's own folder on the machine, named by the request id it minted: the landing runs before any turn is
       // registered, so two sends arriving together both pass the wait, and a folder they shared would leave the first
@@ -7254,7 +7279,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             hold();
             if (landed) break;
             landed = true;
-            ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, sendDir, o.attachments ?? []));
+            ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, sendDir, (o.attachments ?? []).filter(a => isImage(a.mediaType))));
+            const landing = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? folder;
+            filePaths = await landFiles(entry, landing, sendFilesDir(landing, o.requestId, randomUUID()), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
             refuse();
             continue;
           }
@@ -7296,7 +7323,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           waiting,
           open: onEvent =>
             adapter.start({
-              prompt: o.prompt,
+              prompt: attachedFilesPrompt(o.prompt, filePaths),
               ...(resume !== undefined ? { resume } : {}),
               ...(cwd !== undefined ? { cwd } : {}),
               ...picks,

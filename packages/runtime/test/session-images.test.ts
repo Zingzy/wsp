@@ -6,7 +6,7 @@
 // road can be read byte for byte.
 import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { imagePathIn, noImagesLine, sendRefusal, threadImagesDir, turnImagesDir, type AdapterEvent, type AttachmentRoad, type TurnImage, type TurnResult } from "@wsp/protocol";
+import { attachedFilesPrompt, filesNotLandedLine, imagePathIn, landFilesLine, noImagesLine, sendRefusal, threadImagesDir, turnImagesDir, type AdapterEvent, type AttachmentRoad, type TurnImage, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
@@ -93,6 +93,53 @@ async function workspaceOn(adapters: Record<string, HarnessAdapterFactory>, back
   const since = () => ({ puts: backend.puts.slice(mark.puts), execs: backend.machines[0]!.execLog.slice(mark.execs) });
   return { rt, ws, backend, since };
 }
+
+const pdf = (name = "report.pdf") => ({ mediaType: "application/pdf", bytes: Buffer.from("%PDF-1.7 heading").toString("base64"), name });
+
+describe("a file that is not an image", () => {
+  it("lands in the thread's own folder, whatever road the agent reads images on, and the prompt names where", async () => {
+    for (const road of ["inline", "file", undefined] as const) {
+      const agent = recording(road);
+      const { rt, ws, since } = await workspaceOn({ claude: agent.factory });
+      const handle = await rt.sessions.start(ws.id, { prompt: "what is the first heading?", attachments: [pdf()], requestId: "req_a" });
+      await handle.finished;
+      const folder = handle.view().cwd!;
+      const dir = `${folder}/.wsp-files/req_a`;
+      expect(since().execs).toContain(landFilesLine(folder, dir));
+      expect(since().puts.map(put => [put.path, put.body.toString()])).toEqual([[`${dir}/report.pdf`, "%PDF-1.7 heading"]]);
+      expect(agent.starts[0]!.prompt).toBe(attachedFilesPrompt("what is the first heading?", [`${dir}/report.pdf`]));
+      expect(agent.starts[0]!.images).toBeUndefined();
+      // The transcript keeps the words the person typed, not the paths the agent was handed.
+      expect(handle.view().prompt).toBe("what is the first heading?");
+    }
+  });
+
+  it("lands under one plain name inside its send's folder, whatever name the client sent", async () => {
+    const claude = recording("inline");
+    const { rt, ws, since } = await workspaceOn({ claude: claude.factory });
+    const handle = await rt.sessions.start(ws.id, { prompt: "read", attachments: [pdf("../../.ssh/authorized_keys"), pdf("../../.ssh/authorized_keys")], requestId: "../../etc" });
+    await handle.finished;
+    const files = `${handle.view().cwd!}/.wsp-files/`;
+    const paths = since().puts.map(put => put.path);
+    expect(paths).toHaveLength(2);
+    for (const path of paths) {
+      expect(path.startsWith(files)).toBe(true);
+      expect(path).not.toContain("..");
+      expect(path.slice(files.length).split("/")).toHaveLength(2);
+    }
+    expect(paths.map(path => path.split("/").at(-1))).toEqual(["authorized_keys", "2-authorized_keys"]);
+  });
+
+  it("is refused in one line, with nothing put, where the folder could not be readied", async () => {
+    const claude = recording("inline");
+    const { rt, ws, backend, since } = await workspaceOn({ claude: claude.factory });
+    const plain = backend.execImpl;
+    backend.execImpl = async (m, cmd) => (cmd.includes(".wsp-files") ? { exitCode: 1, stdout: "", stderr: "" } : plain(m, cmd));
+    await expect(rt.sessions.start(ws.id, { prompt: "read", attachments: [pdf()], requestId: "req_a", cwd: "/root/shots" })).rejects.toThrow(filesNotLandedLine("/root/shots"));
+    expect(since().puts).toHaveLength(0);
+    expect(claude.starts).toHaveLength(0);
+  });
+});
 
 describe("an image on the inline road", () => {
   it("reaches the adapter as bytes with its type, and nothing lands on the machine", async () => {
@@ -430,11 +477,11 @@ describe("the caps, checked again before the machine is asked", () => {
     expect(since().puts).toHaveLength(0);
   });
 
-  it("six images are refused with both counts", async () => {
+  it("six files are refused with both counts", async () => {
     const claude = recording("inline");
     const { rt, ws } = await workspaceOn({ claude: claude.factory });
     await expect(rt.sessions.start(ws.id, { prompt: "six", attachments: Array.from({ length: 6 }, (_, i) => png(i)) })).rejects.toThrow(
-      "only 5 images fit one message; this one carries 6",
+      "only 5 files fit one message; this one carries 6",
     );
     expect(claude.starts).toHaveLength(0);
   });

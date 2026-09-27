@@ -68,6 +68,8 @@ export interface CodexStartOptions {
   effort?: string;
   permissionMode?: string;
   contextWindow?: string;
+  /** The model's faster output for this turn. */
+  fast?: boolean;
   /** Images for this turn, read off their paths: the server reads each off the machine's disk, where the runtime
    * landed it under the thread's images folder before the start. */
   images?: readonly TurnImage[];
@@ -612,7 +614,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     const images = options.images?.map(imagePathOf);
     const access = accessParams(options.permissionMode);
     const localId = options.resume ?? randomUUID();
-    const thread = { ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.model !== undefined ? { model: options.model } : {}), access };
+    const thread = { ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.model !== undefined ? { model: options.model } : {}), ...(options.fast === true ? { serviceTier: "fast" as const } : {}), access };
     const threadLine = options.resume === undefined ? threadStartLine(thread) : threadResumeLine({ ...thread, threadId: options.resume });
     const command = buildCommand({ ...(options.cwd !== undefined ? { cwd: options.cwd } : {}), ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}) });
     return follow({

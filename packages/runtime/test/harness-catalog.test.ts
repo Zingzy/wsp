@@ -111,6 +111,8 @@ describe("harness catalogs", () => {
             efforts: levels(e.capabilities),
             ...(e.default_effort !== undefined ? { defaultEffort: e.default_effort } : {}),
             contextWindows: e.context.supports_1m_suffix === true ? ["200k", "1m"] : [],
+            // Fast is the table's own mark, on every Opus from 4.5, which the recording does not carry.
+            ...(e.id.startsWith("claude-opus-") ? { fast: true } : {}),
           })),
       );
     });
@@ -136,7 +138,7 @@ describe("harness catalogs", () => {
     // The effort the app-server reports for the default model, so the tab shows a default with no probe at all.
     expect(codex.efforts.find(o => o.isDefault)?.value).toBe("low");
     expect(codex.contextWindows).toEqual([]);
-    expect(codex.permissionModes.map(o => o.value)).toEqual(["read-only", "workspace-write", "danger-full-access"]);
+    expect(codex.permissionModes.map(o => o.value)).toEqual(["read-only", "workspace-write", "danger-full-access", "plan"]);
   });
 
   it("Claude Code offers the models, effort levels, context windows and permission modes its CLI takes", () => {
@@ -301,6 +303,13 @@ describe("startPicks", () => {
     expect(startPicks(noDefault, {}, true)).toEqual({ effort: "high", permissionMode: "bypassPermissions" });
   });
 
+  it("fast rides a start on a model that offers it, is refused naming one that does not, and a start that names no model passes it through", () => {
+    expect(startPicks(claude, { fast: true }, true)).toEqual({ model: "claude-opus-5-5", effort: "high", permissionMode: "bypassPermissions", fast: true });
+    expect(startPicks(claude, { fast: false }, true)).not.toHaveProperty("fast");
+    expect(() => startPicks(claude, { model: "claude-haiku-4-5-20251001", fast: true }, true)).toThrow("Haiku 4.5 has no fast mode");
+    expect(startPicks(claude, { fast: true }, false)).toEqual({ fast: true });
+  });
+
   it("listedPick keeps a remembered pick this list carries and drops one it does not, which is not a refusal", () => {
     // The one rule every reader of a remembered pick uses: the composer's pickers, its start options and the
     // runtime's own read of the record. A pick belongs to a harness and is kept per workspace, so the reader in
@@ -378,6 +387,24 @@ describe("startPicks", () => {
   });
 });
 
+describe("fast and plan in the tables", () => {
+  it("marks the models that offer faster output, Claude's by the table and Codex's by what its binary lists", () => {
+    const claude = harnessCatalog("claude")!;
+    expect(claude.models.filter(m => m.fast === true).map(m => m.value)).toEqual(["claude-opus-5-5"]);
+    expect(modelOf(claude, "claude-opus-4-6")?.fast).toBe(true);
+    expect(modelOf(claude, "claude-sonnet-5")?.fast).toBeUndefined();
+    const probe: HarnessCatalogProbe = { version: "0.155.1", models: [{ slug: "gpt-6-astra", label: "GPT-6-Astra", contextWindows: [], isDefault: true, fast: true }, { slug: "gpt-5.2", label: "GPT-5.2", contextWindows: [], isDefault: false }], efforts: [], permissionModes: ["read-only", "workspace-write", "danger-full-access", "plan"] };
+    const heard = catalogFromProbe(harnessCatalog("codex")!, probe);
+    expect(everyModel(heard).map(m => [m.value, m.fast])).toEqual([["gpt-6-astra", true], ["gpt-5.2", undefined]]);
+    // A binary that says nothing about speed keeps what the table knows of the model.
+    expect(catalogFromProbe(claude, { version: "2.1.283", models: [{ slug: "claude-opus-5-5", label: "Opus 5.5", contextWindows: [], isDefault: true }], efforts: [], permissionModes: [] }).models[0]?.fast).toBe(true);
+  });
+
+  it("gives Codex a plan access mode beside its three sandboxes", () => {
+    expect(harnessCatalog("codex")!.permissionModes.map(o => o.value)).toContain("plan");
+  });
+});
+
 describe("catalogFromProbe", () => {
   const probe: HarnessCatalogProbe = {
     version: "2.1.257",
@@ -395,7 +422,7 @@ describe("catalogFromProbe", () => {
     expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
     expect(catalog).toMatchObject({ harness: "claude", label: "Claude Code", source: "harness", version: "2.1.257" });
     expect(catalog.models).toEqual([
-      { value: "claude-opus-5-5", label: "Opus 5.5", description: "Opus 5.5 with 1M context", isDefault: true, efforts: ["low", "high"], contextWindows: ["200k", "1m"] },
+      { value: "claude-opus-5-5", label: "Opus 5.5", description: "Opus 5.5 with 1M context", isDefault: true, efforts: ["low", "high"], contextWindows: ["200k", "1m"], fast: true },
       { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5", efforts: [], contextWindows: [] },
       { value: "claude-next-6", label: "Next", efforts: ["low", "turbo"], contextWindows: [] },
     ]);
@@ -434,7 +461,7 @@ describe("catalogFromProbe", () => {
     const catalog = catalogFromProbe(harnessCatalog("codex")!, codexProbe);
     expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
     expect(catalog.models.map(m => m.value)).toEqual(["gpt-5.6-sol"]);
-    expect(catalog.legacyModels).toEqual([{ value: "gpt-5.5", label: "GPT-5.5", efforts: ["low", "medium"], defaultEffort: "low", contextWindows: [] }]);
+    expect(catalog.legacyModels).toEqual([{ value: "gpt-5.5", label: "GPT-5.5", efforts: ["low", "medium"], defaultEffort: "low", contextWindows: [], fast: true }]);
     expect(startPicks(catalog, { model: "gpt-5.5" }, true)).toEqual({ model: "gpt-5.5", effort: "low" });
     expect(() => startPicks(catalog, { model: "gpt-5.2" }, true)).toThrow('model "gpt-5.2" is not one codex takes');
     // Its title question then runs on whatever the CLI runs without a model.

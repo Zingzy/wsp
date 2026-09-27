@@ -15,6 +15,8 @@ import { provideDaemonWire } from "../src/files/wire.js";
 import { SEND_LABEL, WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions.js";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { NOT_READY_NAMES } from "../screenshots/ready.mjs";
+import { useComposerModesStore } from "../src/components/chat/composerModesStore.js";
+import { useComposerOptionsStore } from "../src/components/chat/composerOptionsStore.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { requestComposerFocus, requestNewThread } from "../src/shell/shellRequests.js";
 import { CHAT_HARNESS, CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
@@ -466,6 +468,111 @@ describe("composer slash menu", () => {
     await act(async () => useComposerDraftStore.getState().setDraft(WS, { prompt: "", cursor: 0 }));
     await typeInto(editor, "/");
     await waitFor(() => expect(menuItem("compact")).not.toBeNull());
+  });
+});
+
+describe("fast and plan", () => {
+  const option = (value: string, label: string, extra: object = {}) => ({ value, label, ...extra });
+  const MODES_CATALOG: HarnessCatalog = {
+    ...CLAUDE_CATALOG,
+    models: [
+      { ...option("claude-opus-5-5", "Opus 5.5", { isDefault: true, fast: true }), efforts: [], contextWindows: [] },
+      { ...option("claude-haiku-4-5-20251001", "Haiku 4.5"), efforts: [], contextWindows: [] },
+    ],
+    permissionModes: [option("default", "Ask", { isDefault: true }), option("acceptEdits", "Accept edits"), option("plan", "Plan")],
+  };
+  const withModes = (api: Api): Api => ({ ...api, listHarnesses: async () => [MODES_CATALOG] });
+  const toggle = (mode: string) => document.querySelector<HTMLButtonElement>(`[data-composer-mode='${mode}']`);
+
+  beforeEach(() => {
+    useComposerModesStore.setState({ fast: {}, planFrom: {} });
+    useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {} });
+  });
+
+  it("offers fast on a model that has it, and a send with it on carries fast", async () => {
+    const { api, started } = fixtureApi([workspace]);
+    await setup(withModes(api));
+    await waitFor(() => expect(toggle("fast")).not.toBeNull());
+    expect(toggle("fast")!.getAttribute("aria-pressed")).toBe("false");
+    act(() => toggle("fast")!.click());
+    await waitFor(() => expect(toggle("fast")!.getAttribute("aria-pressed")).toBe("true"));
+    await typeInto(composerEditor(), "quick one");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]!.fast).toBe(true);
+  });
+
+  it("hides fast on a model that has none, and sends nothing of it", async () => {
+    const { api, started } = fixtureApi([workspace]);
+    await setup(withModes(api));
+    await waitFor(() => expect(toggle("fast")).not.toBeNull());
+    act(() => toggle("fast")!.click());
+    act(() => useComposerOptionsStore.getState().pick(WS, "model", "claude-haiku-4-5-20251001"));
+    await waitFor(() => expect(toggle("fast")).toBeNull());
+    await typeInto(composerEditor(), "slow one");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]!.fast).toBeUndefined();
+  });
+
+  it("plan moves the thread's access to plan, and turning it off puts back the mode it came from", async () => {
+    const { api, started } = fixtureApi([workspace]);
+    await setup(withModes(api));
+    act(() => void useStore.getState().setPreferences({ access: { [WS]: "acceptEdits" } }));
+    await waitFor(() => expect(toggle("plan")).not.toBeNull());
+    act(() => toggle("plan")!.click());
+    await waitFor(() => expect(toggle("plan")!.getAttribute("aria-pressed")).toBe("true"));
+    await typeInto(composerEditor(), "plan it");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]!.permissionMode).toBe("plan");
+    act(() => toggle("plan")!.click());
+    await waitFor(() => expect(toggle("plan")!.getAttribute("aria-pressed")).toBe("false"));
+    expect(useStore.getState().preferences.access[WS]).toBe("acceptEdits");
+  });
+});
+
+describe("arrow-up recall", () => {
+  /** Three finished turns of one thread, each opened by the prompt it names. */
+  const threeTurns = (): SessionEvent[] =>
+    ["first prompt", "second prompt\nwith a second line", "third prompt"].flatMap((prompt, n) => {
+      const turn = { workspaceId: WS, sessionId: "sess_0001", turnId: `turn_r${n}` };
+      const at = Date.parse("2026-09-01T01:00:00Z") + n * 60_000;
+      return [
+        { type: "session.start", ...turn, at, model: "claude-sonnet-4-5", prompt },
+        { type: "session.done", ...turn, at: at + 1_000, result: { status: "completed", text: `reply ${n}` } },
+        { type: "session.end", ...turn, at: at + 1_100, exitCode: 0, sawResult: true },
+      ] as SessionEvent[];
+    });
+
+  it("walks the thread's sent prompts back newest first from an empty box, and forward past the newest empties it", async () => {
+    const { api } = fixtureApi([workspace], { [WS]: threeTurns() });
+    await setup(api);
+    await screen.findByText("reply 2");
+    const editor = composerEditor();
+    clickIntoEditor(editor);
+    const seen: string[] = [];
+    for (let n = 0; n < 3; n++) {
+      await press(editor, "ArrowUp");
+      seen.push(draft());
+    }
+    expect(seen).toEqual(["third prompt", "second prompt\nwith a second line", "first prompt"]);
+    await press(editor, "ArrowDown");
+    expect(draft()).toBe("second prompt\nwith a second line");
+    await press(editor, "ArrowDown");
+    expect(draft()).toBe("third prompt");
+    await press(editor, "ArrowDown");
+    expect(draft()).toBe("");
+  });
+
+  it("leaves words the person typed where they are", async () => {
+    const { api } = fixtureApi([workspace], { [WS]: threeTurns() });
+    await setup(api);
+    await screen.findByText("reply 2");
+    const editor = composerEditor();
+    await typeInto(editor, "half a thought");
+    await press(editor, "ArrowUp");
+    expect(draft()).toBe("half a thought");
   });
 });
 
@@ -1096,13 +1203,13 @@ describe("a composer that cannot send yet", () => {
     expect(started[0]?.prompt).toBe("check the redirect chain");
   });
 
-  it("the block outranks an image refusal already in the slot, so a held composer says one thing and it is the block", async () => {
+  it("the block outranks a file refusal already in the slot, so a held composer says one thing and it is the block", async () => {
     const { api } = fixtureApi([workspace]);
     await setup(api);
     const editor = composerEditor();
     await typeInto(editor, "look at this");
     act(() => {
-      fireEvent.paste(editor, { clipboardData: { files: [new File(["x"], "shot.png", { type: "image/png" })], getData: () => "" } });
+      fireEvent.paste(editor, { clipboardData: { files: [new File([new Uint8Array(11 * 1024 * 1024)], "huge.bin")], getData: () => "" } });
     });
     await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
     expect(screen.getByRole("status").textContent).not.toBe(SEND_BLOCK_WORDS.closed);

@@ -10,7 +10,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -2188,7 +2188,7 @@ describe("wsp verbs over the host", () => {
     expect(claude.starts.at(-1)).toMatchObject({ resume: thread!.claudeSessionId, model: "claude-fable-5-1", effort: "max", permissionMode: access });
     const named = await run("send", thread!.threadId!, "--access", "acceptEdits", "and now");
     expect(named.code).toBe(3);
-    expect(named.io.errors).toEqual(['--access belongs to wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--image <path>] [--detach] "<message>"']);
+    expect(named.io.errors).toEqual(['--access belongs to wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"']);
 
     const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--model", "claude-sonnet-5", "--access", "bypassPermissions");
     expect(forked.code).toBe(0);
@@ -3709,7 +3709,7 @@ describe("wsp verbs over the host", () => {
     // A flag another verb reads is refused naming that verb, so the caller is told where it lives: run's --agent on send, threads' --tree on stop.
     const foreign = await run("send", "row_1", "--agent", "claude", "hello");
     expect(foreign.code).toBe(3);
-    expect(foreign.io.errors).toEqual(['--agent belongs to wsp skills add, wsp servers signin, wsp servers tools, wsp servers add, wsp servers remove, wsp servers disable, wsp servers enable, wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--image <path>] [--detach] "<message>"']);
+    expect(foreign.io.errors).toEqual(['--agent belongs to wsp skills add, wsp servers signin, wsp servers tools, wsp servers add, wsp servers remove, wsp servers disable, wsp servers enable, wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"']);
     const within = await run("stop", "row_1", "--tree");
     expect(within.io.errors[0]).toContain("--tree belongs to wsp threads; wsp stop does not read it");
     // A flag wsp used to read is nobody's now: the parser's own line, with the verb's usage under it.
@@ -3831,7 +3831,7 @@ describe("wsp verbs over the host", () => {
     });
   });
 
-  describe("an image on a message from the command line", () => {
+  describe("a file on a message from the command line", () => {
     /** A real PNG head, so the type is read off the bytes as the verbs read it; the rest is filler of a known weight. */
     const pngFile = (dirPath: string, name: string, bytes: number): string => {
       const path = join(dirPath, name);
@@ -3839,12 +3839,12 @@ describe("wsp verbs over the host", () => {
       return path;
     };
 
-    it("wsp send --image reads the file here and sends its bytes, so the machine never reaches back for this computer's files", async () => {
+    it("wsp send --file reads the file here and sends its bytes, so the machine never reaches back for this computer's files", async () => {
       await run("new", "alpha");
       await run("run", "alpha", "hello");
       const [row] = await rt.sessions.list();
       const path = pngFile(dir, "shot.png", 2048);
-      const sent = await run("send", row!.threadId!, "--image", path, "what does this show?");
+      const sent = await run("send", row!.threadId!, "--file", path, "what does this show?");
       expect(sent.code).toBe(0);
       const start = claude.starts.at(-1)!;
       expect(start.images).toEqual([{ mediaType: "image/png", bytes: readFileSync(path).toString("base64") }]);
@@ -3858,15 +3858,15 @@ describe("wsp verbs over the host", () => {
       const [row] = await rt.sessions.list();
       const one = pngFile(dir, "one.png", 512);
       const two = pngFile(dir, "two.png", 1024);
-      const sent = await run("send", row!.threadId!, "--image", one, "--image", two, "these two");
+      const sent = await run("send", row!.threadId!, "--file", one, "--file", two, "these two");
       expect(sent.code).toBe(0);
       expect(claude.starts.at(-1)!.images?.map(i => i.bytes)).toEqual([readFileSync(one).toString("base64"), readFileSync(two).toString("base64")]);
     });
 
-    it("run --image opens the thread with the image on its first turn", async () => {
+    it("run --file opens the thread with the image on its first turn", async () => {
       await run("new", "alpha");
       const path = pngFile(dir, "opening.png", 256);
-      const opened = await run("run", "alpha", "--image", path, "what is this?");
+      const opened = await run("run", "alpha", "--file", path, "what is this?");
       expect(opened.code).toBe(0);
       expect(claude.starts.at(-1)!.images).toEqual([{ mediaType: "image/png", bytes: readFileSync(path).toString("base64") }]);
     });
@@ -3874,16 +3874,16 @@ describe("wsp verbs over the host", () => {
     it("the person's turn prints one bracket per image on stderr, since a terminal draws no pixels", async () => {
       await run("new", "alpha");
       const path = pngFile(dir, "big.png", 1_258_291);
-      const opened = await run("run", "alpha", "--image", path, "what is this?");
+      const opened = await run("run", "alpha", "--file", path, "what is this?");
       expect(opened.io.streamed).toContain("[image 1 MB png]");
     });
 
     it("a path this computer has no file at answers in a sentence, not in the reader's own error", async () => {
       await run("new", "alpha");
       const missing = join(dir, "not-here.png");
-      const refused = await run("send", "--image", missing, "x", "y");
+      const refused = await run("send", "--file", missing, "x", "y");
       expect(refused.io.errors[0]).not.toContain("ENOENT");
-      const opening = await run("run", "alpha", "--image", missing, "look");
+      const opening = await run("run", "alpha", "--file", missing, "look");
       expect(opening.code).toBe(EXIT_CODES.usage);
       expect(opening.io.errors).toEqual([`wsp run: there is no file at ${missing} on this computer. Name a file that is already here.`]);
       expect(claude.starts).toHaveLength(0);
@@ -3891,36 +3891,51 @@ describe("wsp verbs over the host", () => {
 
     it("a folder named where an image should be is refused the same way, rather than failing on the read", async () => {
       await run("new", "alpha");
-      const refused = await run("run", "alpha", "--image", dir, "look");
+      const refused = await run("run", "alpha", "--file", dir, "look");
       expect(refused.code).toBe(EXIT_CODES.usage);
       expect(refused.io.errors).toEqual([`wsp run: there is no file at ${dir} on this computer. Name a file that is already here.`]);
     });
 
-    it("a file that is not one of the four types is refused by name, before anything travels", async () => {
+    it("a file that is not an image travels under its own name, and the agent is told where it landed", async () => {
       await run("new", "alpha");
       const path = join(dir, "notes.pdf");
       writeFileSync(path, "%PDF-1.7 not an image at all");
-      const refused = await run("run", "alpha", "--image", path, "look");
-      expect(refused.code).toBe(EXIT_CODES.usage);
-      expect(refused.io.errors).toEqual([`wsp run: ${path} is not PNG, JPEG, GIF or WebP; a message carries those four. Name one of those instead.`]);
-      expect(claude.starts).toHaveLength(0);
+      const opened = await run("run", "alpha", "--file", path, "look");
+      expect(opened.code).toBe(0);
+      const start = claude.starts.at(-1)!;
+      expect(start.images).toBeUndefined();
+      expect(start.prompt).toMatch(/^look\n\nAttached files:\n- \S+\/\.wsp-files\/[^/]+\/notes\.pdf$/);
+      expect(opened.io.streamed).toContain("[file 28 B notes.pdf]");
     });
 
     it("a 12 MB image is refused with the cap in the sentence, and the file is never read whole", async () => {
       await run("new", "alpha");
       const path = pngFile(dir, "huge.png", 12 * 1024 * 1024);
-      const refused = await run("run", "alpha", "--image", path, "look");
+      const refused = await run("run", "alpha", "--file", path, "look");
       expect(refused.code).toBe(EXIT_CODES.usage);
       expect(refused.io.errors).toEqual(["wsp run: huge.png is 12 MB, over the 10 MB an image may be. Drop that one and send the rest."]);
       expect(claude.starts).toHaveLength(0);
     });
 
-    it("six images are refused with both counts", async () => {
+    it("six files are refused with both counts", async () => {
       await run("new", "alpha");
       const paths = Array.from({ length: 6 }, (_, i) => pngFile(dir, `n${i}.png`, 64));
-      const refused = await run("run", "alpha", ...paths.flatMap(p => ["--image", p]), "look");
+      const refused = await run("run", "alpha", ...paths.flatMap(p => ["--file", p]), "look");
       expect(refused.code).toBe(EXIT_CODES.usage);
-      expect(refused.io.errors).toEqual(["wsp run: only 5 images fit one message; this one carries 6. Drop that one and send the rest."]);
+      expect(refused.io.errors).toEqual(["wsp run: only 5 files fit one message; this one carries 6. Drop that one and send the rest."]);
+    });
+
+    it("--fast runs the turn in the agent's fast mode on a model that offers one, and is refused by the model's name on one that does not", async () => {
+      await run("new", "alpha");
+      const opened = await run("run", "alpha", "--fast", "hello");
+      expect(opened.code).toBe(0);
+      expect(claude.starts.at(-1)!.fast).toBe(true);
+      const refused = await run("run", "alpha", "--model", "claude-haiku-4-5-20251001", "--fast", "hello");
+      expect(refused.code).toBe(EXIT_CODES.usage);
+      expect(refused.io.errors[0]).toContain(noFastLine("Haiku 4.5"));
+      const [row] = await rt.sessions.list();
+      expect((await run("send", row!.threadId!, "--fast", "again")).code).toBe(0);
+      expect(claude.starts.at(-1)!.fast).toBe(true);
     });
   });
 });

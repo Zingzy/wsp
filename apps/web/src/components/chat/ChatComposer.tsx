@@ -62,9 +62,9 @@
 // next turn, and never the agent or the access, which are that thread's own
 // off its rows.
 import { cn } from "../../lib/utils";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
-import { composerHeldLine, foldThreads, FS_FILES_CAP_ENTRIES, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { composerHeldLine, foldThreads, markedDefault, PLAN_ACCESS, FS_FILES_CAP_ENTRIES, HOST_ASLEEP_SEND, FILES_AFTER_TURN, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -87,8 +87,14 @@ import { fileGroups, referenceGroups, skillGroups, slashGroups } from "./compose
 import { useComposerList } from "./useComposerList";
 import { useComposerTriggerState } from "./useComposerTriggerState";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
-import { ChatImageThumb } from "./ChatImages";
-import { attachmentOf, recordOf, useComposerImages, useComposerImagesStore } from "./composerImages";
+import { ChatFileTile, ChatImageThumb } from "./ChatFiles";
+import { attachmentOf, fileFromStash, recordOf, releaseFiles, stashedOf, useComposerFiles, useComposerFilesStore } from "./composerFiles";
+import { partitionStashFiles, usePromptStashStore, type PromptStashEntry } from "./promptStashStore";
+import { ComposerStashMenu, stashedWord } from "./ComposerStashMenu";
+import { ComposerModeToggles } from "./ComposerModeToggles";
+import { useComposerModesStore } from "./composerModesStore";
+import { nextPastedTextName, pastesAsFile } from "./pastedText";
+import { buildComposerPromptHistoryEntries, stepComposerPromptHistory, type ComposerPromptHistoryPosition } from "./composerPromptHistory";
 import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld } from "./composerDraftStore";
 import { ComposerAccessPicker, ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
 import type { ComposerStart } from "./composerPicks";
@@ -112,6 +118,9 @@ export const noHostListLine = (host: string, computer: string): string => `no si
 
 /** What the @ menu says under a checkout with more files than one list carries. */
 export const FILES_CUT_LINE = `this checkout has more than ${FS_FILES_CAP_ENTRIES.toLocaleString("en-US")} files; the menu lists the first ${FS_FILES_CAP_ENTRIES.toLocaleString("en-US")}`;
+
+/** What the slot says when the stash could not be written, the draft staying where it was. */
+export const STASH_NOT_WRITTEN = "the stash could not be saved in this browser, so the draft stays here";
 
 /** A list read whose refusal is the computer's wsp not knowing the read yet reads as that, in the person's words. */
 const inPersonsWords = <T,>(read: Promise<T>, computer: string): Promise<T> =>
@@ -158,7 +167,7 @@ export function composerSendBlock(input: {
   return null;
 }
 
-/** What a send carries beyond its words and its images: the composer's picks where it opens a thread, and into a
+/** What a send carries beyond its words and its files: the composer's picks where it opens a thread, and into a
  * thread that has already run the model and the effort alone, the window riding inside the model as it always
  * does. Changing the model in the middle of a thread is ordinary and the agent's own command line takes both per
  * turn. The agent and the access are not picks a message makes: the thread runs on the agent its rows carry, the
@@ -215,7 +224,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   // menu's other folder row in the footer; it goes with the pick once the view is locked to a turn.
   const [folderPicker, setFolderPicker] = useState(false);
   const openFolderPicker = useCallback(() => setFolderPicker(true), []);
-  const { harness: harnessId, startOptions, pinned, latestRow, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
+  const { harness: harnessId, startOptions, pinned, latestRow, catalog: harnessCatalog, model: pickedModel, picks } = useComposerPicks(workspaceId, thread);
   const launching = useStore(s => s.launching);
   const launched = useStore(s => s.launched);
   const harnessCatalogs = useHarnessCatalogs(workspaceId);
@@ -228,17 +237,25 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const requeue = useComposerDraftStore(s => s.requeue);
   const release = useComposerDraftStore(s => s.release);
   const rekeyQueue = useComposerDraftStore(s => s.rekeyQueue);
+  const rekeyModes = useComposerModesStore(s => s.rekey);
   useEffect(() => {
     if (named === null) return;
-    if (named.key !== named.thread) rekeyQueue(named.key, named.thread);
+    if (named.key !== named.thread) {
+      rekeyQueue(named.key, named.thread);
+      rekeyModes(named.key, named.thread);
+    }
     release(named.thread);
-  }, [named, rekeyQueue, release]);
-  const images = useComposerImages(workspaceId);
-  const addImages = useComposerImagesStore(s => s.add);
-  const removeImage = useComposerImagesStore(s => s.remove);
-  const sendImagesAs = useComposerImagesStore(s => s.sendAs);
-  const restoreImages = useComposerImagesStore(s => s.restore);
-  const [imageRefusal, setImageRefusal] = useState<string | null>(null);
+  }, [named, rekeyModes, rekeyQueue, release]);
+  const files = useComposerFiles(workspaceId);
+  const addFiles = useComposerFilesStore(s => s.add);
+  const removeFile = useComposerFilesStore(s => s.remove);
+  const sendFilesAs = useComposerFilesStore(s => s.sendAs);
+  const restoreFiles = useComposerFilesStore(s => s.restore);
+  const [fileRefusal, setFileRefusal] = useState<string | null>(null);
+  const putFiles = useComposerFilesStore(s => s.put);
+  const takeFiles = useComposerFilesStore(s => s.take);
+  const stashed = usePromptStashStore(s => s.entries);
+  const [stashOpen, setStashOpen] = useState(false);
   const editorRef = useRef<ComposerPromptEditorHandle | null>(null);
   const pickerRef = useRef<HTMLInputElement | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -284,9 +301,10 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const sendHeld = unavailable ?? slashHoldLine({ prompt: draft.prompt, catalog, screen: screenCommandsOf(harnessCatalog) });
   const sendDisabledReason = sendHeld ?? (thread.busy ? TURN_IN_FLIGHT : null);
   const hasText = draft.prompt.trim().length > 0;
-  // The catalog answers before the click; a row the runtime's table stood in for is no answer, so the picker is
-  // offered and the runtime refuses in the agent's name if that binary turns out to read none.
-  const canAttach = readsImages(harnessCatalog);
+  // The catalog answers before the click; a row the runtime's table stood in for is no answer, so an image is taken
+  // and the runtime refuses in the agent's name if that binary turns out to read none. Any other file lands in the
+  // thread's folder, which every agent reads.
+  const readsImage = readsImages(harnessCatalog);
 
   const runningTurn = thread.view.running ? thread.view.latestTurn : null;
   // What the still-working line calls the thread: its own title, never the key wsp holds it under.
@@ -309,6 +327,25 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   // The harness's own row decides whether the pick moves the running turn, and it is the same row the menu reads
   // to say so before the pick.
   const accessPick = useAccessPick(workspaceId, pickTarget, thread.threadKey, movesRunningAccess(harnessCatalog));
+  // Fast is the thread's own: a hand toggle on this thread, else what its latest turn ran at. It rides only where the
+  // model in front of the person offers it, which is also the only place the toggle shows.
+  const fastPicked = useComposerModesStore(s => s.fast[threadKey]);
+  const setFast = useComposerModesStore(s => s.setFast);
+  const planFrom = useComposerModesStore(s => s.planFrom[threadKey]);
+  const setPlanFrom = useComposerModesStore(s => s.setPlanFrom);
+  const fastOffered = pickedModel?.fast === true;
+  const fastOn = fastOffered && (fastPicked ?? latestRow?.fast === true);
+  const planOffered = harnessCatalog?.permissionModes.some(mode => mode.value === PLAN_ACCESS) === true;
+  const planOn = picks?.permissionMode === PLAN_ACCESS;
+  const togglePlan = useCallback(() => {
+    if (planOn) {
+      accessPick.pick(planFrom ?? markedDefault(harnessCatalog?.permissionModes ?? [])?.value ?? PLAN_ACCESS);
+      setPlanFrom(threadKey, null);
+      return;
+    }
+    if (picks?.permissionMode != null) setPlanFrom(threadKey, picks.permissionMode);
+    accessPick.pick(PLAN_ACCESS);
+  }, [accessPick, harnessCatalog, picks, planFrom, planOn, setPlanFrom, threadKey]);
   const stopAttempt = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId ? stop : null;
   const steerAttempt = steered !== null && runningTurn !== null && steered.turnId === runningTurn.turnId ? steered : null;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
@@ -329,7 +366,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const folder = pickable ? startFolder : (viewCwd ?? startFolder);
   const listed = onStart === undefined && unavailable === null && wire !== null && folder !== null;
   const session = trigger === null ? "" : `${trigger.kind}:${trigger.rangeStart}`;
-  const files = useComposerList(listed && trigger?.kind === "path" ? `${workspaceId}\0files\0${folder}` : null, session, () => inPersonsWords(fsFiles(wire!, folder!), computer));
+  const checkout = useComposerList(listed && trigger?.kind === "path" ? `${workspaceId}\0files\0${folder}` : null, session, () => inPersonsWords(fsFiles(wire!, folder!), computer));
   const references = useComposerList(listed && trigger?.kind === "pull-request" ? `${workspaceId}\0items\0${folder}` : null, session, () => inPersonsWords(gitPrList(wire!, folder!), computer));
   const skillsWanted = onStart === undefined && (trigger?.kind === "slash-command" || trigger?.kind === "skill");
   const skills = useAgentsReport(skillsWanted ? { workspaceId } : null).report?.skills;
@@ -342,16 +379,16 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
       case "skill":
         return skillGroups({ harness: catalog.harness, skills: skills ?? [], query: trigger.query });
       case "path":
-        return files.data === null ? [] : fileGroups(files.data.files, trigger.query);
+        return checkout.data === null ? [] : fileGroups(checkout.data.files, trigger.query);
       case "pull-request":
         return references.data === null ? [] : referenceGroups(references.data.items, trigger.query);
     }
-  }, [catalog, files.data, references.data, skills, trigger, unavailable]);
+  }, [catalog, checkout.data, references.data, skills, trigger, unavailable]);
   // A list the menu could not read, or one its host could not answer, says why in the slot while its token stands.
   const unlisted = references.data?.noCliFor;
   const menuLine =
     trigger?.kind === "path"
-      ? (files.error ?? (files.data?.truncated === true ? FILES_CUT_LINE : null))
+      ? (checkout.error ?? (checkout.data?.truncated === true ? FILES_CUT_LINE : null))
       : trigger?.kind === "pull-request"
         ? (references.error ?? (groups.length === 0 ? (unlisted !== undefined ? noHostListLine(unlisted, computer) : (references.data?.note ?? null)) : null))
         : null;
@@ -369,8 +406,8 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const line =
     sendHeld !== null
       ? sendHeld
-      : imageRefusal !== null
-        ? imageRefusal
+      : fileRefusal !== null
+        ? fileRefusal
         : stopAttempt !== null && stopAttempt.error !== null
           ? stopFailedLine(stopAttempt.error)
           : steerAttempt !== null && steerAttempt.error !== null
@@ -402,38 +439,50 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     [setDraft, workspaceId],
   );
 
-  /** The one road every image takes into the composer: the paste, the drop and the picker all end here, so the caps
-   * and the refusal words are said once. An agent that reads no image is turned away before a file is even read. */
+  /** The one road every file takes into the composer: the paste, the drop and the picker all end here, so the caps
+   * and the refusal words are said once. An image for an agent that reads none is turned away before it is read
+   * whole. */
   const take = useCallback(
-    (files: readonly File[]) => {
-      // Paste and drop answer to the same state the picker button does: one door open and two shut would take an
-      // image the send could not carry.
-      if (files.length === 0 || shut) return;
-      if (!canAttach) {
-        setImageRefusal(noImagesLine(harnessId));
-        return;
-      }
-      void addImages(workspaceId, files).then(setImageRefusal);
+    (given: readonly File[]) => {
+      // Paste and drop answer to the same state the picker button does: one door open and two shut would take a
+      // file the send could not carry.
+      if (given.length === 0 || shut) return;
+      void addFiles(workspaceId, given, readsImage ? undefined : noImagesLine(harnessId)).then(setFileRefusal);
     },
-    [addImages, canAttach, harnessId, shut, workspaceId],
+    [addFiles, harnessId, readsImage, shut, workspaceId],
   );
 
   const onPaste = useCallback(
     (event: ClipboardEvent<HTMLDivElement>) => {
-      const files = [...(event.clipboardData?.files ?? [])];
-      if (files.length === 0) return;
+      const pasted = [...(event.clipboardData?.files ?? [])];
+      if (pasted.length === 0) return;
       event.preventDefault();
-      take(files);
+      take(pasted);
     },
     [take],
   );
 
+  // Long text lands as a file the agent can read in parts, ahead of the editor, which would otherwise take it into
+  // the box; so this listens as the paste goes down, not as it comes back up.
+  const onPasteCapture = useCallback(
+    (event: ClipboardEvent<HTMLDivElement>) => {
+      const data = event.clipboardData;
+      if (data === null || data === undefined || (data.files?.length ?? 0) > 0) return;
+      const text = data.getData("text/plain");
+      if (!pastesAsFile(text)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      take([new File([text], nextPastedTextName(files.map(file => file.name)), { type: "text/plain" })]);
+    },
+    [files, take],
+  );
+
   const onDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
-      const files = [...(event.dataTransfer?.files ?? [])];
-      if (files.length === 0) return;
+      const dropped = [...(event.dataTransfer?.files ?? [])];
+      if (dropped.length === 0) return;
       event.preventDefault();
-      take(files);
+      take(dropped);
     },
     [take],
   );
@@ -451,17 +500,17 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     (prompt: string, onRefused: () => void) => {
       if (!api) return;
       const requestId = newId();
-      const attachments = images.map(attachmentOf);
+      const attachments = files.map(attachmentOf);
       setSending(true);
       hold(threadKey);
-      appendUserTurn(prompt, requestId, images.map(recordOf));
+      appendUserTurn(prompt, requestId, files.map(recordOf));
       // A send that names no thread opens one the runtime has written no row for, so the sidebar is handed the same
       // thread the transcript has until that row arrives.
       if (into === undefined) launching(workspaceId, { requestId, title: prompt, harness: harnessId });
-      // The images leave the composer with the send and are kept under its request id, which is what the person's
+      // The files leave the composer with the send and are kept under its request id, which is what the person's
       // row in the transcript is drawn from; a refused send hands them back rather than losing them.
-      sendImagesAs(workspaceId, requestId);
-      setImageRefusal(null);
+      sendFilesAs(workspaceId, requestId);
+      setFileRefusal(null);
       // The wake settles or fails before the start is asked; a wake that failed leaves the runtime to refuse the
       // start in its own words, which land in the transcript like any other refusal.
       void (wakesFirst ? wake(workspaceId) : Promise.resolve())
@@ -474,17 +523,18 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
             ...folderStart,
             ...(attachments.length > 0 ? { attachments } : {}),
             ...sendPicks(pinned, startOptions),
+            ...(fastOn ? { fast: true } : {}),
           }),
         )
         .catch((err: unknown) => {
           setSending(false);
           launched(workspaceId, requestId);
           onRefused();
-          restoreImages(workspaceId, requestId);
+          restoreFiles(workspaceId, requestId);
           appendLocalError(err instanceof Error ? err.message : String(err));
         });
     },
-    [api, appendLocalError, appendUserTurn, folderStart, harnessId, hold, images, into, launched, launching, pinned, restoreImages, sendImagesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
+    [api, appendLocalError, appendUserTurn, fastOn, files, folderStart, harnessId, hold, into, launched, launching, pinned, restoreFiles, sendFilesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
   /** Asks the host beside the thread and draws the answer in the sheet; an answer landing after the sheet closed is dropped. */
@@ -520,13 +570,13 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     const screen = screenCommandTyped(harnessCatalog, prompt);
     if (screen !== null && harnessCatalog !== null) {
       setScreenLine(screenCommandLine(screen, harnessCatalog, workspace ?? {}));
-      setImageRefusal(null);
+      setFileRefusal(null);
       dismissTrigger(trigger);
       return;
     }
-    // A queued row keeps only its words, so a message with images waits for the turn rather than losing them.
-    if (busy && images.length > 0) {
-      setImageRefusal(IMAGES_AFTER_TURN);
+    // A queued row keeps only its words, so a message with files waits for the turn rather than losing them.
+    if (busy && files.length > 0) {
+      setFileRefusal(FILES_AFTER_TURN);
       return;
     }
     setDraft(workspaceId, EMPTY_DRAFT);
@@ -553,7 +603,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     }
     enqueue(threadKey, prompt, held ? "head" : "tail");
     release(threadKey);
-  }, [askAside, asides, busy, dismissTrigger, draft, enqueue, harnessCatalog, held, images, onStart, release, sendHeld, sending, setDraft, start, threadKey, trigger, workspace, workspaceId]);
+  }, [askAside, asides, busy, dismissTrigger, draft, enqueue, files, harnessCatalog, held, onStart, release, sendHeld, sending, setDraft, start, threadKey, trigger, workspace, workspaceId]);
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];
@@ -632,6 +682,73 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     [draft, setDraft, workspaceId],
   );
 
+  /** Puts the draft and its files on the stash and opens the composer empty; a stash that could not be written leaves
+   * both where they were and says so. */
+  const stashDraft = useCallback((): boolean => {
+    const prompt = editorRef.current?.readSnapshot().value ?? draft.prompt;
+    const held = takeFiles(workspaceId);
+    const { kept, dropped } = partitionStashFiles(held.map(stashedOf));
+    const written = usePromptStashStore.getState().stash({ id: newId(), createdAt: new Date().toISOString(), prompt, files: kept, dropped });
+    if (!written) {
+      putFiles(workspaceId, held);
+      setFileRefusal(STASH_NOT_WRITTEN);
+      return false;
+    }
+    releaseFiles(held);
+    setDraft(workspaceId, EMPTY_DRAFT);
+    setFileRefusal(null);
+    return true;
+  }, [draft.prompt, putFiles, setDraft, takeFiles, workspaceId]);
+
+  /** Brings a stashed prompt back with its files; a draft already in the box goes onto the stash first, so a restore
+   * never overwrites words. */
+  const restoreStashed = useCallback(
+    (entry: PromptStashEntry) => {
+      const prompt = editorRef.current?.readSnapshot().value ?? draft.prompt;
+      if ((prompt.trim() !== "" || files.length > 0) && !stashDraft()) return;
+      if (usePromptStashStore.getState().take(entry.id) === null) return;
+      putFiles(workspaceId, entry.files.map(fileFromStash));
+      setDraft(workspaceId, { prompt: entry.prompt, cursor: collapseExpandedComposerCursor(entry.prompt, entry.prompt.length) });
+      setStashOpen(false);
+    },
+    [draft.prompt, files.length, putFiles, setDraft, stashDraft, workspaceId],
+  );
+
+  /** Cmd or Ctrl with S: a draft goes onto the stash; an empty box brings back the one stashed prompt, or opens the
+   * list when there are several. */
+  const onStashKey = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (event.key.toLowerCase() !== "s" || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      const prompt = editorRef.current?.readSnapshot().value ?? draft.prompt;
+      if (prompt.trim() !== "" || files.length > 0) stashDraft();
+      else if (stashed.length === 1) restoreStashed(stashed[0]!);
+      else if (stashed.length > 1) setStashOpen(true);
+    },
+    [draft.prompt, files.length, restoreStashed, stashDraft, stashed],
+  );
+
+  // Recall reads the thread's messages at the keypress, through a ref, so a streaming reply re-registers no key.
+  const entriesRef = useRef(thread.view.entries);
+  entriesRef.current = thread.view.entries;
+  const recallRef = useRef<ComposerPromptHistoryPosition | null>(null);
+  const recall = useCallback(
+    (direction: "backward" | "forward"): boolean => {
+      const snapshot = editorRef.current?.readSnapshot() ?? { value: draft.prompt, expandedCursor: expandCollapsedComposerCursor(draft.prompt, draft.cursor) };
+      const edge = direction === "backward" ? !snapshot.value.slice(0, snapshot.expandedCursor).includes("\n") : !snapshot.value.slice(snapshot.expandedCursor).includes("\n");
+      if (snapshot.value.length > 0 && !edge) return false;
+      const entries = buildComposerPromptHistoryEntries(entriesRef.current.flatMap(entry => (entry.kind === "message" ? [{ id: entry.message.id, role: entry.message.role, text: entry.message.text }] : [])));
+      const step = stepComposerPromptHistory({ direction, entries, position: recallRef.current, currentPrompt: snapshot.value });
+      if (step === null) return false;
+      recallRef.current = step.position;
+      // The caret lands on the edge the walk goes on from, so the next press keeps walking even through a prompt of
+      // several lines.
+      setDraft(workspaceId, { prompt: step.prompt, cursor: direction === "backward" ? 0 : collapseExpandedComposerCursor(step.prompt, step.prompt.length) });
+      return true;
+    },
+    [draft, setDraft, workspaceId],
+  );
+
   const onCommandKeyDown = useCallback(
     (key: ComposerCommandKey, event: KeyboardEvent): boolean => {
       if (key === "Escape") {
@@ -655,6 +772,9 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
           return true;
         }
       }
+      if ((key === "ArrowUp" || key === "ArrowDown") && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+        return recall(key === "ArrowUp" ? "backward" : "forward");
+      }
       if (key === "Enter") {
         const intent = composerSubmissionIntentForEnter({
           isMobileViewport: false,
@@ -669,11 +789,18 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
       }
       return false;
     },
-    [activeItemId, dismissTrigger, highlight, items, menuOpen, selectItem, send, trigger],
+    [activeItemId, dismissTrigger, highlight, items, menuOpen, recall, selectItem, send, trigger],
   );
 
   // A home's thread carries a history-unavailable row and no message, so the count is of messages alone.
   const compact = thread.view.running || thread.view.entries.some(entry => entry.kind === "message");
+  const modes = (
+    <ComposerModeToggles
+      fast={fastOffered ? { on: fastOn, toggle: () => setFast(threadKey, !fastOn) } : null}
+      plan={planOffered && onStart === undefined ? { on: planOn, toggle: togglePlan } : null}
+      tight={compact}
+    />
+  );
   const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
   const heightRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -685,7 +812,24 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     <ComposerCommandMenuLayer anchor={menuAnchor}>
       <ComposerCommandMenu groups={groups} triggerKind={trigger?.kind ?? null} activeItemId={activeItemId} onHighlightedItemChange={highlight} onSelect={selectItem} />
     </ComposerCommandMenuLayer>
+  ) : stashOpen && stashed.length > 0 ? (
+    <ComposerCommandMenuLayer anchor={menuAnchor}>
+      <ComposerStashMenu entries={stashed} onRestore={restoreStashed} onDelete={entry => void usePromptStashStore.getState().take(entry.id)} onClose={() => setStashOpen(false)} />
+    </ComposerCommandMenuLayer>
   ) : null;
+  const stashWord =
+    stashed.length > 0 ? (
+      <button
+        type="button"
+        data-composer-stash-word="true"
+        aria-expanded={stashOpen}
+        title="Stashed prompts: Cmd or Ctrl with S stashes a draft, and brings one back into an empty box"
+        onClick={() => setStashOpen(open => !open)}
+        className="shrink-0 cursor-pointer rounded-sm px-1 font-mono text-[11px] text-muted-foreground tabular-nums transition-colors duration-150 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        {stashedWord(stashed.length)}
+      </button>
+    ) : null;
   const actions = (
     <div data-flip="actions" className="flex shrink-0 flex-nowrap items-center gap-2">
       <Button
@@ -693,21 +837,20 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
         size="icon-sm"
         variant="ghost-muted"
         aria-label="Attach"
-        title={`Add an image: paste, drop or pick one. ${IMAGE_TYPE_WORDS}, at most ${IMAGES_MAX} and ${IMAGE_MAX_WORDS} each.`}
+        title={`Add a file: paste, drop or pick one, at most ${FILES_MAX}. An image (${IMAGE_TYPE_WORDS}) goes up to ${IMAGE_MAX_WORDS}, any other file up to ${FILE_MAX_WORDS}.`}
         disabled={shut}
         onClick={() => pickerRef.current?.click()}
-        data-composer-image-picker="true"
+        data-composer-file-picker="true"
       >
         <PaperclipIcon />
       </Button>
       <input
         ref={pickerRef}
         type="file"
-        accept={IMAGE_ACCEPT}
         multiple
         hidden
         aria-hidden="true"
-        data-composer-image-input="true"
+        data-composer-file-input="true"
         onChange={event => {
           take([...(event.target.files ?? [])]);
           event.target.value = "";
@@ -777,24 +920,25 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                     data-tall={tall || undefined}
                     className="rounded-[20px] transition-[background-color] duration-200"
                     onPaste={onPaste}
+                    onPasteCapture={onPasteCapture}
+                    onKeyDown={onStashKey}
                     onDrop={onDrop}
                     onDragOver={event => event.preventDefault()}
                   >
                     {onStart !== undefined ? <ComposerModelChips workspaceId={workspaceId} /> : null}
-                    {images.length > 0 ? (
-                      <ul aria-label="Images to send" data-composer-images="true" className="flex flex-wrap gap-1.5 px-3 pt-3 sm:px-4">
-                        {images.map((image, at) => (
-                          <li key={image.id}>
-                            <ChatImageThumb
-                              image={image}
-                              at={at + 1}
-                              onRemove={() => {
-                                removeImage(workspaceId, image.id);
-                                setImageRefusal(null);
-                              }}
-                            />
-                          </li>
-                        ))}
+                    {files.length > 0 ? (
+                      <ul aria-label="Files to send" data-composer-files="true" className="flex flex-wrap gap-1.5 px-3 pt-3 sm:px-4">
+                        {files.map((file, at) => {
+                          const remove = () => {
+                            removeFile(workspaceId, file.id);
+                            setFileRefusal(null);
+                          };
+                          return (
+                            <li key={file.id}>
+                              {file.url !== undefined ? <ChatImageThumb image={file} at={at + 1} onRemove={remove} /> : <ChatFileTile name={file.name} size={file.size} at={at + 1} onRemove={remove} />}
+                            </li>
+                          );
+                        })}
                       </ul>
                     ) : null}
                     <div
@@ -836,6 +980,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                         )}
                       >
                         <ComposerOptionPickers compact={compact} workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} onOtherFolder={openFolderPicker} />
+                        {compact ? null : modes}
                       </div>
                       <div data-chat-composer-actions="right" className={cn("col-start-3 flex shrink-0 items-center justify-self-end", compact && !tall ? "row-start-1" : "row-start-2 self-end")}>
                         {actions}
@@ -855,7 +1000,15 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
           thread={thread}
           pickerOpen={folderPicker && pickable}
           onPickerOpenChange={setFolderPicker}
-          access={compact ? <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} /> : null}
+          access={
+            compact ? (
+              <>
+                <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} />
+                {modes}
+              </>
+            ) : null
+          }
+          stash={stashWord}
           />
         )}
       </ComposerSurface.Shell>

@@ -1,41 +1,52 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  IMAGES_MAX,
+  attachedFilesPrompt,
+  attachmentBytes,
+  attachmentLine,
+  attachmentRecord,
+  FILE_MAX_BYTES,
+  FILE_MAX_WORDS,
+  FILES_DIR,
+  FILES_MAX,
+  filePathIn,
+  filesBlocked,
+  filesRefusal,
   IMAGE_MAX_BYTES,
-  imageBytes,
-  imageLine,
-  IMAGE_ACCEPT,
   IMAGE_TYPES,
   IMAGE_MAX_WORDS,
   IMAGE_TYPE_WORDS,
   imagePathIn,
-  imageRecord,
   imageTypeOf,
-  imagesBlocked,
-  imagesRefusal,
+  landFilesLine,
   noImagesLine,
   notAFileLine,
-  notAnImageLine,
+  safeFileName,
+  sendFilesDir,
   threadImagesDir,
   turnImagesDir,
 } from "../src/index.js";
 
 const b64 = (bytes: number): string => Buffer.alloc(bytes).toString("base64");
 const png = (bytes = 1024) => ({ mediaType: "image/png", bytes: b64(bytes) });
+const pdf = (bytes = 1024, name = "report.pdf") => ({ mediaType: "application/pdf", bytes: b64(bytes), name });
 
-describe("what an image weighs, from the base64 the wire carries", () => {
+describe("what an attachment weighs, from the base64 the wire carries", () => {
   it("counts the bytes back out of the base64 without decoding it, padding and all", () => {
     for (const size of [1, 2, 3, 4, 5, 1023, 1024, 1_048_577]) {
-      expect(imageBytes({ bytes: b64(size) })).toBe(size);
+      expect(attachmentBytes({ bytes: b64(size) })).toBe(size);
     }
-    expect(imageBytes({ bytes: "" })).toBe(0);
+    expect(attachmentBytes({ bytes: "" })).toBe(0);
   });
 });
 
 describe("the caps, in the person's words", () => {
   it("a 12 MB image is refused with its weight and the cap in the sentence", () => {
-    const refusal = imagesRefusal([imageRecord(png(12 * 1024 * 1024))]);
+    const refusal = filesRefusal([attachmentRecord(png(12 * 1024 * 1024))]);
     expect(refusal).toBe("image 1 is 12 MB, over the 10 MB an image may be");
     // The cap itself is the one in the sentence, so the words cannot drift from the rule.
     expect(refusal).toContain("10 MB");
@@ -43,70 +54,77 @@ describe("the caps, in the person's words", () => {
   });
 
   it("a file the person named is refused by its own name, not by its place in the message", () => {
-    expect(imagesRefusal([imageRecord({ ...png(12 * 1024 * 1024), name: "screenshot.png" })])).toBe(
+    expect(filesRefusal([attachmentRecord({ ...png(12 * 1024 * 1024), name: "screenshot.png" })])).toBe(
       "screenshot.png is 12 MB, over the 10 MB an image may be",
     );
   });
 
   it("one image under the cap goes", () => {
-    expect(imagesRefusal([imageRecord(png(10 * 1024 * 1024))])).toBeNull();
-    expect(imagesRefusal([])).toBeNull();
+    expect(filesRefusal([attachmentRecord(png(10 * 1024 * 1024))])).toBeNull();
+    expect(filesRefusal([])).toBeNull();
   });
 
-  it("six images are refused with both counts", () => {
-    const six = Array.from({ length: IMAGES_MAX + 1 }, () => imageRecord(png()));
-    expect(imagesRefusal(six)).toBe("only 5 images fit one message; this one carries 6");
+  it("six files are refused with both counts, images and the rest counted together", () => {
+    const six = [...Array.from({ length: FILES_MAX }, () => attachmentRecord(png())), attachmentRecord(pdf())];
+    expect(filesRefusal(six)).toBe("only 5 files fit one message; this one carries 6");
   });
 
-  it("a type no harness reads is refused naming the four that travel", () => {
-    expect(imagesRefusal([imageRecord({ mediaType: "application/pdf", bytes: b64(10) })])).toBe(
-      "image 1 is application/pdf; a message carries PNG, JPEG, GIF or WebP",
-    );
-    expect(imagesRefusal([imageRecord({ mediaType: "", bytes: b64(10) })])).toBe(
-      "image 1 is of no stated type; a message carries PNG, JPEG, GIF or WebP",
-    );
+  it("a file over its cap is refused in one sentence naming it, its weight and the cap", () => {
+    const refusal = filesRefusal([attachmentRecord(pdf(FILE_MAX_BYTES + 2 * 1024 * 1024, "manual.pdf"))]);
+    expect(refusal).toBe(`manual.pdf is 12 MB, over the ${FILE_MAX_WORDS} a file may be`);
+    expect(refusal?.split(/[.;]\s/)).toHaveLength(1);
+    expect(filesRefusal([attachmentRecord(pdf(FILE_MAX_BYTES))])).toBeNull();
+  });
+
+  it("any type travels as a file, and one with no name is called by its place", () => {
+    expect(filesRefusal([attachmentRecord(pdf()), attachmentRecord({ mediaType: "", bytes: b64(10) })])).toBeNull();
+    expect(filesRefusal([attachmentRecord({ mediaType: "text/plain", bytes: "" })])).toBe("file 1 is empty");
   });
 
   it("an empty image is refused rather than sent as nothing", () => {
-    expect(imagesRefusal([imageRecord({ mediaType: "image/png", bytes: "" })])).toBe("image 1 is empty");
+    expect(filesRefusal([attachmentRecord({ mediaType: "image/png", bytes: "" })])).toBe("image 1 is empty");
   });
 
   it("the first thing wrong is the whole answer: the count before any one image", () => {
-    const rows = [imageRecord(png(12 * 1024 * 1024)), ...Array.from({ length: IMAGES_MAX }, () => imageRecord(png()))];
-    expect(imagesRefusal(rows)).toContain("only 5 images fit one message");
+    const rows = [attachmentRecord(png(12 * 1024 * 1024)), ...Array.from({ length: FILES_MAX }, () => attachmentRecord(png()))];
+    expect(filesRefusal(rows)).toContain("only 5 files fit one message");
   });
 });
 
 describe("an agent that reads no image is named before the machine is asked", () => {
   it("names the agent when its adapter declared no road", () => {
-    expect(imagesBlocked([imageRecord(png())], undefined, "gemini")).toBe(noImagesLine("gemini"));
+    expect(filesBlocked([attachmentRecord(png())], undefined, "gemini")).toBe(noImagesLine("gemini"));
     expect(noImagesLine("gemini")).toContain("gemini");
   });
 
   it("says nothing when the message carries no image, whatever the agent reads", () => {
-    expect(imagesBlocked([], undefined, "gemini")).toBeNull();
+    expect(filesBlocked([], undefined, "gemini")).toBeNull();
+    // A file that is not an image lands in the thread's folder, which every agent reads.
+    expect(filesBlocked([attachmentRecord(pdf())], undefined, "gemini")).toBeNull();
   });
 
   it("the caps come first, so a person fixes the image rather than the agent", () => {
-    expect(imagesBlocked([imageRecord(png(12 * 1024 * 1024))], undefined, "gemini")).toContain("over the 10 MB");
+    expect(filesBlocked([attachmentRecord(png(12 * 1024 * 1024))], undefined, "gemini")).toContain("over the 10 MB");
   });
 
   it("an agent on either road takes them", () => {
-    expect(imagesBlocked([imageRecord(png())], "inline", "claude")).toBeNull();
-    expect(imagesBlocked([imageRecord(png())], "file", "codex")).toBeNull();
+    expect(filesBlocked([attachmentRecord(png())], "inline", "claude")).toBeNull();
+    expect(filesBlocked([attachmentRecord(png())], "file", "codex")).toBeNull();
   });
 });
 
-describe("what a transcript prints in place of an image", () => {
-  it("is the weight and the type in one bracket", () => {
-    expect(imageLine({ mediaType: "image/png", bytes: 1_258_291 })).toBe("[image 1 MB png]");
-    expect(imageLine({ mediaType: "image/jpeg", bytes: 4096 })).toBe("[image 4 KB jpeg]");
-    expect(imageLine({ mediaType: "image/webp", bytes: 900 })).toBe("[image 900 B webp]");
+describe("what a transcript prints in place of an attachment", () => {
+  it("a file is its weight and its name in one bracket", () => {
+    expect(attachmentLine({ mediaType: "application/pdf", bytes: 4096, name: "report.pdf" })).toBe("[file 4 KB report.pdf]");
+    expect(attachmentLine({ mediaType: "text/plain", bytes: 900 })).toBe("[file 900 B]");
   });
 
-  it("a type outside the table still prints, by its own words", () => {
-    expect(imageLine({ mediaType: "image/avif", bytes: 1024 })).toBe("[image 1 KB image/avif]");
+  it("an image is the weight and the type in one bracket", () => {
+    expect(attachmentLine({ mediaType: "image/png", bytes: 1_258_291 })).toBe("[image 1 MB png]");
+    expect(attachmentLine({ mediaType: "image/jpeg", bytes: 4096 })).toBe("[image 4 KB jpeg]");
+    expect(attachmentLine({ mediaType: "image/webp", bytes: 900 })).toBe("[image 900 B webp]");
   });
+
 });
 
 describe("the type read off the bytes, never off the name", () => {
@@ -125,9 +143,6 @@ describe("the type read off the bytes, never off the name", () => {
     expect(imageTypeOf(new Uint8Array([]))).toBeNull();
   });
 
-  it("the refusal of a file that is not one of the four names the file", () => {
-    expect(notAnImageLine("notes.pdf")).toBe("notes.pdf is not PNG, JPEG, GIF or WebP; a message carries those four");
-  });
 });
 
 describe("where a thread's copies live on a machine", () => {
@@ -165,13 +180,12 @@ describe("where a thread's copies live on a machine", () => {
 });
 
 describe("the words every road reads rather than spelling again", () => {
-  it("the four types, the accept list and the cap are each one export, and the refusals are built from them", () => {
+  it("the four types and the caps are each one export, and the refusals are built from them", () => {
     expect(IMAGE_TYPE_WORDS).toBe("PNG, JPEG, GIF or WebP");
-    expect(IMAGE_ACCEPT).toBe("image/png,image/jpeg,image/gif,image/webp");
-    expect(IMAGE_ACCEPT.split(",")).toEqual(Object.keys(IMAGE_TYPES));
+    expect(Object.keys(IMAGE_TYPES)).toEqual(["image/png", "image/jpeg", "image/gif", "image/webp"]);
     expect(IMAGE_MAX_WORDS).toBe("10 MB");
-    expect(notAnImageLine("a.pdf")).toContain(IMAGE_TYPE_WORDS);
-    expect(imagesRefusal([imageRecord({ mediaType: "image/png", bytes: b64(12 * 1024 * 1024) })])).toContain(IMAGE_MAX_WORDS);
+    expect(FILE_MAX_WORDS).toBe("10 MB");
+    expect(filesRefusal([attachmentRecord({ mediaType: "image/png", bytes: b64(12 * 1024 * 1024) })])).toContain(IMAGE_MAX_WORDS);
   });
 
   it("a path this computer has no file at answers in a sentence, not in the reader's own error", () => {
@@ -179,13 +193,77 @@ describe("the words every road reads rather than spelling again", () => {
   });
 });
 
-describe("what a transcript keeps of an image", () => {
+describe("where a file the person attached lands: inside the thread's own folder, and nowhere else", () => {
+  it("one folder per send under the folder's .wsp-files, named by the request id where it is a plain one", () => {
+    expect(FILES_DIR).toBe(".wsp-files");
+    expect(sendFilesDir("/root/spoo", "req_a", "minted")).toBe("/root/spoo/.wsp-files/req_a");
+    for (const nasty of ["../../../etc", "a/b", "..", "", "-rf"]) expect(sendFilesDir("/root/spoo", nasty, "minted")).toBe("/root/spoo/.wsp-files/minted");
+  });
+
+  it("a name is one plain path segment, whatever the client sent", () => {
+    expect(safeFileName("report.pdf")).toBe("report.pdf");
+    expect(safeFileName("../../.ssh/authorized_keys")).toBe("authorized_keys");
+    expect(safeFileName("C:\\Users\\me\\notes.txt")).toBe("notes.txt");
+    expect(safeFileName("..")).toBe("file");
+    expect(safeFileName(".bashrc")).toBe("bashrc");
+    expect(safeFileName("a b\u0000c$(rm).txt")).toBe("a-b-c--rm-.txt");
+    expect(safeFileName(undefined)).toBe("file");
+    expect(safeFileName(`${"x".repeat(300)}.log`)).toBe(`${"x".repeat(116)}.log`);
+  });
+
+  it("two files of one name in one send each keep their own path", () => {
+    const dir = "/root/spoo/.wsp-files/req_a";
+    const taken = new Set<string>();
+    expect(filePathIn(dir, "notes.txt", taken)).toBe(`${dir}/notes.txt`);
+    expect(filePathIn(dir, "notes.txt", taken)).toBe(`${dir}/2-notes.txt`);
+    for (const name of ["../x", "/etc/passwd", "..", "a/../../b"]) expect(filePathIn(dir, name, taken).startsWith(`${dir}/`)).toBe(true);
+  });
+
+  it("the landing refuses a .wsp-files that is a link, makes the send's folder fresh and ignores the lot to git", () => {
+    expect(landFilesLine("/root/my spoo", "/root/my spoo/.wsp-files/req_a")).toBe(
+      "cd '/root/my spoo' && [ ! -L .wsp-files ] && mkdir -p .wsp-files && { [ -e .wsp-files/.gitignore ] || [ -L .wsp-files/.gitignore ] || printf '*\\n' > .wsp-files/.gitignore; } && mkdir '/root/my spoo/.wsp-files/req_a'",
+    );
+  });
+
+  it("run for real, it readies a fresh folder once, and refuses a link that would carry the files out of the copy", () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-files-"));
+    try {
+      const copy = join(root, "my copy");
+      mkdirSync(copy);
+      const run = (dir: string) => spawnSync("bash", ["-c", landFilesLine(copy, dir)]).status;
+      expect(run(sendFilesDir(copy, "req_a", "m"))).toBe(0);
+      expect(readFileSync(join(copy, ".wsp-files", ".gitignore"), "utf8")).toBe("*\n");
+      expect(existsSync(join(copy, ".wsp-files", "req_a"))).toBe(true);
+      // The same send's folder is never reused: a second landing into it is refused.
+      expect(run(sendFilesDir(copy, "req_a", "m"))).not.toBe(0);
+      const outside = join(root, "outside");
+      mkdirSync(outside);
+      const planted = join(root, "planted");
+      mkdirSync(planted);
+      symlinkSync(outside, join(planted, ".wsp-files"));
+      expect(spawnSync("bash", ["-c", landFilesLine(planted, sendFilesDir(planted, "req_b", "m"))]).status).not.toBe(0);
+      expect(existsSync(join(outside, "req_b"))).toBe(false);
+      expect(existsSync(join(outside, ".gitignore"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("the agent's prompt names every landed path under the words the person typed", () => {
+    expect(attachedFilesPrompt("what is in these?", ["/root/spoo/.wsp-files/req_a/report.pdf", "/root/spoo/.wsp-files/req_a/pasted-text-1.txt"])).toBe(
+      "what is in these?\n\nAttached files:\n- /root/spoo/.wsp-files/req_a/report.pdf\n- /root/spoo/.wsp-files/req_a/pasted-text-1.txt",
+    );
+    expect(attachedFilesPrompt("hi", [])).toBe("hi");
+  });
+});
+
+describe("what a transcript keeps of an attachment", () => {
   it("its type, its weight and its name, never its pixels", () => {
-    expect(imageRecord({ mediaType: "image/png", bytes: b64(2048), name: "shot.png" })).toEqual({
+    expect(attachmentRecord({ mediaType: "image/png", bytes: b64(2048), name: "shot.png" })).toEqual({
       mediaType: "image/png",
       bytes: 2048,
       name: "shot.png",
     });
-    expect(imageRecord({ mediaType: "image/png", bytes: b64(2048) })).toEqual({ mediaType: "image/png", bytes: 2048 });
+    expect(attachmentRecord({ mediaType: "image/png", bytes: b64(2048) })).toEqual({ mediaType: "image/png", bytes: 2048 });
   });
 });

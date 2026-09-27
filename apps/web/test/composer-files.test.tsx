@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// An image into the composer by paste, by drop and by the picker: the
-// thumbnail row above the text, the x per image, the caps in words in the one
-// line the composer keeps for a refusal, and the bytes on the send. The same
+// A file into the composer by paste, by drop and by the picker: the row above
+// the text, a thumbnail per image and a tile per other file, the x on each, a
+// long paste landing as a file, the caps in words in the one line the composer
+// keeps for a refusal, and the bytes on the send. The same
 // fixture shape as chat-composer.test.tsx; no live daemon and no host.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { IMAGES_AFTER_TURN, noImagesLine, sendRefusal, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FILES_AFTER_TURN, noImagesLine, sendRefusal, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
@@ -13,7 +14,8 @@ import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
-import { useComposerImagesStore } from "../src/components/chat/composerImages.js";
+import { useComposerFilesStore } from "../src/components/chat/composerFiles.js";
+import { usePromptStashStore } from "../src/components/chat/promptStashStore.js";
 import { CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
@@ -36,7 +38,9 @@ beforeEach(() => {
   urls.length = 0;
   revoked.length = 0;
   useComposerDraftStore.setState({ drafts: {}, queues: {}, held: {} });
-  useComposerImagesStore.setState({ pending: {}, sent: {} });
+  useComposerFilesStore.setState({ pending: {}, sent: {} });
+  localStorage.clear();
+  usePromptStashStore.getState().reload();
 });
 afterEach(() => useStore.setState({ conn: "connecting", workspaces: [], statuses: {}, sessions: {}, harnesses: [], harnessesByWorkspace: {} }));
 
@@ -104,10 +108,12 @@ async function setup(api: Api) {
 }
 
 const surface = (): HTMLElement => document.querySelector<HTMLElement>("[data-chat-composer-surface]")!;
-const thumbs = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-composer-images] [data-chat-image]")];
+const thumbs = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-composer-files] [data-chat-image]")];
+const tiles = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-composer-files] [data-chat-file]")];
 const refusalLine = (): string => document.querySelector("[data-composer-refusal]")?.textContent ?? "";
 
 const paste = (files: File[]) => fireEvent.paste(surface(), { clipboardData: { files, items: [], getData: () => "" } });
+const pasteText = (text: string) => fireEvent.paste(surface(), { clipboardData: { files: [], items: [], getData: (type: string) => (type === "text/plain" ? text : "") } });
 const drop = (files: File[]) => fireEvent.drop(surface(), { dataTransfer: { files, items: [], types: ["Files"], getData: () => "" } });
 
 describe("an image into the composer", () => {
@@ -133,7 +139,7 @@ describe("an image into the composer", () => {
   it("the paperclip beside send opens the file input and what it takes lands the same way", async () => {
     const { api } = fixtureApi();
     await setup(api);
-    const input = document.querySelector<HTMLInputElement>("[data-composer-image-input]")!;
+    const input = document.querySelector<HTMLInputElement>("[data-composer-file-input]")!;
     const clicked = vi.spyOn(input, "click");
     const attach = screen.getByRole("button", { name: "Attach" });
     expect(attach.closest('[data-chat-composer-actions="right"]')).not.toBeNull();
@@ -173,6 +179,139 @@ describe("an image into the composer", () => {
   });
 });
 
+describe("a file that is not an image", () => {
+  const pdf = () => new File([new TextEncoder().encode("%PDF-1.7 Quarterly report")], "report.pdf", { type: "application/pdf" });
+
+  it("becomes a tile with its name and weight, and rides the send under its own name and type", async () => {
+    const { api, started } = fixtureApi();
+    await setup(api);
+    await typeInto(composerEditor(), "what is the first heading?");
+    act(() => void paste([pdf()]));
+    await waitFor(() => expect(tiles()).toHaveLength(1));
+    expect(tiles()[0]!.dataset["chatFile"]).toBe("report.pdf");
+    expect(tiles()[0]!.textContent).toBe("report.pdf25 B");
+    expect(thumbs()).toHaveLength(0);
+    // No object URL: a file that is not an image has nothing to draw.
+    expect(urls).toEqual([]);
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]!.attachments).toEqual([{ mediaType: "application/pdf", bytes: Buffer.from("%PDF-1.7 Quarterly report").toString("base64"), name: "report.pdf" }]);
+  });
+
+  it("goes to an agent that reads no image, since it lands in the thread's folder", async () => {
+    const { api } = fixtureApi();
+    await setup(api);
+    act(() =>
+      useStore.setState({
+        harnessesByWorkspace: {
+          [WS]: [{ harness: "claude", label: "Claude Code", source: "harness", version: "2.1.263", models: [], efforts: [], contextWindows: [], permissionModes: [], steers: true, renames: true, images: false }],
+        },
+      }),
+    );
+    act(() => void paste([pdf()]));
+    await waitFor(() => expect(tiles()).toHaveLength(1));
+    expect(refusalLine()).toBe("");
+  });
+});
+
+describe("a file named as an image", () => {
+  it("travels as a file when its bytes are not one, so no agent is handed a broken picture", async () => {
+    const { api, started } = fixtureApi();
+    await setup(api);
+    act(() => void paste([new File([new TextEncoder().encode("not a png")], "shot.png", { type: "image/png" })]));
+    await waitFor(() => expect(tiles()).toHaveLength(1));
+    expect(thumbs()).toHaveLength(0);
+    await typeInto(composerEditor(), "what is this");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]!.attachments?.[0]?.mediaType).toBe("application/octet-stream");
+  });
+});
+
+describe("a long paste", () => {
+  const log = (lines: number) => Array.from({ length: lines }, (_, i) => `commit ${i + 1}`).join("\n");
+
+  it("of 200 lines becomes a pasted-text file chip, and the box keeps the words typed", async () => {
+    const { api, started } = fixtureApi();
+    await setup(api);
+    await typeInto(composerEditor(), "count the commits");
+    act(() => void pasteText(log(200)));
+    await waitFor(() => expect(tiles()).toHaveLength(1));
+    expect(tiles()[0]!.dataset["chatFile"]).toBe("pasted-text-1.txt");
+    expect(composerEditor().textContent).toBe("count the commits");
+    act(() => void pasteText(log(300)));
+    await waitFor(() => expect(tiles()).toHaveLength(2));
+    expect(tiles()[1]!.dataset["chatFile"]).toBe("pasted-text-2.txt");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]!.attachments?.map(a => [a.name, a.mediaType, Buffer.from(a.bytes, "base64").toString().split("\n").length])).toEqual([
+      ["pasted-text-1.txt", "text/plain", 200],
+      ["pasted-text-2.txt", "text/plain", 300],
+    ]);
+  });
+
+  it("of one line past 32 KiB becomes a file too, and 199 short lines stay in the box", async () => {
+    const { api } = fixtureApi();
+    await setup(api);
+    act(() => void pasteText("x".repeat(32 * 1024)));
+    await waitFor(() => expect(tiles()).toHaveLength(1));
+    act(() => void pasteText(log(199)));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(tiles()).toHaveLength(1);
+  });
+});
+
+describe("the prompt stash", () => {
+  const stashWord = () => document.querySelector<HTMLElement>("[data-composer-stash-word]");
+
+  it("takes half a prompt and its files off the composer, counts it as a word, and brings both back after another send", async () => {
+    const { api, started } = fixtureApi();
+    await setup(api);
+    const editor = composerEditor();
+    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "compare @src/app.ts with", cursor: 3 }));
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")).not.toBeNull());
+    act(() => void paste([new File([new TextEncoder().encode("%PDF-1.7 spec")], "spec.pdf", { type: "application/pdf" })]));
+    await waitFor(() => expect(tiles()).toHaveLength(1));
+    expect(stashWord()).toBeNull();
+    await press(editor, "s", { ctrlKey: true });
+    await waitFor(() => expect(stashWord()?.textContent).toBe("Stashed 1"));
+    expect(useComposerDraftStore.getState().drafts[WS]?.prompt ?? "").toBe("");
+    expect(tiles()).toHaveLength(0);
+    // A stash that survives a reload: the bytes are in local storage.
+    expect(localStorage.getItem("wsp:prompt-stash")).toContain(Buffer.from("%PDF-1.7 spec").toString("base64"));
+    await typeInto(editor, "something else first");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]!.attachments).toBeUndefined();
+    fireEvent.click(stashWord()!);
+    const restore = await screen.findByRole("button", { name: /^Restore stashed prompt: compare @src\/app\.ts with/ });
+    fireEvent.click(restore);
+    await waitFor(() => expect(useComposerDraftStore.getState().drafts[WS]?.prompt).toBe("compare @src/app.ts with"));
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")?.textContent).toBe("app.ts"));
+    expect(tiles().map(t => t.dataset["chatFile"])).toEqual(["spec.pdf"]);
+    expect(stashWord()).toBeNull();
+  });
+
+  it("brings the one stashed prompt back into an empty box with the same keys, and a restore over a draft stashes that draft first", async () => {
+    const { api } = fixtureApi();
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "first draft");
+    await press(editor, "s", { metaKey: true });
+    await waitFor(() => expect(stashWord()?.textContent).toBe("Stashed 1"));
+    await press(editor, "s", { metaKey: true });
+    await waitFor(() => expect(useComposerDraftStore.getState().drafts[WS]?.prompt).toBe("first draft"));
+    expect(stashWord()).toBeNull();
+    await press(editor, "s", { metaKey: true });
+    await typeInto(editor, "second draft");
+    fireEvent.click(stashWord()!);
+    fireEvent.click(await screen.findByRole("button", { name: "Restore stashed prompt: first draft" }));
+    await waitFor(() => expect(useComposerDraftStore.getState().drafts[WS]?.prompt).toBe("first draft"));
+    expect(stashWord()?.textContent).toBe("Stashed 1");
+    expect(usePromptStashStore.getState().entries.map(e => e.prompt)).toEqual(["second draft"]);
+  });
+});
+
 describe("what the composer will not take at all", () => {
   it("paste and drop answer to the same state the picker does: nothing is taken while a send is blocked", async () => {
     const { api } = fixtureApi();
@@ -189,13 +328,12 @@ describe("what the composer will not take at all", () => {
 });
 
 describe("what the composer refuses, in words, before anything leaves", () => {
-  it("a file that is not one of the four types is named in the one line the composer keeps", async () => {
-    const { api, started } = fixtureApi();
+  it("a file over its cap is refused in one sentence naming it, and it is never read whole", async () => {
+    const { api } = fixtureApi();
     await setup(api);
-    act(() => void paste([new File([new Uint8Array([0x25, 0x50, 0x44, 0x46])], "notes.pdf", { type: "application/pdf" })]));
-    await waitFor(() => expect(refusalLine()).toBe("notes.pdf is not PNG, JPEG, GIF or WebP; a message carries those four"));
-    expect(thumbs()).toHaveLength(0);
-    expect(started).toHaveLength(0);
+    act(() => void paste([new File([new Uint8Array(12 * 1024 * 1024)], "manual.pdf", { type: "application/pdf" })]));
+    await waitFor(() => expect(refusalLine()).toBe("manual.pdf is 12 MB, over the 10 MB a file may be"));
+    expect(tiles()).toHaveLength(0);
   });
 
   it("a 12 MB image is refused with the cap in the sentence, and it is never read whole to refuse it", async () => {
@@ -214,7 +352,7 @@ describe("what the composer refuses, in words, before anything leaves", () => {
     act(() => void paste(Array.from({ length: 5 }, (_, i) => pngFile(`n${i}.png`))));
     await waitFor(() => expect(thumbs()).toHaveLength(5));
     act(() => void paste([pngFile("sixth.png")]));
-    await waitFor(() => expect(refusalLine()).toBe("only 5 images fit one message; this one carries 6"));
+    await waitFor(() => expect(refusalLine()).toBe("only 5 files fit one message; this one carries 6"));
     expect(thumbs()).toHaveLength(5);
   });
 });
@@ -252,7 +390,7 @@ describe("what a tab holds of the images it has sent", () => {
       emit({ type: "session.done", workspaceId: WS, sessionId: `sess_${nth}`, turnId: `turn_${nth}`, result: { status: "completed", text: "ok" } });
       emit({ type: "session.end", workspaceId: WS, sessionId: `sess_${nth}`, turnId: `turn_${nth}`, exitCode: 0, sawResult: true });
     }
-    const sent = useComposerImagesStore.getState().sent;
+    const sent = useComposerFilesStore.getState().sent;
     expect(Object.keys(sent)).toHaveLength(10);
     // The two oldest sends let their bytes go; every image still held keeps its url.
     expect(revoked).toHaveLength(2);
@@ -316,7 +454,7 @@ describe("the images on the send", () => {
     act(() => void paste([pngFile("shot.png")]));
     await waitFor(() => expect(thumbs()).toHaveLength(1));
     await press(editor, "Enter");
-    await waitFor(() => expect(refusalLine()).toBe(IMAGES_AFTER_TURN));
+    await waitFor(() => expect(refusalLine()).toBe(FILES_AFTER_TURN));
     // Nothing was queued and nothing was sent: the words and the images are both still in the composer.
     expect(started).toHaveLength(1);
     expect(thumbs()).toHaveLength(1);
