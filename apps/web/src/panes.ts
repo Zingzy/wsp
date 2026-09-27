@@ -63,7 +63,7 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
   },
   terminal: {
     label: "Terminal",
-    description: "Start a shell in this task.",
+    description: "Start a shell here.",
     icon: TerminalSquare,
     shortcut: "T",
     hint: "Available while the task is running.",
@@ -74,7 +74,7 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
   },
   diff: {
     label: "Diff",
-    description: "Review changes in this task.",
+    description: "Review the changes here.",
     icon: FileDiff,
     shortcut: "D",
     hint: "Review changes once the task is running.",
@@ -103,7 +103,7 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
   },
   agents: {
     label: "Agents",
-    description: "Agents, skills and servers on this task.",
+    description: "Agents, skills and servers here.",
     icon: Bot,
     shortcut: "A",
     hint: "Available when a task is selected.",
