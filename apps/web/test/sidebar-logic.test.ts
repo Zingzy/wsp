@@ -3,15 +3,16 @@
 // pill rollup over wsp thread snapshots, plus our row labels and the
 // new-workspace helpers.
 import { describe, expect, it } from "vitest";
-import { THREAD_ARCHIVE_MS, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { THREAD_SETTLE_MS, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { DisconnectedError, RequestError } from "../src/protocol/client.js";
 import { openedBy, threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
-  foldArchivedThreads,
-  isThreadArchived,
+  isThreadSettleable,
+  isThreadSettled,
   isThreadWorking,
+  type SettleInput,
   resolveAdjacentThreadId,
   searchSidebarThreadsByTitle,
   nestSpawnedThreads,
@@ -58,37 +59,60 @@ describe("copied sort and search", () => {
   });
 });
 
-describe("the archive fold", () => {
-  const NOW = Date.parse("2026-09-08T12:00:00Z");
-  const idleFor = (id: string, ms: number) => thread(id, new Date(NOW - ms - 60_000).toISOString(), new Date(NOW - ms).toISOString());
-
-  it("the threshold is the protocol's one word: a thread idle just under it stays on the shelf, one idle at it or past it archives", () => {
-    expect(isThreadArchived(idleFor("just-under", THREAD_ARCHIVE_MS - 60_000), NOW)).toBe(false);
-    expect(isThreadArchived(idleFor("exactly", THREAD_ARCHIVE_MS), NOW)).toBe(true);
-    expect(isThreadArchived(idleFor("well-past", 3 * THREAD_ARCHIVE_MS), NOW)).toBe(true);
+describe("the Settled fold's rule", () => {
+  const NOW = Date.parse("2026-09-27T12:00:00Z");
+  const at = (msAgo: number): string => new Date(NOW - msAgo).toISOString();
+  /** A thread whose turn ended that long ago, read at or after its end unless said otherwise. */
+  const quietFor = (msAgo: number, over: Partial<SettleInput> = {}): SettleInput => ({
+    status: "completed",
+    asking: null,
+    startedAt: at(msAgo + 60_000),
+    endedAt: at(msAgo),
+    readAt: at(msAgo),
+    settledAt: null,
+    ...over,
   });
 
-  it("a thread with no readable timestamp has no idleness to measure, so it stays on the shelf", () => {
-    expect(isThreadArchived(thread("blank", null, null), NOW)).toBe(false);
-    expect(isThreadArchived(thread("malformed", "not a date", "also not a date"), NOW)).toBe(false);
+  it("a thread a person has read settles once it has been quiet THREAD_SETTLE_MS, two hours, and not a minute sooner", () => {
+    expect(THREAD_SETTLE_MS).toBe(2 * 60 * 60_000);
+    expect(isThreadSettled(quietFor(THREAD_SETTLE_MS - 60_000), NOW)).toBe(false);
+    expect(isThreadSettled(quietFor(THREAD_SETTLE_MS), NOW)).toBe(true);
+    expect(isThreadSettled(quietFor(3 * THREAD_SETTLE_MS), NOW)).toBe(true);
+    // Opened after a day away: it stays on the list while it is read, and settles two quiet hours after the opening.
+    const day = 24 * 60 * 60_000;
+    expect(isThreadSettled(quietFor(day, { readAt: at(60_000) }), NOW)).toBe(false);
+    expect(isThreadSettled(quietFor(day, { readAt: at(THREAD_SETTLE_MS) }), NOW)).toBe(true);
+    // The thread open in the centre stays however long it has been read, and still folds when settled by hand.
+    expect(isThreadSettled(quietFor(day, { readAt: at(THREAD_SETTLE_MS) }), NOW, true)).toBe(false);
+    expect(isThreadSettled(quietFor(day, { settledAt: at(60_000) }), NOW, true)).toBe(true);
   });
 
-  it("the fold counts each side and keeps the order the shelf sorted them into", () => {
-    const shelf = [idleFor("a", 60_000), idleFor("b", 2 * THREAD_ARCHIVE_MS), idleFor("c", 3 * 60_000), idleFor("d", 5 * THREAD_ARCHIVE_MS)];
-    const { settled, archived } = foldArchivedThreads(shelf, NOW);
-    expect(settled.map(t => t.id)).toEqual(["a", "c"]);
-    expect(archived.map(t => t.id)).toEqual(["b", "d"]);
+  it("a finish nobody has seen never settles by time until it is opened, and a failure never does at all", () => {
+    const week = 7 * 24 * 60 * 60_000;
+    expect(isThreadSettled(quietFor(week, { readAt: null }), NOW)).toBe(false);
+    expect(isThreadSettled(quietFor(week, { readAt: at(week + 1) }), NOW)).toBe(false);
+    expect(isThreadSettled(quietFor(week, { status: "failed", readAt: null }), NOW)).toBe(false);
+    expect(isThreadSettled(quietFor(week, { status: "failed", readAt: at(week - 5) }), NOW)).toBe(false);
+    // Put away by hand, a failure folds like any other.
+    expect(isThreadSettled(quietFor(week, { status: "failed", readAt: at(week - 5), settledAt: at(week - 10) }), NOW)).toBe(true);
+    expect(isThreadSettleable(quietFor(60_000, { readAt: null }))).toBe(false);
+    expect(isThreadSettleable(quietFor(60_000))).toBe(true);
   });
 
-  it("a thread that takes a new turn leaves the archive on its own: it is working, so the split never offers it to the fold", () => {
-    const woken = { ...idleFor("woken", 5 * THREAD_ARCHIVE_MS), status: "running" as const };
-    const stale = { ...idleFor("stale", 5 * THREAD_ARCHIVE_MS), status: "completed" as const };
-    const { active, settled } = splitSidebarThreads([woken, stale]);
-    expect(active.map(t => t.id)).toEqual(["woken"]);
-    expect(foldArchivedThreads(settled, NOW).archived.map(t => t.id)).toEqual(["stale"]);
-    // And once that turn settles, its fresh end stamp keeps it out of the archive with no flag to clear.
-    const replied = { ...woken, status: "completed" as const, endedAt: new Date(NOW - 1_000).toISOString() };
-    expect(isThreadArchived(replied, NOW)).toBe(false);
+  it("a thread settled by hand is settled at once, and any activity after the settle brings it back", () => {
+    expect(isThreadSettled(quietFor(60_000, { settledAt: at(30_000) }), NOW)).toBe(true);
+    // A settle takes an unread thread too: the person chose to put it away.
+    expect(isThreadSettled(quietFor(60_000, { readAt: null, settledAt: at(30_000) }), NOW)).toBe(true);
+    // A new turn after the settle: it runs, then it ends, and either way the old settle no longer covers it.
+    expect(isThreadSettled(quietFor(60_000, { status: "running", endedAt: null, startedAt: at(10_000), settledAt: at(30_000) }), NOW)).toBe(false);
+    expect(isThreadSettled(quietFor(5_000, { readAt: at(5_000), settledAt: at(30_000) }), NOW)).toBe(false);
+  });
+
+  it("nothing running or asked ever settles, and a thread with no readable time has no quiet to measure", () => {
+    expect(isThreadSettled(quietFor(THREAD_SETTLE_MS * 3, { asking: "Permission for Bash: ls" }), NOW)).toBe(false);
+    expect(isThreadSettled(quietFor(THREAD_SETTLE_MS * 3, { status: "running" }), NOW)).toBe(false);
+    expect(isThreadSettled(quietFor(0, { startedAt: null, endedAt: null }), NOW)).toBe(false);
+    expect(isThreadSettled(quietFor(0, { startedAt: "not a date", endedAt: "also not a date" }), NOW)).toBe(false);
   });
 });
 
@@ -224,6 +248,9 @@ describe("the tree a thread's own threads make", () => {
     parentThreadId,
     asking: null,
     costUsd: null,
+    unread: false,
+    readAt: null,
+    settledAt: null,
   });
   /** A workspace row as the tree reads it: its own threads, and the record, which says whether an agent forked it. */
   const project = (id: string, threads: SidebarThreadSnapshot[], parentThreadId?: string): SidebarProjectSnapshot =>

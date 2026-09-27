@@ -501,6 +501,12 @@ export interface Api {
    * host refuses one whose turn reached its agent. Optional so fixtures that never forget one need not fake it; a
    * client without it offers no forget. */
   forgetThread?(threadId: string): Promise<void>;
+  /** Stamps a thread as shown now on the host, which tells every window; takes the thread's fold key. Optional so
+   * fixtures that never open one need not fake it. */
+  readThread?(threadId: string): Promise<void>;
+  /** Stamps threads as settled by the person, and read, on the host, which tells every window; takes fold keys. A
+   * client without it offers no settle. */
+  settleThreads?(threadIds: readonly string[]): Promise<void>;
   /** What each harness's CLI takes at launch; the composer's pickers render from it, and every start rides the model,
    * effort, context window and access resolved out of it. With a workspace the runtime asks the binaries on its
    * machine, else its table answers. Optional so fixtures without pickers need not fake it; without it the composer
@@ -739,6 +745,8 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: an outcome outside the enum must not read as renamed.
     renameSession: async (sessionId, title) => SessionRenameResult.parse(await c.request<Record<string, unknown>>("sessions.rename", { sessionId, title })),
     forgetThread: async threadId => void (await c.request("sessions.forget", { threadId })),
+    readThread: async threadId => void (await c.request("sessions.read", { threadId })),
+    settleThreads: async threadIds => void (await c.request("sessions.settle", { threadIds })),
     // Parsed, not trusted: a picker renders only values the wire type vouches for.
     listHarnesses: async workspaceId =>
       HarnessCatalog.array().parse((await c.request<{ harnesses?: unknown }>("harnesses.list", workspaceId !== undefined ? { workspaceId } : {})).harnesses),

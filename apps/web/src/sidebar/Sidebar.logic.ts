@@ -5,7 +5,7 @@
 // which model state wsp's wire does not carry. Contract types are hand-written
 // against the wsp thread snapshot (startedAt and endedAt instead of createdAt,
 // updatedAt and the turn projection).
-import { THREAD_ARCHIVE_MS, type SessionStatus } from "@wsp/protocol";
+import { THREAD_SETTLE_MS, type SessionStatus } from "@wsp/protocol";
 import { cn } from "../lib/utils";
 import { activeThreadAnchorTimestampMs, toSortableTimestamp } from "./threadSort";
 
@@ -224,26 +224,47 @@ export function sortSettledThreadsForSidebar<T extends ThreadTimestamps & { read
   );
 }
 
-/** Whether an idle thread has gone quiet long enough to belong in the archive, against the protocol's one threshold.
-    A thread whose timestamps are all missing or malformed has no idleness to read, so it stays on the shelf rather
-    than falling into a group the shelf keeps shut. */
-export function isThreadArchived(thread: ThreadTimestamps, nowMs: number): boolean {
-  const lastActivityMs = toSortableTimestamp(resolveSettledTimestamp(thread) ?? undefined);
-  return lastActivityMs !== null && nowMs - lastActivityMs >= THREAD_ARCHIVE_MS;
+/** A thread as the Settled fold reads it: its state, its times and the two stamps the host keeps for it. */
+export interface SettleInput extends SidebarThreadStatusInput, ThreadTimestamps {
+  readonly asking: string | null;
+  readonly readAt: string | null;
+  readonly settledAt: string | null;
 }
 
-/** The idle shelf split into the rows it still shows and the ones that fold into Archived, each side keeping the
-    order the shelf sorted them into. */
-export function foldArchivedThreads<T extends ThreadTimestamps>(
-  settled: readonly T[],
-  nowMs: number,
-): { settled: T[]; archived: T[] } {
-  const shelf: T[] = [];
-  const archived: T[] = [];
-  for (const thread of settled) {
-    (isThreadArchived(thread, nowMs) ? archived : shelf).push(thread);
-  }
-  return { settled: shelf, archived };
+/** The last thing that happened on the thread: its latest turn's start or its end, whichever is later. A message
+    into the thread is a turn, so it moves this too. */
+function lastActivityMs(thread: ThreadTimestamps): number | null {
+  const times = [thread.startedAt, thread.endedAt].map(at => toSortableTimestamp(at ?? undefined)).filter(at => at !== null);
+  return times.length === 0 ? null : Math.max(...times);
+}
+
+/** Whether a window has shown the thread since its latest turn ended, which a failed turn needs as much as a
+    finished one before it may fold by time. */
+function isThreadSeen(thread: SettleInput): boolean {
+  const ended = toSortableTimestamp(thread.endedAt ?? undefined);
+  const read = toSortableTimestamp(thread.readAt ?? undefined);
+  return ended === null || (read !== null && read >= ended);
+}
+
+/** Whether the thread belongs in the Settled fold: nothing running and nothing asked, and either the person settled it
+    by hand with nothing happening since, or a window has shown it since it ended and it has been quiet
+    THREAD_SETTLE_MS since then, counted from the later of its last activity and that showing. Three threads never
+    fold by time and wait for a hand: one nobody has seen since it finished, one whose turn failed, and the one open
+    in the centre, which `open` names, so a thread being read does not leave the list under the reader. One whose
+    times are all missing has no quiet to read, so it stays out rather than falling into a group kept shut. */
+export function isThreadSettled(thread: SettleInput, nowMs: number, open = false): boolean {
+  if (thread.asking !== null || isThreadWorking(thread)) return false;
+  const last = lastActivityMs(thread);
+  const settled = toSortableTimestamp(thread.settledAt ?? undefined);
+  if (settled !== null && (last === null || settled >= last)) return true;
+  if (open || thread.status === "failed" || last === null || !isThreadSeen(thread)) return false;
+  return nowMs - Math.max(last, toSortableTimestamp(thread.readAt ?? undefined) ?? last) >= THREAD_SETTLE_MS;
+}
+
+/** Whether the thread has been read and is quiet, so "Settle all read" takes it: no finish nobody has seen, no failure
+    nobody has opened, and nothing running or asked. */
+export function isThreadSettleable(thread: SettleInput): boolean {
+  return thread.asking === null && !isThreadWorking(thread) && isThreadSeen(thread);
 }
 
 /** One thread with the rows its own agent opened under it, as deep as the opening went. */

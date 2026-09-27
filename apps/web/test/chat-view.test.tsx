@@ -290,22 +290,56 @@ describe("ChatView", () => {
     expect(row.querySelector("[role=alert], [data-slot=alert]")).toBeNull();
   });
 
-  it("a paused workspace with nothing running says so once under the last turn, in the same mono rule line, with the idle window the runtime napped it after", async () => {
+  it("a paused workspace with nothing running says Paused once under the last turn, a quiet word with the wake beside it", async () => {
     const { api, emit } = fixtureApi([workspace], { [WS]: settledTurn(WS, "add a health route", "Added GET /health.") });
+    const woken: string[] = [];
+    api.wake = async id => {
+      woken.push(id);
+      return workspace;
+    };
     await setup(api);
     await screen.findByText("Added GET /health.");
-    expect(screen.queryByText(/^paused/)).toBeNull();
+    expect(document.querySelector("[data-workspace-paused]")).toBeNull();
     const status = { ...workspace, machineState: "paused" as const, reach: { state: "napping" as const }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
+    emit({ type: "workspace.napped", workspaceId: WS });
     emit({ type: "workspace.status", status: { ...status, phase: "napping", reason: "idle 30 min" } });
-    const line = (await screen.findByText("paused after 30 min idle")).closest<HTMLElement>("[data-workspace-paused]")!;
+    const line = (await screen.findByText("Paused")).closest<HTMLElement>("[data-workspace-paused]")!;
     expect(line.className).toContain("font-mono");
-    expect(line.className).toContain("text-[11px]");
-    // A nap this window did not see the reason for still says the state; nothing is invented about why.
-    emit({ type: "workspace.status", status: { ...status, phase: "napping" } });
-    await screen.findByText("paused");
+    expect(line.className).toContain("text-muted-foreground");
+    // One word and the action: no sentence about why, no alarm tone, nothing that reads as a fault.
+    expect(line.textContent).toBe("PausedWake");
+    expect(line.querySelector("[role=alert], [data-slot=alert], [class*=warning], [class*=error], [class*=destructive]")).toBeNull();
+    // The button takes the button type, not the rule line's mono.
+    expect(within(line).getByRole("button", { name: "Wake" }).className).toContain("font-sans");
+    expect(within(line).getByRole("button", { name: "Wake" }).className).toContain("text-[13px]");
+    expect(within(line).getByRole("button", { name: "Wake" }).className).toContain("font-medium");
+    fireEvent.click(within(line).getByRole("button", { name: "Wake" }));
+    expect(woken).toEqual([WS]);
     // It is the workspace's line, not a turn's: a running workspace draws none.
     emit({ type: "workspace.status", status: { ...status, phase: "running", machineState: "running", reach: { state: "reachable" } } });
-    await waitFor(() => expect(screen.queryByText(/^paused/)).toBeNull());
+    await waitFor(() => expect(document.querySelector("[data-workspace-paused]")).toBeNull());
+  });
+
+  it("stamps the thread it shows as read when its latest turn ended after the last stamp, and not while the window is hidden", async () => {
+    const turn = settledTurn(WS, "add a health route", "Added GET /health.");
+    const ended = turn.at(-1)!.at!;
+    const row: SessionView = { id: "sess_row", workspaceId: WS, harness: "claude", status: "completed", threadId: "thr_read", startedAt: ended - 1_000, endedAt: ended, readAt: ended - 5_000 };
+    const hidden = { value: true };
+    const visibility = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState")!;
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden.value ? "hidden" : "visible") });
+    try {
+      const { api } = fixtureApi([workspace], { [WS]: turn }, [row]);
+      const stamped: string[] = [];
+      api.readThread = async threadId => void stamped.push(threadId);
+      await setup(api);
+      await screen.findByText("Added GET /health.");
+      expect(stamped).toEqual([]);
+      hidden.value = false;
+      act(() => void document.dispatchEvent(new Event("visibilitychange")));
+      await waitFor(() => expect(stamped).toEqual(["thr_read"]));
+    } finally {
+      Object.defineProperty(document, "visibilityState", visibility);
+    }
   });
 
   it("clears to the empty headline on a new-thread request and shows the fresh turn that follows", async () => {

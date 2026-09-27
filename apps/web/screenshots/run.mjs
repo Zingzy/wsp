@@ -139,6 +139,18 @@ async function holdSocket(page) {
   };
 }
 
+/** Scrolls the nearest box around the element that scrolls, in the page, and says so when none does. */
+function scrollAround(el, by) {
+  for (let at = el; at !== null; at = at.parentElement) {
+    if (at.scrollHeight > at.clientHeight && getComputedStyle(at).overflowY !== "visible") {
+      at.scrollTop += by;
+      at.dispatchEvent(new Event("scroll"));
+      return;
+    }
+  }
+  throw new Error("nothing around that element scrolls");
+}
+
 /** One shot, in a browser that has never seen this app: the context is its own, so the sidebar width, the
  * chosen workspace and the right panel's last state are what a first launch has and not what the shot
  * before left behind. Sharing one context per width and theme is what hid the machine surface at 390,
@@ -159,6 +171,7 @@ async function shoot(context, shot, base, out, token) {
     // the redial, and the window keeps every row it was last told about.
     if (step.offline === true) fallAsleep();
     else if (step.key !== undefined) await page.keyboard.press(step.key);
+    else if (step.scroll !== undefined) await page.locator(step.scroll.within).first().evaluate(scrollAround, step.scroll.by);
     else if (step.type !== undefined) await page.keyboard.type(step.type);
     else if (step.focus !== undefined) await page.locator(step.focus).first().focus({ timeout: 15_000 });
     else await page.locator(step.click).first().click({ timeout: 15_000 });

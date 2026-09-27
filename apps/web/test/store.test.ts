@@ -527,6 +527,23 @@ describe("store sessions", () => {
     expect(useStore.getState().capabilities).toEqual(CAPS);
   });
 
+  it("a thread marked read or settled in any window rereads that workspace's rows, so every window shows the new stamp", async () => {
+    const sessions: SessionView[] = [{ id: "s1", workspaceId: "ws_a", harness: "claude", status: "completed", threadId: "thr_a", endedAt: 2_000, readAt: 1_000 }];
+    const { api, emit, listCalls } = fakeApi([view("ws_a"), view("ws_b")], sessions);
+    const settled: (readonly string[])[] = [];
+    api.settleThreads = async ids => void settled.push(ids);
+    useStore.getState().bind(api);
+    await flush();
+    listCalls.length = 0;
+    sessions[0] = { ...sessions[0]!, readAt: 3_000 };
+    emit({ type: "thread.marked", workspaceId: "ws_a", threadIds: ["thr_a"] });
+    await flush();
+    expect(listCalls).toEqual(["ws_a"]);
+    expect(useStore.getState().sessions["ws_a"]![0]!.readAt).toBe(3_000);
+    await useStore.getState().settleThreads(["thr_a", "thr_b"]);
+    expect(settled).toEqual([["thr_a", "thr_b"]]);
+  });
+
   it("session.start remembers the claude session id on the workspace and refetches that workspace's rows", async () => {
     const sessions: SessionView[] = [];
     const { api, emit, listCalls } = fakeApi([view("ws_a")], sessions);

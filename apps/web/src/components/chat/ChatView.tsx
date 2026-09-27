@@ -14,14 +14,16 @@ import { HeroAtmosphere, HeroMark } from "./EmptyHero.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts } from "@wsp/protocol";
-import { useHarnessCatalog, usePlaces, useSidebarProjects, useStatus, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts, workspaceWord } from "@wsp/protocol";
+import { Button } from "../ui/button";
+import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { Facts } from "../Facts.js";
 import { ThreadRows } from "../threads/ThreadRows.js";
 import { useDiffRevealStore } from "../../diffs/reveal";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { cn } from "../../lib/utils";
-import { DEFAULT_TIMESTAMP_FORMAT, pausedLine, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
+import { DEFAULT_TIMESTAMP_FORMAT, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
+import { useReadStamp } from "./useReadStamp";
 import { threadsOpenedBy, type ThreadOnWorkspace } from "../../sidebar/threadTree";
 import { computerName, useComputerName } from "../../sidebar/workspaceRows";
 import { TimelineRuleLine } from "./TimelineRuleLine";
@@ -86,7 +88,7 @@ export function ChatView({
   // A Working thread on a workspace that is not running is a contradiction: the row says what it waits for instead,
   // naming the workspace and, while it wakes, where it runs, since that is what the send is waiting on.
   const state = useWorkspaceState(workspaceId);
-  const status = useStatus(workspaceId);
+  const capabilities = useCapabilities();
   const where = useComputerName(workspaceId);
   const runs = useMemo(() => ({ name: workspace?.name ?? workspaceId, where }), [workspace, workspaceId, where]);
   const machineWait = useMemo<MachineWait | null>(() => {
@@ -95,9 +97,9 @@ export function ChatView({
     if (wait === null) return null;
     return { label: wait.label, elapsed: wait.elapsed, onWake: wait.wake ? () => void wake(workspaceId) : null };
   }, [state, view.running, wake, workspaceId, runs]);
-  // Nothing is running and the workspace is paused: the last thing that happened to this thread is the nap, and the
-  // next send is what wakes it. One line under the transcript in the timeline's own rule grammar, never a dialog.
-  const paused = state === "paused" && !view.running ? pausedLine(status?.reason) : null;
+  // Nothing is running and the workspace is paused, which is no fault: a machine naps when its work is done. One quiet
+  // word under the transcript in the timeline's own rule grammar, with the wake beside it, never a dialog.
+  const paused = state === "paused" && !view.running ? workspaceWord(state, capabilities?.pauseMode) : null;
   const { startNewThread, hydrated, threadKey } = thread;
   // What the footer's figure is: on this computer the turn ran on the person's own sign-in, so the number is the
   // agent's own list price and nobody is billed for it. The word goes on the figure from the record alone, which
@@ -106,6 +108,7 @@ export function ChatView({
   // title once the catalog holding the agent's own name is in, since nobody opens that menu before sending.
   const onThisComputer = workspace !== null && isLocalWorkspace(workspace);
   const turnRows = useThreadSessions(workspaceId, threadKey);
+  useReadStamp(turnRows);
   const catalog = useHarnessCatalog(turnRows.at(-1)?.harness ?? DEFAULT_HARNESS, workspaceId);
   const asked = useNewThreadRequests(s => s.pending.has(workspaceId));
   useEffect(() => {
@@ -161,7 +164,13 @@ export function ChatView({
     <div className="mx-auto w-full min-w-0 max-w-3xl">
       {opened.length > 0 ? <OpenedThreads opened={opened} /> : null}
       {view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} onThisComputer={onThisComputer} /> : null}
-      {paused !== null ? <TimelineRuleLine data-workspace-paused line={paused} /> : null}
+      {paused !== null ? (
+        <TimelineRuleLine data-workspace-paused line={paused}>
+          <Button size="xs" variant="outline" className="font-sans text-[13px] font-medium" onClick={() => void wake(workspaceId)}>
+            Wake
+          </Button>
+        </TimelineRuleLine>
+      ) : null}
     </div>
   ) : null;
 

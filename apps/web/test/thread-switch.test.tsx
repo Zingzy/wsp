@@ -46,6 +46,7 @@ const ROWS: SessionView[] = [
 /** The runtime records an event before it pushes it, so a later history reply holds everything emitted so far. */
 function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], rows: SessionView[] = ROWS, ws: WorkspaceView = workspace) {
   const history: SessionEvent[] = [...transcript];
+  let held = rows;
   const started: StartSessionOptions[] = [];
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const api: Api = {
@@ -66,7 +67,12 @@ function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], r
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
-    listSessions: async () => rows,
+    listSessions: async () => held,
+    // As the host does: the showing stamps every row of the thread, and every window hears it.
+    readThread: async threadId => {
+      held = held.map(row => ((row.threadId ?? row.id) === threadId ? { ...row, readAt: Math.max(Date.now(), row.endedAt ?? 0) } : row));
+      act(() => { for (const fn of [...listeners]) fn({ type: "thread.marked", workspaceId: ws.id, threadIds: [threadId] } as EventUnion); });
+    },
     listHarnesses: async () => [TABLE_CATALOG],
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => manifest,
@@ -194,7 +200,8 @@ describe("switching threads while a turn runs", () => {
     expect(center().queryByText(/Found it in the keychain/)).toBeNull();
     expect(center().queryByText(/Working for/)).toBeNull();
     expect(threadRow("do you have access").querySelector("[data-thread-status]")!.getAttribute("data-thread-status")).toBe("working");
-    expect(threadRow("make me a simple server").querySelector("[data-thread-status]")!.getAttribute("data-thread-status")).toBe("resting");
+    // The thread on screen was stamped read by being shown, so it rests rather than reading Done.
+    await waitFor(() => expect(threadRow("make me a simple server").querySelector("[data-thread-status]")!.getAttribute("data-thread-status")).toBe("resting"));
   });
 
   it("switching back shows the progress streamed meanwhile and keeps streaming", async () => {

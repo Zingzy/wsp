@@ -708,7 +708,8 @@ function SidebarContent({
   return (
     <>
       {fixedHeader ? <div className="w-full shrink-0">{fixedHeader}</div> : null}
-      <ScrollArea hideScrollbars scrollFade className="h-auto min-h-0 flex-1">
+      {/* No scroll fade: a tile part way under the head read as a tile with no first row and a dimmed title. */}
+      <ScrollArea hideScrollbars className="h-auto min-h-0 flex-1">
         <div
           className={cn(
             "flex w-full min-w-0 flex-col gap-2 group-data-[collapsible=icon]:overflow-hidden",

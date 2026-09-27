@@ -10,7 +10,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { COORDINATOR_HANDOFF, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
+import { COORDINATOR_HANDOFF, DEVICE_OPS, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
 import { agentPage, cli, COMMAND_LINES, commandPage, COMMANDS_FOR_HELP, HELP, HOST_FLAG, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, SHARED_FLAGS, type CliIO, type CommandLine } from "../src/cli.js";
 
@@ -322,6 +322,15 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     // A tool with no command line of its own is held to a stated reason: recording a project is the one, since the
     // command line's `wsp add` also hands out a join code and takes a provider's key, neither of which is an agent's.
     expect(VERBS.filter(v => "toolOnly" in v).map(v => v.name)).toEqual(["projects add"]);
+  });
+
+  it("every thread op a window sends is sent by a verb too, or is listed here with why it stays with the windows", () => {
+    const verbs = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
+    const WINDOW_ONLY: Record<string, string> = {
+      "sessions.settle": "settling is how one person's sidebar is folded, a view preference the windows keep; wsp threads lists every thread and folds none",
+    };
+    expect(DEVICE_OPS.filter(op => op.startsWith("sessions.") && !verbs.includes(`"${op}"`))).toEqual(Object.keys(WINDOW_ONLY));
+    for (const [op, why] of Object.entries(WINDOW_ONLY)) expect(why, `${op} says why it has no verb`).toMatch(/\S/);
   });
 
   it("every command line is a verb table entry or a command carrying why it has no tool, so a new command sits in neither only by failing here", () => {

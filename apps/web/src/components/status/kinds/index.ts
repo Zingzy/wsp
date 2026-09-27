@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Every kind of thread status, in the order a thread is read against them:
-// a question outranks a running turn, and resting takes whatever is left, so
-// it stays last. A kind is its module and its line here.
+// a question outranks a running turn, a failure outranks a finish nobody has
+// seen, and resting takes whatever is left, so it stays last. A kind is its
+// module and its line here.
+import { DONE } from "./done.js";
 import { FAILED } from "./failed.js";
 import type { StatusKind } from "./kind.js";
 import { NEEDS_YOU } from "./needs-you.js";
@@ -10,4 +12,4 @@ import { WORKING } from "./working.js";
 
 export type { StatusKind, StatusTone, ThreadStatusInput } from "./kind.js";
 
-export const THREAD_STATUS_KINDS: readonly StatusKind[] = [NEEDS_YOU, WORKING, FAILED, RESTING];
+export const THREAD_STATUS_KINDS: readonly StatusKind[] = [NEEDS_YOU, WORKING, FAILED, DONE, RESTING];

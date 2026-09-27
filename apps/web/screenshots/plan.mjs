@@ -28,10 +28,13 @@ const KEY = /^key:(.+)$/;
 /** A step that types into whatever the step before it left focused, which is how a surface reaches a state a
  * person only gets to by writing something: a path in a field, and the refusal the app answers it with. */
 const TYPE = /^type:(.+)$/;
+/** A step that scrolls the nearest scrolling box around a data attribute by that many pixels, which is how a shot
+ * reaches a list part way down: `scroll:22:sidebar-tree`. */
+const SCROLL = /^scroll:(\d+):(.+)$/;
 /** A step that puts focus on a data attribute without clicking it, for a control whose keys only answer while it
  * is focused and whose centre is a button a click would press: the panel launcher's arrows. */
 const FOCUS = /^focus:(.+)$/;
-/** The one step that is neither: the network under the window goes, which is what a window on another computer
+/** The one step that is none of those: the network under the window goes, which is what a window on another computer
  * sees the moment the computer running wsp falls asleep. The rows stay as they were last known. */
 const OFFLINE = "offline";
 
@@ -66,9 +69,11 @@ export function stepFor(word, widths) {
   const bare = kept === null ? word : kept[2];
   const key = KEY.exec(typeof bare === "string" ? bare : "");
   const typed = TYPE.exec(typeof bare === "string" ? bare : "");
+  const scrolled = SCROLL.exec(typeof bare === "string" ? bare : "");
   const focused = FOCUS.exec(typeof bare === "string" ? bare : "");
   const step =
     bare === OFFLINE ? { offline: true }
+    : scrolled !== null ? { scroll: { by: Number(scrolled[1]), within: selectorFor(scrolled[2]) } }
     : typed !== null ? { type: typed[1] }
     : focused !== null ? { focus: selectorFor(withThreadId(focused[1])) }
     : key === null ? { click: selectorFor(withThreadId(bare)) }
@@ -79,6 +84,7 @@ export function stepFor(word, widths) {
 /** What the index says a step was. */
 const stepWords = step =>
   step.offline === true ? "the network going"
+  : step.scroll !== undefined ? `scrolling ${step.scroll.by} px around \`${step.scroll.within}\``
   : step.type !== undefined ? `typing \`${step.type}\``
   : step.focus !== undefined ? `focus on \`${step.focus}\``
   : step.key !== undefined ? `the ${step.key} key`

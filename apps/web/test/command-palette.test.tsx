@@ -462,7 +462,7 @@ describe("command palette", () => {
     const fresh = { ...session("s_fresh", "ws_a", "tail the dev server"), threadId: "t_fresh", startedAt: Date.now() - 60_000 };
     // Quiet for a week, so the sidebar draws it inside the shut Settled fold; the palette reads every thread the
     // workspace carries, not the rows the sidebar happens to be drawing.
-    const buried = { ...session("s_buried", "ws_b", "rotate the daemon token"), threadId: "t_buried", startedAt: Date.now() - 8 * 24 * 60 * 60_000, endedAt: Date.now() - 7 * 24 * 60 * 60_000 };
+    const buried = { ...session("s_buried", "ws_b", "rotate the daemon token"), threadId: "t_buried", startedAt: Date.now() - 8 * 24 * 60 * 60_000, endedAt: Date.now() - 7 * 24 * 60 * 60_000, readAt: Date.now() - 7 * 24 * 60 * 60_000 };
     await mountShell([fresh, buried]);
     expect(document.querySelector("[data-row-id='settled']")).not.toBeNull();
     expect(screen.queryByText("rotate the daemon token")).toBeNull();

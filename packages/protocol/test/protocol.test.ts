@@ -77,6 +77,7 @@ import {
   foldThreads,
   threadState,
   threadStateWord,
+  threadUnread,
   threadWordOf,
   threadsFollowed,
   waitingLine,
@@ -1577,6 +1578,27 @@ describe("thread provenance", () => {
     // Only a running turn is ever waiting on a person: the runtime clears the prompt however the turn ends, on the
     // harness's own exit and on the roads that cut it, so a settled row carrying one is a row nothing can answer.
     expect(threadWordOf({ status: "running", asking: "Permission for Write: out.txt" })).toBe("Needs you");
+  });
+
+  it("a turn that ended and that no window has shown since reads Done, until a read stamp at or after its end", () => {
+    const ended = { status: "completed" as const, endedAt: 2_000 };
+    expect(threadUnread({ ...ended })).toBe(true);
+    expect(threadWordOf({ ...ended, readAt: 1_999 })).toBe("Done");
+    expect(threadState({ ...ended, readAt: 1_999 })).toBe("done");
+    expect(threadWordOf({ ...ended, readAt: 2_000 })).toBe("Idle");
+    expect(threadWordOf({ status: "interrupted", endedAt: 2_000, readAt: 10 })).toBe("Done");
+    // A failed turn says so whether anybody saw it, a running one works, and a question outranks the finish.
+    expect(threadWordOf({ status: "failed", endedAt: 2_000 })).toBe("Failed");
+    expect(threadWordOf({ status: "running" })).toBe("Working");
+    expect(threadWordOf({ ...ended, asking: "Permission for Bash: ls" })).toBe("Needs you");
+    // The stamps ride the latest row into the fold, as every other fact of the thread does.
+    const [thread] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", status: "completed", endedAt: 1_000, readAt: 500 },
+      { ...row, id: "s2", threadId: "thr_a", status: "completed", endedAt: 2_000, readAt: 500, settledAt: 400 },
+    ]);
+    expect(thread).toMatchObject({ readAt: 500, settledAt: 400 });
+    expect(ThreadView.parse(thread!)).toMatchObject({ readAt: 500, settledAt: 400 });
+    expect(threadWordOf(thread!)).toBe("Done");
   });
 
   it("foldThreads carries the latest turn's folder, so every director shows where the thread works; a row without one shows none", () => {

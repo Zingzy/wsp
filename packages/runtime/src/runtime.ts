@@ -221,7 +221,7 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
@@ -1479,6 +1479,11 @@ export interface Runtime {
      * keeps the name on every row of the thread; a harness that keeps no name of a person's, a store without that
      * session and an unknown id answer. Refuses while the workspace cannot be reached, as a listing's read needs it. */
     rename(sessionId: string, title: string, origin?: Caller): Promise<SessionRenameResult>;
+    /** Stamps a thread as shown by a window now, by its fold key, and tells every window with thread.marked. Reads
+     * the absence a name nothing holds reads for a thread the caller cannot reach. */
+    read(threadId: string, origin?: Caller): Promise<void>;
+    /** Stamps each thread as settled by the person and as read, now, and tells every window as read does. */
+    settle(threadIds: readonly string[], origin?: Caller): Promise<void>;
     /** Drops a thread no turn ever ran on, the row a launch that never got going leaves: its rows and its
      * transcript rows go and nothing is asked of the machine. Takes the runtime's thread id, not a session id.
      * Refused (kind conflict) with threadForgetRefusal's sentence once a turn of it did work, which threadRan
@@ -1675,6 +1680,10 @@ export const DROPPED_WATCH_MS = 7 * 24 * 60 * 60_000;
 /** One record under one id: the person's view preferences. */
 const PREFERENCES = "preferences";
 const PREFERENCES_ID = "default";
+/** One record under one id: when this state file began keeping a read stamp per thread. A thread whose turn ended
+ * before it reads as seen, so the stamps arriving do not mark every old thread unread at once. */
+const READS = "reads";
+const READS_ID = "since";
 
 /** What the timeline shows as the last row of a turn the runtime ended, not the harness. */
 const PAUSED_REASON = "machine paused while the agent was working";
@@ -1759,6 +1768,10 @@ function readRoad(raw: unknown): WorkspaceOrigin | undefined {
 interface ThreadRecord {
   harness: string;
   permissionMode?: string;
+  /** When a window last showed the thread and when the person settled it, ms epoch; kept here rather than on a row,
+   * since every row of the thread shares them and a row falls off the cap while the thread lives on. */
+  readAt?: number;
+  settledAt?: number;
 }
 
 interface SessionIndexRecord {
@@ -2816,6 +2829,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** A row read back from the store has no handle: its process died with the runtime that started it. */
   /** The record of every thread this host holds, by thread id, persisted beside the workspace's rows. */
   const threadRecords = new Map<string, ThreadRecord & { workspaceId: string }>();
+  /** When this state file began keeping read stamps: what a thread no window has shown since reads as its stamp. */
+  let readsSince = 0;
   /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
@@ -4752,6 +4767,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         owner = `h_${randomBytes(4).toString("hex")}`;
         await store.put(OWNER, "id", { id: owner });
       }
+      const since = (await store.get(READS, READS_ID)) as { at?: unknown } | undefined;
+      if (typeof since?.at === "number") readsSince = since.at;
+      else {
+        readsSince = clock.now();
+        await store.put(READS, READS_ID, { at: readsSince });
+      }
       await migrateCopies();
       // The places are read before the workspaces: a fork standing on one asks which backend it lives on, and that
       // answer comes off what the place last said about itself rather than off a socket that may not be open.
@@ -4777,7 +4798,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (!live.has(index.workspaceId)) continue;
         for (const [threadId, held] of Object.entries(index.threads ?? {})) {
           if (typeof held?.harness !== "string") continue;
-          threadRecords.set(threadId, { workspaceId: index.workspaceId, harness: held.harness, ...(typeof held.permissionMode === "string" ? { permissionMode: held.permissionMode } : {}) });
+          threadRecords.set(threadId, {
+            workspaceId: index.workspaceId,
+            harness: held.harness,
+            ...(typeof held.permissionMode === "string" ? { permissionMode: held.permissionMode } : {}),
+            ...(typeof held.readAt === "number" ? { readAt: held.readAt } : {}),
+            ...(typeof held.settledAt === "number" ? { settledAt: held.settledAt } : {}),
+          });
         }
         if (!Array.isArray(index.sessions)) {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
@@ -4882,6 +4909,32 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await ready();
     const entry = live.get(row.workspaceId);
     return entry === undefined || entry.creating || !reachesRow(row, origin) ? undefined : entry;
+  };
+  /** Moves the read or settled stamp of each thread, by fold key, on the thread's record, which a thread from before
+   * records existed takes here off its latest row; each workspace touched is written once and told once. Every
+   * thread is checked before any moves, so a list naming one the caller cannot reach moves nothing. */
+  const mark = async (threadIds: readonly string[], stamps: Pick<ThreadRecord, "readAt" | "settledAt">, origin: Caller | undefined): Promise<void> => {
+    await ready();
+    const found = await Promise.all(
+      threadIds.map(async threadId => {
+        const latest = [...sessions.values()].filter(s => threadKeyOf(s.view) === threadId).at(-1)?.view;
+        const record = threadRecords.get(threadId);
+        const workspaceId = latest?.workspaceId ?? record?.workspaceId;
+        if (workspaceId === undefined || (await entryOfRow({ ...(latest?.threadId !== undefined ? { threadId: latest.threadId } : { threadId }), workspaceId }, origin)) === undefined) {
+          throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
+        }
+        return { threadId, workspaceId, base: record ?? { workspaceId, harness: latest!.harness } };
+      }),
+    );
+    const touched = new Map<string, string[]>();
+    for (const { threadId, workspaceId, base } of found) {
+      threadRecords.set(threadId, { ...base, ...stamps });
+      touched.set(workspaceId, [...(touched.get(workspaceId) ?? []), threadId]);
+    }
+    for (const [workspaceId, ids] of touched) {
+      await persistSessions(workspaceId);
+      bus.emit({ type: "thread.marked", workspaceId, threadIds: ids });
+    }
   };
   /** Whether a thread of the caller's tree stands on that workspace, which is what lets a child list and read the
    * transcript of the workspace its lead runs on; a caller that is no thread reads workspaces by their own rule. */
@@ -7182,10 +7235,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // written down outlives the question it was on.
       return held.map(s => {
         const behind = s.view.status === "running" ? stoppedBehind(s) : undefined;
+        const marks = threadRecords.get(threadKeyOf(s.view));
         return {
           ...s.view,
           ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}),
           ...(behind !== undefined ? { waitingOn: behind } : {}),
+          // A turn that ended before the stamps began reads as seen the moment it ended, not at the upgrade, so the quiet
+          // the sidebar folds a thread by still counts from its end.
+          readAt: marks?.readAt ?? (s.view.endedAt !== undefined && s.view.endedAt < readsSince ? s.view.endedAt : readsSince),
+          ...(marks?.settledAt !== undefined ? { settledAt: marks.settledAt } : {}),
         };
       });
     },
@@ -7314,6 +7372,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       await persistSessions(entry.record.id);
       return { outcome: "renamed" };
+    },
+
+    async read(threadId, origin) {
+      await mark([threadId], { readAt: clock.now() }, origin);
+    },
+
+    async settle(threadIds, origin) {
+      const at = clock.now();
+      await mark(threadIds, { readAt: at, settledAt: at }, origin);
     },
 
     async forget(threadId, origin) {
