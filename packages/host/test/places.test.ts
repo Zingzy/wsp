@@ -71,6 +71,7 @@ import {
   addableProviders,
   leaveCommand,
   leavePlace,
+  placeHere,
   placeNameHere,
   placeStanding,
   removeCommand,
@@ -626,6 +627,19 @@ describe("what this computer says about itself", () => {
     const report = placeReport({ name: "x", home, env: { PATH: "/only/this", HOME: home } });
     expect(report.login["PATH"]).not.toBe("/only/this");
     expect(report.login["PATH"]).toContain(`${home}/bin`);
+  });
+
+  it("draws this computer's own row without starting a login shell, which the report alone reads", () => {
+    const home = tmp("report-row");
+    const read = join(home, "login-read");
+    writeFileSync(join(home, ".profile"), `echo read >> ${read}\n`);
+    vi.stubEnv("HOME", home);
+    onTestFinished(() => void vi.unstubAllEnvs());
+    // Nearly every verb lists places, and a login file can take seconds: the row has no use for the login it reads.
+    placeHere("x");
+    expect(existsSync(read)).toBe(false);
+    placeReport({ name: "x", home, env: { PATH: "/usr/bin", HOME: home } });
+    expect(readFileSync(read, "utf8")).toBe("read\n");
   });
 
   it("leaves a store folder that is not a plain path out of the login, since what is there lands in a command", () => {

@@ -99,7 +99,7 @@ import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
-import { joinStanding, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writeExclusive, writePlaceFile, wspArgvOf } from "./place-report.js";
+import { joinStanding, placeFilePath, placeKeyPath, placeLogPath, placeFacts, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writeExclusive, writePlaceFile, wspArgvOf } from "./place-report.js";
 import { PROVIDER_ENV, addedProviders, providerBackendFor, type ProviderEnv } from "./providers.js";
 import { placeLink, relaySignIn, type BoxSignIn, type BoxSignedIn, type PlaceLink } from "./place-signin.js";
 import { publicHostname } from "./relay-link.js";
@@ -218,7 +218,7 @@ export function placeLabelHere(): string | undefined {
 export const computerNameHere = (): string => placeLabelHere() ?? placeNameHere();
 
 export function placeHere(name: string = placeNameHere()): HerePlace {
-  const report = placeReport({ name });
+  const report = placeFacts({ name });
   const label = placeLabelHere();
   return { name: report.name, ...(label !== undefined ? { label } : {}), os: report.os, shape: report.shape, engine: report.engine, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
 }
