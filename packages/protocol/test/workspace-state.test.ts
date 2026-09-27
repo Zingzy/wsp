@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, workspaceStateLine, whereWord, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, onDeleteOf, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, goneRoadRefusal, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, workspaceStateLine, whereWord, agentsMayDrive, computerOffline, deleteNotice, onDeleteOf, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, goneRoadRefusal, NOT_ON_THIS_KIND, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -195,33 +195,23 @@ describe("what a workspace's kind changes about its words", () => {
     // folder the person names and worked there. Its row's second line is its
     // cores and memory in the size line a fork's row reads, in its own word for a cpu, since its cores are not virtual.
     expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: true, agents: true, onDelete: { asked: "computer is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" });
-    // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it. It
-    // carries the same daemon a fork does, put there under the person's own login, so it serves the panes, reads
-    // its own load off its own /proc and lists its own processes, and a folder is copied onto it the way one is
-    // copied onto a fork. Its cpus are cores like this computer's, though its words win over any size today.
-    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: [], copiesFolder: false, agents: false, onDelete: { asked: "daemon, its unit and its login line come off the computer, which is otherwise left as it is", done: expect.any(Function) }, panel: "What the computer is running, its projects and how it is doing.", access: "asks" });
-    // The machines wsp forks and this computer run agents that drive this host, each over its own road; a machine
-    // somebody already owns is handed no wsp to drive one with.
+    // The machines wsp forks and this computer run agents that drive this host, each over its own road.
     expect(agentsMayDrive("cloud")).toBe(true);
     expect(agentsMayDrive("local")).toBe(true);
-    expect(agentsMayDrive("ssh")).toBe(false);
-    expect(agentsKindRefusal("ssh")).toContain("cannot drive this host");
     // Which kind of source a computer's projects come from: this computer copies a folder of yours beside itself and
-    // clones a repo into a folder you name first, a machine wsp forks takes a repo any of the three ways it can be
-    // named and a folder here it clones and seeds from, and a machine wsp only reaches takes none yet. Whether the
-    // folder is copied here is its own word, since a computer that clones takes a folder as a source and still
-    // holds a checkout of it.
+    // clones a repo into a folder you name first, and a machine wsp forks takes a repo any of the three ways it can be
+    // named and a folder here it clones and seeds from. Whether the folder is copied here is its own word, since a
+    // computer that clones takes a folder as a source and still holds a checkout of it.
     expect(kindWords("local").projectSources).toEqual(["git", "github", "gitlab", "folder"]);
     expect(kindWords("cloud").projectSources).toEqual(["git", "github", "gitlab", "folder"]);
-    expect(kindWords("ssh").projectSources).toEqual([]);
     expect(kindWords("local").copiesFolder).toBe(true);
     expect(kindWords("cloud").copiesFolder).toBe(false);
   });
 
   it("the two readings a pane waits on are the table's to answer, so nothing sits at pending for a stream that never comes", () => {
-    // Every kind reads both today: this computer off its own host, a fork and a machine over ssh off that
-    // machine's own /proc through the daemon on it. The words stay so the next kind that reads neither says so.
-    for (const kind of ["local", "cloud", "ssh"] as const) {
+    // Every kind reads both today: this computer off its own host, a fork off that machine's own /proc through
+    // the daemon on it. The words stay so the next kind that reads neither says so.
+    for (const kind of ["local", "cloud"] as const) {
       expect(servesReading(kind, "metrics")).toBe(true);
       expect(servesReading(kind, "processes")).toBe(true);
     }
@@ -232,29 +222,25 @@ describe("what a workspace's kind changes about its words", () => {
     // The computer the host runs on is read where it runs. Every other machine answers for itself over the link a
     // pane holds, and the processes of every kind, this computer's included, are read on that machine.
     expect(readingRoad("local", "metrics")).toBe("host");
-    for (const kind of ["cloud", "ssh"] as const) expect(readingRoad(kind, "metrics")).toBe("daemon");
-    for (const kind of ["cloud", "local", "ssh"] as const) expect(readingRoad(kind, "processes")).toBe("daemon");
+    expect(readingRoad("cloud", "metrics")).toBe("daemon");
+    for (const kind of ["cloud", "local"] as const) expect(readingRoad(kind, "processes")).toBe("daemon");
     // Whichever road it is read on, a kind that answers a reading is a kind whose slot waits for a figure.
-    for (const kind of ["cloud", "local", "ssh"] as const) expect(servesReading(kind, "metrics")).toBe(true);
+    for (const kind of ["cloud", "local"] as const) expect(servesReading(kind, "metrics")).toBe(true);
   });
 
   it("every kind has a row in the table, so adding one is a row here and nothing else", () => {
-    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "ssh"]);
+    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local"]);
   });
 
-  it("the delete sentence says what the delete does to this kind's computer, the ssh sweep included", () => {
+  it("the delete sentence says what the delete does to this kind's computer", () => {
     // The words a person reads on the app's Delete row and in the command line's question: computer, never
     // machine, and the cloud, never a provider.
     expect(deleteNotice(2, "cloud")).toBe("Its computer is deleted in the cloud; its record and 2 threads leave this computer.");
     expect(deleteNotice(1, "local")).toBe("Its computer is left as it is; its record and 1 thread leave this computer.");
-    // wsp puts a daemon, a user unit and a login line on a computer somebody owns, and the delete takes those off
-    // again: a sentence saying the computer is left as it is would be saying nothing happened over there.
-    expect(deleteNotice(1, "ssh")).toBe("Its daemon, its unit and its login line come off the computer, which is otherwise left as it is; its record and 1 thread leave this computer.");
     expect(WORKSPACE_KIND_WORDS.cloud.onDelete.done("m_1")).toBe("computer m_1 is gone in the cloud");
     expect(WORKSPACE_KIND_WORDS.local.onDelete.done("local")).toBe("its computer is left as it is");
-    expect(WORKSPACE_KIND_WORDS.ssh.onDelete.done("maya@box")).toBe("its daemon, its unit and its login line come off the computer, which is otherwise left as it is");
-    // Neither sentence names the computer on a kind whose computer stays: naming it would read as the computer going.
-    for (const kind of ["local", "ssh"] as const) expect(WORKSPACE_KIND_WORDS[kind].onDelete.done("m_2")).not.toContain("m_2");
+    // The sentence names no computer on a kind whose computer stays: naming it would read as the computer going.
+    expect(WORKSPACE_KIND_WORDS.local.onDelete.done("m_2")).not.toContain("m_2");
   });
 
   it("the delete sentence for a copy of a project folder says the copy is removed and the folder it came from stays", () => {
@@ -273,7 +259,6 @@ describe("what a workspace's kind changes about its words", () => {
     expect(THIS_COMPUTER).toBe("this computer");
     expect(relayedRefusal("mac")).toContain(THIS_COMPUTER);
     expect(undrivenRefusal("mac", machineWord("local"), "be paused")).toBe(`mac is ${THIS_COMPUTER}, which wsp does not run; it cannot be paused`);
-    expect(undrivenRefusal("box", machineWord("ssh"), "be paused")).toBe(`box is ${OVER_SSH}, which wsp does not run; it cannot be paused`);
   });
 
   it("every kind's own word is in the table, so no sentence about one kind's machine borrows another's", () => {
@@ -281,13 +266,12 @@ describe("what a workspace's kind changes about its words", () => {
     // on one names the provider's limit and never tells a person their fork is the computer they are sitting at.
     expect(machineWord("cloud")).toBe(MACHINE_WSP_FORKS);
     expect(machineWord("local")).toBe(THIS_COMPUTER);
-    expect(machineWord("ssh")).toBe(OVER_SSH);
     // The machine is the subject of every action these sentences take, since each action is the machine's own verb
     // phrase: the provider is where the road is missing, not the thing that would be resized or moved.
     expect(providerCannotRefusal("api", machineWord("cloud"), "be resized")).toBe("api is a machine wsp forks, and it cannot be resized on the provider it runs on");
     expect(providerCannotRefusal("api", machineWord("cloud"), "move to a newer image")).toBe("api is a machine wsp forks, and it cannot move to a newer image on the provider it runs on");
-    for (const kind of ["cloud", "local", "ssh"] as const) expect(machineWord(kind)).not.toBe("");
-    expect(new Set(["cloud", "local", "ssh"].map(k => machineWord(k as "cloud")))).toHaveLength(3);
+    for (const kind of ["cloud", "local"] as const) expect(machineWord(kind)).not.toBe("");
+    expect(new Set(["cloud", "local"].map(k => machineWord(k as "cloud")))).toHaveLength(2);
   });
 });
 
@@ -361,7 +345,6 @@ describe("where a workspace runs, in the person's words", () => {
   it("names the computer this host holds a row for by the name it was given, above the provider that computer forks with, and a fork whose record names no provider by what it is", () => {
     expect(whereWord({ kind: "cloud", provider: "docker", machineId: "fk_dkr_1" }, "vps")).toBe("vps");
     expect(whereWord({ kind: "cloud", machineId: "fk_slr_1" })).toBe("a provider");
-    expect(whereWord({ kind: "ssh", machineId: "ssh://dev@box:22" })).toBe("ssh://dev@box:22");
   });
 
   it("names the computer the host runs on the way every other screen names it, off what that machine said it is", () => {

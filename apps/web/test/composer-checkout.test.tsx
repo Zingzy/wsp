@@ -135,7 +135,7 @@ const STATUS = { branch: { oid: "abc", head: "feature/panes", ahead: 0, behind: 
 
 function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = [], ws: WorkspaceView = workspace) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
-  const started: Array<{ workspaceId: string; prompt: string; resume?: string; cwd?: string; project?: string }> = [];
+  const started: Array<{ workspaceId: string; prompt: string; thread?: string; cwd?: string; project?: string }> = [];
   const api: Api = {
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
     daemon: noDaemonApi,
@@ -506,7 +506,7 @@ describe("composer checkout row", () => {
 
   it("is a label after a turn, carries the harness's cwd, and the panes follow it until pinned", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-    const { api, started, emit } = fixtureApi(CHAT_STREAM.slice());
+    const { api, started, emit } = fixtureApi(CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" })));
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
     expect(row()?.dataset["pickable"]).toBeUndefined();
@@ -518,14 +518,14 @@ describe("composer checkout row", () => {
     await typeInto(editor, "and now from the app");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ resume: workspace.claudeSessionId, cwd: "/root" });
+    expect(started[0]).toMatchObject({ thread: "thr_a", cwd: "/root" });
 
-    emit({ type: "session.start", workspaceId: WS, sessionId: "sess_0002", turnId: "turn_0002", at: Date.now(), cwd: "/root/app" });
+    emit({ type: "session.start", workspaceId: WS, sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_a", at: Date.now(), cwd: "/root/app" });
     await waitFor(() => expect(folder()).toBe("/root/app"));
     expect(root()).toBe("/root/app");
 
     act(() => useRootStore.getState().pin(WS, "/root/app"));
-    emit({ type: "session.start", workspaceId: WS, sessionId: "sess_0003", turnId: "turn_0003", at: Date.now(), cwd: "/root/app/packages/web" });
+    emit({ type: "session.start", workspaceId: WS, sessionId: "sess_0003", turnId: "turn_0003", threadId: "thr_a", at: Date.now(), cwd: "/root/app/packages/web" });
     await waitFor(() => expect(folder()).toBe("/root/app/packages/web"));
     expect(root()).toBe("/root/app");
   });
@@ -848,10 +848,10 @@ describe("composer checkout row on a thread resumed from its row", () => {
     await typeInto(editor, "more");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ resume: "sess_0001", cwd: "/root/app" });
+    expect(started[0]).toMatchObject({ thread: "thr_a", cwd: "/root/app" });
   });
 
-  it("on an empty latest view, the remembered session resumes in its row's folder, the strip locked to it, not in the daemon root", async () => {
+  it("on an empty latest view, the send goes into the remembered session's thread in its row's folder, the strip locked to it, not in the daemon root", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
     const { api, started } = fixtureApi([], [ROW]);
     await setup(api);
@@ -864,7 +864,7 @@ describe("composer checkout row on a thread resumed from its row", () => {
     await typeInto(editor, "more");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ resume: "sess_0001", cwd: "/root/app" });
+    expect(started[0]).toMatchObject({ thread: "thr_a", cwd: "/root/app" });
   });
 
   it("an empty latest view whose remembered session has no row keeps the picker: nothing names its folder", async () => {

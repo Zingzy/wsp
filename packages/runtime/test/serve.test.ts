@@ -532,7 +532,7 @@ describe("serveRuntime session interrupt", () => {
     const first = await c.request("sessions.start", { workspaceId, prompt: "go", requestId: "req_1" });
     expect(first).toMatchObject({ ok: true, outcome: "started", turnId: expect.any(String), session: { id: h.sessionId, status: "running" } });
     expect(c.events.filter(e => e.type === "session.start")).toMatchObject([{ turnId: first["turnId"] }]);
-    const joined = await c.request("sessions.start", { workspaceId, prompt: "and STEERED", resume: h.sessionId, requestId: "req_2", startedBy: "cli" });
+    const joined = await c.request("sessions.start", { workspaceId, prompt: "and STEERED", thread: (first["session"] as { threadId: string }).threadId, requestId: "req_2", startedBy: "cli" });
     expect(joined).toMatchObject({ ok: true, outcome: "steered", turnId: first["turnId"], session: { id: h.sessionId, status: "running", prompt: "go" } });
     expect((joined["session"] as { threadId: string }).threadId).toBe((first["session"] as { threadId: string }).threadId);
     expect(h.steered).toEqual(["and STEERED"]);

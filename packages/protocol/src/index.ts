@@ -220,9 +220,9 @@ export const Capabilities = z.object({
   pauseMode: PauseMode.optional(),
   /** The provider replaces a machine with a fresh fork of the image behind it and the workspace goes on, its
    * vaulted files carried over: the one road a rebuild and an image move both take, since both throw a machine away
-   * and hand its workspace another. False where nothing forks: this computer, a machine reached over ssh, a host with
-   * no provider. Whether the replacement comes up with the processes still running is liveCloneForks, which says
-   * nothing about whether one may stand in at all. */
+   * and hand its workspace another. False where nothing forks: this computer, a host with no provider. Whether the
+   * replacement comes up with the processes still running is liveCloneForks, which says nothing about whether one may
+   * stand in at all. */
   replacesMachine: z.boolean(),
   previewUrls: z.boolean(),
   signedUrls: z.boolean(),
@@ -496,11 +496,10 @@ export type ProjectView = z.infer<typeof ProjectView>;
 export const ProjectRef = ProjectView.pick({ id: true, name: true, path: true, computer: true });
 export type ProjectRef = z.infer<typeof ProjectRef>;
 
-/** What a workspace's machine is: cloud, a fork wsp made at a provider, local, this computer itself, or ssh, a
- * machine of the person's own that wsp only reaches. A missing kind reads cloud, since every record written before
- * local workspaces existed was one. The one fact every road that varies by machine kind reads; nothing switches on
- * it outside the backend registry. */
-export const WorkspaceKind = z.enum(["cloud", "local", "ssh"]);
+/** What a workspace's machine is: cloud, a fork wsp made at a provider or on a computer somebody joined, or local,
+ * this computer itself. The one fact every road that varies by machine kind reads; nothing switches on it outside
+ * the backend registry. */
+export const WorkspaceKind = z.enum(["cloud", "local"]);
 export type WorkspaceKind = z.infer<typeof WorkspaceKind>;
 
 /** Which machine a daemon's own cpu, memory and process readings describe. Wider than WorkspaceKind by one: a
@@ -571,13 +570,6 @@ export const AGENTS_ON: WorkspaceAgents = { spawn: true, maxMachines: 3, maxDept
 export const CopyRoad = z.enum(["clonefile", "worktree"]);
 export type CopyRoad = z.infer<typeof CopyRoad>;
 
-/** The one home of the word for a folder worked where it sits, which no workspace is any more: the copy verb still
- * answers it when asked for it, and nothing asks; a record carrying it is refused at boot in one sentence. */
-export const IN_PLACE_ROAD = "in-place";
-/** What the copy verb may answer as its road: the two a record keeps, and the word above, kept on the wire so the
- * daemon's contract stands while every host asks for a copy. */
-export const CopyVerbRoad = z.enum([...CopyRoad.options, IN_PLACE_ROAD]);
-
 /** What rode along in the copy: everything the folder held that git ignores, so the dependencies are there and a
  * build runs at once; the config files alone, so the dependencies install first; or nothing. */
 export const Carried = z.enum(["deps-and-config", "config-only", "nothing"]);
@@ -603,7 +595,7 @@ export type CopyAsk = z.infer<typeof CopyAsk>;
 /** What the daemon binary's copy verb printed, read back by the host and kept on the workspace's record as
  * `copy`. */
 export const CopyReport = z.object({
-  road: CopyVerbRoad,
+  road: CopyRoad,
   path: z.string(),
   base: z.string(),
   branch: z.string(),
@@ -652,10 +644,10 @@ export const WorkspaceView = z.object({
   project: ProjectRef,
   /** The folder a thread or a command starts in when no project does, the last branch of the runtime's default folder
    * rule: the kind's own (the work folder on this computer). Absent where the kind names none and the machine's own
-   * home is where the shell lands (a fork, a machine over ssh). Published so a client shows what the runtime will do. */
+   * home is where the shell lands (a fork). Published so a client shows what the runtime will do. */
   folder: z.string().optional(),
   /** The machine's own home, where its shell shortens paths to `~`: /root on a fork, the person's home on this
-   * computer, the login's on a machine over ssh once it has answered. Absent where the kind has not read one. */
+   * computer. Absent where the kind has not read one. */
   home: z.string().optional(),
   /** Claude session id of the last session, so the next send can --resume it. */
   claudeSessionId: z.string().optional(),
@@ -2041,9 +2033,6 @@ export function bootLineOf(html: string): BootPayload | undefined {
 
 /** What the host writes into the page's one inline script as window.__WSP__ before serving it. */
 export interface BootPayload {
-  /** The runtime's own port, inlined only on the loopback page beside the token's digest; a page served beyond
-   * loopback carries none and dials the origin it came from at wsPath. */
-  wsPort?: number;
   /** The sha256 of the host's own token, hex, inlined only on the loopback page: the desktop shell compares it to the
    * digest of the token file beside the state and sends nothing, so a page a squatter serves on the lock's port
    * cannot learn the token by being read. The token itself is never in any page: a browser here dials with a
@@ -4004,6 +3993,7 @@ const DAEMON_CONTENTS = [
   "c76e7e2a3b9a767beaa281b973a409e1bc8869969255fa6c9fdeb6211b38ce3d",
   "be3d9077764035f8bf2b96ab6b50c018017046ec74a30827404f64752ef19bdf",
   "837e923920b718c42e372f7d84dd08d4d51add8e7b86de1ab4afb4a156afb8ae",
+  "69559f24eb63363f130e96d07548df1e6cffed939d08d5df760e5ac9948f240e",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4216,7 +4206,10 @@ const DAEMON_CONTENTS = [
  * Version 77 forwards a guest's `wsp mcp` to the running host over the daemon's link, so a thread's MCP server needs no host process of its own on the machine.
  * Version 78 changes no behaviour: the pty broker's cases moved to a test binary of their own, and the file they left is hashed.
  * Version 79 changes no behaviour: every wire type in the protocol crate derives the TypeScript the protocol package re-exports, which moves the crate's sources and the lock.
- * Version 80 answers git.status on a stopped workspace with the branch alone, read off its copy's git directory with no program run, and says the edits were not read; running or stopped, a branch with no upstream counts ahead and behind against the default branch; a stopped copy's history too long or slow to walk answers countsUnknown. */
+ * Version 80 answers git.status on a stopped workspace with the branch alone, read off its copy's git directory with no program run, and says the edits were not read; running or stopped, a branch with no upstream counts ahead and behind against the default branch; a stopped copy's history too long or slow to walk answers countsUnknown.
+ * Version 81 reads no record another daemon wrote: a workspace record carries every field and a points file that does
+ * not parse is refused by its path; the hello always names the version; the copy verb has no in-place road and the
+ * daemon no ssh kind; exec and pty take the compose project off the workspace's own boot environment. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4238,8 +4231,7 @@ export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
 export const DAEMON_ROOTS_PATH = rootsPathIn("/root");
 
 /** The shape the records in a state file are written in. Any change to the schema of a stored record cuts this
- * number, so a host at the older number refuses the file instead of reading a record in a form it does not know:
- * several builds of wsp name one state file on a computer, and the one that wrote it last decides what is in it.
+ * number, and a host refuses a file in any other shape rather than reading a record in a form it does not know.
  * 2 since a project's seeded row changed whole: one word for what its memory did where it held two flags, the
  * memory folder's own file count beside it, and `bytes` now the sum the menu showed for the ticked files where it
  * was the size of the archive they travelled in, which is bigger, so the two numbers do not compare. */
@@ -4262,11 +4254,6 @@ export type StateShape = z.infer<typeof StateShape>;
 
 /** How a sentence names the build that wrote a state file. */
 export const stateWriterWords = (wrote: StateShape): string => `${wrote.bin} (wsp ${wrote.wsp}, daemon ${wrote.daemon})`;
-
-/** The version a hello announces, 1 when it carries none. */
-export function daemonVersionOf(hello: { version?: number }): number {
-  return hello.version ?? 1;
-}
 
 /** The one word a place's row says while this wsp deploys a newer daemon than that computer runs, and nothing
  * while it is level or ahead or has never reported. Both sides of the figure are already on the wire: the place
@@ -4400,8 +4387,8 @@ export const DaemonEvent = z.discriminatedUnion("type", [
   /** The first frame after the auth reply: root is the
    * absolute directory every fs.* and git.* path must resolve inside, so a
    * client can build absolute paths for pickers, pins and session starts.
-   * version is DAEMON_VERSION as the daemon was built; absent on version 1. */
-  z.object({ type: z.literal("daemon.hello"), root: z.string(), version: z.number().int().optional() }),
+   * version is DAEMON_VERSION as the daemon was built. */
+  z.object({ type: z.literal("daemon.hello"), root: z.string(), version: z.number().int() }),
   z.object({ type: z.literal("pty.data"), ptyId: z.string(), data: z.string() }),
   z.object({
     type: z.literal("pty.exit"),
@@ -5379,10 +5366,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
     workspaceId: z.string(),
     prompt: z.string(),
     harness: z.string().optional(),
-    resume: z.string().optional(),
     /** The thread the message goes to, by its runtime id: its latest turn is resumed, and a thread whose harness never
      * announced a session takes the message as a first turn on that same thread. Refused when the workspace has no
-     * thread with that id. */
+     * thread with that id. Absent opens a thread. */
     thread: z.string().optional(),
     /** The folder the thread starts in, absolute; it wins over project and the rule. Absent leaves the runtime's
      * default folder rule (projectFor, then the kind's own folder) to say. */
@@ -6112,7 +6098,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, rootsPathIn, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";

@@ -95,7 +95,7 @@ describe("the sidebar's host foot", () => {
 });
 
 describe("the boot gate in the shell", () => {
-  const boot = (over: Partial<BootPayload> = {}): BootPayload => ({ wsPort: 4410, wsPath: WS_PATH, paired: false, version: "0.0.0", ...over });
+  const boot = (over: Partial<BootPayload> = {}): BootPayload => ({ wsPath: WS_PATH, paired: false, version: "0.0.0", ...over });
   const at = { protocol: "http:", host: "127.0.0.1:1" };
 
   it("with no token in the page asks the shell, and goes through on what it answers", async () => {

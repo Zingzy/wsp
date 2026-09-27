@@ -350,7 +350,7 @@ export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim 
   if (lock === undefined) throw new Error(noHostServingLine(statePath));
   const token = hostTokenFor(statePath);
   if (token === undefined) throw authRefusal(`the host's token file is missing: ${hostTokenPath(statePath)}`);
-  return { url: `ws://${authority(dialAddress(lock), lock.wsPort)}`, token };
+  return { url: wsUrlOf(`http://${authority(dialAddress(lock), lock.port)}`), token };
 }
 
 /** Where the wsp command's forwarder dials for a line aimed at the host serving this state file on this computer:
@@ -1914,13 +1914,10 @@ export async function notifyOf(client: HostClient, refs: readonly string[]): Pro
 
 /** The start a message to an existing thread makes: the thread named to the runtime, which resumes its latest turn
  * or, on a thread whose harness never announced a session, runs the message as its first turn; under the thread's own
- * agent, with any pick named for this turn. A row from before threads had ids resumes by its session, and one with
- * neither is refused: a start naming nothing would open a new thread in silence. */
+ * agent, with any pick named for this turn. */
 export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {}, images: readonly string[] = [], elsewhere = false): Record<string, unknown> {
-  if (thread.threadId === undefined && thread.claudeSessionId === undefined) throw new Error(`thread ${thread.id} has no session to resume yet`);
-  const target = thread.threadId !== undefined ? { thread: thread.threadId } : { resume: thread.claudeSessionId };
   const attachments = imagesFrom(images, elsewhere);
-  return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, ...target, ...(attachments.length > 0 ? { attachments } : {}), ...picksOf(picks) };
+  return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, thread: thread.threadId ?? thread.id, ...(attachments.length > 0 ? { attachments } : {}), ...picksOf(picks) };
 }
 
 /** A reply the protocol schema refuses: the host process predates or postdates this command's build. */

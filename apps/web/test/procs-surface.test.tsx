@@ -354,13 +354,6 @@ describe("processes surface", () => {
     expect(asked).toEqual([WS]);
   });
 
-  it("a machine over ssh is pending until its first snapshot lands", async () => {
-    act(() => useStore.setState({ workspaces: [{ ...view, kind: "ssh" }] }));
-    render(<ProcessesSurface workspaceId={WS} />);
-    await flush();
-    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("pending");
-  });
-
   it("a local workspace with no thread running lists its computer whole, with no toggle", async () => {
     onThisMac([]);
     render(<ProcessesSurface workspaceId={WS} />);

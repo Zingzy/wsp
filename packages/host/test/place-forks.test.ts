@@ -18,7 +18,7 @@ import { stubBackend } from "./stub-backend.js";
 import { copyingFake, fakeDaemonStart } from "./verbs-fixture.js";
 import type { HostHandle } from "../src/server.js";
 
-const PAGE = `<!doctype html><html><body><div id="root"></div><script>window.__WSP__ = { wsPort: 4410, token: "" };</script></body></html>`;
+const PAGE = `<!doctype html><html><body><div id="root"></div><script>window.__WSP__ = { token: "" };</script></body></html>`;
 
 interface Captured extends CliIO {
   lines: string[];
@@ -55,7 +55,7 @@ beforeEach(async () => {
   const store = memoryStore();
   await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
   rt = createRuntime({ backend: stubBackend(), store, adapters: {}, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath) });
-  handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+  handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt });
 });
 
 afterEach(async () => {

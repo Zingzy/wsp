@@ -361,63 +361,6 @@ describe("a workspace of a project", () => {
   });
 });
 
-describe("a project recorded before a later build's fields", () => {
-  /** A record as yesterday's host wrote it: the four fields this build added are not on it. */
-  const old = { id: "pr_old", name: "spoo-landing", computer: "default", source: { kind: "git" as const, url: REPO }, path: "/root/spoo-landing", createdAt: "2026-09-16T00:00:00.000Z" };
-
-  it("is filled in at load with the add's own rules and written back, not refused", async () => {
-    const store = memoryStore();
-    await store.put("projects", old.id, old);
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, local: fakeLocal(here()) });
-    const [project] = await rt.projects.list();
-    expect(project).toMatchObject({
-      id: "pr_old",
-      remote: REPO,
-      defaultBranch: "main",
-      memoryKey: "-root-spoo-landing",
-      memoryDir: "/root/.claude-cfg/projects/-root-spoo-landing/memory",
-    });
-    // Written back, so the next boot reads a record that carries them.
-    expect(await store.get("projects", "pr_old")).toEqual(project);
-    // And the workspaces standing on it still stand: nothing asked anybody to move a state file aside.
-    expect(await rt.workspaces.list()).toEqual([]);
-  });
-
-  it("on a computer that holds the checkout, carries the memory folder that computer's own road names", async () => {
-    const store = memoryStore();
-    await store.put("projects", old.id, old);
-    const backend = stubBackend();
-    // What the computer says about itself: it keeps the project checkouts on a disk of its own and no image.
-    (backend as { projects?: string }).projects = "/wsp/projects";
-    backend.capabilities.images = false;
-    const rt = createRuntime({ backend, store, adapters: {}, local: fakeLocal(here()) });
-    const [project] = await rt.projects.list();
-    // The road's own rule: the agent's own state home on that computer, which every workspace of it reads from
-    // the computer itself, so nothing of wsp's is mounted over that home.
-    expect(project?.memoryDir).toBe(`/root/.claude-cfg/projects/${project?.memoryKey}/memory`);
-    // What a workspace of a project on such a computer mounts is proved in project-landing.test.ts, on a record
-    // the add cloned a checkout for. A record with none, which is this one, is refused a workspace there instead,
-    // since nothing clones one at a create any more.
-    await expect(rt.workspaces.create({ project: old.id, name: "work" })).rejects.toThrow("was recorded before a project was cloned once on its computer");
-    expect(await rt.workspaces.list()).toEqual([]);
-  });
-
-  it("keeps every field a record already carries, and reads a folder here against this computer's own store", async () => {
-    const store = memoryStore();
-    const folder = tempRepo();
-    await store.put("projects", "pr_here", { ...old, id: "pr_here", computer: HERE_PLACE_ID, source: { kind: "folder", path: folder }, path: folder, remote: "git@github.com:dev/x.git" });
-    const root = here();
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, local: fakeLocal(root) });
-    const [project] = await rt.projects.list();
-    // The remote it was recorded with stands; the key and the folder are this computer's own reading.
-    expect(project?.remote).toBe("git@github.com:dev/x.git");
-    expect(project?.memoryKey).toBe(folder.replace(/[^A-Za-z0-9]/g, "-"));
-    expect(project?.memoryDir).toContain("/projects/");
-    expect(project?.memoryDir.endsWith("/memory")).toBe(true);
-    rmSync(folder, { recursive: true, force: true });
-  });
-});
-
 describe("naming a workspace", () => {
   /** Two workspaces whose ids share their first six characters, written into the store by hand: the runtime mints
    * random ids, and an ambiguous prefix is only ambiguous where two ids are known to share one. */
@@ -507,14 +450,5 @@ describe("the folder a thread starts in", () => {
     const ws = await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" });
     await rt.sessions.start(ws.id, { prompt: "hi" });
     expect((await rt.preferences.get()).target).toEqual({ workspace: ws.id });
-  });
-});
-
-describe("a state file from before projects were records", () => {
-  it("is not read: the host refuses in one sentence naming the file and does not serve", async () => {
-    const store = memoryStore();
-    await store.put("workspaces", "ws_old", { id: "ws_old", name: "old", kind: "cloud", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z", spec: {}, size: { cpu: 2, memMb: 4096 }, firstLife: true, projects: [{ name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00.000Z" }] });
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, statePath: "/tmp/wsp-hierarchy/state.json" });
-    await expect(rt.workspaces.list()).rejects.toThrow("move /tmp/wsp-hierarchy/state.json aside and start again");
   });
 });

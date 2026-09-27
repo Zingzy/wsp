@@ -3,10 +3,6 @@
 //! the two limits the kernel takes from us rather than from the spec. The path is the plain manager's, which the
 //! layout spells; nothing here reads a cgroup off a pid, since a pid can belong to another process by the time it
 //! is read.
-//!
-//! Nothing here freezes. A workspace on a computer somebody owns is awake or stopped and nothing else, so the
-//! freezer that used to serve the pause has no reader left: the pause kills, and the wake boots over what the
-//! stop left on disk.
 
 use std::fs;
 use std::io;

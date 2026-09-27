@@ -5,13 +5,10 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { DAEMON_VERSION, STATE_SHAPE } from "@wsp/protocol";
+import { STATE_SHAPE_KEY } from "@wsp/runtime";
 import { BIN, DIST, describeWithBin } from "./built-bin.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
-
-interface Ports {
-  port: number;
-  wsPort: number;
-}
 
 function canListen(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -21,16 +18,15 @@ function canListen(port: number): Promise<boolean> {
   });
 }
 
-/** Resolves once the bin has printed both address lines, so the host is bound. */
-function untilServing(child: ChildProcess, output: string[]): Promise<Ports> {
+/** Resolves once the bin has printed its app address line, so the host is bound. */
+function untilServing(child: ChildProcess, output: string[]): Promise<number> {
   return new Promise((resolve, reject) => {
     let text = "";
     child.stdout?.on("data", (chunk: Buffer) => {
       text += chunk.toString();
       output.push(chunk.toString());
       const port = text.match(/^app\s+http:\/\/127\.0\.0\.1:(\d+)$/m)?.[1];
-      const wsPort = text.match(/^runtime ws\s+ws:\/\/127\.0\.0\.1:(\d+)/m)?.[1];
-      if (port !== undefined && wsPort !== undefined) resolve({ port: Number(port), wsPort: Number(wsPort) });
+      if (port !== undefined) resolve(Number(port));
     });
     child.stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString()));
     child.once("exit", (code, signal) => reject(new Error(`wsp exited early (code ${code}, signal ${signal}):\n${output.join("")}`)));
@@ -57,27 +53,26 @@ describeWithBin("the wsp bin stops cleanly on a signal", () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  it.each(["SIGINT", "SIGTERM", "SIGHUP"] as const)("%s removes host.lock and frees both ports", async signal => {
+  it.each(["SIGINT", "SIGTERM", "SIGHUP"] as const)("%s removes host.lock and frees its port", async signal => {
     const statePath = join(home, "state", "state.json");
     const lockPath = join(home, "state", "host.lock");
     mkdirSync(join(home, "state"));
-    writeFileSync(statePath, JSON.stringify({ goldens: { default: SEALED_GOLDEN } }));
+    writeFileSync(statePath, JSON.stringify({ goldens: { default: SEALED_GOLDEN }, [STATE_SHAPE_KEY]: { shape: STATE_SHAPE, wsp: "test", daemon: DAEMON_VERSION, bin: BIN, at: new Date().toISOString() } }));
     const output: string[] = [];
-    child = spawn(process.execPath, [BIN, "up", "--port", "0", "--ws-port", "0", "--state", statePath], {
+    child = spawn(process.execPath, [BIN, "up", "--port", "0", "--state", statePath], {
       cwd: home,
       env: { ...process.env, SOLARI_API_KEY: "slr_live_fake_signal_key", HOME: home, WSP_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const ports = await untilServing(child, output);
+    const port = await untilServing(child, output);
     expect(existsSync(lockPath)).toBe(true);
-    expect((await fetch(`http://127.0.0.1:${ports.port}/`)).status).toBe(200);
+    expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(200);
 
     child.kill(signal);
     const end = await exited(child);
     expect(end, output.join("")).toEqual({ code: 0, signal: null });
     expect(existsSync(lockPath)).toBe(false);
-    expect(await canListen(ports.port)).toBe(true);
-    expect(await canListen(ports.wsPort)).toBe(true);
+    expect(await canListen(port)).toBe(true);
   }, 30_000);
 
   it("serves a state file that holds nothing, records no workspace, and stops on the signal", async () => {
@@ -85,15 +80,15 @@ describeWithBin("the wsp bin stops cleanly on a signal", () => {
     const statePath = join(home, "state", "state.json");
     mkdirSync(join(home, "state"));
     const output: string[] = [];
-    child = spawn(process.execPath, [BIN, "up", "--port", "0", "--ws-port", "0", "--state", statePath], {
+    child = spawn(process.execPath, [BIN, "up", "--port", "0", "--state", statePath], {
       cwd: home,
       env: { ...process.env, SOLARI_API_KEY: "", ANTHROPIC_API_KEY: "", HOME: home, WSP_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const ports = await untilServing(child, output);
+    const port = await untilServing(child, output);
     // A workspace is one project's copy, so a state with nothing in it records none and the line says the road.
     expect(output.join(""), output.join("")).toMatch(/^no projects yet; wsp add <folder> records one here/m);
-    expect((await fetch(`http://127.0.0.1:${ports.port}/`)).status).toBe(200);
+    expect((await fetch(`http://127.0.0.1:${port}/`)).status).toBe(200);
     const held = JSON.parse(readFileSync(statePath, "utf8")) as { workspaces?: Record<string, unknown> };
     expect(Object.values(held.workspaces ?? {})).toEqual([]);
 

@@ -27,7 +27,7 @@ function Reader() {
 
 beforeEach(() => {
   clearNotices();
-  served({ wsPort: 1, tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: "0.1.5" });
+  served({ tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: "0.1.5" });
 });
 afterEach(() => {
   vi.unstubAllGlobals();

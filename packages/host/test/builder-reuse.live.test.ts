@@ -55,7 +55,7 @@ describe.runIf(LIVE)("builder reuse across processes (live: wsp init twice on on
 
   const spawnInit = (recipeFile: string): { child: ChildProcess; output: string[] } => {
     const output: string[] = [];
-    const child = spawn(process.execPath, [BIN, "init", "--recipe", recipeFile, "--yes", "--port", "0", "--ws-port", "0", "--state", statePath], {
+    const child = spawn(process.execPath, [BIN, "init", "--recipe", recipeFile, "--yes", "--port", "0", "--state", statePath], {
       cwd: home,
       env: { ...process.env, SOLARI_API_KEY: env.SOLARI_API_KEY, ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY, HOME: home, WSP_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],

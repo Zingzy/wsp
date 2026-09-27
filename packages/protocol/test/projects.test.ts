@@ -72,10 +72,9 @@ describe("what one word to wsp add names", () => {
     // into a folder the person names and works that folder.
     expect(kindWords("local").projectSources).toEqual(["git", "github", "gitlab", "folder"]);
     expect(kindWords("cloud").projectSources).toEqual(["git", "github", "gitlab", "folder"]);
-    expect(kindWords("ssh").projectSources).toEqual([]);
     // Copying the folder beside itself is its own word: a computer that clones takes a folder as a source and
     // still holds a checkout of it, so the two cannot be read off one list.
-    expect([kindWords("local").copiesFolder, kindWords("cloud").copiesFolder, kindWords("ssh").copiesFolder]).toEqual([true, false, false]);
+    expect([kindWords("local").copiesFolder, kindWords("cloud").copiesFolder]).toEqual([true, false]);
   });
 
   it("the refusals name the project, the folder and the computer", () => {
@@ -129,7 +128,7 @@ describe("what a computer is called in a row", () => {
       remote: "https://github.com/dev/spoo.git",
       defaultBranch: "main",
       memoryKey: "-root-spoo-landing",
-      memoryDir: "/var/lib/wsp/projects/pr_1/memory",
+      memoryDir: "/wsp/projects/pr_1/memory",
       createdAt: "t",
     };
     expect(addedProjectLine(project, new Map([["pl_box", "hetzner"]]), "darwin")).toBe(

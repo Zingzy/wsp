@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The workspace manager behind the machine ops on a place link. A workspace on a computer somebody owns is that
 //! computer's own system directories under a read-only overlay each, the box's /root, and one copy of a checkout
-//! on it: on Linux the bundle, the runtime, the freezer and the ops boot it through youki's library and answer
+//! on it: on Linux the bundle, the runtime, the cgroup module and the ops boot it through youki's library and answer
 //! every `machine.*` frame, the copy modules make the per-workspace copy the way the disk makes one, and the net
 //! module gives each workspace its network and its published ports. This computer keeps no image: nothing is
 //! pulled and nothing is built here. Every op on another platform is answered with one refusal that names it.
 
 #[cfg(target_os = "linux")]
 pub mod bundle;
+#[cfg(target_os = "linux")]
+pub mod cgroup;
 pub mod copy;
 #[cfg(target_os = "linux")]
 pub mod copy_plain;
@@ -20,8 +22,6 @@ pub mod doctor;
 #[cfg(target_os = "linux")]
 pub mod engine;
 pub mod files;
-#[cfg(target_os = "linux")]
-pub mod freeze;
 pub mod hardening;
 #[cfg(target_os = "linux")]
 pub mod init;
@@ -47,9 +47,9 @@ use wsp_frames::{DaemonErrorResponse, RequestId};
 const LIVE_REASON: &str = "drives the kernel as root: run the live executable on a box with --ignored";
 
 /// Where the runtime keeps everything it owns on a computer somebody joined: the workspaces, their copies and the
-/// checkouts those are made from. Not under any directory a workspace's overlay takes as a lower, which is what
-/// `/var/lib/wsp` was: a workspace's upper would sit inside the tree it reads through the overlay, and the open
-/// refuses such a root rather than serving workspaces that read their own uppers.
+/// checkouts those are made from. Not under any directory a workspace's overlay takes as a lower: a workspace's
+/// upper would sit inside the tree it reads through the overlay, and the open refuses such a root rather than
+/// serving workspaces that read their own uppers.
 pub const DEFAULT_ROOT: &str = "/wsp";
 
 /// What any op naming a workspace this computer does not run is refused with, wherever it is asked: a machine op

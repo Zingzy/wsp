@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The backend for a workspace on a machine reached over ssh: a machine that
-// already exists, the person's own, dialled with their own key. It sits behind
-// the same MachineBackend seam the Solari and local backends do, so the runtime
-// never learns which kind it holds. Nothing here creates, forks, pauses or
-// snapshots: every capability behind those is false, so each road refuses by
-// capability before it reaches this file. exec and run carry one script over
-// the ssh client, which is the only thing here that knows the machine is not
-// in this process.
+// A computer reached over ssh: a machine that already exists, the person's own,
+// dialled with their own key, which is how a host joins it. Nothing here
+// creates, forks, pauses or snapshots. exec and run carry one script over the
+// ssh client, which is the only thing here that knows the machine is not in
+// this process.
 
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -15,11 +12,11 @@ import { homedir, userInfo } from "node:os";
 import { isAbsolute, join, posix } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOOPBACK, isPlainPath, shellQuote } from "@wsp/protocol";
-import type { Capabilities, MachineFacts } from "@wsp/protocol";
+import type { MachineFacts } from "@wsp/protocol";
 import { lineFeed, runChild } from "./child-exec.js";
 import { keyFingerprint } from "./key-fingerprint.js";
 import { ARCH_READ, HOME_READ, MEM_READ, OS_READ, SHELL_READ, SYSTEM_READ, UPTIME_READ, archOf, memMbOf, osNameOf, readLists, readValues, systemOf, uptimeMsOf } from "./machine-facts.js";
-import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
+import type { ExecResult, Machine, MachineShape, MachineState, RunOptions } from "./machine.js";
 
 /** How the ssh client is dialled: who to log in as, where, on which port, and the person's own key when they named
  * one (absent leaves ssh its own config and agent, which is how most people already reach their machines). */
@@ -39,8 +36,6 @@ export type SshLogin = Readonly<Record<string, string>> & { HOME: string; USER: 
 /** The port ssh uses when the person named none. */
 export const SSH_DEFAULT_PORT = 22;
 
-const NO_SNAPSHOT_STORAGE: SnapshotStoragePricing = { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" };
-
 /** The one written form of an ssh machine: its id on the record, which is also the dial. Everything a later host
  * process needs to reach it again is in here, so a record rehydrates with no second store to read and nothing but
  * this module ever looks inside it. */
@@ -48,22 +43,6 @@ export function sshMachineId(reach: SshReach): string {
   const url = new URL(`ssh://${encodeURIComponent(reach.user)}@${reach.host}:${reach.port}`);
   if (reach.keyPath !== undefined) url.searchParams.set("key", reach.keyPath);
   return url.toString();
-}
-
-/** The target an id names, or nothing when the id is not one of ours: a record from another backend, or a string
- * that was never an ssh address. */
-export function parseSshMachineId(id: string): SshReach | undefined {
-  let url: URL;
-  try {
-    url = new URL(id);
-  } catch {
-    return undefined;
-  }
-  if (url.protocol !== "ssh:") return undefined;
-  const user = decodeURIComponent(url.username);
-  const key = url.searchParams.get("key");
-  if (user === "" || url.hostname === "") return undefined;
-  return { user, host: url.hostname, port: Number(url.port) || SSH_DEFAULT_PORT, ...(key !== null ? { keyPath: key } : {}) };
 }
 
 /** The dial a person's `user@host` word names, with the port they gave or ssh's own, and their key when they named
@@ -693,8 +672,7 @@ function homeRefusal(reach: SshReach, home: string | undefined): string {
 const LOOPBACK_NAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"]);
 
 /** Whether this dial reaches the computer wsp is running on: the same machine as the local workspace, under another
- * name. A request relayed from a machine may drive a workspace over ssh, and this is the one such workspace it may
- * not, since it is this computer wearing another kind's clothes. `names` is what this computer answers to. */
+ * name. `names` is what this computer answers to. */
 export function sshDialsThisComputer(reach: SshReach, names: readonly string[]): boolean {
   const host = reach.host.toLowerCase().replace(/\.$/, "");
   if (LOOPBACK_NAMES.has(host) || host.startsWith("127.")) return true;
@@ -777,7 +755,7 @@ export class SshMachine implements Machine {
     throw new Error("a machine reached over ssh cannot be resumed");
   }
 
-  /** Deleting an ssh workspace drops its record: the machine is the person's own and wsp never made it. */
+  /** The machine is the person's own and wsp never made it, so nothing here ends it. */
   async kill(): Promise<void> {}
 
   async state(): Promise<MachineState> {
@@ -842,37 +820,9 @@ export interface SshBackendOptions {
   hostName?: (reach: SshReach) => Promise<string | undefined>;
 }
 
-/** The backend for every ssh machine a host has a record of. It holds no fleet of its own: a machine that already
- * exists is known by the record that names it, so get answers from the id and list answers with nothing. */
-export class SshBackend implements MachineBackend {
-  readonly capabilities: Capabilities = {
-    liveCloneForks: false,
-    replacesMachine: false, // the machine is the person's own: wsp made it no image and throws it away for nothing
-    previewUrls: false,
-    signedUrls: false,
-    callbackRelay: false,
-    diskSnapshots: false,
-    images: false, // the machine is the person's own and wsp keeps no copy of its disk
-    snapshotsAnyLife: false,
-    snapshotListing: false,
-    templates: false,
-    sizes: [],
-    // The machine is the person's own: nothing on it was made by wsp and nothing on it is thrown away, so a turn's
-    // access starts at what its harness asks for rather than at skip-everything.
-    kept: true,
-    // wsp reaches this machine and nothing more: a project on it is worked where it sits, and no copy of it is made.
-    copies: false,
-    ownNetwork: false,
-  };
-
-  /** Nothing wsp runs is billed here, and no size is a default on a machine that already exists: every record
-   * carries what its own machine answered with. */
-  readonly pricing: BackendPricing = {
-    rateUsdPerHour: () => 0,
-    defaultSize: { cpu: 0, memMb: 0 },
-    snapshotStorage: NO_SNAPSHOT_STORAGE,
-  };
-
+/** The reads a host makes of a computer over ssh before it joins it: the machine itself, the key it answers with and
+ * where this computer's client keeps that key. */
+export class SshBackend {
   private readonly transport: SshTransport;
   private readonly hostKey: SshHostKeyReader;
   private readonly knownHosts: (reach: SshReach) => Promise<{ file?: string; target?: string }>;
@@ -885,25 +835,6 @@ export class SshBackend implements MachineBackend {
     this.knownHosts = opts.knownHosts ?? knownHostsWritten;
     this.offered = opts.offeredKey ?? offeredHostKey;
     this.hostName = opts.hostName ?? sshHostName;
-  }
-
-  async create(): Promise<Machine> {
-    throw new Error("a machine reached over ssh already exists; wsp records it, it does not make it");
-  }
-
-  async get(id: string): Promise<Machine> {
-    const reach = parseSshMachineId(id);
-    if (reach === undefined) throw new Error(`${id} is not a machine this host reaches over ssh`);
-    return new SshMachine(reach, this.transport);
-  }
-
-  /** The persisted records are the fleet: nothing on the far side lists the machines a person reaches over ssh. */
-  async list(): Promise<{ id: string; state: MachineState; labels: Record<string, string> }[]> {
-    return [];
-  }
-
-  async deleteSnapshot(): Promise<void> {
-    throw new Error("a machine reached over ssh holds no snapshots");
   }
 
   /** Reads a machine over ssh and hands back the handle its record stands on, so the one call that records a

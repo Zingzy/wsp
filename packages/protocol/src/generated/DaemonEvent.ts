@@ -8,7 +8,7 @@ import type { Usage } from "./Usage.js";
 /**
  * Every frame the daemon pushes without being asked, keyed on `type` as the zod union is.
  */
-export type DaemonEvent = { "type": "daemon.hello", root: string, version?: number, } | { "type": "pty.data", ptyId: string, data: string, } | { "type": "pty.exit", ptyId: string, exitCode: number, signal?: number, } | { "type": "port.open", port: number, pid?: number, process?: string, loopback?: boolean, } | { "type": "port.close", port: number, pid?: number, process?: string, command?: string, exited?: boolean, 
+export type DaemonEvent = { "type": "daemon.hello", root: string, version: number, } | { "type": "pty.data", ptyId: string, data: string, } | { "type": "pty.exit", ptyId: string, exitCode: number, signal?: number, } | { "type": "port.open", port: number, pid?: number, process?: string, loopback?: boolean, } | { "type": "port.close", port: number, pid?: number, process?: string, command?: string, exited?: boolean, 
 /**
  * When the close was seen, as the node daemon stamps it: an ISO date, never a number.
  */
