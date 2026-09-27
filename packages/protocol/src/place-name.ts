@@ -5,7 +5,7 @@
 import type { PlaceView, WorkspaceView } from "./index.js";
 import { HERE_PLACE_ID } from "./place-word.js";
 import { workspacePlaceId } from "./place-state.js";
-import { PROVIDER_KEY_WORDS } from "./format.js";
+import { providerKeyName } from "./format.js";
 import { isLocalWorkspace, whereWord } from "./workspace-state.js";
 
 /** Whether this row is the computer the host runs on: the one predicate, read by id and never by position. */
@@ -20,7 +20,7 @@ export const isProviderPlace = (place: PlaceView): boolean => place.kind === "pr
 export function placeName(place: PlaceView): string {
   if (place.label !== undefined) return place.label;
   if (!isProviderPlace(place)) return place.name;
-  return PROVIDER_KEY_WORDS[place.name]?.name ?? place.name;
+  return providerKeyName(place.name);
 }
 
 /** The computer the host runs on, by its own name; empty until the places list holds that row. */
@@ -43,5 +43,5 @@ export function workspaceComputerName(places: readonly PlaceView[], workspace: P
   if (isLocalWorkspace(workspace)) return hereName(places);
   // A provider's rows arrive a moment after a host restarts: until then it goes by the name its words row gives it,
   // never by the id its record holds.
-  return whereWord(workspace, workspace.provider === undefined ? undefined : PROVIDER_KEY_WORDS[workspace.provider]?.name);
+  return whereWord(workspace, workspace.provider === undefined ? undefined : providerKeyName(workspace.provider));
 }

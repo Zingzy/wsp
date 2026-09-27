@@ -39,7 +39,8 @@ import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine, noPlaceSystemLine } from "../src/daemon-binary.js";
 import { ADD_FOUND_END, ADD_TAKEN_LINE, DAEMON_GONE_LINE, addFound, addFoundScript, addUndoScript, daemonFlags, joinedAddWrites, joinedLine, joinedPlace, loginFilesStep, PLACE_JOINED_LINE, profileSourceLine, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
-import { computerLines, hostPlatform, placeLines } from "../src/verbs.js";
+import { computerLines, hostPlatform, placeLines, placeNames } from "../src/verbs.js";
+import { namesPlace } from "@wsp/protocol";
 import { pinnedDroppingPort, refusedPort } from "../../runtime/test/held-port.js";
 import {
   ADD_FLAGS_REFUSAL,
@@ -454,6 +455,20 @@ describe("the table wsp places prints", () => {
 
   it("says how to get one when the host holds none", () => {
     expect(placeLines([]).join("")).toContain("wsp add prints the join line");
+  });
+
+  it("names a cloud by the name the app gives it, Boat and Solari, never the id stored state holds, and takes either after --on in any case", async () => {
+    const boat: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.16, takesForks: true };
+    const first = (line: string): string => line.split(/\s{2,}/)[0]!;
+    expect(computerLines([rows[1]!, boat, rows[2]!], "darwin").slice(1).map(first)).toEqual(["box", "Boat", "Solari"]);
+    // The computer column of workspaces, threads and projects reads the same names.
+    const names = await placeNames({ request: async () => ({ places: [...rows, boat] }) } as unknown as Parameters<typeof placeNames>[0]);
+    expect([names.get("p_1"), names.get("box"), names.get("solari")]).toEqual(["box", "Boat", "Solari"]);
+    for (const word of ["Boat", "boat", "BOAT", "box", "BOX"]) expect(namesPlace(boat, word), word).toBe(true);
+    expect(namesPlace(boat, "solari")).toBe(false);
+    // A joined computer is named by the word its owner gave it, exactly.
+    expect(namesPlace(rows[1]!, "box")).toBe(true);
+    expect(namesPlace(rows[1]!, "Box")).toBe(false);
   });
 
   it("says on the row what a copy of the image there is doing, and nothing where the copy stands", () => {

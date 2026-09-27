@@ -14,8 +14,9 @@ const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 /** The old product's words, as a line a person reads would carry them. */
 const OLD = [/Box by ASCII/, /\bBox API key\b/, /\bBOX_API_KEY\b/];
 
-/** Where every word a person reads is written: each package's and app's source, the skill, the docs, the READMEs
- * and the tool list the Rust server serves. A test file says what the words were, so it is not one of them. */
+/** Where every word a person reads is written: each package's and app's source and page, the skill, the docs site,
+ * the repo's docs, the READMEs and the tool list the Rust server serves. A test file says what the words were, so it
+ * is not one of them. */
 function readWords(): { path: string; text: string }[] {
   const files: string[] = [];
   const walk = (at: string): void => {
@@ -23,16 +24,16 @@ function readWords(): { path: string; text: string }[] {
       if (name === "node_modules" || name === "dist" || name.startsWith(".")) continue;
       const path = join(at, name);
       if (statSync(path).isDirectory()) walk(path);
-      else if (/\.(ts|tsx|mjs|js|md|json|rs)$/.test(name) && !/\.test\.tsx?$/.test(name)) files.push(path);
+      else if (/\.(ts|tsx|mjs|js|md|mdx|html|json|rs)$/.test(name) && !/\.test\.tsx?$/.test(name)) files.push(path);
     }
   };
   for (const group of ["packages", "apps"])
     for (const name of readdirSync(join(ROOT, group))) {
       const src = join(ROOT, group, name, "src");
       if (statSync(join(ROOT, group, name)).isDirectory() && readdirSync(join(ROOT, group, name)).includes("src")) walk(src);
-      if (readdirSync(join(ROOT, group, name)).includes("README.md")) files.push(join(ROOT, group, name, "README.md"));
+      for (const page of ["README.md", "index.html"]) if (readdirSync(join(ROOT, group, name)).includes(page)) files.push(join(ROOT, group, name, page));
     }
-  for (const dir of ["skills", "docs", "daemon/crates/wsp-mcp/record"]) walk(join(ROOT, dir));
+  for (const dir of ["skills", "docs", "apps/docs/content", "daemon/crates/wsp-mcp/record"]) walk(join(ROOT, dir));
   files.push(join(ROOT, "README.md"));
   return files.map(path => ({ path: path.slice(ROOT.length), text: readFileSync(path, "utf8") }));
 }
