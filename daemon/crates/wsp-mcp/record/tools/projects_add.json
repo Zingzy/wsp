@@ -1,7 +1,7 @@
 {
   "cloudOff": {
     "name": "projects_add",
-    "description": "Records a project: one source on one computer, which every workspace of it is a copy for. A folder on the computer the app runs on is copied beside itself for each workspace, and a repo is cloned by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo without a computer to clone it, and a source already recorded on that computer are each refused in one line. The answer is the project, whose name is what new takes.",
+    "description": "Records a project: one source on one computer, which every workspace of it is a copy for. A folder on the computer the app runs on is copied beside itself for each workspace. A repo is cloned into the empty folder named with into on the computer the app runs on, which is then a folder project there, or by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo with neither into nor on, a folder to clone into that holds something, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what new takes.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -11,7 +11,11 @@
         },
         "on": {
           "type": "string",
-          "description": "the computer that clones the repo, by the name computers lists; a repo needs one and a folder takes none"
+          "description": "the computer that clones the repo, by the name computers lists; a folder, and a repo cloned with into, take none"
+        },
+        "into": {
+          "type": "string",
+          "description": "an absolute path on the computer the app runs on, absent or an empty folder, to clone the repo into; the project is then that folder"
         },
         "name": {
           "type": "string",
@@ -252,7 +256,7 @@
   },
   "cloudOn": {
     "name": "projects_add",
-    "description": "Records a project: one source on one computer, which every workspace of it is a copy for. A folder on the computer the app runs on is copied beside itself for each workspace, and a repo is cloned by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo without a computer to clone it, and a source already recorded on that computer are each refused in one line. The answer is the project, whose name is what new takes.",
+    "description": "Records a project: one source on one computer, which every workspace of it is a copy for. A folder on the computer the app runs on is copied beside itself for each workspace. A repo is cloned into the empty folder named with into on the computer the app runs on, which is then a folder project there, or by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo with neither into nor on, a folder to clone into that holds something, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what new takes.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -262,7 +266,11 @@
         },
         "on": {
           "type": "string",
-          "description": "the computer that clones the repo, by the name computers lists; a repo needs one and a folder takes none"
+          "description": "the computer that clones the repo, by the name computers lists; a folder, and a repo cloned with into, take none"
+        },
+        "into": {
+          "type": "string",
+          "description": "an absolute path on the computer the app runs on, absent or an empty folder, to clone the repo into; the project is then that folder"
         },
         "name": {
           "type": "string",
