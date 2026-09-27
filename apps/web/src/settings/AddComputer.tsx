@@ -9,7 +9,7 @@
 // host answered.
 import { CheckIcon, ChevronRightIcon, CloudIcon, CopyIcon, HashIcon, LaptopIcon, ServerIcon, TerminalIcon, UserIcon, XIcon, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { PLACES_WORDS, PLACE_INSTALL, PROVIDER_KEY_WORDS, PlaceAddStep, placeAddSheetWord, placeBuildsNoImageLine, type InitSetup, type PlaceAddJob, type PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, PLACE_INSTALL, PROVIDER_KEY_WORDS, PlaceAddStep, providerKeyName, placeAddSheetWord, placeBuildsNoImageLine, type InitSetup, type PlaceAddJob, type PlaceView } from "@wsp/protocol";
 import { AddButton } from "../components/ui/add-button.js";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
@@ -29,6 +29,7 @@ import { isProviderPlace, placeName } from "./places.js";
 import { Card } from "./rows.js";
 import { useSettingsContext } from "./settingsContext.js";
 import { INPUT, ProviderKey } from "./ProviderKey.js";
+import { cloudsOffered } from "./providers.js";
 import { RefusalSlot } from "./sheetParts.js";
 
 const MINE = ADD_COMPUTER_WORDS;
@@ -106,10 +107,10 @@ function CodePicture() {
   );
 }
 
-function RoadPicker({ value, onChange }: { value: AddRoad | null; onChange: (road: AddRoad) => void }) {
+function RoadPicker({ value, onChange, setup }: { value: AddRoad | null; onChange: (road: AddRoad) => void; setup: InitSetup | null }) {
   return (
     <div role="radiogroup" aria-label={MINE.title} className="grid grid-cols-3 gap-4 max-sm:grid-cols-1" data-k="add-roads">
-      {(Object.keys(ROADS) as AddRoad[]).map(road => {
+      {roadsFor(setup).map(road => {
         const chosen = road === value;
         return (
           <button key={road} type="button" role="radio" aria-checked={chosen} data-add-road={road} onClick={() => onChange(road)} className="group flex cursor-pointer flex-col gap-2.5 text-left outline-none">
@@ -124,7 +125,7 @@ function RoadPicker({ value, onChange }: { value: AddRoad | null; onChange: (roa
             </span>
             <span className="flex flex-col gap-0.5 px-0.5">
               <span className={cn("text-[13px] transition-colors duration-150", chosen ? "text-foreground" : "text-foreground/80 group-hover:text-foreground")}>{ROADS[road].title}</span>
-              <span className="font-mono text-[11px] text-muted-foreground">{ROADS[road].line}</span>
+              <span className="font-mono text-[11px] text-muted-foreground">{ROADS[road].line(setup)}</span>
             </span>
           </button>
         );
@@ -373,7 +374,9 @@ function CloudRoad({ setup }: { setup: InitSetup | null }) {
   return (
     <RoadBody>
       <div className="flex flex-col divide-y divide-border">
-        {Object.entries(PROVIDER_KEY_WORDS).map(([id, words]) => {
+        {cloudsOffered(setup).map(id => {
+          const words = PROVIDER_KEY_WORDS[id];
+          if (words === undefined) return null;
           const listed = places.find(p => isProviderPlace(p) && p.id === id);
           return (
             <ProviderKey key={id} id={id} words={words} held={setup?.keys[id] === true} kept={kept.includes(id)} onKept={onKept(id)}>
@@ -461,18 +464,21 @@ function Step({ n, word, children }: { n: number; word: string; children: ReactN
 
 interface Road {
   title: string;
-  line: string;
+  line: (setup: InitSetup | null) => string;
   picture: ReactNode;
   panel: (at: { setup: InitSetup | null; now: () => number }) => ReactNode;
 }
 
 /** Every road Add a computer offers, in the order the picker draws them: a new road is one entry here. */
 const ROADS = {
-  ssh: { title: "Your own server", line: "over ssh", picture: <SshPicture />, panel: ({ now }) => <SshRoad now={now} /> },
-  cloud: { title: "A cloud", line: Object.values(PROVIDER_KEY_WORDS).map(p => p.name).join(" or "), picture: <CloudPicture />, panel: ({ setup }) => <CloudRoad setup={setup} /> },
-  code: { title: "A computer running wsp", line: "a Mac or PC you sit at", picture: <CodePicture />, panel: ({ now }) => <CodeRoad now={now} /> },
+  ssh: { title: "Your own server", line: () => "over ssh", picture: <SshPicture />, panel: ({ now }) => <SshRoad now={now} /> },
+  cloud: { title: "A cloud", line: setup => cloudsOffered(setup).map(providerKeyName).join(" or "), picture: <CloudPicture />, panel: ({ setup }) => <CloudRoad setup={setup} /> },
+  code: { title: "A computer running wsp", line: () => "a Mac or PC you sit at", picture: <CodePicture />, panel: ({ now }) => <CodeRoad now={now} /> },
 } satisfies Record<string, Road>;
 export type AddRoad = keyof typeof ROADS;
+
+/** The roads this host offers: every one, less the cloud where it registered none. */
+const roadsFor = (setup: InitSetup | null): AddRoad[] => (Object.keys(ROADS) as AddRoad[]).filter(road => road !== "cloud" || cloudsOffered(setup).length > 0);
 
 /** The panel, opened on `road` where its button names one, else on the picker with none picked. */
 export function AddComputer({ setup, now = () => Date.now(), road: first = null }: { setup: InitSetup | null; now?: () => number; road?: AddRoad | null }) {
@@ -489,7 +495,7 @@ export function AddComputer({ setup, now = () => Date.now(), road: first = null 
   }, [asked]);
   return (
     <div ref={root} className="flex flex-col gap-12" data-k="add-computer">
-      <RoadPicker value={road} onChange={setRoad} />
+      <RoadPicker value={road} onChange={setRoad} setup={setup} />
       {road === null ? null : (
         <section key={road} data-k={`road-${road}`} className="flex flex-col gap-6 motion-safe:animate-[road-in_200ms_ease-out]">
           <header className="text-[15px] font-medium text-foreground">{ROADS[road].title}</header>

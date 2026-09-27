@@ -22,6 +22,7 @@ import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 runsFromItsOwnFolder();
 
@@ -146,7 +147,7 @@ describe("wsp up", () => {
     return handle;
   }
 
-  it("serves the app over a state file with a sealed golden and prints the app, runtime and state lines", async () => {
+  it.runIf(CLOUD_ON)("serves the app over a state file with a sealed golden and prints the app, runtime and state lines", async () => {
     stateFile({ goldens: { default: SEALED_GOLDEN } });
     const lines: string[] = [];
     const handle = await started(lines);
@@ -587,7 +588,7 @@ describe("wsp up", () => {
       expect(readdirSync(folder)).not.toContain(".env");
     });
 
-    it("takes the pick out of the .env beside that state, and a wired provider gets no such line", async () => {
+    it.runIf(CLOUD_ON)("takes the pick out of the .env beside that state, and a wired provider gets no such line", async () => {
       const { state, dialled } = elsewhere("WSP_PROVIDER=box\n");
       const lines: string[] = [];
       await serving(state, lines);
