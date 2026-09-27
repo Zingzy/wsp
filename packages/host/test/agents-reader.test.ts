@@ -9,7 +9,7 @@ import type { ExecResult, Machine } from "@wsp/engine";
 import { controlNameRefusal, placeProvisionPaths } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentHome, SECRET, type AgentHome } from "../../collect/test/agent-home.js";
-import { agentsReader } from "../src/agents-reader.js";
+import { READER_CLOSED, agentsReader } from "../src/agents-reader.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 const roots: string[] = [];
@@ -237,5 +237,40 @@ describe("the agents report off this computer and off a workspace", () => {
     const reader = agentsReader({ vault: () => ({}), here: () => here(at) });
     expect((await reader.read({ kind: "here", projects: [] })).projects).toEqual([]);
     expect(await reader.read({ kind: "here" })).not.toHaveProperty("projects");
+  });
+});
+
+describe("closing the agents reader", () => {
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const until = async (ok: () => boolean, what: string): Promise<void> => {
+    for (const end = Date.now() + 2_000; !ok(); await new Promise(r => setTimeout(r, 20))) if (Date.now() > end) throw new Error(`never ${what}`);
+  };
+
+  it("ends every probe a read here started, one whose agent never answers among them, and refuses that read and every later one", async () => {
+    const at = fixture();
+    const pids = join(at.root, "pids");
+    writeStub(join(at.bin, "claude"), `#!/bin/sh\necho $$ >> '${pids}'\nexec sleep 600\n`);
+    // GNU timeout leads a group of its own; this one does the same on a computer that has none, as a Mac does.
+    writeStub(join(at.bin, "timeout"), `#!/bin/sh\nshift\nexec perl -e 'setpgrp(0, 0); exec @ARGV' "$@"\n`);
+    const started = (): number[] => (existsSync(pids) ? readFileSync(pids, "utf8").split("\n").filter(l => l !== "").map(Number) : []);
+    const reader = agentsReader({ vault: () => ({}), here: () => here(at) });
+    const read = reader.read({ kind: "here" }, { latest: false });
+    await until(() => started().length === 2, "asked claude for its version and its sign-in");
+    try {
+      reader.close();
+      await expect(read).rejects.toThrow(READER_CLOSED);
+      await expect(reader.read({ kind: "here" }, { latest: false })).rejects.toThrow(READER_CLOSED);
+      await expect(reader.tools({ kind: "here" }, { key: "k", agent: "claude", name: "lit" })).rejects.toThrow(READER_CLOSED);
+      await until(() => started().every(pid => !alive(pid)), "ended claude's probes");
+    } finally {
+      for (const pid of started().filter(alive)) process.kill(pid, "SIGKILL");
+    }
   });
 });

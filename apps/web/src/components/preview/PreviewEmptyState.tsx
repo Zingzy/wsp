@@ -1,13 +1,19 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/preview/PreviewEmptyState.tsx at 57a66608 (MIT).
 // useDiscoveredLocalServers is the `servers` prop; threadRef, environmentId and configuredUrls dropped.
-import { Globe, History, RadioTower } from "lucide-react";
-
 import type { PreviewableServer } from "../../adapt/view-model";
 import { relativeLabel, type BrowserHistoryEntry } from "../../browser/recents";
-import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "../ui/empty";
+import { MICRO_LABEL } from "../../lib/microLabel";
+import { cn } from "../../lib/utils";
+import { Empty, EmptyTitle } from "../ui/empty";
 
 import { PreviewLocalServerCard } from "./PreviewLocalServerCard";
 import { PreviewRecentUrlCard } from "./PreviewRecentUrlCard";
+
+/** What the tab says while nothing has listened and nothing was opened: one quiet sentence. */
+export const PREVIEW_EMPTY = "No preview yet. Type a port above or run a dev script, and servers listening on this task show up here.";
+
+const GROUP_LABEL = cn(MICRO_LABEL, "px-1 text-muted-foreground");
+const ROWS = "-mx-1 flex flex-col gap-0.5";
 
 interface Props {
   servers: ReadonlyArray<PreviewableServer>;
@@ -23,14 +29,7 @@ export function PreviewEmptyState({ servers, recentEntries, onRemoveRecent, onOp
   if (servers.length === 0 && recents.length === 0) {
     return (
       <Empty>
-        <EmptyMedia variant="icon">
-          <Globe className="size-4.5 text-muted-foreground" />
-        </EmptyMedia>
-        <EmptyTitle>No preview yet</EmptyTitle>
-        <EmptyDescription>
-          Type a port above, or run a dev script. Servers listening on this task will show up
-          here automatically.
-        </EmptyDescription>
+        <EmptyTitle className="max-w-sm">{PREVIEW_EMPTY}</EmptyTitle>
       </Empty>
     );
   }
@@ -39,12 +38,9 @@ export function PreviewEmptyState({ servers, recentEntries, onRemoveRecent, onOp
     <div className="flex h-full min-h-0 overflow-y-auto px-5 py-8">
       <div className="mx-auto flex w-full max-w-xl flex-col gap-6">
         {recents.length > 0 ? (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <History className="size-4 shrink-0" />
-              <h2 className="font-medium">Recently used</h2>
-            </div>
-            <div className="flex flex-col divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70 bg-background">
+          <div className="flex flex-col gap-2">
+            <h2 className={GROUP_LABEL}>Recently used</h2>
+            <div className={ROWS}>
               {recents.map((entry) => (
                 <PreviewRecentUrlCard
                   key={entry.url}
@@ -58,12 +54,9 @@ export function PreviewEmptyState({ servers, recentEntries, onRemoveRecent, onOp
           </div>
         ) : null}
         {servers.length > 0 ? (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <RadioTower className="size-4 shrink-0" />
-              <h2 className="font-medium">Local servers</h2>
-            </div>
-            <div className="flex flex-col divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70 bg-background">
+          <div className="flex flex-col gap-2">
+            <h2 className={GROUP_LABEL}>Local servers</h2>
+            <div className={ROWS}>
               {servers.map((server) => (
                 <PreviewLocalServerCard
                   key={`${server.host}:${server.port}`}

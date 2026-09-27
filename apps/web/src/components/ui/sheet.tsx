@@ -5,19 +5,10 @@ import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "./button";
-import { ScrollArea } from "./scroll-area";
 
 const Sheet = SheetPrimitive.Root;
 
 const SheetPortal = SheetPrimitive.Portal;
-
-function SheetTrigger(props: SheetPrimitive.Trigger.Props) {
-  return <SheetPrimitive.Trigger data-slot="sheet-trigger" {...props} />;
-}
-
-function SheetClose(props: SheetPrimitive.Close.Props) {
-  return <SheetPrimitive.Close data-slot="sheet-close" {...props} />;
-}
 
 function SheetBackdrop({ className, ...props }: SheetPrimitive.Backdrop.Props) {
   return (
@@ -88,7 +79,7 @@ function SheetPopup({
             side === "right" &&
               "col-start-2 w-[calc(100%-(--spacing(12)))] max-w-md border-s data-ending-style:translate-x-8 data-starting-style:translate-x-8",
             variant === "inset" &&
-              "before:hidden sm:rounded-2xl sm:border sm:before:rounded-[calc(var(--radius-2xl)-1px)] sm:**:data-[slot=sheet-footer]:rounded-b-[calc(var(--radius-2xl)-1px)]",
+              "before:hidden sm:rounded-[16px] sm:border sm:before:rounded-[15px]",
             // An inset sheet at a side is as tall as what it holds: it stands at the top of the padded viewport and
             // grows downward, and max-h-full caps it at the window less that padding, past which its panel scrolls.
             variant === "inset" && (side === "right" || side === "left") && "self-start",
@@ -114,95 +105,27 @@ function SheetPopup({
 }
 
 function SheetHeader({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      className={cn(
-        "flex flex-col gap-2 p-6 in-[[data-slot=sheet-popup]:has([data-slot=sheet-panel])]:pb-3 max-sm:pb-4",
-        className,
-      )}
-      data-slot="sheet-header"
-      {...props}
-    />
-  );
-}
-
-function SheetFooter({
-  className,
-  variant = "default",
-  ...props
-}: React.ComponentProps<"div"> & {
-  variant?: "default" | "bare";
-}) {
-  return (
-    <div
-      className={cn(
-        "flex flex-col-reverse gap-2 px-6 sm:flex-row sm:justify-end",
-        variant === "default" && "border-t bg-muted/72 py-4",
-        variant === "bare" &&
-          "in-[[data-slot=sheet-popup]:has([data-slot=sheet-panel])]:pt-3 pt-4 pb-6",
-        className,
-      )}
-      data-slot="sheet-footer"
-      {...props}
-    />
-  );
+  return <div className={cn("flex flex-col gap-1 px-5 pt-4 pb-1", className)} data-slot="sheet-header" {...props} />;
 }
 
 function SheetTitle({ className, ...props }: SheetPrimitive.Title.Props) {
-  return (
-    <SheetPrimitive.Title
-      className={cn("font-heading font-semibold text-xl leading-none", className)}
-      data-slot="sheet-title"
-      {...props}
-    />
-  );
+  return <SheetPrimitive.Title className={cn("font-medium text-[15px] leading-5", className)} data-slot="sheet-title" {...props} />;
 }
 
 function SheetDescription({ className, ...props }: SheetPrimitive.Description.Props) {
   return (
-    <SheetPrimitive.Description
-      className={cn("text-muted-foreground text-sm", className)}
-      data-slot="sheet-description"
-      {...props}
-    />
-  );
-}
-
-function SheetPanel({
-  className,
-  scrollFade = true,
-  ...props
-}: React.ComponentProps<"div"> & { scrollFade?: boolean }) {
-  return (
-    // The body takes what the header and the footer leave and shrinks below its content: a sheet stands at its
-    // content's height until the popup's cap, and past it this is the box that scrolls, so the footer stays in
-    // view. The column is what makes the scroller itself shrink: its height is a percentage of a box the flex
-    // layout sized, which resolves to the content's height, and the sheet would clip rather than scroll.
-    <ScrollArea className="flex min-h-0 flex-1 flex-col" scrollFade={scrollFade}>
-      <div
-        className={cn(
-          "p-6 in-[[data-slot=sheet-popup]:has([data-slot=sheet-header])]:pt-1 in-[[data-slot=sheet-popup]:has([data-slot=sheet-footer]:not(.border-t))]:pb-1",
-          className,
-        )}
-        data-slot="sheet-panel"
-        {...props}
-      />
-    </ScrollArea>
+    <SheetPrimitive.Description className={cn("text-[13px] leading-5 text-muted-foreground", className)} data-slot="sheet-description" {...props} />
   );
 }
 
 export {
   Sheet,
-  SheetTrigger,
   SheetPortal,
-  SheetClose,
   SheetBackdrop,
   SheetBackdrop as SheetOverlay,
   SheetPopup,
   SheetPopup as SheetContent,
   SheetHeader,
-  SheetFooter,
   SheetTitle,
   SheetDescription,
-  SheetPanel,
 };

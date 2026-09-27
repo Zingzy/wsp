@@ -132,7 +132,7 @@ describe("export project dialog", () => {
     await codexRow(root);
     expect(sections(root).map(s => s.dataset["k"])).toEqual(["source", "dest", "agents", "summary"]);
     expect(new Set(sections(root).map(s => s.className)).size).toBe(1);
-    expect(root.querySelectorAll("[data-slot=dialog-panel] .rounded-md.border")).toHaveLength(0);
+    expect(root.querySelectorAll("[data-slot=dialog-panel] .rounded-md.border:not([data-slot=input-control])")).toHaveLength(0);
     const rows = within(root.querySelector<HTMLElement>("[data-k=agents]")!).getAllByRole("checkbox");
     for (const row of rows) expect(row.getAttribute("data-tone")).toBe("neutral");
     expect(rows.map(r => r.getAttribute("aria-label"))).toEqual(["Claude Code", "Codex"]);

@@ -15,7 +15,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "../../lib/utils";
-import { Badge } from "../ui/badge";
+import { Label } from "../ui/label";
 import {
   Dialog,
   DialogDescription,
@@ -107,12 +107,9 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   };
 
   return (
-    <div className="rounded-[24px] border border-border/80 bg-card/70 p-4 sm:p-5">
+    <div className="rounded-xl border border-border/80 bg-card/70 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <Badge variant="secondary">Plan</Badge>
-          <p className="truncate text-sm font-medium text-foreground">{title}</p>
-        </div>
+        <p className="min-w-0 truncate text-sm font-medium text-foreground">{title}</p>
         <Menu>
           <MenuTrigger
             render={<Button aria-label="Plan actions" size="icon-xs" variant="outline" />}
@@ -176,7 +173,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             }
           }}
         >
-          <DialogPopup className="max-w-xl">
+          <DialogPopup>
             <DialogHeader>
               <DialogTitle>Save plan to a folder</DialogTitle>
               <DialogDescription>
@@ -184,8 +181,8 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
               </DialogDescription>
             </DialogHeader>
             <DialogPanel className="space-y-3">
-              <label htmlFor={savePathInputId} className="grid gap-1.5">
-                <span className="text-xs font-medium text-foreground">Folder</span>
+              <div className="grid gap-1.5">
+                <Label htmlFor={savePathInputId}>Folder</Label>
                 <Input
                   id={savePathInputId}
                   value={savePath}
@@ -197,7 +194,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
                   spellCheck={false}
                   disabled={isSavingToWorkspace}
                 />
-              </label>
+              </div>
               <RefusalSlot k="plan-path-refusal" {...pathRefusal} />
             </DialogPanel>
             <DialogFooter>

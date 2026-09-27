@@ -304,55 +304,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   }
 }
 
-@utility alert-glass {
-  --alert-glass-tint: transparent;
-  background:
-    linear-gradient(
-      color-mix(in srgb, var(--alert-glass-tint) 4%, transparent),
-      color-mix(in srgb, var(--alert-glass-tint) 4%, transparent)
-    ),
-    color-mix(in srgb, var(--background) var(--glass-opacity), transparent) !important;
-  @apply glass-backdrop;
-
-  &[data-variant="error"] {
-    --alert-glass-tint: var(--destructive);
-  }
-
-  &[data-variant="info"] {
-    --alert-glass-tint: var(--info);
-  }
-
-  &[data-variant="success"] {
-    --alert-glass-tint: var(--success);
-  }
-
-  &[data-variant="warning"] {
-    --alert-glass-tint: var(--warning);
-  }
-
-  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-    background: var(--background) !important;
-  }
-}
-
-@utility dialog-glass {
-  background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
-  @apply glass-backdrop;
-  border-color: color-mix(in srgb, var(--foreground) 10%, transparent);
-  box-shadow: 0 24px 64px -24px rgb(0 0 0 / 65%);
-
-  @variant dark {
-    border-color: color-mix(in srgb, var(--color-white) 8%, transparent);
-    box-shadow:
-      inset 0 1px rgb(255 255 255 / 4%),
-      0 24px 72px -20px rgb(0 0 0 / 90%);
-  }
-
-  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-    background: var(--popover) !important;
-  }
-}
-
 @utility dialog-backdrop {
   background: color-mix(in srgb, var(--background) 60%, transparent);
   -webkit-backdrop-filter: blur(4px);
@@ -797,6 +748,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --card-foreground: var(--foreground);
   --popover: var(--card);
   --popover-foreground: var(--foreground);
+  --popover-edge: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --dialog-shadow: 0 24px 64px -24px rgb(0 0 0 / 35%);
+  --input-fill: var(--card);
   --secondary: var(--muted);
   --secondary-foreground: var(--foreground);
   --placeholder: var(--muted-foreground);
@@ -851,6 +805,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
 
   @variant dark {
     --surface-raised: color-mix(in srgb, var(--background) 97%, var(--color-white));
+    --dialog-shadow: inset 0 1px rgb(255 255 255 / 4%), 0 24px 72px -20px rgb(0 0 0 / 90%);
+    --input-fill: color-mix(in oklab, #fff 2.5%, transparent);
     --error: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
     --error-surface: color-mix(in srgb, var(--error) 16%, transparent);
     --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);

@@ -15,7 +15,6 @@ import { CREATION_ASKED } from "../actions/format.js";
 import { Button } from "../components/ui/button.js";
 import { ScrollArea } from "../components/ui/scroll-area.js";
 import { APP_LOCALE, localZoneLabel } from "../lib/timestampFormat.js";
-import { MICRO_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { useStore, type Creation, type CreationLine } from "../protocol/store.js";
 import { FACT } from "../settings/format.js";
@@ -37,12 +36,12 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
   return (
     <div data-testid="workspace-creation" aria-busy={!failed} className="flex h-full min-h-0 flex-col items-center overflow-y-auto bg-background px-6 py-12 text-foreground sm:py-16">
       <div className="flex w-full max-w-xl flex-col items-center text-center">
-        <p className={cn(MICRO_LABEL, "text-muted-foreground")}>{failed ? "Creation failed" : "Creating task"}</p>
-        <h1 className="mt-2 w-full truncate text-2xl font-normal tracking-tight">{creation.name}</h1>
+        <p className="text-[13px] leading-5 text-muted-foreground">{failed ? "Creation failed" : "Creating thread"}</p>
+        <h1 className="mt-1 w-full truncate text-lg/7 font-medium tracking-[-0.01em]">{creation.name}</h1>
         <Squiggle failed={failed} className="mt-6" />
-        <div data-testid="creation-log" className="mt-6 h-32 w-full rounded-md border border-border/60 text-left">
+        <div data-testid="creation-log" className="mt-6 h-32 w-full text-left">
           <ScrollArea scrollFade>
-            <ol ref={log} aria-label="Creation log" aria-live="polite" className="flex flex-col gap-1.5 p-3 font-mono text-xs tabular-nums">
+            <ol ref={log} aria-label="Creation log" aria-live="polite" className="flex flex-col gap-1.5 py-3 font-mono text-xs tabular-nums">
               {creation.lines.length === 0 ? <li className="text-muted-foreground">{CREATION_ASKED}</li> : null}
               {creation.lines.map((line, i) => (
                 <LogLine key={i} line={line} current={i === creation.lines.length - 1} />

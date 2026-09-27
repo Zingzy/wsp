@@ -14,6 +14,7 @@ import { Dialog, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { baseName } from "../files/entries.js";
 import { desktopBridge } from "../lib/desktopShell.js";
+import { MICRO_LABEL } from "../lib/microLabel.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { hereName, isProviderPlace, placeName, placeTakesWorkspaces } from "../settings/places.js";
@@ -188,7 +189,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
         <span className="shrink-0 truncate">{baseName(row.path)}</span>
         {path === null ? <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{tilde(row.path, home)}</span> : <span className="flex-1" />}
         {added.has(row.path) ? (
-          <span className="shrink-0 font-mono text-xs text-muted-foreground">{ADD_PROJECT_WORDS.added}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">{ADD_PROJECT_WORDS.added}</span>
         ) : row.branch !== undefined ? (
           <span className="max-w-40 shrink-0 truncate font-mono text-xs text-muted-foreground">{row.branch}</span>
         ) : null}
@@ -200,7 +201,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={open => (open ? undefined : onClose())}>
-      <DialogPopup showCloseButton={false} className="gap-0 overflow-hidden p-0 sm:max-w-3xl" data-k="add-project">
+      <DialogPopup className="gap-0 overflow-hidden p-0 sm:max-w-3xl" data-k="add-project">
         <DialogTitle className="sr-only">{ADD_PROJECT_WORDS.title}</DialogTitle>
         <div className="flex h-14 items-center gap-3 border-b border-border px-4">
           <input
@@ -230,14 +231,14 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
           <Kbd>esc</Kbd>
         </div>
         <div className="grid h-[400px] grid-cols-[minmax(0,1fr)_210px] max-sm:grid-cols-1">
-          <div className="flex min-h-0 flex-col border-r border-border max-sm:border-r-0">
-            <div className="flex h-10 shrink-0 items-center px-5 text-xs text-muted-foreground">
-              {path !== null ? <span className="truncate font-mono">{tilde(path.dir, home)}</span> : here ? ADD_PROJECT_WORDS.reposOn(computer === undefined ? "" : placeName(computer)) : null}
+          <div className="flex min-h-0 flex-col">
+            <div className="flex h-10 shrink-0 items-center px-5 text-muted-foreground">
+              {path !== null ? <span className="truncate font-mono text-xs">{tilde(path.dir, home)}</span> : here ? <span className={cn(MICRO_LABEL, "truncate")}>{ADD_PROJECT_WORDS.reposOn(computer === undefined ? "" : placeName(computer))}</span> : null}
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{listBody}</div>
           </div>
           <aside className="flex min-h-0 flex-col overflow-y-auto p-2 pt-0 max-sm:hidden">
-            <span className="flex h-10 shrink-0 items-center px-2.5 text-xs text-muted-foreground">{ADD_PROJECT_WORDS.computers}</span>
+            <span className={cn(MICRO_LABEL, "flex h-10 shrink-0 items-center px-2.5 text-muted-foreground")}>{ADD_PROJECT_WORDS.computers}</span>
             {computers.map((place, at) => {
               const Glyph = glyphOf(place, at);
               return (
@@ -251,16 +252,16 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
               <PlusIcon aria-hidden className="size-4 shrink-0" />
               <span className="truncate">{ADD_PROJECT_WORDS.addComputer}</span>
             </button>
-            <span className="mt-4 flex h-10 shrink-0 items-center px-2.5 text-xs text-muted-foreground">{ADD_PROJECT_WORDS.look}</span>
+            <span className={cn(MICRO_LABEL, "mt-4 flex h-10 shrink-0 items-center px-2.5 text-muted-foreground")}>{ADD_PROJECT_WORDS.look}</span>
             <div className="flex flex-col gap-2 px-2.5" data-k="new-project-look">
               <IconSelect icon={icon} hue={hue} onChange={setIcon} className="w-full" />
               <HueSelect hue={hue} onChange={setHue} className="w-full" />
             </div>
           </aside>
         </div>
-        <div className="flex h-11 items-center gap-4 border-t border-border px-4">
+        <div className="flex h-11 items-center gap-4 px-4">
           {refusal !== null ? (
-            <span data-k="add-project-refusal" className="min-w-0 truncate font-mono text-xs text-destructive-foreground" title={refusal}>
+            <span data-k="add-project-refusal" className="min-w-0 truncate text-[13px] text-destructive-foreground" title={refusal}>
               {refusal}
             </span>
           ) : (

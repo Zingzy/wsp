@@ -43,7 +43,7 @@ export function SegmentedControl<T extends string>({
           key={segment.value}
           value={segment.value}
           data-segment={segment.value}
-          className={cn("inline-flex cursor-pointer items-center justify-center rounded-md px-3 text-xs leading-none text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-accent data-checked:text-foreground", segmentClassName)}
+          className={cn("inline-flex cursor-pointer items-center justify-center rounded-md px-3 text-[13px] leading-none text-muted-foreground outline-none transition-colors duration-150 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-checked:bg-accent data-checked:text-foreground", segmentClassName)}
         >
           {segment.label}
         </RadioPrimitive.Root>

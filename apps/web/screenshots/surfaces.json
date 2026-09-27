@@ -630,6 +630,143 @@
         1440
       ],
       "height": 1100
+    },
+    {
+      "name": "new-thread-dialog",
+      "at": "/",
+      "fixture": "mac-and-boxes",
+      "widths": [
+        1440
+      ],
+      "steps": [
+        "key:ControlOrMeta+k",
+        "type:create task",
+        "key:Enter"
+      ],
+      "wait": "k=landing"
+    },
+    {
+      "name": "new-thread-held",
+      "at": "/",
+      "fixture": "mac-and-boxes",
+      "widths": [
+        1440
+      ],
+      "steps": [
+        "key:ControlOrMeta+k",
+        "type:create task",
+        "key:Enter",
+        "key:Enter"
+      ],
+      "wait": "k=waiting"
+    },
+    {
+      "name": "add-project",
+      "at": "/",
+      "widths": [
+        1440
+      ],
+      "steps": [
+        "k=settings-row",
+        "k=settings-projects",
+        "k=add-project-button"
+      ],
+      "wait": "k=add-project"
+    },
+    {
+      "name": "export-dialog",
+      "at": "/",
+      "widths": [
+        1440
+      ],
+      "steps": [
+        "row-id=thread:redirect",
+        "key:ControlOrMeta+k",
+        "type:export",
+        "key:Enter"
+      ],
+      "wait": "k=progress",
+      "settleMs": 800
+    },
+    {
+      "name": "delete-dialog",
+      "at": "/",
+      "widths": [
+        1440
+      ],
+      "steps": [
+        "row-id=thread:redirect",
+        "key:ControlOrMeta+k",
+        "type:delete",
+        "key:Enter"
+      ],
+      "wait": "k=forget-refusal",
+      "settleMs": 800
+    },
+    {
+      "name": "browser-empty",
+      "at": "/",
+      "widths": [
+        1440
+      ],
+      "steps": [
+        "row-id=thread:redirect",
+        "surface-launch=preview"
+      ],
+      "wait": "right-panel-tabbar",
+      "settleMs": 800
+    },
+    {
+      "name": "diff-empty",
+      "at": "/",
+      "widths": [
+        1440
+      ],
+      "steps": [
+        "row-id=thread:redirect",
+        "surface-launch=diff"
+      ],
+      "wait": "right-panel-tabbar",
+      "settleMs": 800
+    },
+    {
+      "name": "long-prompt",
+      "at": "/",
+      "fixture": "long-prompt",
+      "widths": [
+        1440
+      ],
+      "steps": [
+        "row-id=thread:brief"
+      ],
+      "wait": "testid=composer-editor",
+      "settleMs": 800
+    },
+    {
+      "name": "composer-rest",
+      "at": "/",
+      "fixture": "tiles",
+      "widths": [
+        1440
+      ],
+      "steps": [
+        "row-id=thread:coupon"
+      ],
+      "wait": "testid=composer-editor",
+      "settleMs": 800
+    },
+    {
+      "name": "composer-running",
+      "at": "/",
+      "fixture": "tiles",
+      "widths": [
+        1440
+      ],
+      "steps": [
+        "row-id=thread:cart"
+      ],
+      "wait": "testid=composer-editor",
+      "settleMs": 800
     }
   ]
 }

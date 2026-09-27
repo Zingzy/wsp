@@ -15,7 +15,7 @@ export function FirstRun() {
   return (
     <div data-k="first-run" className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-12 text-center">
       <Mark aria-hidden className="size-12 text-muted-foreground/40" />
-      <h1 className="mt-6 text-base font-medium tracking-tight" data-k="title">
+      <h1 className="mt-6 text-lg/7 font-medium tracking-[-0.01em]" data-k="title">
         {FIRST_RUN_WORDS.title}
       </h1>
       <p className="mt-1.5 max-w-xs text-sm text-muted-foreground" data-k="sentence">

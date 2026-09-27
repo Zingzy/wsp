@@ -2811,8 +2811,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
   const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
   const hostId = opts.hostId ?? hostname();
-  /** What names this host's templates: the id's hex alone, in the class the provider's name field has taken. */
-  const templateHostId = templateHost(hostId);
 
   const vaultPathsOf = async (m: Machine): Promise<string[]> => {
     if (opts.vaultPaths) return opts.vaultPaths;
@@ -4100,6 +4098,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   });
 
   let owner = "";
+  /** The mark on every image this state makes: the host's id and this state file's owner, each in the class the
+   * provider's name field has taken. Two state files on one computer read one host id, and on Box a snapshot's name
+   * is its id, so the owner is what keeps one state's image from being the other's. */
+  const imageMark = (): string => templateHost(hostId) + templateHost(owner);
 
   /** The store holds the attempt's key and stamp before the provider hears of it: a retry the provider never answered
    * (the connection dropped, the process died) sends the same body under the same key and gets back the machine the
@@ -4285,8 +4287,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The machine a fork made, taken away and proven gone at the provider rather than at the delete's answer: a
    * DELETE Solari takes and does not act on would otherwise read as a machine that went. Rejects while the
-   * provider still holds it, which is what keeps a record naming it. */
-  const unfork = (entry: LiveWorkspace): Promise<void> => killUntilGone(backendFor(entry.record), entry.machine, opts.killConfirm);
+   * provider still holds it, which is what keeps a record naming it. A machine gone is marked, so one the provider
+   * lists running again is the sweep's to kill; a mark the store refuses is said, and the machine is still gone. */
+  const unfork = async (entry: LiveWorkspace): Promise<void> => {
+    const id = entry.machine.id;
+    await killUntilGone(backendFor(entry.record), entry.machine, opts.killConfirm);
+    await store.put(DROPPED, id, { machineId: id, at: new Date(clock.now()).toISOString() } satisfies DroppedMachine).catch((e: unknown) => {
+      console.warn(`machine ${id} is gone but its mark was not stored (${e instanceof Error ? e.message : String(e)}); should the provider list it running again, the sweep reports it rather than killing it`);
+    });
+  };
 
   /** The engine knows three phases. A pause in flight is a nap to it (the wake resumes either way); a gone record's
    * machine is a stand-in it only ever meets through rebuild, which replaces the machine whatever the phase says. */
@@ -5755,7 +5764,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await syncDisk(entry.machine);
       const disk = await diskUse(entry.machine);
       const createdAt = new Date(clock.now()).toISOString();
-      const snapshotId = await entry.ws.checkpoint(projectSnapshotName(templateHostId, project.name, createdAt.replace(/[:.]/g, "-"))).catch((e: unknown) => {
+      const snapshotId = await entry.ws.checkpoint(projectSnapshotName(imageMark(), project.name, createdAt.replace(/[:.]/g, "-"))).catch((e: unknown) => {
         if (e instanceof NotFirstLifeError) throw e;
         const said = snapshotRefusedLine(name, answerOf(e), disk);
         console.warn(said);
@@ -5809,7 +5818,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               console.warn(line);
               throw Object.assign(new Error(line), { kind: e.kind });
             });
-            await store.put(DROPPED, entry.machine.id, { machineId: entry.machine.id, at: new Date(clock.now()).toISOString() } satisfies DroppedMachine);
           }
           await drop(id);
         } finally {
@@ -6911,9 +6919,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (isHeldAway(entry.record.id)) return;
     const sweep = execFactoryFor(entry).sweep;
     if (sweep === undefined) return;
+    // Every running row's run and not this workspace's alone: the workspaces on one computer share its run folder,
+    // so a sweep that kept only its own would end the turns of the others.
     const held: string[] = [];
     for (const s of sessions.values()) {
-      if (s.view.workspaceId === entry.record.id && s.view.status === "running" && s.run !== undefined) held.push(s.run);
+      if (s.view.status === "running" && s.run !== undefined) held.push(s.run);
     }
     const swept = await sweep(held).catch((e: unknown) => {
       console.warn(`the runs on ${entry.record.id} were left as they are: ${e instanceof Error ? e.message : String(e)}`);
@@ -7673,13 +7683,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * with its doctor's reason, and a place that forks nothing refuses with NO_PROVIDER_LINE when no place here runs
    * workspaces, else naming the places that do, so nobody is sent to a provider they do not need. */
   const landingBackend = async (placeId: string | undefined): Promise<MachineBackend> => {
+    const at = await forkingAt(placeId);
+    if (at !== undefined) return at;
+    const running = (await buildPlaces()).map(r => r.name);
+    throw conflict(running.length === 0 ? NO_PROVIDER_LINE : placeForksNothingPickLine(placeName(placeId ?? places.wired), running));
+  };
+  /** The backend a fork on that place would land on, or nothing where it forks nothing, with no refusal worded: the
+   * refusal lists the places, and a list read while the records load waits on that load. */
+  const forkingAt = async (placeId: string | undefined): Promise<MachineBackend | undefined> => {
     // The first fork on a joined computer is where this host learns what that computer forks with; every road after
     // it reads the answer off the place's record.
     if (placeId !== undefined) await placeDoorOf().forkingBackend(placeId);
     const at = backendOfKind("cloud", placeId);
-    if (!forksNoMachines(at.capabilities)) return at;
-    const running = (await buildPlaces()).map(r => r.name);
-    throw conflict(running.length === 0 ? NO_PROVIDER_LINE : placeForksNothingPickLine(placeName(placeId ?? places.wired), running));
+    return forksNoMachines(at.capabilities) ? undefined : at;
   };
   const placeName = (place: string): string => placeDoor?.nameOf(place) ?? place;
   /** Where the image's own seal stands: the place the record names, or the provider this host forks on for a record
@@ -7860,7 +7876,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(copy === undefined && recipe.vaultPaths !== undefined ? { vaultPaths: recipe.vaultPaths } : {}),
           keepBuilder: keep,
           name,
-          hostId: templateHostId,
+          hostId: imageMark(),
         }),
         at,
       );
@@ -7914,7 +7930,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...build,
           backend: b,
           name: key,
-          hostId: templateHostId,
+          hostId: imageMark(),
           labels: { ...build.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() },
           ...(prior !== undefined ? { manifest: prior } : {}),
         }),
@@ -8282,13 +8298,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async storage() {
       await ready();
       if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
-      return snapshotStorage(await backend.listSnapshots(), backend.pricing.snapshotStorage, { hostId: templateHostId, recorded: await recordedImages(), now: clock.now() });
+      return snapshotStorage(await backend.listSnapshots(), backend.pricing.snapshotStorage, { hostId: imageMark(), recorded: await recordedImages(), now: clock.now() });
     },
 
     async orphans() {
       await ready();
       if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
-      const read = { hostId: templateHostId, recorded: await recordedImages(), now: clock.now() };
+      const read = { hostId: imageMark(), recorded: await recordedImages(), now: clock.now() };
       const rows = await backend.listSnapshots();
       const snapshots = splitByOwner(rows, read);
       const templates = templatesOf(backend);
@@ -8397,7 +8413,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const v of manifest?.versions ?? []) {
         if (v.templateId !== undefined) continue;
         try {
-          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, goldenName(templateHostId, key, v.version));
+          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, goldenName(imageMark(), key, v.version));
           const current = await copyOf(places.wired, key);
           if (current === undefined) throw new Error(`golden ${key} was dropped while its versions were being promoted`);
           await putCopy(places.wired, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });
@@ -8751,7 +8767,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const { placeId } = await landingPlace(computer);
     // A computer this host cannot read a backend for holds nothing of a project: the record still stands, as it
     // did before this road existed, and the road that would have to fork there says so itself when it is asked.
-    const at = await landingBackend(placeId).catch(() => undefined);
+    const at = await forkingAt(placeId).catch(() => undefined);
     const deps: LandingDeps = {
       async worker(o) {
         const forking = await landingBackend(placeId);
@@ -9141,10 +9157,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** A workspace machine of this setup's that no record claims is recorded again rather than killed: its record was
    * lost (a store the machine outlived), and it bills until a person can see and delete it. A running one whose
-   * workspace was deleted here is left unclaimed, so the engine kills it. The row is confirmed with one
-   * get(), so a row the listing lags on after a kill is skipped; a create in flight elsewhere is left its minute. A
-   * row the provider would not confirm (a failed read, a state that is neither running nor paused) is claimed in
-   * `known` all the same, so the engine spares it this sweep and the next one records it: a kill never rides on one read. */
+   * workspace was deleted here is left unclaimed, so the engine kills it. One this host cannot name is reported off
+   * its listing row alone: a get() resets the provider's idle timer (measured), so a read every sweep would keep awake
+   * the very machines it reports. A row about to be recorded is confirmed with one get(), so a row the listing lags on
+   * after a kill is skipped; a create in flight elsewhere is left its minute. A row the provider would not confirm (a
+   * failed read, a state that is neither running nor paused) is claimed in `known` all the same, so the engine spares
+   * it this sweep and the next one records it: a kill never rides on one read. */
   const adoptLost = async (listing: ListedMachine[], known: Set<string>, failed: ReapFailure[]): Promise<AdoptedMachine[]> => {
     const adopted: AdoptedMachine[] = [];
     const now = Date.now();
@@ -9156,6 +9174,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     for (const row of listing) {
       // The engine kills only a running row, so a paused one stays reported rather than silently left.
       if (known.has(row.id) || (dropped.has(row.id) && row.state === "running") || !lostWorkspace(row, owner, now)) continue;
+      // A stamped id another machine now holds is a body a rebuild or a wake replaced and failed to stop: the engine kills it.
+      const stamped = row.labels[WORKSPACE_LABEL];
+      if (stamped !== undefined && live.has(stamped)) continue;
+      const kept = stamped === undefined ? undefined : ((await store.get(WORKSPACE_NAMES, stamped)) as NamedWorkspace | undefined);
+      // A workspace is one project's copy, so a machine whose project this host cannot name is not a workspace
+      // here: it is reported rather than recorded, and the sweep's own --older-than is the road that ends it.
+      if (stamped === undefined || kept?.project === undefined || !projectsHeld.has(kept.project)) {
+        known.add(row.id);
+        failed.push({ id: row.id, message: `not recorded: this host holds no project for it, and a workspace is one project's copy; it is a machine of yours still running` });
+        continue;
+      }
       let machine: Machine;
       try {
         machine = observed(await backend.get(row.id));
@@ -9170,25 +9199,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         known.add(row.id);
         continue;
       }
-      // A stamped id another machine now holds is a body a rebuild or a wake replaced and failed to stop: the engine kills it.
-      const stamped = row.labels[WORKSPACE_LABEL];
-      if (stamped !== undefined && live.has(stamped)) continue;
-      const id = stamped ?? `ws_${randomBytes(4).toString("hex")}`;
-      // The name a person typed here outranks the one the fork stamped: the label is what the machine was forked
-      // under, and no provider road updates it.
-      const kept = stamped === undefined ? undefined : ((await store.get(WORKSPACE_NAMES, stamped)) as NamedWorkspace | undefined);
-      const named = kept?.name ?? row.labels[NAME_LABEL];
-      // A workspace is one project's copy, so a machine whose project this host cannot name is not a workspace
-      // here: it is reported rather than recorded, and the sweep's own --older-than is the road that ends it.
-      if (kept?.project === undefined || !projectsHeld.has(kept.project)) {
-        known.add(row.id);
-        failed.push({ id: row.id, message: `not recorded: this host holds no project for it, and a workspace is one project's copy; it is a machine of yours still running` });
-        continue;
-      }
       const bornAt = row.labels[CREATED_AT_LABEL];
       const record: WorkspaceRecord = {
-        id,
-        name: named !== undefined && nameRefusal(named) === undefined ? named : row.id,
+        id: stamped,
+        name: nameRefusal(kept.name) === undefined ? kept.name : row.id,
         kind: "cloud",
         project: kept.project,
         machineId: row.id,
@@ -9205,7 +9219,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (record.phase === "running") void syncDaemon(entry);
       bus.emit({ type: "workspace.created", workspace: view(record) });
       await emitStatus(entry, record.phase === "running" ? reachOf(entry) : "napping", RECORD_RESTORED);
-      adopted.push({ id: row.id, workspaceId: id, name: record.name, phase: record.phase });
+      adopted.push({ id: row.id, workspaceId: stamped, name: record.name, phase: record.phase });
     }
     return adopted;
   };
@@ -9407,6 +9421,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     close: async () => {
       idle.close();
+      // An agent's version or sign-in command that never answers would otherwise outlive this process.
+      opts.agentsReader?.close?.();
       // What this host started on a machine finishes before it lets that machine go: the boot fires a daemon sync
       // at every running workspace without waiting for it, and a write landing after the close is this process
       // touching a computer it no longer holds. Each sync is a read and a write, so the wait is milliseconds.

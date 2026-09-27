@@ -149,7 +149,9 @@ describe("the Diff header's branch", () => {
     provideTerminals(WS, terminals);
 
     render(<DiffSurface workspaceId={WS} theme="dark" />);
-    await waitFor(() => expect(document.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("refused"));
+    await act(() => new Promise<void>(resolve => setTimeout(resolve, 20)));
+    // The failed read leaves the header quiet: the branch, or nothing until it is known.
+    expect(document.querySelector("[data-diff-repo-state]")).toBeNull();
     up = true;
     act(() => terminals.feedStatus("live"));
     await waitFor(() => expect(document.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("repo"));

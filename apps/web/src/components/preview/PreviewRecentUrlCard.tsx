@@ -23,15 +23,15 @@ export function PreviewRecentUrlCard({ entry, visitedLabel, onOpen, onRemove }: 
       <button
         type="button"
         onClick={onOpen}
-        className="flex w-full items-center gap-3 px-3 py-3 pr-10 text-left hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex w-full items-center gap-3 rounded-md px-2 py-2 pr-10 text-left transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <PreviewFaviconIcon />
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-sm font-medium text-foreground">
+          <span className={entry.title ? "truncate text-sm text-foreground" : "truncate font-mono text-[13px] text-foreground"}>
             {entry.title ?? label}
           </span>
           <span className="truncate text-xs text-muted-foreground">
-            <Spaced parts={entry.title ? [label, visitedLabel] : [visitedLabel]} />
+            <Spaced parts={entry.title ? [<span className="font-mono">{label}</span>, visitedLabel] : [visitedLabel]} />
           </span>
         </div>
       </button>

@@ -1669,8 +1669,9 @@ function AssistantChangedFilesSectionInner({
 
 const MAX_COLLAPSED_USER_MESSAGE_LINES = 8;
 const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 600;
-const COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM = 1.75;
-const COLLAPSED_USER_MESSAGE_FADE_MASK = `linear-gradient(to bottom, black calc(100% - ${COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM}rem), transparent)`;
+/** The last lines fade out over this band, and the toggle stands in its clear bottom, so a clamped message ends in
+ * words going to nothing rather than a hard edge with a blank strip before the toggle. */
+const COLLAPSED_USER_MESSAGE_FADE_MASK = "linear-gradient(to bottom, black calc(100% - 5rem), transparent calc(100% - 1.5rem))";
 
 function shouldCollapseUserMessage(text: string): boolean {
   if (text.trim().length === 0) {
@@ -1687,15 +1688,27 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   text: string;
   skills: ReadonlyArray<ProviderSkill>;
   markdownCwd: string | undefined;
-  footer?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasVisibleBody = props.text.trim().length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
   const isCollapsed = canCollapse && !expanded;
+  const toggle = canCollapse ? (
+    <Button
+      type="button"
+      size="xs"
+      variant="ghost"
+      aria-expanded={expanded}
+      data-scroll-anchor-ignore
+      onClick={() => setExpanded((value) => !value)}
+      className="-mr-1 h-6 rounded-md px-1.5 text-secondary-label text-xs hover:bg-muted/55 hover:text-message-foreground"
+    >
+      {expanded ? "Show less" : "Show full message"}
+    </Button>
+  ) : null;
 
   return (
-    <div>
+    <div className="relative">
       {hasVisibleBody ? (
         <div
           className={cn("relative", isCollapsed && "max-h-44 overflow-hidden")}
@@ -1715,32 +1728,14 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
           <UserMessageBody text={props.text} skills={props.skills} markdownCwd={props.markdownCwd} />
         </div>
       ) : null}
-      {canCollapse || props.footer ? (
+      {toggle === null ? null : (
         <div
-          className={cn(
-            "mt-1.5 flex items-center gap-2",
-            canCollapse && props.footer ? "justify-between" : "justify-end",
-          )}
+          className={cn("flex items-center justify-end", isCollapsed ? "absolute inset-x-0 bottom-0" : "mt-1.5")}
           data-user-message-footer="true"
         >
-          {canCollapse ? (
-            <Button
-              type="button"
-              size="xs"
-              variant="ghost"
-              aria-expanded={expanded}
-              data-scroll-anchor-ignore
-              onClick={() => setExpanded((value) => !value)}
-              className="-ml-1 h-6 rounded-md px-1.5 text-secondary-label text-xs hover:bg-muted/55 hover:text-message-foreground"
-            >
-              {expanded ? "Show less" : "Show full message"}
-            </Button>
-          ) : null}
-          {props.footer ? (
-            <div className="ml-auto flex items-center gap-2">{props.footer}</div>
-          ) : null}
+          {toggle}
         </div>
-      ) : null}
+      )}
     </div>
   );
 });

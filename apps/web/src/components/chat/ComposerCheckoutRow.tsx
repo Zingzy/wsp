@@ -18,49 +18,23 @@
 // not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, FolderSearchIcon, GitBranchIcon, LoaderCircleIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { hiddenFolder, isMacMachine, REPO_STATE_WORDS, type DaemonLinkStatus, type FolderMachine, type RepoStateWord } from "@wsp/protocol";
+import { hiddenFolder, isMacMachine, type FolderMachine } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { FOLDER_GHOST_WITH_WALK, FolderPathField, folderPathRefusal, useFolderPick, type FolderRefusal } from "../../files/FolderPathField";
 import { useWorkspaceListing } from "../../files/listing";
 import { parentWithin, rootOf, useRoots, useRootStore, useThreadFolder } from "../../files/root";
 import { useDaemonRoot, useDaemonWire } from "../../files/wire";
 import { useStatus } from "../../protocol/store";
-import { useLinkWord } from "../../terminal/paneWords";
-import { repoAbsence } from "../../adapt/git";
+import { useBranch, useLinkWord } from "../../terminal/paneWords";
 import { desktopBridge } from "../../lib/desktopShell";
 import { cn } from "../../lib/utils";
-import { DaemonOpError, fsList, gitStatus } from "../../terminal/daemon-fs";
+import { DaemonOpError, fsList } from "../../terminal/daemon-fs";
 import type { TerminalWire } from "../../terminal/link";
 import { Button, BUTTON_GLYPH_INSET } from "../ui/button";
 import { Menu, MenuGroup, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerSurface } from "./ComposerSurface";
 import type { ChatThreadHandle } from "./useChatThread";
-
-/** What git said about the folder: a branch, or one of the states the slot has a word (or none) for. */
-type Branch = { readonly kind: RepoStateWord } | { readonly kind: "repo"; readonly head: string };
-
-/** The branch git names for the folder under the box, asked again every time the daemon's link changes its word,
- * which is the rule `useLinkWord` carries and the Diff pane's header reads too. */
-function useBranch(wire: TerminalWire | null, folder: string | null, running: boolean, link: DaemonLinkStatus): Branch {
-  const [state, setState] = useState<{ folder: string | null; branch: Branch }>({ folder, branch: { kind: "unknown" } });
-  useEffect(() => {
-    if (!wire || folder === null || running) return;
-    let gone = false;
-    gitStatus(wire, folder).then(
-      status => {
-        if (!gone) setState({ folder, branch: { kind: "repo", head: status.branch.head } });
-      },
-      (e: unknown) => {
-        if (!gone) setState({ folder, branch: { kind: repoAbsence(e) } });
-      },
-    );
-    return () => {
-      gone = true;
-    };
-  }, [wire, folder, running, link]);
-  return state.folder === folder ? state.branch : { kind: "unknown" };
-}
 
 /** Whether the composer is about to open a new thread, so its folder and its project are still the person's to pick: a
  * fresh view, or an empty one whose send resumes no folder. The project pick in the footer and the folder picker in
@@ -297,7 +271,7 @@ export function ComposerCheckoutRow({
   // A view on a turn names that turn's folder; a view about to open a thread names the one the thread will start in.
   const folder = pickable ? startFolder : (cwd ?? startFolder);
   const canPick = wire !== null && roots.length > 0 && folder !== null;
-  const branch = useBranch(wire, folder, running, linkWord);
+  const branch = useBranch(wire, folder, true, linkWord, { running, moved: thread.view.entries.length });
 
   useEffect(() => {
     if (cwd !== null) follow(workspaceId, cwd);
@@ -336,17 +310,8 @@ export function ComposerCheckoutRow({
             {BRANCH_NOTE}
           </TooltipPopup>
         </Tooltip>
-      ) : REPO_STATE_WORDS[branch.kind].word === "" ? (
-        <span className={branchSlotClass} data-composer-branch={branch.kind} />
       ) : (
-        <Tooltip>
-          <TooltipTrigger render={<span className={branchSlotClass} tabIndex={0} data-composer-branch={branch.kind} />}>
-            {REPO_STATE_WORDS[branch.kind].word}
-          </TooltipTrigger>
-          <TooltipPopup side="top" align="end" className="max-w-80">
-            {REPO_STATE_WORDS[branch.kind].note}
-          </TooltipPopup>
-        </Tooltip>
+        <span className={branchSlotClass} data-composer-branch={branch.kind} />
       )}
     </ComposerSurface.ContextStrip>
   );

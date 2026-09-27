@@ -17,7 +17,7 @@ import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { KeybindingDispatcher } from "../src/shell/KeybindingDispatcher.js";
 import { cancelWorkspaceSwitch, stepInOrder } from "../src/shell/shellCommands.js";
-import { onComposerFocusRequest, onNewThreadRequest } from "../src/shell/shellRequests.js";
+import { onComposerFocusRequest, onNewThreadRequest, onNewWorkspaceRequest } from "../src/shell/shellRequests.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "../src/sidebar/words.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
@@ -358,8 +358,8 @@ describe("command palette", () => {
     await mountShell();
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
-    fireEvent.click(screen.getByText("New task", { selector: "[data-slot=command-item] span" }));
-    await waitFor(() => expect(screen.getByRole("dialog", { name: "New task" })).toBeTruthy());
+    fireEvent.click(screen.getByText(NEW_WORKSPACE, { selector: "[data-slot=command-item] span" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: NEW_WORKSPACE })).toBeTruthy());
   });
 
   it("while a creation row is selected, the shortcuts act on no workspace: no thread request, no drawer, no panel", async () => {
@@ -377,15 +377,21 @@ describe("command palette", () => {
     off();
   });
 
-  it("raises a new-thread request for the selected workspace", async () => {
+  it("offers one New thread row, which opens the dialog on the selected copy's project and starts nothing in the copy", async () => {
     await mountShell();
-    const seen: string[] = [];
-    const off = onNewThreadRequest(d => seen.push(d.workspaceId));
+    const threads: string[] = [];
+    const offThreads = onNewThreadRequest(d => threads.push(d.workspaceId));
+    const asked: Array<string | undefined> = [];
+    const offAsked = onNewWorkspaceRequest(d => asked.push(d.project));
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
-    fireEvent.click(screen.getByText("New thread"));
-    expect(seen).toEqual(["ws_a"]);
-    off();
+    const rows = inPalette().getAllByText(NEW_WORKSPACE, { selector: "[data-slot=command-item] span" });
+    expect(rows).toHaveLength(1);
+    fireEvent.click(rows[0]!);
+    expect(asked).toEqual(["pr_1"]);
+    expect(threads).toEqual([]);
+    offAsked();
+    offThreads();
   });
 
   it("the sidebar's search row is the palette's door: focus alone opens nothing, a click opens it, Escape shuts it and it stays shut", async () => {

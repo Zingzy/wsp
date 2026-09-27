@@ -225,23 +225,30 @@ describe("the surfaces list this repo ships", () => {
       "tiles-root",
       "tiles-picker",
       "tiles-settled-open",
+      "new-thread-dialog",
+      "new-thread-held",
+      "add-project",
+      "export-dialog",
+      "delete-dialog",
+      "browser-empty",
+      "diff-empty",
+      "long-prompt",
+      "composer-rest",
+      "composer-running",
     ]);
     // The one surface shot as a window on another computer, which is the only state the asleep line is drawn in.
     expect(read.surfaces.filter(s => s.remote).map(s => s.name)).toEqual(["host-asleep"]);
-    // The settings pages the owner reads over the Mac window's glass, where a card's fill shows whether it lets the
-    // glass through.
-    expect(read.surfaces.filter(s => s.mac).map(s => s.name)).toEqual(["settings-computers-mac", "settings-image-built-mac"]);
     // The one surface that makes something on its host, which takes a host of its own for every shot.
     expect(read.surfaces.filter(s => s.fresh).map(s => s.name)).toEqual(["creating-workspace"]);
     // Those served from a state of their own: an image that is built cannot stand in the same state file as one
     // that never was, a thread whose agent opened threads elsewhere needs the workspaces those threads run on, and
     // a person on the first run has no project added.
-    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "orchestrator", "image-built", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "tiles", "tiles", "tiles", "tiles"]);
+    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "orchestrator", "image-built", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "tiles", "tiles", "tiles", "tiles", "mac-and-boxes", "mac-and-boxes", "long-prompt", "tiles", "tiles"]);
     // The first run and the Add surfaces are shot at the two widths a design reading is held to, New workspace at the
     // one width whose sidebar carries its control, and the thread status, the two switchers, the threads list, the
-    // palette, the panel launcher, the tiles and the Mac window at the widest alone; the rest take every width.
+    // palette, the panel launcher and the tiles at the widest alone; the rest take every width the list shoots.
     const narrowed = read.surfaces.filter(s => s.widths.length < read.widths.length);
-    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["settings-computers-mac", [1440]], ["add-cloud", [1440, 390]], ["agents-add", [1440, 390]], ["agents-add-server", [1440, 390]], ["settings-image-built-mac", [1440]], ["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]], ["thread-status", [1440]], ["threads-computers", [1440]], ["threads-computers-shut", [1440]], ["threads-computer-picked", [1440]], ["threads-picker", [1440]], ["thread-list", [1440]], ["palette-threads", [1440]], ["palette-open", [1440]], ["panel-launcher", [1440]], ["tiles", [1440]], ["tiles-root", [1440]], ["tiles-picker", [1440]], ["tiles-settled-open", [1440]]]);
+    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["settings-computers-mac", [1440]], ["add-cloud", [1440, 390]], ["agents-add", [1440, 390]], ["agents-add-server", [1440, 390]], ["settings-image-built-mac", [1440]], ["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]], ["thread-status", [1440]], ["threads-computers", [1440]], ["threads-computers-shut", [1440]], ["threads-computer-picked", [1440]], ["threads-picker", [1440]], ["thread-list", [1440]], ["palette-threads", [1440]], ["palette-open", [1440]], ["panel-launcher", [1440]], ["tiles", [1440]], ["tiles-root", [1440]], ["tiles-picker", [1440]], ["tiles-settled-open", [1440]], ...["new-thread-dialog", "new-thread-held", "add-project", "export-dialog", "delete-dialog", "browser-empty", "diff-empty", "long-prompt", "composer-rest", "composer-running"].map(name => [name, [1440]])]);
     expect(shotPlan(read)).toHaveLength(read.surfaces.reduce((n, s) => n + s.widths.length, 0) * 2);
     // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
     expect(read.widths).toContain(1280);
