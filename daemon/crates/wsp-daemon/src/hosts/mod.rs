@@ -333,12 +333,14 @@ mod tests {
         assert_eq!(find(&quiet, &ask).await.unwrap(), None);
     }
 
-    const PR_JSON: &str = "[{\"number\":42,\"title\":\"Login breaks on Safari\",\"body\":\"cookie\",\"url\":\"https://github.com/o/r/pull/42\"}]";
+    const PR_JSON: &str =
+        "[{\"number\":42,\"title\":\"Login breaks on Safari\",\"body\":\"cookie\",\"url\":\"https://github.com/o/r/pull/42\"}]";
     const ISSUE_JSON: &str = "[{\"number\":7,\"title\":\"Add dark mode\",\"body\":\"\",\"url\":\"https://github.com/o/r/issues/7\"}]";
 
     #[tokio::test]
     async fn the_open_pull_requests_then_issues_are_listed_by_argv_in_the_checkout() {
-        let runner = Recorded::new(&["gh"]).answering(vec![(0, "origin\n"), (0, "git@github.com:o/r.git\n"), (0, PR_JSON), (0, ISSUE_JSON)]);
+        let runner =
+            Recorded::new(&["gh"]).answering(vec![(0, "origin\n"), (0, "git@github.com:o/r.git\n"), (0, PR_JSON), (0, ISSUE_JSON)]);
         let listed = list(&runner, Path::new("/private/tmp/proof/repo")).await.unwrap();
         assert_eq!(listed.note, None);
         let numbers: Vec<(u64, HostItemKind)> = listed.items.iter().map(|i| (i.number, i.kind)).collect();
@@ -352,7 +354,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_gh_nobody_signed_in_lists_nothing_with_one_line_saying_why() {
-        let runner = Recorded::new(&["gh"]).answering_said(vec![(0, "origin\n", ""), (0, "https://github.com/o/r\n", ""), (4, "", SIGN_IN_SAID)]);
+        let runner =
+            Recorded::new(&["gh"]).answering_said(vec![(0, "origin\n", ""), (0, "https://github.com/o/r\n", ""), (4, "", SIGN_IN_SAID)]);
         let listed = list(&runner, Path::new("/private/tmp/proof/repo")).await.unwrap();
         assert!(listed.items.is_empty());
         assert_eq!(listed.note.as_deref(), Some(words::no_host_list("github.com").as_str()));
@@ -366,8 +369,12 @@ mod tests {
     #[tokio::test]
     async fn a_list_gh_refused_is_left_out_with_what_it_said_and_the_other_stands() {
         let said = "the 'o/r' repository has disabled issues";
-        let runner =
-            Recorded::new(&["gh"]).answering_said(vec![(0, "origin\n", ""), (0, "git@github.com:o/r.git\n", ""), (0, PR_JSON, ""), (1, "", said)]);
+        let runner = Recorded::new(&["gh"]).answering_said(vec![
+            (0, "origin\n", ""),
+            (0, "git@github.com:o/r.git\n", ""),
+            (0, PR_JSON, ""),
+            (1, "", said),
+        ]);
         let listed = list(&runner, Path::new("/private/tmp/proof/repo")).await.unwrap();
         assert_eq!(listed.items.len(), 1);
         assert_eq!(listed.note, Some(format!("gh said: {said}")));

@@ -12,9 +12,10 @@ use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
     guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
-    DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitPrListReply, GitPrReply, GitPrStateReply, GitPushReply, GuestCliMessage, GuestOpenReply,
-    HostFolderListing, MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
-    MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitPrListReply, GitPrReply, GitPrStateReply, GitPushReply,
+    GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest,
+    MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity,
+    PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {

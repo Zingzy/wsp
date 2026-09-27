@@ -130,7 +130,10 @@ mod tests {
             GitHub.list_argv(HostItemKind::PullRequest),
             ["pr", "list", "--state", "open", "--limit", "50", "--json", "number,title,body,url"]
         );
-        assert_eq!(GitHub.list_argv(HostItemKind::Issue), ["issue", "list", "--state", "open", "--limit", "50", "--json", "number,title,body,url"]);
+        assert_eq!(
+            GitHub.list_argv(HostItemKind::Issue),
+            ["issue", "list", "--state", "open", "--limit", "50", "--json", "number,title,body,url"]
+        );
     }
 
     #[test]

@@ -49,6 +49,9 @@
 // the agent as a command it does not have, and come back as a question about
 // a stray slash with a turn's price on it. A slash command nobody announced
 // with words after it still goes as text, since the words may be meant.
+// Typing @, # or $ opens the thread's folder's files, the repository's open
+// pull requests and issues, or the person's skills the thread's agent loads,
+// and a pick lands as a chip whose text is what the agent reads.
 // The checkout row under the composer picks the folder a fresh thread starts
 // in; a resumed one is started where its harness last said it was. The
 // model, effort, context window and access picks in the box's footer ride a
@@ -67,7 +70,7 @@ import { useComputerName } from "../../sidebar/workspaceRows";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadFolder, useThreadStart } from "../../files/root";
 import { useDaemonWire } from "../../files/wire";
-import { fsFiles, gitPrList } from "../../terminal/daemon-fs";
+import { DaemonOpError, fsFiles, gitPrList } from "../../terminal/daemon-fs";
 import { useAgentsReport } from "../agents/useAgentsReport";
 import { useLinkDownLine } from "../../terminal/paneWords";
 import { collapseExpandedComposerCursor, composerSubmissionIntentForEnter, detectComposerTrigger, expandCollapsedComposerCursor, insertComposerBlock, isCollapsedCursorAdjacentToInlineToken, replaceTextRange } from "../../composer-logic";
@@ -95,6 +98,15 @@ import { Button } from "../ui/button";
 import type { ChatThreadHandle } from "./useChatThread";
 
 const noop = () => {};
+
+/** What the @ and # menus say where the computer's wsp predates the lists they read. */
+export const MENU_LIST_UNSERVED = "this computer's wsp is older than this app, so the list is not there yet; it arrives with its next update";
+
+/** A list read whose refusal is the computer's wsp not knowing the read yet reads as that, in the person's words. */
+const inPersonsWords = <T,>(read: Promise<T>): Promise<T> =>
+  read.catch((e: unknown) => {
+    throw e instanceof DaemonOpError && e.code === "unsupported" ? new Error(MENU_LIST_UNSERVED) : e;
+  });
 
 /** The draft as the height mirror measures it: a chip draws on one line whatever its text holds, so each one stands
  * as a short run of characters rather than the block it sends. */
@@ -300,8 +312,8 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const folder = pickable ? startFolder : (viewCwd ?? startFolder);
   const listed = onStart === undefined && unavailable === null && wire !== null && folder !== null;
   const session = trigger === null ? "" : `${trigger.kind}:${trigger.rangeStart}`;
-  const files = useComposerList(listed && trigger?.kind === "path" ? `${workspaceId}\0files\0${folder}` : null, session, () => fsFiles(wire!, folder!).then(reply => reply.files));
-  const references = useComposerList(listed && trigger?.kind === "pull-request" ? `${workspaceId}\0items\0${folder}` : null, session, () => gitPrList(wire!, folder!));
+  const files = useComposerList(listed && trigger?.kind === "path" ? `${workspaceId}\0files\0${folder}` : null, session, () => inPersonsWords(fsFiles(wire!, folder!)).then(reply => reply.files));
+  const references = useComposerList(listed && trigger?.kind === "pull-request" ? `${workspaceId}\0items\0${folder}` : null, session, () => inPersonsWords(gitPrList(wire!, folder!)));
   const skillsWanted = onStart === undefined && (trigger?.kind === "slash-command" || trigger?.kind === "skill");
   const skills = useAgentsReport(skillsWanted ? { workspaceId } : null).report?.skills;
   const groups = useMemo<ComposerCommandGroup[]>(() => {

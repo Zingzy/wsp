@@ -3,14 +3,15 @@
 // disabled reasons, and the draft that outlives a tab switch. Same fixture api
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { clickIntoEditor, composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
-import { composerSendBlock } from "../src/components/chat/ChatComposer.js";
+import { composerSendBlock, MENU_LIST_UNSERVED } from "../src/components/chat/ChatComposer.js";
+import { provideDaemonWire } from "../src/files/wire.js";
 import { SEND_LABEL, WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions.js";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { NOT_READY_NAMES } from "../screenshots/ready.mjs";
@@ -464,6 +465,50 @@ describe("composer slash menu", () => {
     await act(async () => useComposerDraftStore.getState().setDraft(WS, { prompt: "", cursor: 0 }));
     await typeInto(editor, "/");
     await waitFor(() => expect(menuItem("compact")).not.toBeNull());
+  });
+});
+
+describe("composer @ menu", () => {
+  const asked: Array<{ op: string; params: Record<string, unknown> | undefined }> = [];
+  afterEach(() => {
+    provideDaemonWire(WS, null);
+    asked.length = 0;
+  });
+
+  it("lists the thread folder's files off the daemon, ranks by name, and a pick goes as @path", async () => {
+    provideDaemonWire(WS, {
+      request: async (op, params) => {
+        asked.push({ op, params });
+        if (op !== "fs.files") throw new Error(`${op} is not what this case is about`);
+        return { files: ["docs/chatv-notes/README.md", "src/components/ChatComposer.tsx", "src/components/ChatView.tsx"], truncated: false };
+      },
+    });
+    const { api, started } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "open @chatv");
+    const first = await waitFor(() => {
+      const rows = document.querySelectorAll<HTMLElement>("[data-composer-item-id^='path:']");
+      expect(rows.length).toBeGreaterThan(0);
+      return rows[0]!;
+    });
+    expect(first.dataset["composerItemId"]).toBe("path:src/components/ChatView.tsx");
+    expect(asked.filter(call => call.op === "fs.files")).toEqual([{ op: "fs.files", params: { cwd: "/root" } }]);
+    act(() => first.click());
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")?.textContent).toBe("ChatView.tsx"));
+    await typeInto(editor, "please");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]?.prompt).toBe("open @src/components/ChatView.tsx please");
+  });
+
+  it("says in the person's words that a computer whose wsp predates the list has none yet", async () => {
+    provideDaemonWire(WS, { request: async () => Promise.reject(Object.assign(new Error("fs.files is not served by this daemon yet"), { code: "unsupported" })) });
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    await typeInto(composerEditor(), "@c");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(MENU_LIST_UNSERVED));
+    expect(document.body.textContent).not.toContain("daemon");
   });
 });
 

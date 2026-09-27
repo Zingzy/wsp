@@ -322,6 +322,19 @@ async fn fs_list_refuses_dot_dot_escapes_and_symlinks_that_leave_the_root_with_a
 }
 
 #[tokio::test]
+async fn fs_files_and_git_pr_list_answer_inside_the_root_and_refuse_a_folder_outside_it_or_a_link_that_leaves() {
+    let (t, _d, mut c) = bench().await;
+    let listed = c.request("fs.files", json!({ "cwd": "repo" })).await;
+    assert_eq!(listed["ok"], true, "{listed}");
+    assert!(listed["files"].as_array().unwrap().iter().any(|f| f == "src/index.ts"), "{listed}");
+    for op in ["fs.files", "git.prList"] {
+        refused(&c.request(op, json!({ "cwd": t.outside() })).await, "outside-root");
+        refused(&c.request(op, json!({ "cwd": ".." })).await, "outside-root");
+        refused(&c.request(op, json!({ "cwd": "repo/escape" })).await, "outside-root");
+    }
+}
+
+#[tokio::test]
 async fn fs_list_types_a_file_target_and_a_missing_target() {
     let (_t, _d, mut c) = bench().await;
     refused(&c.request("fs.list", json!({ "path": "repo/docs.md" })).await, "not-a-directory");
