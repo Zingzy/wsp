@@ -15,6 +15,8 @@ import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
+import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
+import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
@@ -3104,6 +3106,23 @@ export const FsListReply = z.object({ entries: z.array(FsEntry), truncated: z.bo
 export type FsListReply = WireFsListReply;
 type FsListReplyHeld = Held<Same<z.infer<typeof FsListReply>, FsListReply>>;
 
+/** The checkout's files under the folder asked about, relative to it; truncated means files holds only the first
+ * FS_FILES_CAP_ENTRIES of them. */
+export const FsFilesReply = z.object({ files: z.array(z.string()), truncated: z.boolean() });
+export type FsFilesReply = WireFsFilesReply;
+type FsFilesReplyHeld = Held<Same<z.infer<typeof FsFilesReply>, FsFilesReply>>;
+
+/** Which of a git host's two open lists an item came off. */
+export const HostItemKind = z.enum(["pull-request", "issue"]);
+export type HostItemKind = z.infer<typeof HostItemKind>;
+/** One open pull request or issue, its body cut at GIT_PR_LIST_BODY_CAP characters. */
+export const HostItem = z.object({ kind: HostItemKind, number: z.number().int(), title: z.string(), body: z.string(), url: z.string() });
+export type HostItem = z.infer<typeof HostItem>;
+/** The repository's open pull requests, then its open issues; empty with the note where nothing can be listed. */
+export const GitPrListReply = z.object({ items: z.array(HostItem), note: z.string().optional() });
+export type GitPrListReply = WireGitPrListReply;
+type GitPrListReplyHeld = Held<Same<z.infer<typeof GitPrListReply>, GitPrListReply>>;
+
 export const FsReadEncoding = z.enum(["utf8", "base64"]);
 export type FsReadEncoding = z.infer<typeof FsReadEncoding>;
 /** size is the whole file's byte length; content holds at most the first 2 MiB. */
@@ -3304,7 +3323,7 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * symlink, is refused with code outside-root. gitignore hides .git and the
    * entries git would ignore.
    *
-   * machineId, on these seven and on no other op of this road: the workspace the frame is for, on a daemon that
+   * machineId, on these nine and on no other op of this road: the workspace the frame is for, on a daemon that
    * runs workspaces. A workspace on a computer somebody owns runs no daemon of its own, so the daemon of the
    * computer holding it answers for it: the path then names the folder as that workspace sees it, a file is read
    * through the workspace's own rootfs and a git operation runs inside the workspace, in its namespaces and its
@@ -3317,6 +3336,9 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     gitignore: z.boolean().optional(),
     machineId: z.string().optional(),
   }),
+  /** Every file of the checkout under cwd that git would show, tracked or untracked and never ignored, relative
+   * to cwd, answered from `git ls-files` and kept until a folder holding one of them changes. */
+  z.object({ id: reqId, op: z.literal("fs.files"), cwd: z.string(), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional(), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string(), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional(), machineId: z.string().optional() }),
@@ -3329,6 +3351,9 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("git.pr"), cwd: z.string(), base: z.string().optional(), title: z.string().optional(), body: z.string().optional(), machineId: z.string().optional() }),
   /** Where the branch's pull request stands, read back through that same command line. */
   z.object({ id: reqId, op: z.literal("git.prState"), cwd: z.string(), machineId: z.string().optional() }),
+  /** The repository's open pull requests and issues through that same command line, answered as a GitPrListReply.
+   * No command line for the host, or one nobody signed in, is an empty list with the note saying so. */
+  z.object({ id: reqId, op: z.literal("git.prList"), cwd: z.string(), machineId: z.string().optional() }),
   /** Replies with a HostFolderListing: one level of folders on the computer this daemon runs on, for the folder
    * picker of a computer somebody owns. The roots are the home of the login the daemon runs as and each of
    * `projects` the home does not hold; `dir` absent lists the home, and so does a folder inside the roots that is
@@ -3983,6 +4008,7 @@ const DAEMON_CONTENTS = [
   "c76e7e2a3b9a767beaa281b973a409e1bc8869969255fa6c9fdeb6211b38ce3d",
   "be3d9077764035f8bf2b96ab6b50c018017046ec74a30827404f64752ef19bdf",
   "837e923920b718c42e372f7d84dd08d4d51add8e7b86de1ab4afb4a156afb8ae",
+  "83a698f2dcf674f37a41eeb405f65ddf7c5c65dc13f46770a2d2a386c64fabd9",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4195,7 +4221,10 @@ const DAEMON_CONTENTS = [
  * Version 77 forwards a guest's `wsp mcp` to the running host over the daemon's link, so a thread's MCP server needs no host process of its own on the machine.
  * Version 78 changes no behaviour: the pty broker's cases moved to a test binary of their own, and the file they left is hashed.
  * Version 79 changes no behaviour: every wire type in the protocol crate derives the TypeScript the protocol package re-exports, which moves the crate's sources and the lock.
- * Version 80 answers git.status on a stopped workspace with the branch alone, read off its copy's git directory with no program run, and says the edits were not read; running or stopped, a branch with no upstream counts ahead and behind against the default branch; a stopped copy's history too long or slow to walk answers countsUnknown. */
+ * Version 80 answers git.status on a stopped workspace with the branch alone, read off its copy's git directory with no program run, and says the edits were not read; running or stopped, a branch with no upstream counts ahead and behind against the default branch; a stopped copy's history too long or slow to walk answers countsUnknown.
+ * Version 81 adds fs.files, every file of a checkout git would show, from git ls-files and kept until a folder holding one
+ * of them changes, and git.prList, the repository's open pull requests and issues through the host's command line, an
+ * empty list with a note where that command line is not there or nobody signed it in. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

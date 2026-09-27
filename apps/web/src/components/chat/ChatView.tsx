@@ -33,6 +33,9 @@ import { useChatThread, type ChatThreadHandle } from "./useChatThread";
 import { DEFAULT_HARNESS } from "./ComposerOptionPickers";
 import { TRANSCRIPT_LOADING } from "../../transcript-words";
 import { useAppDark } from "../../settings/theme";
+import { insertIntoComposer } from "./composerInsert";
+import { quoteText } from "../../composer-editor-mentions";
+import type { QuotedSelection } from "./AssistantSelectionToolbar";
 
 const noopImageExpand = () => {};
 
@@ -70,6 +73,7 @@ export function ChatView({
   const cwd = view.cwd ?? undefined;
   // A file named in the transcript is read in the Diff pane, which is the one pane that shows a file now: the
   // reveal waits there until that pane has a diff to look in, and a file the diff does not touch is named in a line.
+  const onQuote = useCallback((quote: QuotedSelection) => insertIntoComposer(workspaceId, quoteText(quote)), [workspaceId]);
   const onOpenFile = useCallback(
     (path: string) => {
       revealInDiff(workspaceId, path);
@@ -208,6 +212,7 @@ export function ChatView({
             workspaceRoot={cwd}
             resolvedTheme={appDark ? "dark" : "light"}
             timestampFormat={timestampFormat}
+            onQuote={onQuote}
           />
         )}
       </div>

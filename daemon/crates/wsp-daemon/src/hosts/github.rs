@@ -3,7 +3,7 @@
 //! `gh pr create` for what is not, both run in the checkout so gh reads the repository off its remote.
 
 use serde::Deserialize;
-use wsp_frames::{PullRequest, PullRequestState};
+use wsp_frames::{numbers, HostItem, HostItemKind, PullRequest, PullRequestState};
 
 use super::PullRequests;
 
@@ -19,6 +19,19 @@ struct GhPullRequest {
     number: u64,
     url: String,
     state: String,
+}
+
+/// The fields a list asks for, in gh's own spelling.
+const LIST_FIELDS: &str = "number,title,body,url";
+
+/// gh's JSON for one open pull request or issue in a list.
+#[derive(Deserialize)]
+struct GhItem {
+    number: u64,
+    title: String,
+    #[serde(default)]
+    body: String,
+    url: String,
 }
 
 fn state_of(word: &str) -> Option<PullRequestState> {
@@ -57,6 +70,24 @@ impl PullRequests for GitHub {
         Some(PullRequest { number: read.number, url: read.url, state: state_of(&read.state)?, host: self.host().to_owned() })
     }
 
+    fn list_argv(&self, kind: HostItemKind) -> Vec<String> {
+        let noun = match kind {
+            HostItemKind::PullRequest => "pr",
+            HostItemKind::Issue => "issue",
+        };
+        let limit = numbers::GIT_PR_LIST_CAP.to_string();
+        [noun, "list", "--state", "open", "--limit", &limit, "--json", LIST_FIELDS].iter().map(|w| (*w).to_owned()).collect()
+    }
+
+    fn read_list(&self, kind: HostItemKind, stdout: &str) -> Option<Vec<HostItem>> {
+        let read: Vec<GhItem> = serde_json::from_str(stdout.trim()).ok()?;
+        Some(
+            read.into_iter()
+                .map(|item| HostItem { kind, number: item.number, title: item.title, body: super::cut_body(&item.body), url: item.url })
+                .collect(),
+        )
+    }
+
     fn sign_in_exit(&self) -> Option<i32> {
         Some(AUTH_REQUIRED)
     }
@@ -91,6 +122,29 @@ mod tests {
             GitHub.create_argv("main", "work", None, Some("a body")),
             ["pr", "create", "--base", "main", "--head", "work", "--fill"]
         );
+    }
+
+    #[test]
+    fn the_lists_gh_is_given_ask_for_open_items_by_argv_alone() {
+        assert_eq!(
+            GitHub.list_argv(HostItemKind::PullRequest),
+            ["pr", "list", "--state", "open", "--limit", "50", "--json", "number,title,body,url"]
+        );
+        assert_eq!(GitHub.list_argv(HostItemKind::Issue), ["issue", "list", "--state", "open", "--limit", "50", "--json", "number,title,body,url"]);
+    }
+
+    #[test]
+    fn a_list_is_read_off_ghs_json_with_each_body_cut_at_the_cap() {
+        let long = "x".repeat(numbers::GIT_PR_LIST_BODY_CAP + 10);
+        let json = format!(
+            "[{{\"number\":42,\"title\":\"Login breaks on Safari\",\"body\":\"{long}\",\"url\":\"https://github.com/o/r/pull/42\"}},{{\"number\":3,\"title\":\"t\",\"body\":\"\",\"url\":\"u\"}}]"
+        );
+        let read = GitHub.read_list(HostItemKind::PullRequest, &json).unwrap();
+        assert_eq!((read[0].number, read[0].title.as_str(), read[0].kind), (42, "Login breaks on Safari", HostItemKind::PullRequest));
+        assert_eq!(read[0].body.chars().count(), numbers::GIT_PR_LIST_BODY_CAP + 1);
+        assert!(read[0].body.ends_with('…'));
+        assert_eq!(read[1].body, "");
+        assert!(GitHub.read_list(HostItemKind::Issue, "no issues").is_none());
     }
 
     #[test]

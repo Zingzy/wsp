@@ -80,6 +80,12 @@ export const TUNNEL_CAP = 64;
 export const FS_READ_CAP_BYTES = 2 * 1024 * 1024;
 /** Entries one fs.list carries; total counts the rest. */
 export const FS_LIST_CAP_ENTRIES = 10_000;
+/** Paths one fs.files carries; truncated says there were more. */
+export const FS_FILES_CAP_ENTRIES = 20_000;
+/** Open pull requests, and open issues, one git.prList asks its host for. */
+export const GIT_PR_LIST_CAP = 50;
+/** Characters of an item's body a git.prList carries. */
+export const GIT_PR_LIST_BODY_CAP = 4000;
 /** Bytes of patch one git.diff carries across its files, cut at a line. */
 export const GIT_DIFF_CAP_BYTES = 2 * 1024 * 1024;
 /** Bytes of a pty's output kept for the next client to attach. */
@@ -242,6 +248,9 @@ export const NO_REMOTE = "this project has no remote to push to";
 /** What the pull request is answered with where the git host's own command line is not on the machine: the push
  * stands, so the bring back carries this beside it as a note rather than failing. */
 export const noHostCliLine = (host: string): string => `no signed-in command line for ${host} is on this computer; the branch is pushed and the pull request waits for one`;
+/** The note beside an empty pull request and issue list where the host's command line is not on the computer, or
+ * is there and nobody signed it in. */
+export const noHostListLine = (host: string): string => `no signed-in command line for ${host} is on this computer, so its pull requests and issues are not listed`;
 /** What a push git refused for want of an https credential is refused with: nothing reached the remote, so this is
  * the bring back's own refusal and not a note beside a landed push. The fix is the git host's own to name, since
  * only that host's module knows which command signs its command line in, and a host wsp knows no module for gets

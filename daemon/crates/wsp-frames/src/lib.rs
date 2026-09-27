@@ -26,7 +26,7 @@ pub mod words;
 
 pub use auth::DaemonAuthRequest;
 pub use copy::{Carried, CopyAsk, CopyReport, CopyRoadName};
-pub use enums::{DaemonErrorCode, FsEntryType, FsReadEncoding, GitDiffScope, ProcSignal, PtyMode, PullRequestState, WorkspaceKind};
+pub use enums::{DaemonErrorCode, FsEntryType, FsReadEncoding, GitDiffScope, HostItemKind, ProcSignal, PtyMode, PullRequestState, WorkspaceKind};
 pub use event::{DaemonEvent, ProcEntry, Usage};
 pub use guest::{GuestCliMessage, GuestKind, GuestOpen, GuestOpenReply, GuestStream};
 pub use id::RequestId;
@@ -46,8 +46,8 @@ pub use place::{
 };
 pub use place_paths::{place_daemon_paths, place_owned_paths, place_provision_paths, probe_path, PlaceDaemonPaths, PlaceProvisionPaths};
 pub use reply::{
-    DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsListReply, FsReadReply, GitBranch, GitDiffFile, GitDiffReply,
-    GitPrReply, GitPrStateReply, GitPushReply, GitStatusEntry, GitStatusReply, HostFolder, HostFolderListing, InboxRescanReply,
+    DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsFilesReply, FsListReply, FsReadReply, GitBranch, GitDiffFile, GitDiffReply,
+    GitPrListReply, GitPrReply, GitPrStateReply, GitPushReply, GitStatusEntry, GitStatusReply, HostFolder, HostFolderListing, HostItem, InboxRescanReply,
     ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply,
     PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, Reply, True,
 };

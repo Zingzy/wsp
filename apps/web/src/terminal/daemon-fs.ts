@@ -4,7 +4,9 @@
 // protocol schemas so a malformed daemon answer fails here, not in a pane.
 import {
   DaemonErrorCode,
+  FsFilesReply,
   FsListReply,
+  GitPrListReply,
   FsReadReply,
   GitDiffReply,
   GitStatusReply,
@@ -48,6 +50,14 @@ export function fsList(wire: TerminalWire, path: string, opts: FsListOpts = {}):
   const params: Record<string, unknown> = { path };
   if (opts.gitignore !== undefined) params["gitignore"] = opts.gitignore;
   return call(wire, "fs.list", params, FsListReply);
+}
+
+export function fsFiles(wire: TerminalWire, cwd: string): Promise<FsFilesReply> {
+  return call(wire, "fs.files", { cwd }, FsFilesReply);
+}
+
+export function gitPrList(wire: TerminalWire, cwd: string): Promise<GitPrListReply> {
+  return call(wire, "git.prList", { cwd }, GitPrListReply);
 }
 
 export function fsRead(wire: TerminalWire, path: string, encoding?: FsReadEncoding): Promise<FsReadReply> {

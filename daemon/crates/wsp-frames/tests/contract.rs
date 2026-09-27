@@ -12,7 +12,7 @@ use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
     guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
-    DaemonErrorResponse, DaemonEvent, DaemonRequest, GitPrReply, GitPrStateReply, GitPushReply, GuestCliMessage, GuestOpenReply,
+    DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitPrListReply, GitPrReply, GitPrStateReply, GitPushReply, GuestCliMessage, GuestOpenReply,
     HostFolderListing, MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
     MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
@@ -211,6 +211,12 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "GitPrStateReply" => {
                     round_trip::<GitPrStateReply>(&sample, &at);
                 }
+                "GitPrListReply" => {
+                    round_trip::<GitPrListReply>(&sample, &at);
+                }
+                "FsFilesReply" => {
+                    round_trip::<FsFilesReply>(&sample, &at);
+                }
                 "GuestOpenReply" => {
                     round_trip::<GuestOpenReply>(&sample, &at);
                 }
@@ -229,6 +235,8 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
     let mut expected = vec![
         "CopyReport",
         "DaemonErrorResponse",
+        "FsFilesReply",
+        "GitPrListReply",
         "GitPrReply",
         "GitPrStateReply",
         "GitPushReply",
@@ -283,6 +291,7 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("nothingAhead", words::nothing_ahead("{branch}", "{base}"));
     m.insert("noRemote", words::NO_REMOTE.to_owned());
     m.insert("noHostCli", words::no_host_cli("{host}"));
+    m.insert("noHostList", words::no_host_list("{host}"));
     m.insert("noGitCredential", words::no_git_credential("{host}", Some("{fix}")));
     m.insert("noGitCredentialNoFix", words::no_git_credential("{host}", None));
     m.insert("hostKeyRefusal", words::host_key_refusal("{url}"));
@@ -329,6 +338,9 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("tunnelCap", Value::from(numbers::TUNNEL_CAP));
     m.insert("fsReadCapBytes", Value::from(numbers::FS_READ_CAP_BYTES));
     m.insert("fsListCapEntries", Value::from(numbers::FS_LIST_CAP_ENTRIES));
+    m.insert("fsFilesCapEntries", Value::from(numbers::FS_FILES_CAP_ENTRIES));
+    m.insert("gitPrListCap", Value::from(numbers::GIT_PR_LIST_CAP));
+    m.insert("gitPrListBodyCap", Value::from(numbers::GIT_PR_LIST_BODY_CAP));
     m.insert("gitDiffCapBytes", Value::from(numbers::GIT_DIFF_CAP_BYTES));
     m.insert("ptyScrollbackCapBytes", Value::from(numbers::SCROLLBACK_CAP_BYTES));
     m.insert("procCmdlineBytes", Value::from(numbers::CMDLINE_BYTES));

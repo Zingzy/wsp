@@ -95,6 +95,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../lib/timestampFormat";
 import { formatWorkspaceRelativePath } from "../../lib/filePathDisplay";
+import { AssistantSelectionToolbar, QUOTE_SOURCE_ATTRIBUTE, type QuotedSelection } from "./AssistantSelectionToolbar";
 
 const NOOP_OPEN_TURN_DIFF = (_turnId: TurnId, _filePath?: string) => {};
 const NOOP_REVERT_USER_MESSAGE = (_messageId: MessageId) => {};
@@ -132,6 +133,9 @@ interface TimelineRowSharedState {
   workGroupViewState: WorkGroupViewState;
   lastReplyId: MessageId | null;
   replyMeta: React.ReactNode;
+  /** The prompt a reply answered, which a quote out of that reply names it by. Read through a ref, so a streaming
+   * chunk that moves the rows re-renders no settled one. */
+  replyToOf: (id: MessageId) => string;
 }
 
 /** The workspace cannot run the turn right now: what the working row says instead, the wake to offer where one
@@ -227,6 +231,8 @@ export interface MessagesTimelineProps {
   footer?: React.ReactNode;
   /** Facts about the settled turn, drawn on the last reply's own row beside its time. */
   replyMeta?: React.ReactNode;
+  /** Where a selection quoted out of a reply goes; absent, a selection offers no Quote. */
+  onQuote?: (quote: QuotedSelection) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +272,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   footer = null,
   replyMeta = null,
+  onQuote,
 }: MessagesTimelineProps) {
   const latestTurn = turns[turns.length - 1] ?? null;
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
@@ -401,6 +408,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const rows = useStableRows(rawRows);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
+  const replyToByAssistantId = useMemo(() => {
+    const byId = new Map<MessageId, string>();
+    let asked = "";
+    for (const row of rows) {
+      if (row.kind !== "message") continue;
+      if (row.message.role === "user") asked = row.message.text;
+      else byId.set(row.message.id, asked);
+    }
+    return byId;
+  }, [rows]);
+  const replyToRef = useRef(replyToByAssistantId);
+  replyToRef.current = replyToByAssistantId;
+  const replyToOf = useCallback((id: MessageId) => replyToRef.current.get(id) ?? "", []);
   const lastReplyId = useMemo(() => {
     const last = rows.findLast(row => row.kind === "message");
     return last?.kind === "message" && last.message.role === "assistant" ? last.message.id : null;
@@ -524,6 +544,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupViewState,
       lastReplyId,
       replyMeta,
+      replyToOf,
     }),
     [
       timestampFormat,
@@ -545,6 +566,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupViewState,
       lastReplyId,
       replyMeta,
+      replyToOf,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -618,6 +640,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               </>
             }
           />
+          {onQuote !== undefined ? <AssistantSelectionToolbar viewport={timelineViewportElement} onQuote={onQuote} /> : null}
           <TimelineMinimap
             items={minimapItems}
             hasPersistentGutter={minimapHasPersistentGutter}
@@ -1076,7 +1099,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
 
   return (
     <>
-      <div className="relative min-w-0 px-1 py-0.5">
+      <div className="relative min-w-0 px-1 py-0.5" {...{ [QUOTE_SOURCE_ATTRIBUTE]: ctx.replyToOf(row.message.id) }}>
         <ChatMarkdown
           text={messageText}
           cwd={ctx.markdownCwd}

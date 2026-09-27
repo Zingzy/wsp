@@ -45,6 +45,7 @@ export const THREAD_WORDS = {
 
 export const TERMINAL_WORDS = {
   copy: "Copy",
+  addToChat: "Add to chat",
   paste: "Paste",
   clear: "Clear",
   split: "Split Terminal Horizontally",

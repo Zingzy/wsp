@@ -6,7 +6,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
-import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
+import { clickIntoEditor, composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
@@ -448,7 +448,7 @@ describe("composer slash menu", () => {
     expect(started[0]?.prompt).toBe("/compact");
   });
 
-  it("escape dismisses the menu, keeps the draft, and the menu returns when the query changes", async () => {
+  it("escape dismisses the menu and keeps the draft, and the menu stays shut until the caret leaves its token", async () => {
     const { api } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
@@ -459,7 +459,41 @@ describe("composer slash menu", () => {
     await waitFor(() => expect(menuDrawer()).toBeNull());
     expect(draft()).toBe("/");
     await typeInto(editor, "c");
+    expect(draft()).toBe("/c");
+    expect(menuDrawer()).toBeNull();
+    await act(async () => useComposerDraftStore.getState().setDraft(WS, { prompt: "", cursor: 0 }));
+    await typeInto(editor, "/");
     await waitFor(() => expect(menuItem("compact")).not.toBeNull());
+  });
+});
+
+describe("composer chips", () => {
+  it("backspace right after a chip removes the chip whole and leaves the text around it", async () => {
+    const { api, started } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    clickIntoEditor(editor);
+    // The caret sits right after the file chip: "see " is four places and the chip is one.
+    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "see @src/composer-logic.ts now", cursor: 5 }));
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")).not.toBeNull());
+    await press(editor, "Backspace");
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")).toBeNull());
+    expect(draft()).toBe("see  now");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]?.prompt).toBe("see  now");
+  });
+
+  it("sends a chip as the text the agent reads", async () => {
+    const { api, started } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "summarise @apps/web/src/composer-logic.ts please", cursor: 3 }));
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")?.textContent).toBe("composer-logic.ts"));
+    clickIntoEditor(editor);
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]?.prompt).toBe("summarise @apps/web/src/composer-logic.ts please");
   });
 });
 

@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 80,
+  "daemonVersion": 81,
   "execBodyMax": 16384,
   "guestMessageCapBytes": 4194304,
   "guestQueueCapFrames": 256,
@@ -19,6 +19,9 @@
   "tunnelCap": 64,
   "fsReadCapBytes": 2097152,
   "fsListCapEntries": 10000,
+  "fsFilesCapEntries": 20000,
+  "gitPrListCap": 50,
+  "gitPrListBodyCap": 4000,
   "gitDiffCapBytes": 2097152,
   "ptyScrollbackCapBytes": 262144,
   "procCmdlineBytes": 200,

@@ -2659,9 +2659,11 @@ function forks(
         return say({ pid: frame["pid"] });
       case "ping":
       case "fs.list":
+      case "fs.files":
       case "fs.read":
       case "git.diff":
       case "git.prState":
+      case "git.prList":
       case "guest.watch":
       case "guest.reply":
       case "guest.close":
@@ -3193,7 +3195,7 @@ describe("a fork on a computer you joined", () => {
   });
 
   const PTY = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list"];
-  const FILES_AND_GIT = ["fs.list", "fs.read", "git.status", "git.diff", "git.push", "git.pr", "git.prState"];
+  const FILES_AND_GIT = ["fs.list", "fs.files", "fs.read", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "git.prList"];
   const HOST_GUESTS = ["guest.watch", "guest.reply", "guest.close"];
   const REFUSED = [
     "ports.watch",
