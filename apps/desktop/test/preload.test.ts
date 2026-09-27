@@ -42,6 +42,8 @@ describe("the preload's bridge", () => {
     expect(invoke).toHaveBeenLastCalledWith("preview:read", "ws_b");
     await wsp.localFonts("Berkeley Mono");
     expect(invoke).toHaveBeenLastCalledWith("fonts:local", "Berkeley Mono");
+    await wsp.fontFamilies();
+    expect(invoke).toHaveBeenLastCalledWith("fonts:families");
     await wsp.pickFolder();
     expect(invoke).toHaveBeenLastCalledWith("folder:pick");
   });

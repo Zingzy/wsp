@@ -4,7 +4,7 @@ import { makeApi, ProtocolClient } from "./protocol/client.js";
 import { useCreation, useFirstRun, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedThreadId, useSettingsOpen, useStore } from "./protocol/store.js";
 import { ComputerTerminalDrawer, WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
 import { SettingsPage } from "./settings/SettingsPage.js";
-import { useThemeEffect } from "./settings/theme.js";
+import { useFontEffect, useThemeEffect } from "./settings/theme.js";
 import { AppShell } from "./shell/AppShell.js";
 import { MaterialTuner } from "./dev/MaterialTuner.js";
 import { useHostNotices } from "./notices/hostNotices.js";
@@ -57,6 +57,7 @@ export function App({ wsUrl, token, onUnauthorized }: AppProps) {
   useEffect(() => wireTerminals(useStore), []);
   useEffect(() => wireHostLive(useStore), []);
   useThemeEffect();
+  useFontEffect();
   useHostNotices();
   useWorkspaceLineNotices();
   useShellVersionEffect();

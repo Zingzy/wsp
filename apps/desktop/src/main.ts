@@ -6,7 +6,7 @@ import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreferenc
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
-import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
+import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, type BundleShell } from "./get-bundle.js";
 import { appRestartRoad } from "./restart-road.js";
 import { locateHost, openHost, statePathIn, userDataIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
@@ -79,6 +79,7 @@ let fontIndex: Promise<FontFile[]> | undefined;
 const fonts = (): Promise<FontFile[]> => (fontIndex ??= indexFonts(fontDirs(process.platform, homedir(), process.env)));
 // The font files are this computer's, so only the app's own host's page may read them.
 answer("fonts:local", (_event, family) => localFontFaces(typeof family === "string" ? family : "", fonts));
+answer("fonts:families", () => fontFamilies(fonts));
 
 const previews = pagePreviews();
 // A picture of the page can hold anything the page shows, so only the app's own host's page may take one or read one.

@@ -26,6 +26,7 @@ const bridge: DesktopBridge & OnboardingBridge = {
   getBundle: (ask: { version: string }): Promise<BundleOutcome> => ipcRenderer.invoke("bundle:get", ask),
   quitAndOpen: (): Promise<BundleOutcome> => ipcRenderer.invoke("bundle:open"),
   localFonts: (family: string): Promise<LocalFontFace[]> => ipcRenderer.invoke("fonts:local", family),
+  fontFamilies: (): Promise<string[]> => ipcRenderer.invoke("fonts:families"),
   pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("folder:pick"),
   // Answered here rather than over a handler, since only the preload can read the path off a dropped file; the
   // shell is asked first, so a page served by a host somewhere else is handed nothing from this computer.

@@ -2131,6 +2131,8 @@ export interface DesktopBridge {
   readonly bundleHover?: string;
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
   localFonts(family: string): Promise<LocalFontFace[]>;
+  /** Every font family installed on this computer, by name: what the app and code font pickers offer. */
+  fontFamilies(): Promise<string[]>;
   /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */
   pickFolder(): Promise<string | undefined>;
   /** The absolute path of a file or folder dropped on the window from the desktop, which the page itself cannot

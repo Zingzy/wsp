@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { type FontFile, type FontReader, fontDirs, indexFonts, parseFontFile, resolveLocalFonts } from "../src/fonts.js";
+import { type FontFile, type FontReader, fontDirs, fontFamilies, indexFonts, parseFontFile, resolveLocalFonts } from "../src/fonts.js";
 
 /** A minimal sfnt: a name table (Windows English family, subfamily, full and PostScript names) and an OS/2 table. */
 function sfnt(names: { family: string; subfamily: string; postscript: string }, os2: { weight: number; italic: boolean }): Buffer {
@@ -177,5 +177,20 @@ describe("resolveLocalFonts", () => {
   it("a family nothing installed names resolves to nothing", () => {
     expect(resolveLocalFonts("Berkeley Mono", installed)).toEqual([]);
     expect(resolveLocalFonts("", installed)).toEqual([]);
+  });
+});
+
+describe("fontFamilies", () => {
+  it("names each installed family once, sorted as a person reads them, without the system's hidden faces", async () => {
+    const files = [
+      file("/f/Inter-Regular.ttf", "Inter", "Regular", "Inter-Regular", 400, false),
+      file("/f/Inter-Bold.ttf", "Inter", "Bold", "Inter-Bold", 700, false),
+      file("/f/hack.ttf", "Hack", "Regular", "Hack-Regular", 400, false),
+      file("/f/sf.ttf", ".SF NS", "Regular", ".SFNS-Regular", 400, false),
+      file("/f/avenir.ttc", "avenir next", "Regular", "AvenirNext-Regular", 400, false),
+      file("/f/blank.ttf", "  ", "Regular", "Blank", 400, false),
+    ];
+    await expect(fontFamilies(async () => files)).resolves.toEqual(["avenir next", "Hack", "Inter"]);
+    await expect(fontFamilies(async () => [])).resolves.toEqual([]);
   });
 });
