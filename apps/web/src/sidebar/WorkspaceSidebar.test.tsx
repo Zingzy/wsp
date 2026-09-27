@@ -123,9 +123,12 @@ const depthOf = (text: string): number => Number(rowOf(text).dataset["depth"]);
 const HOUR = 60 * 60_000;
 const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
 
-/** Sessions for the store, one per thread, keyed by workspace. */
-/** A turn that ended was shown as it ended unless `readAgo` says the last showing was earlier. */
+/** Sessions for the store, one per thread, keyed by workspace, every time read off one clock reading so two rows
+ * given the same age share it exactly. A turn that ended was shown as it ended unless `readAgo` says the last
+ * showing was earlier. */
 const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number; readAgo?: number; settledAgo?: number; asking?: string; pinnedAgo?: number; snoozed?: boolean; section?: { name: string; whileState: string } }>) => {
+  const now = Date.now();
+  const before = (ms: number): string => new Date(now - ms).toISOString();
   const by: Record<string, unknown[]> = {};
   for (const r of rows) {
     (by[r.ws] ??= []).push({
@@ -137,12 +140,12 @@ const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?:
       prompt: r.prompt,
       startedBy: r.parent === undefined ? "person" : "agent",
       ...(r.parent === undefined ? {} : { parentThreadId: r.parent }),
-      startedAt: ago(r.startedAgo ?? HOUR),
-      ...(r.endedAgo === undefined ? {} : { endedAt: ago(r.endedAgo), readAt: ago(r.readAgo ?? r.endedAgo) }),
-      ...(r.settledAgo === undefined ? {} : { settledAt: ago(r.settledAgo) }),
+      startedAt: before(r.startedAgo ?? HOUR),
+      ...(r.endedAgo === undefined ? {} : { endedAt: before(r.endedAgo), readAt: before(r.readAgo ?? r.endedAgo) }),
+      ...(r.settledAgo === undefined ? {} : { settledAt: before(r.settledAgo) }),
       ...(r.asking === undefined ? {} : { asking: r.asking }),
-      ...(r.pinnedAgo === undefined ? {} : { pinnedAt: Date.now() - r.pinnedAgo }),
-      ...(r.snoozed === true ? { snoozedUntil: Date.now() + HOUR } : {}),
+      ...(r.pinnedAgo === undefined ? {} : { pinnedAt: now - r.pinnedAgo }),
+      ...(r.snoozed === true ? { snoozedUntil: now + HOUR } : {}),
       ...(r.section === undefined ? {} : { section: r.section }),
     });
   }
@@ -231,8 +234,19 @@ describe("the sidebar's list of thread tiles", () => {
     it("reads a fork's branch once however many tiles it has, and every tile shows it", async () => {
       const terms = linked("ws_f", wireAnswering(async () => ({ branch: { oid: "abc", head: "fix/cart-rounding", ahead: 0, behind: 0 }, entries: [], root: "/root/spoo" })));
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
+      // Two threads started together, built on a clock that moves a millisecond each time it is read, as a loaded
+      // run's clock does between two rows: their order is the sort's tie-break and nothing the clock decides.
+      const real = Date.now();
+      let reads = 0;
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => real + reads++);
+      let rows: ReturnType<typeof sessions>;
+      try {
+        rows = sessions([{ ws: "ws_f", id: "th_one", prompt: "round the total once" }, { ws: "ws_f", id: "th_two", prompt: "pin the cart order" }]);
+      } finally {
+        clock.mockRestore();
+      }
       await act(async () => {
-        useStore.setState({ sessions: sessions([{ ws: "ws_f", id: "th_one", prompt: "round the total once", startedAgo: HOUR - 60_000 }, { ws: "ws_f", id: "th_two", prompt: "pin the cart order" }]) } as never);
+        useStore.setState({ sessions: rows } as never);
       });
       await waitFor(() => expect(rowIds()).toEqual(["thread:th_one", "thread:th_two"]));
       await act(async () => terms.feedStatus("live"));
