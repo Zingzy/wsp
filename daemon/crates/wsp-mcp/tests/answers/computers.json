@@ -8,7 +8,15 @@
         "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
         "cost.spend": "{\"id\":1,\"ok\":true,\"places\":[{\"place\":\"place-solari\",\"todayUsd\":1.25,\"monthUsd\":30,\"rateUsdPerHour\":0.035}]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"computers\\\": [\\n    {\\n      \\\"id\\\": \\\"place-9\\\",\\n      \\\"kind\\\": \\\"computer\\\",\\n      \\\"name\\\": \\\"attic\\\",\\n      \\\"label\\\": \\\"zingzy's \\\\u0085box\\\\u007f \\\\\\\"one\\\\\\\" \\\\\\\\ two\\\\nthree 🧪\\\",\\n      \\\"default\\\": false,\\n      \\\"os\\\": \\\"linux\\\",\\n      \\\"shape\\\": {\\n        \\\"cpu\\\": 8,\\n        \\\"memMb\\\": 16384\\n      },\\n      \\\"diskFreeBytes\\\": 123456789012,\\n      \\\"present\\\": true,\\n      \\\"agentVersions\\\": {\\n        \\\"2\\\": \\\"an index key\\\",\\n        \\\"claude\\\": \\\"2.1.0\\\"\\n      },\\n      \\\"forks\\\": {\\n        \\\"running\\\": 1,\\n        \\\"room\\\": 2\\n      }\\n    },\\n    {\\n      \\\"id\\\": \\\"place-solari\\\",\\n      \\\"kind\\\": \\\"provider\\\",\\n      \\\"name\\\": \\\"solari\\\",\\n      \\\"default\\\": true,\\n      \\\"rateUsdPerHour\\\": 0.30000000000000004\\n    }\\n  ],\\n  \\\"spend\\\": [\\n    {\\n      \\\"place\\\": \\\"place-solari\\\",\\n      \\\"todayUsd\\\": 1.25,\\n      \\\"monthUsd\\\": 30,\\n      \\\"rateUsdPerHour\\\": 0.035\\n    }\\n  ]\\n}\"}],\"structuredContent\":{\"computers\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \\u0085box\\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}],\"spend\":[{\"place\":\"place-solari\",\"todayUsd\":1.25,\"monthUsd\":30,\"rateUsdPerHour\":0.035}]}},\"jsonrpc\":\"2.0\",\"id\":1}"
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"computers\\\": [\\n    {\\n      \\\"id\\\": \\\"place-9\\\",\\n      \\\"kind\\\": \\\"computer\\\",\\n      \\\"name\\\": \\\"attic\\\",\\n      \\\"label\\\": \\\"zingzy's \\\\u0085box\\\\u007f \\\\\\\"one\\\\\\\" \\\\\\\\ two\\\\nthree 🧪\\\",\\n      \\\"default\\\": false,\\n      \\\"os\\\": \\\"linux\\\",\\n      \\\"shape\\\": {\\n        \\\"cpu\\\": 8,\\n        \\\"memMb\\\": 16384\\n      },\\n      \\\"diskFreeBytes\\\": 123456789012,\\n      \\\"present\\\": true,\\n      \\\"agentVersions\\\": {\\n        \\\"2\\\": \\\"an index key\\\",\\n        \\\"claude\\\": \\\"2.1.0\\\"\\n      },\\n      \\\"forks\\\": {\\n        \\\"running\\\": 1,\\n        \\\"room\\\": 2\\n      }\\n    },\\n    {\\n      \\\"id\\\": \\\"place-solari\\\",\\n      \\\"kind\\\": \\\"provider\\\",\\n      \\\"name\\\": \\\"solari\\\",\\n      \\\"default\\\": true,\\n      \\\"rateUsdPerHour\\\": 0.30000000000000004\\n    }\\n  ],\\n  \\\"spend\\\": [\\n    {\\n      \\\"place\\\": \\\"place-solari\\\",\\n      \\\"todayUsd\\\": 1.25,\\n      \\\"monthUsd\\\": 30,\\n      \\\"rateUsdPerHour\\\": 0.035\\n    }\\n  ]\\n}\"}],\"structuredContent\":{\"computers\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \\u0085box\\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}],\"spend\":[{\"place\":\"place-solari\",\"todayUsd\":1.25,\"monthUsd\":30,\"rateUsdPerHour\":0.035}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "cost.spend"
+        }
+      ]
     },
     {
       "case": "empty",
@@ -17,7 +25,15 @@
         "places.list": "{\"id\":1,\"ok\":true,\"places\":[]}",
         "cost.spend": "{\"id\":1,\"ok\":true,\"places\":[]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"computers\\\": [],\\n  \\\"spend\\\": []\\n}\"}],\"structuredContent\":{\"computers\":[],\"spend\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}"
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"computers\\\": [],\\n  \\\"spend\\\": []\\n}\"}],\"structuredContent\":{\"computers\":[],\"spend\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "cost.spend"
+        }
+      ]
     },
     {
       "case": "refused",
@@ -26,7 +42,15 @@
         "places.list": "{\"id\":1,\"ok\":false,\"error\":\"the token this line presented is not one this host holds\",\"kind\":\"auth\"}",
         "cost.spend": "{\"id\":1,\"ok\":true,\"places\":[]}"
       },
-      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the token this line presented is not one this host holds\"}],\"structuredContent\":{\"error\":\"the token this line presented is not one this host holds\",\"class\":\"auth\",\"exit\":2},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}"
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the token this line presented is not one this host holds\"}],\"structuredContent\":{\"error\":\"the token this line presented is not one this host holds\",\"class\":\"auth\",\"exit\":2},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "cost.spend"
+        }
+      ]
     }
   ]
 }
