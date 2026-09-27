@@ -360,6 +360,13 @@ async function showOnboarding(): Promise<void> {
   await page.loadFile(ONBOARDING_PAGE);
 }
 
+/** Set once the app is on its way out: a page that stops loading because its host was just stopped, or its window
+ * destroyed, is the quit and not a start that failed, and a dialog raised for it would hold the quit open. */
+let quitting = false;
+app.on("before-quit", () => {
+  quitting = true;
+});
+
 /** The question the menu's Quit asks while the window is on this computer's own host: quit and leave wsp running, or
  * stop it too. A window on a host somewhere else quits with nothing to ask. */
 async function askQuit(): Promise<void> {
@@ -369,6 +376,7 @@ async function askQuit(): Promise<void> {
   const choice = quitChoice((await dialog.showMessageBox({ type: "question", ...quitPrompt(working) })).response);
   if (choice === "cancel") return;
   if (choice === "stop") {
+    quitting = true;
     try {
       await stopWsp(statePath, home, systemService());
     } catch (e) {
@@ -407,7 +415,7 @@ function reopen(): Promise<void> {
     .catch((e: unknown) => {
       const why = e instanceof Error ? e.message : String(e);
       io.error(`wsp could not open: ${why}`);
-      dialog.showErrorBox("wsp could not open", why);
+      if (!quitting) dialog.showErrorBox("wsp could not open", why);
     })
     .finally(() => (reopening = undefined)));
 }
@@ -573,6 +581,6 @@ app
     const why = e instanceof Error ? e.message : String(e);
     // A launch nobody watches has only its log to say why it quit.
     io.error(`wsp could not start: ${why}`);
-    dialog.showErrorBox("wsp could not start", why);
+    if (!quitting) dialog.showErrorBox("wsp could not start", why);
     app.quit();
   });

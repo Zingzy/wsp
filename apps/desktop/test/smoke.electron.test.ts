@@ -1002,11 +1002,12 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
             const handle = (globalThis as unknown as { wspTray: { model(): TrayModel | undefined; awake(): boolean } }).wspTray;
             return { model: handle.model(), awake: handle.awake() };
           });
-        // The app's own pid or one of its helpers': which of them Chromium takes the assertion in is Chromium's.
+        // The app's own pid or one of its helpers': which of them Chromium takes the assertion in is Chromium's. pmset
+        // lists it by process as NoIdleSleepAssertion, which its summary counts as PreventUserIdleSystemSleep.
         const ours = (): number[] => [appPid, ...spawnSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8", timeout: 20_000 }).stdout.split("\n").map(l => l.trim().split(/\s+/).map(Number)).filter(([, ppid]) => ppid === appPid).map(([pid]) => pid!)];
         const held = (): boolean => {
           const pids = ours();
-          return spawnSync("pmset", ["-g", "assertions"], { encoding: "utf8", timeout: 20_000 }).stdout.split("\n").some(line => line.includes("PreventUserIdleSystemSleep") && pids.some(pid => line.includes(`pid ${pid}(`)));
+          return spawnSync("pmset", ["-g", "assertions"], { encoding: "utf8", timeout: 20_000 }).stdout.split("\n").some(line => /NoIdleSleepAssertion|PreventUserIdleSystemSleep/.test(line) && pids.some(pid => line.includes(`pid ${pid}(`)));
         };
         const thread = wsp("run", LOCAL_WORKSPACE.name, "--agent", "claude", "--detach", "print a line, then run sleep 5").trim().split(/\s+/).find(word => /^[0-9a-f]{8,}$/.test(word));
 
@@ -1019,7 +1020,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
             throw e;
           });
         // Chromium takes the assertion on a task of its own, a moment after the app asked for it.
-        await vi.waitFor(() => expect(held()).toBe(true), { timeout: 10_000, interval: 250 });
+        await vi.waitFor(() => expect(held()).toBe(true), { timeout: 10_000, interval: 250 }).catch((e: unknown) => {
+          console.error([`the app and its helpers: ${ours().join(" ")}`, spawnSync("pmset", ["-g", "assertions"], { encoding: "utf8", timeout: 20_000 }).stdout].join("\n"));
+          throw e;
+        });
 
         // Asking: the mark stands, the row offers Allow, and a thread waiting on the person is not working.
         writeFileSync(gate, "go\n");
@@ -1220,7 +1224,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const home = win.url();
     await win.waitForSelector("[data-host-foot]");
     const here = computerNameHere();
-    expect(await win.locator("[data-host-label]").textContent()).toBe(here);
+    // The foot draws before the shell has answered which host the window is on, and names it once it has.
+    await vi.waitFor(async () => expect(await win.locator("[data-host-label]").textContent()).toBe(here), { timeout: 10_000, interval: 100 });
     await hostsMenu(launched.app, "box");
     await win.waitForURL(`${at}/`);
     // The shell's own menu lists every host on the account, so the owner still moves from one to another while the
