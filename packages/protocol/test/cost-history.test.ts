@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { accruedAt, appendCostPoint, COST_HISTORY_CAP, monthStart, rateAt, spentSince, type WorkspaceCostEvent } from "../src/index.js";
+import { accruedAt, appendCostPoint, COST_HISTORY_CAP, dayStart, monthStart, rateAt, spendMeterWord, spentSince, type WorkspaceCostEvent } from "../src/index.js";
 
 const tick = (minute: number, rate: number, accruedUsd: number): WorkspaceCostEvent => ({
   type: "workspace.cost",
@@ -83,5 +83,68 @@ describe("what a month took", () => {
     expect(spentSince(points, Date.UTC(2026, 8, 1))).toBeCloseTo(0.12, 10);
     expect(spentSince(points, Date.UTC(2026, 9, 1))).toBe(0);
     expect(spentSince([], Date.UTC(2026, 8, 1))).toBe(0);
+  });
+});
+
+/** The zone the computer is set to, for the length of one call: Node reads TZ again whenever it is assigned. */
+function inZone<T>(zone: string, read: () => T): T {
+  const before = process.env["TZ"];
+  process.env["TZ"] = zone;
+  try {
+    return read();
+  } finally {
+    if (before === undefined) delete process.env["TZ"];
+    else process.env["TZ"] = before;
+  }
+}
+
+describe("what a day took", () => {
+  it("begins a day at midnight in the zone the computer is set to, whatever day it is in UTC", () => {
+    const at = Date.parse("2026-09-13T04:20:00.000Z");
+    expect(inZone("America/New_York", () => dayStart(at))).toBe(Date.parse("2026-09-13T04:00:00.000Z"));
+    expect(inZone("America/Los_Angeles", () => dayStart(at))).toBe(Date.parse("2026-09-12T07:00:00.000Z"));
+    expect(inZone("Asia/Kolkata", () => dayStart(at))).toBe(Date.parse("2026-09-12T18:30:00.000Z"));
+    const local = new Date(dayStart(at));
+    expect([local.getHours(), local.getMinutes(), local.getSeconds(), local.getMilliseconds()]).toEqual([0, 0, 0, 0]);
+    expect(dayStart(dayStart(at))).toBe(dayStart(at));
+  });
+
+  it("keeps midnight across a change of the clocks, so the day the clocks go back is 25 hours long", () => {
+    inZone("America/New_York", () => {
+      const fallBack = dayStart(Date.parse("2026-11-01T20:00:00.000Z"));
+      const after = dayStart(Date.parse("2026-11-02T20:00:00.000Z"));
+      expect(fallBack).toBe(Date.parse("2026-11-01T04:00:00.000Z"));
+      expect(after).toBe(Date.parse("2026-11-02T05:00:00.000Z"));
+      expect(after - fallBack).toBe(25 * 3_600_000);
+      expect(dayStart(Date.parse("2026-03-08T12:00:00.000Z"))).toBe(Date.parse("2026-03-08T05:00:00.000Z"));
+      expect(dayStart(Date.parse("2026-03-09T12:00:00.000Z"))).toBe(Date.parse("2026-03-09T04:00:00.000Z"));
+    });
+  });
+
+  it("carries a running series on at its newest rate up to the instant asked for", () => {
+    const at = (minute: number): number => Date.UTC(2026, 8, 5, 9, minute);
+    const running = [tick(0, 0.12, 0), tick(30, 0.12, 0.06)];
+    expect(spentSince(running, at(0), at(90))).toBeCloseTo(0.18, 10);
+    // An instant past the newest tick is on the same line, so a day that began after it counts only its own share.
+    expect(spentSince(running, at(60), at(90))).toBeCloseTo(0.06, 10);
+    expect(spentSince(running, at(15), at(30))).toBeCloseTo(0.03, 10);
+    expect(spentSince(running, at(0))).toBeCloseTo(0.06, 10);
+  });
+
+  it("carries nothing past a newest tick at rate 0: a machine asleep costs nothing more", () => {
+    const at = (minute: number): number => Date.UTC(2026, 8, 5, 9, minute);
+    const asleep = [tick(0, 0.12, 0), tick(30, 0, 0.06)];
+    expect(spentSince(asleep, at(0), at(90))).toBeCloseTo(0.06, 10);
+    expect(spentSince(asleep, at(60), at(90))).toBe(0);
+    expect(spentSince([], at(0), at(90))).toBe(0);
+  });
+});
+
+describe("spendMeterWord", () => {
+  it("reads what a cloud spent today over its spend per day, the limit in whole dollars where it has no cents", () => {
+    expect(spendMeterWord(2.314, 10)).toBe("$2.31/$10");
+    expect(spendMeterWord(0, 10)).toBe("$0.00/$10");
+    expect(spendMeterWord(12.5, 12.5)).toBe("$12.50/$12.50");
+    expect(spendMeterWord(0, 0)).toBe("$0.00/$0");
   });
 });

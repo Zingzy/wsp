@@ -251,8 +251,11 @@ import {
   placeDaemonBehind,
   absentComputer,
   placeRoom,
+  placeSpendLimit,
   placeStateOf,
+  PlaceSpend,
   provisionWord,
+  spendMeterWord,
   namesPlace,
   noSuchPlaceRefusal,
   placeForksNowhereLine,
@@ -659,9 +662,10 @@ export const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" 
  * person uses for them. Every fact is what that computer last reported; a cloud row carries its rate and no shape,
  * since nothing about a machine exists there until one is forked. No row is marked default: which computer a
  * workspace lands on is its project's to say. The platform is handed in, since what this computer is called is
- * read where the host runs and not guessed here. */
-export function computerLines(places: readonly PlaceView[], platform: "darwin" | "linux"): string[] {
+ * read where the host runs and not guessed here, and so is the spend, which is a read of its own. */
+export function computerLines(places: readonly PlaceView[], platform: "darwin" | "linux", spend: readonly PlaceSpend[] = []): string[] {
   if (places.length === 0) return ["This host holds no computer. wsp add prints the join line for a computer you are sitting at."];
+  const todayOf = (p: PlaceView): number | undefined => spend.find(s => s.place === p.id)?.todayUsd;
   const rows = places.map(p => [
     p.name,
     computerKindWord(p, platform),
@@ -673,7 +677,8 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     p.kind === "provider" ? fmtPrice(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     ...capCells(p),
-    placeStateOf(p, p.present === false ? absentComputer(p.name, null) : null).word,
+    spendCell(p, todayOf(p)),
+    placeStateOf(p, p.present === false ? absentComputer(p.name, null) : null, todayOf(p)).word,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     placeDaemonBehind(p) ?? "",
     p.build ?? "",
@@ -684,7 +689,20 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     // cloud account and on this computer, neither of which reports an agent.
     agentsCell(p),
   ]);
-  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows]);
+  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "SPEND", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows]);
+}
+
+/** What wsp computers answers: every row, and what each cloud has spent, both read on the road the list is. */
+async function readComputers(client: HostClient): Promise<{ computers: PlaceView[]; spend: PlaceSpend[] }> {
+  const [listed, spent] = await Promise.all([client.request<{ places: PlaceView[] }>("places.list"), client.request<{ places: PlaceSpend[] }>("cost.spend")]);
+  return { computers: listed.places, spend: spent.places };
+}
+
+/** The SPEND cell: what the row spent today against its spend per day, empty where its kind has no spend limit or
+ * no spend was read, since a figure is never guessed. */
+function spendCell(p: PlaceView, todayUsd: number | undefined): string {
+  const limit = placeSpendLimit(p);
+  return limit === undefined || todayUsd === undefined ? "" : spendMeterWord(todayUsd, limit);
 }
 
 /** The THREADS and MACHINES cells: what the row's cap counts against the cap, under the column named for what it counts. */
@@ -2973,21 +2991,21 @@ export const VERBS: readonly Verb[] = [
   {
     name: "computers",
     usage: "wsp computers",
-    about: "your computers: this Mac, each box you added and each cloud account, with what each has, whether it is connected, how many workspaces it holds and what runs there against its cap",
+    about: "your computers: this Mac, each box you added and each cloud account, with what each has, whether it is connected, how many workspaces it holds, what runs there against its cap and what each cloud spent today",
     page: "front",
     options: {},
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp computers takes no positional arguments.", usageIs(ctx));
-      const places = (await (await ctx.client()).request<{ places: PlaceView[] }>("places.list")).places;
-      ctx.out.emit({ computers: places }, computerLines(places, hostPlatform()).join("\n"));
+      const read = await readComputers(await ctx.client());
+      ctx.out.emit(read, computerLines(read.computers, hostPlatform(), read.spend).join("\n"));
       return 0;
     },
     tool: tool({
       description:
-        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on, each box joined to it and each cloud account. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now; a cloud row carries its hourly rate. Every row carries its cap, threads at once on a computer and machines at once and spend per day on a cloud (the number the person set, else one thread per 2.5 GB of memory up to its cores, and 3 machines and $10 a day), and running, the threads running there now on a computer or the machines holding a slot on a cloud; a row whose running meets its cap is full. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
+        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on, each box joined to it and each cloud account. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now; a cloud row carries its hourly rate. Every row carries its cap, threads at once on a computer and machines at once and spend per day on a cloud (the number the person set, else one thread per 2.5 GB of memory up to its cores, and 3 machines and $10 a day), and running, the threads running there now on a computer or the machines holding a slot on a cloud; a row whose running meets its cap is full. spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
       input: {},
-      output: { computers: z.array(PlaceView) },
-      call: async (_args, deps) => asJson({ computers: (await (await deps.client()).request<{ places: PlaceView[] }>("places.list")).places }),
+      output: { computers: z.array(PlaceView), spend: z.array(PlaceSpend) },
+      call: async (_args, deps) => asJson(await readComputers(await deps.client())),
     }),
   },
   {

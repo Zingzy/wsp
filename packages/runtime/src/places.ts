@@ -476,6 +476,8 @@ export interface PlaceDoor {
   /** The home the place's login lands in, which every path a turn there is built from. */
   homeOf(placeId: string): Promise<string | undefined>;
   list(now: number): Promise<PlaceView[]>;
+  /** Every row as list has it, caps and running counts read now, less the fork room, which asks each computer. */
+  rows(): Promise<PlaceView[]>;
   /** Every add over ssh still running and the last ADDS_KEPT that finished, oldest first. */
   adds(): PlaceAddJob[];
   /** Puts the daemon this host deploys on one place where it is behind, then runs the recipe job on it. Refuses in
@@ -1441,6 +1443,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       buildsImages: false,
     };
   };
+  /** This computer first, the computers joined to it after, the providers last, each with its cap; exactly one
+   * default, which falls to this computer when the mark names a row that is no longer here. */
+  const rowsOf = async (held: readonly PlaceRecord[]): Promise<PlaceView[]> => {
+    const marked = (await markHeld()) ?? HERE_PLACE_ID;
+    const rows: PlaceView[] = [hereRow(marked), ...held.map(r => joinedRow(r, marked)), ...providerIds().map(id => providerRow(id, marked))];
+    return Promise.all(rows.map(row => withCap(row, rows)));
+  };
   /** A joined computer's row off its record, less the fork room, which asks the computer itself. */
   const joinedRow = (record: PlaceRecord, marked: string): PlaceView => ({ ...viewOf(record, marked), ...imageFacts(record.id, door.backendOf(record.id)) });
   const providerRow = (id: string, marked: string): PlaceView => {
@@ -1957,20 +1966,14 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     async list() {
       const held = await records();
-      // This computer first, the computers joined to it after, the providers last; exactly one default, which falls
-      // to this computer when the mark names a row that is no longer here.
-      const marked = (await markHeld()) ?? HERE_PLACE_ID;
       const room = new Map(await Promise.all(held.map(async r => [r.id, await forksOf(r)] as const)));
-      const rows: PlaceView[] = [
-        hereRow(marked),
-        ...held.map(r => {
-          const forks = room.get(r.id);
-          return { ...joinedRow(r, marked), ...(forks !== undefined ? { forks } : {}) };
-        }),
-        ...providerIds().map(id => providerRow(id, marked)),
-      ];
-      return Promise.all(rows.map(row => withCap(row, rows)));
+      return (await rowsOf(held)).map(row => {
+        const forks = room.get(row.id);
+        return forks !== undefined ? { ...row, forks } : row;
+      });
     },
+
+    rows: async () => rowsOf(await records()),
 
     async cap(placeId, set) {
       const marked = (await markHeld()) ?? HERE_PLACE_ID;

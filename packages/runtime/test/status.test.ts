@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer, type Server } from "node:http";
-import { EventUnion, PLACES_TICKET_REFUSAL, THREAD_OPS, computerOffline, machineUnreachableLine, sendRefusal, workspaceState, workspaceWord, type PlaceView, type WorkspaceStatus } from "@wsp/protocol";
+import { CLOUD_CAP_DEFAULT, EventUnion, PLACES_TICKET_REFUSAL, dayStart, THREAD_OPS, computerOffline, machineUnreachableLine, sendRefusal, workspaceState, workspaceWord, type PlaceView, type WorkspaceStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { roadFailed, type ExecResult } from "@wsp/engine";
 import { createRuntime, type Runtime } from "../src/runtime.js";
@@ -67,9 +67,13 @@ type Cost = EventUnion & { type: "workspace.cost" };
  * purpose, so a fold that fell back to the first provider row instead of reading the stamp would be seen.  */
 const PLACES: PlaceView[] = [
   { id: "here", kind: "computer", name: "this-mac", default: true },
-  { id: "box", kind: "provider", name: "box", default: false, takesForks: true },
-  { id: "default", kind: "provider", name: "default", default: false, takesForks: true },
+  { id: "box", kind: "provider", name: "box", default: false, takesForks: true, cap: CLOUD_CAP_DEFAULT },
+  { id: "default", kind: "provider", name: "default", default: false, takesForks: true, cap: CLOUD_CAP_DEFAULT },
 ];
+/** A cloud's spend row where nothing was metered, or nothing in the day and month asked about. */
+const zeros = (place: string) => ({ place, todayUsd: 0, monthUsd: 0, rateUsdPerHour: 0 });
+/** One place's row of a spend read. */
+const spendOn = async (rt: Runtime, place: string, at?: number) => (await rt.status.spend(PLACES, at)).find(r => r.place === place)!;
 
 /** The clock jumps an hour in the tests below: the idle window must not nap the workspace behind the test. */
 const idle = { defaultWindowMs: 24 * 3_600_000 };
@@ -802,7 +806,7 @@ describe("status.history", () => {
     // The bus stamps a seq on what it emits; the history holds the ticks as the tracker built them.
     expect(costs[3]).toMatchObject(history[1]!);
 
-    await rt.workspaces.nap(ws.id);
+    await stepped(costs, () => rt.workspaces.nap(ws.id));
     for (let i = 0; i < 3; i++) await tickCost(fc, costs);
     stop();
     history = await rt.status.history(ws.id);
@@ -814,7 +818,7 @@ describe("status.history", () => {
       ["napping", 0, 4 * TICK_MS],
     ]);
     expect(costs[4]).toMatchObject(history[2]!);
-    expect(costs[6]).toMatchObject(history[3]!);
+    expect(costs[7]).toMatchObject(history[3]!);
 
     srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
@@ -892,12 +896,13 @@ describe("status.history", () => {
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
     for (let i = 0; i < 3; i++) await tickCost(fc, costs);
-    await first.workspaces.nap(ws.id);
+    await stepped(costs, () => first.workspaces.nap(ws.id));
     await tickCost(fc, costs);
     stop();
     const total = 3 * TICK_MS;
     expect(costs.at(-1)).toMatchObject({ phase: "napping", rateUsdPerHour: 0, awakeMs: total });
-    expect(await first.status.history(ws.id)).toHaveLength(3);
+    // The create's tick, the last running one, the nap's own and the newest.
+    expect(await first.status.history(ws.id)).toHaveLength(4);
 
     fc.advance(3_600_000);
     const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
@@ -915,6 +920,9 @@ describe("status.history", () => {
   it("a host that died between a nap and its tick does not bill the nap: the wake starts the stretch afresh", async () => {
     const backend = stubBackend();
     const store = memoryStore();
+    const put = store.put.bind(store);
+    let died = false;
+    store.put = async (collection, id, value) => (died && collection === "cost-histories" ? undefined : put(collection, id, value));
     const fc = fakeClock();
     const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     const ws = await createOn(first, { golden: "snap_g", name: "alpha" });
@@ -924,13 +932,18 @@ describe("status.history", () => {
     await tickCost(fc, costs);
     await tickCost(fc, costs);
     stop();
-    // The store's newest point still says running when the nap lands and the host dies before the next tick.
+    // The store's newest point still says running when the nap lands and the host dies before its tick is written.
+    died = true;
     await first.workspaces.nap(ws.id);
+    await until(() => costs.at(-1)?.phase === "napping");
 
     fc.advance(3_600_000);
+    died = false;
     const second = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     // The store holds the points that were added: the create's tick and the first timer tick; the second only moved the newest in memory.
     expect((await second.status.history(ws.id)).at(-1)).toMatchObject({ phase: "running", awakeMs: TICK_MS });
+    // The record says napping, so the stored running tick is not carried on through the hour the host was down.
+    expect((await spendOn(second, "default")).monthUsd).toBeCloseTo((costs[0]!.rateUsdPerHour * TICK_MS) / 3_600_000, 10);
     const after: Cost[] = [];
     second.events.on("workspace.cost", e => after.push(e as Cost));
     stop = second.status.watch();
@@ -952,20 +965,22 @@ describe("status.history", () => {
     rt.events.on("workspace.cost", e => costs.push(e as Cost));
     const stop = rt.status.watch();
     await until(() => costs.length >= 2);
-    const spent = (await rt.status.spend(PLACES))[0]!.monthUsd;
+    const spent = (await spendOn(rt, "default")).monthUsd;
     expect(spent).toBeGreaterThan(0);
     await rt.workspaces.delete(ws.id);
     stop();
     // The pane is gone with the workspace and there is no record left to read a caller's right to the series off.
     expect(await rt.status.history(ws.id)).toEqual([]);
-    // The month keeps it, and nothing is burning now: the delete ended the stretch wherever it stood.
-    await until(async () => (await rt.status.spend(PLACES))[0]?.rateUsdPerHour === 0);
-    expect((await rt.status.spend(PLACES))[0]).toMatchObject({ place: "default", monthUsd: spent, rateUsdPerHour: 0 });
+    // The month keeps it up to the delete, and nothing is burning now: the delete ended the stretch wherever it stood.
+    const kept = await spendOn(rt, "default");
+    expect(kept.monthUsd).toBeGreaterThanOrEqual(spent);
+    expect(kept.rateUsdPerHour).toBe(0);
     expect(deletes()).toBe(0);
 
     const fresh = createRuntime({ backend, store, adapters: {}, status: { costIntervalMs: 15, pollIntervalMs: 60_000 } });
     expect(await fresh.status.history(ws.id)).toEqual([]);
-    expect(await fresh.status.spend(PLACES)).toEqual([{ place: "default", monthUsd: spent, rateUsdPerHour: 0 }]);
+    await until(async () => (await spendOn(fresh, "default")).monthUsd === kept.monthUsd);
+    expect(await fresh.status.spend(PLACES)).toEqual([zeros("box"), kept]);
   });
 
   it("drops a deleted workspace's document once its last tick falls out of the month, so the store holds one month of them", async () => {
@@ -980,12 +995,12 @@ describe("status.history", () => {
     await tickCost(fc, costs);
     await first.workspaces.delete(ws.id);
     stop();
-    await until(async () => (await first.status.spend(PLACES)).length === 1);
+    await until(async () => (await spendOn(first, "default")).monthUsd > 0);
 
     // A host started the next month reads a series that ended in the one before it and lets it go.
     const later = fakeClock(Date.parse("2026-10-02T09:00:00.000Z"));
     const second = createRuntime({ backend, store, adapters: {}, clock: later.clock, status: ticking, idle });
-    expect(await second.status.spend(PLACES)).toEqual([]);
+    expect(await second.status.spend(PLACES)).toEqual([zeros("box"), zeros("default")]);
     await until(() => deletes() >= 1);
   });
 
@@ -1001,22 +1016,21 @@ describe("status.history", () => {
     for (let i = 0; i < 3; i++) await tickCost(fc, costs);
     const rate = costs[0]!.rateUsdPerHour;
     const both = await rt.status.spend(PLACES);
-    // One row for the place both forks stand on, and the computer the host runs on is not on it: nothing was
-    // metered there, and a row with no meter is not a row that cost nothing.
-    // One row, and it is the provider the records name rather than the first provider on the list.
-    expect(both).toHaveLength(1);
-    expect(both[0]!.place).toBe("default");
-    expect(both[0]!.rateUsdPerHour).toBeCloseTo(2 * rate, 10);
+    // Both forks stand on the provider the records name rather than the first provider on the list, which reads
+    // zeros; the computer the host runs on is not on it, since a computer takes no spend limit and nothing was
+    // metered there.
+    expect(both.map(r => r.place)).toEqual(["box", "default"]);
+    expect(both[0]).toEqual(zeros("box"));
+    expect(both[1]!.rateUsdPerHour).toBeCloseTo(2 * rate, 10);
     const alone = (await rt.status.history(alpha.id)).at(-1)!.accruedUsd + (await rt.status.history(beta.id)).at(-1)!.accruedUsd;
-    expect(both[0]!.monthUsd).toBeCloseTo(alone, 10);
+    expect(both[1]!.monthUsd).toBeCloseTo(alone, 10);
 
-    // A nap lands no tick of its own; the next one on the timer is where the rate it left reads.
-    await rt.workspaces.nap(beta.id);
-    await tickCost(fc, costs);
-    const napped = await rt.status.spend(PLACES);
-    expect(napped[0]!.rateUsdPerHour).toBeCloseTo(rate, 10);
+    // A nap lands a tick of its own, which is where the rate it left reads.
+    await stepped(costs, () => rt.workspaces.nap(beta.id));
+    const napped = await spendOn(rt, "default");
+    expect(napped.rateUsdPerHour).toBeCloseTo(rate, 10);
     // What a place took before a nap is still what it took: the total holds where the meter stopped.
-    expect(napped[0]!.monthUsd).toBeGreaterThanOrEqual(both[0]!.monthUsd);
+    expect(napped.monthUsd).toBeGreaterThanOrEqual(both[1]!.monthUsd);
     stop();
   });
 
@@ -1024,15 +1038,17 @@ describe("status.history", () => {
     const backend = stubBackend();
     const fc = fakeClock(Date.parse("2026-09-15T09:00:00.000Z"));
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
-    await createOn(rt, { golden: "snap_g", name: "alpha" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     rt.events.on("workspace.cost", e => costs.push(e as Cost));
     const stop = rt.status.watch();
     for (let i = 0; i < 3; i++) await tickCost(fc, costs);
-    expect((await rt.status.spend(PLACES))[0]!.monthUsd).toBeGreaterThan(0);
-    // The same series read a month later: every tick of it is behind that month's first day, so it owes nothing.
-    expect((await rt.status.spend(PLACES, Date.parse("2026-10-15T09:00:00.000Z")))[0]!.monthUsd).toBe(0);
+    expect((await spendOn(rt, "default")).monthUsd).toBeGreaterThan(0);
     stop();
+    // A machine still running would go on into the next month; one napped ran out where it napped.
+    await stepped(costs, () => rt.workspaces.nap(ws.id));
+    // The same series read a month later: every tick of it is behind that month's first day, so it owes nothing.
+    expect(await spendOn(rt, "default", Date.parse("2026-10-15T09:00:00.000Z"))).toEqual(zeros("default"));
   });
 
   it("is refused on a socket let in on a ticket, as the places list it feeds is", async () => {
@@ -1050,6 +1066,104 @@ describe("status.history", () => {
     expect(await relayed.request("cost.spend")).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     relayed.close();
     expect(THREAD_OPS).not.toContain("cost.spend");
+  });
+});
+
+describe("spend today", () => {
+  const HOUR = 3_600_000;
+  /** Half an hour before a local midnight on a day that is not the first of its month, whatever zone this runs in. */
+  const beforeMidnight = (): { start: number; midnight: number } => {
+    const midnight = dayStart(Date.parse("2026-09-16T12:00:00.000Z"));
+    return { start: midnight - HOUR / 2, midnight };
+  };
+
+  it("counts of a stretch that began yesterday only the part since midnight, and the month the whole of it", async () => {
+    const backend = stubBackend();
+    const { start, midnight } = beforeMidnight();
+    const fc = fakeClock(start);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: { costIntervalMs: 10 * 60_000, pollIntervalMs: 24 * HOUR }, idle });
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    await stepped(costs, () => createOn(rt, { golden: "snap_g", name: "alpha" }));
+    const rate = costs[0]!.rateUsdPerHour;
+    const stop = rt.status.watch();
+    for (let i = 0; i < 6; i++) {
+      const n = costs.length;
+      fc.advance(10 * 60_000);
+      await until(() => costs.length > n);
+    }
+    stop();
+    expect(fc.clock.now()).toBe(midnight + HOUR / 2);
+    const spent = await spendOn(rt, "default");
+    expect(spent.todayUsd).toBeCloseTo(rate / 2, 10);
+    expect(spent.monthUsd).toBeCloseTo(rate, 10);
+    expect(spent.todayUsd).toBeLessThanOrEqual(spent.monthUsd);
+    // Read at an instant before midnight, the same series has cost nothing today yet.
+    // Read a minute before midnight, the same series is still yesterday's: 29 minutes of it.
+    expect((await spendOn(rt, "default", midnight - 60_000)).todayUsd).toBeCloseTo((rate * 29) / 60, 10);
+  });
+
+  it("reads a running machine live between ticks while nobody watches, from the rate it was made at", async () => {
+    const backend = stubBackend();
+    const { midnight } = beforeMidnight();
+    const fc = fakeClock(midnight + HOUR);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    await stepped(costs, () => createOn(rt, { golden: "snap_g", name: "alpha" }));
+    const rate = costs[0]!.rateUsdPerHour;
+    fc.advance(2 * HOUR);
+    expect(costs).toHaveLength(1);
+    expect(await spendOn(rt, "default")).toMatchObject({ rateUsdPerHour: rate });
+    expect((await spendOn(rt, "default")).todayUsd).toBeCloseTo(2 * rate, 10);
+    expect((await spendOn(rt, "default")).monthUsd).toBeCloseTo(2 * rate, 10);
+    fc.advance(HOUR);
+    expect((await spendOn(rt, "default")).todayUsd).toBeCloseTo(3 * rate, 10);
+  });
+
+  it("holds the figure where a nap stopped the machine, however long it sleeps", async () => {
+    const backend = stubBackend();
+    const { midnight } = beforeMidnight();
+    const fc = fakeClock(midnight + HOUR);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
+    await until(() => costs.length === 1);
+    const rate = costs[0]!.rateUsdPerHour;
+    fc.advance(HOUR);
+    await stepped(costs, () => rt.workspaces.nap(ws.id));
+    const napped = await spendOn(rt, "default");
+    expect(napped.todayUsd).toBeCloseTo(rate, 10);
+    expect(napped.rateUsdPerHour).toBe(0);
+    fc.advance(3 * HOUR);
+    expect(await spendOn(rt, "default")).toEqual(napped);
+  });
+
+  it("keeps what a deleted workspace spent today on its cloud, and carries it no further", async () => {
+    const backend = stubBackend();
+    const { midnight } = beforeMidnight();
+    const fc = fakeClock(midnight + HOUR);
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
+    await until(() => costs.length === 1);
+    const rate = costs[0]!.rateUsdPerHour;
+    // Nothing watches, so the hour it ran lands on no tick before the delete.
+    fc.advance(HOUR);
+    await rt.workspaces.delete(ws.id);
+    const kept = await spendOn(rt, "default");
+    expect(kept.todayUsd).toBeCloseTo(rate, 10);
+    expect(kept.monthUsd).toBeCloseTo(rate, 10);
+    expect(kept.rateUsdPerHour).toBe(0);
+    fc.advance(2 * HOUR);
+    expect(await spendOn(rt, "default")).toEqual(kept);
+  });
+
+  it("answers every cloud a row, zeros where nothing was ever metered, and leaves this computer off", async () => {
+    const { rt } = testRuntime();
+    expect(await rt.status.spend(PLACES)).toEqual([zeros("box"), zeros("default")]);
   });
 });
 
