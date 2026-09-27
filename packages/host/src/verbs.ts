@@ -2045,7 +2045,8 @@ async function waitThrough(deps: Pick<VerbDeps, "client" | "hostWaitMs">, named:
   let client = await deps.client();
   for (;;) {
     try {
-      return await firstEnded(client, named, left());
+      const waited = await firstEnded(client, named, left());
+      return "timedOutMs" in waited ? { timedOutMs: timeoutMs! } : waited;
     } catch (e) {
       if (!(await stoppedUnder(client))) throw e;
       redialed?.();
