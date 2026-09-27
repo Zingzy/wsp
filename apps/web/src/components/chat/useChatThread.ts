@@ -17,7 +17,7 @@
 import { isProjectHomeKey } from "../../protocol/store";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isSessionEvent } from "@wsp/protocol";
-import type { ImageRecord, SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
+import type { AttachmentRecord, SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { ProtocolEvent } from "../../protocol/client";
 import { deriveSession, entryTurnId, type TimelineEntry, type TurnSummary } from "./adapt";
@@ -62,7 +62,7 @@ export interface ChatThreadHandle {
   /** The last send's start, once it landed: the key its rows waited under (the thread id the view held or was pinned to, or the workspace id before the thread had one) and the thread that start carried. Null while a send is in flight, after one that settled without a start, and before any. */
   readonly named: NamedStart | null;
   /** Optimistic user message for a send, with the request id the send carries; the session.start stamped with it replaces it. */
-  readonly appendUserTurn: (prompt: string, requestId: string, attachments?: ReadonlyArray<ImageRecord>) => void;
+  readonly appendUserTurn: (prompt: string, requestId: string, attachments?: ReadonlyArray<AttachmentRecord>) => void;
   /** A send that failed before the runtime emitted anything. */
   readonly appendLocalError: (message: string) => void;
   readonly setSending: (sending: boolean) => void;
@@ -85,7 +85,7 @@ export interface Sent {
 /** A send this view holds the words of: when it was made, what rode with it, and, once a turn refused it, which turn. */
 export interface Kept extends Sent {
   readonly at: string;
-  readonly attachments?: ReadonlyArray<ImageRecord>;
+  readonly attachments?: ReadonlyArray<AttachmentRecord>;
   readonly turnId?: string;
 }
 
@@ -646,7 +646,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     [],
   );
   const appendUserTurn = useCallback(
-    (text: string, requestId: string, attachments: ReadonlyArray<ImageRecord> = []) =>
+    (text: string, requestId: string, attachments: ReadonlyArray<AttachmentRecord> = []) =>
       setState(s => ({ ...s, pendingPrompt: { text, requestId, at: now(), ...(attachments.length > 0 ? { attachments } : {}) } })),
     [],
   );

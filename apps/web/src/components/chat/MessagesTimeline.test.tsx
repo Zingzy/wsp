@@ -5,10 +5,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { act, fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LegendListRef } from "@legendapp/list/react";
-import type { ImageRecord, SessionEvent } from "@wsp/protocol";
+import type { AttachmentRecord, SessionEvent } from "@wsp/protocol";
 import { MessagesTimeline, WORK_TONES } from "./MessagesTimeline";
 import { deriveSession, type TimelineEntry, type TurnSummary, type WorkLogEntry, type WorkLogTone } from "./adapt";
-import { imageFactsOf, imageOf, useComposerImagesStore } from "./composerImages";
+import { fileFactsOf, fileOf, useComposerFilesStore } from "./composerFiles";
 
 // jsdom has no object URLs; a thumbnail only needs one string per image.
 URL.createObjectURL = (): string => "blob:wsp/1";
@@ -157,7 +157,7 @@ function buildUserTimelineEntry(text: string) {
 
 /** A person's message that carried images: the runtime's records, and the request id whichever client made the send
  * still holds their bytes under. */
-function buildUserTimelineEntryWithImages(text: string, attachments: ImageRecord[], requestId?: string) {
+function buildUserTimelineEntryWithImages(text: string, attachments: AttachmentRecord[], requestId?: string) {
   const entry = buildUserTimelineEntry(text);
   return { ...entry, message: { ...entry.message, attachments, ...(requestId !== undefined ? { requestId } : {}) } };
 }
@@ -1223,8 +1223,8 @@ describe("MessagesTimeline", () => {
 
   it("shows the thumbnails when this client holds the bytes it sent, and each opens the image at full size", async () => {
     const file = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4])], "shot.png", { type: "image/png" });
-    const image = await imageOf(file, (await imageFactsOf(file))!);
-    act(() => useComposerImagesStore.setState({ sent: { req_1: [image] } }));
+    const image = await fileOf(file, await fileFactsOf(file));
+    act(() => useComposerFilesStore.setState({ sent: { req_1: [image] } }));
     const view = render(
       <MessagesTimeline
         {...buildProps()}
@@ -1237,7 +1237,7 @@ describe("MessagesTimeline", () => {
     fireEvent.click(view.getByRole("button", { name: "Open image 1 at full size" }));
     const full = await vi.waitFor(() => document.querySelector<HTMLImageElement>("[data-slot=dialog-popup] img")!);
     expect(full.getAttribute("src")).toBe(thumb!.getAttribute("src"));
-    act(() => useComposerImagesStore.setState({ sent: {} }));
+    act(() => useComposerFilesStore.setState({ sent: {} }));
     view.unmount();
   });
 

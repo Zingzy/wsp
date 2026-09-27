@@ -19,12 +19,16 @@
           "type": "string",
           "description": "the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"
         },
-        "images": {
+        "fast": {
+          "type": "boolean",
+          "description": "true runs the turn in the agent's fast mode, on a model that offers one, and is refused naming the model otherwise; absent runs at the agent's usual speed"
+        },
+        "files": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: PNG, JPEG, GIF or WebP, at most 5 and 10 MB each. The host reads each file and sends its bytes, so the machine never reaches back for this computer’s files; a message to an agent that reads no image is refused naming that agent."
+          "description": "paths on this computer, absolute or relative to the folder wsp runs in, of files to send with the message, at most 5. An image (PNG, JPEG, GIF or WebP, up to 10 MB) goes to the agent as an image; any other file, up to 10 MB, lands in the folder the thread works in, under .wsp-files where git lists none of it, and the message names its path. The host reads each file and sends its bytes, so the machine never reaches back for this computer’s files; an image to an agent that reads none is refused naming that agent."
         },
         "detach": {
           "type": "boolean",
@@ -100,12 +104,16 @@
           "type": "string",
           "description": "the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"
         },
-        "images": {
+        "fast": {
+          "type": "boolean",
+          "description": "true runs the turn in the agent's fast mode, on a model that offers one, and is refused naming the model otherwise; absent runs at the agent's usual speed"
+        },
+        "files": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: PNG, JPEG, GIF or WebP, at most 5 and 10 MB each. The host reads each file and sends its bytes, so the machine never reaches back for this computer’s files; a message to an agent that reads no image is refused naming that agent."
+          "description": "paths on this computer, absolute or relative to the folder wsp runs in, of files to send with the message, at most 5. An image (PNG, JPEG, GIF or WebP, up to 10 MB) goes to the agent as an image; any other file, up to 10 MB, lands in the folder the thread works in, under .wsp-files where git lists none of it, and the message names its path. The host reads each file and sends its bytes, so the machine never reaches back for this computer’s files; an image to an agent that reads none is refused naming that agent."
         },
         "detach": {
           "type": "boolean",

@@ -5,7 +5,8 @@
 // so the line carries only the folder and the MCP servers' config overrides.
 // No listener is ever named: stdio is the server's default transport, and a
 // socket would let anything on the machine drive the agent.
-import { inFolder, LAUNCH_ENV, MCP_SERVER_NAME, shellQuote, type McpServerSpec } from "@wsp/protocol";
+import { inFolder, LAUNCH_ENV, MCP_SERVER_NAME, PLAN_ACCESS, shellQuote, type McpServerSpec } from "@wsp/protocol";
+import { CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS } from "./plan-mode.js";
 
 const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 /** The sandbox modes thread/start takes; the one that turns the sandbox off is the one that asks nobody. */
@@ -72,14 +73,18 @@ function serverFlags(servers: Readonly<Record<string, McpServerSpec>>): string[]
 export interface AccessParams {
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   approvalPolicy: "on-request" | "never";
+  developerInstructions?: string;
 }
 
 /** A sandboxed mode asks the person before the agent goes past its sandbox; full access, and a turn that names no
- * mode, as every turn in a throwaway machine does, runs unsandboxed and asks nobody. */
+ * mode, as every turn in a throwaway machine does, runs unsandboxed and asks nobody. Plan reads and asks nobody,
+ * with the plan mode's instructions as the thread's developer instructions. */
 export function accessParams(mode: string | undefined): AccessParams {
   if (mode === undefined || mode === NO_SANDBOX) return { sandbox: NO_SANDBOX, approvalPolicy: "never" };
+  // Plan's developer instructions replace the person's own for the thread: codex takes one value for them.
+  if (mode === PLAN_ACCESS) return { sandbox: "read-only", approvalPolicy: "never", developerInstructions: CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS };
   const sandboxed = SANDBOXED.find(m => m === mode);
-  if (sandboxed === undefined) throw new Error(`permissionMode must be one of ${[...SANDBOXED, NO_SANDBOX].join(", ")}, got "${mode}"`);
+  if (sandboxed === undefined) throw new Error(`permissionMode must be one of ${[...SANDBOXED, NO_SANDBOX, PLAN_ACCESS].join(", ")}, got "${mode}"`);
   return { sandbox: sandboxed, approvalPolicy: "on-request" };
 }
 

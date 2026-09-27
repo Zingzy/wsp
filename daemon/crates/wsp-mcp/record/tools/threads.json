@@ -217,6 +217,12 @@
                 ],
                 "additionalProperties": false
               },
+              "permissionMode": {
+                "type": "string"
+              },
+              "fast": {
+                "type": "boolean"
+              },
               "projectName": {
                 "type": "string"
               },
@@ -472,6 +478,12 @@
                   "whileState"
                 ],
                 "additionalProperties": false
+              },
+              "permissionMode": {
+                "type": "string"
+              },
+              "fast": {
+                "type": "boolean"
               },
               "projectName": {
                 "type": "string"
