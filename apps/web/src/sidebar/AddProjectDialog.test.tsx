@@ -92,7 +92,7 @@ describe("Add a project", () => {
     expect(t.addProject).not.toHaveBeenCalled();
     fireEvent.click(t.rows()[0]!);
     await settle();
-    expect(t.addProject).toHaveBeenCalledWith("/Users/dev/code/spoo", undefined);
+    expect(t.addProject).toHaveBeenCalledWith("/Users/dev/code/spoo", undefined, undefined);
     expect(t.onClose).toHaveBeenCalled();
     expect(t.setPreferences).not.toHaveBeenCalled();
   });
@@ -109,7 +109,7 @@ describe("Add a project", () => {
     fireEvent.keyDown(t.field(), { key: "ArrowDown" });
     fireEvent.keyDown(t.field(), { key: "Enter" });
     await settle();
-    expect(t.addProject).toHaveBeenCalledWith("/Users/dev/code/wsp", undefined);
+    expect(t.addProject).toHaveBeenCalledWith("/Users/dev/code/wsp", undefined, undefined);
   });
 
   it("walks the disk from a path typed from ~, one level filtered by the name being typed, and Enter on a plain folder goes into it", async () => {
@@ -126,13 +126,46 @@ describe("Add a project", () => {
     expect(t.addProject).not.toHaveBeenCalled();
   });
 
-  it("says a repository address is cloned on a box, never on this computer, and holds Add", async () => {
+  it("clones a repository address on this computer into the folder named, holding Add until one is", async () => {
     const t = mount({ places: [HERE, BOX] });
     await settle();
-    fireEvent.change(t.field(), { target: { value: "https://github.com/dev/spoo.git" } });
+    fireEvent.change(t.field(), { target: { value: "https://github.com/spoo-me/spoo.me" } });
     expect(t.rows()).toHaveLength(0);
-    expect(t.dialog().textContent).toContain("A repository address is cloned on a computer you added. Projects on zingzy's MacBook Pro are folders you already have.");
+    const row = t.dialog().querySelector<HTMLElement>("[data-k=clone-into]")!;
+    expect(row.textContent).toContain(ADD_PROJECT_WORDS.cloneInto("https://github.com/spoo-me/spoo.me"));
+    const folder = row.querySelector<HTMLInputElement>("[data-k=clone-into-folder]")!;
+    expect(folder.placeholder).toBe(ADD_PROJECT_WORDS.cloneIntoPlaceholder("spoo.me"));
     expect(t.addButton().disabled).toBe(true);
+    // A folder the host cannot read as it stands holds Add: it is named from the root or the home.
+    fireEvent.change(folder, { target: { value: "clones" } });
+    expect(t.addButton().disabled).toBe(true);
+    fireEvent.change(folder, { target: { value: "~/tmp/clones" } });
+    expect(t.addButton().disabled).toBe(false);
+    fireEvent.click(t.addButton());
+    await settle();
+    expect(t.addProject).toHaveBeenCalledWith("https://github.com/spoo-me/spoo.me", undefined, "~/tmp/clones");
+    expect(t.onClose).toHaveBeenCalled();
+  });
+
+  it("reads owner/repo as a search while a repo here matches it and as a repo to clone once none does, and the picker fills the folder", async () => {
+    window.wsp = { pickFolder: async () => "/Users/dev/tmp/clones" };
+    try {
+      const t = mount({ places: [HERE] });
+      await settle();
+      fireEvent.change(t.field(), { target: { value: "code/spoo" } });
+      expect(names(t.rows())).toEqual(["spoo"]);
+      expect(t.dialog().querySelector("[data-k=clone-into]")).toBeNull();
+      fireEvent.change(t.field(), { target: { value: "spoo-me/spoo.me" } });
+      expect(t.rows()).toHaveLength(0);
+      fireEvent.click(t.dialog().querySelector("[data-k=clone-into-choose]")!);
+      await settle();
+      expect(t.dialog().querySelector<HTMLInputElement>("[data-k=clone-into-folder]")!.value).toBe("/Users/dev/tmp/clones");
+      fireEvent.keyDown(t.field(), { key: "Enter" });
+      await settle();
+      expect(t.addProject).toHaveBeenCalledWith("spoo-me/spoo.me", undefined, "/Users/dev/tmp/clones");
+    } finally {
+      delete window.wsp;
+    }
   });
 
   it("lists this computer and every computer that runs workspaces, and on a box asks for an address and clones it there", async () => {
@@ -148,7 +181,7 @@ describe("Add a project", () => {
     expect(clone.textContent).toBe(ADD_PROJECT_WORDS.cloneLine("https://github.com/dev/spoo.git", "spoo"));
     fireEvent.click(t.addButton());
     await settle();
-    expect(t.addProject).toHaveBeenCalledWith("https://github.com/dev/spoo.git", "p_1");
+    expect(t.addProject).toHaveBeenCalledWith("https://github.com/dev/spoo.git", "p_1", undefined);
   });
 
   it("says a provider clones from an address", async () => {

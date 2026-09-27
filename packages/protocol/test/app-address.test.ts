@@ -4,7 +4,7 @@
 // after its first fork, the app writes the others as the person moves, and the
 // app's store reads all three back.
 import { describe, expect, it } from "vitest";
-import { addressFromHash, appHash, openingHash, pairingCodeOf, workspaceHash } from "../src/index.js";
+import { addressFromHash, addressFromLink, appHash, linkFromHash, linkHash, openingHash, pairingCodeOf, workspaceHash } from "../src/index.js";
 
 describe("the workspace a page opens on", () => {
   it("round-trips an id through the hash", () => {
@@ -71,5 +71,49 @@ describe("the code wsp init puts in the address of the page it opens", () => {
     expect(pairingCodeOf("#c/")).toBeUndefined();
     expect(pairingCodeOf("#gallery")).toBeUndefined();
     expect(pairingCodeOf("")).toBeUndefined();
+  });
+});
+
+describe("a wsp:// link", () => {
+  it("names a thread, a workspace, a project or a Settings page by its id, and carries it to the page as a hash", () => {
+    expect(addressFromLink("wsp://thread/th_9f3a")).toEqual({ kind: "thread", id: "th_9f3a" });
+    expect(addressFromLink("wsp://workspace/ws_a1b2")).toEqual({ kind: "workspace", id: "ws_a1b2" });
+    expect(addressFromLink("wsp://project/pr_77c0")).toEqual({ kind: "project", id: "pr_77c0" });
+    expect(addressFromLink("wsp://settings/keybindings")).toEqual({ kind: "settings", id: "keybindings" });
+    expect(addressFromLink("wsp://settings/keybindings/")).toEqual({ kind: "settings", id: "keybindings" });
+    expect(addressFromLink("WSP://thread/0b6e1c2a-7f1d-4c55-9a9b-3f1f2a6c8d10")).toEqual({ kind: "thread", id: "0b6e1c2a-7f1d-4c55-9a9b-3f1f2a6c8d10" });
+    for (const target of [{ kind: "thread", id: "th_9f3a" }, { kind: "settings", id: "keybindings" }] as const) {
+      expect(linkFromHash(linkHash(target))).toEqual(target);
+    }
+    expect(linkHash({ kind: "thread", id: "th_9f3a" })).toBe("#open/thread/th_9f3a");
+    // A link's hash is not a workspace address, and a workspace address is not a link.
+    expect(addressFromHash(linkHash({ kind: "workspace", id: "ws_a" }))).toBeUndefined();
+    expect(linkFromHash(workspaceHash("ws_a"))).toBeUndefined();
+  });
+
+  it("names nothing for any other scheme, route or shape: ids alone ride a link, never an act or a query", () => {
+    for (const url of [
+      "https://thread/th_1",
+      "wsp:thread/th_1",
+      "wsp://send/th_1",
+      "wsp://thread/",
+      "wsp://thread",
+      "wsp://thread/th_1/extra",
+      "wsp://thread/th_1?send=rm%20-rf",
+      "wsp://thread/th_1#x",
+      "wsp://user:pw@thread/th_1",
+      "wsp://thread:9/th_1",
+      "wsp://thread/th%201",
+      "wsp://thread/..",
+      "wsp://thread/%2e%2e",
+      "wsp://thread/<script>",
+      `wsp://thread/${"a".repeat(129)}`,
+      "not a url",
+      "",
+    ]) {
+      expect(addressFromLink(url), url).toBeUndefined();
+    }
+    expect(linkFromHash("#open/send/th_1")).toBeUndefined();
+    expect(linkFromHash("#open/thread/a%20b")).toBeUndefined();
   });
 });

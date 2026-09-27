@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AgentHere, InstallReport } from "@wsp/host";
-import type { BundleOutcome, ContextMenuItem, DesktopBridge, HostOutcome, HostsView, InitNeedsYou, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
+import type { BundleOutcome, ContextMenuItem, DesktopBridge, HostOutcome, HostsView, InitNeedsYou, LinkTarget, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { shellArgFrom } from "./shell-args.js";
 
@@ -26,6 +26,7 @@ const bridge: DesktopBridge & OnboardingBridge = {
   getBundle: (ask: { version: string }): Promise<BundleOutcome> => ipcRenderer.invoke("bundle:get", ask),
   quitAndOpen: (): Promise<BundleOutcome> => ipcRenderer.invoke("bundle:open"),
   localFonts: (family: string): Promise<LocalFontFace[]> => ipcRenderer.invoke("fonts:local", family),
+  fontFamilies: (): Promise<string[]> => ipcRenderer.invoke("fonts:families"),
   pickFolder: (): Promise<string | undefined> => ipcRenderer.invoke("folder:pick"),
   // Answered here rather than over a handler, since only the preload can read the path off a dropped file; the
   // shell is asked first, so a page served by a host somewhere else is handed nothing from this computer.
@@ -41,6 +42,11 @@ const bridge: DesktopBridge & OnboardingBridge = {
   },
   setTheme: (theme: ThemePreference): void => ipcRenderer.send("theme:set", theme),
   needsYou: (need: InitNeedsYou): void => ipcRenderer.send("needs-you:say", need),
+  onOpen: (handler: (target: LinkTarget) => void): (() => void) => {
+    const listen = (_event: unknown, target: LinkTarget): void => handler(target);
+    ipcRenderer.on("shell:open", listen);
+    return () => ipcRenderer.off("shell:open", listen);
+  },
   onNeedsYouOpen: (handler: () => void): (() => void) => {
     const listen = (): void => handler();
     ipcRenderer.on("needs-you:open", listen);

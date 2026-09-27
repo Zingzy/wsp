@@ -29,7 +29,6 @@ import { copyText } from "../actions/clipboard";
 import { openContextMenu } from "../actions/contextMenu";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry";
 import { terminalActions, type TerminalVerbs } from "../actions/terminalActions";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults";
 import { shortcutLabelForCommand } from "../keybindings";
 import type { TerminalConfig, TerminalScheme } from "@wsp/protocol";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
@@ -37,6 +36,8 @@ import { Button } from "./ui/button";
 import { TerminalFontButton, TerminalFontCard } from "./TerminalFontButton";
 import { PanelTabCloseButton } from "./ui/panel-tab-close-button";
 import { isTerminalAppShortcut } from "../keybindings";
+import type { ResolvedKeybindingsConfig } from "../keybindingTypes";
+import { currentKeybindings, useKeybindings } from "../shell/useKeybindings";
 import { cn, errorText } from "../lib/utils";
 import { getTerminalLabel } from "../lib/terminalLabels";
 import { GhosttyTerminalSurface, type GhosttyTerminalFont, type GhosttyTerminalSurfaceOptions } from "../terminal/ghostty/surface";
@@ -67,8 +68,8 @@ export type TerminalPaneVerbs = Pick<TerminalVerbs, "split" | "splitVertical" | 
 const TERMINAL_SHORTCUTS = { context: { terminalFocus: true } };
 
 /** A toolbar button's label: the title, then the chord, or the refusal when it cannot run. */
-function toolbarLabel(action: ResolvedAction): string {
-  const chord = action.shortcutCommand === undefined ? null : shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, action.shortcutCommand, TERMINAL_SHORTCUTS);
+function toolbarLabel(action: ResolvedAction, keybindings: ResolvedKeybindingsConfig): string {
+  const chord = action.shortcutCommand === undefined ? null : shortcutLabelForCommand(keybindings, action.shortcutCommand, TERMINAL_SHORTCUTS);
   const suffix = action.refusal ?? chord;
   return suffix === null ? action.title : `${action.title} (${suffix})`;
 }
@@ -329,7 +330,7 @@ export function TerminalViewport({
         },
         onResize: (cols, rows) => io.resize(cols, rows),
         onSelectionChange: () => {},
-        beforeKey: event => !isTerminalAppShortcut(event),
+        beforeKey: event => !isTerminalAppShortcut(event, currentKeybindings()),
         onLinkActivate: (text, event) => {
           if (isTerminalLinkActivation(event)) activateLink(text);
         },
@@ -640,6 +641,7 @@ export default function ThreadTerminalDrawer({
   terminalConfig = EMPTY_CONFIG,
 }: ThreadTerminalDrawerProps) {
   const isPanel = mode === "panel";
+  const keybindings = useKeybindings();
   const [fontOpen, setFontOpen] = useState(false);
   const toggleFont = useCallback(() => setFontOpen(open => !open), []);
   const refusalRef = useRef<string | null>(null);
@@ -823,10 +825,10 @@ export default function ThreadTerminalDrawer({
   const splitVerticalAction = actionById(toolbar, "split-vertical");
   const newAction = actionById(toolbar, "new");
   const closeAction = actionById(toolbar, "close");
-  const splitTerminalActionLabel = toolbarLabel(splitAction);
-  const splitTerminalVerticalActionLabel = toolbarLabel(splitVerticalAction);
-  const newTerminalActionLabel = toolbarLabel(newAction);
-  const closeTerminalActionLabel = toolbarLabel(closeAction);
+  const splitTerminalActionLabel = toolbarLabel(splitAction, keybindings);
+  const splitTerminalVerticalActionLabel = toolbarLabel(splitVerticalAction, keybindings);
+  const newTerminalActionLabel = toolbarLabel(newAction, keybindings);
+  const closeTerminalActionLabel = toolbarLabel(closeAction, keybindings);
   const onSplitTerminalAction = useCallback(() => {
     if (splitAction.refusal !== null) return;
     void splitAction.run();

@@ -291,7 +291,7 @@ describe("a project golden", () => {
     expect(other.path).not.toBe(ws.project.path);
     const fork = await rt.workspaces.create({ project: other.id, golden: golden.snapshotId, name: "other-task" });
     const machine = backend.machines.find(m => m.id === fork.machineId)!;
-    expect(machine.execLog.join("\n")).toContain(`git clone https://github.com/dev/other.git ${other.path}`);
+    expect(machine.execLog.join("\n")).toContain(`git clone -- https://github.com/dev/other.git ${other.path}`);
   });
 
   it("over the wire: workspaces.snapshot replies with the project golden, projectGoldens.list with every one, and a refusal carries its kind", async () => {

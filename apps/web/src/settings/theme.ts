@@ -7,6 +7,7 @@
 // draw the same side.
 import type { Preferences, ThemePreference } from "@wsp/protocol";
 import { useLayoutEffect, useSyncExternalStore } from "react";
+import { applyFonts } from "../appearanceFonts.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { useStore } from "../protocol/store.js";
@@ -49,6 +50,13 @@ export function useThemeEffect(): void {
     applyTheme({ theme, lightTheme, darkTheme }, systemDark);
     desktopBridge()?.setTheme?.(theme);
   }, [theme, lightTheme, darkTheme, systemDark]);
+}
+
+/** Mounted once beside the theme: the root's app and code font tokens follow the record's picks. */
+export function useFontEffect(): void {
+  const appFont = useStore(s => s.preferences.appFont);
+  const codeFont = useStore(s => s.preferences.codeFont);
+  useLayoutEffect(() => applyFonts({ appFont, codeFont }), [appFont, codeFont]);
 }
 
 const subscribeToHtmlClass = (onChange: () => void): (() => void) => {

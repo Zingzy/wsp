@@ -4,7 +4,7 @@
 // Keybindings as lines per platform, and About's lines with the newest release.
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
-import { DEFAULT_KEYBINDINGS } from "../src/keybindingDefaults.js";
+import { DEFAULT_KEYBINDINGS, parseKeybindingShortcut } from "../src/keybindingDefaults.js";
 import { KEYBINDING_COMMANDS, type KeybindingCommand } from "../src/keybindingTypes.js";
 import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, ReleaseView, WorkspaceView } from "@wsp/protocol";
 import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
@@ -13,7 +13,8 @@ import { useStore } from "../src/protocol/store.js";
 import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { builtWhen } from "../src/settings/image.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
-import { JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
+import { CHORD_WORDS, JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
+import { formatShortcutLabel } from "../src/keybindings.js";
 import { placeName } from "../src/settings/places.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { crumb, descriptionOf, lineLabels, lineOf, mountSettings, pageAt, resetSettings, rowOf, rowTitles, settingsApi, settle, wordOf } from "./settings-harness.js";
@@ -359,6 +360,78 @@ describe("Keybindings", () => {
     expect(lineLabels()).toContain("Search");
     expect(document.querySelectorAll("[data-settings-page] [data-slot=kbd]").length).toBeGreaterThan(10);
     expect(document.querySelector("[data-settings-page] [data-command='chat.new'] [data-settings-keys]")?.textContent).toMatch(/N.*T$|N$/);
+  });
+
+  const chordOf = (command: string): HTMLElement => document.querySelector<HTMLElement>(`[data-chord='${command}']`)!;
+  const press = (key: string, mods: Partial<KeyboardEventInit> = {}): void => {
+    fireEvent.keyDown(chordOf("sidebar.toggle"), { key, metaKey: navigator.platform.startsWith("Mac"), ctrlKey: !navigator.platform.startsWith("Mac"), ...mods });
+  };
+  const keysOf = (command: string): string => document.querySelector(`[data-command='${command}'] [data-settings-keys]`)?.textContent ?? "";
+
+  it("listens for a chord when its keycaps are pressed, writes the next one as the person's own, and redraws the line with it", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api, at: { kind: "group", group: "keybindings" } });
+    await settle();
+    fireEvent.click(chordOf("sidebar.toggle"));
+    expect(document.querySelector("[data-command='sidebar.toggle'] [data-k=capturing]")?.textContent).toBe(CHORD_WORDS.capturing);
+    expect(CHORD_WORDS.capturing).toBe("Press keys");
+    // A modifier on its own is not a chord yet: the line keeps listening.
+    press("Meta");
+    expect(sets).toEqual([]);
+    press("b", { shiftKey: true });
+    await settle();
+    expect(sets).toEqual([{ keybindings: { "sidebar.toggle": "mod+shift+b" } }]);
+    expect(document.querySelector("[data-k=capturing]")).toBeNull();
+    expect(keysOf("sidebar.toggle")).toBe(formatShortcutLabel(parseKeybindingShortcut("mod+shift+b")!, navigator.platform));
+    // Only lines that are rules change: the jumps and the fixed keys have no button.
+    expect(document.querySelector("[data-chord='workspace.select.1']")).toBeNull();
+    expect(document.querySelector("[data-settings-line=send] [data-chord]")).toBeNull();
+  });
+
+  it("refuses a chord another command holds, naming it in the error ink where the keycaps were until the next key, and Esc stops listening", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api, at: { kind: "group", group: "keybindings" } });
+    await settle();
+    fireEvent.click(chordOf("sidebar.toggle"));
+    press("j");
+    await settle();
+    const refused = document.querySelector("[data-command='sidebar.toggle'] [data-k=chord-refused]");
+    expect(refused?.textContent).toBe("Taken by Toggle the terminal drawer");
+    expect(refused?.className).toContain("text-error-foreground");
+    expect(sets).toEqual([]);
+    // The next key down clears it and the line listens on.
+    press("Shift", { shiftKey: true });
+    expect(document.querySelector("[data-k=chord-refused]")).toBeNull();
+    expect(document.querySelector("[data-k=capturing]")).not.toBeNull();
+    // A chord a browser tab keeps is refused whichever shell holds the page.
+    press("t");
+    expect(document.querySelector("[data-k=chord-refused]")?.textContent).toBe("Taken by New thread");
+    fireEvent.keyDown(chordOf("sidebar.toggle"), { key: "Escape" });
+    expect(document.querySelector("[data-k=capturing], [data-k=chord-refused]")).toBeNull();
+    expect(sets).toEqual([]);
+    // Esc while listening never leaves Settings.
+    expect(useStore.getState().settingsOpen).toBe(true);
+  });
+
+  it("offers Reset on a changed line alone and Restore defaults while any is changed, each putting the defaults back", async () => {
+    const record = { ...DEFAULT_PREFERENCES, labs: false, keybindings: { "sidebar.toggle": "mod+shift+b", "terminal.toggle": "mod+shift+y" } };
+    const { api, sets } = settingsApi({}, record);
+    act(() => useStore.setState({ preferences: record }));
+    mountSettings({ api, at: { kind: "group", group: "keybindings" } });
+    await settle();
+    const resets = (): string[] => [...document.querySelectorAll("[data-k=reset-chord]")].map(button => button.closest("[data-command]")!.getAttribute("data-command")!);
+    expect(resets()).toEqual(["sidebar.toggle", "terminal.toggle"]);
+    fireEvent.click(document.querySelector("[data-command='sidebar.toggle'] [data-k=reset-chord]")!);
+    await settle();
+    expect(sets).toEqual([{ keybindings: { "sidebar.toggle": null } }]);
+    expect(resets()).toEqual(["terminal.toggle"]);
+    expect(keysOf("sidebar.toggle")).toBe(formatShortcutLabel(parseKeybindingShortcut("mod+b")!, navigator.platform));
+    fireEvent.click(document.querySelector("[data-k=restore-defaults]")!);
+    await settle();
+    expect(Object.values(sets.at(-1)!.keybindings!).every(value => value === null)).toBe(true);
+    expect(useStore.getState().preferences.keybindings).toEqual({});
+    expect(resets()).toEqual([]);
+    expect(document.querySelector("[data-k=restore-defaults]")).toBeNull();
   });
 });
 
