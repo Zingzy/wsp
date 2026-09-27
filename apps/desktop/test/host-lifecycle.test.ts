@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SERVICE_MANAGERS, dialHost, httpProbe, localWiring, localWorkFolder, makeRuntime, noManagerLine, serviceAddressHere, serviceTag, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord, type ServiceDeps, type ServiceRunner } from "@wsp/host";
+import { SERVICE_MANAGERS, dialHost, httpProbe, localWiring, localWorkFolder, makeRuntime, noManagerLine, serve, serviceAddressHere, serviceTag, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord, type ServiceDeps, type ServiceRunner } from "@wsp/host";
 import { hostNoKeyLine } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -260,6 +260,41 @@ describe("openHost", () => {
     };
     const session = await open();
     expect(session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
+  });
+
+  it("the launch that installs the service attaches while the host it started is still listing its provider's machines", async () => {
+    // What the first launch after the install meets on a computer with a provider key: the host binds its page, then
+    // sweeps and lists at the provider before it is done starting. The launch waited on the token file that came
+    // after the listing, gave up, and quit; the next launch found the host ready.
+    const probe = createTcpServer();
+    const port = await listen(probe);
+    await closeServer(probe);
+    const rt = testRuntime();
+    let release = (): void => {};
+    const held = new Promise<void>(resolve => (release = resolve));
+    const reap = rt.reap.bind(rt);
+    Object.assign(rt, { reap: async (...args: Parameters<Runtime["reap"]>) => (await held, reap(...args)) });
+    let serving: Promise<HostHandle> | undefined;
+    let loaded = false;
+    const road = {
+      ...launchd.road,
+      waitMs: 3_000,
+      run: async (argv: readonly string[]) => {
+        if (argv[1] === "print") return loaded ? { code: 0, output: "" } : { code: 113, output: "Could not find service" };
+        if (argv[1] === "bootstrap") {
+          loaded = true;
+          serving = serve(quietIO(), { port, statePath, webDir: fakeWebDir(), runtime: rt });
+        }
+        return { code: 0, output: "" };
+      },
+    };
+    try {
+      const session = await open({ service: road });
+      expect(session.url).toBe(`http://127.0.0.1:${port}`);
+    } finally {
+      release();
+      existing = await serving;
+    }
   });
 
   it("a serving host means no unit written", async () => {
