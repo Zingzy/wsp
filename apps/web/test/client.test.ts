@@ -110,7 +110,7 @@ describe("makeApi wrappers", () => {
 
   it("preferences and setPreferences send the two preferences ops and unwrap the record the wire type vouches for", async () => {
     const { api, lastSent } = await connect();
-    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, projectLook: { pr_1: { icon: "rocket", hue: "teal" } }, labs: false };
+    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, projectLook: { pr_1: { icon: "rocket", hue: "teal" } }, notifySound: false, projectOrder: ["pr_1"], labs: false };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record });
     // A record from a host that kept no computer icons or theme picks reads as none and the side defaults rather than
     // failing the whole record.

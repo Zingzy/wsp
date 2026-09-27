@@ -2,10 +2,13 @@
 // The left region. Fixed at the top: the search row with the compose glyph that
 // opens a thread in the selected workspace, and the project switcher, "All
 // projects" or the one project the list is filtered to. Under them, scrolling:
-// every root thread as a tile, newest first across every workspace, the
-// threads its agents opened under it on the rail, and at the foot the Settled
-// fold holding every root whose whole tree is settled, by hand or by quiet
-// after a read, with "Settle all read" on its own row's menu. A workspace
+// every root thread as a tile under its section (Pinned, Needs you, Working,
+// Done, Idle), newest first inside each across every workspace, the threads
+// its agents opened under it on the rail, and at the foot the Settled fold
+// holding every root whose whole tree is settled, by hand or by quiet after a
+// read, with "Settle all read" on its own row's menu. A root tile is dragged
+// onto another section to hold it there, onto Pinned to pin it and onto the
+// fold to settle it; while one is dragged every section stands to take it. A workspace
 // with no thread yet is a tile of its own and a workspace being made is a
 // tile-shaped placeholder. The first tile of a copy in a tree carries every
 // one of that copy's verbs in its menu after the thread's own. On a wsp with no project
@@ -17,7 +20,7 @@
 // shell's sidebar-glass: nothing here paints a background.
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, computerOffline, creationAwaits, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED, rebuildRefusedLine } from "../actions/format.js";
@@ -48,7 +51,8 @@ import { workspacesOn } from "./computerPick.js";
 import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, SETTLED_ROW_ID, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { resolveAdjacentThreadId, topSidebarThread } from "./Sidebar.logic.js";
-import { projectGroups, settleableRoots, sidebarTiles, treeSettle, treeThreadIds, type ProjectGroup, type TileNode } from "./threadTree.js";
+import { SIDEBAR_SECTIONS, dropMarks, projectGroups, settleableRoots, sidebarTiles, treeSettle, treeThreadIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
+import { SnoozeDialog } from "./SnoozeDialog.js";
 import { SettingsRow } from "./SettingsRow.js";
 import { HostFoot } from "../hosts/HostFoot.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
@@ -56,7 +60,7 @@ import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, type TilePla
 import { NEW_THREAD_TITLE, computerName, copyName, placeNames } from "./workspaceRows.js";
 import { BranchReader, readsBranch, workspaceBranch } from "./WorkspaceBranch.js";
 import { restingAge } from "../components/status/restingAge.js";
-import { PROJECT_WORDS } from "./words.js";
+import { PROJECT_WORDS, SECTION_WORDS } from "./words.js";
 
 /** Whether the Settled fold is open. It starts shut: it holds the tiles a person has stopped looking at. */
 const SETTLED_OPEN_KEY = "wsp:sidebar-settled-open";
@@ -144,6 +148,11 @@ export function WorkspaceSidebar() {
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [addProject, setAddProject] = useState<number | null>(null);
   const [trip, setTrip] = useState<ProjectTripState | null>(null);
+  /** The root whose snooze is being picked, by fold key. */
+  const [snoozing, setSnoozing] = useState<string | null>(null);
+  /** The root tile being dragged, by fold key, and the place under the pointer it would land in. */
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<SidebarSection | "settled" | null>(null);
   const [forgetting, setForgetting] = useState<{ workspaceId: string; act: "forget" | "delete" } | null>(null);
   /** The tile whose name is being typed, by the row id every tile carries, and whether that name is on its way; one
    * tile at a time, the tile is the only editor, and the field stays until the store has the name. */
@@ -152,14 +161,23 @@ export function WorkspaceSidebar() {
   const renameThread = useStore(s => s.renameThread);
   const renameWorkspace = useStore(s => s.renameWorkspace);
   const canRename = useStore(s => s.api?.renameSession !== undefined);
+  const canMark = useStore(s => s.api?.markThreads !== undefined);
+  const markThreads = useStore(s => s.markThreads);
+  const settleThreads = useStore(s => s.settleThreads);
+  const setPreferences = useStore(s => s.setPreferences);
+  const projectOrder = useStore(s => s.preferences.projectOrder);
   const harnesses = useStore(s => s.harnesses);
   const harnessesByWorkspace = useStore(s => s.harnessesByWorkspace);
   // The sidebar draws the tiles, so it owns the rename's opener, as it owns the forget's dialog; a client that cannot
   // send the name offers no box, and the action carries that refusal.
   const defaultThreadVerbs = useThreadVerbs();
   const threadVerbs = useMemo<ThreadVerbs>(
-    () => ({ ...defaultThreadVerbs, ...(canRename ? { rename: (threadId: string) => setRenaming({ rowId: threadRowId(threadId), saving: false }) } : {}) }),
-    [canRename, defaultThreadVerbs],
+    () => ({
+      ...defaultThreadVerbs,
+      ...(canRename ? { rename: (threadId: string) => setRenaming({ rowId: threadRowId(threadId), saving: false }) } : {}),
+      ...(canMark ? { snooze: setSnoozing } : {}),
+    }),
+    [canMark, canRename, defaultThreadVerbs],
   );
   const defaultVerbs = useWorkspaceVerbs();
 
@@ -171,7 +189,7 @@ export function WorkspaceSidebar() {
   const computerPicked = places.some(place => place.id === computerStored) ? computerStored : null;
   const projects = useMemo(() => workspacesOn(fleet, places, computerPicked), [fleet, places, computerPicked]);
   const launches = useLaunches();
-  const groups = useMemo(() => projectGroups(recorded, projects), [recorded, projects]);
+  const groups = useMemo(() => projectGroups(recorded, projects, projectOrder), [recorded, projects, projectOrder]);
   const named = useMemo(() => placeNames(places), [places]);
   // A pick for a project this host no longer holds reads as every project.
   const picked = pickStored === null ? null : groups.find(group => group.project.id === pickStored) ?? null;
@@ -289,9 +307,9 @@ export function WorkspaceSidebar() {
         />
       );
     } else {
-      // A settle takes a root and its whole tree, so only a live root offers it; a tile under one settles with it.
-      const settle = depth === 0 && tiles.live.includes(node) ? treeSettle(node) : null;
-      const target = threadTarget(thread, { catalog: catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness), ...machineOf(runs) }, settle);
+      // A settle, a restore, a pin and a snooze take a root and its whole tree; a tile under one goes where it goes.
+      const root = depth === 0 ? { ...treeSettle(node), pinned: thread.pinnedAt !== null, settled } : null;
+      const target = threadTarget(thread, { catalog: catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness), ...machineOf(runs) }, root);
       const actionsOf = resolveActions(threadActions, target, threadVerbs);
       const rowId = threadRowId(thread.id);
       tile = (
@@ -310,6 +328,19 @@ export function WorkspaceSidebar() {
           onRename={title => void sendName(rowId, () => renameThread({ sessionId: thread.sessionId, workspaceId: thread.workspaceId, harness: thread.harness, title }))}
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actionsOf, "rename"))}
+          {...(depth === 0 && !settled
+            ? {
+                onDragStart: (event: DragEvent<HTMLElement>) => {
+                  event.dataTransfer.setData("text/plain", thread.title);
+                  event.dataTransfer.effectAllowed = "move";
+                  setDragging(item.id);
+                },
+                onDragEnd: () => {
+                  setDragging(null);
+                  setOver(null);
+                },
+              }
+            : {})}
         />
       );
     }
@@ -355,6 +386,36 @@ export function WorkspaceSidebar() {
     ];
   });
   const made = creations.filter(creation => picked === null || creation.project === picked.project.id);
+  /** A root dropped on a section or on the fold: the marks the drop writes, or the settle of its tree. */
+  const drop = (rootId: string, place: SidebarSection | "settled"): void => {
+    const node = tiles.live.find(root => root.thread.id === rootId);
+    if (node === undefined || node.thread.thread === null) return;
+    if (place === "settled") {
+      const tree = treeSettle(node);
+      if (!tree.working) void settleThreads(tree.threadIds);
+      return;
+    }
+    const marks = dropMarks(node, place);
+    if (marks !== null) void markThreads([node.thread.thread.id], marks);
+  };
+  /** What makes a section, or the fold, a place a dragged root lands in. */
+  const dropZone = (place: SidebarSection | "settled") => ({
+    onDragOver: (event: DragEvent<HTMLElement>) => {
+      if (dragging === null) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      if (over !== place) setOver(place);
+    },
+    onDrop: (event: DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      const rootId = dragging;
+      setDragging(null);
+      setOver(null);
+      if (rootId !== null) drop(rootId, place);
+    },
+  });
+  // While a root is dragged every section stands, the empty ones too, so any of them can take it.
+  const sections = dragging === null ? tiles.sections : SIDEBAR_SECTIONS.map(id => tiles.sections.find(section => section.id === id) ?? { id, roots: [] });
   const settledCount = tiles.settled.reduce((sum, node) => sum + tileCount(node), 0);
   const settleable = settleableRoots(tiles.live);
   const settledRowActions = resolveActions(settledFoldActions, { threadIds: settleable.flatMap(treeThreadIds) }, threadVerbs);
@@ -420,6 +481,7 @@ export function WorkspaceSidebar() {
       </div>
       <ProjectSwitcher
         projects={groups.map(group => group.project)}
+        onReorder={ids => void setPreferences({ projectOrder: ids })}
         named={named}
         pick={picked?.project ?? null}
         onPick={setPickStored}
@@ -455,10 +517,28 @@ export function WorkspaceSidebar() {
         <SidebarContent fixedHeader={header}>
           <ul data-sidebar-tree className="flex w-full min-w-0 flex-col px-[var(--sidebar-content-inset)]">
             {launchItems}
-            {tiles.live.map(node => tileItem(node, 0, null))}
+            {sections.map((section, index) => (
+              <li
+                key={section.id}
+                data-section={section.id}
+                data-thread-selection-safe
+                className={cn("min-w-0 rounded-[var(--control-radius)] transition-colors duration-150", index > 0 && "mt-3", over === section.id && "bg-sidebar-row-hover")}
+                {...dropZone(section.id)}
+              >
+                <div data-section-head={section.id} className="flex h-7 items-center gap-3 px-2 text-sidebar-muted-foreground">
+                  <span data-group-word className={cn(MICRO_LABEL, "min-w-0 flex-1")}>
+                    {SECTION_WORDS[section.id]}
+                  </span>
+                  <span data-group-count className={cn(ROW_META_CLASS, "shrink-0")}>
+                    {section.roots.reduce((sum, node) => sum + tileCount(node), 0)}
+                  </span>
+                </div>
+                <ul className="flex min-w-0 flex-col">{section.roots.map(node => tileItem(node, 0, null))}</ul>
+              </li>
+            ))}
             {made.map(creationItem)}
-            {tiles.settled.length > 0 || settleable.length > 0 ? (
-              <li data-thread-selection-safe className="mt-3">
+            {tiles.settled.length > 0 || settleable.length > 0 || dragging !== null ? (
+              <li data-thread-selection-safe className={cn("mt-3 rounded-[var(--control-radius)] transition-colors duration-150", over === "settled" && "bg-sidebar-row-hover")} {...dropZone("settled")}>
                 <button
                   type="button"
                   data-sidebar-row
@@ -522,6 +602,15 @@ export function WorkspaceSidebar() {
         />
       ) : null}
       {addProject !== null ? <AddProjectDialog key={addProject} onClose={() => setAddProject(null)} /> : null}
+      {snoozing !== null ? (
+        <SnoozeDialog
+          onSnooze={until => {
+            void markThreads([snoozing], { snoozedUntil: until });
+            setSnoozing(null);
+          }}
+          onCancel={() => setSnoozing(null)}
+        />
+      ) : null}
       {trip !== null && tripTarget !== undefined ? <ExportProjectDialog key={trip.key} workspace={tripTarget} onClose={() => setTrip(null)} /> : null}
       {forgetTarget !== undefined ? (
         <ForgetWorkspaceDialog

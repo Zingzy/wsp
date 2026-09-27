@@ -204,7 +204,7 @@ describe("header", () => {
 });
 
 describe("tiles from the fixture wire", () => {
-  it("every root thread is a tile titled by its prompt, newest first across every workspace, with where it runs and its status in row one", async () => {
+  it("every root thread is a tile titled by its prompt, under its section and newest first inside it across every workspace, with where it runs and its status in row one", async () => {
     await mount(
       fakeApi(
         [API, WEB],
@@ -217,7 +217,8 @@ describe("tiles from the fixture wire", () => {
       ),
       "fix the port list",
     );
-    expect(rowIds()).toEqual(["thread:s1", "thread:s3", "thread:s2", "settled"]);
+    // The failure waits on the person, so it heads the list over the working thread, and the read one rests last.
+    expect(rowIds()).toEqual(["thread:s3", "thread:s1", "thread:s2", "settled"]);
     expect(rowOf("fix the port list").querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${BOX_NAME}`);
     // The one slot at row one's right edge: the state word while a thread is one a person acts on, the age once it rests.
     expect(threadState(rowOf("fix the port list"))).toBe("Working");
@@ -799,9 +800,10 @@ describe("the tree", () => {
       ),
       "move the pricing table",
     );
-    expect(rowIds()).toEqual(["thread:th_orphan", "thread:th_lead", "thread:th_build", "thread:th_move", "thread:th_review"]);
+    // The reviewer asks, so the lead's whole tree stands under Needs you, over the orphan that only works.
+    expect(rowIds()).toEqual(["thread:th_lead", "thread:th_build", "thread:th_move", "thread:th_review", "thread:th_orphan"]);
     const depths = rowIds().map(id => Number(document.querySelector<HTMLElement>(`[data-row-id='${id}']`)!.dataset["depth"]));
-    expect(depths).toEqual([0, 0, 1, 2, 2]);
+    expect(depths).toEqual([0, 1, 2, 2, 0]);
     // Real nesting, item inside item: the builder's item holds the reviewer and the fork's thread.
     const build = rowOf("build the rows").closest("li[data-thread-item]")!;
     expect(build.contains(rowOf("review the rows"))).toBe(true);

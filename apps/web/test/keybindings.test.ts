@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { compileResolvedKeybindingsConfig, DEFAULT_KEYBINDINGS, DEFAULT_RESOLVED_KEYBINDINGS, parseKeybindingShortcut, parseKeybindingWhenExpression } from "../src/keybindingDefaults.js";
 import { useStore } from "../src/protocol/store.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
+import { KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
 import { browserTabClaimsShortcut, eventHoldKeys, formatShortcutLabel, resolveShortcutCommand, shortcutLabelForCommand, type ShortcutEventLike } from "../src/keybindings.js";
 
 const MAC = "MacIntel";
@@ -71,6 +72,14 @@ describe("default shortcuts", () => {
     expect(resolve(ctrl("e", { shiftKey: true }), LINUX)).toBe("thread.settle");
     expect(resolve(cmd("e", { shiftKey: true }), MAC, { terminalFocus: true })).toBeNull();
     expect(DEFAULT_KEYBINDINGS.filter(rule => rule.command === "thread.settle")).toHaveLength(1);
+  });
+
+  it("mod+alt+u jumps to the next thread that needs the person, Command on macOS and Control elsewhere, outside a terminal", () => {
+    expect(resolve(cmd("u", { altKey: true }), MAC)).toBe("thread.nextNeedsYou");
+    expect(resolve(ctrl("u", { altKey: true }), LINUX)).toBe("thread.nextNeedsYou");
+    expect(resolve(cmd("u", { altKey: true }), MAC, { terminalFocus: true })).toBeNull();
+    expect(DEFAULT_KEYBINDINGS.filter(rule => rule.command === "thread.nextNeedsYou")).toHaveLength(1);
+    expect(KEYBINDING_WORDS["thread.nextNeedsYou"]).toBe("Next thread that needs you");
   });
 
   it("gates the terminal chords on terminalFocus and hands mod+n to chat otherwise", () => {
@@ -315,5 +324,23 @@ describe("the settle chord's command", () => {
     put({ status: "running", endedAt: undefined });
     runShellCommand("thread.settle", { workspaceId: "ws_a", toggleSidebar: () => {} } as never, []);
     expect(settleThreads).not.toHaveBeenCalled();
+  });
+});
+
+describe("the jump to the next thread that needs the person", () => {
+  it("opens the first thread after the open one that asks or holds a finish nobody has seen, in the sidebar's order, wrapping, and nothing when none does", () => {
+    const now = Date.now();
+    const row = (id: string, over: Record<string, unknown> = {}) => ({ id: `s_${id}`, workspaceId: "ws_a", threadId: id, harness: "claude", status: "completed", startedAt: now - 60_000, endedAt: now - 30_000, readAt: now - 30_000, ...over });
+    const workspace = { id: "ws_a", name: "a", machineId: "m", phase: "running", golden: "", createdAt: "2026-09-27T00:00:00Z", project: { id: "pr", name: "pr", path: "/root", computer: "here" } };
+    const rows = [row("th_asks", { status: "running", endedAt: undefined, asking: "Permission for Bash: ls", startedAt: now - 10_000 }), row("th_unseen", { readAt: now - 40_000, startedAt: now - 20_000 }), row("th_read")];
+    useStore.setState({ workspaces: [workspace], statuses: {}, selectedId: "ws_a", selectedThreadId: "th_asks", sessions: { ws_a: rows } } as never);
+    const jump = () => runShellCommand("thread.nextNeedsYou", { workspaceId: "ws_a", toggleSidebar: () => {} } as never, []);
+    jump();
+    expect(useStore.getState().selectedThreadId).toBe("th_unseen");
+    jump();
+    expect(useStore.getState().selectedThreadId).toBe("th_asks");
+    useStore.setState({ selectedThreadId: "th_read", sessions: { ws_a: [row("th_read")] } } as never);
+    jump();
+    expect(useStore.getState().selectedThreadId).toBe("th_read");
   });
 });

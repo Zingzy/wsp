@@ -44,7 +44,7 @@ describe("what a page may ask the shell for", () => {
   const here = { url: "http://127.0.0.1:4400", remote: false };
   const away = { url: "http://box.example:4400", remote: true };
   /** Its own device token, the hosts list, a move home, and the shell's own presentation. */
-  const REMOTE = ["hosts:token", "hosts:list", "hosts:switch", "menu:context", "terminal:focus", "theme:set", "needs-you:say"];
+  const REMOTE = ["hosts:token", "hosts:list", "hosts:switch", "menu:context", "terminal:focus", "theme:set", "outside:say", "badge:set"];
   /** This computer's files, its pictures, its picker and the download of a new app. */
   const HERE_ONLY = ["fonts:local", "folder:pick", "preview:capture", "preview:read", "drop:allowed", "bundle:get", "bundle:open"];
 

@@ -2,11 +2,13 @@
 // What the app does with the job's needsYou field beyond the sidebar's row:
 // the tab or window title leads with the mark while a need stands, and each
 // need is said once outside the app on this shell's own road, and a machine
-// that came up while the person looked away is said on that same road. Both
-// roads run here against a stubbed Notification and a stubbed bridge; nothing
-// real is shown and nothing makes a sound.
+// that came up while the person looked away is said on that same road, as is
+// a turn that finished, which makes a sound unless the person turned it off.
+// The dock's badge counts the threads waiting on the person. Both roads run
+// here against a stubbed Notification and a stubbed bridge; nothing real is
+// shown and nothing makes a sound.
 import { act, render } from "@testing-library/react";
-import { NEEDS_YOU, askingLine, initNeedsYouLine, workspaceAwakeLine, type InitNeedsYou } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, NEEDS_YOU, askingLine, initNeedsYouLine, workspaceAwakeLine, type InitNeedsYou, type OutsideLine, type SessionView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -50,7 +52,7 @@ beforeEach(() => {
   Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
   vi.stubGlobal("Notification", FakeNotification);
   document.title = "wsp";
-  useStore.setState({ api: null, initJob: null, settingsOpen: false });
+  useStore.setState({ api: null, initJob: null, settingsOpen: false, sessions: {}, workspaces: [], preferences: DEFAULT_PREFERENCES });
   clearNotices();
 });
 afterEach(() => {
@@ -141,7 +143,7 @@ describe("a browser tab's road out of the app", () => {
   });
 
   it("a shell that owns its own notifications is never asked for the browser's leave", () => {
-    window.wsp = { needsYou: () => {}, onNeedsYouOpen: () => () => {} };
+    window.wsp = { sayOutside: () => {}, onNeedsYouOpen: () => () => {} };
     FakeNotification.permission = "default";
     askToNotify();
     expect(FakeNotification.asked).toBe(0);
@@ -195,7 +197,8 @@ describe("a thread stopped on a permission prompt while the person looked away",
     render(<Harness />);
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
     act(() => emit(ASKED));
-    expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: askingLine(ASKED), silent: true }]);
+    // A prompt sounds under the person's one switch, which is on until they turn it off.
+    expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: askingLine(ASKED), silent: false }]);
     FakeNotification.last!.onclick!();
     expect(focus).toHaveBeenCalled();
     expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_1", "thr_1"]);
@@ -247,10 +250,10 @@ describe("a machine that came up while the person looked away", () => {
 
 describe("the desktop shell's road out of the app", () => {
   it("hands the need to the shell rather than showing anything itself, since only the shell can read its window's focus", () => {
-    const said: InitNeedsYou[] = [];
+    const said: OutsideLine[] = [];
     const handlers: (() => void)[] = [];
     window.wsp = {
-      needsYou: need => said.push(need),
+      sayOutside: line => said.push(line),
       onNeedsYouOpen: handler => {
         handlers.push(handler);
         return () => {};
@@ -259,7 +262,7 @@ describe("the desktop shell's road out of the app", () => {
     const emit = bindEvents();
     render(<Harness />);
     emit({ type: "job.needs-you", jobId: "init_1", needsYou: NEED });
-    expect(said).toEqual([NEED]);
+    expect(said).toEqual([{ title: NEEDS_YOU, body: NEED.what, sound: false }]);
     // The browser's own notifications are never used where a shell owns them.
     expect(FakeNotification.built).toEqual([]);
     // The shell's click comes back over the bridge and opens Computers here.
@@ -272,9 +275,59 @@ describe("the desktop shell's road out of the app", () => {
   it("a shell too old to take a need falls back to the browser's own road, so nothing is silently dropped", () => {
     window.wsp = { setTheme: () => {} };
     const road = needsYouRoad(() => {});
-    road.say(NEED);
+    road.say({ title: NEEDS_YOU, body: NEED.what, sound: false });
     expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: "sign in to GitHub CLI login", silent: true }]);
     road.close();
     expect(FakeNotification.last!.closed).toBe(1);
+  });
+});
+
+describe("a turn that finished while the person looked away", () => {
+  const WS = { id: "ws_1", name: "b1", machineId: "m1", phase: "running" as const, golden: "snap_g", createdAt: "2026-09-10T00:00:00Z", project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } };
+  const turn = (over: Partial<SessionView> = {}): SessionView =>
+    ({ id: "s1", workspaceId: "ws_1", threadId: "thr_1", prompt: "Fix the redirect", harness: "claude", status: "completed", startedBy: "cli", startedAt: 1_000, endedAt: 2_000, readAt: 500, ...over }) as SessionView;
+  const finish = (emit: (e: ProtocolEvent) => void, status: "completed" | "interrupted" = "completed", threadId = "thr_1") => {
+    emit({ type: "session.done", workspaceId: "ws_1", sessionId: "s1", turnId: `turn_${threadId}`, threadId, result: { status, text: "done" } });
+    emit({ type: "session.end", workspaceId: "ws_1", sessionId: "s1", turnId: `turn_${threadId}`, threadId, exitCode: 0, sawResult: true });
+  };
+
+  it("says which thread finished with a sound, silent once the switch is off, and a click opens that thread", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn()] } }));
+    const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
+    act(() => finish(emit));
+    expect(FakeNotification.built).toEqual([{ title: "Fix the redirect finished", body: "b1", silent: false }]);
+    FakeNotification.last!.onclick!();
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_1", "thr_1"]);
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifySound: false } }));
+    act(() => finish(emit));
+    expect(FakeNotification.built.at(-1)).toEqual({ title: "Fix the redirect finished", body: "b1", silent: true });
+    focus.mockRestore();
+  });
+
+  it("says nothing for a turn somebody stopped, for a thread an agent opened, or while the app is in front", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn(), turn({ id: "s2", threadId: "thr_child", startedBy: "agent", parentThreadId: "thr_1" })] } }));
+    act(() => finish(emit, "interrupted"));
+    act(() => finish(emit, "completed", "thr_child"));
+    hidden = false;
+    act(() => finish(emit));
+    expect(FakeNotification.built).toEqual([]);
+  });
+
+  it("puts the count of threads waiting on the person on the dock, and it drops as one is opened", () => {
+    const badge: number[] = [];
+    // A bridge whose call answers something is still only told: nothing the page does waits on it or keeps it.
+    window.wsp = { sayOutside: () => {}, onNeedsYouOpen: () => () => {}, setBadge: ((count: number) => badge.push(count)) as unknown as (count: number) => void };
+    render(<Harness />);
+    const asks = turn({ id: "s3", threadId: "thr_asks", status: "running", endedAt: undefined, asking: "Permission for Bash: ls" });
+    act(() => useStore.setState({ sessions: { ws_1: [turn(), asks, turn({ id: "s4", threadId: "thr_read", readAt: 3_000 })] } }));
+    expect(badge.at(-1)).toBe(2);
+    act(() => useStore.setState({ sessions: { ws_1: [turn({ readAt: 2_000 }), asks] } }));
+    expect(badge.at(-1)).toBe(1);
+    act(() => useStore.setState({ sessions: {} }));
+    expect(badge.at(-1)).toBe(0);
   });
 });

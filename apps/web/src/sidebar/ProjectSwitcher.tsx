@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The project filter at the head of the sidebar, one project per row in the
-// host's order. While one project is picked the head stands in for that
+// order the person dragged them into, the rest in the host's order. While one project is picked the head stands in for that
 // project's row: its plus on hover is New workspace and a right-click opens
 // the project's menu.
 import { FolderIcon, PlusIcon } from "lucide-react";
@@ -24,6 +24,7 @@ export function ProjectSwitcher({
   onNewWorkspace,
   onAddProject,
   onContextMenu,
+  onReorder,
 }: {
   projects: ReadonlyArray<ProjectRef>;
   /** Every computer this host holds by id, for the word beside a project that is not on this one. */
@@ -35,6 +36,8 @@ export function ProjectSwitcher({
   onAddProject: () => void;
   /** The picked project's own menu, which the head offers while it stands in for that project's row. */
   onContextMenu: (event: MouseEvent<HTMLElement>, projectId: string) => void;
+  /** Keeps the order the person dragged the rows into, every project's id in it. */
+  onReorder: (ids: string[]) => void;
 }) {
   const rows = useMemo<SwitcherRow[]>(
     () => projects.map(project => ({ id: project.id, name: project.name, meta: projectComputerWord(project, named), glyph: <ProjectGlyph projectId={project.id} /> })),
@@ -51,6 +54,7 @@ export function ProjectSwitcher({
       onPick={onPick}
       onAdd={onAddProject}
       onSettings={openProjectSettings}
+      onReorder={onReorder}
       {...(pick === null
         ? {}
         : {

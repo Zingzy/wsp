@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The palette container: one dialog over the copied content and results,
-// items from the store's workspaces and sessions, opened through the bus.
+// items from the store's workspaces and sessions, opened through the bus. What
+// the person types is asked of the host's message search once the typing
+// pauses, and the answer is kept for the query it answered.
 // The workspace rows come from the workspace registry, so they run what the
 // sidebar's buttons and menus run.
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { isLocalWorkspace } from "@wsp/protocol";
+import { isLocalWorkspace, type SessionSearchHit } from "@wsp/protocol";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { isCommandPaletteOpen, onOpenCommandPalette } from "../../commandPaletteBus.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
@@ -29,6 +31,9 @@ import { CommandPaletteResults } from "./CommandPaletteResults.js";
 import { buildPaletteItems, type PaletteHandlers } from "./paletteItems.js";
 
 const NO_ITEMS: ReadonlyArray<CommandPaletteActionItem> = [];
+const NO_HITS: ReadonlyArray<SessionSearchHit> = [];
+/** How long the typing rests before the words go to the host. */
+const MESSAGE_SEARCH_WAIT_MS = 200;
 
 export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: { keybindings?: ResolvedKeybindingsConfig }) {
   const [open, setOpen] = useState(false);
@@ -60,6 +65,26 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   );
 
   const projects = useSidebarProjects();
+  const [found, setFound] = useState<{ query: string; hits: ReadonlyArray<SessionSearchHit> } | null>(null);
+  const words = query.startsWith(">") ? "" : query.trim();
+  useEffect(() => {
+    const search = api?.searchMessages;
+    if (!open || search === undefined || words.length < 2) return;
+    let current = true;
+    const wait = setTimeout(() => {
+      search(words).then(
+        ({ hits }) => {
+          if (current) setFound({ query: words, hits });
+        },
+        () => {},
+      );
+    }, MESSAGE_SEARCH_WAIT_MS);
+    return () => {
+      current = false;
+      clearTimeout(wait);
+    };
+  }, [api, open, words]);
+  const messageHits = found?.query === words ? found.hits : NO_HITS;
   const handlers = useMemo<PaletteHandlers>(
     () => ({
       selectWorkspace: goToWorkspace,
@@ -78,8 +103,8 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
     [openAddComputer, openSettings, select, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, handlers, verbs, places }),
-    [api, handlers, places, projects, query, selectedId, verbs],
+    () => buildPaletteItems({ projects, selectedId, query, messageHits, canCreate: api !== null, handlers, verbs, places }),
+    [api, handlers, messageHits, places, projects, query, selectedId, verbs],
   );
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {
@@ -93,6 +118,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       isInSubmenu: false,
       projectSearchItems: NO_ITEMS,
       threadSearchItems: items.threadSearchItems,
+      messageSearchItems: items.messageSearchItems,
     });
   }, [items, query]);
 

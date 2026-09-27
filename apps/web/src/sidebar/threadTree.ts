@@ -9,10 +9,10 @@
 // while the workspace its session is filed under stays what its meta names and
 // what selecting it opens: the two are the same thread's two facts and a
 // surface needs both.
-import type { ProjectView } from "@wsp/protocol";
+import { ThreadSection, type ProjectView, type ThreadMarks, type ThreadPlacement } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
 import { workspaceRowId } from "./rowGrammar.js";
-import { isThreadSettleable, isThreadSettled, isThreadWorking, nestSpawnedThreads, sortSettledThreadsForSidebar, sortThreadsForSidebar, threadForest, type ThreadNode } from "./Sidebar.logic.js";
+import { isThreadSettleable, isThreadSettled, isThreadWorking, nestSpawnedThreads, sortSettledThreadsForSidebar, sortThreadsForSidebar, threadForest, threadSection, type ThreadNode } from "./Sidebar.logic.js";
 
 /** One project of the sidebar: the record the host holds for it, and its workspaces. */
 export interface ProjectGroup {
@@ -28,10 +28,11 @@ export interface ProjectRef {
   readonly computer?: string;
 }
 
-/** The projects the sidebar's picker lists, in the order the host holds them, each with its workspaces. A workspace
- * whose project the host's list does not carry keeps a project of its own off its own record, so a list that has
- * not arrived, or a workspace of a project another computer holds, is never left out. */
-export function projectGroups(recorded: ReadonlyArray<ProjectView>, rows: ReadonlyArray<SidebarProjectSnapshot>): ProjectGroup[] {
+/** The projects the sidebar's picker lists, in the order the person dragged them into and then in the order the host
+ * holds them, each with its workspaces. A workspace whose project the host's list does not carry keeps a project of
+ * its own off its own record, so a list that has not arrived, or a workspace of a project another computer holds, is
+ * never left out. */
+export function projectGroups(recorded: ReadonlyArray<ProjectView>, rows: ReadonlyArray<SidebarProjectSnapshot>, order: ReadonlyArray<string>): ProjectGroup[] {
   const groups = new Map<string, { project: ProjectRef; workspaces: SidebarProjectSnapshot[] }>();
   for (const project of recorded) groups.set(project.id, { project: { id: project.id, name: project.name, computer: project.computer }, workspaces: [] });
   for (const row of rows) {
@@ -40,7 +41,14 @@ export function projectGroups(recorded: ReadonlyArray<ProjectView>, rows: Readon
     groups.set(own.id, group);
     group.workspaces.push(row);
   }
-  return [...groups.values()];
+  return inProjectOrder([...groups.values()], group => group.project.id, order);
+}
+
+/** Things keyed by project in the order the person dragged the projects into, an id they no longer hold skipped, and
+ * then the rest as they came: the one rule every list of projects is drawn by. */
+export function inProjectOrder<T>(items: ReadonlyArray<T>, idOf: (item: T) => string, order: ReadonlyArray<string>): T[] {
+  const placed = order.flatMap(id => items.filter(item => idOf(item) === id));
+  return [...placed, ...items.filter(item => !placed.includes(item))];
 }
 
 /** A thread with the workspace it runs on, which is not always the workspace whose rows it is drawn among. */
@@ -135,24 +143,102 @@ export interface TileItem {
 
 export type TileNode = ThreadNode<TileItem>;
 
+/** The sections of the live list, in the order they are drawn: the pinned trees, then every other tree under the
+ * most pressing state in it. */
+export type SidebarSection = "pinned" | ThreadSection;
+export const SIDEBAR_SECTIONS: readonly SidebarSection[] = ["pinned", ...ThreadSection.options];
+
+/** One section of the live list and the roots it holds, each with its tree. */
+export interface TileSection {
+  readonly id: SidebarSection;
+  readonly roots: TileNode[];
+}
+
 /** The sidebar's list: root tiles across every workspace newest first, each with the tiles its agents opened under
  * it, parted into the live list and the Settled fold, which holds every root whose whole tree is settled threads.
- * Under a picked project only that project's roots are listed, children kept wherever they run. */
+ * The live list is drawn in sections, and `live` is every root of them in the order they are drawn. A snoozed tree
+ * is in neither until its snooze ends or a thread of it needs the person. Under a picked project only that project's
+ * roots are listed, children kept wherever they run. */
 export function sidebarTiles(
   projects: ReadonlyArray<SidebarProjectSnapshot>,
   { picked, nowMs, open = null }: { picked: string | null; nowMs: number; /** The thread open in the centre, by fold key. */ open?: string | null },
-): { live: TileNode[]; settled: TileNode[] } {
+): { live: TileNode[]; settled: TileNode[]; sections: TileSection[] } {
   const items = projects.flatMap((runs): TileItem[] => {
     const forkedBy = runs.workspace.parentThreadId ?? null;
     if (runs.threads.length === 0) return [{ id: workspaceRowId(runs.id), parentThreadId: forkedBy, startedAt: runs.workspace.createdAt, runs, thread: null }];
     return runs.threads.map(thread => ({ id: thread.id, parentThreadId: thread.parentThreadId ?? forkedBy, startedAt: thread.startedAt, runs, thread }));
   });
   const roots = threadForest(sortThreadsForSidebar(items)).filter(node => picked === null || node.thread.runs.workspace.project.id === picked);
-  const live: TileNode[] = [];
+  const filed = new Map<SidebarSection, TileNode[]>(SIDEBAR_SECTIONS.map(id => [id, []]));
   const settled: TileNode[] = [];
-  for (const node of roots) (everyTile(node, thread => isThreadSettled(thread, nowMs, thread.id === open)) ? settled : live).push(node);
+  for (const node of roots) {
+    if (isSnoozed(node)) continue;
+    const pinned = node.thread.thread?.pinnedAt != null;
+    if (everyTile(node, thread => isThreadSettled(thread, nowMs, pinned || thread.id === open))) settled.push(node);
+    else filed.get(pinned ? "pinned" : sectionOf(node))!.push(node);
+  }
+  filed.get("pinned")!.sort((a, b) => b.thread.thread!.pinnedAt!.localeCompare(a.thread.thread!.pinnedAt!));
+  const sections = SIDEBAR_SECTIONS.map(id => ({ id, roots: filed.get(id)! })).filter(section => section.roots.length > 0);
   const bySettle = new Map(settled.map(node => [node.thread.thread!, node]));
-  return { live, settled: sortSettledThreadsForSidebar([...bySettle.keys()]).map(thread => bySettle.get(thread)!) };
+  return { live: sections.flatMap(section => section.roots), settled: sortSettledThreadsForSidebar([...bySettle.keys()]).map(thread => bySettle.get(thread)!), sections };
+}
+
+const SECTION_RANK: readonly ThreadSection[] = ThreadSection.options;
+
+/** The section a tree's state files it under: the most pressing of its threads', a workspace with no thread yet
+ * resting in Idle. */
+function treeSection({ thread: { thread }, children }: TileNode): ThreadSection {
+  const own = thread === null ? "idle" : threadSection(thread);
+  return children.map(treeSection).reduce((best, next) => (SECTION_RANK.indexOf(next) < SECTION_RANK.indexOf(best) ? next : best), own);
+}
+
+/** The state a placement holds while: the tree's section and its root's latest turn, so the tree moving to another
+ * section or its root taking a new turn both lapse it. */
+const placementKey = (node: TileNode): string => `${treeSection(node)}:${node.thread.thread?.sessionId ?? node.thread.id}`;
+
+/** What dropping a root tree into a section writes: the section, held while the tree is as it is now. */
+export function placementFor(node: TileNode, name: ThreadSection): ThreadPlacement {
+  return { name, whileState: placementKey(node) };
+}
+
+/** What dropping a root tree on a section writes: a pin for Pinned; for any other the pin taken off where it had one,
+ * and a placement there, or the placement taken off where the section is its state's own. Null for a drop that
+ * changes nothing. */
+export function dropMarks(node: TileNode, section: SidebarSection): ThreadMarks | null {
+  const thread = node.thread.thread;
+  if (thread === null) return null;
+  const pinned = thread.pinnedAt != null;
+  if (section === "pinned") return pinned ? null : { pinned: true };
+  const own = treeSection(node) === section;
+  if (own && !pinned && thread.section == null) return null;
+  return { ...(pinned ? { pinned: false } : {}), section: own ? null : placementFor(node, section) };
+}
+
+/** The section a root tree is drawn in: where the person dragged it while that still holds, else its state's. */
+function sectionOf(node: TileNode): ThreadSection {
+  const placed = node.thread.thread?.section;
+  return placed != null && placed.whileState === placementKey(node) ? placed.name : treeSection(node);
+}
+
+/** A tree whose root is snoozed and none of whose threads needs the person, which the list leaves out. */
+function isSnoozed(node: TileNode): boolean {
+  const needs = ({ thread: { thread }, children }: TileNode): boolean => thread?.needsYou === true || children.some(needs);
+  return node.thread.thread?.snoozedUntil != null && !needs(node);
+}
+
+/** The next tile after the one named, in the order the live list draws them, children included, whose thread needs
+ * the person, wrapping to the top; the first there is when the one named is not drawn or none is named. */
+export function nextNeedsYou(live: ReadonlyArray<TileNode>, fromId: string | null): TileItem | undefined {
+  const drawn: TileItem[] = [];
+  const walk = (nodes: ReadonlyArray<TileNode>): void => {
+    for (const { thread, children } of nodes) {
+      drawn.push(thread);
+      walk(children);
+    }
+  };
+  walk(live);
+  const at = drawn.findIndex(item => item.id === fromId);
+  return [...drawn.slice(at + 1), ...drawn.slice(0, at + 1)].find(item => item.thread?.needsYou === true);
 }
 
 /** Every tile of the tree is a thread, and each passes the test; a workspace tile with no thread passes none. */

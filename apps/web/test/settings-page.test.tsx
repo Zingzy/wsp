@@ -339,14 +339,14 @@ describe("Appearance", () => {
     expect(sets).toEqual([{ darkTheme: "pitch" }]);
   });
 
-  it("is the page's head over the theme picker alone, with no line under the pictures", async () => {
+  it("is the page's head over the theme picker and the one Notifications switch, with no line under the pictures", async () => {
     const { api } = settingsApi();
     mountSettings({ api });
     await settle();
     const head = document.querySelector<HTMLElement>("[data-settings-page] [data-k=settings-page-head]")!;
     expect(head.querySelector("h1")!.textContent).toBe(SETTINGS_WORDS.appearance);
     expect(head.querySelector("p")!.textContent).toBe(groupBlurbs("").appearance);
-    expect(document.querySelectorAll("[data-settings-page] [data-settings-row], [data-settings-page] [data-settings-line]")).toHaveLength(0);
+    expect([...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-row], [data-settings-page] [data-settings-line]")].map(row => row.querySelector("[data-k]")?.getAttribute("data-k"))).toEqual(["notify-sound"]);
     expect(document.querySelector("[data-k=sidebar-width]")).toBeNull();
     expect(document.querySelector("[data-k=terminal-size-row]")).toBeNull();
     expect(within(group(SETTINGS_WORDS.theme)).queryByText(/whatever this Mac/)).toBeNull();
@@ -366,7 +366,7 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.theme).toBe("system");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite" });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", notifySound: true });
   });
 
   it("a theme picked for either side is off the defaults, and Restore defaults puts both sides back", async () => {
@@ -379,7 +379,7 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.darkTheme).toBe("graphite");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite" });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", notifySound: true });
   });
 });
 

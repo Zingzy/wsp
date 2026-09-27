@@ -1399,6 +1399,17 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               await rt.sessions.settle(msg.threadIds, origin);
               send({ id: msg.id, ok: true });
               return;
+            case "sessions.mark":
+              await rt.sessions.mark(msg.threadIds, msg.marks, origin);
+              send({ id: msg.id, ok: true });
+              return;
+            case "sessions.restore":
+              await rt.sessions.restore(msg.threadIds, origin);
+              send({ id: msg.id, ok: true });
+              return;
+            case "sessions.search":
+              send({ id: msg.id, ok: true, ...(await rt.sessions.search(msg.query, origin)) });
+              return;
             case "sessions.steer":
               send({ id: msg.id, ok: true, ...(await rt.sessions.steer(msg.sessionId, { prompt: msg.prompt, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) }, origin)) });
               return;

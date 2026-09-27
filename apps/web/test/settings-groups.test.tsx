@@ -10,7 +10,7 @@ import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, 
 import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, NOTIFY_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { builtWhen } from "../src/settings/image.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
 import { JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
@@ -276,6 +276,26 @@ describe("Account", () => {
   });
 });
 
+describe("Appearance", () => {
+  it("offers the sound of a finished turn and a prompt as one switch under Notifications, on by default, that writes the record and restores to on", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api, at: { kind: "group", group: "appearance" } });
+    await settle();
+    expect(rowTitles()).toEqual([NOTIFY_WORDS.sound]);
+    expect(descriptionOf("notify-sound")).toBe(NOTIFY_WORDS.soundDescription);
+    const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=notify-sound]")!;
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle());
+    await settle();
+    expect(sets).toEqual([{ notifySound: false }]);
+    expect(useStore.getState().preferences.notifySound).toBe(false);
+    fireEvent.click(document.querySelector<HTMLElement>("[data-k=restore-defaults]")!);
+    await settle();
+    expect(sets.at(-1)).toMatchObject({ notifySound: true });
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+});
+
 describe("Privacy", () => {
   it("offers server icons from Google as one switch, on by default, that writes the record and restores to on", async () => {
     const { api, sets } = settingsApi();
@@ -344,7 +364,7 @@ describe("Keybindings", () => {
     const cards = keybindingCards(DEFAULT_KEYBINDINGS, mac);
     expect(cards.map(card => card.head)).toEqual([undefined, KEYBINDINGS_WORDS.workspacesAndThreads, KEYBINDINGS_WORDS.terminal, KEYBINDINGS_WORDS.fixed]);
     expect(cards[0]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["Search", "Settings", "Toggle the sidebar", "Toggle the terminal drawer", "Toggle the right panel", "Toggle the preview"]);
-    expect(cards[1]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["New thread", "Next task", "Previous task", "Next thread", "Previous thread", "Settle thread", JUMP_WORD]);
+    expect(cards[1]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["New thread", "Next task", "Previous task", "Next thread", "Previous thread", "Settle thread", "Next thread that needs you", JUMP_WORD]);
     expect(cards[3]!.items.map(item => (item.kind === "line" ? [item.label, item.keys] : []))).toEqual([
       [KEYBINDINGS_WORDS.sendMessage, [["Enter"]]],
       [KEYBINDINGS_WORDS.submitComment, [["⌘Enter"]]],

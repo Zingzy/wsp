@@ -342,6 +342,18 @@ describe("ChatView", () => {
     }
   });
 
+  it("stamps a failed turn it shows as read too, so the thread stops counting as waiting on the person", async () => {
+    const turn = settledTurn(WS, "add a health route", "Added GET /health.");
+    const ended = turn.at(-1)!.at!;
+    const row: SessionView = { id: "sess_row", workspaceId: WS, harness: "claude", status: "failed", threadId: "thr_broke", startedAt: ended - 1_000, endedAt: ended, readAt: ended - 5_000 };
+    const { api } = fixtureApi([workspace], { [WS]: turn }, [row]);
+    const stamped: string[] = [];
+    api.readThread = async threadId => void stamped.push(threadId);
+    await setup(api);
+    await screen.findByText("Added GET /health.");
+    await waitFor(() => expect(stamped).toEqual(["thr_broke"]));
+  });
+
   it("clears to the empty headline on a new-thread request and shows the fresh turn that follows", async () => {
     const { api, emit } = fixtureApi([workspace], { [WS]: settledTurn(WS, "add a health route", "Added GET /health.") });
     const handle: { current: ChatThreadHandle | null } = { current: null };

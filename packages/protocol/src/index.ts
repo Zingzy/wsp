@@ -854,6 +854,24 @@ export const ThreadWaitingOn = z.object({
 });
 export type ThreadWaitingOn = z.infer<typeof ThreadWaitingOn>;
 
+/** The sidebar's sections a thread's own state files it under; Pinned is a mark of its own and the Settled fold is
+ * the settle, so neither is a place a thread is dragged to by this. */
+export const ThreadSection = z.enum(["needs-you", "working", "done", "idle"]);
+export type ThreadSection = z.infer<typeof ThreadSection>;
+
+/** Where the person dragged a thread, and the state it was in then as the sidebar words it: the placement holds while
+ * the thread is still in that state and lapses the moment it moves, so the thread rejoins the section its state
+ * files it under. */
+export const ThreadPlacement = z.object({ name: ThreadSection, whileState: z.string() });
+export type ThreadPlacement = z.infer<typeof ThreadPlacement>;
+
+/** What sessions.mark moves on a thread: a pin set or taken off, a snooze set until a moment or taken off, a
+ * placement set or taken off. A field left out is left as it is. */
+export const ThreadMarks = z
+  .object({ pinned: z.boolean().optional(), snoozedUntil: z.number().nullable().optional(), section: ThreadPlacement.nullable().optional() })
+  .strict();
+export type ThreadMarks = z.infer<typeof ThreadMarks>;
+
 export const SessionView = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -923,6 +941,15 @@ export const SessionView = z.object({
   /** When the person settled this row's thread by hand, kept and stamped as readAt is; absent on a thread nobody
    * settled. Activity after it brings the thread back. */
   settledAt: z.number().optional(),
+  /** When the person pinned this row's thread to the top of the sidebar, kept and stamped as readAt is. */
+  pinnedAt: z.number().optional(),
+  /** When a snooze on this row's thread ends, while it has not: the sidebar leaves the thread out until then. Once
+   * the host's clock passes it the listing carries wokeAt instead, and every window is told at that moment. */
+  snoozedUntil: z.number().optional(),
+  /** When the thread's last snooze ended; the thread reads Done until a read at or after it. */
+  wokeAt: z.number().optional(),
+  /** The sidebar section the person dragged the thread into, held only while the thread is still as it was then. */
+  section: ThreadPlacement.optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -961,9 +988,13 @@ export const ThreadView = z.object({
   costUsd: z.number().optional(),
   /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
   pid: z.number().int().optional(),
-  /** The thread's read and settled stamps, as SessionView carries them; threadUnread reads the first. */
+  /** The thread's stamps and marks, as SessionView carries them; threadUnread reads readAt and wokeAt. */
   readAt: z.number().optional(),
   settledAt: z.number().optional(),
+  pinnedAt: z.number().optional(),
+  snoozedUntil: z.number().optional(),
+  wokeAt: z.number().optional(),
+  section: ThreadPlacement.optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -1014,6 +1045,10 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
       ...(latest.readAt !== undefined ? { readAt: latest.readAt } : {}),
       ...(latest.settledAt !== undefined ? { settledAt: latest.settledAt } : {}),
+      ...(latest.pinnedAt !== undefined ? { pinnedAt: latest.pinnedAt } : {}),
+      ...(latest.snoozedUntil !== undefined ? { snoozedUntil: latest.snoozedUntil } : {}),
+      ...(latest.wokeAt !== undefined ? { wokeAt: latest.wokeAt } : {}),
+      ...(latest.section !== undefined ? { section: latest.section } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
@@ -1917,6 +1952,10 @@ export const Preferences = z.object({
   /** Whether the host asks each agent's vendor for its newest version. On unless the person turns it off, and
    * WSP_UPDATE_CHECK=0 in the host's environment stops it whatever this says; defaulted as serverIcons is. */
   agentVersions: z.boolean().default(true),
+  /** Whether a system notification for a finished turn or a permission prompt makes a sound. */
+  notifySound: z.boolean(),
+  /** The order the person dragged the projects into, by id; a project it does not name follows in the host's order. */
+  projectOrder: z.array(z.string()),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -1943,7 +1982,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1976,6 +2015,8 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     computerLook: perWorkspace(current.computerLook, patch.computerLook),
     serverIcons: patch.serverIcons ?? current.serverIcons,
     agentVersions: patch.agentVersions ?? current.agentVersions,
+    notifySound: patch.notifySound ?? current.notifySound,
+    projectOrder: patch.projectOrder ?? current.projectOrder,
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
@@ -1986,7 +2027,8 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
 export const serverIconsLeftLine = (folder: string, reason: string): string =>
   `Server icons are off, but ${folder} could not be deleted: ${reason}. Delete it by hand.`;
 
-/** A thread's read or settled stamp moved, by any window: the workspace's rows are read again to pick it up. */
+/** A thread's read or settled stamp or one of its marks moved, by any window, or its snooze ended: the workspace's
+ * rows are read again to pick it up. */
 export const ThreadMarkedEvent = z.object({ type: z.literal("thread.marked"), workspaceId: z.string(), threadIds: z.array(z.string()) });
 export type ThreadMarkedEvent = z.infer<typeof ThreadMarkedEvent>;
 
@@ -2107,6 +2149,10 @@ export interface ShellChord {
   readonly altKey: boolean;
 }
 
+/** One notification said outside the app: its title, its line, and whether it makes a sound. */
+export const OutsideLine = z.object({ title: z.string(), body: z.string(), sound: z.boolean() });
+export type OutsideLine = z.infer<typeof OutsideLine>;
+
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
 export interface DesktopBridge {
   /** The release this shell is, so a page served by a host of another one can say which half is behind. Absent on
@@ -2134,12 +2180,15 @@ export interface DesktopBridge {
   onShellChord(handler: (chord: ShellChord) => void): () => void;
   /** The theme the page draws, so the window's frame, glass and traffic-light bar follow it. */
   setTheme(theme: ThemePreference): void;
-  /** A build waits on the person: the shell shows a system notification while its window has no focus, and nothing
-   * while it has, since the page already says it. The page decides nothing about focus; the shell owns that. */
-  needsYou(need: InitNeedsYou): void;
-  /** A click on that notification, after the shell has raised its window: the page opens the build screen. Returns
+  /** Something the person should hear about outside the app (a build waiting, a machine up, a prompt, a finished
+   * turn): the shell shows a system notification while its window has no focus, and nothing while it has, since the
+   * page already says it. The page decides nothing about focus; the shell owns that. */
+  sayOutside(line: OutsideLine): void;
+  /** A click on that notification, after the shell has raised its window: the page opens what it was about. Returns
    * the unsubscribe. */
   onNeedsYouOpen(handler: () => void): () => void;
+  /** How many threads wait on the person, for the dock's badge; zero clears it. */
+  setBadge(count: number): void;
   /** The device token the shell holds for the host that served this page, when the window is on a host somewhere
    * else; nothing on the app's own host, whose page carries its own token. The token never rides in the page. */
   hostToken(): Promise<string | undefined>;
@@ -5422,6 +5471,17 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** The person settled these threads by hand, a root and every thread under it: each takes a settled stamp and a
    * read stamp of now, and every window hears thread.marked. Takes fold keys. */
   z.object({ id: reqId, op: z.literal("sessions.settle"), threadIds: z.array(z.string()).min(1) }),
+  /** The person pinned, snoozed or placed these threads, or took one of those back with false or null: each moves on
+   * the thread's record and every window hears thread.marked. A snooze stamps the thread read as well, since putting
+   * a finish away is looking at it. Takes fold keys. */
+  z.object({ id: reqId, op: z.literal("sessions.mark"), threadIds: z.array(z.string()).min(1), marks: ThreadMarks }),
+  /** The person took settled threads back out of the fold: the settled stamp goes and the read stamp moves to now, so
+   * the quiet the fold reads counts from the restore. Takes fold keys. */
+  z.object({ id: reqId, op: z.literal("sessions.restore"), threadIds: z.array(z.string()).min(1) }),
+  /** The words of every thread the caller reaches, the person's messages and the agent's replies, searched on the
+   * host for the query, case aside: one hit per thread with a snippet around the words. Reads only what the host
+   * still holds of each transcript. */
+  z.object({ id: reqId, op: z.literal("sessions.search"), query: z.string() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -5749,6 +5809,7 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.steer",
   "sessions.rename",
   "sessions.read",
+  "sessions.search",
 ];
 
 /** The ops a computer the person paired may send with no role of its own, and the whole of them, for the reason
@@ -5808,6 +5869,9 @@ export const DEVICE_OPS: readonly string[] = [
   "sessions.forget",
   "sessions.read",
   "sessions.settle",
+  "sessions.mark",
+  "sessions.restore",
+  "sessions.search",
   "golden.get",
   "image.get",
   "snapshots.list",
@@ -5938,6 +6002,13 @@ export type SessionRenameOutcome = z.infer<typeof SessionRenameOutcome>;
 export const SessionRenameResult = z.object({ outcome: SessionRenameOutcome, error: z.string().optional() });
 export type SessionRenameResult = z.infer<typeof SessionRenameResult>;
 
+/** One thread whose words hold the query: the thread by the runtime's id and the workspace it runs on, and the words
+ * around the first place they hold it, on one line. */
+export const SessionSearchHit = z.object({ workspaceId: z.string(), threadId: z.string(), snippet: z.string() });
+export type SessionSearchHit = z.infer<typeof SessionSearchHit>;
+export const SessionSearchResult = z.object({ hits: z.array(SessionSearchHit) });
+export type SessionSearchResult = z.infer<typeof SessionSearchResult>;
+
 // --- session start (how the turn the caller asked for came to be) --------------
 
 /** started: a turn of its own began. steered: the thread's turn was running and took the message mid-way, so
@@ -6036,7 +6107,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { needsYouLine, threadState, threadStateWord, threadUnread, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
+export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeCapRefusal, placeFullLine, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";

@@ -25,6 +25,8 @@ import {
   SessionAnswerOutcome,
   SessionInterruptOutcome,
   SessionRenameResult,
+  SessionSearchResult,
+  type ThreadMarks,
   SessionSteerOutcome,
   WorkspaceLanding,
   type Capabilities,
@@ -507,6 +509,13 @@ export interface Api {
   /** Stamps threads as settled by the person, and read, on the host, which tells every window; takes fold keys. A
    * client without it offers no settle. */
   settleThreads?(threadIds: readonly string[]): Promise<void>;
+  /** Pins, snoozes or places threads, or takes one of those back, on the host, which tells every window; takes fold
+   * keys. A client without it offers none of them. */
+  markThreads?(threadIds: readonly string[], marks: ThreadMarks): Promise<void>;
+  /** Takes settled threads back out of the fold on the host, which tells every window; takes fold keys. */
+  restoreThreads?(threadIds: readonly string[]): Promise<void>;
+  /** The threads whose messages or replies hold the words, searched on the host, one hit each with a snippet. */
+  searchMessages?(query: string): Promise<SessionSearchResult>;
   /** What each harness's CLI takes at launch; the composer's pickers render from it, and every start rides the model,
    * effort, context window and access resolved out of it. With a workspace the runtime asks the binaries on its
    * machine, else its table answers. Optional so fixtures without pickers need not fake it; without it the composer
@@ -748,6 +757,10 @@ export function makeApi(c: ProtocolClient): Api {
     forgetThread: async threadId => void (await c.request("sessions.forget", { threadId })),
     readThread: async threadId => void (await c.request("sessions.read", { threadId })),
     settleThreads: async threadIds => void (await c.request("sessions.settle", { threadIds })),
+    markThreads: async (threadIds, marks) => void (await c.request("sessions.mark", { threadIds, marks })),
+    restoreThreads: async threadIds => void (await c.request("sessions.restore", { threadIds })),
+    // Parsed, not trusted: a hit names a thread the palette opens.
+    searchMessages: async query => SessionSearchResult.parse(await c.request<Record<string, unknown>>("sessions.search", { query })),
     // Parsed, not trusted: a picker renders only values the wire type vouches for.
     listHarnesses: async workspaceId =>
       HarnessCatalog.array().parse((await c.request<{ harnesses?: unknown }>("harnesses.list", workspaceId !== undefined ? { workspaceId } : {})).harnesses),

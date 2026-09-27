@@ -707,7 +707,7 @@ describe("buildSwitcherCards", () => {
     const child = { ...session("s_kid", "ws_a", "The child.", Date.parse("2026-09-01T02:00:00Z")), threadId: "thr_kid", parentThreadId: "thr_lead", startedBy: "agent" as const };
     const projects = deriveSidebarProjects({ workspaces: [here], sessions: { ws_a: [lead, child] } });
     const MAC: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true };
-    const palette = (places: PlaceView[]) => buildPaletteItems({ projects, selectedId: null, query: "", canCreate: false, handlers: {} as never, verbs: {} as never, places });
+    const palette = (places: PlaceView[]) => buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, handlers: {} as never, verbs: {} as never, places });
     const card = (places: PlaceView[]) => {
       const found = buildSwitcherCards({ places, projects, targets: [{ workspaceId: "ws_a", threadId: "thr_kid" }], images: {}, currentId: null, pinnedThreadId: null })[0]!;
       return found.threadId === null ? null : found.place;
@@ -724,7 +724,7 @@ describe("buildSwitcherCards", () => {
   it("a thread in the palette wears the agent's mark and the one status slot, and a workspace no dot for its state", () => {
     const running = { ...session("s_run", "ws_a", "The running one.", Date.now() - 125_000), status: "running" as const, endedAt: undefined };
     const projects = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [running] } });
-    const items = buildPaletteItems({ projects, selectedId: null, query: "", canCreate: false, handlers: {} as never, verbs: {} as never, places: [] });
+    const items = buildPaletteItems({ projects, selectedId: null, query: "", messageHits: [], canCreate: false, handlers: {} as never, verbs: {} as never, places: [] });
     const item = items.recentThreadItems.find(found => found.title === "The running one.")!;
     expect(render(<>{item.icon}</>).container.querySelector("[data-harness-mark='claude']")).not.toBeNull();
     const slot = render(<>{item.titleTrailingContent}</>).container.querySelector<HTMLElement>("[data-thread-status]")!;

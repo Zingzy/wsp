@@ -89,8 +89,8 @@ describe("deriveSidebarProjects", () => {
     ]);
     expect(projects[0]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable", state: "running" });
     expect(projects[0]?.threads).toEqual([
-      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: "2026-09-02T17:19:40.000Z", settledAt: null },
-      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null },
+      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: "2026-09-02T17:19:40.000Z", settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null },
+      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null },
     ]);
   });
 
