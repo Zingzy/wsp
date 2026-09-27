@@ -521,6 +521,31 @@ describe("serveRuntime session interrupt", () => {
     c.close();
   });
 
+  it("a thread the command line starts reaches a window already open: the window hears its start, and the rows it reads then hold it", async () => {
+    const h = stoppableHarness();
+    const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const window = await WsClient.connect(srv.port, { token: "secret" });
+    await window.request("events.subscribe");
+    const created = await createOverWire(window, "x", { golden: "snap_g" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    // What the window's store does on a start: it reads the workspace's rows again, at once.
+    let read: { id: string }[] | undefined;
+    window.ws.on("message", raw => {
+      const m = JSON.parse(String(raw)) as { type?: string; workspaceId?: string };
+      if (m.type === "session.start" && m.workspaceId === workspaceId) void window.request("sessions.list", { workspaceId }).then(r => (read = r["sessions"] as { id: string }[]));
+    });
+    const cli = await WsClient.connect(srv.port, { token: "secret" });
+    await cli.request("events.subscribe");
+    const started = await cli.request("sessions.start", { workspaceId, prompt: "go", startedBy: "cli", requestId: "req_cli" });
+    const sessionId = (started["session"] as { id: string }).id;
+    await until(() => read !== undefined);
+    expect(read!.map(row => row.id)).toContain(sessionId);
+    h.complete();
+    window.close();
+    cli.close();
+  });
+
   it("sessions.start replies with how the start went: started on a fresh thread, steered when the thread's turn runs and the harness steers, with the running turn as the session", async () => {
     const h = stoppableHarness();
     const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
