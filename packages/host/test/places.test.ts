@@ -10,7 +10,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sig
 import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, posix } from "node:path";
+import { basename, dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
@@ -71,6 +71,7 @@ import {
   addableProviders,
   leaveCommand,
   leavePlace,
+  placeHere,
   placeNameHere,
   placeStanding,
   removeCommand,
@@ -627,6 +628,19 @@ describe("what this computer says about itself", () => {
     const report = placeReport({ name: "x", home, env: { PATH: "/only/this", HOME: home } });
     expect(report.login["PATH"]).not.toBe("/only/this");
     expect(report.login["PATH"]).toContain(`${home}/bin`);
+  });
+
+  it("draws this computer's own row without starting a login shell, which the report alone reads", () => {
+    const home = tmp("report-row");
+    const read = join(home, "login-read");
+    writeFileSync(join(home, ".profile"), `echo read >> ${read}\n`);
+    vi.stubEnv("HOME", home);
+    onTestFinished(() => void vi.unstubAllEnvs());
+    // Nearly every verb lists places, and a login file can take seconds: the row has no use for the login it reads.
+    placeHere("x");
+    expect(existsSync(read)).toBe(false);
+    placeReport({ name: "x", home, env: { PATH: "/usr/bin", HOME: home } });
+    expect(readFileSync(read, "utf8")).toBe("read\n");
   });
 
   it("leaves a store folder that is not a plain path out of the login, since what is there lands in a command", () => {
@@ -3943,6 +3957,16 @@ describe("wsp add <folder> --on <computer>: the menu before anything travels", (
     expect(printed).toContain("--yes");
     // The computer's own kind is read first, then the menu, and nothing was recorded.
     expect(asked.map(a => a.op)).toEqual(["places.list", "project.seed.plan"]);
+  });
+
+  it("--into sends the folder a repo is cloned into, resolved where it was typed, and reads no seed menu", async () => {
+    const { dial, asked } = menuClient();
+    expect(await addCommand(captured(), opts(tmp("add-into")), ["https://github.com/spoo-me/spoo.me"], addFlags(undefined, undefined, undefined, undefined, undefined, undefined, undefined, {}, undefined, "clones/spoo.me"), menuDeps(dial))).toBe(0);
+    expect(asked.map(a => a.op)).toEqual(["places.list", "projects.add"]);
+    expect(asked.find(a => a.op === "projects.add")?.params).toEqual({ source: "https://github.com/spoo-me/spoo.me", into: resolve("clones/spoo.me") });
+    // The home and an absolute path are the host's to read as they stand.
+    expect(addFlags(undefined, undefined, undefined, undefined, undefined, undefined, undefined, {}, undefined, "~/code/spoo.me")).toEqual({ into: "~/code/spoo.me" });
+    expect(addFlags(undefined, undefined, undefined, undefined, undefined, undefined, undefined, {}, undefined, "/srv/spoo.me")).toEqual({ into: "/srv/spoo.me" });
   });
 
   it("with --yes it sends the ticks the catalogue decided, and the keeps and cuts move them", async () => {

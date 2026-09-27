@@ -1,6 +1,6 @@
 // Adapted from pingdotgg/t3code apps/web/src/appearanceFonts.ts at 57a66608 (MIT).
-// Only the monospace probe the terminal surface needs; the settings-driven
-// font preferences around it in the source stayed behind.
+// The family quoting, the monospace probe the terminal surface needs, and the
+// app and code fonts laid on the root's two font tokens.
 
 function quoteFontFamilyName(name: string): string {
   const bare = name.trim();
@@ -8,7 +8,7 @@ function quoteFontFamilyName(name: string): string {
   // Already quoted, or a single ident that needs no quoting.
   if (/^(['"]).*\1$/.test(bare)) return bare;
   if (/^[a-zA-Z][a-zA-Z0-9-]*$/.test(bare)) return bare;
-  return `"${bare.replaceAll('"', "")}"`;
+  return `"${bare.replace(/["\\]/g, "")}"`;
 }
 
 export function cssFontFamilies(input: string): string | null {
@@ -65,5 +65,15 @@ export function isMonospaceFamily(family: string): boolean {
     return true;
   } catch {
     return true;
+  }
+}
+
+/** The two font tokens as the record's picks set them on the root: the family in front of the token's system stack,
+ * or the token left to the stylesheet for none. The terminal draws with its own chain and reads neither. */
+export function applyFonts(picks: { readonly appFont: string; readonly codeFont: string }, root: HTMLElement = document.documentElement): void {
+  for (const [token, family] of [["--font-sans", picks.appFont], ["--font-mono", picks.codeFont]] as const) {
+    const chosen = cssFontFamilies(family);
+    if (chosen === null) root.style.removeProperty(token);
+    else root.style.setProperty(token, `${chosen}, var(${token}-system)`);
   }
 }

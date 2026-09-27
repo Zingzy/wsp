@@ -15,7 +15,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, copiesFolder, type ProjectView, type SeedChoice, type SeedPlan,
   ALREADY_JOINED_LINE,
   isHttpUrl,
@@ -100,7 +100,7 @@ import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, type HostAim, type HostPick } from "./hosts.js";
-import { joinStanding, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writeExclusive, writePlaceFile, wspArgvOf } from "./place-report.js";
+import { joinStanding, placeFilePath, placeKeyPath, placeLogPath, placeFacts, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writeExclusive, writePlaceFile, wspArgvOf } from "./place-report.js";
 import { PROVIDER_ENV, addedProviders, providerBackendFor, unregisteredCloud, type ProviderEnv } from "./providers.js";
 import { placeLink, relaySignIn, type BoxSignIn, type BoxSignedIn, type PlaceLink } from "./place-signin.js";
 import { publicHostname } from "./relay-link.js";
@@ -219,7 +219,7 @@ export function placeLabelHere(): string | undefined {
 export const computerNameHere = (): string => placeLabelHere() ?? placeNameHere();
 
 export function placeHere(name: string = placeNameHere()): HerePlace {
-  const report = placeReport({ name });
+  const report = placeFacts({ name });
   const label = placeLabelHere();
   return { name: report.name, ...(label !== undefined ? { label } : {}), os: report.os, shape: report.shape, engine: report.engine, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
 }
@@ -429,6 +429,8 @@ export interface AddFlags {
   on?: string;
   /** The branch a workspace of the project starts on; absent takes the remote's own default at the clone. */
   base?: string;
+  /** The empty folder on this computer a repo is cloned into, which is then the project. */
+  into?: string;
   /** The agent to sign in on a computer already in this wsp, once, outside every workspace on it. The join offers
    * this itself while the person is at the terminal; this is the same road for a computer that is already in. */
   signIn?: string;
@@ -454,10 +456,13 @@ export function addFlags(
   signIn?: string,
   seed: { yes?: boolean; keep?: string[]; cut?: string[]; noMemory?: boolean; noCommits?: boolean; remember?: boolean } = {},
   hostKey?: string,
+  into?: string,
 ): AddFlags {
   const asked = sshAsked(name, port, keyPath);
   const pinned = hostKey?.trim();
   return {
+    // Resolved where it was typed: the host runs in a folder of its own, and ~ is left for it to read as the home.
+    ...(into !== undefined ? { into: into.startsWith("~") || isAbsolute(into) ? into : resolve(into) } : {}),
     ...(pinned !== undefined && pinned !== "" ? { hostKey: pinned } : {}),
     ...(seed.yes === true ? { yes: true } : {}),
     ...(seed.keep !== undefined ? { keep: seed.keep } : {}),
@@ -1293,6 +1298,7 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
         ...(flags.on !== undefined ? { on: flags.on } : {}),
         ...(flags.name !== undefined ? { name: flags.name } : {}),
         ...(flags.base !== undefined ? { base: flags.base } : {}),
+        ...(flags.into !== undefined ? { into: flags.into } : {}),
         ...(seed !== undefined ? { seed } : {}),
       });
       // A record that stood with nothing to land on that computer runs no stage at all, so this terminal says
