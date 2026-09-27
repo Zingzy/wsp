@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
 import { bootLineOf } from "@wsp/protocol";
 import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runtime";
@@ -229,6 +230,56 @@ describe("serve takes host.lock next to the state file", () => {
     await expect(start(broken)).rejects.toThrow(/web app not built/);
     expect(existsSync(lockPath)).toBe(false);
   });
+});
+
+describe("hosts starting at once against a stale lock", () => {
+  // Each taker is its own process, as two hosts starting together are, held until one shared moment so they all read
+  // the stale lock before any of them writes. One that wins writes its token next, as serve does.
+  const TAKER = `
+    import { writeFileSync } from "node:fs";
+    import { takeLock } from ${JSON.stringify(fileURLToPath(new URL("../src/host-lock.ts", import.meta.url)))};
+    const [lockPath, statePath, tokenPath, at] = process.argv.slice(2);
+    while (Date.now() < Number(at)) {}
+    try {
+      takeLock(lockPath, statePath, { port: 1 });
+      writeFileSync(tokenPath, String(process.pid));
+      console.log("won " + process.pid);
+    } catch (e) {
+      console.log("refused " + e.message);
+    }
+    setTimeout(() => {}, 1_000);
+  `;
+  const take = (dir: string, at: number): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", join(dir, "taker.mts"), join(dir, "host.lock"), join(dir, "state.json"), join(dir, "host-token"), String(at)]);
+      let out = "";
+      child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
+      child.stderr.on("data", (chunk: Buffer) => (out += chunk.toString()));
+      child.on("error", reject);
+      // Read once the taker has said which it was, while a winner is still alive and holds the lock.
+      child.stdout.once("end", () => resolve(out.trim()));
+    });
+
+  it("exactly one takes it, the lock names that one, and the token is that one's", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-lock-race-"));
+    try {
+      writeFileSync(join(dir, "taker.mts"), TAKER);
+      for (let round = 0; round < 3; round++) {
+        writeFileSync(join(dir, "host.lock"), JSON.stringify({ pid: deadPid(), port: 1, startedAt: "2026-01-01T00:00:00.000Z" }));
+        rmSync(join(dir, "host-token"), { force: true });
+        const at = Date.now() + 1_500;
+        const said = await Promise.all(Array.from({ length: 6 }, () => take(dir, at)));
+        const won = said.filter(line => line.startsWith("won "));
+        expect(said.filter(line => !line.startsWith("won ") && !line.startsWith("refused ")), said.join("\n")).toEqual([]);
+        expect(won, said.join("\n")).toHaveLength(1);
+        const winner = Number(won[0]!.slice("won ".length));
+        expect(readLock(join(dir, "host.lock")).pid).toBe(winner);
+        expect(readFileSync(join(dir, "host-token"), "utf8")).toBe(String(winner));
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe("what the lock's pid says", () => {
