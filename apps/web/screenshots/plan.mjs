@@ -107,7 +107,7 @@ const surfaceFrom = (raw, index, widths) => {
   if (fresh !== undefined && typeof fresh !== "boolean") fail(`${name}: "fresh" says whether the shot changes what the host holds, and so takes a host of its own`);
   if (height !== undefined && (!Number.isInteger(height) || height < 1)) fail(`${name}: "height" is the window height in whole pixels, for a surface taller than its width's window`);
   const own = raw.widths;
-  if (own !== undefined && (!Array.isArray(own) || own.some(w => !widths.includes(w)))) fail(`${name}: "widths" picks from the list's own ${widths.join(", ")}`);
+  if (own !== undefined && (!Array.isArray(own) || own.length === 0 || own.some(w => !widths.includes(w)))) fail(`${name}: "widths" picks one or more from the list's own ${widths.join(", ")}`);
   if (fixture !== undefined && (typeof fixture !== "string" || !NAME.test(fixture))) fail(`${name}: "fixture" is the name of a fixture the state file serves`);
   return {
     name,

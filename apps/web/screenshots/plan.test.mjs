@@ -96,6 +96,7 @@ describe("a surfaces list", () => {
 
   it("refuses a route that is not one", () => {
     expect(() => list([{ name: "sidebar", at: "sidebar" }])).toThrow(/starting with \//);
+    expect(() => list([{ name: "sidebar", at: "/", widths: [] }])).toThrow(/one or more/);
   });
 
   it("refuses a width with no height, which the browser could not be sized to", () => {
