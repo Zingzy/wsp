@@ -233,6 +233,18 @@ describe("one module per service manager", () => {
     expect(SERVICE_MANAGERS.systemd.text(plan)).toContain("Environment='WSP_STARTED_BY=service'");
   });
 
+  it("each manager reads the program a unit it wrote runs, and nothing but that program, whatever words follow it", () => {
+    const at: ServiceAddress = { statePath: "/Users/z/.wsp/state.json", home: "/Users/z", uid: 501 };
+    const odd = "/Users/z/O'Brien & Co/.wsp/bin/wsp";
+    for (const manager of Object.values(SERVICE_MANAGERS)) {
+      const text = manager.text({ ...at, argv: [odd, "up", "--state", at.statePath], cwd: "/Users/z", env: {}, logPath: "/Users/z/.wsp/host.log" });
+      expect(manager.runs(text, odd), manager.words).toBe(true);
+      expect(manager.runs(text, "/Users/z/O'Brien & Co/.wsp/bin"), manager.words).toBe(false);
+      expect(manager.runs(text, "up"), manager.words).toBe(false);
+      expect(manager.runs(manager.text({ ...at, argv: ["/usr/bin/node", odd, "up"], cwd: "/Users/z", env: {}, logPath: "/l" }), odd), manager.words).toBe(false);
+    }
+  });
+
   it("the unit standing is what says this computer is registered to serve a state file, whether or not the manager has it loaded", () => {
     const home = mkdtempSync(join(tmpdir(), "wsp-registered-"));
     try {
@@ -303,6 +315,7 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
       plans.push(plan);
       return `fake ${plan.argv.join(" ")}\n`;
     },
+    runs: (text, program) => text.startsWith(`fake ${program} `),
     load: a => [["fake", "load", unit(a).name]],
     unload: a => [["fake", "unload", unit(a).name]],
     holds: a => ["fake", "holds", unit(a).name],

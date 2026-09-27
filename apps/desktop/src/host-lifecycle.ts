@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { STARTED_BY_ENV, accountAim, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, downCommand, homeNamed, hostLogPath, hostTokenFor, httpProbe, installService, lockPathFor, logTail, noManagerLine, ownPid, readHost, runAll, runFailureLine, serviceAddressHere, serviceEnv, servingHost, severalAccountHostsLine, stopService, untilServing, type CliIO, type HostLock, type HostRecord, type HostProbe, type RunFailure, type ServiceDeps, type ServicePlan } from "@wsp/host";
+import { STARTED_BY_ENV, accountAim, claudeKeyOnlyInThisShell, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, downCommand, homeNamed, hostLogPath, hostTokenFor, httpProbe, installService, keyOnlyInThisShell, lockPathFor, logTail, noManagerLine, ownPid, readHost, runAll, runFailureLine, serviceAddressHere, serviceEnv, servingHost, severalAccountHostsLine, stopService, untilServing, type CliIO, type HostLock, type HostRecord, type HostProbe, type RunFailure, type ServiceDeps, type ServicePlan } from "@wsp/host";
 import { LOOPBACK, authority, bootLineOf, fmtDuration, holdsNothing, isLocalWorkspace, isLoopback, type BootPayload, type GoldenManifest, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { safeEqual, tokenDigest } from "@wsp/runtime";
 
@@ -191,27 +191,36 @@ const answersAsOwn =
   };
 
 /** Makes this computer's own manager serve the state file with the shim, and waits until wsp answers. A unit that
- * says anything else than this launch would write (another shim, another home, a PATH the login shell has since
- * changed) is stopped and written again; one that says exactly this is loaded where the manager has let it go.
- * Read only when nothing serves, so a rewrite never restarts wsp under a window attached to it. */
-export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "home" | "shim" | "service">): Promise<void> {
+ * runs another program (another app's shim, the node a terminal's wsp up --service named) is stopped and written
+ * again; one that runs this shim is kept as it stands, whatever words a terminal gave it, and loaded where the
+ * manager has let it go. Read only when nothing serves, so a rewrite never restarts wsp under a window on it. */
+export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "home" | "shim" | "service" | "io">): Promise<void> {
   const { manager, run } = opts.service;
   if (manager === undefined) throw new Error(noManagerLine(opts.service.platform));
+  // The service reads keys off the .env beside the state and in its own folder, never off the shell that launched
+  // this app; a launch from a terminal holding one is told, as wsp up --service tells it.
+  const sources = { env: process.env, cwd: opts.home, statePath: opts.statePath };
+  for (const line of [keyOnlyInThisShell(sources), claudeKeyOnlyInThisShell(sources)]) if (line !== undefined) opts.io.error(line);
   const plan = servicePlan(opts);
   const unit = manager.unit(plan);
-  const text = manager.text(plan);
   const written = existsSync(unit.path) ? readFileSync(unit.path, "utf8") : undefined;
-  if (written !== text) {
+  const held = async (): Promise<boolean> => (await run(manager.holds(plan))).code === 0;
+  if (written === undefined || !manager.runs(written, opts.shim)) {
     if (written !== undefined) {
       const stopped = await stopService(manager, plan, run);
       const failure = stopped.unsure ?? stopped.failure;
       if (failure !== undefined) throw refused(failure);
     }
     const { failure } = await installService(manager, plan, run);
-    if (failure !== undefined) throw refused(failure);
-  } else if ((await run(manager.holds(plan))).code !== 0) {
+    // A load refused because the manager holds the unit is another launch that loaded it a moment before: the same
+    // service coming up. The refused install took back the file it wrote, which that service still needs.
+    if (failure !== undefined) {
+      if (!(await held())) throw refused(failure);
+      if (!existsSync(unit.path)) writeFileSync(unit.path, manager.text(plan), { mode: 0o600 });
+    }
+  } else if (!(await held())) {
     const failure = await runAll(manager.load(plan), run);
-    if (failure !== undefined) throw refused(failure);
+    if (failure !== undefined && !(await held())) throw refused(failure);
   }
   if ((await untilServing(opts.statePath, opts.service.waitMs, answersAsOwn(opts.statePath))) === undefined) {
     throw new Error([`wsp did not start within ${fmtDuration(opts.service.waitMs)}; its log is ${plan.logPath}`, ...logTail(plan.logPath)].join("\n"));

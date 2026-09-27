@@ -876,9 +876,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(existsSync(join(launched.home, ".env"))).toBe(false);
   });
 
-  it("turns on two workspaces of this computer outlive a SIGTERM to the app: the next launch reads both working and both replies land", async () => {
-    // What a supervisor relaunching the app sends: a raw SIGTERM to the main process, which no quit menu or window
-    // close precedes. Two workspaces, since the run folder is this computer's and every workspace on it shares it.
+  it("turns on two workspaces of this computer outlive a SIGTERM to the service's host: the manager starts a new one, the next launch reads both working and both replies land", async () => {
+    // What wsp restart and a crash both come to: the host the manager started ends, and the manager starts it again.
+    // The manager ends what is left of the job's own process group with it, so a turn outlives it only by leading a
+    // group of its own. Two workspaces, since the run folder is this computer's and every workspace on it shares it.
     const agents = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-agents-"));
     const gate = join(agents, "gate");
     const pidFile = join(agents, "claude.pids");
@@ -908,12 +909,22 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       await vi.waitFor(async () => expect(await statuses(win)).toEqual(["working", "working"]), { timeout: 30_000, interval: 100 });
       const threads = await win.locator("[data-row-id^='thread:']").evaluateAll(rows => rows.map(r => r.getAttribute("data-row-id")!.slice("thread:".length)));
 
-      const first = launched.app.process();
-      const ended = new Promise<void>(resolve => first.once("exit", () => resolve()));
-      process.kill(first.pid!, "SIGTERM");
-      await ended;
-      expect(claudes.filter(pid => !alive(pid)), "a turn went with the app").toEqual([]);
+      const { statePath } = launched;
+      const first = servingHost(statePath)!;
+      expect(first.startedBy).toBe("service");
+      process.kill(first.pid, "SIGTERM");
+      const second = await vi.waitFor(
+        async () => {
+          const now = servingHost(statePath);
+          expect(now !== undefined && now.pid !== first.pid && !alive(first.pid) && !(await refused(`http://127.0.0.1:${now.port}/`))).toBe(true);
+          return now!;
+        },
+        { timeout: 40_000, interval: 250 },
+      );
+      if (process.platform === "darwin") expect(Number(spawnSync("ps", ["-o", "ppid=", "-p", String(second.pid)], { encoding: "utf8", timeout: 20_000 }).stdout.trim())).toBe(1);
+      expect(claudes.filter(pid => !alive(pid)), "a turn went with the host").toEqual([]);
 
+      await quit(launched.app);
       launched = await launchIn(home, env);
       const again = await windowAt(launched.app, APP_URL);
       await vi.waitFor(async () => expect(await statuses(again)).toHaveLength(2), { timeout: 30_000, interval: 100 });
@@ -930,7 +941,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       for (const pid of claudes) if (alive(pid)) process.kill(pid, "SIGKILL");
       rmSync(agents, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it("no frame in the window registers a service worker on a loopback origin, and a host page loads into a session holding none", async () => {
     const served = await workerPage();

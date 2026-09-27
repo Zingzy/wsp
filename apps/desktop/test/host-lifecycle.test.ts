@@ -201,6 +201,41 @@ describe("openHost", () => {
     expect(readFileSync(unitPath(), "utf8")).not.toContain("Old.app");
   });
 
+  it("a unit wsp up --service wrote behind this shim, with words of its own, is loaded as it stands, not rewritten", async () => {
+    const mine = { ...serviceAddressHere(statePath), argv: [shim, "up", "--state", statePath, "--port", "4400", "--listen", "0.0.0.0"], cwd: join(home, "elsewhere"), env: { PATH: "/usr/bin" }, logPath: join(home, "host.log") };
+    mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
+    writeFileSync(unitPath(), SERVICE_MANAGERS.launchd.text(mine));
+    const before = readFileSync(unitPath(), "utf8");
+    await open();
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["print", "bootstrap"]);
+    expect(readFileSync(unitPath(), "utf8")).toBe(before);
+  });
+
+  it("a load launchd refuses because another launch loaded the unit a moment before waits for that one", async () => {
+    // Two launches while nothing serves both reach the load; launchd takes the first and refuses the second, which
+    // is the same service coming up, not a start that failed.
+    const run = launchd.road.run;
+    launchd.road.run = async (argv, waitMs) => {
+      if (argv[1] !== "bootstrap") return run(argv, waitMs);
+      await launchd.load();
+      return { code: 5, output: "Bootstrap failed: 5: Input/output error" };
+    };
+    const session = await open();
+    expect(session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
+    expect(readFileSync(unitPath(), "utf8")).toContain(`<string>${shim}</string>`);
+  });
+
+  it("says in the app's log when a provider key is only in the shell that launched it, which the service starts without", async () => {
+    const lines: string[] = [];
+    await open({}, lines);
+    expect(lines.join("\n")).toContain("SOLARI_API_KEY is only in this shell's environment");
+    await launchd.road.run(["launchctl", "bootout", "x"]);
+    lines.length = 0;
+    writeFileSync(join(home, ".env"), "SOLARI_API_KEY=slr_live_fake_desktop_key\n");
+    await open({}, lines);
+    expect(lines.join("\n")).not.toContain("only in this shell");
+  });
+
   it("a unit written as this launch would write it and let go by launchd is loaded, not rewritten", async () => {
     await open();
     await launchd.road.run(["launchctl", "bootout", "x"]);
@@ -594,7 +629,7 @@ describe("quit and stop wsp", () => {
 
   it("interrupts every turn on this computer, then stops the service and takes its unit away", async () => {
     const launchd = fakeLaunchd(statePath);
-    await ensureService({ statePath, home, shim: join(home, "bin", "wsp"), service: launchd.road });
+    await ensureService({ statePath, home, shim: join(home, "bin", "wsp"), service: launchd.road, io: quietIO() });
     const { dial, interrupted } = hostHere();
     expect(await workingHere(statePath, home, dial)).toBe(2);
     launchd.ran.length = 0;

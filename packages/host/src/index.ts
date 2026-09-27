@@ -12,10 +12,12 @@ export {
   type WorkspaceStatus,
 } from "./server.js";
 export {
+  claudeKeyOnlyInThisShell,
   cli,
   devCheckoutState,
   downCommand,
   goldenRecipe,
+  keyOnlyInThisShell,
   keySources,
   loadKeys,
   localWiring,
