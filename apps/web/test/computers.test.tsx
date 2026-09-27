@@ -1056,8 +1056,8 @@ describe("Add a computer on the page", () => {
     expect(words.said).toBe(`${PROVIDER_KEY_WORDS["box"]!.name} refused that key.`);
     expect(words.fix).toBe(`Check it at ${PROVIDER_KEY_WORDS["box"]!.keyConsole} and paste it again.`);
     expect(boxKey.querySelector("[data-k='key-state']")).toBeNull();
-    refuse = new RequestError("Box refused. Check it and paste it again.", "auth", "Check it and paste it again.");
-    expect(await save()).toBe("Box refused. Check it and paste it again.");
+    refuse = new RequestError("Boat refused. Check it and paste it again.", "auth", "Check it and paste it again.");
+    expect(await save()).toBe("Boat refused. Check it and paste it again.");
     expect(boxKey.querySelector("[data-k='cloud-refusal'] span.text-foreground")?.textContent?.trim()).toBe("Check it and paste it again.");
   });
 

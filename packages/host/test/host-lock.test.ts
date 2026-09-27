@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
@@ -234,54 +234,117 @@ describe("serve takes host.lock next to the state file", () => {
 });
 
 describeWithDists("hosts starting at once against a stale lock", ["protocol", "own-file"], () => {
-  // Each taker is its own process, as two hosts starting together are, held until one shared moment so both read the
-  // stale lock before either writes. One that wins writes its token next, as serve does. Two per round, not more:
-  // three starts inside the same moment is a case of its own.
+  // Six takers, each its own process as a host is, kept alive across every round so the moment they all start from
+  // is not spread out by each one's boot. A round is a stale lock and a shared moment in the round file; one that
+  // wins writes its token next, as serve does, and stays alive so the others meet a live lock.
   const TAKER = `
-    import { writeFileSync } from "node:fs";
+    import { readFileSync, writeFileSync } from "node:fs";
+    import { join } from "node:path";
     import { takeLock } from ${JSON.stringify(fileURLToPath(new URL("../src/host-lock.ts", import.meta.url)))};
-    const [lockPath, statePath, tokenPath, at] = process.argv.slice(2);
-    while (Date.now() < Number(at)) {}
-    try {
-      takeLock(lockPath, statePath, { port: 1 });
-      writeFileSync(tokenPath, String(process.pid));
-      console.log("won " + process.pid);
-    } catch (e) {
-      console.log("refused " + e.message);
+    const [dir] = process.argv.slice(2);
+    const nap = new Int32Array(new SharedArrayBuffer(4));
+    const parent = process.ppid;
+    for (let seen = -1; process.ppid === parent; ) {
+      let round;
+      try {
+        round = JSON.parse(readFileSync(join(dir, "round"), "utf8"));
+      } catch {
+        round = { r: seen };
+      }
+      if (round.r === "done") break;
+      if (round.r === seen) {
+        Atomics.wait(nap, 0, 0, 2);
+        continue;
+      }
+      seen = round.r;
+      // Starts at once are not in step: each is up to a fifth of a millisecond behind the shared moment.
+      const at = round.at + Math.random() * 0.2;
+      while (performance.timeOrigin + performance.now() < at) {}
+      let said;
+      try {
+        takeLock(join(dir, "host.lock"), join(dir, "state.json"), { port: 1 });
+        writeFileSync(join(dir, "host-token"), String(process.pid));
+        said = "won";
+      } catch (e) {
+        said = "refused " + e.message;
+      }
+      process.stdout.write(JSON.stringify({ r: seen, pid: process.pid, said }) + "\\n");
     }
-    setTimeout(() => {}, 500);
   `;
-  const take = (dir: string, at: number): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", join(dir, "taker.mts"), join(dir, "host.lock"), join(dir, "state.json"), join(dir, "host-token"), String(at)]);
-      let out = "";
-      child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
-      child.stderr.on("data", (chunk: Buffer) => (out += chunk.toString()));
-      child.on("error", reject);
-      // Read once the taker has exited, after its hold: nothing removes the lock, so it still names the winner.
-      child.stdout.once("end", () => resolve(out.trim()));
-    });
+  const TAKERS = 6;
+  const ROUNDS = 30;
 
-  it("exactly one takes it, the lock names that one, and the token is that one's", async () => {
+  /** One busy loop per core for as long as the case runs, so the takers are preempted mid-take as a loaded Mac does.
+   * Each is a process group of its own, killed however the case ends, and one whose worker was killed outright ends
+   * itself once it finds its parent gone. */
+  const BUSY = "const parent = process.ppid; for (let i = 0; ; i++) if (i % 1e8 === 0 && process.ppid !== parent) process.exit();";
+  const loadEveryCore = (): { stop(): void } => {
+    const loops = Array.from({ length: availableParallelism() }, () => spawn(process.execPath, ["-e", BUSY], { stdio: "ignore", detached: true }));
+    const stop = (): void => {
+      process.off("exit", stop);
+      for (const loop of loops) {
+        try {
+          process.kill(-loop.pid!, "SIGKILL");
+        } catch {
+          // Gone already.
+        }
+      }
+    };
+    process.on("exit", stop);
+    return { stop };
+  };
+
+  it("exactly one of six takes it in every round on a loaded computer, the lock names that one, and the token is that one's", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-lock-race-"));
+    const load = loadEveryCore();
+    const heard = new Map<number, { pid: number; said: string }[]>();
+    const takers: ChildProcess[] = [];
+    const setRound = (round: { r: number | "done"; at?: number }): void => {
+      writeFileSync(join(dir, "round.next"), JSON.stringify(round));
+      renameSync(join(dir, "round.next"), join(dir, "round"));
+    };
     try {
       writeFileSync(join(dir, "taker.mts"), TAKER);
-      for (let round = 0; round < 10; round++) {
+      for (let i = 0; i < TAKERS; i++) {
+        const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", join(dir, "taker.mts"), dir], { stdio: ["ignore", "pipe", "inherit"] });
+        let rest = "";
+        child.stdout!.on("data", (chunk: Buffer) => {
+          const lines = (rest + chunk.toString()).split("\n");
+          rest = lines.pop()!;
+          for (const line of lines) {
+            const { r, pid, said } = JSON.parse(line) as { r: number; pid: number; said: string };
+            heard.set(r, [...(heard.get(r) ?? []), { pid, said }]);
+          }
+        });
+        takers.push(child);
+      }
+      for (let r = 0; r < ROUNDS; r++) {
         writeFileSync(join(dir, "host.lock"), JSON.stringify({ pid: deadPid(), port: 1, startedAt: "2026-01-01T00:00:00.000Z" }));
         rmSync(join(dir, "host-token"), { force: true });
-        const at = Date.now() + 1_200;
-        const said = await Promise.all([take(dir, at), take(dir, at)]);
-        const won = said.filter(line => line.startsWith("won "));
-        expect(said.filter(line => !line.startsWith("won ") && !line.startsWith("refused ")), said.join("\n")).toEqual([]);
-        expect(won, said.join("\n")).toHaveLength(1);
-        const winner = Number(won[0]!.slice("won ".length));
-        expect(readLock(join(dir, "host.lock")).pid).toBe(winner);
-        expect(readFileSync(join(dir, "host-token"), "utf8")).toBe(String(winner));
+        // The first round waits for six processes to boot on a loaded computer; the rest only for the file to be read.
+        setRound({ r, at: Date.now() + (r === 0 ? 5_000 : 300) });
+        const said = await vi.waitFor(
+          () => {
+            const got = heard.get(r) ?? [];
+            expect(got).toHaveLength(TAKERS);
+            return got;
+          },
+          { timeout: 20_000, interval: 20 },
+        );
+        const lines = said.map(s => `${s.pid} ${s.said}`).join("\n");
+        expect(said.filter(s => s.said !== "won" && !s.said.startsWith("refused ")), lines).toEqual([]);
+        const won = said.filter(s => s.said === "won");
+        expect(won, `round ${r}:\n${lines}`).toHaveLength(1);
+        expect(readLock(join(dir, "host.lock")).pid, lines).toBe(won[0]!.pid);
+        expect(readFileSync(join(dir, "host-token"), "utf8"), lines).toBe(String(won[0]!.pid));
       }
+      setRound({ r: "done" });
     } finally {
+      load.stop();
+      for (const child of takers) child.kill("SIGKILL");
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 60_000);
+  }, 180_000);
 });
 
 describe("what the lock's pid says", () => {

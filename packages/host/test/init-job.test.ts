@@ -198,11 +198,11 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
     provider: k => void swapped.push(k),
     // The provider table this test stands in for: the two rows the host has, each with the variable it reads, and
     // the stub backend behind the check, so the check the keys step runs is this test's own.
-    keysHeld: held => ({ box: held["BOX_API_KEY"] !== undefined, solari: held["SOLARI_API_KEY"] !== undefined }),
+    keysHeld: held => ({ box: held["BOAT_API_KEY"] !== undefined, solari: held["SOLARI_API_KEY"] !== undefined }),
     keyProvider: () => ("keyProvider" in over ? over.keyProvider : "solari"),
     forksOn: () => over.forksOn ?? "solari",
     keySet: (key, provider): Record<string, string> | undefined => {
-      const names: Record<string, string> = { box: "BOX_API_KEY", solari: "SOLARI_API_KEY" };
+      const names: Record<string, string> = { box: "BOAT_API_KEY", solari: "SOLARI_API_KEY" };
       if (provider === undefined) return { SOLARI_API_KEY: key };
       const name = names[provider];
       return name === undefined ? undefined : { [name]: key };
@@ -1293,9 +1293,9 @@ describe("the init job, manual road", () => {
   it("a Box key typed on the keys door that Box refuses, or that nothing answered about, says Box and not Solari", async () => {
     const f = fake({ env: {} });
     f.backend.keyRefusal = Object.assign(new Error("Unauthorized"), { kind: "auth", status: 401 });
-    await expect(f.jobs.keys({ provider: "box", key: "box_live_wrong" })).rejects.toMatchObject({ message: "Box by ASCII refused this key: 401 Unauthorized", kind: KEY_REFUSED });
+    await expect(f.jobs.keys({ provider: "box", key: "box_live_wrong" })).rejects.toMatchObject({ message: "Boat refused this key: 401 Unauthorized", kind: KEY_REFUSED });
     f.backend.keyRefusal = Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
-    await expect(f.jobs.keys({ provider: "box", key: "box_live_maybe" })).rejects.toMatchObject({ message: "Box by ASCII could not be reached to check the key: fetch failed", kind: KEY_UNCHECKED });
+    await expect(f.jobs.keys({ provider: "box", key: "box_live_maybe" })).rejects.toMatchObject({ message: "Boat could not be reached to check the key: fetch failed", kind: KEY_UNCHECKED });
     expect(f.saved).toEqual([]);
   });
 
@@ -1322,7 +1322,7 @@ describe("the init job, manual road", () => {
     const setup = await f.jobs.keys({ provider: "box", key: "ascii_live_9f3k2mx0" });
     // Its own variable and nothing beside it: saving a key opens that provider as a place and leaves the provider
     // this computer forks on where it was.
-    expect(f.saved).toEqual([{ BOX_API_KEY: "ascii_live_9f3k2mx0" }]);
+    expect(f.saved).toEqual([{ BOAT_API_KEY: "ascii_live_9f3k2mx0" }]);
     expect(setup.keys).toEqual({ box: true, solari: false });
     expect(JSON.stringify(setup)).not.toMatch(/ascii_live/);
     // A provider nothing in the table takes a key for is refused before anything is checked or written.
@@ -1332,7 +1332,7 @@ describe("the init job, manual road", () => {
 
   it("says which provider's key its own step asks for, so a step reads what is held by that word", async () => {
     expect((await fake({ env: {} }).jobs.get()).keyProvider).toBe("solari");
-    expect((await fake({ env: { BOX_API_KEY: "ascii_live_9f3k2mx0" }, keyProvider: "box" }).jobs.get()).keyProvider).toBe("box");
+    expect((await fake({ env: { BOAT_API_KEY: "ascii_live_9f3k2mx0" }, keyProvider: "box" }).jobs.get()).keyProvider).toBe("box");
     expect((await fake({ env: {}, keyProvider: undefined }).jobs.get()).keyProvider).toBeUndefined();
   });
 
@@ -1422,12 +1422,12 @@ describe("the init job, manual road", () => {
     expect([refused.box.keyChecks, refused.f.backend.keyChecks]).toEqual([1, 0]);
     const stopped = refused.f.jobs.view()!;
     expect(stopped.error).toBe(savedKeyRefusedLine("401 Unauthorized", "box"));
-    expect(stopped.error).toBe("Box by ASCII refused the saved key: 401 Unauthorized");
+    expect(stopped.error).toBe("Boat refused the saved key: 401 Unauthorized");
     expect(stopped.keyRefused).toBe(true);
     expect(refused.box.machines).toEqual([]);
     // The way on names the same provider: the key to save is a Box key.
     const said = stopped.log.join("\n");
-    expect(said).toContain("Save a key Box by ASCII takes and run wsp init again; nothing booted, and the recipe is kept.");
+    expect(said).toContain("Save a key Boat takes and run wsp init again; nothing booted, and the recipe is kept.");
     expect(said).not.toContain("Solari");
     // Solari refuses its key and Box takes its own: the build at Box goes on, and Solari is never asked.
     const taken = twoPlaces();

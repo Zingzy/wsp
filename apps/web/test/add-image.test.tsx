@@ -159,9 +159,9 @@ describe("Add a computer goes on to the image", () => {
     await settle();
     expect(boxKey.querySelector("[data-k='key-state']")?.textContent).toBe(ADD_COMPUTER_WORDS.keySaved);
     // One name for the cloud: the key block's, which the card's head and the cloud's own page read too.
-    expect(boxKey.querySelector("[data-k='provider-name']")?.textContent).toBe("Box by ASCII");
-    expect(head(cloud)).toBe(IMAGE_WORDS.head("Box by ASCII"));
-    expect(placeName(ascii)).toBe("Box by ASCII");
+    expect(boxKey.querySelector("[data-k='provider-name']")?.textContent).toBe("Boat");
+    expect(head(cloud)).toBe(IMAGE_WORDS.head("Boat"));
+    expect(placeName(ascii)).toBe("Boat");
     expect(press(cloud).textContent).toBe(IMAGE_WORDS.copyHere);
     expect(cost(cloud)).toEqual(copyCost(0.018));
     expect(cost(cloud)[1]).toBe(fmtRate(0.018));
@@ -182,7 +182,7 @@ describe("Add a computer goes on to the image", () => {
     await openRoad(host(WITH_IMAGE, { initGet: async () => setupOf({ solari: false, box: true }) } as Partial<Api>).api, "cloud");
     const boxKey = road("cloud")!.querySelector("[data-provider='box']")!;
     const line = boxKey.querySelector<HTMLButtonElement>("[data-k='held-image']");
-    expect(line?.textContent).toBe(`${IMAGE_WORDS.head("Box by ASCII")}${IMAGE_WORDS.state.notHere}`);
+    expect(line?.textContent).toBe(`${IMAGE_WORDS.head("Boat")}${IMAGE_WORDS.state.notHere}`);
     expect(line?.querySelector("svg")).not.toBeNull();
     // Solari's key is not held, so it says nothing of an image.
     expect(road("cloud")!.querySelector("[data-provider='solari'] [data-k='held-image']")).toBeNull();
@@ -195,6 +195,6 @@ describe("Add a computer goes on to the image", () => {
     useStore.setState({ places: [here, ascii] });
     const view: SealedImageView = { ...WITH_IMAGE, copies: [{ ...copyAt("box"), version: IMAGE.version }] };
     await openRoad(host(view, { initGet: async () => setupOf({ solari: false, box: true }) } as Partial<Api>).api, "cloud");
-    expect(road("cloud")!.querySelector("[data-provider='box'] [data-k='held-image']")?.textContent).toBe(`${IMAGE_WORDS.head("Box by ASCII")}${IMAGE_WORDS.state.ready}`);
+    expect(road("cloud")!.querySelector("[data-provider='box'] [data-k='held-image']")?.textContent).toBe(`${IMAGE_WORDS.head("Boat")}${IMAGE_WORDS.state.ready}`);
   });
 });

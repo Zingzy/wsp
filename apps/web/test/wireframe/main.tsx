@@ -66,7 +66,7 @@
 //                         that takes no copy, which says so in one line)
 //   settings-add-code     the code road, a computer joining a moment after the
 //                         code is made
-//   settings-add-cloud    the cloud road, where a key saved for Box lists it and
+//   settings-add-cloud    the cloud road, where a key saved for Boat lists it and
 //                         draws its Image card (&image=none as above)
 //   settings-remove-computer  the Remove dialog over the box's page
 //   settings-image-nothing, -copy, -copying, -stopped, -stale, -ready  the box's

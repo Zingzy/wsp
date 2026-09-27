@@ -232,13 +232,13 @@ describe("the first build in the Image card", () => {
     expect(stateRow().querySelector("[data-k='image-press']")?.textContent).toBe(IMAGE_WORDS.buildHere);
   });
 
-  it("a Box key the provider refuses in Change the key says Box refused it under the Box field", async () => {
+  it("a Boat key the provider refuses in Change the key says Boat refused it under the Boat field", async () => {
     const boxCloud: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018, takesForks: true, buildsImages: true };
     useStore.setState({ places: [here, box, solari, boxCloud] });
     const refused: InitJob = { ...BUILDING, phase: "failed", keyRefused: true, error: savedKeyRefusedLine("401 Unauthorized", "box"), rows: KEY_REFUSED_ROWS, place: { id: "box", name: "box" } };
     useStore.setState({ initJob: refused });
     const fake = host(refused);
-    // The host holds a Box key, the one refused at build time, so Box's page draws its card.
+    // The host holds a Boat key, the one refused at build time, so Boat's page draws its card.
     const refuse = settingsApi({ ...fake.api, initGet: async () => ({ ...SETUP, keys: { solari: true, box: true }, job: refused }), initKeys: async () => Promise.reject(new RequestError(keyRefusedLine("401 Unauthorized", "box"), KEY_REFUSED)) } as Partial<Api>);
     await open(refuse.api, "box");
     await press("build-primary");
@@ -246,7 +246,7 @@ describe("the first build in the Image card", () => {
     fireEvent.change(field.querySelector<HTMLInputElement>("[data-k='cloud-key']")!, { target: { value: "box_live_x" } });
     fireEvent.click(field.querySelector("[data-k='cloud-save']")!);
     await settle();
-    expect(field.querySelector("[data-k='cloud-refusal']")?.textContent).toContain("Box by ASCII refused this key: 401 Unauthorized");
+    expect(field.querySelector("[data-k='cloud-refusal']")?.textContent).toContain("Boat refused this key: 401 Unauthorized");
     expect(field.textContent).not.toContain("Solari");
   });
 

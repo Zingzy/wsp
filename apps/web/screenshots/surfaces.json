@@ -580,6 +580,8 @@
       "name": "new-workspace",
       "at": "/",
       "steps": [
+        "k=project-switcher",
+        "switcher-option=pr_spoo",
         "k=new-workspace"
       ],
       "wait": "k=landing",
@@ -608,6 +610,8 @@
       "at": "/",
       "fixture": "mac-and-boxes",
       "steps": [
+        "k=project-switcher",
+        "switcher-option=pr_spoo",
         "k=new-workspace",
         "type:pricing page",
         "k=create"

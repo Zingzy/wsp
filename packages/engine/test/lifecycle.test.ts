@@ -149,7 +149,7 @@ describe("Workspace verified wake", () => {
   });
 
   it("a resume that ends with the guest unusable fails the wake with the provider's words: no check runs, no fork, and the machine stays", async () => {
-    const { machine, calls } = counting({ resume: async () => { throw new GuestUnusableError("m1", "Box by ASCII", "Error 24", 200); } });
+    const { machine, calls } = counting({ resume: async () => { throw new GuestUnusableError("m1", "Boat", "Error 24", 200); } });
     const ws = new Workspace(machine, {
       goldenSnapshot: "snap_g",
       wakeAttempts: 2,
@@ -157,7 +157,7 @@ describe("Workspace verified wake", () => {
       wakeCheck: async () => { throw new Error("a machine nothing can run on is never checked"); },
     });
     await ws.nap();
-    await expect(ws.wake()).rejects.toThrow(/Box by ASCII left m1 running but nothing on it can run: Error 24/);
+    await expect(ws.wake()).rejects.toThrow(/Boat left m1 running but nothing on it can run: Error 24/);
     expect(ws.machineId).toBe("m1");
     expect(ws.currentPhase).toBe("napping");
     expect(calls).toEqual({ pause: 1, resume: 0, kill: 0 });
