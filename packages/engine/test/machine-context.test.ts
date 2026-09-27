@@ -10,7 +10,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TURN_END_WORDS, TURN_WALL_MS, fmtBytes } from "@wsp/protocol";
 import {
   ALIAS_PROBES,
@@ -95,7 +95,6 @@ function probeOf(over: Partial<ContextProbe> = {}): ContextProbe {
       { name: "o", word: "open" },
       { name: "rc", word: "code" },
     ],
-    aliasesRead: true,
     conflicts: new Set(),
     ...over,
   };
@@ -229,7 +228,7 @@ describe("the document", () => {
   });
 
   it("says the aliases were not read where no shell was opened to read them, rather than saying there are none", () => {
-    const doc = renderMachineContext({ workspace: { name: "box-1" }, probe: probeOf({ aliases: [], aliasesRead: false }), facts: FACTS });
+    const doc = renderMachineContext({ workspace: { name: "box-1" }, probe: probeOf({ aliases: [], aliasesUnread: "shared" }), facts: FACTS });
     expect(doc).toContain("- Aliases: not read here. This computer's home is shared with every workspace on it, so wsp opens no login shell on it.");
     expect(doc).not.toContain("- Aliases whose command is not here:");
   });
@@ -430,12 +429,26 @@ describe("the guest scripts on a local bash", () => {
     mkdirSync(roots.home, { recursive: true });
     return roots;
   };
+  /** Files a startup file under test writes each job's pid to, so a job a red run left is ended here. */
+  const pidFiles: string[] = [];
+  const pidsIn = (file: string): number[] => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(l => l !== "").map(Number) : []);
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   afterEach(() => {
+    for (const pid of pidFiles.splice(0).flatMap(pidsIn)) if (alive(pid)) process.kill(pid, "SIGKILL");
     for (const t of tmps.splice(0)) rmSync(t, { recursive: true, force: true });
   });
-  const run = async (script: string): Promise<ExecResult> => {
+  /** A login shell reads its startup files from HOME, and zsh from ZDOTDIR first, so both name the fake home: the
+   * shell of whoever runs the suite never runs, since what their rc file does is theirs and not the case's. */
+  const run = async (script: string, home: string): Promise<ExecResult> => {
     try {
-      const { stdout, stderr } = await bash("bash", ["-c", script], { maxBuffer: 4 * 1024 * 1024 });
+      const { stdout, stderr } = await bash("bash", ["-c", script], { env: { ...process.env, HOME: home, ZDOTDIR: home }, maxBuffer: 4 * 1024 * 1024 });
       return { exitCode: 0, stdout, stderr };
     } catch (e) {
       const err = e as { code?: number; stdout?: string; stderr?: string };
@@ -446,7 +459,7 @@ describe("the guest scripts on a local bash", () => {
   it("the probe prints its markers, the kernel and the disk, and names each hook the person's file claims", async () => {
     const roots = fakeGuest();
     expect(probeCommand(roots)).toContain(dfKbCmd(["size", "free"], roots.home));
-    let probe = parseProbe((await run(probeCommand(roots))).stdout)!;
+    let probe = parseProbe((await run(probeCommand(roots), roots.home)).stdout)!;
     expect(probe).toBeDefined();
     expect(probe.kernel).toBeTruthy();
     expect(probe.disk?.sizeBytes).toBeGreaterThan(0);
@@ -466,7 +479,7 @@ describe("the guest scripts on a local bash", () => {
     writeFileSync(join(roots.etc, "wsp/machine-context.json"), JSON.stringify(FACTS));
     mkdirSync(join(roots.etc, "profile.d"), { recursive: true });
     writeFileSync(join(roots.etc, "profile.d/wsp-secrets.sh"), "export GH_TOKEN='sk-ant-x'\nexport BAD-NAME='x'\n");
-    probe = parseProbe((await run(probeCommand(roots))).stdout)!;
+    probe = parseProbe((await run(probeCommand(roots), roots.home)).stdout)!;
     expect([...probe.conflicts]).toEqual(["gemini"]);
     expect(probe.facts).toEqual(FACTS);
     expect(probe.secrets).toEqual(["GH_TOKEN"]);
@@ -475,7 +488,7 @@ describe("the guest scripts on a local bash", () => {
     writeFileSync(join(roots.home, ".pi/agent/APPEND_SYSTEM.md"), "the person's own\n");
     writeFileSync(join(roots.home, ".hermes/config.yaml"), "agent:\n  model: x\n  environment_hint: 'set by them'\n");
     writeFileSync(join(roots.home, ".gemini/settings.json"), '{ "theme": "dark" }\n');
-    probe = parseProbe((await run(probeCommand(roots))).stdout)!;
+    probe = parseProbe((await run(probeCommand(roots), roots.home)).stdout)!;
     expect([...probe.conflicts].sort()).toEqual(["hermes", "pi"]);
   }, 30_000);
 
@@ -489,19 +502,19 @@ describe("the guest scripts on a local bash", () => {
     const none = probeCommand(roots, TOOLS_PATH, "none");
     expect(none).not.toContain("-lic");
     expect(none).not.toContain("bash -l");
-    const quiet = parseProbe((await run(`export HOME=${roots.home}\n${none}`)).stdout)!;
+    const quiet = parseProbe((await run(none, roots.home)).stdout)!;
     expect(existsSync(marker)).toBe(false);
     expect(quiet.kernel).toBeTruthy();
     expect(quiet.disk?.sizeBytes).toBeGreaterThan(0);
     expect(quiet.shell).toBeTruthy();
-    expect(quiet.aliasesRead).toBe(false);
+    expect(quiet.aliasesUnread).toBe("shared");
     expect(quiet.aliases).toEqual([]);
 
     // And the machine wsp forked, whose home is its own root's: the shell is opened there and the files are read.
     const login = probeCommand(roots, TOOLS_PATH, "login");
     expect(login).toContain("-lic");
-    const read = parseProbe((await run(`export HOME=${roots.home}\n${login}`)).stdout)!;
-    expect(read.aliasesRead).toBe(true);
+    const read = parseProbe((await run(login, roots.home)).stdout)!;
+    expect(read.aliasesUnread).toBeUndefined();
     // Which shell was opened is this computer's own, so what it reads first is read off the word the probe named
     // rather than off one written here: the file differs by family and the platform decides which family runs.
     expect(readFileSync(marker, "utf8").trim()).not.toBe("");
@@ -546,7 +559,7 @@ describe("the guest scripts on a local bash", () => {
   it.skipIf(shellOf("bash") === undefined)("the bash alias probe does the same on this machine's bash, from a fake home's profile", async () => {
     const roots = fakeGuest();
     writeFileSync(join(roots.home, ".bash_profile"), SH_RC);
-    const out = await runIn(shellOf("bash")!, ["-lic", ALIAS_PROBES.bash!], { HOME: roots.home });
+    const out = await runIn(shellOf("bash")!, ["-lic", ALIAS_PROBES.bash!], { HOME: roots.home, ZDOTDIR: roots.home });
     expect(aliasLines(out)).toEqual(MISSING);
   }, 30_000);
 
@@ -576,12 +589,43 @@ describe("the guest scripts on a local bash", () => {
     expect(aliasLines(stdout)).toEqual(MISSING);
   }, 30_000);
 
-  it("a bounded command is killed at its bound and the script goes on", async () => {
+  it("a bounded command is killed at its bound, fails there so the script can say so, and the script goes on", async () => {
+    const home = fakeGuest().home;
     const started = Date.now();
-    const res = await run(`${boundedCommand(1, "sleep 20")}\necho after`);
-    expect(res.stdout).toBe("after\n");
+    const res = await run(`${boundedCommand(1, "sleep 20")} || echo late\necho after`, home);
+    expect(res.stdout).toBe("late\nafter\n");
     expect(Date.now() - started).toBeLessThan(6_000);
-    expect((await run(`${boundedCommand(5, "echo quick")}\necho after`)).stdout).toBe("quick\nafter\n");
+    expect((await run(`${boundedCommand(5, "echo quick")} || echo late\necho after`, home)).stdout).toBe("quick\nafter\n");
+  }, 30_000);
+
+  /** A login file of either family that leaves a job in the background holding the shell's output open, the way a
+   * completion script run with & does, then does `rest`; every job writes its pid to the file returned. */
+  const holdingOutput = (home: string, rest = ""): string => {
+    const pids = join(home, "pids");
+    pidFiles.push(pids);
+    for (const rc of [".zshrc", ".bash_profile"]) writeFileSync(join(home, rc), `sleep 300 & echo $! >> ${pids}\n${rest}`);
+    return pids;
+  };
+
+  it("a login shell whose rc file leaves a job holding the output open ends the probe once it has answered, and the job ends with it", async () => {
+    const roots = fakeGuest();
+    const pids = holdingOutput(roots.home);
+    const started = Date.now();
+    const probe = parseProbe((await run(probeCommand(roots), roots.home)).stdout)!;
+    expect(Date.now() - started).toBeLessThan(8_000);
+    expect(probe.aliasesUnread).toBeUndefined();
+    expect(pidsIn(pids).length).toBeGreaterThan(0);
+    await vi.waitFor(() => expect(pidsIn(pids).filter(alive)).toEqual([]));
+  }, 30_000);
+
+  it("a login shell that has not answered by its bound is ended with every job it started, and the probe says the aliases went unread", async () => {
+    const roots = fakeGuest();
+    const pids = holdingOutput(roots.home, `sleep 299 & echo $! >> ${join(roots.home, "pids")}; wait $!\n`);
+    const probe = parseProbe((await run(probeCommand(roots), roots.home)).stdout)!;
+    expect(probe.aliasesUnread).toBe("late");
+    expect(renderMachineContext({ workspace: { name: "box-1" }, probe, facts: FACTS })).toContain("- Aliases: not read. The login shell had not finished starting after 8 seconds, so wsp stopped it.");
+    expect(pidsIn(pids).length).toBe(2);
+    await vi.waitFor(() => expect(pidsIn(pids).filter(alive)).toEqual([]));
   }, 30_000);
 });
 
