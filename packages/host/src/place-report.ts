@@ -177,14 +177,13 @@ function readTextOr(path: string): string | undefined {
   }
 }
 
-/** What this computer says about itself on every link. Read at each dial rather than once: a laptop gains an
- * engine, loses a disk and is upgraded under wsp rather than by it. */
-export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
+/** What this computer is, read off the machine alone with no shell started: the part of the report the host's own
+ * row of the places list shows, which every verb that lists places reads. */
+export function placeFacts(opts: Omit<PlaceReportOptions, "run">): Pick<PlaceSelfReport, "name" | "platform" | "arch" | "os" | "shape" | "diskFreeBytes" | "runsWorkspaces" | "engine" | "workspacesBlocked"> {
   const home = opts.home ?? homedir();
   const env = opts.env ?? process.env;
   const work = workFolderIn(home);
   const free = diskFree(existsSync(work) ? work : home);
-  const login = placeLogin(env, home);
   return {
     name: opts.name,
     platform: platform() === "darwin" ? "darwin" : "linux",
@@ -192,10 +191,20 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
     os: `${osType()} ${release()}`,
     shape: localShape(),
     ...(free !== undefined ? { diskFreeBytes: free } : {}),
-    login,
     // Whether the daemon runs workspaces here, and the engine a project's own containers would run on: the read-only
     // twin of the daemon's self check, so what the doctor says and what a create does cannot part ways.
     ...selfDoctor(env),
+  };
+}
+
+/** What this computer says about itself on every link. Read at each dial rather than once: a laptop gains an
+ * engine, loses a disk and is upgraded under wsp rather than by it. */
+export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
+  const home = opts.home ?? homedir();
+  const login = placeLogin(opts.env ?? process.env, home);
+  return {
+    ...placeFacts({ ...opts, home }),
+    login,
     uptimeMs: Math.max(0, Math.round(upSeconds() * 1000)),
     daemonVersion: DAEMON_VERSION,
     wsp: wspArgvOf(opts.run ?? runningWsp()),
