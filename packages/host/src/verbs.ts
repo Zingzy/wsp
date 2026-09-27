@@ -1723,12 +1723,14 @@ export function projectGoldenLine(g: ProjectGolden): string {
   return `project image ${g.snapshotId}: ${version} plus ${carried}, taken from ${g.workspaceName}\nfork it with: wsp new <name> --from ${goldenForkName(g)}`;
 }
 
+export const PLACES_FIX = "Run wsp places.";
+
 /** The place a word names, by the name or the id the list carries; a word nothing holds is refused with the names
  * there are. One reading, so the verb and the tool answer an unknown place alike. */
 export async function placeNamed(client: HostClient, word: string): Promise<PlaceView> {
   const places = (await client.request<{ places: PlaceView[] }>("places.list")).places;
   const found = places.find(p => namesPlace(p, word));
-  if (found === undefined) throw usageRefusal(noSuchPlaceRefusal(word, places.map(p => p.name)), "Run wsp places.");
+  if (found === undefined) throw usageRefusal(noSuchPlaceRefusal(word, places.map(p => p.name)), PLACES_FIX);
   return found;
 }
 
@@ -1932,7 +1934,7 @@ export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {},
 }
 
 /** A reply the protocol schema refuses: the host process predates or postdates this command's build. */
-const otherVersion = (op: string): string => `the host answered ${op} in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up`;
+export const otherVersion = (op: string): string => `the host answered ${op} in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up`;
 const OTHER_VERSION = otherVersion("sessions.start");
 
 /** What the runtime pushes about a start before it answers it: the wait behind the thread's running turn, and the
@@ -2879,11 +2881,16 @@ async function drawRows(ctx: VerbContext, words: string, frame: (client: HostCli
   return 0;
 }
 
+export const aimedBothLine = "A workspace already names its computer; give the workspace or --on <computer>, not both.";
+
+/** What a tool that takes a workspace or a computer answers after a refusal of what it was given. */
+export const aimedUsage = (tool: string): string => `${tool} takes a workspace or on, not both`;
+
 /** The computer or workspace a list of what stands there names: a workspace by its name, a computer by the name
  * wsp computers shows it under, and this computer where neither is given. Refused where both are, since a workspace
  * already names the computer it is on. */
 async function agentsTarget(client: HostClient, workspace: string | undefined, on: string | undefined, usage: string, project?: string): Promise<AgentsTarget> {
-  if (workspace !== undefined && on !== undefined) throw usageRefusal("A workspace already names its computer; give the workspace or --on <computer>, not both.", usage);
+  if (workspace !== undefined && on !== undefined) throw usageRefusal(aimedBothLine, usage);
   if (workspace !== undefined) return { workspaceId: (await workspaceOf(client, workspace)).id };
   if (on !== undefined) return { placeId: (await placeNamed(client, on)).id, ...(project !== undefined ? { project } : {}) };
   return { placeId: HERE_PLACE_ID };
@@ -2896,15 +2903,19 @@ interface ProjectAsked {
   name?: string;
 }
 
+export const projectUnnamedLine = "--project with --on names the project: --project <name>, as wsp projects shows it.";
+export const projectOffComputerLine = (value: string): string => `--project ${value} names a project on a computer, which --on names; a workspace's own project is --project alone.`;
+export const toolsProjectBareLine = "--project on wsp servers tools names a project on --on <computer>; a workspace finds its own project's servers.";
+
 /** Reads --project against the target the line names: a name needs --on, since a workspace names its own project,
  * and --on needs a name, since a computer holds several. */
 function projectAsked(value: string | boolean | undefined, workspace: string | undefined, on: string | undefined, usage: string): ProjectAsked {
   if (value === undefined || value === false) return { project: false };
   if (value === true || value === "") {
-    if (on !== undefined) throw usageRefusal("--project with --on names the project: --project <name>, as wsp projects shows it.", usage);
+    if (on !== undefined) throw usageRefusal(projectUnnamedLine, usage);
     return { project: true };
   }
-  if (on === undefined) throw usageRefusal(`--project ${value} names a project on a computer, which --on names; a workspace's own project is --project alone.`, usage);
+  if (on === undefined) throw usageRefusal(projectOffComputerLine(value), usage);
   return { project: true, name: value };
 }
 
@@ -2912,7 +2923,7 @@ function projectAsked(value: string | boolean | undefined, workspace: string | u
  * servers by itself. */
 function toolsProject(value: string | undefined, workspace: string | undefined, on: string | undefined, usage: string): string | undefined {
   if (value === undefined) return undefined;
-  if (value === "") throw usageRefusal("--project on wsp servers tools names a project on --on <computer>; a workspace finds its own project's servers.", usage);
+  if (value === "") throw usageRefusal(toolsProjectBareLine, usage);
   return projectAsked(value, workspace, on, usage).name;
 }
 
@@ -2956,12 +2967,14 @@ function serverRowLines(r: AgentsReport): string[] {
   return [...(r.servers.length === 0 ? ["no MCP servers"] : table([["SERVER", "AGENT", "SCOPE", "REACHED BY", "FILE", "STATE"], ...r.servers.map(s => [s.name, agentName(s.agent), scopeWord(s), reach(s), s.file, state(s)])])), ...reportTail(r)];
 }
 
+export const SERVER_TOOL_COLUMNS = ["TOOL", "DESCRIPTION"];
+
 /** One server's tools as lines: its sign-in as the connect found it, then each tool, or why none came back. */
-function toolLines(name: string, a: ServerToolsAnswer): string[] {
+export function toolLines(name: string, a: ServerToolsAnswer): string[] {
   const head = `${name}: ${a.auth}${a.holder !== undefined ? `, ${agentName(a.holder)} holds the sign-in` : ""}`;
   if (a.refused !== undefined) return [head, `refused: ${a.refused}`];
   if (a.tools === undefined) return [head];
-  return [head, ...(a.tools.length === 0 ? ["no tools"] : table([["TOOL", "DESCRIPTION"], ...a.tools.map((t: McpTool) => [t.name, (t.description ?? "-").split("\n")[0]!])]))];
+  return [head, ...(a.tools.length === 0 ? ["no tools"] : table([SERVER_TOOL_COLUMNS, ...a.tools.map((t: McpTool) => [t.name, (t.description ?? "-").split("\n")[0]!])]))];
 }
 
 async function serverToolsOf(client: HostClient, name: string, agent: string, workspace: string | undefined, on: string | undefined, refresh: boolean, usage: string, project?: string): Promise<ServerToolsAnswer> {
@@ -2975,19 +2988,22 @@ async function serverChanged(client: HostClient, op: "servers.add" | "servers.re
   return z.object({ file: z.string() }).parse(await client.request(op, { target, ...body }));
 }
 
+export const unsetVariableLine = (variable: string): string => `${variable} is not set in this environment, so there is no value to write.`;
+export const notHeaderLine = (pair: string): string => `${pair} is not <header>=<variable>.`;
+
 /** The values an add names, off this process's own environment: `NAME` reads $NAME for a variable, and `Name=VAR`
  * reads $VAR as that header's value. A variable this environment does not hold is refused rather than sent empty. */
 export function serverValues(env: Readonly<Record<string, string | undefined>>, names: readonly string[], headers: readonly string[], usage: string): { env?: Record<string, string>; headers?: Record<string, string> } {
   const read = (variable: string): string => {
     const value = env[variable];
-    if (value === undefined) throw usageRefusal(`${variable} is not set in this environment, so there is no value to write.`, usage);
+    if (value === undefined) throw usageRefusal(unsetVariableLine(variable), usage);
     return value;
   };
   const vars = Object.fromEntries(names.map(name => [name, read(name)]));
   const heads = Object.fromEntries(
     headers.map(pair => {
       const at = pair.indexOf("=");
-      if (at <= 0 || at === pair.length - 1) throw usageRefusal(`${pair} is not <header>=<variable>.`, usage);
+      if (at <= 0 || at === pair.length - 1) throw usageRefusal(notHeaderLine(pair), usage);
       return [pair.slice(0, at), read(pair.slice(at + 1))];
     }),
   );
@@ -3003,13 +3019,15 @@ function serverCommand(line: string | undefined, usage: string): { command?: str
   return { command, args };
 }
 
+export const projectScopeLine = (word: string): string => `--project is the project scope, not ${word}; give one of the two.`;
+
 /** The scope a line names, which the wire checks too, and --project, which is the project scope; nothing without
  * either. */
 function serverScope(word: string | undefined, usage: string, project: ProjectAsked = { project: false }): { scope?: McpScope } {
   if (word === undefined) return project.project ? { scope: "project" } : {};
   const scope = McpScope.safeParse(word);
   if (!scope.success) throw usageRefusal(`--scope is user, home or project, not ${word}.`, usage);
-  if (project.project && scope.data !== "project") throw usageRefusal(`--project is the project scope, not ${word}; give one of the two.`, usage);
+  if (project.project && scope.data !== "project") throw usageRefusal(projectScopeLine(word), usage);
   return { scope: scope.data };
 }
 
@@ -3025,6 +3043,8 @@ const SERVER_CHANGE_WORDS =
 
 const SERVER_TOOLS_WORDS =
   "Starts that one server once on that computer or workspace, as the login it was added with and with the command and variables its agent's config gives it, or asks its address once from there, and stops it within 20 seconds; the answer is the server's state, the one the app shows, and stands three minutes unless refreshed or a sign-in there ends; an edited entry is asked again. A server behind a sign-in its agent holds brings no list, since no login file is read: Claude Code is asked for its word on it, and for any other agent it answers unknown, naming that agent as the one holding the sign-in. A napping workspace is not woken.";
+
+export const toolsAddedLine = (agent: string, file: string): string => `${agent} now has the wsp tools: ${file}`;
 
 /** The wsp tools into one agent's config on this computer. */
 async function addTools(client: HostClient, agent: string): Promise<{ file: string }> {
@@ -3066,26 +3086,33 @@ const printable = (s: string): string => s.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f
 /** A name a line prints: on one line, so a folder name cannot draw a row of its own, and with no control character. */
 const cell = (s: string): string => withoutControlChars(s.replace(/[\n\t]/g, " "));
 
+export const noSkillHitsLine = "no skills on skills.sh match";
+export const SKILL_HIT_COLUMNS = ["SKILL", "INSTALLS", "ADD WITH"];
+
 export function skillHitLines(hits: readonly SkillHit[]): string[] {
-  return hits.length === 0 ? ["no skills on skills.sh match"] : table([["SKILL", "INSTALLS", "ADD WITH"], ...hits.map(h => [cell(h.name), String(h.installs), cell(h.id)])]);
+  return hits.length === 0 ? [noSkillHitsLine] : table([SKILL_HIT_COLUMNS, ...hits.map(h => [cell(h.name), String(h.installs), cell(h.id)])]);
 }
 
 /** A skill named `<owner>/<repo>/<skill>` is one on skills.sh; any other name is one already on the target. */
 const onSkillsSh = (skill: string): boolean => skill.split("/").length === 3;
 
+export const skillsShPlacelessLine = (skill: string): string => `${skill} is read off skills.sh, which names no computer or project.`;
+
 /** A skill's SKILL.md: off skills.sh by its id, else off the target by its name. */
 async function skillShown(client: HostClient, skill: string, workspace: string | undefined, on: string | undefined, project: ProjectAsked, usage: string): Promise<SkillPreview> {
   if (onSkillsSh(skill)) {
-    if (workspace !== undefined || on !== undefined || project.project) throw usageRefusal(`${skill} is read off skills.sh, which names no computer or project.`, usage);
+    if (workspace !== undefined || on !== undefined || project.project) throw usageRefusal(skillsShPlacelessLine(skill), usage);
     return SkillPreview.parse((await client.request<{ preview: unknown }>("skills.get", { skill })).preview);
   }
   const target = await agentsTarget(client, workspace, on, usage, project.name);
   return SkillPreview.parse((await client.request<{ preview: unknown }>("skills.preview", { target, name: skill, ...(project.project ? { project: true } : {}) })).preview);
 }
 
+export const previewCutLine = (kb: number): string => `(the first ${SKILL_PREVIEW_BYTES / 1024} KB of ${kb} KB)`;
+
 export const shownText = (p: SkillPreview): string => {
   const text = printable(p.text);
-  return p.size > SKILL_PREVIEW_BYTES ? `${text}\n\n(the first ${SKILL_PREVIEW_BYTES / 1024} KB of ${Math.ceil(p.size / 1024)} KB)` : text;
+  return p.size > SKILL_PREVIEW_BYTES ? `${text}\n\n${previewCutLine(Math.ceil(p.size / 1024))}` : text;
 };
 
 async function skillAdded(client: HostClient, skill: string, workspace: string | undefined, on: string | undefined, agents: readonly string[] | undefined, project: ProjectAsked, usage: string): Promise<SkillAdded> {
@@ -3093,12 +3120,19 @@ async function skillAdded(client: HostClient, skill: string, workspace: string |
   return SkillAdded.parse((await client.request<{ added: unknown }>("skills.add", { target, skill, ...(agents !== undefined && agents.length > 0 ? { agents } : {}), ...(project.project ? { project: true } : {}) })).added);
 }
 
+export const isInLine = (name: string, path: string): string => `${name} is in ${path}.`;
+export const isInAlsoLine = (name: string, path: string, copies: string): string => `${name} is in ${path}, and in ${copies}.`;
+export const agentCopyWords = (agent: string, path: string): string => `${agent}'s ${path}`;
+
 export function addedLine(skill: string, a: SkillAdded): string {
   const name = cell(skill.split("/").at(-1) ?? skill);
-  return a.agents.length === 0 ? `${name} is in ${cell(a.path)}.` : `${name} is in ${cell(a.path)}, and in ${a.agents.map(x => `${agentName(x.agent)}'s ${cell(x.path)}`).join(", ")}.`;
+  return a.agents.length === 0 ? isInLine(name, cell(a.path)) : isInAlsoLine(name, cell(a.path), a.agents.map(x => agentCopyWords(agentName(x.agent), cell(x.path))).join(", "));
 }
 
-export const removedLine = (name: string, removed: readonly string[]): string => `${cell(name)} is gone from ${removed.map(cell).join(", ")}.`;
+export const goneFromLine = (name: string, from: string): string => `${name} is gone from ${from}.`;
+export const turnedInLine = (name: string, on: boolean, file: string): string => `${name} is ${on ? "on" : "off"} in ${file}.`;
+
+export const removedLine = (name: string, removed: readonly string[]): string => goneFromLine(cell(name), removed.map(cell).join(", "));
 
 /** A skill there turned off, on, or removed, by its name. */
 async function skillChanged(client: HostClient, op: "skills.remove" | "skills.toggle", name: string, workspace: string | undefined, on: string | undefined, project: ProjectAsked, turn: boolean | undefined, usage: string): Promise<string[]> {
@@ -3106,6 +3140,8 @@ async function skillChanged(client: HostClient, op: "skills.remove" | "skills.to
   const said = await client.request<{ removed?: unknown; paths?: unknown }>(op, { target, name, ...(project.project ? { project: true } : {}), ...(turn !== undefined ? { on: turn } : {}) });
   return z.array(z.string()).parse(op === "skills.remove" ? said.removed : said.paths);
 }
+
+export const turnedLine = (name: string, on: boolean): string => `${name} is ${on ? "on" : "off"}.`;
 
 const SkillNameIn = z.string().describe("the skill's name, as skills lists it");
 const SkillProjectIn = z
@@ -3229,7 +3265,7 @@ export const ALL_VERBS: readonly Verb[] = [
       input: { skill: z.string().describe("an <owner>/<repo>/<skill> off skills_search, or the name of a skill skills lists"), workspace: AgentsWorkspaceIn, on: AgentsOnIn, project: SkillProjectIn },
       output: SkillPreview.shape,
       call: async ({ skill, workspace, on, project }, deps) => {
-        const shown = await skillShown(await deps.client(), skill, workspace, on, projectAsked(project, workspace, on, "skills_show"), "skills_show takes a workspace or on, not both");
+        const shown = await skillShown(await deps.client(), skill, workspace, on, projectAsked(project, workspace, on, "skills_show"), aimedUsage("skills_show"));
         return asText(shownText(shown), shown);
       },
     }),
@@ -3260,7 +3296,7 @@ export const ALL_VERBS: readonly Verb[] = [
       },
       output: SkillAdded.shape,
       call: async ({ skill, workspace, on, agent, project }, deps) => {
-        const added = await skillAdded(await deps.client(), skill, workspace, on, agent, projectAsked(project, workspace, on, "skills_add"), "skills_add takes a workspace or on, not both");
+        const added = await skillAdded(await deps.client(), skill, workspace, on, agent, projectAsked(project, workspace, on, "skills_add"), aimedUsage("skills_add"));
         return asText(addedLine(skill, added), added);
       },
     }),
@@ -3283,7 +3319,7 @@ export const ALL_VERBS: readonly Verb[] = [
       input: { name: SkillNameIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, project: SkillProjectIn },
       output: { removed: z.array(z.string()) },
       call: async ({ name, workspace, on, project }, deps) => {
-        const removed = await skillChanged(await deps.client(), "skills.remove", name, workspace, on, projectAsked(project, workspace, on, "skills_remove"), undefined, "skills_remove takes a workspace or on, not both");
+        const removed = await skillChanged(await deps.client(), "skills.remove", name, workspace, on, projectAsked(project, workspace, on, "skills_remove"), undefined, aimedUsage("skills_remove"));
         return asText(removedLine(name, removed), { removed });
       },
     }),
@@ -3299,7 +3335,7 @@ export const ALL_VERBS: readonly Verb[] = [
         const [name, workspace, ...rest] = ctx.args;
         if (name === undefined || rest.length > 0) throw usageRefusal(`wsp skills ${word} takes one skill's name and one workspace at most.`, usageIs(ctx));
         const paths = await skillChanged(await ctx.client(), "skills.toggle", name, workspace, flag(ctx.flags, "on"), { project: false }, word === "enable", usageIs(ctx));
-        ctx.out.emit({ paths }, `${name} is ${word === "enable" ? "on" : "off"}.`);
+        ctx.out.emit({ paths }, turnedLine(name, word === "enable"));
         return 0;
       },
       tool: tool({
@@ -3307,8 +3343,8 @@ export const ALL_VERBS: readonly Verb[] = [
         input: { name: SkillNameIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn },
         output: { paths: z.array(z.string()) },
         call: async ({ name, workspace, on }, deps) => {
-          const paths = await skillChanged(await deps.client(), "skills.toggle", name, workspace, on, { project: false }, word === "enable", `skills_${word} takes a workspace or on, not both`);
-          return asText(`${name} is ${word === "enable" ? "on" : "off"}.`, { paths });
+          const paths = await skillChanged(await deps.client(), "skills.toggle", name, workspace, on, { project: false }, word === "enable", aimedUsage(`skills_${word}`));
+          return asText(turnedLine(name, word === "enable"), { paths });
         },
       }),
     }),
@@ -3381,7 +3417,7 @@ export const ALL_VERBS: readonly Verb[] = [
       const [agent, ...rest] = ctx.args;
       if (agent === undefined || rest.length > 0) throw usageRefusal("wsp agents addtools takes one agent.", usageIs(ctx));
       const added = await addTools(await ctx.client(), agent);
-      ctx.out.emit(added, `${agentName(agent)} now has the wsp tools: ${added.file}`);
+      ctx.out.emit(added, toolsAddedLine(agentName(agent), added.file));
       return 0;
     },
     tool: tool({
@@ -3390,7 +3426,7 @@ export const ALL_VERBS: readonly Verb[] = [
       output: { file: z.string() },
       call: async ({ agent }, deps) => {
         const added = await addTools(await deps.client(), agent);
-        return asText(`${agentName(agent)} now has the wsp tools: ${added.file}`, added);
+        return asText(toolsAddedLine(agentName(agent), added.file), added);
       },
     }),
   },
@@ -3441,7 +3477,7 @@ export const ALL_VERBS: readonly Verb[] = [
       },
       output: ServerToolsAnswer.shape,
       call: async ({ name, agent, workspace, on, project, refresh }, deps) => {
-        const usage = "servers_tools takes a workspace or on, not both";
+        const usage = aimedUsage("servers_tools");
         const answer = await serverToolsOf(await deps.client(), name, agent, workspace, on, refresh === true, usage, toolsProject(project, workspace, on, usage));
         return asText(toolLines(name, answer).join("\n"), answer);
       },
@@ -3464,7 +3500,7 @@ export const ALL_VERBS: readonly Verb[] = [
       const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
       const body = { agent, name, ...serverCommand(command, usageIs(ctx)), ...(url !== undefined ? { url } : {}), ...values, ...(project.project ? { project: true } : {}) };
       const added = await serverChanged(await ctx.client(), "servers.add", body, workspace, flag(ctx.flags, "on"), usageIs(ctx), project.name);
-      ctx.out.emit(added, `${name} is in ${added.file}.`);
+      ctx.out.emit(added, isInLine(name, added.file));
       return 0;
     },
     tool: tool({
@@ -3482,12 +3518,12 @@ export const ALL_VERBS: readonly Verb[] = [
       },
       output: { file: z.string() },
       call: async ({ name, agent, workspace, on, command, env, url, header, project }, deps) => {
-        const usage = "servers_add takes a workspace or on, not both";
+        const usage = aimedUsage("servers_add");
         const values = serverValues(deps.env, env ?? [], header ?? [], usage);
         const asked = projectAsked(project, workspace, on, usage);
         const body = { agent, name, ...serverCommand(command, usage), ...(url !== undefined ? { url } : {}), ...values, ...(asked.project ? { project: true } : {}) };
         const added = await serverChanged(await deps.client(), "servers.add", body, workspace, on, usage, asked.name);
-        return asText(`${name} is in ${added.file}.`, added);
+        return asText(isInLine(name, added.file), added);
       },
     }),
   },
@@ -3505,7 +3541,7 @@ export const ALL_VERBS: readonly Verb[] = [
       const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
       const scope = serverScope(flag(ctx.flags, "scope"), usageIs(ctx), project);
       const removed = await serverChanged(await ctx.client(), "servers.remove", { agent, name, ...scope }, workspace, flag(ctx.flags, "on"), usageIs(ctx), project.name);
-      ctx.out.emit(removed, `${name} is gone from ${removed.file}.`);
+      ctx.out.emit(removed, goneFromLine(name, removed.file));
       return 0;
     },
     tool: tool({
@@ -3513,10 +3549,10 @@ export const ALL_VERBS: readonly Verb[] = [
       input: { name: ServerNameIn, agent: ServerAgentIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, scope: ServerScopeIn, project: ServerProjectIn },
       output: { file: z.string() },
       call: async ({ name, agent, workspace, on, scope, project }, deps) => {
-        const usage = "servers_remove takes a workspace or on, not both";
+        const usage = aimedUsage("servers_remove");
         const asked = projectAsked(project, workspace, on, usage);
         const removed = await serverChanged(await deps.client(), "servers.remove", { agent, name, ...serverScope(scope, usage, asked) }, workspace, on, usage, asked.name);
-        return asText(`${name} is gone from ${removed.file}.`, removed);
+        return asText(goneFromLine(name, removed.file), removed);
       },
     }),
   },
@@ -3535,7 +3571,7 @@ export const ALL_VERBS: readonly Verb[] = [
         const project = projectAsked(ctx.flags["project"] as string | undefined, workspace, flag(ctx.flags, "on"), usageIs(ctx));
         const scope = serverScope(flag(ctx.flags, "scope"), usageIs(ctx), project);
         const changed = await serverChanged(await ctx.client(), "servers.toggle", { agent, name, ...scope, on: word === "enable" }, workspace, flag(ctx.flags, "on"), usageIs(ctx), project.name);
-        ctx.out.emit(changed, `${name} is ${word === "enable" ? "on" : "off"} in ${changed.file}.`);
+        ctx.out.emit(changed, turnedInLine(name, word === "enable", changed.file));
         return 0;
       },
       tool: tool({
@@ -3543,10 +3579,10 @@ export const ALL_VERBS: readonly Verb[] = [
         input: { name: ServerNameIn, agent: ServerAgentIn, workspace: AgentsWorkspaceIn, on: AgentsOnIn, scope: ServerScopeIn, project: ServerProjectIn },
         output: { file: z.string() },
         call: async ({ name, agent, workspace, on, scope, project }, deps) => {
-          const usage = `servers_${word} takes a workspace or on, not both`;
+          const usage = aimedUsage(`servers_${word}`);
           const asked = projectAsked(project, workspace, on, usage);
           const changed = await serverChanged(await deps.client(), "servers.toggle", { agent, name, ...serverScope(scope, usage, asked), on: word === "enable" }, workspace, on, usage, asked.name);
-          return asText(`${name} is ${word === "enable" ? "on" : "off"} in ${changed.file}.`, changed);
+          return asText(turnedInLine(name, word === "enable", changed.file), changed);
         },
       }),
     }),

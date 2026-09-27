@@ -6,7 +6,7 @@
 
 The tool's entry (name, description, both schemas) is already in `record/tools/<name>.json`, once as the TypeScript server lists it with `WSP_CLOUD` off and once with it on, null in a state that lists no such tool. The record test writes every tool, and the server serves the state its own environment names. What you add is what the host answers.
 
-In `packages/host/test/mcp-record.test.ts`, add the tool to `ANSWERED`: one case per shape worth holding, each with the arguments and the frame the host answers every op the tool asks. Put the awkward bytes in the frames (a C1 control, a quote, text past ASCII, a fraction), and include one refusal. Run the test; it fails and prints a folder. Copy it over as it says. `tests/contract.rs` now fails on your tool with `Tool <name> not found`.
+In `packages/host/test/mcp-record.test.ts`, add the tool to `ANSWERED`: one case per shape worth holding, each with the arguments, the frame the host answers every op the tool asks, and `env` where the tool reads a variable. Put the awkward bytes in the frames (a C1 control, a quote, text past ASCII, a fraction), and include one refusal. The record keeps every op the call asked the host with its fields, and `tests/contract.rs` holds the Rust call to the same asks. Run the test; it fails and prints a folder. Copy it over as it says. `tests/contract.rs` now fails on your tool with `Tool <name> not found`.
 
 ## 2. Write it
 
@@ -22,6 +22,7 @@ Then add it to `TOOLS` in `src/tools/mod.rs`.
 Things that break the byte compare:
 
 - A view (anything the host sends that the tool does not reshape) is `Box<RawValue>`, never `Value`. `Value` sorts keys; the raw bytes keep the host's order, which is JavaScript's.
+- A row the TypeScript tool parses with a zod schema (`SkillPreview.parse`, `z.array(SkillHit).parse`) is a struct in the schema's field order, not a view: zod drops a key the schema lacks and writes the schema's order, whatever the host sent.
 - A number from the host is never `f64`: serde prints `5.0` where JavaScript prints `5`. Pass it raw, or keep it as `serde_json::Number` read off the host's bytes.
 - `Out`'s fields go in the order of the object literal the TypeScript tool builds, and an optional field is `Option<T>` with `#[serde(skip_serializing_if = "Option::is_none")]`, since JavaScript leaves `undefined` out.
 - Arguments are refused before `call` runs, off the recorded input schema, in zod's words (`src/checked.rs`), so a wrongly typed field reads as the TypeScript server words it: `Expected string, received number at workspace`. Your `In` never sees bad input; `input()` failing means `In` disagrees with the schema, which `its_structs_are_the_recorded_schemas` catches first. A schema keyword the checker does not read fails `every_recorded_input_schema_uses_only_the_keywords_this_reads`. Teach it the keyword, and add a case to `REFUSED` in the record test so its words are held.
@@ -29,7 +30,7 @@ Things that break the byte compare:
 
 ## 3. Hold it to the command line
 
-Add a row to `CALLED` in `packages/host/test/mcp-binary.test.ts`: the verb's words and the tool's arguments. The case calls the tool through the built binary against a host over the fake runtime and checks the answer equals the verb's `--json` object, its text byte for byte.
+Add a row to `CALLED` in `packages/host/test/mcp-binary.test.ts`: the verb's words and the tool's arguments. The case calls the tool through the built binary against a host over the fake runtime and checks the answer equals the verb's `--json` object, its text byte for byte. `files` and `setup` put in place what the call acts on; `prose` holds the text to the line the verb prints without `--json`, for a tool that answers with `asText`; `twin` lets a tool that changes something act on a second thing beside the verb's, its answer the verb's with the one name for the other.
 
 ## Gates
 
