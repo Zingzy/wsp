@@ -145,6 +145,16 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
+    /// Every file of the checkout under the folder that git would show, tracked or untracked and never ignored,
+    /// each relative to that folder: what the composer's file mention picks from.
+    #[serde(rename = "fs.files", rename_all = "camelCase")]
+    FsFiles {
+        cwd: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     #[serde(rename = "fs.read", rename_all = "camelCase")]
     FsRead {
         path: String,
@@ -225,6 +235,15 @@ pub enum DaemonOp {
     /// Where the branch's pull request stands, read back through that same command line.
     #[serde(rename = "git.prState", rename_all = "camelCase")]
     GitPrState {
+        cwd: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// The repository's open pull requests and issues, read through that same command line.
+    #[serde(rename = "git.prList", rename_all = "camelCase")]
+    GitPrList {
         cwd: String,
         /// The workspace this frame is for, as on fs.list above.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -322,7 +341,7 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 39] = [
+pub const DAEMON_OPS: [&str; 41] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -343,6 +362,7 @@ pub const DAEMON_OPS: [&str; 39] = [
     "proc.kill",
     "ping",
     "fs.list",
+    "fs.files",
     "fs.read",
     "fs.search",
     "git.status",
@@ -350,6 +370,7 @@ pub const DAEMON_OPS: [&str; 39] = [
     "git.push",
     "git.pr",
     "git.prState",
+    "git.prList",
     "fs.folders",
     "tunnel.open",
     "tunnel.write",

@@ -1,15 +1,16 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/ComposerCommandMenu.test.tsx at 57a66608 (MIT).
-// Differs from upstream: the two skill cases are dropped with the skill arm, and the empty-state case went with the
-// empty state; the one case left renders a harness command, and the order a real-sized catalog is drawn in, at rest
-// and under a filter, is checked beside it.
+// Differs from upstream: the two skill cases read wsp's Skills heading rather than a source badge, the empty-state
+// case went with the empty state, and the order a real-sized catalog is drawn in, at rest and under a filter, is
+// checked beside them, with the # menu's pull requests and issues.
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { ProviderSlashCommand } from "./adapt";
-import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
+import { ComposerCommandMenu, type ComposerSlashItem } from "./ComposerCommandMenu";
 import { composerCommandGroups } from "./composerCommandGroups";
+import { referenceGroups, slashGroups } from "./composerMenuItems";
 
-const itemOf = (command: ProviderSlashCommand): ComposerCommandItem => ({
+const itemOf = (command: ProviderSlashCommand): ComposerSlashItem => ({
   id: `provider-slash-command:claude:${command.name}`,
   type: "provider-slash-command",
   harness: "claude",
@@ -94,5 +95,50 @@ describe("ComposerCommandMenu", () => {
     const groups = composerCommandGroups(ANNOUNCED.map(itemOf), "x-repeat");
     expect(groups.map(group => group.label)).toEqual(["skill-creator"]);
     expect(groups[0]!.items.map(item => item.label)).toEqual(["/skill-creator:x-repeat"]);
+  });
+
+  it("draws the person's skills under their own Skills heading below the announced commands, each with its description", () => {
+    const skills = [
+      { name: "unslop", description: "Cut AI tells from any writing", paths: [{ path: "~/.claude/skills/unslop", agent: "claude" }], scope: "user" as const },
+      { name: "why", description: "Why a decision was made", paths: [{ path: "~/.agents/skills/why" }], scope: "user" as const },
+      { name: "gone", description: "turned off", paths: [{ path: "~/.claude/skills/gone", agent: "claude", off: true as const }], scope: "user" as const },
+    ];
+    const groups = slashGroups({ harness: "claude", announced: [{ name: "review", description: "review a pull request" }, { name: "unslop" }], skills, query: "" });
+    expect(groups.map(group => group.label)).toEqual(["Commands", "Skills"]);
+    // A skill the harness announced is drawn once, under Skills, and goes as the command the harness knows.
+    expect(groups[0]!.items.map(item => item.label)).toEqual(["/review"]);
+    expect(groups[1]!.items.map(item => item.label)).toEqual(["/unslop", "$why"]);
+    const markup = renderToStaticMarkup(
+      <ComposerCommandMenu groups={groups} triggerKind="slash-command" activeItemId={null} onHighlightedItemChange={() => {}} onSelect={() => {}} />,
+    );
+    expect(markup).toContain("Cut AI tells from any writing");
+    expect(markup).toContain("Why a decision was made");
+    expect(markup).not.toContain("gone");
+  });
+
+  it("offers skills alone on an agent that announces no commands, and filters them by what was typed", () => {
+    const skills = [
+      { name: "unslop", paths: [{ path: "~/.agents/skills/unslop" }], scope: "user" as const },
+      { name: "why", paths: [{ path: "~/.codex/skills/why", agent: "codex" }], scope: "user" as const },
+    ];
+    const groups = slashGroups({ harness: "codex", announced: [], skills, query: "wh" });
+    expect(groups.map(group => group.label)).toEqual(["Skills"]);
+    expect(groups[0]!.items.map(item => item.label)).toEqual(["$why"]);
+  });
+
+  it("lists the repository's open pull requests and issues by number and title, each under its own heading", () => {
+    const groups = referenceGroups(
+      [
+        { kind: "pull-request", number: 42, title: "Login breaks on Safari", body: "Safari drops the cookie.", url: "https://github.com/o/r/pull/42" },
+        { kind: "issue", number: 7, title: "Add dark mode", body: "", url: "https://github.com/o/r/issues/7" },
+      ],
+      "",
+    );
+    expect(groups.map(group => group.label)).toEqual(["Pull requests", "Issues"]);
+    const markup = renderToStaticMarkup(
+      <ComposerCommandMenu groups={groups} triggerKind="pull-request" activeItemId={null} onHighlightedItemChange={() => {}} onSelect={() => {}} />,
+    );
+    expect(markup).toContain("#42 Login breaks on Safari");
+    expect(markup).toContain("#7 Add dark mode");
   });
 });

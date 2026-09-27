@@ -95,6 +95,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "../../lib/utils";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../lib/timestampFormat";
 import { formatWorkspaceRelativePath } from "../../lib/filePathDisplay";
+import { AssistantSelectionToolbar, QUOTE_SOURCE_ATTRIBUTE, type QuotedSelection } from "./AssistantSelectionToolbar";
 
 const NOOP_OPEN_TURN_DIFF = (_turnId: TurnId, _filePath?: string) => {};
 const NOOP_REVERT_USER_MESSAGE = (_messageId: MessageId) => {};
@@ -227,6 +228,8 @@ export interface MessagesTimelineProps {
   footer?: React.ReactNode;
   /** Facts about the settled turn, drawn on the last reply's own row beside its time. */
   replyMeta?: React.ReactNode;
+  /** Where a selection quoted out of a reply goes; absent, a selection offers no Quote. */
+  onQuote?: (quote: QuotedSelection) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +269,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   footer = null,
   replyMeta = null,
+  onQuote,
 }: MessagesTimelineProps) {
   const latestTurn = turns[turns.length - 1] ?? null;
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
@@ -401,6 +405,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const rows = useStableRows(rawRows);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const replyToOf = useCallback((id: string) => {
+    let asked = "";
+    for (const row of rowsRef.current) {
+      if (row.kind !== "message") continue;
+      if (row.message.role === "user") asked = row.message.text;
+      else if (row.message.id === id) return asked;
+    }
+    return "";
+  }, []);
   const lastReplyId = useMemo(() => {
     const last = rows.findLast(row => row.kind === "message");
     return last?.kind === "message" && last.message.role === "assistant" ? last.message.id : null;
@@ -618,6 +633,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               </>
             }
           />
+          {onQuote !== undefined ? <AssistantSelectionToolbar viewport={timelineViewportElement} replyToOf={replyToOf} onQuote={onQuote} /> : null}
           <TimelineMinimap
             items={minimapItems}
             hasPersistentGutter={minimapHasPersistentGutter}
@@ -1076,7 +1092,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
 
   return (
     <>
-      <div className="relative min-w-0 px-1 py-0.5">
+      <div className="relative min-w-0 px-1 py-0.5" {...{ [QUOTE_SOURCE_ATTRIBUTE]: row.message.id }}>
         <ChatMarkdown
           text={messageText}
           cwd={ctx.markdownCwd}

@@ -8,6 +8,7 @@ mod bring_back;
 mod clock;
 mod door;
 mod exec;
+mod files;
 mod fs;
 mod git;
 mod guest;
@@ -218,6 +219,8 @@ pub(crate) struct Ctx {
     pub(crate) spotter: Mutex<relay::CallbackSpotter>,
     pub(crate) ports: ports::PortWatch,
     pub(crate) inbox: inbox::InboxWatch,
+    /// The file lists fs.files keeps, one per folder asked about.
+    pub(crate) files: files::FileLists,
     /// The guest sessions open on this machine, and the socket the host watches them from.
     pub(crate) guests: Arc<guest::Guests>,
     /// Where the daemon's lines go: stderr in the binary, a test's own list otherwise.
@@ -282,6 +285,7 @@ impl Ctx {
             spotter: Mutex::new(relay::CallbackSpotter::new()),
             ports,
             inbox: inbox::InboxWatch::default(),
+            files: files::FileLists::default(),
             guests: Arc::new(guest::Guests::new(guest_unwatched)),
             log: Arc::from(log),
             sys: Mutex::new(None),

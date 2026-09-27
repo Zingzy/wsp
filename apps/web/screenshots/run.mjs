@@ -20,9 +20,9 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { chromium } from "playwright";
-import { fixtureCloud, fixtureFleet, fixtureFolders, fixtureRepos, fixtureState, HERE_AGENTS } from "./fixture-state.mjs";
+import { fixtureCloud, fixtureFleet, fixtureFolders, fixtureRepos, fixtureState, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
 import { writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
@@ -195,6 +195,14 @@ async function shoot(context, shot, base, out, token) {
 function fixtureOn(home, fixture = "mac-in-use") {
   const state = fixtureState(fixture, { home: realpathSync(home) });
   writeWorkFolder(home, fixtureFolders(state), fixtureRepos(fixture, { home }));
+  for (const project of Object.values(state.projects ?? {})) {
+    if (!fixtureFolders(state).includes(project.path)) continue;
+    for (const file of HERE_PROJECT_FILES) {
+      mkdirSync(dirname(join(project.path, file)), { recursive: true });
+      writeFileSync(join(project.path, file), "");
+    }
+    execFileSync("git", ["remote", "add", "origin", project.remote], { cwd: project.path, stdio: "ignore" });
+  }
   return state;
 }
 
@@ -245,6 +253,7 @@ async function main() {
       cloud: fixtureCloud(fixture),
       records: writeStandIn(own, fixtureFleet(state)),
       agents: HERE_AGENTS,
+      hostItems: HERE_HOST_ITEMS,
     });
     const made = { ...started, home: own, token: hostToken(started) };
     if (!fresh) others.set(fixture, made);
@@ -255,7 +264,7 @@ async function main() {
     // The stand-in's records, seeded and named: a fixture's sleeping fork is asleep because its provider says so,
     // and this run names no folder for the machines, so nothing runs on any of them. The cloud those machines are
     // meant to be at rides with them, or the stand-in stands in for nothing and no provider is on the places table.
-    host = await startHost({ home, state, port: await freePort(), cloud: fixtureCloud(), records: writeStandIn(home, fixtureFleet(state)), agents: HERE_AGENTS });
+    host = await startHost({ home, state, port: await freePort(), cloud: fixtureCloud(), records: writeStandIn(home, fixtureFleet(state)), agents: HERE_AGENTS, hostItems: HERE_HOST_ITEMS });
     host.token = hostToken(host);
     browser = await chromium.launch({ args: BROWSER_ARGS });
     for (const shot of shotPlan(list)) {

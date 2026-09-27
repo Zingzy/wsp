@@ -1,13 +1,14 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/composerSlashCommandSearch.ts at 57a66608 (MIT).
-// Differs from upstream: the built-in and skill item arms went with the
-// menu's; the scoring and the prompt-start rule are unchanged.
+// Differs from upstream: the built-in arm went with the menu's, and a skill is
+// ranked by its command like any announced one; the scoring and the
+// prompt-start rule are unchanged.
 import {
   insertRankedSearchResult,
   normalizeSearchQuery,
   scoreQueryMatch,
 } from "../../lib/searchRanking";
 
-import type { ComposerCommandItem } from "./ComposerCommandMenu";
+import type { ComposerSlashItem } from "./ComposerCommandMenu";
 
 /**
  * A provider expands a slash command only when it opens the whole message;
@@ -15,16 +16,16 @@ import type { ComposerCommandItem } from "./ComposerCommandMenu";
  * there.
  */
 export function slashCommandItemsForPromptPosition(
-  items: ReadonlyArray<ComposerCommandItem>,
+  items: ReadonlyArray<ComposerSlashItem>,
   isAtPromptStart: boolean,
-): ComposerCommandItem[] {
+): ComposerSlashItem[] {
   if (isAtPromptStart) {
     return [...items];
   }
   return items.filter((item) => item.type !== "provider-slash-command");
 }
 
-function scoreSlashCommandItem(item: ComposerCommandItem, query: string): number | null {
+function scoreSlashCommandItem(item: ComposerSlashItem, query: string): number | null {
   const primaryValue = item.command.name.toLowerCase();
   const description = item.description.toLowerCase();
 
@@ -57,16 +58,16 @@ function scoreSlashCommandItem(item: ComposerCommandItem, query: string): number
 }
 
 export function searchSlashCommandItems(
-  items: ReadonlyArray<ComposerCommandItem>,
+  items: ReadonlyArray<ComposerSlashItem>,
   query: string,
-): ComposerCommandItem[] {
+): ComposerSlashItem[] {
   const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\/+/ });
   if (!normalizedQuery) {
     return [...items];
   }
 
   const ranked: Array<{
-    item: ComposerCommandItem;
+    item: ComposerSlashItem;
     score: number;
     tieBreaker: string;
   }> = [];

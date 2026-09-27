@@ -3,14 +3,15 @@
 // disabled reasons, and the draft that outlives a tab switch. Same fixture api
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
-import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
+import { clickIntoEditor, composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
-import { composerSendBlock } from "../src/components/chat/ChatComposer.js";
+import { composerSendBlock, FILES_CUT_LINE, menuListUnserved, noHostListLine } from "../src/components/chat/ChatComposer.js";
+import { provideDaemonWire } from "../src/files/wire.js";
 import { SEND_LABEL, WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions.js";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { NOT_READY_NAMES } from "../screenshots/ready.mjs";
@@ -448,7 +449,7 @@ describe("composer slash menu", () => {
     expect(started[0]?.prompt).toBe("/compact");
   });
 
-  it("escape dismisses the menu, keeps the draft, and the menu returns when the query changes", async () => {
+  it("escape dismisses the menu and keeps the draft, and the menu stays shut until the caret leaves its token", async () => {
     const { api } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
@@ -459,7 +460,123 @@ describe("composer slash menu", () => {
     await waitFor(() => expect(menuDrawer()).toBeNull());
     expect(draft()).toBe("/");
     await typeInto(editor, "c");
+    expect(draft()).toBe("/c");
+    expect(menuDrawer()).toBeNull();
+    await act(async () => useComposerDraftStore.getState().setDraft(WS, { prompt: "", cursor: 0 }));
+    await typeInto(editor, "/");
     await waitFor(() => expect(menuItem("compact")).not.toBeNull());
+  });
+});
+
+describe("composer @ menu", () => {
+  const asked: Array<{ op: string; params: Record<string, unknown> | undefined }> = [];
+  afterEach(() => {
+    provideDaemonWire(WS, null);
+    asked.length = 0;
+  });
+
+  it("lists the thread folder's files off the daemon, ranks by name, and a pick goes as @path", async () => {
+    provideDaemonWire(WS, {
+      request: async (op, params) => {
+        asked.push({ op, params });
+        if (op !== "fs.files") throw new Error(`${op} is not what this case is about`);
+        return { files: ["docs/chatv-notes/README.md", "src/components/ChatComposer.tsx", "src/components/ChatView.tsx"], truncated: false };
+      },
+    });
+    const { api, started } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "open @chatv");
+    const first = await waitFor(() => {
+      const rows = document.querySelectorAll<HTMLElement>("[data-composer-item-id^='path:']");
+      expect(rows.length).toBeGreaterThan(0);
+      return rows[0]!;
+    });
+    expect(first.dataset["composerItemId"]).toBe("path:src/components/ChatView.tsx");
+    expect(asked.filter(call => call.op === "fs.files")).toEqual([{ op: "fs.files", params: { cwd: "/root" } }]);
+    act(() => first.click());
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")?.textContent).toBe("ChatView.tsx"));
+    await typeInto(editor, "please");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]?.prompt).toBe("open @src/components/ChatView.tsx please");
+  });
+
+  it("undo right after a pick takes the chip back to the words that were typed", async () => {
+    provideDaemonWire(WS, { request: async () => ({ files: ["src/components/ChatView.tsx"], truncated: false }) });
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    await typeInto(editor, "open @chatv");
+    const row = await waitFor(() => document.querySelector<HTMLElement>("[data-composer-item-id='path:src/components/ChatView.tsx']")!);
+    act(() => row.click());
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")).not.toBeNull());
+    await press(editor, "z", { ctrlKey: true });
+    await waitFor(() => expect(draft()).toBe("open @chatv"));
+    expect(editor.querySelector("[data-composer-mention-chip]")).toBeNull();
+  });
+
+  /** The composer on a copy on a computer somebody owns, which the menu's lines name as the rest of the app does. */
+  const COMPUTER = "old-laptop";
+  async function onComputer() {
+    await setup(fixtureApi([{ ...workspace, place: "p_oldlaptop" }]).api);
+    act(() => useStore.setState({ places: [{ id: "p_oldlaptop", kind: "computer", name: COMPUTER, default: true, present: true }] }));
+  }
+
+  it("says in the person's words that a computer whose wsp predates the list has none yet", async () => {
+    provideDaemonWire(WS, { request: async () => Promise.reject(Object.assign(new Error("fs.files is not served by this daemon yet"), { code: "unsupported" })) });
+    await onComputer();
+    await typeInto(composerEditor(), "@c");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(menuListUnserved(COMPUTER)));
+    expect(document.body.textContent).not.toContain("daemon");
+    expect(document.body.textContent).not.toContain("this computer");
+  });
+
+  it("names the computer the copy is on where no signed-in command line lists its pull requests", async () => {
+    provideDaemonWire(WS, { request: async () => ({ items: [], noCliFor: "github.com" }) });
+    await onComputer();
+    await typeInto(composerEditor(), "#4");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(noHostListLine("github.com", COMPUTER)));
+    expect(document.body.textContent).not.toContain("this computer");
+  });
+
+  it("says in the slot that a checkout past the cap is listed only as far as the cap", async () => {
+    provideDaemonWire(WS, { request: async () => ({ files: ["src/components/ChatView.tsx"], truncated: true }) });
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    await typeInto(composerEditor(), "@chatv");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(FILES_CUT_LINE));
+    expect(document.querySelector("[data-composer-item-id='path:src/components/ChatView.tsx']")).not.toBeNull();
+  });
+});
+
+describe("composer chips", () => {
+  it("backspace right after a chip removes the chip whole and leaves the text around it", async () => {
+    const { api, started } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    clickIntoEditor(editor);
+    // The caret sits right after the file chip: "see " is four places and the chip is one.
+    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "see @src/composer-logic.ts now", cursor: 5 }));
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")).not.toBeNull());
+    await press(editor, "Backspace");
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")).toBeNull());
+    expect(draft()).toBe("see  now");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]?.prompt).toBe("see  now");
+  });
+
+  it("sends a chip as the text the agent reads", async () => {
+    const { api, started } = fixtureApi([workspace]);
+    await setup(api);
+    const editor = composerEditor();
+    act(() => useComposerDraftStore.getState().setDraft(WS, { prompt: "summarise @apps/web/src/composer-logic.ts please", cursor: 3 }));
+    await waitFor(() => expect(editor.querySelector("[data-composer-mention-chip]")?.textContent).toBe("composer-logic.ts"));
+    clickIntoEditor(editor);
+    await press(editor, "Enter");
+    await waitFor(() => expect(started.length).toBe(1));
+    expect(started[0]?.prompt).toBe("summarise @apps/web/src/composer-logic.ts please");
   });
 });
 

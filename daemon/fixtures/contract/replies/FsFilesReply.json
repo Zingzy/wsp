@@ -1,0 +1,13 @@
+[
+  {
+    "files": [
+      "README.md",
+      "src/ChatView.tsx"
+    ],
+    "truncated": false
+  },
+  {
+    "files": [],
+    "truncated": true
+  }
+]

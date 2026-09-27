@@ -1,0 +1,24 @@
+[
+  {
+    "items": [
+      {
+        "kind": "pull-request",
+        "number": 42,
+        "title": "Login breaks on Safari",
+        "body": "Safari drops the cookie.",
+        "url": "https://github.com/o/r/pull/42"
+      },
+      {
+        "kind": "issue",
+        "number": 7,
+        "title": "Add dark mode",
+        "body": "",
+        "url": "https://github.com/o/r/issues/7"
+      }
+    ]
+  },
+  {
+    "items": [],
+    "note": "no signed-in command line for github.com is on this computer, so its pull requests and issues are not listed"
+  }
+]
