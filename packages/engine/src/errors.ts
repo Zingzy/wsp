@@ -47,7 +47,7 @@ export class NotFirstLifeError extends Error {
 
 /** Thrown by a backend whose machine the provider reports running while the road every command takes is dead in a
  * way no wait mends: the guest's shell cannot start, or the provider's agent cannot spawn it. A create that meets it
- * deletes the machine and fails with it; a wake reads it as a fault and forks the golden again. */
+ * deletes the machine and fails with it; a wake fails with it and keeps the machine, whose disk is the person's. */
 export class GuestUnusableError extends Error {
   constructor(
     readonly machineId: string,
@@ -65,8 +65,8 @@ export class GuestUnusableError extends Error {
 }
 
 /** Thrown by a backend whose provider answered a command with its own word that it cannot reach the machine, while
- * its state read may still say running. Not a GuestUnusableError: that class's two readers act on it, a wake giving
- * the machine up for a fresh fork and a detached run ending at once, where this refusal must not be acted on, and its
+ * its state read may still say running. Not a GuestUnusableError: that class's readers act on it, a create deleting
+ * the machine and a detached run ending at once, where this refusal must not be acted on, and its
  * sentence names the machine id, which a thread's failure line must not. Minted as itself for "Sandbox is not
  * reachable", with `machineUnreachableLine`; each other answer of the same kind is a subclass that passes its own. */
 export class MachineUnreachableError extends Error {

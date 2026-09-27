@@ -1,0 +1,172 @@
+{
+  "tool": "servers_tools",
+  "cases": [
+    {
+      "case": "tools",
+      "arguments": {
+        "name": "linear",
+        "agent": "claude"
+      },
+      "replies": {
+        "servers.tools": "{\"id\":1,\"ok\":true,\"answer\":{\"readAt\":\"2026-09-27T00:00:00.000Z\",\"tools\":[{\"description\":\"Finds issues\\nacross teams\",\"name\":\"search_issues\",\"params\":[{\"required\":true,\"name\":\"query\",\"type\":\"string\",\"extra\":1},{\"name\":\"limit\",\"required\":false,\"description\":\"how many\"}]},{\"name\":\"whoami\"}],\"auth\":\"signed-in\",\"extra\":\"dropped\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"linear: signed-in\\nTOOL           DESCRIPTION\\nsearch_issues  Finds issues\\nwhoami         -\"}],\"structuredContent\":{\"auth\":\"signed-in\",\"tools\":[{\"name\":\"search_issues\",\"description\":\"Finds issues\\nacross teams\",\"params\":[{\"name\":\"query\",\"type\":\"string\",\"required\":true},{\"name\":\"limit\",\"required\":false,\"description\":\"how many\"}]},{\"name\":\"whoami\"}],\"readAt\":\"2026-09-27T00:00:00.000Z\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "servers.tools",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "claude",
+          "name": "linear"
+        }
+      ]
+    },
+    {
+      "case": "held",
+      "arguments": {
+        "name": "notion",
+        "agent": "codex",
+        "refresh": true
+      },
+      "replies": {
+        "servers.tools": "{\"id\":1,\"ok\":true,\"answer\":{\"auth\":\"unknown\",\"holder\":\"codex\",\"readAt\":\"2026-09-27T00:00:00.000Z\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"notion: unknown, Codex holds the sign-in\"}],\"structuredContent\":{\"auth\":\"unknown\",\"holder\":\"codex\",\"readAt\":\"2026-09-27T00:00:00.000Z\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "servers.tools",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "codex",
+          "name": "notion",
+          "refresh": true
+        }
+      ]
+    },
+    {
+      "case": "refused by the server",
+      "arguments": {
+        "name": "slow",
+        "agent": "zed-x",
+        "workspace": "landing"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
+        "servers.tools": "{\"id\":1,\"ok\":true,\"answer\":{\"auth\":\"failed\",\"refused\":\"Did not answer in 20 s.\",\"readAt\":\"2026-09-27T00:00:00.000Z\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"slow: failed\\nrefused: Did not answer in 20 s.\"}],\"structuredContent\":{\"auth\":\"failed\",\"refused\":\"Did not answer in 20 s.\",\"readAt\":\"2026-09-27T00:00:00.000Z\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "landing"
+        },
+        {
+          "op": "servers.tools",
+          "target": {
+            "workspaceId": "ws_1"
+          },
+          "agent": "zed-x",
+          "name": "slow"
+        }
+      ]
+    },
+    {
+      "case": "no tools",
+      "arguments": {
+        "name": "empty",
+        "agent": "claude",
+        "on": "attic",
+        "project": "api",
+        "refresh": false
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
+        "servers.tools": "{\"id\":1,\"ok\":true,\"answer\":{\"auth\":\"open\",\"tools\":[],\"readAt\":\"2026-09-27T00:00:00.000Z\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"empty: open\\nno tools\"}],\"structuredContent\":{\"auth\":\"open\",\"tools\":[],\"readAt\":\"2026-09-27T00:00:00.000Z\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "servers.tools",
+          "target": {
+            "placeId": "place-9",
+            "project": "api"
+          },
+          "agent": "claude",
+          "name": "empty"
+        }
+      ]
+    },
+    {
+      "case": "not yet asked",
+      "arguments": {
+        "name": "empty",
+        "agent": "claude"
+      },
+      "replies": {
+        "servers.tools": "{\"id\":1,\"ok\":true,\"answer\":{\"auth\":\"open\",\"readAt\":\"2026-09-27T00:00:00.000Z\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"empty: open\"}],\"structuredContent\":{\"auth\":\"open\",\"readAt\":\"2026-09-27T00:00:00.000Z\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "servers.tools",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "claude",
+          "name": "empty"
+        }
+      ]
+    },
+    {
+      "case": "project bare",
+      "arguments": {
+        "name": "x",
+        "agent": "claude",
+        "on": "attic",
+        "project": ""
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--project on wsp servers tools names a project on --on <computer>; a workspace finds its own project's servers. servers_tools takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"--project on wsp servers tools names a project on --on <computer>; a workspace finds its own project's servers. servers_tools takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "project off a computer",
+      "arguments": {
+        "name": "x",
+        "agent": "claude",
+        "project": "api"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--project api names a project on a computer, which --on names; a workspace's own project is --project alone. servers_tools takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"--project api names a project on a computer, which --on names; a workspace's own project is --project alone. servers_tools takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "name": "x",
+        "agent": "claude"
+      },
+      "replies": {
+        "servers.tools": "{\"id\":1,\"ok\":false,\"error\":\"claude has no MCP server named x\",\"kind\":\"not-found\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"claude has no MCP server named x\"}],\"structuredContent\":{\"error\":\"claude has no MCP server named x\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "servers.tools",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "claude",
+          "name": "x"
+        }
+      ]
+    }
+  ]
+}

@@ -4,7 +4,7 @@
 // command on a free port, and the wait until it answers. The screenshot run
 // and the persona lab both take this road, so the environment a fixture is
 // served under is written once rather than once per harness.
-import { CATALOG_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, skillsDirOf } from "@wsp/catalog";
 import { CLOUD_ENV, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, shellQuote, WEB_DIR_ENV, wsUrlOf } from "@wsp/protocol";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
@@ -172,6 +172,17 @@ export function writeHereLabel(home) {
   return bin;
 }
 
+/** A folder holding a stand-in gh that lists a fixture's open pull requests and issues in gh's JSON and answers
+ * nothing else, so the composer's # menu reads a list without a login or a network. Answers the folder. */
+export function writeHereGh(home, items) {
+  const bin = join(home, ".wsp-gh");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "pr.json"), JSON.stringify(items.pr));
+  writeFileSync(join(bin, "issue.json"), JSON.stringify(items.issue));
+  writeScript(join(bin, "gh"), sh(`case "$1 $2" in\n  "pr list"|"issue list") cat "$(dirname "$0")/$1.json" ;;\n  *) exit 1 ;;\nesac`));
+  return bin;
+}
+
 /** The folders a host serving a fixture's own agents looks past its stand-ins to: the system's, where no agent a Mac
  * installs lives, so no agent of this computer's is found, run or read. */
 export const SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
@@ -209,6 +220,13 @@ export function writeHereAgents(home, here) {
       return [s.name, { kind: "stdio", command, args: [], env: {} }];
     }),
   );
+  for (const skill of here.skills ?? []) {
+    const agent = CATALOG_AGENTS.find(a => a.id === skill.agent);
+    if (agent === undefined) throw new Error(`the fixture names an agent the catalog does not have: ${skill.agent}`);
+    const folder = join(skillsDirOf(agent).replace(/^~\//, `${home}/`), skill.name);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "SKILL.md"), `---\nname: ${skill.name}\ndescription: ${skill.description}\n---\n`);
+  }
   for (const agent of CATALOG_AGENTS) {
     const mine = here.servers.filter(s => s.agents.includes(agent.id));
     if (mine.length === 0 || agent.mcp === undefined) continue;
@@ -226,7 +244,7 @@ export function writeHereAgents(home, here) {
  * `agents` names the fixture's own agents on this computer, which the host then reads in place of this computer's:
  * their stand-ins lead a path of the system's folders alone, and the newest versions are kept as already asked, so
  * no agent of the person's is run and no vendor is asked. A lab names none, since its testers' turns run real agents. */
-export async function startHost({ home, state, port, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, records, advertise, agents, secrets = {} }) {
+export async function startHost({ home, state, port, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, records, advertise, agents, hostItems, secrets = {} }) {
   const statePath = join(home, ".wsp", "state.json");
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
@@ -234,7 +252,8 @@ export async function startHost({ home, state, port, logPath, detached = false, 
   const { hostTokenFor, writeKeptLatest } = await import(pathToFileURL(HOST_PACKAGE).href);
   if (agents !== undefined) writeKeptLatest(statePath, agents.latest, Date.now());
   const path = agents === undefined ? await hostPath() : `${writeHereAgents(home, agents)}:${SYSTEM_PATH}`;
-  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn, records, path: `${writeHereLabel(home)}:${path}` });
+  const here = hostItems === undefined ? writeHereLabel(home) : `${writeHereLabel(home)}:${writeHereGh(home, hostItems)}`;
+  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn, records, path: `${here}:${path}` });
   const child = spawn(process.execPath, hostArgv({ statePath, port, advertise }), {
     cwd: home,
     env: { ...env, ...secrets },

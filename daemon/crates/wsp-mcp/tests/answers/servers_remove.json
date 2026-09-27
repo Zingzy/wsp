@@ -1,0 +1,91 @@
+{
+  "tool": "servers_remove",
+  "cases": [
+    {
+      "case": "scoped",
+      "arguments": {
+        "name": "linear",
+        "agent": "claude",
+        "scope": "home"
+      },
+      "replies": {
+        "servers.remove": "{\"id\":1,\"ok\":true,\"file\":\"~/.claude.json\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"linear is gone from ~/.claude.json.\"}],\"structuredContent\":{\"file\":\"~/.claude.json\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "servers.remove",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "claude",
+          "name": "linear",
+          "scope": "home"
+        }
+      ]
+    },
+    {
+      "case": "a project on a computer",
+      "arguments": {
+        "name": "linear",
+        "agent": "claude",
+        "on": "attic",
+        "project": "api"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
+        "servers.remove": "{\"id\":1,\"ok\":true,\"file\":\"/root/api/.mcp.json\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"linear is gone from /root/api/.mcp.json.\"}],\"structuredContent\":{\"file\":\"/root/api/.mcp.json\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "servers.remove",
+          "target": {
+            "placeId": "place-9",
+            "project": "api"
+          },
+          "agent": "claude",
+          "name": "linear",
+          "scope": "project"
+        }
+      ]
+    },
+    {
+      "case": "project and another scope",
+      "arguments": {
+        "name": "linear",
+        "agent": "claude",
+        "project": true,
+        "scope": "user"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--project is the project scope, not user; give one of the two. servers_remove takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"--project is the project scope, not user; give one of the two. servers_remove takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "name": "linear",
+        "agent": "claude"
+      },
+      "replies": {
+        "servers.remove": "{\"id\":1,\"ok\":false,\"error\":\"claude has no MCP server named linear\",\"kind\":\"not-found\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"claude has no MCP server named linear\"}],\"structuredContent\":{\"error\":\"claude has no MCP server named linear\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "servers.remove",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "claude",
+          "name": "linear"
+        }
+      ]
+    }
+  ]
+}

@@ -403,7 +403,7 @@ describe("protocol event union", () => {
         },
       },
       { type: "workspace.napped", workspaceId: "ws_1" },
-      { type: "workspace.woken", workspaceId: "ws_1", machineId: "m2", resurrected: true },
+      { type: "workspace.woken", workspaceId: "ws_1", machineId: "m2" },
       { type: "workspace.upgraded", workspaceId: "ws_1", machineId: "m3" },
       { type: "workspace.deleted", workspaceId: "ws_1" },
       { type: "session.start", workspaceId: "ws_1", sessionId: "s1", model: "claude-sonnet-4-5" },

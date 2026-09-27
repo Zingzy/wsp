@@ -280,6 +280,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "pty.list"
             | "exec"
             | "fs.list"
+            | "fs.files"
             | "fs.read"
             | "fs.search"
             | "fs.folders"
@@ -288,6 +289,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "git.push"
             | "git.pr"
             | "git.prState"
+            | "git.prList"
             | "ports.watch"
             | "manifest.get"
             | "manifest.record"
@@ -697,6 +699,13 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, listed.await)
         }
+        DaemonOp::FsFiles { cwd, machine_id } => {
+            let listed = async {
+                let (runner, under, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                ctx.files.of(&runner, under, &at).await
+            };
+            answer(id, listed.await)
+        }
         DaemonOp::FsRead { path, encoding, machine_id } => {
             let read = async {
                 let (_, under, _) = road(ctx, machine_id.as_deref(), &path, Reads).await?;
@@ -760,6 +769,13 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                 let (_, remote_url) = bring_back::remote_url(&runner, &at).await?;
                 let ask = hosts::Ask { cwd: &at, remote_url: &remote_url, branch: &branch };
                 Ok(GitPrStateReply { pr: hosts::find(&runner, &ask).await? })
+            };
+            answer(id, read.await)
+        }
+        DaemonOp::GitPrList { cwd, machine_id } => {
+            let read = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                hosts::list(&runner, &at).await
             };
             answer(id, read.await)
         }
@@ -996,6 +1012,7 @@ mod tests {
             "pty.list",
             "exec",
             "fs.list",
+            "fs.files",
             "fs.read",
             "fs.search",
             "git.status",
@@ -1003,6 +1020,7 @@ mod tests {
             "git.push",
             "git.pr",
             "git.prState",
+            "git.prList",
             "fs.folders",
             "ports.watch",
             "manifest.get",

@@ -72,7 +72,7 @@ const HELD_REFUSALS = (): ReadonlyArray<string | null> => [
   goneRoadRefusal("paused", "forget"),
   notAnsweringYet("rebuild"),
   notAnsweringYet("forget"),
-  goneRefusal("wake"),
+  goneRefusal("api", "wake"),
   actionRefusal("paused", "import"),
   actionRefusal("waking", "import"),
   actionRefusal("unreachable", "export"),

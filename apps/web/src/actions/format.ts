@@ -55,6 +55,7 @@ export const FILE_WORDS = {
 
 export const TERMINAL_WORDS = {
   copy: "Copy",
+  addToChat: "Add to chat",
   paste: "Paste",
   clear: "Clear",
   split: "Split Terminal Horizontally",
@@ -109,7 +110,7 @@ export function phaseRefusal(state: WorkspaceState): string | null {
     case "waking":
       return null;
     case "gone":
-      return goneRefusal("wake");
+      return goneRefusal(undefined, "wake");
     default: {
       const _exhaustive: never = state;
       return null;
@@ -149,7 +150,7 @@ export const CLIENT_CANNOT_DELETE = "This client cannot delete tasks";
  * workspace, which is everywhere but a pane outliving its own row. */
 export const terminalRefusedLine = (name: string | undefined, said: string): string => (name === undefined ? `No terminal: ${said}` : `No terminal on ${name}: ${said}`);
 
-export const openTerminalRefusal = (state: WorkspaceState): string | null => (state === "gone" ? goneRefusal("open a terminal") : null);
+export const openTerminalRefusal = (state: WorkspaceState): string | null => (state === "gone" ? goneRefusal(undefined, "open a terminal") : null);
 export const openBrowserRefusal = (state: WorkspaceState): string | null => actionRefusal(state, "preview");
 
 export const THREAD_NOT_RUNNING = "Thread is not running";
@@ -182,7 +183,7 @@ export const notKeptLine = (harness: string): string => `Rename in ${agentName(h
 export function threadRenameRefusal(opts: { catalog: HarnessCatalog | null; harness: string; state: WorkspaceState; goneWords?: string; hasVerb: boolean }): string | null {
   if (!keepsRename(opts.catalog)) return notKeptLine(opts.harness);
   if (!opts.hasVerb) return CLIENT_CANNOT_RENAME;
-  return opts.state === "gone" ? goneRefusal("rename", opts.goneWords) : null;
+  return opts.state === "gone" ? goneRefusal(undefined, "rename", opts.goneWords) : null;
 }
 
 /** What the toast says when the runtime named nothing: the answer in the person's words, never the enum, and the
