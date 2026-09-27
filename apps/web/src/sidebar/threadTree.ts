@@ -142,6 +142,9 @@ export interface TileItem {
   /** Set on the head of the threads one send to several models opened, and nowhere else: the title they share, drawn
    * once over them. Such a head holds no thread of its own; its children are those threads. */
   readonly groupTitle?: string;
+  /** Set on the root of a snoozed tree while threads of it run: how many, drawn quietly on the one tile the tree
+   * keeps, so a thread working under a snooze is still reachable through its root. */
+  readonly snoozedWorking?: number;
 }
 
 export type TileNode = ThreadNode<TileItem>;
@@ -160,7 +163,8 @@ export interface TileSection {
 /** The sidebar's list: root tiles across every workspace newest first, each with the tiles its agents opened under
  * it, parted into the live list and the Settled fold, which holds every root whose whole tree is settled threads.
  * The live list is drawn in sections, and `live` is every root of them in the order they are drawn. A snoozed tree
- * is in neither until its snooze ends or a thread of it needs the person. Under a picked project only that project's
+ * is in neither until its snooze ends or a thread of it needs the person, but while a thread of it runs its root
+ * stands alone at the foot of Idle carrying how many work. Under a picked project only that project's
  * roots are listed, children kept wherever they run. */
 export function sidebarTiles(
   projects: ReadonlyArray<SidebarProjectSnapshot>,
@@ -174,12 +178,18 @@ export function sidebarTiles(
   const roots = attemptGroups(threadForest(sortThreadsForSidebar(items)).filter(node => picked === null || node.thread.runs.workspace.project.id === picked));
   const filed = new Map<SidebarSection, TileNode[]>(SIDEBAR_SECTIONS.map(id => [id, []]));
   const settled: TileNode[] = [];
+  const snoozedWorking: TileNode[] = [];
   for (const node of roots) {
-    if (isSnoozed(node)) continue;
+    if (isSnoozed(node)) {
+      const working = workingIn(node);
+      if (working > 0) snoozedWorking.push({ thread: { ...node.thread, snoozedWorking: working }, children: [] });
+      continue;
+    }
     const pinned = node.thread.thread?.pinnedAt != null;
     if (everyTile(node, thread => isThreadSettled(thread, nowMs, pinned || thread.id === open))) settled.push(node);
     else filed.get(pinned ? "pinned" : sectionOf(node))!.push(node);
   }
+  filed.get("idle")!.push(...snoozedWorking);
   filed.get("pinned")!.sort((a, b) => b.thread.thread!.pinnedAt!.localeCompare(a.thread.thread!.pinnedAt!));
   const sections = SIDEBAR_SECTIONS.map(id => ({ id, roots: filed.get(id)! })).filter(section => section.roots.length > 0);
   const bySettle = new Map(settled.map(node => [node.thread.thread!, node]));
@@ -244,6 +254,9 @@ function sectionOf(node: TileNode): ThreadSection {
   const placed = node.thread.thread?.section;
   return placed != null && placed.whileState === placementKey(node) ? placed.name : treeSection(node);
 }
+
+/** How many threads of a tree are working, the root's own included. */
+const workingIn = ({ thread: { thread }, children }: TileNode): number => (thread !== null && isThreadWorking(thread) ? 1 : 0) + children.reduce((sum, child) => sum + workingIn(child), 0);
 
 /** A tree whose root is snoozed and none of whose threads needs the person, which the list leaves out. */
 function isSnoozed(node: TileNode): boolean {

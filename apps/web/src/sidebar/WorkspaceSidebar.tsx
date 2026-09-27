@@ -342,6 +342,7 @@ export function WorkspaceSidebar() {
           depth={depth}
           active={selectedId === thread.workspaceId && (selectedThreadId === null ? thread.threadId === null : selectedThreadId === thread.id)}
           settled={settled}
+          snoozedWorking={item.snoozedWorking}
           renaming={renaming?.rowId === rowId}
           saving={renaming?.rowId === rowId && renaming.saving}
           onSelect={() => select(thread.workspaceId, thread.threadId)}

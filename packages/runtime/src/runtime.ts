@@ -5058,6 +5058,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       bus.emit({ type: "thread.marked", workspaceId, threadIds: ids });
     }
   };
+  /** A thread that asks for the person ends the snooze standing on its tree, its own or its root's, as a snooze that
+   * ran out does: the thread reads as woken now and every window hears it. */
+  const endSnoozeFor = (row: Pick<SessionView, "threadId" | "rootThreadId">): void => {
+    const now = clock.now();
+    const standing = [...new Set([row.threadId, row.rootThreadId])].filter((id): id is string => id !== undefined && (threadRecords.get(id)?.snoozedUntil ?? 0) > now);
+    if (standing.length > 0) void mark(standing, { snoozedUntil: now }, undefined).catch((e: unknown) => console.warn(`snooze not ended for ${standing.join(", ")}: ${e instanceof Error ? e.message : String(e)}`));
+  };
   /** Whether a thread of the caller's tree stands on that workspace, which is what lets a child list and read the
    * transcript of the workspace its lead runs on; a caller that is no thread reads workspaces by their own rule. */
   const treeStandsOn = (workspaceId: string, caller: Caller | undefined): boolean =>
@@ -6782,6 +6789,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           open.set(ask.askId, ask);
           readsOpen();
           record({ type: "session.permission", workspaceId, sessionId, turnId, threadId, ...ask, options: [...ask.options] });
+          endSnoozeFor(view);
           return;
         }
         case "permission.close":

@@ -7,7 +7,7 @@
 // passes brings its thread back reading Done.
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { foldThreads, threadNeedsYou, threadWordOf, type EventUnion, type TurnResult } from "@wsp/protocol";
+import { AGENTS_ON, foldThreads, threadNeedsYou, threadWordOf, type EventUnion, type ThreadScope, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
@@ -176,6 +176,48 @@ describe("a thread's read and settled stamps", () => {
 
     await rt.sessions.read(threadId);
     expect(threadWordOf(foldThreads(await rt.sessions.list(ws.id))[0]!)).toBe("Idle");
+    await rt.close();
+  });
+
+  it("a thread of a snoozed tree that asks for the person ends the snooze, and every window hears it", async () => {
+    const store = await keptSinceLongAgo();
+    const { clock } = aheadClock();
+    // The lead's turn finishes; the child's turn asks for a Bash call and waits there.
+    let asks = (): void => {};
+    const asking: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: o => {
+        const sessionId = randomUUID();
+        const lead = o.prompt === "lead";
+        const result: TurnResult = { status: "completed", text: "done" };
+        const finished = lead ? Promise.resolve().then(() => (o.onEvent({ type: "session.start", sessionId }), o.onEvent({ type: "turn.done", sessionId, result }), o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true }), result)) : new Promise<TurnResult>(() => {});
+        if (!lead) {
+          queueMicrotask(() => o.onEvent({ type: "session.start", sessionId }));
+          asks = () => o.onEvent({ type: "permission.ask", sessionId, ask: { askId: "ask_1", toolName: "Bash", input: '{"command":"sleep 5"}', options: [{ id: "allow", label: "Allow", effect: "allow" }] } });
+        }
+        return { localId: sessionId, finished, interrupt: async () => {} };
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: asking }, clock });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a", agents: AGENTS_ON });
+    const lead = await rt.sessions.start(ws.id, { prompt: "lead" });
+    await lead.finished;
+    const root = lead.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: root, workspaceId: ws.id, rootThreadId: root };
+    const child = await rt.sessions.start(ws.id, { prompt: "child" }, { origin: "relayed", by: scope });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(child.view().rootThreadId).toBe(root);
+    await rt.sessions.mark([root], { snoozedUntil: clock.now() + 60 * 60_000 });
+    expect(foldThreads(await rt.sessions.list(ws.id)).find(t => t.id === root)).toHaveProperty("snoozedUntil");
+
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    asks();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const woke = foldThreads(await rt.sessions.list(ws.id)).find(t => t.id === root)!;
+    expect(woke).not.toHaveProperty("snoozedUntil");
+    expect(events.filter(e => e.type === "thread.marked")).toMatchObject([{ workspaceId: ws.id, threadIds: [root] }]);
     await rt.close();
   });
 
