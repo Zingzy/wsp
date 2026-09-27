@@ -885,6 +885,9 @@ export const SessionView = z.object({
    * a row carrying a parent always carries one. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
+  /** The id one send to several models stamps on each thread it opens, so the threads that send made are drawn and
+   * settled together; absent on a thread opened alone. */
+  attempt: z.string().optional(),
   /** The turn that opened this row's thread; a resumed turn keeps it, and its own prompt rides its session.start
    * event, so the title every client derives from a row never follows the latest send. */
   prompt: z.string().optional(),
@@ -976,6 +979,8 @@ export const ThreadView = z.object({
   /** The opening turn's parent and root, so a listing draws the tree a root thread spawned without reading rows. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
+  /** The opening turn's attempt, as SessionView.attempt carries it. */
+  attempt: z.string().optional(),
   /** The latest turn's open permission prompt, as SessionView.asking carries it; what threadState reads. */
   asking: z.string().optional(),
   /** The thread the latest turn is stopped behind, as SessionView.waitingOn carries it; threadState reads this too,
@@ -1050,6 +1055,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
       ...(first.rootThreadId !== undefined ? { rootThreadId: first.rootThreadId } : {}),
+      ...(first.attempt !== undefined ? { attempt: first.attempt } : {}),
       ...(spent !== undefined ? { costUsd: spent } : {}),
     };
   });
@@ -5489,6 +5495,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
     startedBy: SessionOrigin.optional(),
     /** Minted by the client per send and echoed on the turn's session.start, so the client knows which start is its own. */
     requestId: z.string().optional(),
+    /** Minted by the client once for a send that opens the same message on several models, one copy each, and stamped
+     * on each thread's row as SessionView.attempt. */
+    attempt: z.string().optional(),
     /** Who the end of every turn on the thread this start opens is told, each a thread id or NOTIFY_ME: registered on
      * the thread, and each target gets one line (a session.notify event per target in this thread's transcript).
      * Refused when a target names no thread, and refused when one names the thread this start opens. */
@@ -6194,7 +6203,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeCapRefusal, placeFullLine, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteCopiesNotice, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
 export * from "./exit.js";
 export * from "./format.js";

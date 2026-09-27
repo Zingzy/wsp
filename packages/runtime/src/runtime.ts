@@ -1449,6 +1449,8 @@ export interface Runtime {
         startedBy?: SessionOrigin;
         /** The client's id for this send, stamped on the turn's session.start as sent. */
         requestId?: string;
+        /** The id a send to several models opens each of its threads under, stamped on the row as sent. */
+        attempt?: string;
         /** Who the end of every turn on the thread this start opens is told, each a thread id or NOTIFY_ME: the line
          * (notifyLine) goes into each named thread through this same start, and for me it is recorded for the person.
          * A start that resumes a thread keeps what the thread had. Rejects when a target names no thread, and rejects
@@ -7164,6 +7166,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         startedBy: o.startedBy ?? "person",
         threadId,
         ...tree,
+        ...(o.attempt !== undefined ? { attempt: o.attempt } : {}),
         prompt: o.prompt,
         startedAt: Date.now(),
         ...(title !== undefined ? { harnessTitle: title, titleSource: "person" as const } : carriedTitle(threadId)),

@@ -1374,6 +1374,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
                 ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
                 ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
+                ...(msg.attempt !== undefined ? { attempt: msg.attempt } : {}),
                 ...(msg.notify !== undefined ? { notify: msg.notify } : {}),
                 ...(msg.turnToken !== undefined ? { turnToken: msg.turnToken } : {}),
                 ...(msg.title !== undefined ? { title: msg.title } : {}),

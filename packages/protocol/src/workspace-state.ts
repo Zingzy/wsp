@@ -189,6 +189,12 @@ export function deleteNotice(threads: number, kind: WorkspaceKind, copy?: Pick<P
   return `Its ${onDeleteOf(kind, copy, machineId).asked}; its record and ${fmtThreads(threads)} leave this computer.`;
 }
 
+/** What deleting the other copies one send to several models made takes, the sentence Keep this one confirms with:
+ * the copies and every change in them, their records and their threads. */
+export function deleteCopiesNotice(copies: number, threads: number): string {
+  return `The ${copies} copies are deleted with every change made in them; their records and ${fmtThreads(threads)} leave this computer.`;
+}
+
 /** What a delete does to a create that failed before any machine was made, which is the one record with no machine id. */
 const NO_MACHINE_MADE: MachineOnDelete = { asked: "create failed before any computer was made, so there is none to delete", done: () => "its create had made no computer" };
 

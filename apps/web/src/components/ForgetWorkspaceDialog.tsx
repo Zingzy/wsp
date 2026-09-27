@@ -3,10 +3,11 @@
 // which takes its machine in that kind's own words and its record with it, and
 // a forget, which is the same road for a workspace whose machine is already
 // gone. It names the workspace and what leaves, asks the host once, and shows
-// the host's refusal in place. The row leaves on workspace.deleted, which the
-// store already applies.
+// the host's refusal in place. Keep this one ends several copies at once
+// through the same dialog, naming how many go. The row leaves on
+// workspace.deleted, which the store already applies.
 import { useState } from "react";
-import { deleteNotice, forgetNotice, workspaceKind, type WorkspaceView } from "@wsp/protocol";
+import { deleteCopiesNotice, deleteNotice, forgetNotice, workspaceKind, type WorkspaceView } from "@wsp/protocol";
 import { CLIENT_CANNOT_DELETE, CLIENT_CANNOT_FORGET } from "../actions/format.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
@@ -21,13 +22,14 @@ const ROADS = {
 } as const;
 
 export function ForgetWorkspaceDialog({
-  workspace,
+  workspaces,
   threads,
   act = "forget",
   open,
   onOpenChange,
 }: {
-  workspace: WorkspaceView;
+  /** One workspace, or the copies Keep this one ends together. */
+  workspaces: ReadonlyArray<WorkspaceView>;
   threads: number;
   /** Which road out this dialog is for; a workspace whose machine is gone takes the forget. */
   act?: "forget" | "delete";
@@ -36,6 +38,8 @@ export function ForgetWorkspaceDialog({
 }) {
   const api = useStore(s => s.api);
   const road = ROADS[act];
+  const [workspace] = workspaces;
+  const many = workspaces.length > 1;
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
 
@@ -52,24 +56,22 @@ export function ForgetWorkspaceDialog({
     }
     setBusy(true);
     setRefusal(null);
-    try {
-      await ask(workspace.id);
-      change(false);
-    } catch (e) {
-      setRefusal(errorText(e));
-    } finally {
-      setBusy(false);
-    }
+    // Each goes on its own, so one the host refuses leaves the rest going and its refusal stands in the slot.
+    const refused = (await Promise.allSettled(workspaces.map(w => ask(w.id)))).find(r => r.status === "rejected");
+    setBusy(false);
+    if (refused === undefined) change(false);
+    else setRefusal(errorText(refused.reason));
   };
 
+  if (workspace === undefined) return null;
   return (
     <AlertDialog open={open} onOpenChange={change}>
       <AlertDialogPopup>
         <AlertDialogHeader>
-          <AlertDialogTitle>
-            {road.word} {workspace.name}?
-          </AlertDialogTitle>
-          <AlertDialogDescription>{act === "delete" ? deleteNotice(threads, workspaceKind(workspace), workspace.copy) : forgetNotice(threads)}</AlertDialogDescription>
+          <AlertDialogTitle>{many ? `${road.word} the other ${workspaces.length} copies?` : `${road.word} ${workspace.name}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {many ? deleteCopiesNotice(workspaces.length, threads) : act === "delete" ? deleteNotice(threads, workspaceKind(workspace), workspace.copy) : forgetNotice(threads)}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="px-5 pt-2">
           <RefusalSlot k="forget-refusal" {...(refusal ? { said: refusal } : {})} />

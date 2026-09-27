@@ -21,7 +21,7 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, computerOffline, creationAwaits, workspaceState, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, computerOffline, creationAwaits, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED, THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -31,6 +31,7 @@ import { useThreadVerbs, useWorkspaceVerbs } from "../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
+import { modelPicks } from "../components/chat/composerPicks.js";
 import { SidebarContent, SidebarGroupAction, SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
@@ -49,7 +50,7 @@ import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ProjectSwitcher } from "./ProjectSwitcher.js";
 import { ComputerSwitcher } from "./ComputerSwitcher.js";
 import { COMPUTER_PICK_KEY, PROJECT_PICK_KEY, pickCodec, underPicks } from "./picks.js";
-import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, SETTLED_ROW_ID, threadRowId, workspaceRowId } from "./rowGrammar.js";
+import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, SETTLED_ROW_ID, TILE_TITLE_CLASS, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { resolveAdjacentThreadId, topSidebarThread } from "./Sidebar.logic.js";
 import { SIDEBAR_SECTIONS, dropMarks, settleableRoots, sidebarTiles, treeSettle, treeThreadIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
@@ -88,8 +89,8 @@ interface RowMachine {
 /** Whether a tree holds the thread, at any depth. */
 const holds = (node: TileNode, threadId: string): boolean => node.thread.id === threadId || node.children.some(child => holds(child, threadId));
 
-/** Every tile a tree holds, itself included. */
-const tileCount = (node: TileNode): number => 1 + node.children.reduce((sum, child) => sum + tileCount(child), 0);
+/** Every tile a tree holds, itself included; a group's head is no tile. */
+const tileCount = (node: TileNode): number => (node.thread.groupTitle === undefined ? 1 : 0) + node.children.reduce((sum, child) => sum + tileCount(child), 0);
 
 /** The new-workspace dialog open on one project, keyed per opening so its field resets. */
 interface DialogState {
@@ -142,7 +143,7 @@ export function WorkspaceSidebar() {
   /** The root tile being dragged, by fold key, and the place under the pointer it would land in. */
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<SidebarSection | "settled" | null>(null);
-  const [forgetting, setForgetting] = useState<{ workspaceId: string; act: "forget" | "delete" } | null>(null);
+  const [forgetting, setForgetting] = useState<{ workspaceIds: ReadonlyArray<string>; act: "forget" | "delete" } | null>(null);
   /** The tile whose name is being typed, by the row id every tile carries, and whether that name is on its way; one
    * tile at a time, the tile is the only editor, and the field stays until the store has the name. */
   const [renaming, setRenaming] = useState<{ rowId: string; saving: boolean } | null>(null);
@@ -151,6 +152,7 @@ export function WorkspaceSidebar() {
   const renameWorkspace = useStore(s => s.renameWorkspace);
   const canRename = useStore(s => s.api?.renameSession !== undefined);
   const canMark = useStore(s => s.api?.markThreads !== undefined);
+  const canDelete = useStore(s => s.api?.deleteWorkspace !== undefined);
   const markThreads = useStore(s => s.markThreads);
   const settleThreads = useStore(s => s.settleThreads);
   const setPreferences = useStore(s => s.setPreferences);
@@ -165,8 +167,9 @@ export function WorkspaceSidebar() {
       ...defaultThreadVerbs,
       ...(canRename ? { rename: (threadId: string) => setRenaming({ rowId: threadRowId(threadId), saving: false }) } : {}),
       ...(canMark ? { snooze: setSnoozing } : {}),
+      ...(canDelete ? { keep: (workspaceIds: ReadonlyArray<string>) => setForgetting({ workspaceIds, act: "delete" }) } : {}),
     }),
-    [canMark, canRename, defaultThreadVerbs],
+    [canDelete, canMark, canRename, defaultThreadVerbs],
   );
   const defaultVerbs = useWorkspaceVerbs();
 
@@ -195,7 +198,7 @@ export function WorkspaceSidebar() {
     for (const group of groups) void loadLanding(group.project.id);
   }, [groups, loadLanding]);
   const tripTarget = trip === null ? undefined : workspaces.find(w => w.id === trip.workspaceId);
-  const forgetTarget = forgetting === null ? undefined : fleet.find(p => p.id === forgetting.workspaceId);
+  const forgetTargets = forgetting === null ? [] : fleet.filter(p => forgetting.workspaceIds.includes(p.id));
 
   const openDialog = (project: string | null): void => setDialog({ key: Date.now(), project });
   // The palette's New workspace lands on the project the head names while one is picked, as the head's plus does.
@@ -204,7 +207,7 @@ export function WorkspaceSidebar() {
   openDialogRef.current = openDialogForPick;
   useEffect(() => onNewWorkspaceRequest(({ project }) => openDialogRef.current(project)), []);
   useEffect(() => onAddProjectRequest(() => setAddProject(Date.now())), []);
-  useEffect(() => onForgetWorkspaceRequest(({ workspaceId, act }) => setForgetting({ workspaceId, act })), []);
+  useEffect(() => onForgetWorkspaceRequest(({ workspaceId, act }) => setForgetting({ workspaceIds: [workspaceId], act })), []);
   useEffect(() => onProjectTripRequest(request => setTrip({ ...request, key: Date.now() })), []);
   /** The palette's Rename on a copy: the box opens on the title of the thread the centre shows there, or its top
    * thread, the Settled fold opening if that is where the tile is; a copy with no thread names the copy itself. */
@@ -269,9 +272,22 @@ export function WorkspaceSidebar() {
   /** One tile's item with the tiles its agents opened under it. The first tile of a copy in the tree, a root or a
    * tile whose opener runs on another copy, carries every one of that copy's verbs after the thread's own. A tile's verbs reach
    * the machine its own copy runs on, so a thread on a machine that is gone is refused wherever it is drawn. */
-  const tileItem = (node: TileNode, depth: number, above: string | null, settled = false): ReactNode => {
+  const tileItem = (node: TileNode, depth: number, above: string | null, settled = false, group: ReadonlyArray<string> = []): ReactNode => {
     const { thread: item, children } = node;
     const { runs, thread } = item;
+    if (item.groupTitle !== undefined) {
+      const copies = children.map(child => child.thread.runs.id);
+      return (
+        <li key={item.id} data-thread-item data-attempt-group className="min-w-0">
+          <div className="flex h-8 min-w-0 items-center px-2">
+            <span data-attempt-title className={cn(TILE_TITLE_CLASS, "text-sidebar-foreground")} title={item.groupTitle}>
+              {item.groupTitle}
+            </span>
+          </div>
+          <ul className={CHILD_LIST_CLASS}>{children.map(child => tileItem(child, depth + 1, null, settled, copies.filter(id => id !== child.thread.runs.id)))}</ul>
+        </li>
+      );
+    }
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
     const place = placeOf(runs);
     const branch = workspaceBranch(runs, readBranches);
@@ -296,7 +312,8 @@ export function WorkspaceSidebar() {
     } else {
       // A settle, a restore, a pin and a snooze take a root and its whole tree; a tile under one goes where it goes.
       const root = depth === 0 ? { ...treeSettle(node), pinned: thread.pinnedAt !== null, settled } : null;
-      const target = threadTarget(thread, { catalog: catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness), ...machineOf(runs) }, root);
+      const catalog = catalogIn({ harnesses, harnessesByWorkspace }, thread.workspaceId, thread.harness);
+      const target = threadTarget(thread, { catalog, ...machineOf(runs) }, root, group);
       const actionsOf = resolveActions(threadActions, target, threadVerbs);
       const rowId = threadRowId(thread.id);
       tile = (
@@ -315,6 +332,7 @@ export function WorkspaceSidebar() {
           onRename={title => void sendName(rowId, () => renameThread({ sessionId: thread.sessionId, workspaceId: thread.workspaceId, harness: thread.harness, title }))}
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actionsOf, "rename"))}
+          {...(group.length > 0 && thread.model !== null ? { label: catalog === null ? thread.model : modelOf(catalog, modelPicks(thread.model).model)?.label } : {})}
           {...(depth === 0 && !settled
             ? {
                 onDragStart: (event: DragEvent<HTMLElement>) => {
@@ -602,10 +620,10 @@ export function WorkspaceSidebar() {
         />
       ) : null}
       {trip !== null && tripTarget !== undefined ? <ExportProjectDialog key={trip.key} workspace={tripTarget} onClose={() => setTrip(null)} /> : null}
-      {forgetTarget !== undefined ? (
+      {forgetTargets.length > 0 ? (
         <ForgetWorkspaceDialog
-          workspace={forgetTarget.workspace}
-          threads={forgetTarget.threads.length}
+          workspaces={forgetTargets.map(target => target.workspace)}
+          threads={forgetTargets.reduce((sum, target) => sum + target.threads.length, 0)}
           act={forgetting!.act}
           open
           onOpenChange={next => {

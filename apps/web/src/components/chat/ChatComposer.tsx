@@ -83,6 +83,8 @@ import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useCompose
 import { ComposerAccessPicker, ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
 import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
+import { ComposerModelChips } from "./ComposerModelChips";
+import { useMultiPicks } from "./composerMultiPick";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerQueue } from "./ComposerQueue";
 import { slashCommandItemsForPromptPosition } from "./composerSlashCommandSearch";
@@ -154,8 +156,8 @@ interface SteerAttempt {
 }
 
 /** `onStart` takes the first send instead of the runtime: a project's home has no workspace yet, and its send is what
- * makes one. */
-export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: string; thread: ChatThreadHandle; onStart?: (prompt: string) => void }) {
+ * makes one. A sentence it answers is why nothing was made: the draft goes back and the sentence stands above the box. */
+export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: string; thread: ChatThreadHandle; onStart?: (prompt: string) => Promise<string | null> }) {
   const api = useStore(s => s.api);
   const wake = useStore(s => s.wake);
   const conn = useStore(s => s.conn);
@@ -164,6 +166,8 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const workspace = useWorkspace(workspaceId);
   const [stop, setStop] = useState<StopAttempt | null>(null);
   const [screenLine, setScreenLine] = useState<string | null>(null);
+  const [startRefusal, setStartRefusal] = useState<string | null>(null);
+  const multiPicks = useMultiPicks(workspaceId);
   const [steering, setSteering] = useState<string | null>(null);
   const [steered, setSteered] = useState<SteerAttempt | null>(null);
   const draft = useComposerDraft(workspaceId);
@@ -296,7 +300,9 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
             ? sendNowFailedLine(steerAttempt.error)
             : screenLine !== null
               ? screenLine
-              : runningTurn?.replied === true
+              : startRefusal !== null
+                ? startRefusal
+                : runningTurn?.replied === true
                 ? stillWorkingLine(workingTitle)
                 : (accessPick.line ?? linkDown);
 
@@ -331,6 +337,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const onChange = useCallback(
     (value: string, cursor: number) => {
       setScreenLine(null);
+      setStartRefusal(null);
       setDraft(workspaceId, { prompt: value, cursor });
     },
     [setDraft, workspaceId],
@@ -466,7 +473,12 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     }
     setDraft(workspaceId, EMPTY_DRAFT);
     if (onStart !== undefined) {
-      onStart(prompt);
+      void onStart(prompt).then(refusal => {
+        if (refusal === null) return;
+        setStartRefusal(refusal);
+        const current = useComposerDraftStore.getState().drafts[workspaceId];
+        if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
+      });
       return;
     }
     if (!busy) {
@@ -643,6 +655,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
         promptHasText={hasText}
         isSendBusy={thread.busy}
         wakesFirst={wakesFirst}
+        sendLabel={onStart !== undefined && multiPicks.length > 0 ? `Send to ${multiPicks.length}` : undefined}
         sendDisabledReason={sendDisabledReason}
         isConnecting={false}
         isEnvironmentUnavailable={false}
@@ -700,6 +713,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                     onDrop={onDrop}
                     onDragOver={event => event.preventDefault()}
                   >
+                    {onStart !== undefined ? <ComposerModelChips workspaceId={workspaceId} /> : null}
                     {images.length > 0 ? (
                       <ul aria-label="Images to send" data-composer-images="true" className="flex flex-wrap gap-1.5 px-3 pt-3 sm:px-4">
                         {images.map((image, at) => (

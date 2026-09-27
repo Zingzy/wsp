@@ -817,6 +817,64 @@
       ]
     },
     {
+      "name": "tiles-attempt-group",
+      "at": "/",
+      "fixture": "tiles-attempt",
+      "steps": [
+        "1440:row-id=thread:sonnet",
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "menu:row-id=thread:sonnet"
+      ],
+      "wait": "attempt-group",
+      "widths": [
+        1440,
+        390
+      ],
+      "settleMs": 700
+    },
+    {
+      "name": "tiles-attempt-keep",
+      "at": "/",
+      "fixture": "tiles-attempt",
+      "steps": [
+        "1440:row-id=thread:sonnet",
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "menu:row-id=thread:sonnet",
+        "menu-item=keep"
+      ],
+      "wait": "k=end-workspace",
+      "widths": [
+        1440,
+        390
+      ],
+      "settleMs": 700
+    },
+    {
+      "name": "composer-multi-pick",
+      "at": "/#p/pr_spoo-landing",
+      "fixture": "tiles-attempt",
+      "steps": [
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:Find why the cart total test is flaky and fix it",
+        "composer-picker=model",
+        "key:ArrowDown",
+        "key:Shift+Enter",
+        "composer-harness=codex",
+        "key:Shift+Enter",
+        "key:Escape",
+        "testid=composer-editor"
+      ],
+      "wait": "composer-model-chips",
+      "widths": [
+        1440,
+        390
+      ],
+      "settleMs": 700
+    },
+    {
       "name": "new-thread-dialog",
       "at": "/",
       "fixture": "mac-and-boxes",

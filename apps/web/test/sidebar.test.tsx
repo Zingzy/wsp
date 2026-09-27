@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, type PlaceView, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, deleteCopiesNotice, type PlaceView, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
@@ -20,6 +20,7 @@ import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { WorkspaceTerminals, provideTerminals } from "../src/terminal/link.js";
 import { clearNotices, lastNotice } from "./notice-text.js";
+import { useContextMenuStore } from "../src/actions/contextMenu.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
 // clicks the search row, and Base UI's positioning against jsdom's zero-size
@@ -839,6 +840,74 @@ describe("the tree", () => {
     expect(depthOf(rowOf("benchmark the new index"))).toBe(1);
     expect(rowOf("benchmark the new index").querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${BOX_NAME}`);
     expect(rowOf("run the migration across the fleet").querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${placeName(PLACES[0]!)}`);
+  });
+});
+
+describe("one send to several models", () => {
+  const OPUS = view("ws_opus", "fix the flaky login test (Opus 5)", "running", 3 * 60_000);
+  const SONNET = view("ws_sonnet", "fix the flaky login test (Sonnet 5)", "running", 3 * 60_000);
+  const ASTRA = view("ws_astra", "fix the flaky login test (GPT-6 Astra)", "running", 3 * 60_000);
+  const CATALOGS = [
+    { harness: "claude", label: "Claude Code", source: "harness" as const, version: "2.1.257", models: [{ value: "claude-opus-5", label: "Opus 5" }, { value: "claude-sonnet-5", label: "Sonnet 5" }], efforts: [], contextWindows: [], permissionModes: [], steers: true, renames: true, images: false },
+    { harness: "codex", label: "Codex", source: "table" as const, version: null, models: [{ value: "gpt-6-astra", label: "GPT-6 Astra" }], efforts: [], contextWindows: [], permissionModes: [], steers: false, renames: false, images: false },
+  ];
+  const tried = (id: string, workspaceId: string, harness: string, model: string, startedAt: number): SessionView =>
+    session(id, workspaceId, { harness, model, prompt: "fix the flaky login test", threadId: `th_${id}`, attempt: "att_1", startedAt });
+
+  it("draws the roots one send opened as one group under the first's title, each tile named by its model, and Keep this one deletes the other copies", async () => {
+    const api = fakeApi(
+      [API, OPUS, SONNET, ASTRA],
+      [status(API), status(OPUS), status(SONNET), status(ASTRA)],
+      [
+        session("s_alone", "ws_a", { prompt: "fix the port list", threadId: "th_alone", startedAt: iso(-60_000) }),
+        tried("opus", "ws_opus", "claude", "claude-opus-5", iso(-3 * 60_000)),
+        tried("sonnet", "ws_sonnet", "claude", "claude-sonnet-5", iso(-3 * 60_000 + 10)),
+        tried("astra", "ws_astra", "codex", "gpt-6-astra", iso(-3 * 60_000 + 20)),
+      ],
+    );
+    const deleteWorkspace = vi.fn(async (_id: string) => {});
+    await mount({ ...api, deleteWorkspace, listHarnesses: async () => CATALOGS }, "fix the port list");
+    const group = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-attempt-group]");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    // One head carrying the task, and under it a tile per model in the order the send made them, each on the rail.
+    expect(group.querySelector("[data-attempt-title]")!.textContent).toBe("fix the flaky login test");
+    await waitFor(() => expect([...group.querySelectorAll<HTMLElement>("[data-sidebar-row] [data-thread-title]")].map(t => t.textContent)).toEqual(["Opus 5", "Sonnet 5", "GPT-6 Astra"]));
+    expect(rowIds()).toEqual(["thread:th_alone", "thread:th_opus", "thread:th_sonnet", "thread:th_astra"]);
+    for (const id of ["th_opus", "th_sonnet", "th_astra"]) expect(depthOf(document.querySelector<HTMLElement>(`[data-row-id='thread:${id}']`)!)).toBe(1);
+    expect(document.querySelector("[data-row-id='thread:th_astra'] svg[data-harness-mark='codex']")).not.toBeNull();
+    // A thread opened alone is a tile of its own with no Keep.
+    fireEvent.contextMenu(rowOf("fix the port list"));
+    await waitFor(() => expect(useContextMenuStore.getState().menu).not.toBeNull());
+    expect(useContextMenuStore.getState().menu!.items.map(item => item.id)).not.toContain("keep");
+    act(() => useContextMenuStore.getState().choose(null));
+
+    fireEvent.contextMenu(document.querySelector<HTMLElement>("[data-row-id='thread:th_sonnet']")!);
+    await waitFor(() => expect(useContextMenuStore.getState().menu).not.toBeNull());
+    const keep = useContextMenuStore.getState().menu!.items.find(item => item.id === "keep");
+    // Neutral where it stands, the danger ink only on hover: the menu draws a destructive row that way.
+    expect(keep).toMatchObject({ label: "Keep this one", enabled: true, destructive: true });
+    // Keep asks first: the other copies do not come back, and cancel leaves every one of them.
+    act(() => useContextMenuStore.getState().choose("keep"));
+    let dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByRole("heading").textContent).toBe("Delete the other 2 copies?");
+    expect(dialog.textContent).toContain(deleteCopiesNotice(2, 2));
+    // The dialog's own confirm is the one place red stands at rest: the solid destructive button.
+    expect(within(dialog).getByRole("button", { name: "Delete" }).className).toContain("bg-destructive");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(deleteWorkspace).not.toHaveBeenCalled();
+
+    fireEvent.contextMenu(document.querySelector<HTMLElement>("[data-row-id='thread:th_sonnet']")!);
+    await waitFor(() => expect(useContextMenuStore.getState().menu).not.toBeNull());
+    act(() => useContextMenuStore.getState().choose("keep"));
+    dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(deleteWorkspace).toHaveBeenCalledTimes(2));
+    expect(deleteWorkspace.mock.calls.map(call => call[0]).sort()).toEqual(["ws_astra", "ws_opus"]);
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 });
 

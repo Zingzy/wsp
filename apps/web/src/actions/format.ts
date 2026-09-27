@@ -45,6 +45,7 @@ export const THREAD_WORDS = {
   pin: "Pin thread",
   unpin: "Unpin thread",
   snooze: "Snooze thread",
+  keep: "Keep this one",
 } as const;
 
 export const FILE_WORDS = {

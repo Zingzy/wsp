@@ -1474,6 +1474,20 @@ describe("thread provenance", () => {
     for (const t of threads) expect(ThreadView.parse(t)).toEqual(t);
   });
 
+  it("a start carries the attempt it was sent under, and a thread reads the attempt off its opening row alone", () => {
+    const start = { id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "go", attempt: "att_1" };
+    expect(RuntimeRequest.parse(start)).toMatchObject({ attempt: "att_1" });
+    const [grouped, alone] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", attempt: "att_1" },
+      { ...row, id: "s2", threadId: "thr_a", attempt: "att_2" },
+      { ...row, id: "s3", threadId: "thr_b" },
+    ]);
+    expect(grouped!.attempt).toBe("att_1");
+    expect("attempt" in alone!).toBe(false);
+    expect(ThreadView.parse(grouped)).toEqual(grouped);
+    expect(SessionView.parse({ ...row, id: "s1", attempt: "att_1" })).toMatchObject({ attempt: "att_1" });
+  });
+
   it("foldThreads adds up what a thread's turns cost, and says nothing where no turn of it reported a figure", () => {
     const [spent, said] = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", claudeSessionId: "c1", costUsd: 0.75, startedAt: 1_000, endedAt: 2_000 },

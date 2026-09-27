@@ -4,7 +4,7 @@
 // sidebarProjectGrouping.ts SidebarProjectSnapshot and Sidebar.logic.ts
 // resolveThreadStatusPill (commit 57a66608). Phase is the product word and
 // leads; machine state and reach only add when they diverge from it.
-import { foldThreads, threadNeedsYou, threadState, threadUnread, threadWordOf, waitingLine, workspaceStateOf, workspaceWord, type PauseMode, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, threadKeyOf, threadNeedsYou, threadState, threadUnread, threadWordOf, waitingLine, workspaceStateOf, workspaceWord, type PauseMode, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicator } from "./view-model.js";
 
 export interface SidebarInput {
@@ -23,7 +23,8 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
       const status = input.statuses?.[workspace.id] ?? null;
       const phase = status?.phase ?? workspace.phase;
       const state = workspaceStateOf({ phase }, status);
-      const threads = foldThreads(input.sessions?.[workspace.id] ?? []);
+      const rows = input.sessions?.[workspace.id] ?? [];
+      const threads = foldThreads(rows);
       const pauseMode = input.pauseModes?.[workspace.project.id];
       return {
         id: workspace.id,
@@ -40,7 +41,7 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
         reach: status?.reach.state ?? null,
         state,
         indicator: indicatorFor(state, pauseMode),
-        threads: threads.map(thread => deriveThread(thread, workspace)),
+        threads: threads.map(thread => deriveThread(thread, workspace, rows.find(row => threadKeyOf(row) === thread.id)?.model)),
       } satisfies SidebarProjectSnapshot;
     })
     .sort(byCreation);
@@ -114,7 +115,7 @@ export function turnWait(state: WorkspaceState, workspace: { readonly name: stri
   }
 }
 
-function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "project">): SidebarThreadSnapshot {
+function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "project">, model: string | undefined): SidebarThreadSnapshot {
   return {
     id: thread.id,
     threadId: thread.threadId ?? null,
@@ -130,6 +131,8 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     startedBy: thread.startedBy,
     project: workspace.project.name,
     parentThreadId: thread.parentThreadId ?? null,
+    attempt: thread.attempt ?? null,
+    model: model ?? null,
     asking: waitingLine(thread) ?? null,
     costUsd: thread.costUsd ?? null,
     unread: threadUnread(thread),

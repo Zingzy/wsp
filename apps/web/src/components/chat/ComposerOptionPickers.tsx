@@ -44,6 +44,7 @@ import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuRadioGroup, M
 import { canPickFolder } from "./ComposerCheckoutRow";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { useComposerDraftStore } from "./composerDraftStore";
+import { togglePick, useMultiPicks, useMultiPickStore } from "./composerMultiPick";
 import { useComposerOptions, useComposerOptionsStore, type ComposerOptionKey, type PickThreads } from "./composerOptionsStore";
 import { effectivePicks, pickedFor, resolveModel, startOptionsFrom, threadPicks, type ComposerStart, type ResolvedPicks } from "./composerPicks";
 import { ACCESS_WORD, accessLabel, REASONING_WORD, reasoningLabel } from "./format";
@@ -407,6 +408,9 @@ export function ComposerOptionPickers({
   const projects = useMemo(() => (project === null ? [] : [project]), [project]);
   const where = useComputerName(workspaceId);
   const { catalog, model, picks, pinned } = useComposerPicks(workspaceId, thread);
+  // Only a home's send opens a copy per model; a send anywhere else lands in the one thread on screen.
+  const home = useStore(s => s.projects.some(p => projectHomeKey(p.id) === workspaceId));
+  const added = useMultiPicks(workspaceId);
   if (catalog === null || picks === null) return null;
   const efforts = effortsFor(catalog, model);
   const contextWindows = contextWindowsFor(catalog, model);
@@ -422,7 +426,17 @@ export function ComposerOptionPickers({
         onPickModel={(harness, value) => {
           if (harness !== catalog.harness) pick(workspaceId, "harness", harness);
           pick(workspaceId, "model", value, thread.threadKey);
+          useMultiPickStore.getState().set(workspaceId, []);
         }}
+        {...(home
+          ? {
+              multi: {
+                picks: added,
+                onAdd: (harness: string, next: HarnessModel) =>
+                  togglePick(workspaceId, model === null ? null : { harness: catalog.harness, model: model.value, label: model.label }, { harness, model: next.value, label: next.label }),
+              },
+            }
+          : {})}
       />
       {efforts.length > 0 || contextWindows.length > 0 ? (
         <>

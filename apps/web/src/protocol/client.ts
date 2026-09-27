@@ -680,6 +680,8 @@ export interface StartSessionOptions {
   /** Minted per send; the runtime stamps it on the turn's session.start, which is how the sender tells its own start
    * from another client's with the same text. */
   requestId?: string;
+  /** Minted once for a send that opens the same message on several models, and stamped on each thread it opens. */
+  attempt?: string;
   harness?: string;
   /** The thread the message goes to, by its runtime id: the runtime resumes the thread's latest session or, after a
    * launch that failed, runs the message as the thread's first turn. Absent opens a thread. */
