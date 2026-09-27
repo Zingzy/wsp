@@ -1,22 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The pair of ports the app is served on and the address it binds: the
-// defaults, the offset the runtime's WebSocket port sits at above the app
-// port, the one rule that reads a pair and an address off what a person named
-// (which wsp up and wsp init both take theirs from), the one reading of what
-// loopback is, and the words for a port somebody else holds. The rules and the
-// words live together so the sentence that offers --port and --listen and the
-// arithmetic behind them cannot drift apart.
+// The port the app and the runtime's WebSocket are served on and the address
+// it binds: the default, the one rule that reads a port and an address off
+// what a person named (which wsp up and wsp init both take theirs from), the
+// one reading of what loopback is, and the words for a port somebody else
+// holds. The rules and the words live together so the sentence that offers
+// --port and --listen and the arithmetic behind them cannot drift apart.
 
-/** The port the app is served on when nobody names one. */
+/** The port the app and the runtime's WebSocket are served on when nobody names one. */
 export const DEFAULT_PORT = 4400;
-/** How far above the app port the runtime's WebSocket port sits, so `--port` alone moves the pair. */
-export const WS_PORT_OFFSET = 10;
-/** The WebSocket port of the default pair. */
-export const DEFAULT_WS_PORT = DEFAULT_PORT + WS_PORT_OFFSET;
 
-/** How far above the app port the door for computers you own sits, so `--port` alone moves all three. */
+/** How far above the app port the door for computers you own sits, so `--port` alone moves both. */
 export const PLACE_PORT_OFFSET = 20;
-/** The port that door answers on for the default pair. */
+/** The port that door answers on for the default port. */
 export const DEFAULT_PLACE_PORT = DEFAULT_PORT + PLACE_PORT_OFFSET;
 
 /** The first port base a copy of a project folder on this computer is handed, and the step between one copy's base
@@ -147,36 +142,29 @@ export function loopbackThreadsLine(address: string): string {
 }
 
 export interface AppPorts {
-  /** The port the app is served on. */
+  /** The port the app and the runtime's WebSocket are served on. */
   port: number;
-  /** The port the runtime's WebSocket is served on. */
-  wsPort: number;
 }
 
-/** A pair with whether a person named either port: a taken port somebody asked for is a refusal, where a taken
- * default is one wsp steps over. */
+/** A port with whether a person named it: a taken port somebody asked for is a refusal, where a taken default is
+ * one wsp steps over. */
 export interface PortsAsked extends AppPorts {
   named: boolean;
 }
 
-/** The pair with the address to bind them on, which is what a command line asked for and what wsp up serves; the
- * port stepping reads the pair alone, so it takes the narrower shape above. */
+/** The port with the address to bind it on, which is what a command line asked for and what wsp up serves; the
+ * port stepping reads the port alone, so it takes the narrower shape above. */
 export interface ListenAsked extends PortsAsked {
   /** The address the host binds, as `--listen` named it or this computer alone. */
   address: string;
 }
 
-/** The one rule for the pair and the address, read by wsp up and wsp init: the app port as named or the default,
- * the WebSocket port as named or the app port plus the offset the defaults themselves sit apart, and the address as
- * named or this computer alone. Port 0 asks the operating system for any free port, and an offset above it would be
- * a privileged port, so that pair stays 0. */
-export function portsAsked(flags: { port?: string; wsPort?: string; listen?: string }): ListenAsked {
-  const port = flags.port !== undefined ? Number(flags.port) : DEFAULT_PORT;
-  const derived = port === 0 ? 0 : port + WS_PORT_OFFSET;
+/** The one rule for the port and the address, read by wsp up and wsp init: the port as named or the default, and
+ * the address as named or this computer alone. Port 0 asks the operating system for any free port. */
+export function portsAsked(flags: { port?: string; listen?: string }): ListenAsked {
   return {
-    port,
-    wsPort: flags.wsPort !== undefined ? Number(flags.wsPort) : derived,
-    named: flags.port !== undefined || flags.wsPort !== undefined,
+    port: flags.port !== undefined ? Number(flags.port) : DEFAULT_PORT,
+    named: flags.port !== undefined,
     address: flags.listen !== undefined && flags.listen !== "" ? flags.listen : LOOPBACK,
   };
 }
@@ -197,21 +185,19 @@ export function portTakenLine(port: number, holder: PortHolder): string {
   return `Port ${port} is in use on this computer by ${portHolderWords(holder)}.`;
 }
 
-/** What a run says when the default pair was taken and it stepped to a free one: the pair it serves on, then the
+/** What a run says when the default port was taken and it stepped to a free one: the port it serves on, then the
  * port it stepped over and who holds it, so a second setup beside a running host reads as a move and not a fault. */
 export function portsPickedLine(ports: AppPorts, taken: number, holder: PortHolder): string {
-  return `Serving on ${ports.port} and ${ports.wsPort}; ${taken} is held by ${portHolderWords(holder)}.`;
+  return `Serving on ${ports.port}; ${taken} is held by ${portHolderWords(holder)}.`;
 }
 
 /** The last line when a port a person named is held: nothing has booted, and the two ways on. */
-export const PORT_TAKEN_REFUSAL = `Nothing was booted. Stop that process, or name a free app port with --port; the WebSocket port follows ${WS_PORT_OFFSET} above it unless --ws-port names another.`;
+export const PORT_TAKEN_REFUSAL = "Nothing was booted. Stop that process, or name a free port with --port.";
 
-/** The same last line where the run found a free pair above the held one: the line to type, spelled out, since a
- * person whose port is taken is guessing at numbers otherwise. Both ports are named only where the pair is not the
- * offset apart, which --port alone would not reproduce. */
+/** The same last line where the run found a free port above the held one: the line to type, spelled out, since a
+ * person whose port is taken is guessing at numbers otherwise. */
 export function portInsteadLine(ports: AppPorts): string {
-  const flags = ports.wsPort === ports.port + WS_PORT_OFFSET ? `--port ${ports.port}` : `--port ${ports.port} --ws-port ${ports.wsPort}`;
-  return `Nothing was booted. The next free pair is ${ports.port} and ${ports.wsPort}: wsp up ${flags}. Or stop what holds the one you named.`;
+  return `Nothing was booted. The next free port is ${ports.port}: wsp up --port ${ports.port}. Or stop what holds the one you named.`;
 }
 
 /** Which state file a run sets up and the flag that starts a fresh one instead: a run on a file that already

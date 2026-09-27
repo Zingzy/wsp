@@ -1575,7 +1575,7 @@ mod tests {
     #[test]
     fn a_workspace_this_daemon_has_no_clock_for_answers_no_figure() {
         let net = Net {
-            layout: Layout::new(Path::new("/var/lib/wsp")),
+            layout: Layout::new(Path::new("/wsp")),
             daemon_port: 0,
             turn: Mutex::new(()),
             listeners: Mutex::new(BTreeMap::new()),
@@ -1595,16 +1595,16 @@ mod tests {
     #[test]
     fn an_alias_names_a_workspace_under_this_root_alone() {
         let net = Net {
-            layout: Layout::new(Path::new("/var/lib/wsp")),
+            layout: Layout::new(Path::new("/wsp")),
             daemon_port: 0,
             turn: Mutex::new(()),
             listeners: Mutex::new(BTreeMap::new()),
             inward: Mutex::new(BTreeMap::new()),
             quiet: std::sync::Mutex::new(BTreeMap::new()),
         };
-        assert_eq!(net.workspace_of("/var/lib/wsp/run/wsp-a"), Some("wsp-a".to_owned()));
+        assert_eq!(net.workspace_of("/wsp/run/wsp-a"), Some("wsp-a".to_owned()));
         assert_eq!(net.workspace_of("/tmp/other/run/wsp-a"), None);
         assert_eq!(net.workspace_of("wsp-a"), None);
-        assert_eq!(net.alias_of("wsp-a"), "/var/lib/wsp/run/wsp-a");
+        assert_eq!(net.alias_of("wsp-a"), "/wsp/run/wsp-a");
     }
 }

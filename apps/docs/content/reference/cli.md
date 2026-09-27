@@ -217,8 +217,8 @@ up and down for the host, recipe and image for what a workspace starts from.
       AGENTS.md into that agent (claude, codex, gemini, opencode); --agent
       repeats, --remove takes it back out, and --json prints what each agent
       took
-  wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>]
-    [--provider <name>] [--no-relay] [--service]
+  wsp up [--port <n>] [--listen <addr>] [--advertise <url>] [--provider <name>]
+    [--no-relay] [--service]
       serve the host in this terminal, for a host you want to watch or one that
       serves beyond this computer; --service hands the same line to this
       computer's own service manager, which starts it now and again at every
@@ -666,7 +666,7 @@ usage: wsp mcp [--host <alias>]
 ## wsp up
 
 ```text
-usage: wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>]
+usage: wsp up [--port <n>] [--listen <addr>] [--advertise <url>]
        [--provider <name>] [--no-relay] [--service]
   serve the host in this terminal, for a host you want to watch or one that
   serves beyond this computer; --service hands the same line to this computer's
@@ -676,10 +676,8 @@ usage: wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>]
   --state        the state file: this word first, else WSP_HOME's state.json,
                  else ./.wsp/state.json when the current directory is a checkout
                  of wsp, else state.json in the home the running host serves
-  --port         the app port (default 4400); the runtime websocket port follows
-                 10 above it
-  --ws-port      the runtime websocket port on its own (default 4410); --port
-                 alone moves both
+  --port         the port the app and the runtime websocket are served on
+                 (default 4400)
   --listen       the address to bind (default 127.0.0.1, this computer alone).
                  No page carries the host's token on any address: the desktop
                  attaches by the token file beside the state, the browser wsp

@@ -174,7 +174,7 @@ describe("the workspace the address opens on", () => {
 
   it("remembers each workspace the person selects, under the state file the boot object names, and never a creation row", async () => {
     hash("");
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, wsPath: "/ws", paired: true, version: "0.0.0", statePath: "/Users/dev/.wsp/state.json" };
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: true, version: "0.0.0", statePath: "/Users/dev/.wsp/state.json" };
     await refreshed(rows());
     expect(JSON.parse(window.localStorage.getItem(LAST_WORKSPACE_KEY)!)).toEqual({ "/Users/dev/.wsp/state.json": "ws_b" });
     useStore.getState().select("ws_a", "thr_1");
@@ -271,7 +271,7 @@ describe("store creations", () => {
   const HERE_PLACE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true };
   const HETZNER_PLACE: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, engine: "docker", present: true, takesForks: true };
   /** The project every create here is made of: a repo on the computer that clones it, so the work goes there. */
-  const PROJECT_ON_HETZNER: ProjectView = { id: "pr_1", name: "spoo-landing", computer: "p_1", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/var/lib/wsp/projects/pr_1/memory", createdAt: "t" };
+  const PROJECT_ON_HETZNER: ProjectView = { id: "pr_1", name: "spoo-landing", computer: "p_1", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/wsp/projects/pr_1/memory", createdAt: "t" };
 
   const stage = (over: Partial<Extract<ProtocolEvent, { type: "workspace.creating" }>> = {}): ProtocolEvent => ({
     type: "workspace.creating",
@@ -812,7 +812,7 @@ describe("store connection", () => {
 });
 
 describe("the projects a workspace is made of", () => {
-  const SPOO: ProjectView = { id: "pr_1", name: "spoo-landing", computer: "p_1", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/var/lib/wsp/projects/pr_1/memory", createdAt: "t" };
+  const SPOO: ProjectView = { id: "pr_1", name: "spoo-landing", computer: "p_1", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/wsp/projects/pr_1/memory", createdAt: "t" };
   const WSP: ProjectView = { id: "pr_2", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/dev/wsp" }, path: "/Users/dev/wsp", remote: "https://github.com/dev/wsp.git", defaultBranch: "main", memoryKey: "-Users-dev-wsp", memoryDir: "/Users/dev/.claude/projects/-Users-dev-wsp/memory", createdAt: "t" };
 
   it("are read at bind and kept by the two project events: one added shows, one removed goes, and an id nothing holds leaves the list as it was", async () => {

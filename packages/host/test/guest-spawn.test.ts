@@ -57,7 +57,7 @@ describe("the wsp command on a thread's machine", () => {
         wspMcp: { command: "node", args: ["/root/wsp-daemon/wsp/dist/bin.js", "mcp"] },
       },
     });
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt });
     advertised = `http://127.0.0.1:${handle.port}`;
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
@@ -145,7 +145,7 @@ describe("the wsp command a thread on this computer runs", () => {
       local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copyingFake()),
       agents: { reach: hostReach({ address: LOOPBACK, port: 0 }, undefined, () => undefined, undefined, here), wspMcp: { command: "wsp", args: ["mcp"] } },
     });
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt, here });
+    handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt, here });
   });
   afterEach(async () => {
     await handle?.close();
@@ -179,7 +179,7 @@ describe("the wsp command a thread on this computer runs", () => {
     const lead = await rt.sessions.start((await byName("mac")).id, { prompt: "start two children" });
     const threadId = lead.view().threadId!;
     const launch = held.envs[1]!;
-    expect(launch[HOST_URL_ENV]).toBe(`http://${LOOPBACK}:${handle!.wsPort}`);
+    expect(launch[HOST_URL_ENV]).toBe(`http://${LOOPBACK}:${handle!.port}`);
     const pair = { [HOST_URL_ENV]: launch[HOST_URL_ENV]!, [HOST_TOKEN_ENV]: launch[HOST_TOKEN_ENV]! };
 
     const made = await thread(pair, "new", "kid", "--json");

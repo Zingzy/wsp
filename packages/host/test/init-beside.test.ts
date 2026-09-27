@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
-import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, initSignInOutcome, SIGN_IN_OPEN_STATE, type InitJob, type InitJobEvent, type InitRow, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, INIT_ROW_STATES, initSignInOutcome, SIGN_IN_OPEN_STATE, type InitJob, type InitJobEvent, type InitRow, type InitSetup, WS_PATH } from "@wsp/protocol";
 import { createRuntime, memoryStore, type InitDoor } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildBesideHost } from "../src/init-beside.js";
@@ -107,7 +107,7 @@ interface Beside {
 
 /** Spends a code the way the page wsp init opens does: the first frame of a socket nothing authed. */
 async function redeem(port: number, code: string): Promise<{ deviceId?: string; deviceToken?: string; error?: string }> {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}${WS_PATH}`);
   await new Promise<void>((done, fail) => {
     ws.once("open", () => done());
     ws.once("error", fail);
@@ -136,12 +136,11 @@ async function serving(): Promise<Beside> {
     runtime: createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} }),
     webDir,
     port: 0,
-    wsPort: 0,
     statePath,
     init: door,
   });
   handles.push(handle);
-  writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: handle.port, wsPort: handle.wsPort, address: "127.0.0.1", startedAt: new Date().toISOString() }));
+  writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: handle.port, address: "127.0.0.1", startedAt: new Date().toISOString() }));
   writeFileSync(hostTokenPath(statePath), handle.authToken, { mode: 0o600 });
   const output = new PassThrough();
   const chunks: string[] = [];
@@ -202,7 +201,7 @@ describe("the build wsp init hands to the host serving the state", () => {
     const opened = /Open (http:\/\/127\.0\.0\.1:\d+\/#w\/ws_1\/c\/([0-9A-Z]{8}))/.exec(out);
     expect(opened, out).not.toBeNull();
     expect(opened![1]).toBe(`http://127.0.0.1:${f.handle.port}/#w/ws_1/c/${opened![2]!}`);
-    const admitted = await redeem(f.handle.wsPort, opened![2]!);
+    const admitted = await redeem(f.handle.port, opened![2]!);
     expect(typeof admitted.deviceToken).toBe("string");
     const { devices } = await client.request<{ devices: { id: string; here?: true }[] }>("devices.list");
     expect(devices).toEqual([{ id: admitted.deviceId, here: true, name: "a Mac in a browser", createdAt: expect.any(String), lastSeenAt: expect.any(String) }]);

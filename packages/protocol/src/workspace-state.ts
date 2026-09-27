@@ -3,7 +3,7 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { computerWord, fmtThreads, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
+import { computerWord, fmtThreads, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, THIS_COMPUTER, type CpuWord } from "./format.js";
 import type { HarnessCatalog, MachineFacts, MachineState, PauseMode, PlaceBack, ProjectCopy, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 import { LOOPBACK, authority } from "./app-ports.js";
 
@@ -103,20 +103,12 @@ export interface MachineOnDelete {
  * here beside the table that reads them, and each mood supplies the "its" its own line needs. */
 export const COMPUTER_LEFT = "computer is left as it is";
 
-/** What a machine somebody already owns keeps and loses: wsp puts a daemon, a user unit and a line in the login
- * file on it, and a delete takes exactly those off again; the machine is theirs and stays. */
-const SSH_SWEPT = "daemon, its unit and its login line come off the computer, which is otherwise left as it is";
-
-/** What the Workspace panel holds for a computer that already existed: no spend and no version behind it, so the
- * panel is what the computer is running and how it is doing. */
-const OWN_COMPUTER_PANEL = "What the computer is running, its projects and how it is doing.";
-
 /** What a row calls a fork whose record names no provider: what it is, since the id the provider minted for the
  * machine names nothing to the person reading the row. */
 const A_PROVIDER = "a provider";
 
-/** The two readings a pane waits on. Each is one module per kind: the cloud kind and a machine over ssh read
- * that machine's own /proc through the daemon on it, and this computer reads its own host. */
+/** The two readings a pane waits on. Each is one module per kind: the cloud kind reads that machine's own /proc
+ * through the daemon on it, and this computer reads its own host. */
 export type KindReading = "metrics" | "processes";
 
 /** Who reads one of those two for a machine of this kind. `daemon` is the machine answering for itself over the
@@ -125,12 +117,11 @@ export type KindReading = "metrics" | "processes";
  * needs a port, a token or a pty. False is a kind that reads it on no road. */
 export type ReadingRoad = "daemon" | "host" | false;
 
-/** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
- * machine) is a row here. */
+/** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind is a row
+ * here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
   cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git", "github", "gitlab", "folder"], copiesFolder: false, agents: true, onDelete: { asked: "computer is deleted in the cloud", done: machineId => `computer ${machineId} is gone in the cloud` }, panel: "Where it runs, its projects and what it costs.", access: "bypass" },
   local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], copiesFolder: true, agents: true, onDelete: { asked: COMPUTER_LEFT, done: () => `its ${COMPUTER_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" },
-  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: [], copiesFolder: false, agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL, access: "asks" },
 };
 
 /**
@@ -193,8 +184,7 @@ export function machineWord(kind: WorkspaceKind): string {
 
 /** What deleting a workspace takes, the one sentence every client's confirmation shows: what the delete does to
  * this kind's machine, in that kind's own words, and either way the record and the threads go from here. It sits
- * with the kind table rather than with the other notices, since the machine half is a kind's word and a second
- * copy of it beside the sentence is what let the ssh kind say a delete leaves its machine untouched. */
+ * with the kind table rather than with the other notices, since the machine half is a kind's word. */
 export function deleteNotice(threads: number, kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path">, machineId?: string): string {
   return `Its ${onDeleteOf(kind, copy, machineId).asked}; its record and ${fmtThreads(threads)} leave this computer.`;
 }

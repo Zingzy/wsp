@@ -135,7 +135,7 @@ pub(crate) enum CopyVerb {
         from: PathBuf,
         #[arg(long, value_name = "dir")]
         to: PathBuf,
-        #[arg(long, value_name = "clonefile|worktree|in-place", value_parser = road_of)]
+        #[arg(long, value_name = "clonefile|worktree", value_parser = road_of)]
         road: CopyRoadName,
     },
 }

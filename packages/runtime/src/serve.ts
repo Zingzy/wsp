@@ -121,13 +121,15 @@ export interface ForwardsSource {
 export { LOOPBACK, WS_PATH } from "@wsp/protocol";
 
 export interface ServeOptions {
-  port: number;
+  /** A port of the runtime's own, for a runtime served with no page in front of it. A host names none and hands its
+   * servers in `attach`, so the page and the protocol share one port. */
+  port?: number;
   authToken: string;
   host?: string;
-  /** Every HTTP server whose upgrades of WS_PATH this runtime answers too, beside its own port, so one address and
-   * one port carry the page and the protocol. An upgrade of any other path is refused rather than left hanging.
-   * More than one because the host serves the page twice: on the person's own loopback port and on the door a
-   * computer they own dials, and both carry the one protocol. */
+  /** Every HTTP server whose upgrades of WS_PATH this runtime answers, so one address and one port carry the page
+   * and the protocol. An upgrade of any other path is refused rather than left hanging. More than one because the
+   * host serves the page twice: on the person's own loopback port and on the door a computer they own dials, and
+   * both carry the one protocol. */
   attach?: HttpServer | HttpServer[];
   /** Whether a browser's upgrade may open a socket here, read off the request's own headers by the host that
    * serves the page: a page drives only the host it was served by. Without it every upgrade is taken, which is
@@ -281,6 +283,7 @@ export type ImageExporter = (o: { image: SealedImage; tar: Buffer; dest: string;
 export type Authed = { kind: "host" } | { kind: "device"; device: HeldDevice };
 
 export interface RuntimeServer {
+  /** The runtime's own port where it was given one, and 0 where it answers only on the servers it was handed. */
   port: number;
   /** Who the bearer token of an HTTP request names, or nothing when it names nobody. The JSON routes the host
    * serves beyond loopback gate on this, so the WebSocket and those routes read one token store. */
@@ -462,7 +465,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
    * Named apart from the `ownRoad()` a socket carries below, which says what that socket is rather than where its
    * bytes came from. */
   const dialledHere: (req: IncomingMessage) => boolean = opts.ownRoad ?? (() => true);
-  const wss = new WebSocketServer({ host: opts.host ?? LOOPBACK, port: opts.port, verifyClient: (info: { req: IncomingMessage }) => originAllowed(info.req) });
+  const wss = opts.port === undefined ? undefined : new WebSocketServer({ host: opts.host ?? LOOPBACK, port: opts.port, verifyClient: (info: { req: IncomingMessage }) => originAllowed(info.req) });
   const attachTo = opts.attach === undefined ? [] : Array.isArray(opts.attach) ? opts.attach : [opts.attach];
   const attached = attachTo.length === 0 ? undefined : new WebSocketServer({ noServer: true });
   const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
@@ -1349,7 +1352,6 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               const handle = await rt.sessions.start(msg.workspaceId, {
                 prompt: msg.prompt,
                 ...(msg.harness !== undefined ? { harness: msg.harness } : {}),
-                ...(msg.resume !== undefined ? { resume: msg.resume } : {}),
                 ...(msg.thread !== undefined ? { thread: msg.thread } : {}),
                 ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}),
                 ...(msg.model !== undefined ? { model: msg.model } : {}),
@@ -1751,16 +1753,18 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     ws.on("message", onMessage);
   };
 
-  wss.on("connection", onConnection);
+  wss?.on("connection", onConnection);
   attached?.on("connection", onConnection);
 
-  await new Promise<void>((resolve, reject) => {
-    wss.once("listening", resolve);
-    wss.once("error", reject);
-  });
-  const addr = wss.address();
-  const port = typeof addr === "object" && addr !== null ? addr.port : opts.port;
-  const servers = attached === undefined ? [wss] : [wss, attached];
+  if (wss !== undefined) {
+    await new Promise<void>((resolve, reject) => {
+      wss.once("listening", resolve);
+      wss.once("error", reject);
+    });
+  }
+  const addr = wss?.address();
+  const port = typeof addr === "object" && addr !== null ? addr.port : (opts.port ?? 0);
+  const servers = [wss, attached].filter((server): server is WebSocketServer => server !== undefined);
   const clients = (): WebSocket[] => servers.flatMap(server => [...server.clients]);
 
   return {

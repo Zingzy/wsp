@@ -380,7 +380,7 @@ async fn a_pause_asks_the_processes_to_end_before_it_kills_them() {
     // sixth of a second after the first process, and a create that answered inside that window handed back a
     // workspace whose every pause ran the whole patience.
     let cgroup = Path::new(CGROUPS).join(&id);
-    let pids = wsp_runtime::freeze::pids_under(&cgroup).unwrap();
+    let pids = wsp_runtime::cgroup::pids_under(&cgroup).unwrap();
     let init = init_pid(&id);
     assert!(pids.contains(&init), "the workspace's own first process is not in its cgroup: {pids:?}");
     assert!(

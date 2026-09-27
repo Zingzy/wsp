@@ -3,4 +3,4 @@
 /**
  * Which kind of machine a daemon serves, which picks the modules its readings come from.
  */
-export type WorkspaceKind = "cloud" | "local" | "ssh" | "place";
+export type WorkspaceKind = "cloud" | "local" | "place";

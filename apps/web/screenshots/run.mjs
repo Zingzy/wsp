@@ -79,7 +79,7 @@ async function letIn(context, token) {
 }
 
 /** A context that reads as a window on another computer: the boot object the page is handed loses what only the
- * loopback page carries (the port, the token's digest, the state file) and reads unpaired, as a page served beyond
+ * loopback page carries (the token's digest and the state file) and reads unpaired, as a page served beyond
  * loopback does. The boot object is taken as the page's own inline script sets it rather than by rewriting the page:
  * a fulfilled response puts the page in another address space and Chromium then blocks its socket to loopback
  * outright (measured 2026-09-12). Nothing in the app is told which window this is; it reads the same boot object a
@@ -91,7 +91,7 @@ async function asAnotherComputer(context) {
       configurable: true,
       get: () => boot,
       set: value => {
-        const { wsPort: _port, tokenHash: _digest, statePath: _state, ...rest } = value ?? {};
+        const { tokenHash: _digest, statePath: _state, ...rest } = value ?? {};
         boot = { ...rest, paired: false };
       },
     });
@@ -227,7 +227,6 @@ async function main() {
       home: own,
       state,
       port: await freePort(),
-      wsPort: await freePort(),
       cloud: fixtureCloud(fixture),
       records: writeStandIn(own, fixtureFleet(state)),
       agents: HERE_AGENTS,
@@ -241,7 +240,7 @@ async function main() {
     // The stand-in's records, seeded and named: a fixture's sleeping fork is asleep because its provider says so,
     // and this run names no folder for the machines, so nothing runs on any of them. The cloud those machines are
     // meant to be at rides with them, or the stand-in stands in for nothing and no provider is on the places table.
-    host = await startHost({ home, state, port: await freePort(), wsPort: await freePort(), cloud: fixtureCloud(), records: writeStandIn(home, fixtureFleet(state)), agents: HERE_AGENTS });
+    host = await startHost({ home, state, port: await freePort(), cloud: fixtureCloud(), records: writeStandIn(home, fixtureFleet(state)), agents: HERE_AGENTS });
     host.token = hostToken(host);
     browser = await chromium.launch({ args: BROWSER_ARGS });
     for (const shot of shotPlan(list)) {

@@ -1146,22 +1146,18 @@ describe("agents spawning agents", () => {
     expect(await rt.sessions.steer(theirs.id, { prompt: "do this instead" }, asThread(scope))).toEqual({ outcome: "not-found" });
     expect(await rt.sessions.rename(theirs.id, "mine now", asThread(scope))).toEqual({ outcome: "not-found" });
 
-    // A send into either is refused whether it names the thread or names the harness session that thread resumes,
-    // and the sentence says back what the caller gave: a session id probed this way never comes back as a thread id.
+    // A send into either is refused as no thread at all.
     await expect(rt.sessions.start(ws.id, { prompt: "hi", thread: mineThread }, asThread(scope))).rejects.toThrow(`no thread ${mineThread} on this workspace`);
-    const sessionOfOther = other.view().claudeSessionId!;
-    const refused = await rt.sessions.start(ws.id, { prompt: "hi", resume: sessionOfOther }, asThread(scope)).catch((e: unknown) => (e as Error).message);
-    expect(refused).toBe(`no thread ${sessionOfOther} on this workspace`);
-    expect(refused).not.toContain(otherThread);
+    await expect(rt.sessions.start(ws.id, { prompt: "hi", thread: otherThread }, asThread(scope))).rejects.toThrow(`no thread ${otherThread} on this workspace`);
     expect((await rt.sessions.list(ws.id)).filter(v => v.threadId === mineThread || v.threadId === otherThread).every(v => v.status !== "running")).toBe(true);
 
-    // Its own tree it drives, by thread id and by the session id a resume carries alike.
+    // Its own tree it drives.
     const carry = await rt.sessions.start(ws.id, { prompt: "carry on", thread: childThread }, asThread(scope));
     expect(carry.view().threadId).toBe(childThread);
     expect(await rt.sessions.steer(carry.id, { prompt: "and this" }, asThread(scope))).toEqual({ outcome: "unsupported" });
     expect(await rt.sessions.rename(carry.id, "builder", asThread(scope))).toEqual({ outcome: "unsupported" });
     expect((await rt.sessions.interrupt(carry.id, asThread(scope))).outcome).toBe("accepted");
-    const back = await rt.sessions.start(ws.id, { prompt: "and you", resume: grand.view().claudeSessionId }, asThread(scope));
+    const back = await rt.sessions.start(ws.id, { prompt: "and you", thread: grandThread }, asThread(scope));
     expect(back.view().threadId).toBe(grandThread);
     expect((await rt.sessions.interrupt(back.id, asThread(scope))).outcome).toBe("accepted");
     // The person keeps every verb on every thread, the two the lead cannot see among them.

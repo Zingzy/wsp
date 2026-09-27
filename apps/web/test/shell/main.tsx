@@ -30,7 +30,7 @@
 // ?sidebar=<px> opens the sidebar at that remembered width so the rows can
 // be measured at several; ?spaces=1 opens it in the Spaces body, one
 // workspace under its header with an icon per workspace at the bottom;
-// ?look=1 gives the first two workspaces a theme and the first a glyph of its own, ?ssh=1 adds a machine over ssh,
+// ?look=1 gives the first two workspaces a theme and the first a glyph of its own,
 // ?many=<n> adds n more running forks so the space bar overflows;
 // ?archived=1 gives the first workspace two threads quiet for days, so the
 // Archived group nested in its idle shelf can be measured shut and opened;
@@ -127,14 +127,12 @@ const LONG_PROJECT = { id: "pr_long", name: "customer-billing-service-platform",
 const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "", ...(projects ? { project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } } : {}), ...(params.get("longproject") === "1" ? { project: LONG_PROJECT } : {}) };
 const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
 // ?look=1 gives the first two workspaces a theme and the first a glyph of its own, and leaves the rest with neither, so
-// one page holds two themed spaces, a plain one and, with ?local=1 and ?ssh=1, every kind's own glyph on the bar. The
+// one page holds two themed spaces, a plain one and, with ?local=1, every kind's own glyph on the bar. The
 // first theme is a preset at the default grain and opacity; the second has three colours, grain and its own side pinned.
 if (params.get("look") === "1") {
   Object.assign(workspaces[0]!, { theme: { ...DEFAULT_THEME, dots: [...THEME_PRESETS[1]!.dots], harmony: THEME_PRESETS[1]!.harmony }, glyph: "flask" });
   Object.assign(workspaces[1]!, { theme: { ...DEFAULT_THEME, dots: [...THEME_PRESETS[2]!.dots], harmony: THEME_PRESETS[2]!.harmony, grain: 0.5, opacity: 0.7, mode: "dark" } });
 }
-// ?ssh=1 adds a machine over ssh, the third kind, so the space bar can be shot with every kind's own glyph.
-if (params.get("ssh") === "1") workspaces.push({ ...view("ws_s", "build-box"), kind: "ssh", machineId: "ssh:build-box", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" });
 // ?many=<n> adds n more running forks, so the space bar can be measured once its icons outgrow the footer.
 for (let i = 0; i < Number(params.get("many") ?? 0); i++) workspaces.push(view(`ws_x${i}`, `extra-${i}`));
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
@@ -510,7 +508,7 @@ function fakeWire(): TerminalWire {
 // says about it can be measured where it lands; the whole road runs, bridge and boot object both.
 if (params.get("version") === "behind") {
   window.wsp = { ...window.wsp, version: "0.1.3" };
-  (window as unknown as { __WSP__?: { wsPort: number; paired: boolean; version: string } }).__WSP__ = { wsPort: 0, paired: true, version: "0.1.5" };
+  (window as unknown as { __WSP__?: { paired: boolean; version: string } }).__WSP__ = { paired: true, version: "0.1.5" };
 }
 const toast = params.get("toast");
 const shown = params.get("ws");

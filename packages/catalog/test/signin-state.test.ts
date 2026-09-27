@@ -108,9 +108,9 @@ describe("a login signed in once on the computer that runs the workspaces", () =
   });
 
   it("what a create shares into a workspace is that computer's own file at the path the tool reads, and the sign-in runs against the same directory", () => {
-    expect(sharesIn("/var/lib/wsp/logins")).toEqual([{ source: "/var/lib/wsp/logins/codex/auth.json", target: `${GUEST_HOME}/.codex/auth.json` }]);
+    expect(sharesIn("/wsp/logins")).toEqual([{ source: "/wsp/logins/codex/auth.json", target: `${GUEST_HOME}/.codex/auth.json` }]);
     // The sign-in on that computer runs with the tool's store pointed here, which is where the shared file lands.
-    expect(loginHomeIn("/var/lib/wsp/logins", sharedLoginOf(SIGN_IN_ROWS.codex)!)).toBe("/var/lib/wsp/logins/codex");
-    for (const share of sharesIn("/var/lib/wsp/logins")) expect(share.source.startsWith("/var/lib/wsp/logins/")).toBe(true);
+    expect(loginHomeIn("/wsp/logins", sharedLoginOf(SIGN_IN_ROWS.codex)!)).toBe("/wsp/logins/codex");
+    for (const share of sharesIn("/wsp/logins")) expect(share.source.startsWith("/wsp/logins/")).toBe(true);
   });
 });

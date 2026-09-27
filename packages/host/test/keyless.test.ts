@@ -16,7 +16,6 @@ import { stateWriterHere } from "../src/version.js";
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import { noProviderStorageLine } from "../src/storage.js";
 import type { HostHandle } from "../src/server.js";
-import { fakeSsh } from "../../runtime/test/fake-ssh.js";
 import { PAGE, captured, copyingFake, fakeDaemonStart } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
@@ -60,10 +59,9 @@ describe("a computer with no machine provider key", () => {
       store: jsonFileStore(statePath, stateWriterHere()),
       adapters: {},
       local: localWiring(home, undefined, fakeDaemonStart, statePath, copyingFake()),
-      ssh: fakeSsh().wiring,
       hostId: "box:h1",
     });
-    handle = await up(io, { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    handle = await up(io, { port: 0, statePath, webDir, runtime: rt });
     expect(handle).toBeDefined();
     expect(io.errors).toEqual([]);
   }
@@ -72,7 +70,7 @@ describe("a computer with no machine provider key", () => {
     // The whole real wiring, provider module and all, brought up with no key in the environment. The copy road
     // alone is the fake, since every workspace here is a copy and this checkout stages no daemon binary.
     const served = captured();
-    handle = await up(served, { port: 0, wsPort: 0, statePath, webDir, runtime: makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(home, process.env, fakeDaemonStart, statePath, copyingFake())) });
+    handle = await up(served, { port: 0, statePath, webDir, runtime: makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(home, process.env, fakeDaemonStart, statePath, copyingFake())) });
     expect(handle).toBeDefined();
     expect(served.errors).toEqual([]);
     // A workspace is one project's copy, so a start records none and the first line says what records one.
