@@ -3934,3 +3934,7 @@ export function fmtThemeVars(theme: WorkspaceTheme, appDark: boolean): ThemeVars
         : `radial-gradient(circle at 0% 0%, ${first} 0%, transparent 70%), radial-gradient(circle at 100% 0%, ${second} 0%, transparent 70%), linear-gradient(to top, ${third} 0%, transparent 65%)`;
   return { "--space-gradient": gradient, "--space-grain": String(theme.grain), "--space-tint": fmtRgb(themeInk(theme, appDark)) };
 }
+
+/** What a system notification says when a thread's turn finished while nobody was looking: the page's own line and
+ * the desktop's when its window is closed are this one. */
+export const threadFinishedLine = (title: string): string => `${title} finished`;

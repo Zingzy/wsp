@@ -5,10 +5,10 @@
 // read here and never respelled. Pure but for the one hook beside the where
 // word, which reads that word off the store for the surfaces that hold a
 // workspace's id and no snapshot.
-import { HERE_PLACE_ID, isLocalWorkspace, madeOfWord, portsWord, whereWord as whereOf, workspaceKind, type Capabilities, type PlaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, isLocalWorkspace, madeOfWord, portsWord, workspaceComputerName, workspaceKind, type Capabilities, type PlaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import type { ProjectRef } from "./threadTree.js";
-import { PLACE_KIND_WORDS, hereName, isHere, placeName, placeOf } from "../settings/places.js";
+import { PLACE_KIND_WORDS, isHere, placeName, placeOf } from "../settings/places.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
 import { usePlaces, useStatus, useWorkspace } from "../protocol/store.js";
 
@@ -54,11 +54,7 @@ const liveRecord = (project: Pick<SidebarProjectSnapshot, "status" | "workspace"
  * protocol's one reading of the question, off the live record once a status has arrived, so this row, the command
  * line's table and the pane cannot name one machine three ways. */
 export function computerName(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
-  const live = liveRecord(project);
-  const at = placeOf(places, live);
-  if (at !== undefined) return placeName(at);
-  if (isLocalWorkspace(live)) return hereName(places);
-  return whereOf(live);
+  return workspaceComputerName(places, liveRecord(project));
 }
 
 /** A copy's name as a person reads it. The workspace that is this computer itself, rather than a copy beside a

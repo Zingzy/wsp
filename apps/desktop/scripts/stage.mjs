@@ -5,7 +5,7 @@
 // where the host's asset table reads them back from for the window and for
 // the wsp command alike). Nothing native rides beside the bundles: the daemon
 // is a static binary among the assets.
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeGlyphs } from "./glyphs.mjs";
@@ -45,6 +45,9 @@ writeFileSync(
   join(app, "main", "onboarding.html"),
   page.replace("__WEB_CSS__", `../${ASSETS_DIR}/web/assets/${webCss}`).replace("__AGENT_GLYPHS__", JSON.stringify(glyphIds)),
 );
+
+// The menu bar's template images, read beside main.
+cpSync(join(root, "src", "tray"), join(app, "main", "tray"), { recursive: true });
 
 rmSync(join(app, "node_modules"), { recursive: true, force: true });
 
