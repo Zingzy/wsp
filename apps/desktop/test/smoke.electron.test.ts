@@ -252,6 +252,11 @@ async function stopServiceOf(launched: Pick<Launched, "user" | "statePath">): Pr
   if (stopped.held && lock !== undefined) await vi.waitFor(() => expect(alive(lock.pid)).toBe(false), { timeout: 30_000, interval: 100 });
 }
 
+/** Where a long case stands, by time since it began, read out when it fails: a stall shows as the last step named. */
+const trail: string[] = [];
+let trailFrom = Date.now();
+const step = (name: string): void => void trail.push(`+${Date.now() - trailFrom} ms ${name}`);
+
 /** Quits the app. A plain quit is every road out of the app but the menu's own row, and asks nothing; the other
  * answer is the menu's Quit, pressed as a person presses it, with the question it asks answered by that button. */
 async function quit(app: ElectronApplication, answer: "Quit" | "Quit and stop wsp" = "Quit"): Promise<void> {
@@ -562,8 +567,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   afterEach(async ({ task }) => {
     if (task.result?.state === "fail" && launched !== undefined) {
       const log = join(dirname(launched.statePath), "host.log");
-      console.error([`the app said:`, ...launched.said.slice(-40), `${log}:`, ...(existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").slice(-40) : ["(none)"])].join("\n"));
+      const running = spawnSync("ps", ["-A", "-o", "pid,ppid,etime,stat,command"], { encoding: "utf8", timeout: 10_000 }).stdout.split("\n").filter(line => line.includes(launched!.home) || line.includes(builtApp()));
+      console.error([`steps:`, ...trail, `processes:`, ...running, `the app said:`, ...launched.said.slice(-40), `${log}:`, ...(existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").slice(-40) : ["(none)"])].join("\n"));
     }
+    trail.length = 0;
     const app = launched?.app;
     // A case that timed out may leave the app stuck; its pid is the one this suite started, and the service it
     // installed is taken away whatever state the app is in.
@@ -592,13 +599,17 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   });
 
   it("opens one window, titled wsp, on the service it installed, whose parent is the manager and not the app; a quit leaves it serving and the next launch attaches; Quit and stop wsp leaves nothing", async () => {
+    trailFrom = Date.now();
+    step("launch");
     // Claude Code by its config alone, for the agent the service writes the wsp tools into.
     launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, home => {
       seedGolden(home);
       mkdirSync(join(home, ".claude"));
     });
     const { home, user, statePath } = launched;
+    step("launched; waiting for the window");
     const win = await windowAt(launched.app, APP_URL);
+    step("window");
     const boot = await bootOf(win);
     const url = win.url();
     expect(url).toMatch(APP_URL);
@@ -625,23 +636,30 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(parent).not.toBe(launched.app.process().pid);
     if (process.platform === "darwin") expect(parent).toBe(1);
     const env = { ...process.env, HOME: user, WSP_HOME: home };
+    step("wsp status");
     expect(spawnSync(shimPath(home), ["status"], { encoding: "utf8", env, timeout: 20_000 }).stdout).toContain(`service     ${manager.words} ${unit.name}, loaded`);
     // The service runs wsp behind the command the app wrote, so what it writes into an agent's config runs that
     // command and never the app's binary, which is node only under the variable the command sets.
+    step("wsp agents addtools");
     const added = spawnSync(shimPath(home), ["agents", "addtools", "claude"], { encoding: "utf8", env, cwd: join(home, "cwd"), timeout: 20_000 });
     expect(added.status, `${added.stdout}${added.stderr}`).toBe(0);
     expect((JSON.parse(readFileSync(join(user, ".claude.json"), "utf8")) as { mcpServers: { wsp: { command: string } } }).mcpServers.wsp.command).toBe(shimPath(home));
 
+    step("quit");
     await quit(launched.app);
     expect(await refused(url)).toBe(false);
     expect(alive(host.pid)).toBe(true);
 
+    step("relaunch");
     launched = await launchIn(home, { SOLARI_API_KEY: FAKE_SOLARI });
+    step("relaunched; waiting for the window");
     const again = await windowAt(launched.app, APP_URL);
     expect(again.url()).toBe(url);
     expect(servingHost(statePath)?.pid).toBe(host.pid);
 
+    step("quit and stop wsp");
     await quit(launched.app, "Quit and stop wsp");
+    step("stopped");
     expect(servingHost(statePath)).toBeUndefined();
     expect(alive(host.pid)).toBe(false);
     expect(await refused(url)).toBe(true);
