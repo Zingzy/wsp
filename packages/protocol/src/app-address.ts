@@ -4,8 +4,9 @@
 // written on. The address is the app's one record of what a person is
 // reading, so it is written on every pick and read on every refresh; wsp init
 // writes the workspace form after its first fork, and a thread row's
-// copy-link action the thread form. One writer and one reader live here, so
-// no surface grows a hash parser of its own.
+// copy-link action the thread form. A wsp:// link the desktop takes from the
+// system is read here too, down to the kind and id it names. One writer and
+// one reader live here, so no surface grows a parser of its own.
 
 const PREFIX = "#w/";
 const THREAD = "/t/";
@@ -61,4 +62,43 @@ export function addressFromHash(hash: string): AppAddress | undefined {
   if (workspaceId === "") return undefined;
   const threadId = cut === -1 ? "" : decodeURIComponent(rest.slice(cut + THREAD.length));
   return { workspaceId, ...(threadId === "" ? {} : { threadId }), ...(fresh ? { fresh: true } : {}) };
+}
+
+/** What a wsp:// link can name. A link opens something and never does anything to it: an act a link could start
+ * would be one any page or app on the computer could start by handing the shell a url. */
+export const LINK_KINDS = ["thread", "workspace", "project", "settings"] as const;
+export type LinkKind = (typeof LINK_KINDS)[number];
+export interface LinkTarget {
+  readonly kind: LinkKind;
+  /** The thread's, workspace's or project's id, or the Settings group's. */
+  readonly id: string;
+}
+
+const LINK_SCHEME = "wsp://";
+const LINK_PREFIX = "#open/";
+/** An id as wsp mints them: letters, digits, dashes and underscores, nothing a path or a query could hide behind. */
+const LINK_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+function linkTarget(kind: string, id: string): LinkTarget | undefined {
+  if (!(LINK_KINDS as readonly string[]).includes(kind) || !LINK_ID.test(id)) return undefined;
+  return { kind: kind as LinkKind, id };
+}
+
+/** What a wsp:// link names, read as `wsp://<kind>/<id>` and nothing looser: no query, no fragment, no second
+ * segment, no escapes. Anything else names nothing. */
+export function addressFromLink(url: string): LinkTarget | undefined {
+  if (url.slice(0, LINK_SCHEME.length).toLowerCase() !== LINK_SCHEME) return undefined;
+  const rest = url.slice(LINK_SCHEME.length);
+  const parts = (rest.endsWith("/") ? rest.slice(0, -1) : rest).split("/");
+  return parts.length === 2 ? linkTarget(parts[0]!, parts[1]!) : undefined;
+}
+
+/** The hash the app is opened on for a link the shell took before the page was up. */
+export const linkHash = (target: LinkTarget): string => `${LINK_PREFIX}${target.kind}/${target.id}`;
+
+/** The link a hash carries, or nothing. */
+export function linkFromHash(hash: string): LinkTarget | undefined {
+  if (!hash.startsWith(LINK_PREFIX)) return undefined;
+  const parts = hash.slice(LINK_PREFIX.length).split("/");
+  return parts.length === 2 ? linkTarget(parts[0]!, parts[1]!) : undefined;
 }

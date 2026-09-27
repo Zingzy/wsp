@@ -9,7 +9,6 @@ import { useEffect, useRef } from "react";
 import { isCommandPaletteOpen } from "../commandPaletteBus.js";
 import { surfaceShortcutTargetsTypingContext } from "../components/RightPanelTabs.js";
 import { useSidebar } from "../components/ui/sidebar.js";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { eventHoldKeys, resolveShortcutCommand } from "../keybindings.js";
 import type { ResolvedKeybindingsConfig } from "../keybindingTypes.js";
 import { desktopBridge } from "../lib/desktopShell.js";
@@ -17,9 +16,12 @@ import { isPreviewFocused } from "../lib/previewFocus.js";
 import { isTerminalFocused } from "../lib/terminalFocus.js";
 import { useSelectedWorkspaceId, useStore } from "../protocol/store.js";
 import { cancelWorkspaceSwitch, commitWorkspaceSwitch, runShellCommand, type ShellCommandTarget } from "./shellCommands.js";
+import { useKeybindings } from "./useKeybindings.js";
 import { releasesSwitchHold, useWorkspaceSwitcher } from "./workspaceSwitcher.js";
 
-export function KeybindingDispatcher({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: { keybindings?: ResolvedKeybindingsConfig }) {
+export function KeybindingDispatcher({ keybindings: given }: { keybindings?: ResolvedKeybindingsConfig }) {
+  const live = useKeybindings();
+  const keybindings = given ?? live;
   const { toggleSidebar } = useSidebar();
   const workspaceId = useSelectedWorkspaceId();
   const target = useRef<ShellCommandTarget>({ workspaceId, toggleSidebar });

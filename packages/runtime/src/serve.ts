@@ -1202,7 +1202,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, projectGolden: await rt.workspaces.snapshot(msg.workspaceId, origin) });
               return;
             case "projects.add": {
-              const { notice, ...project } = await rt.projects.add({ source: msg.source, ...(msg.on !== undefined ? { on: msg.on } : {}), ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.base !== undefined ? { base: msg.base } : {}), ...(msg.seed !== undefined ? { seed: msg.seed } : {}) }, origin);
+              const { notice, ...project } = await rt.projects.add({ source: msg.source, ...(msg.on !== undefined ? { on: msg.on } : {}), ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.base !== undefined ? { base: msg.base } : {}), ...(msg.into !== undefined ? { into: msg.into } : {}), ...(msg.seed !== undefined ? { seed: msg.seed } : {}) }, origin);
               send({ id: msg.id, ok: true, project, ...(notice !== undefined ? { notice } : {}) });
               return;
             }

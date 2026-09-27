@@ -223,6 +223,8 @@ describe("the surfaces list this repo ships", () => {
       "settings-projects",
       "settings-devices",
       "settings-keybindings",
+      "settings-keybindings-capture",
+      "settings-keybindings-refused",
       "settings-about",
       "new-workspace",
       "first-run",
@@ -246,6 +248,7 @@ describe("the surfaces list this repo ships", () => {
       "new-thread-dialog",
       "new-thread-held",
       "add-project",
+      "add-project-clone-here",
       "export-dialog",
       "delete-dialog",
       "browser-empty",
@@ -269,11 +272,11 @@ describe("the surfaces list this repo ships", () => {
     expect(read.surfaces.map(s => s.fixture)).toEqual(listed.map(s => s.fixture));
     const clouded = listed.filter(s => (s.steps ?? []).some(word => word.endsWith("add-cloud-button")));
     expect(clouded.map(s => [s.name, fixtureCloud(s.fixture)])).toEqual([["add-cloud", "box"]]);
-    // The first run and the Add surfaces are shot at the two widths a design reading is held to, New workspace at the
+    // The first run, the Add surfaces and the keybinding and clone states are shot at the two widths a design reading is held to, New workspace at the
     // one width whose sidebar carries its control, and the thread status, the two switchers, the threads list, the
     // palette, the panel launcher and the tiles at the widest alone; the rest take every width the list shoots.
     const narrowed = read.surfaces.filter(s => s.widths.length < read.widths.length);
-    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["settings-computers-mac", [1440]], ["add-cloud", [1440, 390]], ["agents-add", [1440, 390]], ["agents-add-server", [1440, 390]], ["settings-image-built-mac", [1440]], ["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]], ["thread-status", [1440]], ["threads-computers", [1440]], ["threads-computers-shut", [1440]], ["threads-computer-picked", [1440]], ["threads-picker", [1440]], ["thread-list", [1440]], ["palette-threads", [1440]], ["palette-open", [1440]], ["panel-launcher", [1440]], ["panel-launcher-mac", [1440]], ["tiles", [1440]], ["tiles-root", [1440]], ["tiles-picker", [1440]], ["tiles-settled-open", [1440]], ["tiles-scrolled", [1440]], ["tiles-paused-done", [1440]], ...["new-thread-dialog", "new-thread-held", "add-project", "export-dialog", "delete-dialog", "browser-empty", "diff-empty", "long-prompt", "composer-rest", "composer-running"].map(name => [name, [1440]])]);
+    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["settings-computers-mac", [1440]], ["add-cloud", [1440, 390]], ["agents-add", [1440, 390]], ["agents-add-server", [1440, 390]], ["settings-image-built-mac", [1440]], ["settings-keybindings-capture", [1440, 390]], ["settings-keybindings-refused", [1440, 390]], ["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]], ["thread-status", [1440]], ["threads-computers", [1440]], ["threads-computers-shut", [1440]], ["threads-computer-picked", [1440]], ["threads-picker", [1440]], ["thread-list", [1440]], ["palette-threads", [1440]], ["palette-open", [1440]], ["panel-launcher", [1440]], ["panel-launcher-mac", [1440]], ["tiles", [1440]], ["tiles-root", [1440]], ["tiles-picker", [1440]], ["tiles-settled-open", [1440]], ["tiles-scrolled", [1440]], ["tiles-paused-done", [1440]], ...["new-thread-dialog", "new-thread-held", "add-project"].map(name => [name, [1440]]), ["add-project-clone-here", [1440, 390]], ...["export-dialog", "delete-dialog", "browser-empty", "diff-empty", "long-prompt", "composer-rest", "composer-running"].map(name => [name, [1440]])]);
     expect(shotPlan(read)).toHaveLength(read.surfaces.reduce((n, s) => n + s.widths.length, 0) * 2);
     // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
     expect(read.widths).toContain(1280);

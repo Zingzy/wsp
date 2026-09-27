@@ -490,6 +490,39 @@
       "wait": "settings-at=keybindings"
     },
     {
+      "name": "settings-keybindings-capture",
+      "at": "/",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-keybindings",
+        "chord=sidebar.toggle"
+      ],
+      "wait": "k=capturing"
+    },
+    {
+      "name": "settings-keybindings-refused",
+      "at": "/",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-keybindings",
+        "chord=sidebar.toggle",
+        "key:ControlOrMeta+j"
+      ],
+      "wait": "k=chord-refused"
+    },
+    {
       "name": "settings-about",
       "at": "/",
       "steps": [
@@ -782,6 +815,24 @@
         "k=add-project-button"
       ],
       "wait": "k=add-project"
+    },
+    {
+      "name": "add-project-clone-here",
+      "at": "/",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-projects",
+        "k=add-project-button",
+        "k=source",
+        "type:https://github.com/spoo-me/spoo.me"
+      ],
+      "wait": "k=clone-into"
     },
     {
       "name": "export-dialog",

@@ -128,8 +128,8 @@ usage: wsp <verb> ...
   wsp init                        set this computer up: your tools and sign-ins,
                                   copied so a workspace starts ready
   wsp add <user@host|folder|url>  a computer over ssh (user@host or ssh alias);
-                                  or a project: a folder here or a repo cloned
-                                  with --on <computer>
+                                  or a project: a folder here, or a repo cloned
+                                  --into <folder> here or --on <computer>
 ${CLOUD_ON ? `  wsp computers                   your computers: this one, each box you added,
                                   each cloud account` : "  wsp computers                   your computers: this one, each box you added"}
   wsp remove <computer>           take a computer out; the box is left as
@@ -1790,6 +1790,7 @@ interface SharedFlags {
   "first-workspace"?: string;
   import?: string;
   on?: string;
+  into?: string;
   rebuild?: boolean;
   "no-local"?: boolean;
   local?: boolean;
@@ -1841,6 +1842,8 @@ interface Command {
  * hands a fake host client where a real one would be dialled. */
 export interface CommandDeps {
   dial(statePath: string, opts: DialOpts): Promise<HostClient>;
+  /** Which ports wsp up finds held; this computer's own, read by binding them, when absent. */
+  ports?: PortProbes;
 }
 
 /** The dial every command line takes when the caller names no other. */
@@ -1931,7 +1934,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     json: false,
     host: "refused",
     cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
-    run: async (io, opts, values) => {
+    run: async (io, opts, values, _args, deps) => {
       if (values.service === true) return upServiceCommand(io, opts, systemService());
       // The lock is read before a port is stepped, a key is read or a daemon is dialled: each of those writes under
       // the home the other host is serving, and a start that is going to be refused must leave it as it found it.
@@ -1947,7 +1950,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       }
       // Which ports are free is settled before anything binds: a port another wsp or another program holds is one
       // sentence naming who holds it, and a pair nobody named is stepped over rather than refused.
-      const picked = await pickUpPorts(io, opts);
+      const picked = await pickUpPorts(io, opts, deps.ports);
       if (picked === undefined) return EXIT_CODES.provider;
       const handle = await up(io, { ...opts, ...picked.ports });
       // "Serving on 4401" is a claim about a host that serves, so it is said once one does: the state read, the
@@ -2070,9 +2073,9 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   add: {
     page: "front",
     usage:
-      `wsp add [<user@host>|<ssh alias>|<folder>|<url>|<owner/repo>|${CLOUD_ON ? "<provider>|" : ""}<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]`,
+      `wsp add [<user@host>|<ssh alias>|<folder>|<url>|<owner/repo>|${CLOUD_ON ? "<provider>|" : ""}<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--into <folder>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]`,
     about:
-      "a computer of yours over ssh by user@host or by an alias from your ssh config, or a project: a folder on this computer, which every workspace of it is a copy of, or a repo a computer clones with --on <computer>; " + (CLOUD_ON ? "<provider> takes a provider's key, " : "") + "nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every workspace on it",
+      "a computer of yours over ssh by user@host or by an alias from your ssh config, or a project: a folder on this computer, which every workspace of it is a copy of, or a repo cloned into an empty folder here with --into <folder> or by a computer with --on <computer>; " + (CLOUD_ON ? "<provider> takes a provider's key, " : "") + "nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every workspace on it",
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
@@ -2084,7 +2087,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values["no-memory"] === true ? { noMemory: true } : {}),
         ...(values["no-commits"] === true ? { noCommits: true } : {}),
         ...(values.remember === true ? { remember: true } : {}),
-      }, values["host-key"])),
+      }, values["host-key"], values.into)),
   },
   remove: {
     page: "front",
@@ -2393,6 +2396,7 @@ export const SHARED_OPTIONS: Options = {
   "first-workspace": { type: "string" },
   import: { type: "string" },
   on: { type: "string" },
+  into: { type: "string" },
   rebuild: { type: "boolean" },
   "no-local": { type: "boolean" },
   local: { type: "boolean" },
@@ -2538,7 +2542,8 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "recipe", on: ["init"], says: "tick the agents and tools from this recipe (wsp recipe writes it) and go straight to the sign-ins" },
   { name: "project", on: ["init"], says: "the project folder you are bringing first; its own files say what it needs, and those rows are ticked first" },
   { name: "on", on: ["init"], says: "the computer the image is built on, by the name wsp computers lists, a box you joined included; the default place without it" },
-  { name: "on", on: ["add"], says: "the computer a project lives on, by the name wsp computers lists: a repo's url needs one, since this computer copies a folder of yours and never clones" },
+  { name: "on", on: ["add"], says: "the computer a project lives on, by the name wsp computers lists: a repo a computer clones needs one, and a folder here or a repo cloned --into a folder here takes none" },
+  { name: "into", on: ["add"], says: "the empty folder on this computer to clone a repo into, one that does not exist yet or holds nothing; the project is then that folder, worked where it sits" },
   { name: "base", on: ["add"], says: "the branch a workspace of the project starts on; the remote's own default branch at the clone without it" },
   { name: "yes", on: ["add"], says: "send the ticked rows of the seed menu; without it a folder seeding a project on another computer prints the menu and sends nothing, since what git ignores in your folder is yours" },
   { name: "keep", on: ["add"], says: "one more path off the seed menu that travels, however the catalogue ticked it; given once per path" },
