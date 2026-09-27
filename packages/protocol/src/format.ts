@@ -1094,7 +1094,7 @@ const SEPARATOR_TAIL = /[\s,;:]+$/;
 
 /** The whole words of a line that fit in the room, the separator they ended on taken off; nothing when the line's
  * first word alone overruns it. A word that ends exactly at the room's edge is kept whole. */
-function wordsWithin(line: string, room: number): string | undefined {
+export function wordsWithin(line: string, room: number): string | undefined {
   const head = line.slice(0, room + 1);
   const boundary = head.lastIndexOf(" ");
   return boundary > 0 ? head.slice(0, boundary).replace(SEPARATOR_TAIL, "") : undefined;
@@ -2527,6 +2527,7 @@ export const SPAWN_ACTS = {
   fork: "fork a machine",
   send: "send into a thread",
   bring_back: "bring its work back",
+  commit: "commit its work",
   delete: "delete a workspace",
   pause: "pause a machine",
   import: "import a folder",
@@ -2536,7 +2537,7 @@ export const SPAWN_ACTS = {
 export type SpawnAct = keyof typeof SPAWN_ACTS;
 
 /** The acts a thread may ask for at all; every other act in the table is refused whatever the caps say. */
-export const SPAWN_ACTS_ALLOWED: readonly SpawnAct[] = ["thread_new", "fork", "send", "bring_back"];
+export const SPAWN_ACTS_ALLOWED: readonly SpawnAct[] = ["thread_new", "fork", "send", "bring_back", "commit"];
 
 /** The one sentence a thread's own token is refused with when the workspace it runs on lets its agents spawn
  * nothing. Off is what every workspace reads as until a person turns it on. */

@@ -103,6 +103,12 @@ export const HERE_AGENTS = {
         afterS: 8,
         text: "I'm in the spoo folder on this computer. You last asked why the short links were 302ing twice, and I moved the trailing-slash rewrite ahead of the canonical host check so each form redirects once.",
       },
+      /** What the agent drafts when a commit message is asked of it, after the same wait so a shot can catch the box
+       * still drafting and a later one filled. */
+      draft: {
+        afterS: 1,
+        text: "Round the cart total once, at the end\n\nThe total rounded each line and added the pennies up, so three lines at 0.335\nlanded on 1.00 or 1.01 depending on the order. It rounds the sum now.",
+      },
     },
     codex: { version: "codex-cli 0.155.0", status: "Logged in using ChatGPT" },
   },
@@ -958,9 +964,17 @@ const FIXTURES = {
   "tiles-attempt": { build: tilesAttempt },
   "image-built": { build: imageBuilt },
   "long-prompt": { build: longPrompt },
+  changes: { build: macInUse, changes: ["spoo"] },
 };
 
 export const FIXTURE_NAMES = Object.keys(FIXTURES);
+
+/** The project folders a fixture leaves mid-work, a branch one commit ahead of main with three files changed and
+ * nothing committed, so the Changes pane and a tile's counts have something to show: empty for every other fixture. */
+export function fixtureChanges(name, state) {
+  const named = new Set(fixtureRow(name).changes ?? []);
+  return Object.values(state.projects ?? {}).flatMap(p => (p.computer === HERE && named.has(p.name) ? [p.path] : []));
+}
 
 const fixtureRow = name => {
   const row = FIXTURES[name];

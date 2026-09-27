@@ -260,10 +260,10 @@ describe("app shell", () => {
 
   it("opens the diff pane from the picker", async () => {
     await mountShell();
-    fireEvent.click(screen.getByText("Diff", { selector: "span" }).closest("button")!);
+    fireEvent.click(screen.getByText("Changes", { selector: "span" }).closest("button")!);
     await settle();
     const tab = document.querySelector('[data-active-tab="true"]');
-    expect(tab?.textContent).toContain("Diff");
+    expect(tab?.textContent).toContain("Changes");
     expect(useRightPanelStore.getState().byWorkspaceId["ws_a"]?.activeSurfaceId).toBe("diff");
   });
 });

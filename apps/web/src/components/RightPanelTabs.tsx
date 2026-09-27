@@ -269,7 +269,7 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
           <h3 className="font-medium text-foreground text-sm">Open a panel</h3>
           <p className="mt-1 text-muted-foreground text-xs">
-            A browser, a terminal, the diff, the files, the computer or what runs on it.
+            A browser, a terminal, the changes, the files, the computer or what runs on it.
           </p>
         </div>
         <div className="flex flex-col gap-2">

@@ -35,6 +35,7 @@ import type {
   SessionAsker,
   SessionRenamer,
   SessionTitleMaker,
+  CommitDrafter,
   SessionTitleReader,
   TurnImage,
   TurnRefusal,
@@ -57,7 +58,7 @@ import {
   turnSteerLine,
   type RequestId,
 } from "./rpc.js";
-import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
+import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 
 export interface CodexStartOptions {
   prompt: string;
@@ -140,6 +141,7 @@ export interface CodexAdapter {
   renameSession: SessionRenamer;
   /** Asks the CLI itself, in one read-only turn, for a name for a thread it has just replied in. */
   titleFor: SessionTitleMaker;
+  draftFor: CommitDrafter;
   /** Answers a question about a thread on an ephemeral fork of it, leaving the thread as it was. */
   aside: SessionAsker;
   readonly env: Readonly<Record<string, string>>;
@@ -686,6 +688,15 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
         }),
       ).then(parseTitleFor),
+    draftFor: (ask, exec) =>
+      exec(
+        draftForCommand({
+          home: deps.home,
+          promptFile: ask.promptFile,
+          ...(ask.model !== undefined ? { model: ask.model } : {}),
+          ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
+        }),
+      ).then(parseDraftFor),
     env,
   };
 }

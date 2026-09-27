@@ -4,13 +4,13 @@
 // NULL and carries the thread's opening words, name is null until the person
 // names the thread.
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
 import type { SessionRenameWrite } from "@wsp/protocol";
-import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "../src/session-title.js";
+import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "../src/session-title.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 
 const THREAD = "01a079b6-6f04-7f73-84d6-40e9e6885ffd";
@@ -181,5 +181,31 @@ describe("naming a Codex thread from wsp", () => {
     expect(parseRename("failed database is locked\n")).toEqual({ kind: "failed", error: "database is locked" });
     expect(parseRename("")).toEqual({ kind: "failed", error: "the machine said nothing about the write" });
     expect(parseRename("Error: attempt to write a readonly database\n")).toEqual({ kind: "failed", error: "Error: attempt to write a readonly database" });
+  });
+});
+
+describe("the commit message Codex drafts", () => {
+  it("runs the question from the file as a read-only turn on stdin, and answers the last agent message whole", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-codex-draft-"));
+    const seen = join(dir, "seen");
+    const asked = join(dir, "it's the question.txt");
+    writeFileSync(asked, "Write a commit message.\n\nThe diff:\n+one\n");
+    const bin = fakeCodex(
+      `{ printf '%s\\n' "$*"; cat; } > ${seen}\n` +
+        `printf '%s\\n' '{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"Round the total once\\n\\nIt rounded per line."}}'`,
+    );
+    const command = draftForCommand({ home: "/root/.codex", promptFile: asked, model: "gpt-5.2" });
+    const { stdout } = await run("bash", ["-c", command], { env: { PATH: `${bin}:${process.env["PATH"] ?? ""}`, HOME: tmpdir() } });
+    expect(parseDraftFor(stdout)).toBe("Round the total once\n\nIt rounded per line.");
+    const [argv, ...rest] = readFileSync(seen, "utf8").split("\n");
+    expect(argv).toContain(`sandbox_mode="read-only"`);
+    expect(argv).toContain("-m gpt-5.2");
+    expect(rest.join("\n")).toBe("Write a commit message.\n\nThe diff:\n+one\n");
+  });
+
+  it("reads no message out of a failed turn or out of nothing", () => {
+    expect(parseDraftFor('{"type":"turn.failed","error":{"message":"401 Unauthorized"}}')).toBeNull();
+    expect(parseDraftFor('{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"  "}}')).toBeNull();
+    expect(parseDraftFor("")).toBeNull();
   });
 });

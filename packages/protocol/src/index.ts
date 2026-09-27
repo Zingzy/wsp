@@ -24,6 +24,7 @@ import type { GitDiffFile as WireGitDiffFile } from "./generated/GitDiffFile.js"
 import type { FsWriteReply as WireFsWriteReply } from "./generated/FsWriteReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
+import { Checkout } from "./changes.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
 import type { LinkTarget } from "./app-address.js";
@@ -745,6 +746,9 @@ export const WorkspaceStatus = WorkspaceView.extend({
   wakeAsk: z.object({ ask: z.number(), of: z.number() }).optional(),
   /** Epoch ms when the runtime's idle policy naps this workspace; absent while napping, held by a running session, or with auto-nap off. */
   idleAt: z.number().optional(),
+  /** The copy's checkout as the host last read it, at a turn's end, on view and after a write, never on a timer;
+   * absent until git has answered once. */
+  checkout: Checkout.optional(),
 });
 export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 
@@ -1673,6 +1677,10 @@ export const WorkspaceGoneEvent = z.object({
 });
 
 export const WorkspaceStatusEvent = z.object({ type: z.literal("workspace.status"), status: WorkspaceStatus });
+
+/** A person marked a file of the workspace viewed or took the mark off: every mark it now holds, by path, against the
+ * blob id the file's contents had when it was marked. */
+export const WorkspaceViewedEvent = z.object({ type: z.literal("workspace.viewed"), workspaceId: z.string(), viewed: z.record(z.string(), z.string()) });
 
 /** Awake-time cost tick. Computed locally from size and elapsed running time
  * (provider billing API integration is a later plan); zero rate while napping. */
@@ -3120,6 +3128,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceDeletedEvent.extend(sequenced),
   WorkspaceGoneEvent.extend(sequenced),
   WorkspaceStatusEvent.extend(sequenced),
+  WorkspaceViewedEvent.extend(sequenced),
   WorkspaceCostEvent.extend(sequenced),
   SessionStartEvent.extend(sequenced),
   SessionDeltaEvent.extend(sequenced),
@@ -5494,6 +5503,19 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * after, and the project's own base otherwise; the base branch itself is refused, since work leaves a workspace
    * as a branch of its own. */
   z.object({ id: reqId, op: z.literal("workspaces.bringBack"), workspaceId: z.string(), title: z.string().optional(), body: z.string().optional() }),
+  /** The copy's checkout, read again unless the host read it moments ago, and answered as a CheckoutReply. */
+  z.object({ id: reqId, op: z.literal("workspaces.checkout"), workspaceId: z.string() }),
+  /** Puts one changed file of the copy back as HEAD has it and answers a GitDiscardReply. */
+  z.object({ id: reqId, op: z.literal("workspaces.discard"), workspaceId: z.string(), path: z.string() }),
+  /** Commits the files named in the copy with the message given, hooks and all, and answers a GitCommitReply; paths
+   * absent is every changed file, and an empty list is refused as nothing to commit. */
+  z.object({ id: reqId, op: z.literal("workspaces.commit"), workspaceId: z.string(), message: z.string(), paths: z.array(z.string()).optional() }),
+  /** A commit message for those files, or every changed file where paths is absent, drafted by the workspace's own
+   * agent with no thread and no tool, answered as a CommitDraft. */
+  z.object({ id: reqId, op: z.literal("workspaces.commitDraft"), workspaceId: z.string(), paths: z.array(z.string()).optional() }),
+  /** The workspace's viewed marks, answered as ViewedMarks; with a path, the mark on that file is set against the
+   * blob given, or taken off where the blob is null. */
+  z.object({ id: reqId, op: z.literal("workspaces.viewed"), workspaceId: z.string(), path: z.string().optional(), blob: z.string().nullable().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Turns the workspace's agents switch on or off and names its caps. Every key left out keeps what the record
    * holds, so the two flags a person gives on one line never clear the third. */
@@ -5974,6 +5996,11 @@ export const THREAD_OPS: readonly string[] = [
   // A thread's work leaves its workspace the one way any work does, as a branch on the project's remote: the tree
   // rule refuses every workspace but its own, and the guard reads the switch as it does for a fork.
   "workspaces.bringBack",
+  // The checkout a thread's own copy is on, and a commit of its files with a message drafted or its own, under the
+  // same tree rule and the same guard; a discard is not here, since an agent has git in its copy.
+  "workspaces.checkout",
+  "workspaces.commit",
+  "workspaces.commitDraft",
   "harnesses.list",
   "sessions.start",
   "sessions.list",
@@ -5997,7 +6024,9 @@ export const THREAD_OPS: readonly string[] = [
  * dials, sweeps or lands a binary on a computer of the person's or clones onto one, every op that writes keys,
  * builds or seals an image, runs the sign-ins or costs money, and every op that reads or writes this computer's
  * disk outside wsp's own folders. The daemon channel's send and close ride a channel a refused open never gave
- * this socket. A role of the person's is where this list widens, per device. */
+ * this socket. A role of the person's is where this list widens, per device. The Changes pane's own ops are here
+ * although a commit runs the copy's hooks and a draft runs its agent: each writes inside wsp's own copy and nowhere
+ * else, which the device's panes already type into, and none reaches a remote. */
 export const DEVICE_OPS: readonly string[] = [
   "auth",
   "events.subscribe",
@@ -6030,6 +6059,11 @@ export const DEVICE_OPS: readonly string[] = [
   "workspaces.portReach",
   "workspaces.portProbe",
   "workspaces.rebuild",
+  "workspaces.checkout",
+  "workspaces.discard",
+  "workspaces.commit",
+  "workspaces.commitDraft",
+  "workspaces.viewed",
   "projects.list",
   "projects.resolve",
   "projects.remove",
@@ -6340,6 +6374,7 @@ export {
 } from "./workspace-look.js";
 export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, rootsPathIn, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
+export * from "./changes.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
@@ -6350,4 +6385,4 @@ export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
 export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
-export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

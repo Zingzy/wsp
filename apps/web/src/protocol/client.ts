@@ -17,6 +17,11 @@ import {
   type ServerAdd,
   type ServerAsk,
   BringBackResult,
+  CheckoutReply,
+  CommitDraft,
+  GitCommitReply,
+  GitDiscardReply,
+  ViewedMarks,
   CLOUD_SETUP_WORDS,
   DeviceView,
   HarnessCatalog,
@@ -395,6 +400,17 @@ export interface Api {
   /** Pushes the branch the agent made and opens its pull request through the git host's own command line, and
    * answers what both did. Optional so a fixture with no remote need not fake it. */
   bringBack?(id: string): Promise<BringBackResult>;
+  /** The copy's checkout as the host holds it, read again unless it was read moments ago; the fact also rides every
+   * status. Optional so a fixture with no copy need not fake it. */
+  workspaceCheckout?(id: string): Promise<CheckoutReply>;
+  /** Puts one changed file back as its last commit has it. */
+  discard?(id: string, path: string): Promise<GitDiscardReply>;
+  /** Commits the files named with the message given. */
+  commit?(id: string, message: string, paths: readonly string[]): Promise<GitCommitReply>;
+  /** A message for those files, drafted by the workspace's own agent, or none with the line saying why. */
+  commitDraft?(id: string, paths: readonly string[]): Promise<CommitDraft>;
+  /** The workspace's viewed marks; with a path, sets the mark on that file against the blob, or takes it off at null. */
+  viewed?(id: string, mark?: { path: string; blob: string | null }): Promise<ViewedMarks>;
   /** Drops a workspace whose machine is gone from the host's store; the row leaves on workspace.deleted. The host refuses
    * while the machine exists. Optional so fixtures without a gone machine need not fake it. */
   forget?(id: string): Promise<void>;
@@ -737,6 +753,11 @@ export function makeApi(c: ProtocolClient): Api {
     deleteWorkspace: async id => void (await c.request("workspaces.delete", { workspaceId: id })),
     // Parsed, not trusted: the row's line is built from these fields and a reply short of them must not become one.
     bringBack: async id => BringBackResult.parse(await c.request("workspaces.bringBack", { workspaceId: id })),
+    workspaceCheckout: async id => CheckoutReply.parse(await c.request("workspaces.checkout", { workspaceId: id })),
+    discard: async (id, path) => GitDiscardReply.parse(await c.request("workspaces.discard", { workspaceId: id, path })),
+    commit: async (id, message, paths) => GitCommitReply.parse(await c.request("workspaces.commit", { workspaceId: id, message, paths: [...paths] })),
+    commitDraft: async (id, paths) => CommitDraft.parse(await c.request("workspaces.commitDraft", { workspaceId: id, paths: [...paths] })),
+    viewed: async (id, mark) => ViewedMarks.parse(await c.request("workspaces.viewed", { workspaceId: id, ...(mark ?? {}) })),
     renameWorkspace: async (id, name) => (await c.request<{ workspace: WorkspaceView }>("workspaces.rename", { workspaceId: id, name })).workspace,
     setWorkspaceLook: async (id, look) => (await c.request<{ workspace: WorkspaceView }>("workspaces.look", { workspaceId: id, ...look })).workspace,
     // Parsed, not trusted: a reply without the list must not become the list.

@@ -60,7 +60,7 @@ import { HostFoot } from "../hosts/HostFoot.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
 import { newThreadTitle, computerName, copyName, placeNames } from "./workspaceRows.js";
-import { BranchReader, readsBranch, workspaceBranch } from "./WorkspaceBranch.js";
+import { CheckoutAsk, tileCheckout } from "./tileCheckout.js";
 import { restingAge } from "../components/status/restingAge.js";
 import { PROJECT_WORDS, SECTION_WORDS } from "./words.js";
 
@@ -212,8 +212,6 @@ export function WorkspaceSidebar() {
     return ((selectedThreadId === null ? undefined : runs.threads.find(t => t.threadId === selectedThreadId)) ?? topSidebarThread(runs.threads))?.id ?? null;
   }, [fleet, selectedId, selectedThreadId]);
   const tiles = useMemo(() => sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs, open }), [projects, picked, nowMs, open]);
-  const [readBranches, setReadBranches] = useState<Record<string, string>>({});
-  const branchRead = useCallback((workspaceId: string, branch: string) => setReadBranches(held => (held[workspaceId] === branch ? held : { ...held, [workspaceId]: branch })), []);
   // One landing per project, for the pause mode a copy's phase verb reads. Asked here, where the tiles are drawn,
   // so no tile asks for itself.
   useEffect(() => {
@@ -307,7 +305,7 @@ export function WorkspaceSidebar() {
     }
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
     const place = placeOf(runs);
-    const branch = workspaceBranch(runs, readBranches);
+    const { branch, counts } = tileCheckout(runs);
     let tile: ReactNode;
     if (thread === null) {
       tile = (
@@ -316,6 +314,7 @@ export function WorkspaceSidebar() {
           name={copyName(places, runs)}
           place={place}
           branch={branch}
+          counts={counts}
           depth={depth}
           active={selectedId === runs.id && selectedThreadId === null}
           renaming={renaming?.rowId === item.id}
@@ -338,6 +337,7 @@ export function WorkspaceSidebar() {
           thread={thread}
           place={place}
           branch={branch}
+          counts={counts}
           time={restingAge(thread)}
           depth={depth}
           active={selectedId === thread.workspaceId && (selectedThreadId === null ? thread.threadId === null : selectedThreadId === thread.id)}
@@ -403,7 +403,7 @@ export function WorkspaceSidebar() {
     if (launch === undefined || (picked !== null && runs.workspace.project.id !== picked.project.id)) return [];
     return [
       <li key={`launch:${runs.id}`} data-thread-selection-safe>
-        <ThreadLaunchTile launch={launch} place={placeOf(runs)} branch={workspaceBranch(runs, readBranches)} />
+        <ThreadLaunchTile launch={launch} place={placeOf(runs)} {...tileCheckout(runs)} />
       </li>,
     ];
   });
@@ -535,8 +535,8 @@ export function WorkspaceSidebar() {
   return (
     <>
       <SidebarChromeHeader />
-      {projects.filter(readsBranch).map(runs => (
-        <BranchReader key={runs.id} project={runs} onBranch={branchRead} />
+      {projects.map(runs => (
+        <CheckoutAsk key={runs.id} workspaceId={runs.id} />
       ))}
       <div ref={rootRef} onKeyDown={onKeyDown} className="flex min-h-0 flex-1 flex-col">
         <SidebarContent fixedHeader={header}>

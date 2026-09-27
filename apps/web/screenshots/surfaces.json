@@ -1069,6 +1069,51 @@
       "settleMs": 800
     },
     {
+      "name": "diff-changes",
+      "at": "/",
+      "fixture": "changes",
+      "widths": [1440, 390],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:ControlOrMeta+Alt+b",
+        "surface-launch=diff"
+      ],
+      "wait": "changed-files",
+      "settleMs": 1200
+    },
+    {
+      "name": "diff-commit-box",
+      "at": "/",
+      "fixture": "changes",
+      "widths": [1440, 390],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:ControlOrMeta+Alt+b",
+        "surface-launch=diff",
+        "diff-commit"
+      ],
+      "wait": "commit-box",
+      "settleMs": 2500
+    },
+    {
+      "name": "tiles-checkout",
+      "at": "/",
+      "fixture": "changes",
+      "widths": [1440, 390],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger"
+      ],
+      "wait": "tile-counts",
+      "settleMs": 1200
+    },
+    {
       "name": "long-prompt",
       "at": "/",
       "fixture": "long-prompt",

@@ -207,6 +207,13 @@ const asideScript = aside =>
     ? ""
     : `case " $* " in\n  *" --fork-session "*) sleep ${aside.afterS}; printf '%s\\n' ${shellQuote(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: aside.text }))}; exit 0 ;;\nesac\n`;
 
+/** A stand-in's answer to a commit message asked of it: the question comes on stdin with the person's customizations
+ * off and no side question's fork, and the draft is the print-mode result after the fixture's wait. */
+const draftScript = draft =>
+  draft === undefined
+    ? ""
+    : `case " $* " in\n  *" --fork-session "*) ;;\n  *" --safe-mode "*) cat >/dev/null; sleep ${draft.afterS}; printf '%s\\n' ${shellQuote(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: draft.text }))}; exit 0 ;;\nesac\n`;
+
 /** This computer's agents as a fixture has them, all under the throwaway home: a stand-in for each agent's command that
  * says the fixture's version and sign-in and answers a side question where the fixture gives it one, a stand-in
  * command for each server with tools, and each agent's own MCP file written by the catalog's module for its format.
@@ -217,7 +224,7 @@ export function writeHereAgents(home, here) {
   for (const [id, said] of Object.entries(here.agents)) {
     const agent = CATALOG_AGENTS.find(a => a.id === id);
     if (agent === undefined) throw new Error(`the fixture names an agent the catalog does not have: ${id}`);
-    writeScript(join(bin, agent.bin), sh(`${asideScript(said.aside)}case "$1" in\n  --version) printf '%s\\n' ${shellQuote(said.version)} ;;\n  *) printf '%s\\n' ${shellQuote(said.status)} ;;\nesac`));
+    writeScript(join(bin, agent.bin), sh(`${asideScript(said.aside)}${draftScript(said.draft)}case "$1" in\n  --version) printf '%s\\n' ${shellQuote(said.version)} ;;\n  *) printf '%s\\n' ${shellQuote(said.status)} ;;\nesac`));
   }
   const transports = new Map(
     here.servers.map(s => {

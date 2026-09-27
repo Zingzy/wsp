@@ -4,11 +4,11 @@
 // recorded in solari-poc/RESULTS.md.
 
 import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus, CommitDrafter } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { asideAnswer, asideCommand, forkCleanupCommand } from "./aside.js";
-import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
+import { draftForCommand, parseDraftFor, parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
@@ -122,6 +122,7 @@ export interface ClaudeAdapter {
   renameSession: SessionRenamer;
   /** Asks the CLI itself, in one print-mode turn, for a name for a thread it has just replied in. */
   titleFor: SessionTitleMaker;
+  draftFor: CommitDrafter;
   /** Answers a question on a fork of a session with no tools, the fork's file removed once the answer is read. */
   aside: SessionAsker;
   /** What every session's command is exported with; the one environment a turn on the machine gets. */
@@ -830,6 +831,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
         }),
       ).then(parseTitleFor),
+    draftFor: (ask, exec) =>
+      exec(
+        draftForCommand({
+          promptFile: ask.promptFile,
+          ...(ask.model !== undefined ? { model: ask.model } : {}),
+          ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
+        }),
+      ).then(parseDraftFor),
     aside,
     env,
   };

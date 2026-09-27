@@ -273,7 +273,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("!size-[22px]");
     expect(markup).toContain("size-3");
     expect(markup).toContain('aria-label="Collapse all folders"');
-    expect(markup).toContain('aria-label="Open diff"');
+    expect(markup).toContain('aria-label="Open changes"');
     expect(markup).toContain("1 changed file");
   });
 

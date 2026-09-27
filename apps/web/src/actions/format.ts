@@ -50,7 +50,7 @@ export const THREAD_WORDS = {
 
 export const FILE_WORDS = {
   open: "Open file",
-  showDiff: "Show in diff",
+  showDiff: "Show in Changes",
   copyPath: "Copy path",
 } as const;
 
@@ -207,7 +207,7 @@ export function renameNotTakenLine(harness: string, outcome: Exclude<SessionRena
 }
 
 export const FOLDER_OPENS_IN_TREE = "A folder opens in the tree";
-export const ONLY_FILES_HAVE_DIFFS = "Only a file has a diff";
+export const ONLY_FILES_HAVE_DIFFS = "Only a file has changes";
 
 export const NOTHING_SELECTED = "Nothing is selected";
 export const NO_CLIPBOARD_READ = "The clipboard cannot be read here";
@@ -219,7 +219,7 @@ export const SPLIT_LIMIT = `max ${MAX_TERMINALS_PER_GROUP} per group`;
 export const noSuchThreadLine = (): string => "That thread is not in this task; opened the task instead";
 
 /** Show in diff asked for a file the diff does not touch. */
-export const noDiffLine = (fileName: string, scopeLabel: string): string => `${fileName} has no diff in ${scopeLabel.toLowerCase()}`;
+export const noDiffLine = (fileName: string, scopeNoun: string): string => `${fileName} has no ${scopeNoun}`;
 
 /** A row button on the object's own row names the object: Forget api, New thread in api. */
 export const rowVerb = (verb: string, name: string): string => `${verb} ${name}`;
