@@ -8,7 +8,7 @@
 // and a subscription dies with the channel, so every live transition asks again.
 // This computer's own terminal, readings and processes ride a link of their
 // own, to its daemon by place.
-import { daemonVersionOf, HERE_PLACE_ID, readingRoad, workspaceKind, type DaemonLinkStatus } from "@wsp/protocol";
+import { HERE_PLACE_ID, readingRoad, workspaceKind, type DaemonLinkStatus } from "@wsp/protocol";
 import { getBrowser } from "../browser/model.js";
 import { provideDaemonHello, provideDaemonWire } from "../files/wire.js";
 import { errorText } from "../lib/utils.js";
@@ -138,7 +138,7 @@ export function wireTerminals(store: typeof useStore, opts: WiringOptions = {}):
               browser.feedEvent({ ...e, workspaceId: w.id });
               if (e.type === "port.close") useSignInStore.getState().portClosed(w.id, e.port);
             } else if (e.type === "browser.open") useSignInStore.getState().announce(w.id, e.url, e.port);
-            else if (e.type === "daemon.hello") provideDaemonHello(w.id, { root: e.root, version: daemonVersionOf(e) });
+            else if (e.type === "daemon.hello") provideDaemonHello(w.id, { root: e.root });
             else if (e.type === "sys.sample") getLive(w.id).feedSample(e);
             else if (e.type === "proc.snapshot") getProcs(w.id).feedSnapshot(e);
             else wt.feedEvent(e);

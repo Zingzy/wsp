@@ -56,15 +56,15 @@ describe("the wsp command on a thread's machine", () => {
       local: localWiring(join(dir, "user")),
       agents: { here: {}, wspMcp: { command: "wsp", args: ["mcp", SCOPED_MCP_ARG] } },
     });
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
     replies = [];
     closes = [];
-    const wsPort = handle.wsPort;
+    const port = handle.port;
     door = guestDoor({
       authorize: token => rt.devices.match(token).then(device => (device === undefined ? undefined : { kind: "device", device })),
-      hostUrl: () => `http://${LOOPBACK}:${wsPort}`,
+      hostUrl: () => `http://${LOOPBACK}:${port}`,
       kinds: { mcp: guestMcp(statePath), cli: guestCli(statePath, runningWsp()) },
     });
   });
@@ -173,7 +173,7 @@ describe("the wsp command a thread on this computer runs", () => {
       local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copyingFake()),
       agents: { here, wspMcp: { command: "wsp", args: ["mcp"] } },
     });
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt, here });
+    handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt, here });
   });
   afterEach(async () => {
     await handle?.close();
@@ -207,7 +207,7 @@ describe("the wsp command a thread on this computer runs", () => {
     const lead = await rt.sessions.start((await byName("mac")).id, { prompt: "start two children" });
     const threadId = lead.view().threadId!;
     const launch = held.envs[1]!;
-    expect(launch[HOST_URL_ENV]).toBe(`http://${LOOPBACK}:${handle!.wsPort}`);
+    expect(launch[HOST_URL_ENV]).toBe(`http://${LOOPBACK}:${handle!.port}`);
     const pair = { [HOST_URL_ENV]: launch[HOST_URL_ENV]!, [HOST_TOKEN_ENV]: launch[HOST_TOKEN_ENV]! };
 
     const made = await thread(pair, "new", "kid", "--json");

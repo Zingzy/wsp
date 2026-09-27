@@ -10,7 +10,7 @@ Set Height 1520
 Set Padding 56
 Set Theme { "name": "wsp", "background": "#0b0c10", "foreground": "#f5f6f8", "cursor": "#8fc9f5", "selection": "#1f2430", "black": "#0b0c10", "red": "#f07a7a", "green": "#62d99a", "yellow": "#e8c46a", "blue": "#8fc9f5", "magenta": "#c9a7f5", "cyan": "#8fe3e8", "white": "#c9ced8", "brightBlack": "#6b7280", "brightRed": "#f59a9a", "brightGreen": "#8fe8b6", "brightYellow": "#f2d68a", "brightBlue": "#b3dcf9", "brightMagenta": "#dcc6f9", "brightCyan": "#b0eef1", "brightWhite": "#f5f6f8" }
 Hide
-Type `wsp() { command wsp "$@" --state /tmp/wsp-shots/state.json --port 4401 --ws-port 4411; }`
+Type `wsp() { command wsp "$@" --state /tmp/wsp-shots/state.json --port 4401; }`
 Enter
 Type "clear"
 Enter

@@ -55,9 +55,7 @@ export interface ChatThreadHandle {
   readonly sending: boolean;
   /** True from a new-thread request until its first session.start: the next send must not resume the old session. */
   readonly fresh: boolean;
-  /** The harness session the next send resumes: the shown thread's last started turn, else, on an empty latest view, the workspace's remembered one, else, pinned, the one its session row carries; none while fresh. */
-  readonly resume: string | undefined;
-  /** The thread the next send names when it has no session to resume: the one the view shows, its launch having failed, so the runtime runs the message as that thread's first turn. None on a fresh view or an empty latest one, where the runtime opens a thread. */
+  /** The thread the next send goes to: the one the shown thread's last start opened, else, on an empty latest view, the thread of the workspace's remembered session, else, pinned, the one its session row carries, else the one the view shows, its launch having failed, so the runtime runs the message as that thread's first turn. None on a fresh view or an empty latest one with nothing remembered, where the runtime opens a thread. */
   readonly thread: string | undefined;
   /** The held thread's runtime id, else the pinned one, else the workspace id before the thread has one; keys what belongs to this thread outside the transcript. */
   readonly threadKey: string;
@@ -552,7 +550,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   const gaps = useStore(s => s.gaps);
   const remembered = useStore(s => s.workspaces.find(w => w.id === workspaceId)?.claudeSessionId);
   // The runtime stamps a row only once the harness announced its session, so a capped pinned thread resumes by its row and a dead one resumes nothing.
-  const rowSession = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.claudeSessionId);
+  const rowThread = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.threadId);
   const rowCwd = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.cwd);
   const viewKey = threadId === null ? workspaceId : `${workspaceId}/${threadId}`;
   const [state, setState] = useState<ThreadState>(EMPTY);
@@ -660,15 +658,14 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   );
   const startNewThread = useCallback(() => setState(s => ({ ...EMPTY, fresh: true, known: knowing(s.known, s.events), stray: s.stray })), []);
 
-  const resume = state.fresh ? undefined : (startedSession(state.events) ?? (fromRow ? (threadId === null ? remembered : rowSession) : undefined));
+  const thread = (state.fresh ? undefined : startedSession(state.events) !== undefined ? heldThreadId(state) : fromRow ? rowThread : undefined) ?? shownThread(state, threadId);
   return {
     view,
     hydrated: hydratedFor === viewKey,
     busy: state.sending !== null || view.running,
     sending: state.sending !== null,
     fresh: state.fresh,
-    resume,
-    thread: resume === undefined ? shownThread(state, threadId) : undefined,
+    thread,
     threadKey: heldThreadId(state) ?? threadId ?? workspaceId,
     named: state.named,
     appendUserTurn,

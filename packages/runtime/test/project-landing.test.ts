@@ -592,14 +592,13 @@ describe("a repo added by url on a computer the person owns", () => {
     expect(said).toBe(`landing-906 is no longer a project on default; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout, and the memory its agent keeps on that computer stays`);
   });
 
-  it("a record from before the add cloned it refuses a workspace, before a machine is asked for", async () => {
+  it("a record with no checkout refuses a workspace, before a machine is asked for", async () => {
     const backend = stubBackend();
     (backend as { projects?: string }).projects = "/wsp/projects";
     backend.capabilities.images = false;
     const store = memoryStore();
-    // The shape the first road left on a box: a repo recorded with no checkout, whose path is under the
-    // computer's own home.
-    await store.put("projects", "pr_old", { id: "pr_old", name: "spoo-landing", computer: "default", source: { kind: "git", url: "https://github.com/spoo-me/frontend" }, path: "/root/spoo-landing", createdAt: "2026-09-17T00:00:00.000Z" });
+    // A repo recorded with no checkout, whose path is under the computer's own home.
+    await store.put("projects", "pr_old", { id: "pr_old", name: "spoo-landing", computer: "default", source: { kind: "git", url: "https://github.com/spoo-me/frontend" }, path: "/root/spoo-landing", remote: "https://github.com/spoo-me/frontend", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/root/.claude-cfg/projects/-root-spoo-landing/memory", createdAt: "2026-09-17T00:00:00.000Z" });
     const root = mkdtempSync(join(tmpdir(), "wsp-add-old-"));
     roots.push(root);
     const rt = createRuntime({ backend, store, adapters: {}, local: fakeLocal(root) });

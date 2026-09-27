@@ -137,7 +137,7 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       const store = memoryStore();
       await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
       const runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath) });
-      handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime });
+      handle = await serve(captured(), { port: 0, statePath, webDir, runtime });
     });
     afterEach(async () => {
       await handle?.close();

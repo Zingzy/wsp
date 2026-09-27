@@ -9,8 +9,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpListener;
 use wsp_mcp::{Args, Env};
 
 /// A wsp that writes down how it was run and then does what `body` says.
@@ -40,18 +38,10 @@ async fn brings_up_the_wsp_it_was_handed_and_answers_once_that_host_serves() {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state").join("state.json");
     let empty = r#"{"id":1,"ok":true,"places":[]}"#.to_owned();
-    let ws_port =
+    let port =
         common::host("started-token", BTreeMap::from([("places.list".to_owned(), empty.clone()), ("cost.spend".to_owned(), empty)])).await;
-    // The app's port answers any request with a status line, which is all the probe asks of it.
-    let app = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let app_port = app.local_addr().unwrap().port();
-    tokio::spawn(async move {
-        while let Ok((mut tcp, _)) = app.accept().await {
-            let _ = tcp.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n").await;
-        }
-    });
     // The host it starts takes the lock under this process's pid, which is alive, and writes its token beside it.
-    let lock = json!({ "pid": std::process::id(), "port": app_port, "wsPort": ws_port, "startedAt": "2026-09-27T00:00:00.000Z" });
+    let lock = json!({ "pid": std::process::id(), "port": port, "startedAt": "2026-09-27T00:00:00.000Z" });
     let folder = state.parent().unwrap().display().to_string();
     let wsp = stub(
         dir.path(),

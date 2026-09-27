@@ -38,7 +38,7 @@ function computer(): { user: string; own: string; moved: string } {
 const checkoutAt = (dir: string): void => writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "wsp", private: true })}\n`);
 
 const lockOn = (home: string, pid: number): void =>
-  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid, port: 4400, wsPort: 4410, address: "127.0.0.1", startedAt: "2026-09-11T10:00:00.000Z" }));
+  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid, port: 4400, address: "127.0.0.1", startedAt: "2026-09-11T10:00:00.000Z" }));
 
 /** A pid that was real a moment ago and is not alive now. */
 function deadPid(): number {

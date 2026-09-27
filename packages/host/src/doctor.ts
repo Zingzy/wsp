@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, clientWords, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_WORKSPACE_PATH, placeDaemonPaths, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, DoctorLineEvent, EXIT_CODES, exitClassOf, hereDaemonBehindLine, HERE_PLACE_ID, isJoinedComputer, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, guestWspShim, LOOPBACK, WSP_WORKSPACE_APPARMOR_PATH, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, PLACE_WORKSPACE_PATH, placeDaemonPaths, placeOwnedPaths, rootsPathIn, shellQuote, workFolderIn, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -349,9 +349,9 @@ export function guestPlace(supervisor: DaemonSupervisor): DaemonPlace {
  * that machine reads it. Nothing here needs root, and nothing on the machine listens beyond its own loopback.
  * Where each file sits is the protocol's rule, since the same layout is read back off the machine. */
 export function sshDaemonPlace(login: { home: string; path: string }): DaemonPlace {
-  const at = sshDaemonPaths(login.home);
+  const at = placeDaemonPaths(login.home);
   return {
-    kind: "ssh",
+    kind: "place",
     dir: at.dir,
     bundle: at.bundle,
     inbox: at.inbox,
@@ -397,7 +397,6 @@ export function joinedPlace(login: { home: string; path: string }, join: Omit<Da
   const at = placeDaemonPaths(login.home);
   return {
     ...sshDaemonPlace(login),
-    kind: "place",
     // Root, and the daemon is the system's: a computer you own runs workspaces, which needs root anyway, so its
     // agent is a service of the machine rather than of one login that has to be told to linger.
     preflight: [...DAEMON_PREFLIGHT, NEEDS_ROOT_CHECK],
@@ -809,48 +808,6 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
   ].join("\n");
 }
 
-/** Takes the daemon off a machine and everything wsp kept beside it: the unit stopped, disabled and removed, the
- * bundle, the token, the inbox, the port file and the browser shim, and the one line wsp added to the person's
- * own login file, which would otherwise print an error on every login for a file that is gone. What wsp put on a
- * machine somebody already owns goes when the workspace that put it there does, so the machine is left as wsp
- * found it. Nothing here fails the delete: a machine that will not answer is a machine whose record goes anyway. */
-export function removeDaemonScript(place: DaemonPlace): string {
-  const systemctl = systemctlIn(place);
-  return [
-    ...place.exportEnv,
-    `${systemctl} disable --now ${DAEMON_UNIT} 2>/dev/null || true`,
-    `rm -f ${sh(place, place.unitPath)}`,
-    `${systemctl} daemon-reload 2>/dev/null || true`,
-    `rm -rf ${daemonOwnedPaths(place).map(path => sh(place, path)).join(" ")}`,
-    `rm -f ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}${place.wsp === "shim" ? ` ${sh(place, GUEST_WSP_PATH)}` : ""}`,
-    // The profile the deploy loaded on a root install goes with the binary it names: a profile left loaded for a
-    // path nothing is at is something of wsp's still on a computer the remove said it left as it found it. Only on
-    // the scope that could write it, and unloaded before the file goes, since the kernel holds it by name.
-    ...(place.scope === "system" ? apparmorOffStep() : []),
-    // This sweep runs on every machine recorded over ssh, and a machine whose deploy never landed has a login
-    // file wsp never wrote to, so the step reads their file before it opens it.
-    ...(place.profileSource === undefined ? [] : [unsourceStep(place, place.profileSource)]),
-    `echo ${DAEMON_GONE_LINE}`,
-  ].join("\n");
-}
-
-/** Everything wsp put on the machine, off the place that named each one: nothing is guessed and no path is
- * written twice. wsp's own folder under somebody's home is not swept whole, since other roads of wsp keep things
- * beside the daemon in it. */
-export function daemonOwnedPaths(place: DaemonPlace): string[] {
-  return [
-    place.dir,
-    place.bundle,
-    place.inbox,
-    place.tokenPath,
-    place.rootsPath,
-    place.profileFile,
-    place.openSocket,
-    place.runDir,
-    ...(place.portFile !== undefined ? [place.portFile] : []),
-  ];
-}
-
 /** What a failed add's undo answers with when a place file stands that neither the read nor this add's join put
  * there: another add took the box meanwhile. */
 export const ADD_TAKEN_LINE = "WSP_ADD_TAKEN";
@@ -955,15 +912,6 @@ export function addUndoScript(place: DaemonPlace, writes: readonly AddWrite[], f
     ...checked.map(w => (w.as === "login" ? `[ -e ${sh(place, w.path)} ] && [ ! -s ${sh(place, w.path)} ] && left=1` : `${stillThere(place, w, systemctl)} && left=1`)),
     `[ "$left" = 0 ] && echo ${DAEMON_GONE_LINE}`,
   ].join("\n");
-}
-
-/** Runs that removal and says what the machine answered, for the one caller that has to report a machine which
- * would not let go of it. */
-export async function removeDaemon(machine: Machine, place: DaemonPlace): Promise<void> {
-  const res = await machine.run(removeDaemonScript(place), { deadlineMs: 120_000 });
-  if (res.exitCode !== 0 || !res.stdout.includes(DAEMON_GONE_LINE)) {
-    throw new Error(`the daemon would not come off ${machine.id}: ${res.stdout.slice(-200)} ${res.stderr.slice(-200)}`.trim());
-  }
 }
 
 /** What must hold on the machine, asked on its own before a single byte of wsp's lands there: a machine that

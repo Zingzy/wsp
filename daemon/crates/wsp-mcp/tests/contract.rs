@@ -27,9 +27,9 @@ struct Case {
 }
 
 /// A state folder a host on this port serves: the lock naming this process, which is alive, and the token beside it.
-fn served_state(dir: &Path, ws_port: u16, token: &str) -> std::path::PathBuf {
+fn served_state(dir: &Path, port: u16, token: &str) -> std::path::PathBuf {
     let state = dir.join("state.json");
-    let lock = json!({ "pid": std::process::id(), "port": 1, "wsPort": ws_port, "startedAt": "2026-09-27T00:00:00.000Z" });
+    let lock = json!({ "pid": std::process::id(), "port": port, "startedAt": "2026-09-27T00:00:00.000Z" });
     std::fs::write(dir.join("host.lock"), lock.to_string()).unwrap();
     std::fs::write(dir.join("host-token"), format!("{token}\n")).unwrap();
     state

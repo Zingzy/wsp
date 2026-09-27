@@ -955,7 +955,7 @@ mod tests {
         // And the root the daemon was given is part of that reading: under one of the directories every
         // workspace overlays, the open refuses it, so the row says why and carries no copy word rather than
         // reading ready and refusing every create.
-        let under = std::path::Path::new("/var/lib/wsp-under-a-lower");
+        let under = std::path::Path::new("/var/wsp-under-a-lower");
         let bad = place_report(&ReportInput {
             file: &file,
             home: home.path(),

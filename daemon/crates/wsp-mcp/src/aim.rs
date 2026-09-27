@@ -43,13 +43,12 @@ struct Via {
     host_id: String,
 }
 
-/// The host whose lock names a state file: its pid, the ports it bound and the address it bound them on.
+/// The host whose lock names a state file: its pid, the port it bound and the address it bound it on.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Lock {
     pub pid: i32,
     pub port: u16,
-    pub ws_port: u16,
     #[serde(default)]
     pub address: Option<String>,
     /// Read so a lock without it is no lock, as the command line's reader holds it.
@@ -176,8 +175,9 @@ pub fn here_door(state: &Path) -> Result<(String, String, String), Failure> {
     let Some(token) = std::fs::read_to_string(&token_path).ok().map(|t| t.trim().to_owned()) else {
         return Err(Failure::auth(fill(&words.host_token_missing, &[("path", &token_path.to_string_lossy())])));
     };
-    let at = authority(&dial_address(&lock), lock.ws_port);
-    Ok((format!("ws://{at}"), token, at))
+    let at = authority(&dial_address(&lock), lock.port);
+    let url = ws_url_of(&format!("http://{at}")).unwrap_or_default();
+    Ok((url, token, at))
 }
 
 /// Where a tool on this computer dials the host a lock names: the address it bound, and loopback for the wildcard.
@@ -376,11 +376,8 @@ mod tests {
         std::fs::write(state.parent().unwrap().join("relay.json"), r#"{"relayUrl":"r","hostId":"h-cellar","token":"t"}"#).unwrap();
         assert!(matches!(aimed(&state, &pick(None, empty)).unwrap(), Aim::Alias { alias, .. } if alias == "attic"));
         // A lock whose process is alive: this computer, ahead of the account.
-        std::fs::write(
-            state.parent().unwrap().join("host.lock"),
-            format!(r#"{{"pid":{},"port":1,"wsPort":2,"startedAt":"x"}}"#, std::process::id()),
-        )
-        .unwrap();
+        std::fs::write(state.parent().unwrap().join("host.lock"), format!(r#"{{"pid":{},"port":1,"startedAt":"x"}}"#, std::process::id()))
+            .unwrap();
         assert_eq!(aimed(&state, &pick(None, empty)).unwrap(), Aim::Here);
         // The launch's pair goes ahead of the lock; a non-loopback pair with no key is refused.
         let launched: &'static Env = Box::leak(Box::new(

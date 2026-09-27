@@ -51,8 +51,7 @@
             "type": "string",
             "enum": [
               "cloud",
-              "local",
-              "ssh"
+              "local"
             ]
           },
           "golden": {
