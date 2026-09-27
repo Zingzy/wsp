@@ -6,6 +6,7 @@
 // helpers here for a refusal), never off its words, so every door classes
 // the same failure the same way.
 import { z } from "zod";
+import { CLOUD_ENV } from "./env.js";
 import { refusalLine } from "./format.js";
 
 export const ExitClass = z.enum(["ok", "provider", "auth", "usage"]);
@@ -17,7 +18,7 @@ export const EXIT_CODES: Readonly<Record<ExitClass, number>> = { ok: 0, provider
 /** What each class means, in the words the skill, the help and the instructions quote. */
 export const EXIT_WORDS: Readonly<Record<ExitClass, string>> = {
   ok: "it did what its line says; with --json stdout holds the answer",
-  provider: "the host, the runtime, Solari or the machine refused or failed",
+  provider: "the host, the runtime, a provider or the machine refused or failed",
   auth: "no key, no sign-in, or the host refused the token",
   usage: "the line was refused before anything ran: a missing argument, an unknown flag or a value nothing takes",
 };
@@ -84,6 +85,9 @@ export function keptSaid(said: string): string {
 
 /** A line refused before anything ran: a missing argument, a flag or a value nothing takes. */
 export const usageRefusal = (happened: string, fix: string): Error => refusal(happened, fix, "usage");
+
+/** A line that only means something on a cloud, typed while the cloud is off: one sentence, naming the flag. */
+export const cloudOffRefusal = (line: string): Error => refusal(`${line} needs the cloud, which is off on this computer:`, `start the host with ${CLOUD_ENV}=1 to turn it on.`, "usage");
 
 /** No key, no sign-in, or a token the host refused. */
 export const authRefusal = (message: string): Error => Object.assign(new Error(message), { kind: "auth" });

@@ -80,7 +80,7 @@ export const ADD_PROJECT_WORDS = {
   noFolders: "No folders here.",
   noMatch: "No repo matches.",
   added: "added",
-  noCloneHere: (here: string) => onceNamed(here, h => `A repository address is cloned on a box, Solari or ASCII. Projects on ${h} are folders you already have.`),
+  noCloneHere: (here: string) => onceNamed(here, h => `A repository address is cloned on a computer you added. Projects on ${h} are folders you already have.`),
   cloneLine: (url: string, on: string) => `Clone ${url} on ${on}`,
   boxSays: (name: string) => `Repos on ${name} show here soon. Paste a repository address above to clone it there.`,
   providerSays: (name: string) => `${name} clones a project from its repository address. Paste one above.`,

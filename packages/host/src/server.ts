@@ -297,7 +297,7 @@ function describeSpared(m: SparedMachine): string {
   const kind = kindOf(m.labels, m.builder);
   const cost = describeCost(m.rateUsdPerHour, m.ageMs);
   if (m.whose === "foreign") {
-    return `reap: left alone ${m.id}: ${kind} from another wsp setup (owner ${m.owner}), ${describeAge(m.ageMs)}, ${cost}; kill it from the Solari console if it is yours and forgotten`;
+    return `reap: left alone ${m.id}: ${kind} from another wsp setup (owner ${m.owner}), ${describeAge(m.ageMs)}, ${cost}; kill it from its provider's console if it is yours and forgotten`;
   }
   const who = m.whose === "own" ? `${kind} from this setup that no record claims` : `${kind} with no owner`;
   // An own workspace is recorded once its create grace is over; an own builder or smoke fork is killed then.

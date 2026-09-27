@@ -17,8 +17,9 @@ import { agentPage, cli, COMMAND_LINES, commandPage, COMMANDS_FOR_HELP, HELP, HO
 /** One command's own help, as `wsp <words> --help` prints it. */
 const commandPageFor = (words: string): string => commandPage(words, COMMANDS_FOR_HELP[words]!);
 import { mcpServer } from "../src/mcp.js";
+import { CLOUD_ON } from "../src/cloud.js";
 import { INSTRUCTIONS, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, WSP_SKILL } from "../src/skill.js";
-import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, FLAG_WORDS, HELP_WIDTH, VERBS, flagList, flagSays, hasTool, optionalValues, openingOf, ownFlagsOf, toolName, verbPage, type Flags } from "../src/verbs.js";
+import { ALL_VERBS, CLI_VERBS, COMMON, COMMON_FLAG_WORDS, FLAG_WORDS, HELP_WIDTH, VERBS, flagList, flagSays, hasTool, optionalValues, openingOf, ownFlagsOf, toolName, verbPage, type Flags } from "../src/verbs.js";
 
 interface Tool {
   name: string;
@@ -318,7 +319,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "servers signin",
       "status",
       "up",
-    ]);
+    ].filter(words => CLOUD_ON || words !== "image export"));
     // A tool with no command line of its own is held to a stated reason: recording a project is the one, since the
     // command line's `wsp add` also hands out a join code and takes a provider's key, neither of which is an agent's.
     expect(VERBS.filter(v => "toolOnly" in v).map(v => v.name)).toEqual(["projects add"]);
@@ -400,7 +401,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
   it("every flag that shapes a serving host is in the help and in the skill, so a row added to the table is a word a person can read", () => {
     // The table drives the parse and the unit wsp up --service writes, so a row added is read and travels; without
     // this, it would do both and be named nowhere a person or an agent looks.
-    for (const flag of SERVE_FLAGS) {
+    for (const flag of SERVE_FLAGS.filter(f => CLOUD_ON || f.cloud !== true)) {
       const readers = SHARED_FLAGS.filter(f => f.name === flag.name).flatMap(f => f.on);
       expect(readers, `--${flag.name} is read by some command`).not.toEqual([]);
       for (const words of readers) expect(commandPageFor(words), `--${flag.name} in wsp ${words} --help`).toMatch(new RegExp(`--${flag.name}\\b`));
@@ -417,6 +418,14 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       for (const name of ownFlagsOf(verb)) {
         expect(flagSays(verb.name, name), `wsp ${verb.name} --${name} has a line`).toMatch(/\S/);
         expect(page, `wsp ${verb.name} --help names --${name}`).toContain(`--${name}`);
+        keys.delete(`${verb.name} ${name}`);
+        keys.delete(name);
+      }
+    }
+    // A cloud verb's lines stand with the cloud off too: the verb is still in the table, only not answered.
+    for (const verb of ALL_VERBS) {
+      if (!("run" in verb)) continue;
+      for (const name of ownFlagsOf(verb)) {
         keys.delete(`${verb.name} ${name}`);
         keys.delete(name);
       }
@@ -481,7 +490,8 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
         expect(option!.multiple, `wsp ${line.words} reads ${how} as one value where ${tool.name} takes a list`).toBe(true);
       }
     }
-    expect([...carried].sort()).toEqual(Object.keys(LISTS_ON_THE_COMMAND_LINE).sort());
+    const answered = Object.keys(LISTS_ON_THE_COMMAND_LINE).filter(key => COMMAND_LINES.some(c => key.startsWith(`${c.words} `)));
+    expect([...carried].sort()).toEqual(answered.sort());
   });
 
   it("a --notify typed once and a --notify typed again both reach the start as an array of targets, the one shape the protocol takes", () => {
@@ -494,7 +504,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       ["fork", ["alpha", "--send", "build it", "--notify", "me"], ["me"]],
       ["fork", ["alpha", "--send", "build it", "--notify", "me", "--notify", "1a2b3c4d"], ["me", "1a2b3c4d"]],
     ];
-    for (const [words, argv, targets] of cases) {
+    for (const [words, argv, targets] of cases.filter(([words]) => CLI_VERBS.some(v => v.name === words))) {
       const typed = `wsp ${words} ${argv.join(" ")}`;
       const entry = CLI_VERBS.find(v => v.name === words)!;
       const { values } = parseArgs({ args: argv, options: { ...COMMON, ...entry.options }, allowPositionals: true });

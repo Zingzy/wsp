@@ -21,7 +21,7 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, computerOffline, creationAwaits, workspaceState, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, computerOffline, creationAwaits, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED, THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -487,7 +487,7 @@ export function WorkspaceSidebar() {
         </p>
       ) : offline ? (
         <p data-sidebar-offline className={cn(ROW_PROSE_CLASS, "px-2 pt-1 leading-4")}>
-          {PROVIDER_UNREACHED_LINE}
+          {MACHINE_UNREACHED_LINE}
         </p>
       ) : null}
     </div>

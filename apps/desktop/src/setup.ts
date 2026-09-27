@@ -21,7 +21,7 @@ const refuse = (q: string): Promise<string> => Promise.reject(new Error(`this wi
  * nothing asked: this window has no terminal, and a missing provider key is not a missing answer here, it is the
  * road on which this computer alone is the workspace. */
 async function findKeys(statePath: string, sources?: KeySources): Promise<LoadedKeys> {
-  return loadKeys({ ...silent, ask: refuse, askSecret: refuse }, sources ?? keySources(process.env, statePath), { anthropic: false, noSolari: "local" });
+  return loadKeys({ ...silent, ask: refuse, askSecret: refuse }, sources ?? keySources(process.env, statePath), { anthropic: false, noProviderKey: "local" });
 }
 
 /** The state file read once before anything is made, then the runtime this window serves over: the provider picked

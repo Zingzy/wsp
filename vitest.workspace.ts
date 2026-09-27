@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TEST_ENV } from "./vitest.env.js";
+import { CLOUD_ENV } from "./packages/protocol/src/env.js";
 
 // Paths are pinned to this file, not the cwd, so a run started inside one package sees the same tree as a root run.
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
@@ -40,6 +41,38 @@ export default [
       environment: "node",
       // Anything a test writes to the OS-local config dir (the install id) lands here, never in the developer's own.
       env: { XDG_CONFIG_HOME: join(tmpdir(), "wsp-test-config"), ...TEST_ENV },
+    },
+  },
+  {
+    // The cloud on: the node project runs every file with it off, and these run again with it on, the contract
+    // between the command line, the tools and the skill and every file with a case on the cloud's own road.
+    root: here("./"),
+    plugins: [markdownText()],
+    resolve: { alias },
+    test: {
+      name: "cloud",
+      include: [
+        "cloud",
+        "parity",
+        "skill",
+        "contract",
+        "verbs",
+        "mcp",
+        "mcp-install",
+        "places",
+        "service",
+        "up",
+        "host-lock",
+        "servers-acts",
+        "keyless",
+        "init-local",
+        "keys",
+        "providers",
+        "key-saved-place",
+        "provider-swap",
+      ].map(name => `packages/host/test/${name}.test.ts`),
+      environment: "node",
+      env: { XDG_CONFIG_HOME: join(tmpdir(), "wsp-test-config"), ...TEST_ENV, [CLOUD_ENV]: "1" },
     },
   },
   here("./apps/web/vite.config.ts"),

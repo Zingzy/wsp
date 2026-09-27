@@ -29,6 +29,7 @@ import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
 import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, lastingAgent, launchedScript, launchedScripts, projectBundler, sayingAgent, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 runsFromItsOwnFolder();
 
@@ -206,7 +207,7 @@ describe("wsp verbs over the host", () => {
     expect(again.io.streamed).toBe("");
   });
 
-  it("new and fork take --size as <cpu>x<memGb>, which reaches the create's size; a size the provider does not offer, or no size at all, is refused in one line naming the list, and nothing is minted", async () => {
+  it.runIf(CLOUD_ON)("new and fork take --size as <cpu>x<memGb>, which reaches the create's size; a size the provider does not offer, or no size at all, is refused in one line naming the list, and nothing is minted", async () => {
     const big = await run("new", "big", "--size", "2x8");
     expect(big.code).toBe(0);
     expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
@@ -249,7 +250,7 @@ describe("wsp verbs over the host", () => {
     expect(backend.machines.at(-1)!.spec.engine).toBeUndefined();
   });
 
-  it("a fork the provider refuses at the machine cap is one line naming the workspaces holding the slots, never the provider's sentence", async () => {
+  it.runIf(CLOUD_ON)("a fork the provider refuses at the machine cap is one line naming the workspaces holding the slots, never the provider's sentence", async () => {
     await run("new", "first");
     await run("new", "t-cap");
     const create = backend.create.bind(backend);
@@ -528,7 +529,7 @@ describe("wsp verbs over the host", () => {
     expect(await rt.workspaces.list()).toEqual([]);
   });
 
-  it("fork makes a sibling from the source's own golden version, by name or id, and --send opens its first thread", async () => {
+  it.runIf(CLOUD_ON)("fork makes a sibling from the source's own golden version, by name or id, and --send opens its first thread", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
     const plain = await run("fork", "alpha");
@@ -598,7 +599,7 @@ describe("wsp verbs over the host", () => {
     expect(listed.io.lines.join("\n")).toContain("Ticket 411 review");
   });
 
-  it("fork, run, exec and wake refuse a workspace whose machine is gone, quoting the provider, with no waking line", async () => {
+  it.runIf(CLOUD_ON)("fork, run, exec and wake refuse a workspace whose machine is gone, quoting the provider, with no waking line", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
     await handle!.close();
@@ -625,7 +626,7 @@ describe("wsp verbs over the host", () => {
     expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "gone"]]);
   });
 
-  it("rebuild is the road out of gone: a new machine under the same workspace, its id and state printed; a machine that answers is refused in the row's own words", async () => {
+  it.runIf(CLOUD_ON)("rebuild is the road out of gone: a new machine under the same workspace, its id and state printed; a machine that answers is refused in the row's own words", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
     const refused = await run("rebuild", "alpha");
@@ -663,7 +664,7 @@ describe("wsp verbs over the host", () => {
     expect(extra.io.errors).toEqual(["wsp rebuild takes one workspace. usage: wsp rebuild <workspace>"]);
   });
 
-  it("rebuild refuses a workspace whose machine stopped answering in the words the row shows, not in the words for one that answers", async () => {
+  it.runIf(CLOUD_ON)("rebuild refuses a workspace whose machine stopped answering in the words the row shows, not in the words for one that answers", async () => {
     await run("new", "dark");
     // Every cloud machine has an edge route, and a prompt 502 on it is the edge dialling the guest and finding
     // nothing on the daemon's port: the machine runs, the record reads running, and nothing answers on it.
@@ -722,7 +723,7 @@ describe("wsp verbs over the host", () => {
     expect(view.image.pins).toEqual(pins);
   });
 
-  it("wsp image build refuses in one line for a place this host has not got and a place that takes no copy; the place it forks on is a place like any other", async () => {
+  it.runIf(CLOUD_ON)("wsp image build refuses in one line for a place this host has not got and a place that takes no copy; the place it forks on is a place like any other", async () => {
     // Three places over one host: the one it forks on, one more that could build, and this computer, which forks
     // nothing and copies no disk.
     const elsewhere = stubBackend();
@@ -755,7 +756,7 @@ describe("wsp verbs over the host", () => {
     expect(usage.io.errors.join("")).toContain("wsp image build takes one place.");
   });
 
-  it("wsp image build on a host that has sealed nothing says so, whatever place is named", async () => {
+  it.runIf(CLOUD_ON)("wsp image build on a host that has sealed nothing says so, whatever place is named", async () => {
     const elsewhere = stubBackend();
     await restartHost({}, memoryStore(), {
       wired: "default",
@@ -768,7 +769,7 @@ describe("wsp verbs over the host", () => {
     expect(elsewhere.machines).toEqual([]);
   });
 
-  it("wsp image export refuses a record with no sign-ins to export, and says so rather than writing an empty file", async () => {
+  it.runIf(CLOUD_ON)("wsp image export refuses a record with no sign-ins to export, and says so rather than writing an empty file", async () => {
     env[IMAGE_PASSPHRASE_ENV] = "a-long-enough-passphrase";
     const dest = join(dir, "image.wsp");
     const refused = await run("image", "export", dest);
@@ -777,7 +778,7 @@ describe("wsp verbs over the host", () => {
     expect(existsSync(dest)).toBe(false);
   });
 
-  it("wsp image export writes one file whose header parses and whose body the passphrase opens back to the vault", async () => {
+  it.runIf(CLOUD_ON)("wsp image export writes one file whose header parses and whose body the passphrase opens back to the vault", async () => {
     const tar = Buffer.from("the person's sign-ins as the seal took them");
     const record = RECORD(tar.length);
     await store.put("images", "default", record);
@@ -797,7 +798,7 @@ describe("wsp verbs over the host", () => {
     expect(done.io.lines.at(-1)).toContain(dest);
   });
 
-  it("wsp image export asks the passphrase twice at a terminal, and refuses when the second does not match", async () => {
+  it.runIf(CLOUD_ON)("wsp image export asks the passphrase twice at a terminal, and refuses when the second does not match", async () => {
     const tar = Buffer.from("the person's sign-ins as the seal took them");
     await store.put("images", "default", RECORD(tar.length));
     await store.putBlob("image-vaults", "default@v1", tar);
@@ -828,7 +829,7 @@ describe("wsp verbs over the host", () => {
     expect(asks).toEqual(["A passphrase for this export", "The same passphrase again"]);
   });
 
-  it("wsp image export aimed at a host on another computer is answered here, and nothing of this computer's crosses to it", async () => {
+  it.runIf(CLOUD_ON)("wsp image export aimed at a host on another computer is answered here, and nothing of this computer's crosses to it", async () => {
     // A host this computer really holds, so the answer is the sentence and not the refusal for a name nobody knows.
     // The aim reads the home off the run's own environment, which this file hands every verb.
     env["WSP_HOME"] = join(dir, "home");
@@ -852,13 +853,13 @@ describe("wsp verbs over the host", () => {
     expect(CLI_VERBS.filter(v => "hostSide" in v && v.hostSide !== undefined).map(v => v.name)).toEqual(["agents key", "image export"]);
   });
 
-  it("wsp image export with nobody at the terminal and no passphrase in the environment refuses before anything is read", async () => {
+  it.runIf(CLOUD_ON)("wsp image export with nobody at the terminal and no passphrase in the environment refuses before anything is read", async () => {
     const refused = await run("image", "export", join(dir, "image.wsp"));
     expect(refused.code).toBe(EXIT_CODES.usage);
     expect(refused.io.errors.at(-1)).toContain(IMAGE_PASSPHRASE_ENV);
   });
 
-  it("wsp image export refuses a passphrase under the minimum, and a destination that already holds something", async () => {
+  it.runIf(CLOUD_ON)("wsp image export refuses a passphrase under the minimum, and a destination that already holds something", async () => {
     env[IMAGE_PASSPHRASE_ENV] = "short";
     const tooShort = await run("image", "export", join(dir, "image.wsp"));
     expect(tooShort.code).toBe(EXIT_CODES.usage);
@@ -872,7 +873,7 @@ describe("wsp verbs over the host", () => {
     expect(readFileSync(taken, "utf8")).toBe("mine");
   });
 
-  it("image move puts the workspace on the newest version, says up front what moves, and names the files of the image's own it kept", async () => {
+  it.runIf(CLOUD_ON)("image move puts the workspace on the newest version, says up front what moves, and names the files of the image's own it kept", async () => {
     const sha = (c: string): string => c.repeat(64);
     const v1 = { ...head(SEALED_GOLDEN), owned: [{ path: ".zshrc", sha256: sha("1") }, { path: ".gitconfig", sha256: sha("2") }] };
     await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [v1] });
@@ -908,7 +909,7 @@ describe("wsp verbs over the host", () => {
     expect(extra.io.errors.at(-1)).toBe("wsp image move takes one workspace. usage: wsp image move <workspace>");
   });
 
-  it("fork's help says it makes a new machine from the source's image version, on the agent page and in wsp fork --help", async () => {
+  it.runIf(CLOUD_ON)("fork's help says it makes a new machine from the source's image version, on the agent page and in wsp fork --help", async () => {
     const line = "a new machine from the source's image version";
     expect(agentPage()).toContain(line);
     const { code, io } = await run("fork", "--help");
@@ -1405,7 +1406,7 @@ describe("wsp verbs over the host", () => {
     expect(await running.ended).toBe(0);
   });
 
-  it("a name nothing here holds is refused before anything ran, on every verb that resolves one: the usage class, never the provider's", async () => {
+  it.runIf(CLOUD_ON)("a name nothing here holds is refused before anything ran, on every verb that resolves one: the usage class, never the provider's", async () => {
     await run("new", "alpha");
     await run("run", "alpha", "build it");
     const folder = join(dir, "here");
@@ -1691,7 +1692,7 @@ describe("wsp verbs over the host", () => {
     expect(await rt.sessions.list()).toHaveLength(1);
   });
 
-  it("fork --send under an agent the host has no adapter for is refused naming the agents it has, and no machine is minted", async () => {
+  it.runIf(CLOUD_ON)("fork --send under an agent the host has no adapter for is refused naming the agents it has, and no machine is minted", async () => {
     await run("new", "alpha");
     const refused = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--agent", "gemini");
     expect(refused.code).toBe(3);
@@ -1701,7 +1702,7 @@ describe("wsp verbs over the host", () => {
     expect(await rt.sessions.list()).toEqual([]);
   });
 
-  it("an empty or whitespace task or message is refused in words by run, fork --send and send; no machine is minted or woken and nothing starts", async () => {
+  it.runIf(CLOUD_ON)("an empty or whitespace task or message is refused in words by run, fork --send and send; no machine is minted or woken and nothing starts", async () => {
     await run("new", "alpha");
     await run("run", "alpha", "first");
     const [row] = await rt.sessions.list();
@@ -2089,7 +2090,7 @@ describe("wsp verbs over the host", () => {
     }
   });
 
-  it("a copy of a folder here takes none of the words a fork takes, and says which to drop", async () => {
+  it.runIf(CLOUD_ON)("a copy of a folder here takes none of the words a fork takes, and says which to drop", async () => {
     const folder = realpathSync(mkdtempSync(join(dir, "repo-flags-")));
     execFileSync("git", ["init", "-q", folder]);
     const here = await projectOn(rt, HERE_PLACE_ID, folder);
@@ -2139,7 +2140,7 @@ describe("wsp verbs over the host", () => {
     expect(extra.io.errors[0]).toMatch(/^wsp projects takes no positional arguments/);
   });
 
-  it("fork --send --cwd starts the first thread in that folder; without it, in the project the fork holds", async () => {
+  it.runIf(CLOUD_ON)("fork --send --cwd starts the first thread in that folder; without it, in the project the fork holds", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
     const picked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--cwd", "/root/work/site");
@@ -2154,7 +2155,7 @@ describe("wsp verbs over the host", () => {
     expect(other.project.id).toBe(alpha!.project.id);
   });
 
-  it("--model, --effort and --access on run, fork --send and send reach the start as the fields the composer sends; a new thread without them runs the catalog's defaults, the ones the composer shows", async () => {
+  it.runIf(CLOUD_ON)("--model, --effort and --access on run, fork --send and send reach the start as the fields the composer sends; a new thread without them runs the catalog's defaults, the ones the composer shows", async () => {
     await run("new", "alpha");
     const picked = await run("run", "alpha", "--model", "claude-sonnet-5", "--effort", "low", "--access", "plan", "review it");
     expect(picked.code).toBe(0);
@@ -2209,7 +2210,7 @@ describe("wsp verbs over the host", () => {
     expect(markedDefault(shown.permissionModes)?.value).toBe("bypassPermissions");
   });
 
-  it("a model, effort or access mode the agent's catalog does not list is refused with that list, in the composer's words, and nothing starts", async () => {
+  it.runIf(CLOUD_ON)("a model, effort or access mode the agent's catalog does not list is refused with that list, in the composer's words, and nothing starts", async () => {
     await run("new", "alpha");
     const model = await run("run", "alpha", "--model", "claude-haiku-4-5", "review it");
     expect(model.code).toBe(3);
@@ -2275,7 +2276,7 @@ describe("wsp verbs over the host", () => {
     expect(claude.starts.map(s => [s.model, s.effort])).toEqual([["claude-opus-5", "high"]]);
   });
 
-  it("checks a pick against the workspace's own machine, so a model only that machine knows is taken here as the app takes it", async () => {
+  it.runIf(CLOUD_ON)("checks a pick against the workspace's own machine, so a model only that machine knows is taken here as the app takes it", async () => {
     await run("new", "alpha");
     // A machine routed to another model provider: its codex names a model no table carries, and the app's composer
     // takes it because sessions.start checks the probed catalog. The command line has to agree with the app.
@@ -2297,7 +2298,7 @@ describe("wsp verbs over the host", () => {
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha"]);
   });
 
-  it("a --cwd that is not absolute is refused with the usage line before anything is created, started or dialled; fork's --cwd needs --send", async () => {
+  it.runIf(CLOUD_ON)("a --cwd that is not absolute is refused with the usage line before anything is created, started or dialled; fork's --cwd needs --send", async () => {
     await run("new", "alpha");
     const relative = await run("run", "alpha", "--cwd", "packages/host", "look here");
     expect(relative.code).toBe(3);
@@ -2673,7 +2674,7 @@ describe("wsp verbs over the host", () => {
     expect(await rt.sessions.list()).toEqual([]);
   });
 
-  it("fork --send --notify me prints the first turn's end on stderr as run does; a bad --notify fails before any machine is minted", async () => {
+  it.runIf(CLOUD_ON)("fork --send --notify me prints the first turn's end on stderr as run does; a bad --notify fails before any machine is minted", async () => {
     await run("new", "alpha");
     const { code, io } = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--notify", "me");
     expect(code).toBe(0);
@@ -3074,7 +3075,7 @@ describe("wsp verbs over the host", () => {
     }
   });
 
-  it("run, send and fork --send return with the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {
+  it.runIf(CLOUD_ON)("run, send and fork --send return with the reply on the turn's session.done; a session.end that never comes is not waited for", async () => {
     const agent = doneOnlyAgent(prompt => `re: ${prompt}`);
     await restartHost({ claude: agent.adapter });
     await run("new", "alpha");
@@ -3434,7 +3435,7 @@ describe("wsp verbs over the host", () => {
     }
   });
 
-  it("snapshot takes a project golden of the workspace it names and says how to fork it; a workspace that was resumed is refused in one line", async () => {
+  it.runIf(CLOUD_ON)("snapshot takes a project golden of the workspace it names and says how to fork it; a workspace that was resumed is refused in one line", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
     const { code, io } = await run("snapshot", "alpha");
@@ -3459,7 +3460,7 @@ describe("wsp verbs over the host", () => {
     expect(await rt.golden.projects()).toHaveLength(2);
   });
 
-  it("new --from forks a project image of that project, by its name or its snapshot id, and refuses one taken of another project", async () => {
+  it.runIf(CLOUD_ON)("new --from forks a project image of that project, by its name or its snapshot id, and refuses one taken of another project", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
     const taken = await rt.workspaces.snapshot(alpha!.id);
@@ -3484,7 +3485,7 @@ describe("wsp verbs over the host", () => {
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
   });
 
-  it("wsp image lists every project image by its id, project, size and date; image remove asks once, deletes the snapshot at the provider and drops the record, and is refused while a workspace stands on it", async () => {
+  it.runIf(CLOUD_ON)("wsp image lists every project image by its id, project, size and date; image remove asks once, deletes the snapshot at the provider and drops the record, and is refused while a workspace stands on it", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
     const taken = await rt.workspaces.snapshot(alpha!.id);
@@ -3689,7 +3690,7 @@ describe("wsp verbs over the host", () => {
     expect(existsSync(join(dir, "out"))).toBe(false);
   });
 
-  it("every verb takes --json and --help; a bad flag prints the usage", async () => {
+  it.runIf(CLOUD_ON)("every verb takes --json and --help; a bad flag prints the usage", async () => {
     for (const verb of [["new"], ["fork"], ["snapshot"], ["pause"], ["wake"], ["forget"], ["delete"], ["threads"], ["threads", "wait"], ["run"], ["send"], ["stop"], ["exec"], ["projects"], ["export"]]) {
       const help = await run(...verb, "--help");
       expect(help.code).toBe(0);

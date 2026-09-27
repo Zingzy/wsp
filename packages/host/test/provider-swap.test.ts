@@ -7,9 +7,10 @@ import { describe, expect, it } from "vitest";
 import { makeRuntime, providerSlotOf, swapProvider } from "../src/cli.js";
 import { SOLARI_KEY_ENV } from "../src/providers.js";
 import { stubBackend } from "./stub-backend.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 describe("the provider slot behind a host's runtime", () => {
-  it("makeRuntime wires a slot a saved key swaps the module in; a runtime from elsewhere refuses the swap in one line", async () => {
+  it.runIf(CLOUD_ON)("makeRuntime wires a slot a saved key swaps the module in; a runtime from elsewhere refuses the swap in one line", async () => {
     const rt = makeRuntime({}, "/tmp/wsp-provider-swap/state.json");
     try {
       expect(providerSlotOf(rt)?.current().capabilities.previewUrls).toBe(false);
