@@ -19,6 +19,7 @@ import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
 import type { FsSearchReply as WireFsSearchReply } from "./generated/FsSearchReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
+import { threadNeedsYou } from "./thread-state.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
 import type { LinkTarget } from "./app-address.js";
@@ -1054,6 +1055,10 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
   });
 }
 
+/** How many threads wait on the person, off every row the host lists: the dock's badge and the menu bar read this one
+ * count, so the two never disagree. */
+export const needsYouCount = (sessions: ReadonlyArray<SessionView>): number => foldThreads(sessions).filter(threadNeedsYou).length;
+
 /** What a thread has cost: the figures its rows carry, added up; undefined where not one of them reported a
  * figure, which no reader may take for nothing spent. */
 function threadCost(turns: ReadonlyArray<Pick<SessionView, "costUsd">>): number | undefined {
@@ -1968,6 +1973,9 @@ export const Preferences = z.object({
   editor: EditorId.optional(),
   /** Whether a system notification for a finished turn or a permission prompt makes a sound. */
   notifySound: z.boolean(),
+  /** Whether the desktop app keeps this computer from sleeping on its own while a thread works on it. On unless the
+   * person turns it off; defaulted so a record from a host older than the switch reads as on. */
+  keepAwake: z.boolean().default(true),
   /** The order the person dragged the projects into, by id; a project it does not name follows in the host's order. */
   projectOrder: z.array(z.string()),
   /** The person's own chord for a command, by command id, in the app's chord spelling (mod+shift+b): it replaces every
@@ -2007,7 +2015,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, keepAwake: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -2042,6 +2050,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     serverIcons: patch.serverIcons ?? current.serverIcons,
     agentVersions: patch.agentVersions ?? current.agentVersions,
     notifySound: patch.notifySound ?? current.notifySound,
+    keepAwake: patch.keepAwake ?? current.keepAwake,
     projectOrder: patch.projectOrder ?? current.projectOrder,
     keybindings: perWorkspace(current.keybindings, patch.keybindings),
     appFont: patch.appFont ?? current.appFont,
@@ -6204,6 +6213,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
+export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceComputerName } from "./place-name.js";
 export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeCapRefusal, placeFullLine, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
