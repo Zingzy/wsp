@@ -10,8 +10,8 @@ import { creationAwaits, GOLDEN_STAGE_WORDS, type GoldenStageEvent, type Workspa
 import type { Creation, CreationLine } from "../protocol/store.js";
 
 export const CREATE_STEP_WORDS: Record<WorkspaceCreateStage, string> = {
-  "fork-requested": "Making the machine",
-  "hostname-set": "Naming the machine",
+  "fork-requested": "Making the copy",
+  "hostname-set": "Naming the copy",
   "preview-route": "Connecting to it",
   "daemon-answering": "Waiting for it to answer",
   "project-cloned": "Putting the project on it",

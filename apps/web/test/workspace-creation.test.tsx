@@ -53,7 +53,7 @@ describe("the step words", () => {
   it("are one table with a plain word for every stage a create reports, and none of the runtime's names", () => {
     expect(Object.keys(CREATE_STEP_WORDS).sort()).toEqual([...WorkspaceCreateStage.options].sort());
     for (const words of [...Object.values(CREATE_STEP_WORDS), CREATE_ASKED]) {
-      expect(words).not.toMatch(/daemon|route|fork|hostname|preview|minted|clone/i);
+      expect(words).not.toMatch(/daemon|route|fork|hostname|preview|minted|clone|machine/i);
       expect(words.charAt(0)).toBe(words.charAt(0).toUpperCase());
       expect(words).not.toMatch(/\.$/);
     }
