@@ -97,6 +97,18 @@ describe("the preload's bridge", () => {
     stop();
     expect(off).toHaveBeenLastCalledWith("needs-you:open", listen);
   });
+
+  it("hands the page what a wsp:// link names on its own channel, unsubscribing with the same listener", async () => {
+    const wsp = await bridge();
+    const opened: unknown[] = [];
+    const stop = wsp.onOpen(target => opened.push(target));
+    expect(on).toHaveBeenLastCalledWith("shell:open", expect.any(Function));
+    const listen = on.mock.calls.at(-1)![1] as (event: unknown, target: unknown) => void;
+    listen(null, { kind: "thread", id: "th_9f3a" });
+    expect(opened).toEqual([{ kind: "thread", id: "th_9f3a" }]);
+    stop();
+    expect(off).toHaveBeenLastCalledWith("shell:open", listen);
+  });
 });
 
 describe("the hosts the window can move between", () => {

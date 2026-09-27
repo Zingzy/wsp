@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { AgentHere, InstallReport } from "@wsp/host";
-import type { BundleOutcome, ContextMenuItem, DesktopBridge, HostOutcome, HostsView, InitNeedsYou, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
+import type { BundleOutcome, ContextMenuItem, DesktopBridge, HostOutcome, HostsView, InitNeedsYou, LinkTarget, LocalFontFace, ShellChord, ThemePreference } from "@wsp/protocol";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { shellArgFrom } from "./shell-args.js";
 
@@ -42,6 +42,11 @@ const bridge: DesktopBridge & OnboardingBridge = {
   },
   setTheme: (theme: ThemePreference): void => ipcRenderer.send("theme:set", theme),
   needsYou: (need: InitNeedsYou): void => ipcRenderer.send("needs-you:say", need),
+  onOpen: (handler: (target: LinkTarget) => void): (() => void) => {
+    const listen = (_event: unknown, target: LinkTarget): void => handler(target);
+    ipcRenderer.on("shell:open", listen);
+    return () => ipcRenderer.off("shell:open", listen);
+  },
   onNeedsYouOpen: (handler: () => void): (() => void) => {
     const listen = (): void => handler();
     ipcRenderer.on("needs-you:open", listen);

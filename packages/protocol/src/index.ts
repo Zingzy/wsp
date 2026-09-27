@@ -18,6 +18,7 @@ import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js"
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
+import type { LinkTarget } from "./app-address.js";
 import { rootsPathIn } from "./project-path.js";
 import { ReleaseChangedEvent } from "./release.js";
 import { shellQuote } from "./shell-quote.js";
@@ -2157,6 +2158,9 @@ export interface DesktopBridge {
   /** A click on that notification, after the shell has raised its window: the page opens the build screen. Returns
    * the unsubscribe. */
   onNeedsYouOpen(handler: () => void): () => void;
+  /** A wsp:// link the system handed the shell while the page was up, read down to what it names: the page opens it
+   * and does nothing to it. Only the app's own host's page is told. Returns the unsubscribe. */
+  onOpen(handler: (target: LinkTarget) => void): () => void;
   /** The device token the shell holds for the host that served this page, when the window is on a host somewhere
    * else; nothing on the app's own host, whose page carries its own token. The token never rides in the page. */
   hostToken(): Promise<string | undefined>;
@@ -6112,7 +6116,7 @@ export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
-export { addressFromHash, appHash, openingHash, pairingCodeOf, workspaceHash, type AppAddress } from "./app-address.js";
+export { addressFromHash, addressFromLink, appHash, linkFromHash, linkHash, openingHash, pairingCodeOf, workspaceHash, LINK_KINDS, type AppAddress, type LinkKind, type LinkTarget } from "./app-address.js";
 export * from "./app-ports.js";
 export * from "./release.js";
 export * from "./init-job.js";
