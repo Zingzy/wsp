@@ -189,12 +189,12 @@ describe("the shape a state file was written in", () => {
     );
   });
 
-  it("is 3 on this build, since record shapes changed, and a file at 4 is refused", async () => {
+  it("is 2 on this build, since the seeded record changed shape, and a file at 3 is refused as newer", async () => {
     // The number every save writes, pinned: a record's schema changed, so a host that reads another number meets a
     // file it cannot read and says so instead of reading a record in a form it does not know.
-    expect(STATE_SHAPE).toBe(3);
-    const path = join(dir, "shape-four.json");
-    const wrote: StateShape = { shape: 4, wsp: "0.4.0", daemon: DAEMON_VERSION, bin: "/Users/z/.local/bin/wsp", at: "2026-09-19T08:00:00.000Z" };
+    expect(STATE_SHAPE).toBe(2);
+    const path = join(dir, "shape-three.json");
+    const wrote: StateShape = { shape: 3, wsp: "0.4.0", daemon: DAEMON_VERSION, bin: "/Users/z/.local/bin/wsp", at: "2026-09-19T08:00:00.000Z" };
     writeFileSync(path, JSON.stringify({ projects: { p: { id: "p" } }, [STATE_SHAPE_KEY]: wrote }, null, 2));
     const store = jsonFileStore(path, writer);
     await expect(store.get("projects", "p")).rejects.toThrow(stateWrittenByNewerLine(path, wrote));

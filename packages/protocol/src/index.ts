@@ -4194,9 +4194,10 @@ export const DAEMON_ROOTS_PATH = rootsPathIn("/root");
 
 /** The shape the records in a state file are written in. Any change to the schema of a stored record cuts this
  * number, and a host refuses a file in any other shape rather than reading a record in a form it does not know.
- * 3 since a project record always carries its remote, default branch and memory key and folder, a workspace record
- * always carries its kind and size, and no record is of a machine reached over ssh or a folder worked in place. */
-export const STATE_SHAPE = 3;
+ * 2 since a project's seeded row changed whole: one word for what its memory did where it held two flags, the
+ * memory folder's own file count beside it, and `bytes` now the sum the menu showed for the ticked files where it
+ * was the size of the archive they travelled in, which is bigger, so the two numbers do not compare. */
+export const STATE_SHAPE = 2;
 
 /** What a save records about the wsp that wrote the file, apart from the records themselves: the shape those
  * records are in, the build that wrote them and when. A file with none was written before this record existed. */
