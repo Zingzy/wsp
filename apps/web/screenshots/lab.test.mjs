@@ -23,7 +23,7 @@ import { NO_FINDER_CHOOSER, PASTE_THIS, homeOf, keptLog, labLines, launchDiesLin
 
 describe("the fixtures a lab serves", () => {
   it("has one per kind of person the testers play", () => {
-    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "mac-and-boxes", "orchestrator", "thread-states", "tiles", "tiles-marks", "image-built", "long-prompt"]);
+    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "mac-and-boxes", "orchestrator", "thread-states", "tiles", "tiles-marks", "tiles-attempt", "image-built", "long-prompt"]);
   });
 
   it("gives the two personas who have this computer and nothing else the first run, with no project added", () => {
@@ -270,6 +270,7 @@ describe("the fixtures a lab serves", () => {
       "thread-states": "box",
       tiles: "solari",
       "tiles-marks": "solari",
+      "tiles-attempt": "no cloud",
       "image-built": "no cloud",
       "long-prompt": "no cloud",
     });
@@ -409,6 +410,7 @@ describe("the provider a fixture's host runs under", () => {
       "thread-states": "fake",
       tiles: "fake",
       "tiles-marks": "fake",
+      "tiles-attempt": "none",
       "image-built": "fake",
       "long-prompt": "fake",
     });

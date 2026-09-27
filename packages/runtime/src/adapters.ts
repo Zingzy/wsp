@@ -8,6 +8,8 @@
 // machine; the adapter packages carry no catalog rows of their own.
 import { createClaudeAdapter } from "@wsp/adapter-claude";
 import { createCodexAdapter } from "@wsp/adapter-codex";
+import { createCursorAdapter } from "@wsp/adapter-cursor";
+import { createOpenCodeAdapter } from "@wsp/adapter-opencode";
 import { CATALOG_AGENTS, keyEnvOf, mintsToken, type ThreadAgent } from "@wsp/catalog";
 import type { HarnessAdapterFactory } from "./runtime.js";
 
@@ -56,4 +58,6 @@ export const HARNESS_ADAPTERS: Readonly<Record<ThreadAgent, HarnessAdapterFactor
     }),
   codex: ctx =>
     createCodexAdapter({ exec: ctx.execStream, home: ctx.home("codex"), login: machineLogin("codex"), baseEnv: ctx.env, ...secretsOf(ctx.vault, "codex", ctx.loginStands("codex")) }),
+  opencode: ctx => createOpenCodeAdapter({ exec: ctx.execStream, baseEnv: ctx.env, signInRefusal: ctx.signInRefusal, ...secretsOf(ctx.vault, "opencode", ctx.loginStands("opencode")) }),
+  cursor: ctx => createCursorAdapter({ exec: ctx.execStream, baseEnv: ctx.env, signInRefusal: ctx.signInRefusal, ...secretsOf(ctx.vault, "cursor", ctx.loginStands("cursor")) }),
 };

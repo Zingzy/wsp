@@ -28,6 +28,7 @@
     "qwen": "Qwen Code",
     "goose": "Goose",
     "amp": "Amp",
+    "cursor": "Cursor",
     "curl": "curl",
     "node": "Node 22 with npm",
     "pnpm": "pnpm",

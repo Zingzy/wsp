@@ -52,6 +52,8 @@
 // Typing @, # or $ opens the thread's folder's files, the repository's open
 // pull requests and issues, or the person's skills the thread's agent loads,
 // and a pick lands as a chip whose text is what the agent reads.
+// Where the agent takes a side question, /btw and a question goes to the host
+// instead, starts no turn and opens the sheet its answer lands in.
 // The checkout row under the composer picks the folder a fresh thread starts
 // in; a resumed one is started where its harness last said it was. The
 // model, effort, context window and access picks in the box's footer ride a
@@ -76,7 +78,8 @@ import { useLinkDownLine } from "../../terminal/paneWords";
 import { collapseExpandedComposerCursor, composerSubmissionIntentForEnter, detectComposerTrigger, expandCollapsedComposerCursor, insertComposerBlock, isCollapsedCursorAdjacentToInlineToken, replaceTextRange } from "../../composer-logic";
 import { hostItemText, serializeComposerMention, splitPromptIntoComposerSegments } from "../../composer-editor-mentions";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
-import { catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
+import { asideQuestion, catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
+import { AsideSheet } from "./AsideSheet";
 import { canPickFolder, ComposerCheckoutRow, HomeCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import type { ComposerCommandGroup } from "./composerCommandGroups";
@@ -90,6 +93,8 @@ import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useCompose
 import { ComposerAccessPicker, ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
 import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
+import { ComposerModelChips } from "./ComposerModelChips";
+import { useMultiPicks } from "./composerMultiPick";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerQueue } from "./ComposerQueue";
 import { ComposerSurface } from "./ComposerSurface";
@@ -183,8 +188,8 @@ interface SteerAttempt {
 }
 
 /** `onStart` takes the first send instead of the runtime: a project's home has no workspace yet, and its send is what
- * makes one. */
-export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: string; thread: ChatThreadHandle; onStart?: (prompt: string) => void }) {
+ * makes one. A sentence it answers is why nothing was made: the draft goes back and the sentence stands above the box. */
+export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: string; thread: ChatThreadHandle; onStart?: (prompt: string) => Promise<string | null> }) {
   const api = useStore(s => s.api);
   const wake = useStore(s => s.wake);
   const conn = useStore(s => s.conn);
@@ -193,6 +198,8 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const workspace = useWorkspace(workspaceId);
   const [stop, setStop] = useState<StopAttempt | null>(null);
   const [screenLine, setScreenLine] = useState<string | null>(null);
+  const [startRefusal, setStartRefusal] = useState<string | null>(null);
+  const multiPicks = useMultiPicks(workspaceId);
   const [steering, setSteering] = useState<string | null>(null);
   const [steered, setSteered] = useState<SteerAttempt | null>(null);
   const draft = useComposerDraft(workspaceId);
@@ -242,7 +249,11 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const computer = useComputerName(workspaceId);
   const linkDown = useLinkDownLine(workspaceId);
   const { harness } = thread.view;
-  const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
+  // A side question copies the thread's own session, so it is offered only on a thread that has a row to name it by.
+  const asides = harnessCatalog?.asides === true && latestRow !== null && api?.askAside !== undefined;
+  const [aside, setAside] = useState<{ question: string; answer?: string; error?: string } | null>(null);
+  const asked = useRef(0);
+  const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog), asides }), [asides, harness, harnessCatalog, harnessId]);
   // A daemon this host started is not the road a turn takes, so its absence leaves the box open on this computer.
   const daemonOnly = absent?.start !== undefined;
   const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated, agents: harnessCatalogs.length > 0, absent: absent !== null, daemonOnly });
@@ -366,11 +377,13 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
             ? sendNowFailedLine(steerAttempt.error)
             : screenLine !== null
               ? screenLine
-              : menuLine !== null
-                ? menuLine
-                : runningTurn?.replied === true
-                ? stillWorkingLine(workingTitle)
-                : (accessPick.line ?? linkDown);
+              : startRefusal !== null
+                ? startRefusal
+                : menuLine !== null
+                  ? menuLine
+                  : runningTurn?.replied === true
+                    ? stillWorkingLine(workingTitle)
+                    : (accessPick.line ?? linkDown);
 
   const activeItemId = resolveComposerMenuActiveItemId({ items, highlightedItemId, currentSearchKey: searchKey, highlightedSearchKey });
 
@@ -383,6 +396,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const onChange = useCallback(
     (value: string, cursor: number) => {
       setScreenLine(null);
+      setStartRefusal(null);
       setDraft(workspaceId, { prompt: value, cursor });
     },
     [setDraft, workspaceId],
@@ -473,12 +487,34 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     [api, appendLocalError, appendUserTurn, folderStart, harnessId, hold, images, into, launched, launching, pinned, restoreImages, sendImagesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
+  /** Asks the host beside the thread and draws the answer in the sheet; an answer landing after the sheet closed is dropped. */
+  const askAside = useCallback(
+    (question: string) => {
+      const method = api?.askAside;
+      if (method === undefined || latestRow === null) return;
+      const id = ++asked.current;
+      setAside({ question });
+      void method(latestRow.id, question).then(
+        result => asked.current === id && setAside({ question, answer: result.text }),
+        (err: unknown) => asked.current === id && setAside({ question, error: err instanceof Error ? err.message : String(err) }),
+      );
+    },
+    [api, latestRow],
+  );
+
   const send = useCallback(() => {
     // The same reading the slot and the send button are already wearing: an Enter that lands here leaves the draft
     // where it was typed and that line standing.
     if (sendHeld !== null) return;
     const prompt = (editorRef.current?.readSnapshot().value ?? draft.prompt).trim();
     if (prompt === "") return;
+    // A side question is the host's to answer and never a turn, so it goes whether or not the thread is working.
+    const question = asides ? asideQuestion(prompt) : null;
+    if (question !== null) {
+      setDraft(workspaceId, EMPTY_DRAFT);
+      askAside(question);
+      return;
+    }
     // A command the CLI runs only in its own terminal would come back as not available, so the draft stays for
     // editing and the line names the wsp control that serves it instead.
     const screen = screenCommandTyped(harnessCatalog, prompt);
@@ -495,7 +531,12 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     }
     setDraft(workspaceId, EMPTY_DRAFT);
     if (onStart !== undefined) {
-      onStart(prompt);
+      void onStart(prompt).then(refusal => {
+        if (refusal === null) return;
+        setStartRefusal(refusal);
+        const current = useComposerDraftStore.getState().drafts[workspaceId];
+        if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
+      });
       return;
     }
     if (!busy) {
@@ -512,7 +553,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     }
     enqueue(threadKey, prompt, held ? "head" : "tail");
     release(threadKey);
-  }, [busy, dismissTrigger, draft, enqueue, harnessCatalog, held, images, onStart, release, sendHeld, sending, setDraft, start, threadKey, trigger, workspace, workspaceId]);
+  }, [askAside, asides, busy, dismissTrigger, draft, enqueue, harnessCatalog, held, images, onStart, release, sendHeld, sending, setDraft, start, threadKey, trigger, workspace, workspaceId]);
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];
@@ -681,6 +722,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
         promptHasText={hasText}
         isSendBusy={thread.busy}
         wakesFirst={wakesFirst}
+        sendLabel={onStart !== undefined && multiPicks.length > 0 ? `Send to ${multiPicks.length}` : undefined}
         sendDisabledReason={sendDisabledReason}
         isConnecting={false}
         isEnvironmentUnavailable={false}
@@ -738,6 +780,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                     onDrop={onDrop}
                     onDragOver={event => event.preventDefault()}
                   >
+                    {onStart !== undefined ? <ComposerModelChips workspaceId={workspaceId} /> : null}
                     {images.length > 0 ? (
                       <ul aria-label="Images to send" data-composer-images="true" className="flex flex-wrap gap-1.5 px-3 pt-3 sm:px-4">
                         {images.map((image, at) => (
@@ -816,6 +859,15 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
           />
         )}
       </ComposerSurface.Shell>
+      {aside !== null ? (
+        <AsideSheet
+          {...aside}
+          onClose={() => {
+            asked.current += 1;
+            setAside(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

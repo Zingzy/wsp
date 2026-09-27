@@ -6,9 +6,12 @@ import { CLAUDE_CODE, THREAD_AGENTS } from "@wsp/catalog";
 import { HarnessCatalog, catalogSourceLine, effortsFor, everyModel, workspaceAccess, listedPick, markedDefault, modelOf, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "../src/harness-catalog.js";
 
+/** The agents whose models no table can list: the machine's own providers, or an account's. */
+const OPEN_MODELS: readonly string[] = ["opencode", "cursor"];
+
 describe("harness catalogs", () => {
   it("names every harness the recipe collects, each parsing as the wire type with at most one default per picker", () => {
-    expect(HARNESS_CATALOGS.map(c => c.harness)).toEqual(["claude", "codex", "gemini", "opencode", "pi", "hermes"]);
+    expect(HARNESS_CATALOGS.map(c => c.harness)).toEqual(["claude", "codex", "gemini", "opencode", "pi", "hermes", "cursor"]);
     for (const catalog of HARNESS_CATALOGS) {
       expect(HarnessCatalog.parse(catalog)).toEqual(catalog);
       expect(catalog.source).toBe("table");
@@ -24,9 +27,11 @@ describe("harness catalogs", () => {
   it("every agent wsp can run stands in with its own models, its own pin and its own binary in the footer, never another agent's", () => {
     for (const id of THREAD_AGENTS) {
       const table = harnessCatalog(id)!;
-      // The bug this walks: a tab whose binary never answered showed no model and another agent's pin.
-      expect(table.models.length).toBeGreaterThan(0);
-      expect(table.version).toMatch(/^\S+ \d+\.\d+\.\d+, \d{4}-\d{2}-\d{2}$/);
+      // The bug this walks: a tab whose binary never answered showed no model and another agent's pin. OpenCode's
+      // models are whatever providers the machine holds and Cursor's need a sign-in to list, so both rows hold none
+      // and the picker stands aside until the binary names them.
+      expect(table.models.length > 0, id).toBe(!OPEN_MODELS.includes(id));
+      expect(table.version).toMatch(/^[^,]+ \d+\.\d+\.\d+(-\w+)?, \d{4}-\d{2}-\d{2}$/);
       const line = catalogSourceLine(table, THIS_COMPUTER);
       expect(line).toBe(`${id} table, ${table.version!}`);
       // One line at the popup's width: 48 characters of the 10px mono the footer draws in (measured in Chromium).
@@ -42,7 +47,9 @@ describe("harness catalogs", () => {
     expect(harnessCatalog("claude")!.version).toBe("--help 2.1.280, 2026-09-23");
     expect(harnessCatalog("codex")!.version).toBe("app-server 0.153.0, 2026-09-07");
     expect(catalogSourceLine(harnessCatalog("codex")!, THIS_COMPUTER)).toBe("codex table, app-server 0.153.0, 2026-09-07");
-    for (const id of ["gemini", "opencode", "pi", "hermes"]) {
+    expect(catalogSourceLine(harnessCatalog("opencode")!, THIS_COMPUTER)).toBe("opencode table, run --help 1.18.18, 2026-09-27");
+    expect(catalogSourceLine(harnessCatalog("cursor")!, THIS_COMPUTER)).toBe("cursor table, -h 2026.09.26-dd393fe, 2026-09-27");
+    for (const id of ["gemini", "pi", "hermes"]) {
       expect(harnessCatalog(id)!.version, id).toBeNull();
       expect(catalogSourceLine(harnessCatalog(id)!, THIS_COMPUTER)).toBe(`${id} table`);
     }
@@ -225,14 +232,15 @@ describe("the access a thread starts at, per kind of workspace", () => {
       // Each row names its own skip-everything mode, so nothing outside the table keeps a list of them.
       expect(catalog.bypassMode).toBeDefined();
       expect(catalog.permissionModes.map(o => o.value)).toContain(catalog.bypassMode);
-      expect(catalog.bypassMode).not.toBe(catalog.keptMode);
+      // A row with one mode starts there on every kind, so the two name it both; any other row names two.
+      if (catalog.permissionModes.length > 1) expect(catalog.bypassMode).not.toBe(catalog.keptMode);
       // The mark has one home, and it is not here: which of the two a start runs at belongs to the workspace's
       // kind, and a mark left on a row would be a second answer for anyone reading the table without a workspace.
       expect(markedDefault(catalog.permissionModes)).toBeUndefined();
     }
   });
 
-  it("claude asks the person in its default mode; codex exec cannot ask, so its narrowest working sandbox stands", () => {
+  it("claude asks the person in its default mode; codex keeps its narrowest working sandbox and asks past it", () => {
     expect(harnessCatalog("claude")!.keptMode).toBe("default");
     expect(harnessCatalog("codex")!.keptMode).toBe("workspace-write");
   });
@@ -254,6 +262,7 @@ describe("the access a thread starts at, per kind of workspace", () => {
       ["gemini", "yolo"],
       ["opencode", "auto"],
       ["hermes", "yolo"],
+      ["cursor", "force"],
     ]);
   });
 

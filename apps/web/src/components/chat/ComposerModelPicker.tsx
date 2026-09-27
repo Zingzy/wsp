@@ -26,6 +26,7 @@ import { Kbd } from "../ui/kbd";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { favouriteKey, useComposerFavouritesStore } from "./composerFavouritesStore";
+import type { ModelPick } from "./composerMultiPick";
 import { HarnessMark } from "./HarnessMark";
 
 const JUMP_KEYS = 9;
@@ -42,7 +43,13 @@ export interface ModelPickerProps {
    * list is opened for them the one time. It takes no focus, since the box under it is where the ask is typed. */
   onPickHarness: (harness: string) => void;
   onPickModel: (harness: string, model: string) => void;
+  /** Where the send opens a copy per model: a shift-click, or Shift+Enter, adds the row to these picks instead of
+   * picking it alone. */
+  multi?: { picks: ReadonlyArray<ModelPick>; onAdd: (harness: string, model: HarnessModel) => void };
 }
+
+/** The foot's line where a shift-click adds a model, since nothing else on the menu says it can. */
+export const ADD_MODEL_LINE = "Shift-click a model, or Shift+Enter on it, to send to it too";
 
 /** The line under the model the composer names that this list has no row for: it may be the one the thread runs on
  * or a pick the binary has since dropped, and this is true of both. */
@@ -101,23 +108,29 @@ export function newThreadNotice(entry: HarnessCatalog): string {
 const RAIL_TAB =
   "relative flex aspect-square w-full items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 before:absolute before:top-2 before:bottom-2 before:-left-1.5 before:w-0.5 before:rounded-full hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
-export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, onPickHarness, onPickModel }: ModelPickerProps) {
+export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, onPickHarness, onPickModel, multi }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [onlyStarred, setOnlyStarred] = useState(false);
   const [active, setActive] = useState(0);
   const [legacyOpen, setLegacyOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // While a list of picks stands the rail browses another agent's models without moving the composer's own pick,
+  // which is the first of the list.
+  const [viewing, setViewing] = useState<string | null>(null);
+  const shown = (viewing === null ? undefined : catalogs.find(entry => entry.harness === viewing)) ?? catalog;
+  const current = shown.harness === catalog.harness ? model : null;
+  const browsing = multi !== undefined && multi.picks.length > 0;
   // An agent that described nothing says why here, such as a CLI that is not signed in; a notice outranks it while it stands.
-  const foot = notice ?? catalog.refusal ?? null;
+  const foot = notice ?? shown.refusal ?? (multi !== undefined ? ADD_MODEL_LINE : null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const favourites = useComposerFavouritesStore(s => s.keys);
   const toggle = useComposerFavouritesStore(s => s.toggle);
   const items = useMemo(() => {
-    const starred = (m: ModelRow) => favourites.includes(favouriteKey(catalog.harness, m.value));
-    const all = listModels(catalog, favourites, query, model);
+    const starred = (m: ModelRow) => favourites.includes(favouriteKey(shown.harness, m.value));
+    const all = listModels(shown, favourites, query, current);
     return menuItems(onlyStarred ? all.filter(starred) : all, starred, query === "" && !onlyStarred, legacyOpen);
-  }, [catalog, favourites, legacyOpen, model, onlyStarred, query]);
+  }, [current, favourites, legacyOpen, onlyStarred, query, shown]);
   const rows = useMemo(() => items.filter((item): item is ModelRow => item !== LEGACY_FOLD), [items]);
   const currentIsLegacy = catalog.legacyModels?.some(m => m.value === model?.value) === true;
   const platform = typeof navigator === "undefined" ? "" : navigator.platform;
@@ -127,16 +140,24 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
     setQuery("");
     setActive(0);
     setNotice(null);
+    setViewing(null);
     const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
 
   const pick = useCallback(
     (m: HarnessModel) => {
-      onPickModel(catalog.harness, m.value);
+      onPickModel(shown.harness, m.value);
       setOpen(false);
     },
-    [catalog.harness, onPickModel],
+    [onPickModel, shown.harness],
+  );
+  const choose = useCallback(
+    (m: HarnessModel, adds: boolean) => {
+      if (adds && multi !== undefined) multi.onAdd(shown.harness, m);
+      else pick(m);
+    },
+    [multi, pick, shown.harness],
   );
 
   const onKeyDown = useCallback(
@@ -159,10 +180,10 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
         if (item === undefined) return;
         event.preventDefault();
         if (item === LEGACY_FOLD) setLegacyOpen(on => !on);
-        else pick(item);
+        else choose(item, event.shiftKey);
       }
     },
-    [active, items, pick, rows],
+    [active, choose, items, pick, rows],
   );
 
   const foldAt = items.indexOf(LEGACY_FOLD);
@@ -170,21 +191,22 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
   const tail = foldAt === -1 ? [] : rows.slice(foldAt);
 
   const optionRow = (m: ModelRow, index: number) => {
-    const starred = favourites.includes(favouriteKey(catalog.harness, m.value));
+    const starred = favourites.includes(favouriteKey(shown.harness, m.value));
     const chip = jumpLabel(rows.indexOf(m), platform);
+    const selected = browsing ? multi.picks.some(p => p.harness === shown.harness && p.model === m.value) : current?.value === m.value;
     return (
       <div
         key={m.value}
         role="option"
-        aria-selected={model?.value === m.value}
+        aria-selected={selected}
         data-composer-option={m.value}
         data-active={index === active || undefined}
         onMouseEnter={() => setActive(index)}
-        onClick={() => pick(m)}
+        onClick={event => choose(m, event.shiftKey)}
         className={cn(
           "group flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground",
           index === active && "bg-accent text-accent-foreground",
-          model?.value === m.value && "bg-foreground/[0.08]",
+          selected && "bg-foreground/[0.08]",
         )}
       >
         <div className="min-w-0 flex-1" {...(m.unlisted === true ? { "data-unlisted-model": "" } : {})}>
@@ -193,8 +215,8 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
             {m.isDefault ? <span className="rounded border border-primary/40 bg-primary/10 px-1.5 text-[10px] font-semibold uppercase leading-4 tracking-wide text-primary">default</span> : null}
           </div>
           <div className="mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
-            <HarnessMark harness={catalog.harness} label={catalog.label} className="size-3.5" />
-            <span className="truncate">{catalog.label}</span>
+            <HarnessMark harness={shown.harness} label={shown.label} className="size-3.5" />
+            <span className="truncate">{shown.label}</span>
           </div>
         </div>
         {chip !== null ? <Kbd className="h-6 min-w-0 rounded-md px-1.5 font-mono text-xs">{chip}</Kbd> : null}
@@ -205,7 +227,7 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
           data-composer-favourite={m.value}
           onClick={e => {
             e.stopPropagation();
-            toggle(catalog.harness, m.value);
+            toggle(shown.harness, m.value);
           }}
           className={cn("shrink-0 rounded p-1 text-muted-foreground/60 opacity-60 hover:text-foreground group-hover:opacity-100", starred && "text-foreground opacity-100")}
         >
@@ -257,7 +279,7 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
             </button>
             <span aria-hidden className="mx-1.5 my-0.5 h-px bg-border" />
             {catalogs.map(entry => {
-              const selected = entry.harness === catalog.harness && !onlyStarred;
+              const selected = entry.harness === shown.harness && !onlyStarred;
               return (
                 <Tooltip key={entry.harness}>
                   <TooltipTrigger
@@ -270,6 +292,10 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
                         data-composer-harness={entry.harness}
                         onClick={() => {
                           setOnlyStarred(false);
+                          if (browsing) {
+                            setViewing(entry.harness === catalog.harness ? null : entry.harness);
+                            return;
+                          }
                           if (entry.harness === catalog.harness) return;
                           if (pinned) setNotice(newThreadNotice(entry));
                           else onPickHarness(entry.harness);
@@ -304,7 +330,7 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
             <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
               <div role="listbox" aria-label="Models">
                 {items.length === 0 ? (
-                  <div className="px-2 py-3 text-center text-xs text-muted-foreground">{catalog.models.length === 0 ? noModelsLine(catalog) : onlyStarred && query === "" ? "Star a model to keep it here." : "No model matches"}</div>
+                  <div className="px-2 py-3 text-center text-xs text-muted-foreground">{shown.models.length === 0 ? noModelsLine(shown) : onlyStarred && query === "" ? "Star a model to keep it here." : "No model matches"}</div>
                 ) : (
                   head.map((m, index) => optionRow(m, index))
                 )}

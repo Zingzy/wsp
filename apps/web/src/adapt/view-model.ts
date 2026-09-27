@@ -324,6 +324,11 @@ export interface SidebarThreadSnapshot {
   /** The thread whose own agent opened this one; null on every thread a person or the command line opened. The row
    * is drawn one step in under it. */
   readonly parentThreadId: string | null;
+  /** The send to several models that opened this thread, which the sidebar draws its threads together by; null on a
+   * thread opened alone. */
+  readonly attempt: string | null;
+  /** The model the thread was opened on, off its opening turn's row; null where that row names none. */
+  readonly model: string | null;
   /** The lead of the permission prompt the thread is stopped on, as the protocol's fold reads it; null while it is
    * waiting on nobody. */
   readonly asking: string | null;

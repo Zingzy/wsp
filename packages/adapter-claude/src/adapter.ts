@@ -3,12 +3,13 @@
 // t3code ClaudeAdapter.ts (MIT, see NOTICE); event shapes are the ones
 // recorded in solari-poc/RESULTS.md.
 
-import { PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
-import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus } from "@wsp/protocol";
+import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, PERMISSION_ALLOW, PERMISSION_DENY, RUN_EXIT_MS, asideWallLine, backgroundTasksLine, endAfterResult, endRun, fmtDuration, harnessExitLine, refusedTurn, taskFinishedLine, titlePrompt } from "@wsp/protocol";
+import type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
+import { asideAnswer, asideCommand, forkCleanupCommand } from "./aside.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
-import { INTERRUPT_GRACE_MS, buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
+import { buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
 
 export interface StartOptions {
@@ -91,6 +92,8 @@ export interface AdapterDeps {
    * for how it is signed in; it differs between the person's own computer and a machine, which only the caller
    * knows. Absent leaves such a turn carrying the CLI's own sentence alone. */
   signInRefusal?: string;
+  /** How long a side question may run before its process is ended; ASIDE_WALL_MS unless a test says otherwise. */
+  asideWallMs?: number;
 }
 
 export interface ClaudeAdapter {
@@ -119,6 +122,8 @@ export interface ClaudeAdapter {
   renameSession: SessionRenamer;
   /** Asks the CLI itself, in one print-mode turn, for a name for a thread it has just replied in. */
   titleFor: SessionTitleMaker;
+  /** Answers a question on a fork of a session with no tools, the fork's file removed once the answer is read. */
+  aside: SessionAsker;
   /** What every session's command is exported with; the one environment a turn on the machine gets. */
   readonly env: Readonly<Record<string, string>>;
 }
@@ -746,6 +751,56 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     return follow({ stream, localId, announced: false, command, onEvent: options.onEvent });
   };
 
+  /** Removes the fork's file on the same road, once the side question's own run has ended; a removal that fails leaves
+   * the answer standing. */
+  const removeFork = async (fork: string): Promise<void> => {
+    const cleanup = deps.exec(forkCleanupCommand({ fork, configDir: deps.configDir }), { env: { ...env } });
+    for await (const _ of cleanup.lines);
+    await cleanup.exited;
+  };
+
+  /** One run on the turn's road and environment, read to its end so the answer lands after the fork's file is gone. */
+  const aside = async (q: AsideQuestion): Promise<AsideAnswer> => {
+    const fork = newSessionId();
+    const command = asideCommand({ session: q.session, fork, configDir: deps.configDir, ...(q.cwd !== undefined ? { cwd: q.cwd } : {}), ...(q.model !== undefined ? { model: q.model } : {}) });
+    const stream = deps.exec(command, { env: { ...env }, input: [userMessageLine(q.question, fork)] });
+    const wallMs = deps.asideWallMs ?? ASIDE_WALL_MS;
+    let walled = false;
+    const wall = setTimeout(() => {
+      walled = true;
+      void endRun(stream, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
+    }, wallMs);
+    let answer: AsideAnswer | { error: string } | undefined;
+    const said: string[] = [];
+    let code: number | null;
+    try {
+      for await (const raw of stream.lines) {
+        const event = parseLine(raw);
+        if (event === undefined) {
+          const text = raw.trim();
+          if (text.length > 0 && said.push(text) > STDERR_TAIL_LINES) said.shift();
+          continue;
+        }
+        if (event.type !== "result" || answer !== undefined) continue;
+        answer = asideAnswer(event);
+        stream.closeInput();
+        void endAfterResult(stream, deps.resultExitMs ?? RUN_EXIT_MS, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
+      }
+      code = await stream.exited;
+    } finally {
+      clearTimeout(wall);
+      // Every road out, a transport that threw included, waits for the run to end and then removes the fork's file.
+      await stream.exited.catch(() => null);
+      await removeFork(fork).catch(() => {});
+    }
+    if (answer !== undefined) {
+      if ("error" in answer) throw new Error(answer.error);
+      return answer;
+    }
+    if (walled) throw new Error(asideWallLine(wallMs));
+    throw new Error(said.length > 0 ? said.join("\n") : harnessExitLine("claude", code, env["PATH"], { reached: false }));
+  };
+
   const attach = deps.exec.attach?.bind(deps.exec);
 
   return {
@@ -775,6 +830,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
           ...(deps.baseEnv !== undefined ? { baseEnv: deps.baseEnv } : {}),
         }),
       ).then(parseTitleFor),
+    aside,
     env,
   };
 }

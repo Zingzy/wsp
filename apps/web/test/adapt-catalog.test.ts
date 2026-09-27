@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
 import { DEFAULT_HARNESS } from "../src/components/chat/ComposerOptionPickers.js";
-import { HARNESS_CLIENTS, catalogFor, catalogFromHarness, composerPlaceholder, deriveSession, harnessClient, offersSlashCommands, slashHoldLine } from "../src/adapt/index.js";
+import { ASIDE_COMMAND, HARNESS_CLIENTS, asideQuestion, catalogFor, catalogFromHarness, composerPlaceholder, deriveSession, harnessClient, offersSlashCommands, slashHoldLine } from "../src/adapt/index.js";
 import { CHAT_HARNESS, CHAT_STREAM } from "./fixtures/chat-stream.js";
 
 describe("the client's harness registry", () => {
@@ -110,5 +110,29 @@ describe("a draft that is a slash and nothing more", () => {
     const fresh = catalogFromHarness({ id: "claude", harness: null });
     expect(slashHoldLine({ prompt: "/", catalog: fresh })).toBe("a slash on its own is not a command");
     expect(slashHoldLine({ prompt: "/compact", catalog: fresh })).toBeNull();
+  });
+});
+
+describe("wsp's own side question in the slash menu", () => {
+  it("is offered under wsp's own source only where the agent takes one, and stands in for an announced name of its own", () => {
+    const off = catalogFromHarness({ id: "claude", harness: { slashCommands: ["compact"] } });
+    expect(off.slashCommands.map(c => c.name)).toEqual(["compact"]);
+    const on = catalogFromHarness({ id: "claude", harness: { slashCommands: ["compact", "btw"] }, asides: true });
+    expect(on.slashCommands).toEqual([{ name: "compact" }, ASIDE_COMMAND]);
+    expect(ASIDE_COMMAND).toMatchObject({ name: "btw", source: "wsp" });
+    // Before any session announced a command, the side question alone opens the menu.
+    const fresh = catalogFromHarness({ id: "claude", harness: null, asides: true });
+    expect(fresh.slashCommands.at(-1)).toEqual(ASIDE_COMMAND);
+    expect(offersSlashCommands(fresh)).toBe(true);
+  });
+
+  it("holds /btw with no question, lets it through with one, and reads the question off it", () => {
+    const catalog = catalogFromHarness({ id: "claude", harness: { slashCommands: ["compact"] }, asides: true });
+    expect(slashHoldLine({ prompt: "/btw", catalog })).toBe("/btw takes a question after it");
+    expect(slashHoldLine({ prompt: " /btw  ", catalog })).toBe("/btw takes a question after it");
+    expect(slashHoldLine({ prompt: "/btw which folder are you in?", catalog })).toBeNull();
+    expect(asideQuestion("/btw which folder are you in?\nand why")).toBe("which folder are you in?\nand why");
+    expect(asideQuestion("  /btw   what now  ")).toBe("what now");
+    for (const prompt of ["/btw", "/btw   ", "/btwx what", "tell me /btw what", "btw what"]) expect(asideQuestion(prompt), prompt).toBeNull();
   });
 });

@@ -526,7 +526,7 @@ describe("an access picked while a turn runs", () => {
   });
 
   /** A turn that stays open until the test replies. `moves` is what its harness answers a mode change with, and null
-   * is a harness that takes none mid-turn, as codex exec does. A send resumes its thread's session and a thread the
+   * is a harness that takes none mid-turn. A send resumes its thread's session and a thread the
    * send opens gets one of its own, as a CLI's would, so two threads on one workspace hold two rows. */
   const held = (moves: "set" | "refused" | null): { rt: Runtime; turns: { modes: string[]; reply: () => void }[]; picks: (string | undefined)[] } => {
     const turns: { modes: string[]; reply: () => void }[] = [];
