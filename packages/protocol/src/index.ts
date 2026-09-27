@@ -1402,6 +1402,20 @@ export type DeltaKind = z.infer<typeof DeltaKind>;
 export const TurnStatus = z.enum(["completed", "interrupted", "failed"]);
 export type TurnStatus = z.infer<typeof TurnStatus>;
 
+/** What a turn cost in tokens, as its agent counted them. input is every token the model read over the turn, cached
+ * the part of it read back from the agent's cache and cacheWrite the part written to it; context is what the model
+ * held at the turn's last call and window the most it can hold, which only an agent that reports it carries. */
+export const TurnTokens = z.object({
+  input: z.number(),
+  output: z.number(),
+  cached: z.number().optional(),
+  cacheWrite: z.number().optional(),
+  reasoning: z.number().optional(),
+  context: z.number().optional(),
+  window: z.number().optional(),
+});
+export type TurnTokens = z.infer<typeof TurnTokens>;
+
 export const TurnResult = z.object({
   status: TurnStatus,
   durationMs: z.number().optional(),
@@ -1410,7 +1424,9 @@ export const TurnResult = z.object({
    * own; this is what every reader takes off it. Absent on a turn nothing of it waited on. */
   waitedMs: z.number().optional(),
   costUsd: z.number().optional(),
-  usage: z.record(z.unknown()).optional(),
+  tokens: TurnTokens.optional(),
+  /** The model the turn ran on, by the agent's own id. */
+  model: z.string().optional(),
   text: z.string().optional(),
   error: z.string().optional(),
   /** Set only on a turn the agent refused outright for a cause wsp knows; the status is failed with it. */
@@ -1598,6 +1614,38 @@ export const SessionNotifyEvent = z.object({
 });
 export type SessionNotifyEvent = z.infer<typeof SessionNotifyEvent>;
 
+/** One file a turn changed, as the tree under its reply lists it. */
+export const TurnChangedFile = z.object({ path: z.string(), kind: z.string(), additions: z.number(), deletions: z.number() });
+export type TurnChangedFile = z.infer<typeof TurnChangedFile>;
+
+/** What one turn changed in the folder it ran in: every file between the snapshot taken as it launched and the one
+ * taken as it ended, with the two commits' shas, off which the Changes pane reads the patches. shared: another
+ * thread's turn ran in the same folder between the two, so some of these changes may be that thread's. A turn that
+ * changed nothing records none. */
+export const SessionChangesEvent = z.object({
+  type: z.literal("session.changes"),
+  ...sessionScope,
+  from: z.string(),
+  to: z.string(),
+  files: z.array(TurnChangedFile),
+  shared: z.literal(true).optional(),
+});
+export type SessionChangesEvent = z.infer<typeof SessionChangesEvent>;
+
+/** One step of the list an agent keeps of its own work, in the three states every agent's list comes down to. */
+export const PlanStep = z.object({ text: z.string(), state: z.enum(["pending", "working", "done"]) });
+export type PlanStep = z.infer<typeof PlanStep>;
+
+/** The agent's plan for the turn as it stands: its step list whole, each time it changes, or the plan it proposed as
+ * Markdown. A later one of either replaces the earlier in the turn it names. */
+export const SessionPlanEvent = z.object({
+  type: z.literal("session.plan"),
+  ...sessionScope,
+  steps: z.array(PlanStep).optional(),
+  text: z.string().optional(),
+});
+export type SessionPlanEvent = z.infer<typeof SessionPlanEvent>;
+
 /** One permission prompt the harness raised, relayed into the chat as its own row. The prompt blocks the turn until
  * sessions.answer names an option or the turn itself ends, so the row is what the thread is waiting on for as long
  * as the turn lives. */
@@ -1643,6 +1691,8 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionPermissionEvent,
   SessionPermissionClosedEvent,
   SessionCheckpointEvent,
+  SessionChangesEvent,
+  SessionPlanEvent,
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
@@ -3204,6 +3254,8 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionPermissionEvent.extend(sequenced),
   SessionPermissionClosedEvent.extend(sequenced),
   SessionCheckpointEvent.extend(sequenced),
+  SessionChangesEvent.extend(sequenced),
+  SessionPlanEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
   ThreadRewoundEvent.extend(sequenced),
@@ -3378,9 +3430,10 @@ export type GitStatusReply = z.infer<typeof GitStatusReply>;
  * head: working tree against HEAD with every untracked file as a new one, what a commit could take. */
 export const GitDiffScope = z.enum(["branch", "unstaged", "staged", "head"]);
 export type GitDiffScope = z.infer<typeof GitDiffScope>;
-/** blob is the id git gives the file's worktree contents now, absent for a file that is gone: a viewed mark is kept
- * against it, so a file that changes again reads unviewed with nothing compared anywhere. */
-export const GitDiffFile = z.object({ path: z.string(), patch: z.string(), blob: z.string().optional() });
+/** kind is added, modified, deleted, renamed or copied; additions and deletions count lines, none for a binary. blob is
+ * the id git gives the file's worktree contents now, absent for a file that is gone: a viewed mark is kept against it,
+ * so a file that changes again reads unviewed with nothing compared anywhere. */
+export const GitDiffFile = z.object({ path: z.string(), kind: z.string(), additions: z.number(), deletions: z.number(), patch: z.string(), blob: z.string().optional() });
 export type GitDiffFile = WireGitDiffFile;
 type GitDiffFileHeld = Held<Same<z.infer<typeof GitDiffFile>, GitDiffFile>>;
 /** The file a git.discard put back as HEAD has it. */
@@ -3403,6 +3456,9 @@ type GitUpdateReplyHeld = Held<Same<GitUpdateReply, WireGitUpdateReply>>;
  * truncated means the 2 MiB patch budget cut files or a patch short. */
 export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean() });
 export type GitDiffReply = z.infer<typeof GitDiffReply>;
+/** The commit a git.snapshot recorded, by its full sha. */
+export const GitSnapshotReply = z.object({ commit: z.string() });
+export type GitSnapshotReply = z.infer<typeof GitSnapshotReply>;
 
 /** One live or exited pty the daemon still holds; exited ones stay until pty.kill. */
 export const PtyListEntry = z.object({ id: z.string(), pid: z.number(), cols: z.number(), rows: z.number(), exited: z.boolean() });
@@ -3605,6 +3661,12 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * and all, and answers a GitCommitReply. A held index is waited on once; git knowing no author, and a hook that
    * says no, are refused in one sentence each. */
   z.object({ id: reqId, op: z.literal("git.commit"), cwd: z.string(), message: z.string(), paths: z.array(z.string()), machineId: z.string().optional() }),
+  /** Records the checkout as it stands, new files in and ignored ones out, as one commit on top of HEAD through an
+   * index of its own, so the checkout's own index is never written; answers a GitSnapshotReply. No ref names it. */
+  z.object({ id: reqId, op: z.literal("git.snapshot"), cwd: z.string(), machineId: z.string().optional() }),
+  /** The diff between two commits, each its full 40 character sha or the frame is refused before git runs; answers
+   * a GitDiffReply. */
+  z.object({ id: reqId, op: z.literal("git.range"), cwd: z.string(), from: z.string(), to: z.string(), path: z.string().optional(), machineId: z.string().optional() }),
   /** Pushes the branch the checkout is on to its remote and answers a GitPushReply. The base branch itself is
    * refused: wsp makes no branch and pushes none of the branch the work started from. Without a base the
    * checkout's own default branch is read, which is what a project recorded without one was cloned at. */
@@ -4328,6 +4390,7 @@ const DAEMON_CONTENTS = [
   "7e3fcbd460f842ff7343389c09ddbf43de751d83abea5cf82580d929811656e7",
   "e927a6944459d21c2598ce6ff7511bd6bb22eed9ac962aaedcce620e92b3d321",
   "1796fa8ef2dcd4c907e1314205bdca852b06c8fb807c5580b517c7ee389a188a",
+  "fcbf00c4e8075aea8eec9513751ad6412db3feae36f2a1e78d2465eca51b86a4",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4569,7 +4632,10 @@ const DAEMON_CONTENTS = [
  * number that gh refused is an error rather than none; git.prView its page with the comments on its lines, git.runLog
  * a failed job's last lines, git.repoRead a repository's merge methods, and git.prMerge merges only the head it names;
  * git.update merges the base's latest commits into a clean checkout and takes a conflicting merge back; git.pr answers
- * the whole fact, and git.prState is gone. */
+ * the whole fact, and git.prState is gone.
+ * Version 91 adds git.snapshot, the checkout as it stands as one commit on HEAD taken through an index of its own,
+ * and git.range, the diff between two such commits by their full shas, held to the daemon's root as git.diff is;
+ * every git.diff file gains its kind and its line counts, and a checkpoint starts no fsmonitor. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -6487,7 +6553,7 @@ export { compareVersions } from "./semver.mjs";
 export { attachedFilesPrompt, Attachment, attachmentBytes, attachmentLine, AttachmentRecord, attachmentRecord, FILE_MAX_BYTES, FILE_MAX_WORDS, FILES_AFTER_TURN, FILES_DIR, FILES_MAX, filePathIn, filesBlocked, filesNotLandedLine, filesRefusal, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, imagePathIn, imageTypeOf, isImage, dropFilesLine, landFilesLine, noImagesLine, notAFileLine, safeFileName, sendFilesDir, threadFilesDir, threadImagesDir, turnImagesDir, UNTYPED_FILE } from "./attachments.js";
 export * from "./oom.js";
 export { accruedAt, accruedPast, appendCostPoint, COST_HISTORY_CAP, dayStart, monthStart, rateAt, spentSince } from "./cost-history.js";
-export { leadAsk, openAsk, ThreadMessage, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";
+export { leadAsk, openAsk, ThreadMessage, threadMarkdown, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";
 export { inFolder, shellLine, shellQuote } from "./shell-quote.js";
 export {
   DEFAULT_THEME,

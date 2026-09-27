@@ -75,8 +75,9 @@ export function useThreadVerbs(): ThreadVerbs {
       restore: canRestore ? restoreThreads : undefined,
       mark: canMark ? markThreads : undefined,
       undoRewind: canUndoRewind ? requestUndoRewind : undefined,
+      readEvents: api === null ? undefined : workspaceId => api.sessionHistory(workspaceId),
       copyText,
     }),
-    [canForget, canMark, canRestore, canSettle, canUndoRewind, forgetThread, markThreads, restoreThreads, settleThreads, stop],
+    [api, canForget, canMark, canRestore, canSettle, canUndoRewind, forgetThread, markThreads, restoreThreads, settleThreads, stop],
   );
 }

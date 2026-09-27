@@ -23,6 +23,7 @@ import React, {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   isValidElement,
+  lazy,
   use,
   useCallback,
   memo,
@@ -39,6 +40,7 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import { remarkGithubAlerts } from "../lib/markdownGithubAlerts";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import type { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -194,7 +196,8 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   attributes: {
     ...defaultSchema.attributes,
     "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
-    code: [...(defaultSchema.attributes?.code ?? []), "dataCodeMeta", "dataInlineCode"],
+    // The default's language class, and the two marks remark-math puts on a formula, which KaTeX reads after this.
+    code: [["className", /^language-./, "math-inline", "math-display"], "dataCodeMeta", "dataInlineCode"],
     blockquote: [...(defaultSchema.attributes?.blockquote ?? []), "dataAlert"],
     img: [...(defaultSchema.attributes?.img ?? []), "dataLocalSrc", "dataMarkdownTitle"],
   },
@@ -207,6 +210,8 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
 
 const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
+  remarkMath,
+  remarkPandocMath,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkPreserveCodeMeta,
@@ -215,6 +220,8 @@ const CHAT_MARKDOWN_REMARK_PLUGINS = [
 
 const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkGfm,
+  remarkMath,
+  remarkPandocMath,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkBreaks,
@@ -227,6 +234,39 @@ const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypePreserveImageSourceMeta,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+
+type RehypePlugin = NonNullable<ReactMarkdownOptions["rehypePlugins"]>[number];
+
+/** A display formula, or an inline one by Pandoc's rules: an opening dollar not followed by a space, a closing one not
+ * after a space and not followed by a digit, so "$3 to $5" is prose. */
+const DISPLAY_MATH = /\$\$[\s\S]*?\S[\s\S]*?\$\$/;
+const INLINE_MATH = /(?<![\\$])\$(?![\s$])[^$\n]*?[^\s\\$]\$(?![\d$])/;
+
+export function hasMath(text: string): boolean {
+  return DISPLAY_MATH.test(text) || INLINE_MATH.test(text);
+}
+
+let katexLoad: Promise<RehypePlugin> | null = null;
+let katexLoaded: RehypePlugin | null = null;
+
+/** KaTeX's plugin once a message with math has asked for it; nothing for a message without, which never loads it. */
+function useKatex(wanted: boolean): RehypePlugin | null {
+  const [plugin, setPlugin] = useState<RehypePlugin | null>(katexLoaded);
+  useEffect(() => {
+    if (!wanted || plugin !== null) return;
+    let live = true;
+    katexLoad ??= import("./markdownMath").then(m => (katexLoaded = m.REHYPE_KATEX as unknown as RehypePlugin));
+    void katexLoad.then(loaded => {
+      if (live) setPlugin(() => loaded);
+    });
+    return () => {
+      live = false;
+    };
+  }, [plugin, wanted]);
+  return wanted ? plugin : null;
+}
+
+const MermaidBlock = lazy(() => import("./chat/MermaidBlock"));
 
 /** The sanitizer's schema for a restricted file: no image, links only to web pages and mail addresses, no source
  * for anything, and the span the restricted plugin writes for an image or a link it took apart. */
@@ -355,11 +395,42 @@ type MarkdownAstNode = {
   type?: string;
   meta?: unknown;
   url?: string;
+  value?: string;
+  position?: { start: { offset?: number }; end: { offset?: number } };
   data?: {
     hProperties?: Record<string, unknown>;
   };
   children?: MarkdownAstNode[];
 };
+
+/**
+ * Pandoc's rules over remark-math's inline formulas, which read any two dollars as one: a formula whose opening
+ * dollar is followed by a space, whose closing one follows a space, or is followed by a digit, is the prose it was
+ * ("$3 to $5"), and one written between double dollars is a display formula wherever it stands.
+ */
+function remarkPandocMath() {
+  return (tree: MarkdownAstNode, file: { value?: unknown }) => {
+    const source = String(file.value ?? "");
+    const visit = (node: MarkdownAstNode) => {
+      if (node.children === undefined) return;
+      node.children = node.children.map((child) => {
+        const start = child.position?.start.offset;
+        const end = child.position?.end.offset;
+        if (child.type !== "inlineMath" || start === undefined || end === undefined) return child;
+        const raw = source.slice(start, end);
+        if (raw.startsWith("$$")) {
+          child.data = { ...child.data, hProperties: { ...child.data?.hProperties, className: ["language-math", "math-display"] } };
+          return child;
+        }
+        const inner = raw.slice(1, -1);
+        const prose = /^\s/.test(inner) || /\s$/.test(inner) || /\d/.test(source.charAt(end));
+        return prose ? { type: "text", value: raw } : child;
+      });
+      node.children.forEach(visit);
+    };
+    visit(tree);
+  };
+}
 
 function remarkPreserveCodeMeta() {
   return (tree: MarkdownAstNode) => {
@@ -1683,6 +1754,19 @@ function ChatMarkdown({
 
         const language = extractFenceLanguage(codeBlock.className);
         const fenceTitle = extractFenceTitle(extractPreCodeMeta(node));
+        // A diagram is drawn once its reply has settled; half a fence is not a diagram, and redrawing each chunk is waste.
+        if (language === "mermaid" && !isStreaming && !restricted) {
+          const source = <pre {...props}>{children}</pre>;
+          return (
+            <MarkdownCodeBlock code={codeBlock.code} language={language} fenceTitle={fenceTitle} wordWrap={wordWrap}>
+              <RenderErrorBoundary fallback={source}>
+                <Suspense fallback={source}>
+                  <MermaidBlock code={codeBlock.code} resolvedTheme={resolvedTheme} source={source} />
+                </Suspense>
+              </RenderErrorBoundary>
+            </MarkdownCodeBlock>
+          );
+        }
         return (
           <MarkdownCodeBlock
             code={codeBlock.code}
@@ -1715,6 +1799,7 @@ function ChatMarkdown({
     onTaskListChange,
     onImageExpand,
     onOpenFile,
+    resolvedTheme,
     restricted,
     skills,
     text,
@@ -1733,6 +1818,13 @@ function ChatMarkdown({
     [extraRemarkPlugins, lineBreaks, restricted],
   );
 
+  const katex = useKatex(!restricted && hasMath(text));
+  const rehypePlugins = useMemo(() => {
+    if (restricted) return SKILL_MARKDOWN_REHYPE_PLUGINS;
+    const base = parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : [];
+    return katex === null ? (parseRawHtml ? base : undefined) : [...base, katex];
+  }, [katex, parseRawHtml, restricted]);
+
   // react-markdown converts unparsed HTML nodes to text when skipHtml is false.
   // Keep that behavior explicit because literal mode depends on escaping the
   // complete source token instead of dropping it from the rendered message.
@@ -1746,7 +1838,7 @@ function ChatMarkdown({
     >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={restricted ? SKILL_MARKDOWN_REHYPE_PLUGINS : parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
+        rehypePlugins={rehypePlugins}
         skipHtml={false}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}

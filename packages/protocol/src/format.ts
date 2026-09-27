@@ -318,6 +318,16 @@ export function fmtDuration(ms: number, style: DurationStyle = "short"): string 
   return hours === 0 ? `${minutes}m ${pad2(seconds)}s` : `${hours}h ${pad2(minutes)}m ${pad2(seconds)}s`;
 }
 
+/** A token count as a reply's footer reads it: whole under a thousand, then thousands and millions to one place,
+ * with no trailing zero place. */
+export function fmtTokens(n: number): string {
+  const count = Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+  const short = (value: number, unit: string): string => `${Number(value.toFixed(1))}${unit}`;
+  if (count < 1_000) return String(count);
+  if (count < 1_000_000) return short(count / 1_000, "k");
+  return short(count / 1_000_000, "M");
+}
+
 /** How long a machine has been up, as the Machine tab reads it: minutes under an hour, hours and minutes under a
  * day, then days and hours. Coarser than a turn's duration on purpose: the figure is read once, not watched. */
 export function fmtUptime(ms: number): string {
@@ -436,6 +446,16 @@ export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: n
   return parts;
 }
 
+/** What a reply ran on and what it read and wrote, in the footer's order: the model, then the tokens in and out.
+ * `modelLabel` is the name the app's picker gives the model; the command line has only the agent's id for it. */
+export function turnFactsParts(turn: { model?: string | null; tokens?: { input: number; output: number } | null }, modelLabel?: string): string[] {
+  const parts: string[] = [];
+  const model = modelLabel ?? turn.model ?? undefined;
+  if (model !== undefined && model !== "") parts.push(model);
+  if (turn.tokens != null) parts.push(`${fmtTokens(turn.tokens.input)} in`, `${fmtTokens(turn.tokens.output)} out`);
+  return parts;
+}
+
 /** The chat footer as one line, for a stream that has no footer: the outcome word, then what it worked and cost.
  * `spendWord` is what the figure is, where the surface knows: a turn on a computer of the person's own ran on
  * their own sign-in and its figure is LIST_PRICE_WORD, which is the word the app's footer already gives it. */
@@ -443,11 +463,26 @@ export function turnSettledLine(result: TurnResult, spendWord?: string): string 
   return [result.status, ...turnSettledParts(result, undefined, spendWord)].join("  ");
 }
 
+/** The agent's step list as a read transcript's row says it: the count done, then one task line per step. */
+export function planStepsLine(steps: ReadonlyArray<{ text: string; state: "pending" | "working" | "done" }>): string {
+  const done = steps.filter(s => s.state === "done").length;
+  const lines = steps.map(s => `- [${s.state === "done" ? "x" : " "}] ${s.text}${s.state === "working" ? " (working)" : ""}`);
+  return [`Plan: ${done} of ${steps.length} steps done`, ...lines].join("\n");
+}
+
+/** What a turn changed in its folder, as a read transcript's row says it: the files and the lines added and taken. */
+export function turnChangesLine(files: ReadonlyArray<{ additions: number; deletions: number }>): string {
+  const added = files.reduce((n, f) => n + f.additions, 0);
+  const taken = files.reduce((n, f) => n + f.deletions, 0);
+  return `Changed ${files.length} file${files.length === 1 ? "" : "s"}, +${added} -${taken}`;
+}
+
 /** The row a turn's end leaves in a read transcript: the footer above, and why it did not complete where it did
  * not, since a reader of a failed turn needs the reason with the word. */
 export function turnEndLine(result: TurnResult): string {
   const failure = result.status === "completed" ? undefined : result.error;
-  return failure === undefined ? turnSettledLine(result) : `${turnSettledLine(result)}: ${failure}`;
+  const line = [turnSettledLine(result), ...turnFactsParts(result)].join("  ");
+  return failure === undefined ? line : `${line}: ${failure}`;
 }
 
 /** A turn the agent refused outright: it answered with an error line of its own and did none of the work. The word
@@ -464,7 +499,8 @@ export function refusedTurn(result: TurnResult, refusal?: { road?: string; cause
     status: "failed",
     ...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
     ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
-    ...(result.usage !== undefined ? { usage: result.usage } : {}),
+    ...(result.tokens !== undefined ? { tokens: result.tokens } : {}),
+    ...(result.model !== undefined ? { model: result.model } : {}),
     ...(sentence.length > 0 ? { error: sentence } : {}),
     ...(refusal?.cause !== undefined ? { refusal: refusal.cause } : {}),
   };

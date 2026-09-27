@@ -12,6 +12,8 @@ import { useSelectedThreadId, useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
+import { useDiffStore } from "../src/diffs/store.js";
+import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { requestNewThread } from "../src/shell/shellRequests.js";
 import { CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
@@ -113,6 +115,71 @@ describe("chat tab rendering", () => {
     expect(footer.textContent).toContain("Worked for 10s");
     expect(footer.textContent).toContain("$0.02");
     expect(screen.queryByText(/Working for/)).toBeNull();
+  });
+
+  it("says the reply's model and tokens in its footer beside the time, the model by the picker's own name", async () => {
+    const { api, emit } = fixtureApi([workspace]);
+    const named = { ...TABLE_CATALOG, models: [{ value: "claude-sonnet-4-5", label: "Sonnet 4.5", efforts: [], contextWindows: [] }] };
+    await setup({ ...api, listHarnesses: async () => [named] });
+    for (const e of FIXTURE) emit(e.type === "session.done" ? { ...e, result: { ...e.result, model: "claude-sonnet-4-5", tokens: { input: 22_564, output: 251, context: 4_269, window: 200_000 } } } : e);
+    await screen.findByText(/Server is live at :3000\./);
+    const facts = await waitFor(() => {
+      const row = document.querySelector<HTMLElement>("[data-reply-facts]");
+      expect(row).not.toBeNull();
+      return row!;
+    });
+    expect([...facts.children].map(c => c.textContent)).toEqual(["Sonnet 4.5", "22.6k in", "251 out"]);
+    expect(facts.className).toContain("tabular-nums");
+    // On a phone the row wraps between facts, never inside one.
+    for (const fact of facts.children) expect(fact.className).toContain("whitespace-nowrap");
+    expect(facts.className).toContain("flex-wrap");
+    // The composer's meter reads what the model held at that turn's end, out of its window.
+    expect(document.querySelector("[data-context-meter]")?.textContent).toBe("4.3k / 200k");
+    expect(document.querySelectorAll("[data-context-meter]")).toHaveLength(1);
+    expect(document.querySelector("[data-context-track]")).not.toBeNull();
+  });
+
+  it("draws what a turn changed under its reply, says when another thread shared the folder, and opens the Changes pane on that turn", async () => {
+    useDiffStore.setState({ turnByWorkspaceId: {} });
+    useRightPanelStore.setState({ byWorkspaceId: {} });
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    for (const e of FIXTURE) emit(e);
+    await screen.findByText(/Server is live at :3000\./);
+    expect(screen.queryByRole("button", { name: "Open changes" })).toBeNull();
+    const from = "a".repeat(40);
+    const to = "b".repeat(40);
+    const files = [
+      { path: "server.js", kind: "added", additions: 12, deletions: 0 },
+      { path: "README.md", kind: "modified", additions: 2, deletions: 3 },
+    ];
+    emit({ type: "session.changes", ...scope, from, to, files, shared: true });
+    const open = await screen.findByRole("button", { name: "Open changes" });
+    expect(screen.getByText("2 changed files")).toBeDefined();
+    // The counts are neutral at rest, as in the Changes pane: no success or destructive ink under a reply.
+    const counts = document.querySelector<HTMLElement>('[aria-label="14 additions, 3 deletions"]')!;
+    expect(counts.innerHTML).not.toMatch(/text-success|text-destructive/);
+    expect([...counts.children].every(c => c.className.includes("text-muted-foreground"))).toBe(true);
+    const shared = screen.getByText("Includes changes from another thread in this copy");
+    expect(shared.className).toContain("text-[11px]");
+    expect(shared.className).toContain("text-muted-foreground");
+    fireEvent.click(open);
+    expect(useDiffStore.getState().turnByWorkspaceId[WS]).toEqual({ turnId: CHAT_TURN, cwd: expect.any(String), from, to, path: "server.js" });
+    const panel = useRightPanelStore.getState().byWorkspaceId[WS];
+    expect([panel?.isOpen, panel?.activeSurfaceId]).toEqual([true, "diff"]);
+  });
+
+  it("draws the agent's step list as one card under the turn, rewritten in place as the steps move", async () => {
+    const { api, emit } = fixtureApi([workspace]);
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "make a list and work through it" });
+    emit({ type: "session.plan", ...scope, steps: [{ text: "one", state: "working" }, { text: "two", state: "pending" }] });
+    await waitFor(() => expect(document.querySelectorAll("[data-todo-card]")).toHaveLength(1));
+    emit({ type: "session.plan", ...scope, steps: [{ text: "one", state: "done" }, { text: "two", state: "working" }] });
+    await waitFor(() => expect(document.querySelector("[data-todo-header]")?.textContent).toContain("1 of 2 done"));
+    expect(document.querySelectorAll("[data-todo-card]")).toHaveLength(1);
+    emit({ type: "session.plan", ...scope, text: "# Add a quiet flag\n\n1. Parse it" });
+    expect(await screen.findByText("Add a quiet flag")).toBeDefined();
   });
 
   it("renders a plain error when the session exits without a result", async () => {

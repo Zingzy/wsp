@@ -14,7 +14,7 @@ import { HeroAtmosphere, HeroMark } from "./EmptyHero.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowDownIcon } from "lucide-react";
 import type { LegendListRef } from "@legendapp/list/react";
-import { isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts, workspaceWord } from "@wsp/protocol";
+import { everyModel, isLocalWorkspace, LIST_PRICE_WORD, turnSettledParts, workspaceWord } from "@wsp/protocol";
 import { Button } from "../ui/button";
 import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { Facts } from "../Facts.js";
@@ -23,7 +23,9 @@ import { PullRequestRow } from "../../pull-request/PullRequestRow.js";
 import { openNamedFile } from "../../files/open";
 import { threadFolderOf } from "../../files/root";
 import { cn } from "../../lib/utils";
-import { DEFAULT_TIMESTAMP_FORMAT, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
+import { DEFAULT_TIMESTAMP_FORMAT, turnWait, type MessageId, type TimestampFormat, type TurnDiffSummary, type TurnSummary } from "./adapt";
+import { useDiffStore } from "../../diffs/store";
+import { useRightPanelStore } from "../../rightPanelStore";
 import { useReadStamp } from "./useReadStamp";
 import { threadsOpenedBy, type ThreadOnWorkspace } from "../../sidebar/threadTree";
 import { computerName, useComputerName } from "../../sidebar/workspaceRows";
@@ -115,6 +117,34 @@ export function ChatView({
   const turnRows = useThreadSessions(workspaceId, threadKey);
   useReadStamp(turnRows);
   const catalog = useHarnessCatalog(turnRows.at(-1)?.harness ?? DEFAULT_HARNESS, workspaceId);
+  // A reply names its model the way the picker does; one the catalog does not list is named by its id.
+  const modelLabel = useCallback((model: string) => (catalog === null ? undefined : everyModel(catalog).find(m => m.value === model.replace(/\[1m\]$/, ""))?.label), [catalog]);
+  // What each turn changed hangs under that turn's last reply, and opens the Changes pane on the turn's own range.
+  // Keyed on what it draws rather than on the entries, so a streamed chunk hands the timeline the same map.
+  const diffPlaces = view.turns.flatMap(turn => {
+    if (turn.changes === null) return [];
+    const last = view.entries.findLast(e => e.kind === "message" && e.message.role === "assistant" && e.message.turnId === turn.turnId);
+    return last?.kind === "message" ? [{ messageId: last.message.id, turn: turn.turnId, changes: turn.changes }] : [];
+  });
+  const diffKey = JSON.stringify(diffPlaces.map(p => [p.messageId, p.turn, p.changes.to, p.changes.shared]));
+  const diffPlacesRef = useRef(diffPlaces);
+  diffPlacesRef.current = diffPlaces;
+  const turnDiffs = useMemo(
+    () => new Map<MessageId, TurnDiffSummary>(diffPlacesRef.current.map(p => [p.messageId, { turnId: p.turn, files: p.changes.files, shared: p.changes.shared }])),
+    [diffKey],
+  );
+  const turnsRef = useRef(view.turns);
+  turnsRef.current = view.turns;
+  const onOpenTurnDiff = useCallback(
+    (turnId: string, path?: string) => {
+      const changes = turnsRef.current.find(t => t.turnId === turnId)?.changes;
+      const at = cwd ?? threadFolderOf(workspaceId);
+      if (!changes || at === null) return;
+      useDiffStore.getState().openTurn(workspaceId, { turnId, cwd: at, from: changes.from, to: changes.to, ...(path === undefined ? {} : { path }) });
+      useRightPanelStore.getState().open(workspaceId, "diff");
+    },
+    [cwd, workspaceId],
+  );
   const asked = useNewThreadRequests(s => s.pending.has(workspaceId));
   useEffect(() => {
     // The latest view takes the request once its transcript is in, so it knows which thread it leaves behind.
@@ -221,6 +251,9 @@ export function ChatView({
             listRef={listRef}
             timelineEntries={view.entries}
             turns={view.turns}
+            modelLabel={modelLabel}
+            turnDiffSummaryByAssistantMessageId={turnDiffs}
+            onOpenTurnDiff={onOpenTurnDiff}
             threadKey={threadId === null ? workspaceId : `${workspaceId}/${threadId}`}
             onImageExpand={noopImageExpand}
             onAnswerPermission={onAnswerPermission}

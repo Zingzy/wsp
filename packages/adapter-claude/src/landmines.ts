@@ -16,10 +16,12 @@ export const ENV_STRIP_PATTERNS: readonly RegExp[] = [
 ];
 
 // From t3code's probe options: headless runs must not probe for IDEs, or the
-// CLI spawns discovery process trees on every invocation.
+// CLI spawns discovery process trees on every invocation. A headless run also
+// leaves the task list tools off, which the CLI's own terminal has on.
 const HEADLESS_OVERRIDES = {
   CLAUDE_CODE_AUTO_CONNECT_IDE: "0",
   CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: "1",
+  CLAUDE_CODE_ENABLE_TODO_TOOLS: "1",
 } as const;
 
 /** The variable that tells the CLI which folder under its projects directory to keep this run's sessions and its

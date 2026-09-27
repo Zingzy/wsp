@@ -13,7 +13,7 @@
 // these into the SessionEvent shapes in index.ts that clients read, which is
 // why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
 // declared once there and imported back here.
-import type { DeltaKind, PermissionOption, PermissionOutcome, SessionHarness, TurnResult } from "./index.js";
+import type { DeltaKind, PermissionOption, PermissionOutcome, PlanStep, SessionHarness, TurnResult } from "./index.js";
 
 /** The id every adapter's ask carries for "run this call" and for "refuse it", so the runtime's own answers (the
  * deny it sends when nobody answered in time) name an option without knowing which CLI raised the prompt. Options
@@ -65,6 +65,9 @@ export type AdapterEvent =
       cwd?: string;
     }
   | { type: "turn.done"; sessionId: string; result: TurnResult }
+  /** The agent's step list whole each time it changes, or the plan it proposed as Markdown; read off whichever tool
+   * or item the agent keeps them in, which draws no tool row of its own. */
+  | { type: "turn.plan"; sessionId: string; steps?: PlanStep[]; text?: string }
   | {
       /** How many commands and subagents the harness reports running in the background right now, sent every time
        * that set changes. The turn is still working while the count is above zero, whatever its agent has said, so

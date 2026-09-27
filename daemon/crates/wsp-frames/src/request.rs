@@ -216,6 +216,32 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
+    /// Records the checkout as it stands, tracked and new files alike and ignored ones not, as one commit whose parent
+    /// is HEAD, through an index of its own so the checkout's own index is never written; answers the commit's sha.
+    /// No ref names it: a pruned object reads as gone.
+    #[serde(rename = "git.snapshot", rename_all = "camelCase")]
+    GitSnapshot {
+        cwd: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// The diff between two commits, each named by its full 40 hex characters and nothing else, answered as git.diff
+    /// answers.
+    #[serde(rename = "git.range", rename_all = "camelCase")]
+    GitRange {
+        cwd: String,
+        from: String,
+        to: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        path: Option<String>,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     /// Pushes the branch this checkout is on to its remote, refusing the base branch itself: work leaves a
     /// workspace through git, and the branch is the agent's own to make.
     #[serde(rename = "git.push", rename_all = "camelCase")]
@@ -481,7 +507,7 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 51] = [
+pub const DAEMON_OPS: [&str; 53] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -507,6 +533,8 @@ pub const DAEMON_OPS: [&str; 51] = [
     "fs.search",
     "git.status",
     "git.diff",
+    "git.snapshot",
+    "git.range",
     "git.push",
     "git.pr",
     "git.prList",

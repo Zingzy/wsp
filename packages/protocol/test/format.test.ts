@@ -84,6 +84,7 @@ import {
   fmtBytes,
   fmtCost,
   fmtDuration,
+  fmtTokens,
   fmtElapsed,
   fmtMemGb,
   fmtRate,
@@ -171,6 +172,7 @@ import {
   turnSpendPart,
   turnSettledLine,
   turnSettledParts,
+  turnFactsParts,
   waitedOnYouPart,
   refusedTurn,
   signInRefusalLine,
@@ -595,6 +597,17 @@ describe("a turn's activity in one line each", () => {
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 0.22 })).toEqual(["Worked for 1m 12s", "$0.22"]);
   });
 
+  it("says a turn's model and tokens in short figures, and nothing the agent did not report", () => {
+    expect([0, 251, 999, 1_000, 4_269, 12_400, 22_564, 200_000, 1_000_000, 1_250_000].map(fmtTokens)).toEqual(["0", "251", "999", "1k", "4.3k", "12.4k", "22.6k", "200k", "1M", "1.3M"]);
+    expect(turnFactsParts({ model: "claude-sonnet-4-5", tokens: { input: 12_400, output: 251 } })).toEqual(["claude-sonnet-4-5", "12.4k in", "251 out"]);
+    // The app names the model the way its picker does; the command line has only the id.
+    expect(turnFactsParts({ model: "claude-sonnet-4-5", tokens: { input: 12_400, output: 251 } }, "Sonnet 4.5")).toEqual(["Sonnet 4.5", "12.4k in", "251 out"]);
+    expect(turnFactsParts({})).toEqual([]);
+    expect(turnFactsParts({ tokens: { input: 10, output: 3 } })).toEqual(["10 in", "3 out"]);
+    // A read transcript's finished line says the same facts the footer does.
+    expect(turnEndLine({ status: "completed", durationMs: 72_000, costUsd: 0.22, model: "gpt-5.5", tokens: { input: 24_763, output: 122 } })).toBe("completed  Worked for 1m 12s  $0.22  gpt-5.5  24.8k in  122 out");
+  });
+
   it("counts work in Worked for: the minutes a turn stood on a question come off it, and are said where they are most of it", () => {
     // The harness reports wall time from launch to result, prompts included; the person's minutes are not the turn's.
     expect(turnSettledParts({ durationMs: 215_000, waitedMs: 211_000, costUsd: 0.05 })).toEqual(["Worked for 4.0s", "waited on you 3m 31s", "$0.05"]);
@@ -885,7 +898,7 @@ describe("refusedTurn", () => {
   });
 
   it("a refusal wsp knows no road out of keeps the agent's sentence alone and is classed by nothing; one with neither sentence nor road says only failed", () => {
-    expect(refusedTurn({ status: "completed", text: "  Overloaded  ", usage: { input_tokens: 0 } }, { road: "" })).toEqual({ status: "failed", usage: { input_tokens: 0 }, error: "Overloaded" });
+    expect(refusedTurn({ status: "completed", text: "  Overloaded  ", tokens: { input: 0, output: 0 } }, { road: "" })).toEqual({ status: "failed", tokens: { input: 0, output: 0 }, error: "Overloaded" });
     expect(refusedTurn({ status: "completed", error: "the provider refused" })).toEqual({ status: "failed", error: "the provider refused" });
     expect(refusedTurn({ status: "completed" })).toEqual({ status: "failed" });
   });

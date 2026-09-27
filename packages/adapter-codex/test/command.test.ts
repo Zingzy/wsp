@@ -27,7 +27,8 @@ describe("buildEnv", () => {
 
 describe("buildCommand", () => {
   it("runs the app server on stdio in the guest home, with no prompt and no turn flags on the line", () => {
-    expect(buildCommand({})).toBe("cd ~ && codex app-server");
+    // The plan tool is off in a headless 0.155.1 unless its config turns it on, and its updates are the steps card.
+    expect(buildCommand({})).toBe("cd ~ && codex app-server -c tools.update_plan.enabled='true'");
   });
 
   it("never names a listener: the server speaks on the process's own stdio and nothing else", () => {
@@ -58,7 +59,7 @@ describe("buildCommand", () => {
     // Codex ends a tool call past its own limit, and a send can wait through a paused Boat's wake before its turn.
     expect(command).toContain(`-c mcp_servers.wsp.tool_timeout_sec='${WSP_TOOL_TIMEOUT_SEC}'`);
     expect(command).not.toContain("mcp_servers.docs.tool_timeout_sec");
-    expect(command.startsWith("cd ~ && codex app-server -c ")).toBe(true);
+    expect(command.startsWith("cd ~ && codex app-server -c tools.update_plan.enabled='true' -c ")).toBe(true);
   });
 
   it("refuses a server name that is not one plain word of a config key", () => {
@@ -70,7 +71,7 @@ describe("buildCommand", () => {
   });
 
   it("starts in the folder named, quoted", () => {
-    expect(buildCommand({ cwd: "/root/my project" })).toBe("cd '/root/my project' && codex app-server");
+    expect(buildCommand({ cwd: "/root/my project" })).toBe("cd '/root/my project' && codex app-server -c tools.update_plan.enabled='true'");
   });
 });
 

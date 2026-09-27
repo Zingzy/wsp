@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1,
+    "op": "git.snapshot",
+    "cwd": "repo"
+  },
+  {
+    "id": 1,
+    "op": "git.snapshot",
+    "cwd": "/root/repo",
+    "machineId": "wsp-x"
+  }
+]

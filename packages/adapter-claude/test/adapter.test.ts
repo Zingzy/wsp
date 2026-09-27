@@ -269,6 +269,9 @@ describe("ClaudeAdapter over the recorded fixture", () => {
     expect(result.durationMs).toBe(10458);
     expect(result.costUsd).toBe(0.0187);
     expect(result.text).toBe("Server is live at :3000 and answered: Hello, World!");
+    // The result's usage sums every call of the turn; what the model held at the end is the last reply's own figure.
+    expect(result.model).toBe("claude-sonnet-4-5");
+    expect(result.tokens).toEqual({ input: 22_564, output: 251, cached: 18_435, cacheWrite: 4_113, context: 4_269, window: 200_000 });
 
     const end = events.at(-1);
     if (end?.type !== "session.end") throw new Error("expected session.end");
@@ -285,6 +288,63 @@ describe("ClaudeAdapter over the recorded fixture", () => {
 
     const deltas = events.filter(e => e.type === "turn.delta");
     expect(deltas.filter(d => d.kind === "text").map(d => d.messageId)).toEqual(["msg_01WspFixA1", "msg_01WspFixA4"]);
+  });
+
+  it("reads the agent's todo list and its proposed plan as the turn's plan, with no tool row for either", async () => {
+    const sid = FIXTURE_SESSION_ID;
+    const call = (id: string, name: string, input: unknown) => JSON.stringify({ type: "assistant", session_id: sid, parent_tool_use_id: null, message: { id: `msg_${id}`, role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
+    const answer = (id: string) => JSON.stringify({ type: "user", session_id: sid, parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "Todos have been modified successfully" }] } });
+    const todos = (states: string[]) => ({ todos: states.map((status, n) => ({ content: `step ${n + 1}`, activeForm: `doing step ${n + 1}`, status })) });
+    const lines = fixtureLines();
+    const exec = scriptedExec([
+      lines[1]!,
+      call("toolu_todo1", "TodoWrite", todos(["in_progress", "pending", "pending"])),
+      answer("toolu_todo1"),
+      call("toolu_todo2", "TodoWrite", todos(["completed", "in_progress", "pending"])),
+      answer("toolu_todo2"),
+      call("toolu_plan", "ExitPlanMode", { plan: "# Add --quiet\n\n1. Parse the flag" }),
+      answer("toolu_plan"),
+      lines.at(-1)!,
+    ]);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    await adapter.start({ prompt: "plan it", onEvent }).finished;
+
+    expect(events.filter(e => e.type === "turn.plan")).toEqual([
+      { type: "turn.plan", sessionId: sid, steps: [{ text: "step 1", state: "working" }, { text: "step 2", state: "pending" }, { text: "step 3", state: "pending" }] },
+      { type: "turn.plan", sessionId: sid, steps: [{ text: "step 1", state: "done" }, { text: "step 2", state: "working" }, { text: "step 3", state: "pending" }] },
+      { type: "turn.plan", sessionId: sid, text: "# Add --quiet\n\n1. Parse the flag" },
+    ]);
+    expect(events.filter(e => e.type === "turn.delta" && (e.kind === "tool_use" || e.kind === "tool_result"))).toEqual([]);
+  });
+
+  it("keeps the task list 2.1.283 builds call by call as the turn's plan, the list whole each time it moves, with no tool rows", async () => {
+    const sid = FIXTURE_SESSION_ID;
+    const call = (id: string, name: string, input: unknown) => JSON.stringify({ type: "assistant", session_id: sid, parent_tool_use_id: null, message: { id: `msg_${id}`, role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
+    const answer = (id: string, text: string) => JSON.stringify({ type: "user", session_id: sid, parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: text }] } });
+    const lines = fixtureLines();
+    const exec = scriptedExec([
+      lines[1]!,
+      call("toolu_c1", "TaskCreate", { subject: "Write line 1", description: "first", activeForm: "Writing line 1" }),
+      answer("toolu_c1", "Task #1 created successfully: Write line 1"),
+      call("toolu_c2", "TaskCreate", { subject: "Write line 2", description: "second", activeForm: "Writing line 2" }),
+      answer("toolu_c2", "Task #2 created successfully: Write line 2"),
+      call("toolu_u1", "TaskUpdate", { taskId: "1", status: "in_progress" }),
+      answer("toolu_u1", "Updated task #1 status"),
+      call("toolu_u2", "TaskUpdate", { taskId: "1", status: "completed" }),
+      answer("toolu_u2", "Updated task #1 status"),
+      call("toolu_l", "TaskList", {}),
+      answer("toolu_l", "#1 [completed] Write line 1\n#2 [pending] Write line 2"),
+      lines.at(-1)!,
+    ]);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+    await adapter.start({ prompt: "list it", onEvent }).finished;
+
+    const one = (state: "pending" | "working" | "done") => ({ text: "Write line 1", state });
+    const two = { text: "Write line 2", state: "pending" };
+    expect(events.filter(e => e.type === "turn.plan").map(e => (e as { steps?: unknown }).steps)).toEqual([[one("pending")], [one("pending"), two], [one("working"), two], [one("done"), two]]);
+    expect(events.filter(e => e.type === "turn.delta" && (e.kind === "tool_use" || e.kind === "tool_result"))).toEqual([]);
   });
 
   it("stamps every line a subagent wrote with the call that launched it, and leaves the thread's own unstamped", async () => {
@@ -785,7 +845,7 @@ describe("result classification", () => {
       status: "failed",
       durationMs: 26,
       costUsd: 0,
-      usage,
+      tokens: { input: 0, output: 0, cached: 0, cacheWrite: 0 },
       text: "",
       error: "claude answered with no output and no usage after 26ms: No conversation found with session ID: e16ed170\nError: transcript ended mid-turn",
     });
@@ -864,7 +924,8 @@ describe("result classification", () => {
       status: "failed",
       durationMs: 88,
       costUsd: 0,
-      usage: { input_tokens: 0, output_tokens: 0 },
+      tokens: { input: 0, output: 0 },
+      model: "claude-opus-5[1m]",
       error: "Not logged in · Please run /login; sign in from a terminal on this computer, then send again",
       refusal: "sign-in",
     });
@@ -1226,5 +1287,18 @@ describe("what a rewind needs of a Claude Code turn", () => {
     expect(exec.calls[1]!.command).not.toContain("--resume-drops-turn");
     expect(() => plain.start({ prompt: "x", resume: FIXTURE_SESSION_ID, resumeAt: "$(rm -rf /)", onEvent: () => {} })).toThrow(/UUID/);
     expect(() => plain.start({ prompt: "x", resumeAt: "1a2b3c4d-0002-4aaa-8bbb-000000000002", onEvent: () => {} })).toThrow(/resume/);
+  });
+});
+
+describe("what the model held after a compaction", () => {
+  it("is the compaction's own post figure where it came after the last reply's usage", async () => {
+    const raw = readFileSync(new URL("./fixtures/compact-turn.jsonl", import.meta.url), "utf8");
+    const exec = scriptedExec(raw.split("\n").filter((line) => line.trim().length > 0));
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { onEvent } = collect();
+    const result = await adapter.start({ prompt: "keep going", onEvent }).finished;
+    expect(result.tokens?.context).toBe(31_250);
+    expect(result.tokens?.window).toBe(1_000_000);
+    expect(result.model).toBe("claude-opus-5-5[1m]");
   });
 });

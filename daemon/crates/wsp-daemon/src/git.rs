@@ -207,8 +207,19 @@ pub(crate) async fn default_branch<R: Runs>(runner: &R, cwd: &Path) -> Result<Op
 pub(crate) struct ListedFile {
     pub(crate) path: String,
     pub(crate) orig_path: Option<String>,
-    /// The change took the file away, so there are no contents to hash.
-    pub(crate) gone: bool,
+    /// added, modified, deleted, renamed or copied; a deleted file has no contents to hash.
+    pub(crate) kind: &'static str,
+}
+
+/// git's status letter as the word a client draws it by.
+fn kind_of(status: &str) -> &'static str {
+    match status.chars().next() {
+        Some('A') => "added",
+        Some('D') => "deleted",
+        Some('R') => "renamed",
+        Some('C') => "copied",
+        _ => "modified",
+    }
 }
 
 /// `diff --name-status -z`: a status record, then the path, and for a rename or a copy the new path after it.
@@ -220,13 +231,35 @@ pub(crate) fn parse_name_status(text: &str) -> Vec<ListedFile> {
             continue;
         }
         let first = tokens.next().unwrap_or_default().to_owned();
+        let kind = kind_of(status);
         if status.starts_with('R') || status.starts_with('C') {
-            files.push(ListedFile { path: tokens.next().unwrap_or_default().to_owned(), orig_path: Some(first), gone: false });
+            files.push(ListedFile { path: tokens.next().unwrap_or_default().to_owned(), orig_path: Some(first), kind });
         } else {
-            files.push(ListedFile { path: first, orig_path: None, gone: status.starts_with('D') });
+            files.push(ListedFile { path: first, orig_path: None, kind });
         }
     }
     files
+}
+
+/// `diff --numstat -z`: lines added and removed by the path they land at. A rename's record ends its counts with a
+/// tab and names the old path and the new one as two more records; a binary file counts "-", which is none.
+pub(crate) fn parse_numstat(text: &str) -> std::collections::HashMap<String, (u32, u32)> {
+    let mut counts = std::collections::HashMap::new();
+    let mut tokens = text.split('\0');
+    while let Some(record) = tokens.next() {
+        let mut fields = record.splitn(3, '\t');
+        let (Some(added), Some(removed), Some(path)) = (fields.next(), fields.next(), fields.next()) else {
+            continue;
+        };
+        let path = if path.is_empty() {
+            let _old = tokens.next();
+            tokens.next().unwrap_or_default().to_owned()
+        } else {
+            path.to_owned()
+        };
+        counts.insert(path, (added.parse().unwrap_or(0), removed.parse().unwrap_or(0)));
+    }
+    counts
 }
 
 /// The head of bytes that fits the limit, cut at the last line end inside it when there is one.
@@ -285,6 +318,57 @@ pub(crate) async fn git_diff<R: Runs>(
         GitDiffScope::Unstaged => {}
         GitDiffScope::Head => args.push(if rev_exists(runner, cwd, "HEAD").await? { "HEAD" } else { EMPTY_TREE }.to_owned()),
     }
+    let listing = Listing { untracked: matches!(scope, GitDiffScope::Head | GitDiffScope::Branch), blobs: true, whole };
+    diff_listed(runner, cwd, bound, &args, path, paths, listing, cap, base).await
+}
+
+/// The diff between two commits a git.snapshot recorded, held to bound as git.diff is. Each is taken only as its full
+/// sha, which the caller has checked, so neither reaches git as an option.
+pub(crate) async fn git_range<R: Runs>(
+    runner: &R,
+    cwd: &Path,
+    bound: &Path,
+    from: &str,
+    to: &str,
+    path: Option<&str>,
+    cap: usize,
+) -> Result<GitDiffReply, OpError> {
+    for sha in [from, to] {
+        let spec = format!("{sha}^{{commit}}");
+        let held = run_git(runner, cwd, &["cat-file", "-e", &spec], None, None).await?;
+        if held.code != Some(0) {
+            if held.stderr.to_ascii_lowercase().contains("not a git repository") {
+                return Err(not_a_repo());
+            }
+            return Err(OpError::coded(DaemonErrorCode::NotFound, format!("the snapshot {sha} is gone")));
+        }
+    }
+    let listing = Listing { untracked: false, blobs: false, whole: false };
+    diff_listed(runner, cwd, bound, &[from.to_owned(), to.to_owned()], path, &[], listing, cap, None).await
+}
+
+/// What a diff lists beyond git's own name-status: the untracked files as new ones, each file's worktree blob, and
+/// whole files in one hunk.
+#[derive(Clone, Copy)]
+struct Listing {
+    untracked: bool,
+    blobs: bool,
+    whole: bool,
+}
+
+/// One name-status pass picks the files and one numstat pass counts them, then one diff per file spends the budget.
+#[allow(clippy::too_many_arguments)]
+async fn diff_listed<R: Runs>(
+    runner: &R,
+    cwd: &Path,
+    bound: &Path,
+    args: &[String],
+    path: Option<&str>,
+    paths: &[String],
+    Listing { untracked: with_untracked, blobs: with_blobs, whole }: Listing,
+    cap: usize,
+    base: Option<String>,
+) -> Result<GitDiffReply, OpError> {
     let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
     check(&top, "rev-parse")?;
     let top = PathBuf::from(stdout_text(&top).trim());
@@ -314,12 +398,22 @@ pub(crate) async fn git_diff<R: Runs>(
     if listed.code != Some(0) {
         return Err(OpError::plain(format!("git diff --name-status failed: {}", listed.stderr.trim())));
     }
+    let mut count_args: Vec<&str> = vec!["diff"];
+    count_args.extend(args.iter().map(String::as_str));
+    count_args.extend(["-M", "--numstat", "-z"]);
+    if !narrowed.is_empty() {
+        count_args.push("--");
+        count_args.extend(&narrowed);
+    }
+    let counted = run_git(runner, cwd, &count_args, None, None).await?;
+    check(&counted, "diff --numstat")?;
+    let counts = parse_numstat(&stdout_text(&counted));
     let mut listed_files: Vec<(ListedFile, Untracked)> = parse_name_status(&stdout_text(&listed))
         .into_iter()
         .filter(|f| inside(&f.path))
         .map(|f| (ListedFile { orig_path: f.orig_path.filter(|o| inside(o)), ..f }, Untracked::No))
         .collect();
-    if matches!(scope, GitDiffScope::Head | GitDiffScope::Branch) {
+    if with_untracked {
         let mut others = vec!["ls-files", "--others", "--exclude-standard", "--eol", "--full-name", "-z", "--"];
         others.extend(if narrowed.is_empty() { vec![":/"] } else { narrowed.clone() });
         let untracked = run_git(runner, cwd, &others, None, None).await?;
@@ -328,27 +422,39 @@ pub(crate) async fn git_diff<R: Runs>(
         let text = stdout_text(&untracked);
         listed_files.extend(text.split('\0').filter_map(|row| row.split_once('\t')).filter(|(_, p)| inside(p)).map(|(eol, p)| {
             let regular = eol.split_whitespace().any(|w| w.starts_with("w/") && w.len() > 2);
-            (ListedFile { path: p.to_owned(), orig_path: None, gone: false }, if regular { Untracked::File } else { Untracked::NotRegular })
+            (
+                ListedFile { path: p.to_owned(), orig_path: None, kind: "added" },
+                if regular { Untracked::File } else { Untracked::NotRegular },
+            )
         }));
     }
-    let blobs = blobs_of(
-        runner,
-        &top,
-        listed_files.iter().filter(|(f, u)| !f.gone && *u != Untracked::NotRegular).map(|(f, _)| f.path.as_str()).collect(),
-    )
-    .await?;
+    let blobs = if with_blobs {
+        let hashed = listed_files.iter().filter(|(f, u)| f.kind != "deleted" && *u != Untracked::NotRegular).map(|(f, _)| f.path.as_str());
+        blobs_of(runner, &top, hashed.collect()).await?
+    } else {
+        std::collections::HashMap::new()
+    };
     let mut files = Vec::new();
     let mut remaining = cap;
     let mut truncated = false;
     for (file, untracked) in listed_files {
         let blob = blobs.get(&file.path).cloned();
+        let (additions, deletions) = counts.get(&file.path).copied().unwrap_or((0, 0));
+        let bare = |file: ListedFile, blob: Option<String>| GitDiffFile {
+            path: file.path,
+            kind: file.kind.to_owned(),
+            additions,
+            deletions,
+            patch: String::new(),
+            blob,
+        };
         if untracked == Untracked::NotRegular {
-            files.push(GitDiffFile { path: file.path, patch: String::new(), blob });
+            files.push(bare(file, blob));
             continue;
         }
         if remaining == 0 {
             truncated = true;
-            files.push(GitDiffFile { path: file.path, patch: String::new(), blob });
+            files.push(bare(file, blob));
             continue;
         }
         let res = if untracked == Untracked::File {
@@ -362,7 +468,7 @@ pub(crate) async fn git_diff<R: Runs>(
             // own name then says; what git read is checked rather than what the listing saw.
             let read_through = format!("{}/null", file.path);
             if stdout_text(&res).lines().any(|l| l.starts_with("+++ ") && l.trim_end_matches('"').ends_with(&read_through)) {
-                files.push(GitDiffFile { path: file.path, patch: String::new(), blob: None });
+                files.push(bare(file, None));
                 continue;
             }
             res
@@ -387,7 +493,14 @@ pub(crate) async fn git_diff<R: Runs>(
         } else {
             remaining -= bytes.len();
         }
-        files.push(GitDiffFile { path: file.path, patch: utf8_text(bytes, true), blob });
+        let patch = utf8_text(bytes, true);
+        // numstat reads tracked files alone; an untracked one is all additions, counted off its own patch.
+        let (additions, deletions) = match counts.get(&file.path) {
+            Some(counted) => *counted,
+            None if untracked == Untracked::File => (added_lines(&patch), 0),
+            None => (0, 0),
+        };
+        files.push(GitDiffFile { path: file.path, kind: file.kind.to_owned(), additions, deletions, patch, blob });
     }
     Ok(GitDiffReply { base, files, truncated })
 }
@@ -399,6 +512,41 @@ enum Untracked {
     File,
     /// A link, or a nested repository's folder: anything `--eol` reads no worktree contents for.
     NotRegular,
+}
+
+/// Whether a ref is a commit named by its full sha and nothing else.
+pub(crate) fn is_full_sha(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The checkout as it stands as one commit on top of HEAD, taken the way a checkpoint takes its tree: an index of
+/// its own seeded from the checkout's, every change added to it, new files in and ignored ones out, written as a
+/// tree and committed. The checkout's own index is never written, no ref is moved, and commit-tree runs no hook.
+pub(crate) async fn git_snapshot<R: Runs>(runner: &R, cwd: &Path) -> Result<wsp_frames::GitSnapshotReply, OpError> {
+    let top = checkpoint::top_of(runner, cwd).await?;
+    let at = top.as_path();
+    let tree = checkpoint::with_index(runner, at, |index| async move {
+        let added = checkpoint::git_on(runner, at, &index, &["add", "-A"]).await?;
+        checkpoint::ran(&added, "add")?;
+        let written = checkpoint::git_on(runner, at, &index, &["write-tree"]).await?;
+        checkpoint::ran(&written, "write-tree")?;
+        Ok(stdout_text(&written).trim().to_owned())
+    })
+    .await?;
+    let head = run_git(runner, at, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], None, None).await?;
+    let parent = (head.code == Some(0)).then(|| stdout_text(&head).trim().to_owned());
+    let mut commit_args = vec!["-c", "user.name=wsp", "-c", "user.email=wsp@localhost", "commit-tree", tree.as_str(), "-m", "wsp snapshot"];
+    if let Some(parent) = parent.as_deref() {
+        commit_args.extend(["-p", parent]);
+    }
+    let commit = run_git(runner, at, &commit_args, None, None).await?;
+    checkpoint::ran(&commit, "commit-tree")?;
+    Ok(wsp_frames::GitSnapshotReply { commit: stdout_text(&commit).trim().to_owned() })
+}
+
+/// The lines a patch adds, its file header left out.
+fn added_lines(patch: &str) -> u32 {
+    patch.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++")).count() as u32
 }
 
 /// The blob id each file's worktree contents hash to, by path from the top, one hash-object for them all. A name
@@ -606,15 +754,24 @@ mod tests {
         assert_eq!(
             files,
             vec![
-                ListedFile { path: "src/index.ts".to_owned(), orig_path: None, gone: false },
-                ListedFile { path: "docs.md".to_owned(), orig_path: Some("README.md".to_owned()), gone: false },
-                ListedFile { path: "staged.txt".to_owned(), orig_path: None, gone: false },
-                ListedFile { path: "b.txt".to_owned(), orig_path: Some("a.txt".to_owned()), gone: false },
-                ListedFile { path: "gone.txt".to_owned(), orig_path: None, gone: true },
+                ListedFile { path: "src/index.ts".to_owned(), orig_path: None, kind: "modified" },
+                ListedFile { path: "docs.md".to_owned(), orig_path: Some("README.md".to_owned()), kind: "renamed" },
+                ListedFile { path: "staged.txt".to_owned(), orig_path: None, kind: "added" },
+                ListedFile { path: "b.txt".to_owned(), orig_path: Some("a.txt".to_owned()), kind: "copied" },
+                ListedFile { path: "gone.txt".to_owned(), orig_path: None, kind: "deleted" },
             ]
         );
         assert!(parse_name_status("").is_empty());
-        assert_eq!(parse_name_status("M\0"), vec![ListedFile { path: String::new(), orig_path: None, gone: false }]);
+        assert_eq!(parse_name_status("M\0"), vec![ListedFile { path: String::new(), orig_path: None, kind: "modified" }]);
+    }
+
+    #[test]
+    fn numstat_counts_each_file_by_where_it_lands_a_rename_by_its_new_path_and_a_binary_as_none() {
+        let counts = parse_numstat("3\t0\tNOTES.md\x001\t2\t\0README.md\0docs.md\0-\t-\tlogo.png\0");
+        assert_eq!(counts.get("NOTES.md"), Some(&(3, 0)));
+        assert_eq!(counts.get("docs.md"), Some(&(1, 2)));
+        assert_eq!(counts.get("logo.png"), Some(&(0, 0)));
+        assert_eq!(counts.len(), 3);
     }
 
     fn git_in(cwd: &Path, args: &[&str]) -> String {
@@ -657,12 +814,21 @@ mod tests {
             (0, ""),
             (0, "/repo\n"),
             (0, ""),
+            (0, ""),
             (0, "i/      w/lf    attr/                 \tnotes\0"),
             (0, "abc\n"),
             (1, "diff --git a/notes/null b/notes/null\nnew file mode 100644\n--- /dev/null\n+++ b/notes/null\n@@ -0,0 +1 @@\n+secret\n"),
         ]);
         let reply = git_diff(&runner, Path::new("/repo"), Path::new("/"), GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
-        assert_eq!(reply.files, vec![GitDiffFile { path: "notes".to_owned(), patch: String::new(), blob: None }]);
+        let bare = GitDiffFile {
+            path: "notes".to_owned(),
+            kind: "added".to_owned(),
+            additions: 0,
+            deletions: 0,
+            patch: String::new(),
+            blob: None,
+        };
+        assert_eq!(reply.files, vec![bare]);
         assert!(runner.asked().last().unwrap().args.contains(&"--no-index".to_owned()));
     }
 

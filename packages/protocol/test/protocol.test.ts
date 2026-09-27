@@ -1243,7 +1243,7 @@ describe("daemon files and diff ops", () => {
     expect(GitStatusReply.parse(stopped)).toEqual(stopped);
     const uncounted = { ...stopped, branch: { ...stopped.branch, ahead: 0 }, countsUnknown: true };
     expect(GitStatusReply.parse(uncounted)).toEqual(uncounted);
-    const diff = { base: "main", files: [{ path: "a.ts", patch: "diff --git a/a.ts b/a.ts\n" }], truncated: true };
+    const diff = { base: "main", files: [{ path: "a.ts", kind: "modified", additions: 2, deletions: 1, patch: "diff --git a/a.ts b/a.ts\n" }], truncated: true };
     expect(GitDiffReply.parse(diff)).toEqual(diff);
   });
 

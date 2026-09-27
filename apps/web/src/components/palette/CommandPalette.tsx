@@ -6,12 +6,13 @@
 // The workspace rows come from the workspace registry, so they run what the
 // sidebar's buttons and menus run.
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { isLocalWorkspace, type SessionSearchHit } from "@wsp/protocol";
+import { isLocalWorkspace, threadMarkdown, threadMessages, type SessionSearchHit } from "@wsp/protocol";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { isCommandPaletteOpen, onOpenCommandPalette } from "../../commandPaletteBus.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
 import { noticeFailure } from "../../notices/store.js";
-import { useSelectedWorkspaceId, useSidebarProjects, useStore } from "../../protocol/store.js";
+import { useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore } from "../../protocol/store.js";
+import { copyText } from "../../actions/clipboard.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
 import { useKeybindings } from "../../shell/useKeybindings.js";
@@ -49,6 +50,7 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
   const openSettings = useStore(s => s.openSettings);
   const openAddComputer = useStore(s => s.openAddComputer);
   const selectedId = useSelectedWorkspaceId();
+  const selectedThreadId = useSelectedThreadId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
   const verbs = useWorkspaceVerbs();
 
@@ -101,8 +103,12 @@ export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedK
       openSettings,
       addProject: requestAddProject,
       openAddComputer,
+      copyThreadMarkdown:
+        api === null || selectedId === null || selectedThreadId === null
+          ? null
+          : async () => await copyText(threadMarkdown(threadMessages(await api.sessionHistory(selectedId), selectedThreadId))),
     }),
-    [openAddComputer, openSettings, select, toggleRightPanel, toggleSidebar],
+    [api, openAddComputer, openSettings, select, selectedId, selectedThreadId, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
     () => buildPaletteItems({ projects, selectedId, query, messageHits, canCreate: api !== null, handlers, verbs, places }),

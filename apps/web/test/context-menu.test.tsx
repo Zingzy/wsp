@@ -272,7 +272,7 @@ describe("a tile's menu for the copy it runs on", () => {
     await mountSidebar(fakeApi([API], [statusOf(API)], [{ ...RUNNING }, child]), "fix the port list");
     rightClick(rowOf("fix the port list"));
     await screen.findByRole("menu");
-    expect(labels()).toEqual([THREAD_WORDS.stop, THREAD_WORDS.settle, THREAD_WORDS.rename, THREAD_WORDS.pin, THREAD_WORDS.snooze, THREAD_WORDS.copyLink, THREAD_WORDS.forget, ...[
+    expect(labels()).toEqual([THREAD_WORDS.stop, THREAD_WORDS.settle, THREAD_WORDS.rename, THREAD_WORDS.copyMarkdown, THREAD_WORDS.pin, THREAD_WORDS.snooze, THREAD_WORDS.copyLink, THREAD_WORDS.forget, ...[
       WORKSPACE_WORDS.pause,
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
@@ -291,7 +291,7 @@ describe("a tile's menu for the copy it runs on", () => {
     await waitFor(() => expect(menu()).toBeNull());
     rightClick(rowOf("write the migration"));
     await screen.findByRole("menu");
-    expect(labels()).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
+    expect(labels()).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyMarkdown, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
   });
 
   it("in the desktop shell the bridge gets the serialized items and the chosen id runs, with no in-app menu", async () => {
@@ -345,7 +345,7 @@ describe("a thread row's menu", () => {
     const row = rowOf("fix the port list");
     rightClick(row);
     await screen.findByRole("menu");
-    expect(labels().slice(0, 7)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.settle, THREAD_WORDS.rename, THREAD_WORDS.pin, THREAD_WORDS.snooze, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
+    expect(labels().slice(0, 8)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.settle, THREAD_WORDS.rename, THREAD_WORDS.copyMarkdown, THREAD_WORDS.pin, THREAD_WORDS.snooze, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
     // The agent's own store keeps a name, and the row is the box: the rename runs.
     expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBeNull();
     expect(refusalOf(THREAD_WORDS.rename)).toBeNull();

@@ -33,7 +33,7 @@ import {
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import type { ThreadWaitingOn } from "@wsp/protocol";
+import { turnFactsParts, type ThreadWaitingOn } from "@wsp/protocol";
 import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
@@ -62,6 +62,7 @@ import { useSentFiles } from "./composerFiles";
 import { PermissionPromptRow } from "./PermissionPromptRow";
 import { SubagentFoldRow } from "./SubagentFoldRow";
 import { ProposedPlanCard } from "./ProposedPlanCard";
+import { TodoCard } from "./TodoCard";
 import { TimelineRuleLine } from "./TimelineRuleLine";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
@@ -135,6 +136,8 @@ interface TimelineRowSharedState {
   workGroupViewState: WorkGroupViewState;
   lastReplyId: MessageId | null;
   replyMeta: React.ReactNode;
+  /** Each settled turn's model and tokens in the footer's words, by the turn's id. */
+  factsByTurn: ReadonlyMap<string, readonly string[]>;
 }
 
 /** The workspace cannot run the turn right now: what the working row says instead, the wake to offer where one
@@ -198,6 +201,8 @@ export interface MessagesTimelineProps {
   turns: ReadonlyArray<TurnSummary>;
   turnDiffSummaryByAssistantMessageId?: ReadonlyMap<MessageId, TurnDiffSummary>;
   threadKey: string;
+  /** The name the model picker gives a model, by the agent's id for it; absent names the model by the id. */
+  modelLabel?: (model: string) => string | undefined;
   onOpenTurnDiff?: (turnId: TurnId, filePath?: string) => void;
   rewindableMessageIds?: ReadonlySet<MessageId>;
   onRewind?: (messageId: MessageId) => void;
@@ -247,6 +252,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   turns,
   turnDiffSummaryByAssistantMessageId = EMPTY_TURN_DIFF_SUMMARIES,
   threadKey,
+  modelLabel,
   onOpenTurnDiff = NOOP_OPEN_TURN_DIFF,
   rewindableMessageIds = EMPTY_REWINDABLE,
   onRewind = NOOP_REWIND,
@@ -517,6 +523,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [timelineViewportElement, rows.length]);
 
+  // Keyed on the words it draws, since `turns` is new on every streamed chunk and a new map re-renders every row.
+  const factsList = turns.flatMap(turn => {
+    const parts = turnFactsParts(turn, turn.model === null ? undefined : modelLabel?.(turn.model));
+    return parts.length > 0 ? [[turn.turnId, parts] as const] : [];
+  });
+  const factsKey = JSON.stringify(factsList);
+  const factsListRef = useRef(factsList);
+  factsListRef.current = factsList;
+  const factsByTurn = useMemo(() => new Map<string, readonly string[]>(factsListRef.current), [factsKey]);
+
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       timestampFormat,
@@ -538,6 +554,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupViewState,
       lastReplyId,
       replyMeta,
+      factsByTurn,
     }),
     [
       timestampFormat,
@@ -559,6 +576,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupViewState,
       lastReplyId,
       replyMeta,
+      factsByTurn,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -988,6 +1006,11 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         <AssistantTimelineRow row={row} />
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
+      {row.kind === "todo" ? (
+        <div className="min-w-0 px-1 py-0.5">
+          <TodoCard steps={row.todo.steps} />
+        </div>
+      ) : null}
       {row.kind === "permission" ? <PermissionTimelineRow row={row} /> : null}
       {row.kind === "subagent" ? <SubagentTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
@@ -1094,7 +1117,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
         {row.showAssistantMeta ? (
-          <div className="mt-1.5 flex items-center gap-3.5 text-[13px] tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-[13px] tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
             <span className="flex items-center gap-0.5">
               <AssistantCopyButton row={row} />
               {ctx.rewindableMessageIds.has(row.message.id) ? <RewindButton messageId={row.message.id} /> : null}
@@ -1102,7 +1125,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             {!row.message.streaming && (
               <Tooltip>
                 <TooltipTrigger
-                  render={<p className="text-muted-foreground tabular-nums" />}
+                  render={<p className="whitespace-nowrap text-muted-foreground tabular-nums" />}
                 >
                   {formatDayAwareTimestamp(row.message.updatedAt, ctx.timestampFormat)}
                 </TooltipTrigger>
@@ -1111,6 +1134,13 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
                 </TooltipPopup>
               </Tooltip>
             )}
+            {row.message.turnId !== null && ctx.factsByTurn.has(row.message.turnId) ? (
+              <span data-reply-facts className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-muted-foreground tabular-nums">
+                {ctx.factsByTurn.get(row.message.turnId)!.map(part => (
+                  <span key={part} className="whitespace-nowrap">{part}</span>
+                ))}
+              </span>
+            ) : null}
             {ctx.lastReplyId === row.message.id ? ctx.replyMeta : null}
           </div>
         ) : null}
@@ -1653,17 +1683,24 @@ function AssistantChangedFilesSectionInner({
   const [allDirectoriesExpanded, setAllDirectoriesExpanded] = useState(autoExpanded);
 
   return (
-    <ChangedFilesCard
-      turnId={turnSummary.turnId}
-      files={checkpointFiles}
-      expanded={expanded}
-      showCompactPreview={isLatestTurn}
-      allDirectoriesExpanded={allDirectoriesExpanded}
-      resolvedTheme={resolvedTheme}
-      onExpandedChange={setExpanded}
-      onToggleAllDirectories={() => setAllDirectoriesExpanded((current) => !current)}
-      onOpenTurnDiff={onOpenTurnDiff}
-    />
+    <>
+      <ChangedFilesCard
+        turnId={turnSummary.turnId}
+        files={checkpointFiles}
+        expanded={expanded}
+        showCompactPreview={isLatestTurn}
+        allDirectoriesExpanded={allDirectoriesExpanded}
+        resolvedTheme={resolvedTheme}
+        onExpandedChange={setExpanded}
+        onToggleAllDirectories={() => setAllDirectoriesExpanded((current) => !current)}
+        onOpenTurnDiff={onOpenTurnDiff}
+      />
+      {turnSummary.shared ? (
+        <p className="mt-1.5 px-2 text-[11px] text-muted-foreground" data-changes-shared>
+          Includes changes from another thread in this copy
+        </p>
+      ) : null}
+    </>
   );
 }
 

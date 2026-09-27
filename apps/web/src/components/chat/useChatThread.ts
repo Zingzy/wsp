@@ -159,7 +159,10 @@ function ownPlace(e: SessionEvent): string | undefined {
     case "session.start":
     case "session.done":
     case "session.end":
+    case "session.changes":
       return `${e.type}:${e.turnId}`;
+    case "session.plan":
+      return undefined;
     case "session.delta":
       return e.line === undefined ? undefined : `session.delta:${e.turnId}:${e.line}`;
     case "session.steer":
@@ -440,6 +443,7 @@ function sameEntry(a: TimelineEntry, b: TimelineEntry): boolean {
   if (a.kind === "message" && b.kind === "message") return shallowEqual(a.message, b.message);
   if (a.kind === "work" && b.kind === "work") return shallowEqual(a.entry, b.entry);
   if (a.kind === "proposed-plan" && b.kind === "proposed-plan") return shallowEqual(a.proposedPlan, b.proposedPlan);
+  if (a.kind === "todo" && b.kind === "todo") return shallowEqual(a.todo, b.todo);
   return false;
 }
 

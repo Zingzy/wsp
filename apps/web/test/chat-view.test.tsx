@@ -962,7 +962,7 @@ describe("the threads a thread opened", () => {
     // The facts sit on the reply's row beside its time, in the time's own type, one gap between every piece of it.
     expect(footer.className).toContain("text-[13px]");
     expect(footer.className).toContain("gap-x-3.5");
-    expect(footer.parentElement!.className).toContain("gap-3.5");
+    expect(footer.parentElement!.className).toContain("gap-x-3.5");
     expect(footer.parentElement!.className).toContain("text-[13px]");
     // A narrow window breaks the line between facts, never inside one.
     expect(footer.className).toContain("flex-wrap");

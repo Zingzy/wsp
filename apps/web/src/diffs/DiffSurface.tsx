@@ -32,7 +32,7 @@ import { Spinner } from "../components/ui/spinner.js";
 import { Toggle, ToggleGroup } from "../components/ui/toggle-group.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { noDiffLine } from "../actions/format.js";
-import { COMMIT_WORDS, EDIT_WORDS, SEND_TO_THREAD, VIEWED_WORDS } from "./words.js";
+import { COMMIT_WORDS, EDIT_WORDS, SEND_TO_THREAD, SNAPSHOT_GONE, TURN_NOUN, TURN_SCOPE, VIEWED_WORDS } from "./words.js";
 import { CommitBox, type CommitDraftState } from "./CommitBox.js";
 import { DiscardDialog } from "./DiscardDialog.js";
 import { FileControls } from "./FileControls.js";
@@ -53,7 +53,7 @@ import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting.js";
 import { cn } from "../lib/utils.js";
 import { reviewCommentsQuote, type ReviewCommentContext } from "../reviewCommentContext.js";
 import { repoAbsence } from "../adapt/git.js";
-import { fsWrite, gitDiff, gitStatus } from "../terminal/daemon-fs.js";
+import { DaemonOpError, fsWrite, gitDiff, gitRange, gitStatus } from "../terminal/daemon-fs.js";
 import { editable, SCOPE_LABELS, SCOPE_NOUNS, SCOPES, toDiffModel, type DiffFile } from "./model.js";
 import { useDiffRevealStore } from "./reveal.js";
 import { DEFAULT_SCOPE, useDiffStore, type DiffRenderMode } from "./store.js";
@@ -62,7 +62,7 @@ import { DEFAULT_SCOPE, useDiffStore, type DiffRenderMode } from "./store.js";
 type LoadState =
   | { kind: "pending"; cwd: string; last: GitDiffReply | null }
   | { kind: "ready"; cwd: string; reply: GitDiffReply }
-  | { kind: "error"; cwd: string; message: string; absence: RepoStateWord; last: GitDiffReply | null };
+  | { kind: "error"; cwd: string; message: string; absence: RepoStateWord; gone: boolean; last: GitDiffReply | null };
 
 /** The repository git resolved for one folder: its top level and branch, or one of the states the word table names. */
 type RepoState = { kind: RepoStateWord } | { kind: "repo"; root: string; branch: string };
@@ -117,6 +117,10 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const pin = useRootStore(s => s.pin);
   const unpin = useRootStore(s => s.unpin);
   const scope = useDiffStore(s => s.scopeByWorkspaceId[workspaceId] ?? DEFAULT_SCOPE);
+  const turn = useDiffStore(s => s.turnByWorkspaceId[workspaceId]);
+  const turnCwd = turn?.cwd;
+  const turnFrom = turn?.from;
+  const turnTo = turn?.to;
   const renderMode = useDiffStore(s => s.renderMode);
   const setScope = useDiffStore(s => s.setScope);
   const setRenderMode = useDiffStore(s => s.setRenderMode);
@@ -127,7 +131,10 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const [treeOpen, setTreeOpen] = useState(true);
   const [comments, setComments] = useState<ReviewCommentContext[]>([]);
   const viewerRef = useRef<AnnotatableCodeViewHandle>(null);
-  const scopeKey = `${cwd} ${scope}`;
+  // A turn's range is read in the folder its snapshots were taken in, whatever the panes' root is now.
+  const gitCwd = turnCwd ?? cwd;
+  const scopeKey = turnFrom === undefined ? `${cwd} ${scope}` : `${gitCwd} ${turnFrom}..${turnTo}`;
+  const loadKey = turnFrom === undefined ? cwd : scopeKey;
   const revealRequest = useDiffRevealStore(s => s.pendingByWorkspaceId[workspaceId]);
   const takeReveal = useDiffRevealStore(s => s.take);
   const [revealNote, setRevealNote] = useState<string | null>(null);
@@ -167,34 +174,37 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   // The link's word is a dependency for the rule useLinkWord carries: a pane reopened at load reads over a link
   // that is not up yet, and that first failed read is not this header's last word.
   const fetchDiff = useCallback(() => {
-    if (!wire || cwd === "") return;
+    if (!wire || gitCwd === "") return;
     let gone = false;
     // The last diff and the repository label stay through a refresh of the same folder and reset for a new one.
-    setLoad(current => ({ kind: "pending", cwd, last: current.cwd === cwd ? lastReply(current) : null }));
-    setRepo(current => (current.cwd === cwd ? current : { cwd, state: { kind: "unknown" } }));
-    gitDiff(wire, cwd, scope).then(
+    setLoad(current => ({ kind: "pending", cwd: loadKey, last: current.cwd === loadKey ? lastReply(current) : null }));
+    setRepo(current => (current.cwd === gitCwd ? current : { cwd: gitCwd, state: { kind: "unknown" } }));
+    const read = turnFrom === undefined || turnTo === undefined ? gitDiff(wire, gitCwd, scope) : gitRange(wire, gitCwd, turnFrom, turnTo);
+    read.then(
       reply => {
-        if (!gone) setLoad({ kind: "ready", cwd, reply });
+        if (!gone) setLoad({ kind: "ready", cwd: loadKey, reply });
       },
       (e: unknown) => {
         if (gone) return;
         const absence = repoAbsence(e);
+        const pruned = turnFrom !== undefined && e instanceof DaemonOpError && e.code === "not-found";
         // A state whose pane line replaces the diff has none to keep; a refused read keeps the last one through the failure.
-        setLoad(current => ({ kind: "error", cwd, message: e instanceof Error ? e.message : String(e), absence, last: REPO_STATE_WORDS[absence].pane === "" ? lastReply(current) : null }));
+        const keep = REPO_STATE_WORDS[absence].pane === "" && !pruned;
+        setLoad(current => ({ kind: "error", cwd: loadKey, message: e instanceof Error ? e.message : String(e), absence, gone: pruned, last: keep ? lastReply(current) : null }));
       },
     );
-    gitStatus(wire, cwd).then(
+    gitStatus(wire, gitCwd).then(
       status => {
-        if (!gone) setRepo({ cwd, state: repoOf(status) });
+        if (!gone) setRepo({ cwd: gitCwd, state: repoOf(status) });
       },
       (e: unknown) => {
-        if (!gone) setRepo({ cwd, state: { kind: repoAbsence(e) } });
+        if (!gone) setRepo({ cwd: gitCwd, state: { kind: repoAbsence(e) } });
       },
     );
     return () => {
       gone = true;
     };
-  }, [wire, cwd, scope, linkWord]);
+  }, [wire, gitCwd, loadKey, scope, turnFrom, turnTo, linkWord]);
 
   useEffect(() => fetchDiff(), [fetchDiff]);
   // A new scope or folder is a new set of files; stale collapse keys would pin
@@ -368,19 +378,27 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     setRevealNote(revealFile(relativeTo(cwd, revealRequest)) ? null : noDiffLine(baseName(revealRequest), SCOPE_NOUNS[scope]));
   }, [cwd, model, revealFile, revealRequest, scope, takeReveal, workspaceId]);
 
+  // The file a reply's tree was clicked on, named as git names it from the top of the checkout.
+  const turnPath = turn?.path;
+  useEffect(() => {
+    if (turnPath === undefined || model === null) return;
+    setRevealNote(revealFile(turnPath) ? null : noDiffLine(baseName(turnPath), TURN_NOUN));
+  }, [model, revealFile, turnPath]);
+
   if (!wire || root === null) return <NotRunning workspaceId={workspaceId} line="Changes are read over the thread's daemon; wake it to read them." />;
 
   const isPending = load.kind === "pending";
-  const scopeLabel = SCOPE_LABELS[scope];
-  const shown = repo.cwd === cwd ? repo.state : { kind: "unknown" as const };
-  const folderLabel = shown.kind === "repo" ? shown.root : cwd;
-  const paneLine = load.kind === "error" ? REPO_STATE_WORDS[load.absence].pane : "";
+  const scopeLabel = turn === undefined ? SCOPE_LABELS[scope] : TURN_SCOPE;
+  const shown = repo.cwd === gitCwd ? repo.state : { kind: "unknown" as const };
+  const folderLabel = shown.kind === "repo" ? shown.root : gitCwd;
+  const paneLine = load.kind !== "error" ? "" : load.gone ? SNAPSHOT_GONE : REPO_STATE_WORDS[load.absence].pane;
   const repoRoot = shown.kind === "repo" ? shown.root : null;
-  const canCommit = scope === "head" && api?.commit !== undefined && model !== null && model.changedFiles.length > 0;
+  // A turn's range is a record of what it changed, so nothing in it is committed, edited or put back from here.
+  const canCommit = turn === undefined && scope === "head" && api?.commit !== undefined && model !== null && model.changedFiles.length > 0;
   // Branch changes lists what commits changed too, which a discard cannot put back: discarding is Uncommitted's.
-  const canDiscard = scope !== "branch" && api?.discard !== undefined;
+  const canDiscard = turn === undefined && scope !== "branch" && api?.discard !== undefined;
   const editOf = (file: DiffFile | undefined) => {
-    if (file === undefined || repoRoot === null) return undefined;
+    if (turn !== undefined || file === undefined || repoRoot === null) return undefined;
     if (editing?.fileKey === file.fileKey) return { kind: "open" as const, saving: editing.saving, onSave: () => void saveEdit(repoRoot), onCancel: () => setEditing(null) };
     return editable(file, scope) && editing === null ? { kind: "offer" as const, onEdit: () => void startEdit(file) } : undefined;
   };
@@ -394,7 +412,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
       tabIndex={0}
       onKeyDown={onKeyDown}
       data-diff-surface
-      data-diff-scope={scope}
+      data-diff-scope={turn === undefined ? scope : "turn"}
       data-diff-cwd={cwd}
     >
       <div
@@ -414,7 +432,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
               {SCOPES.map(candidate => (
                 <MenuItem
                   key={candidate}
-                  className={candidate === scope ? "bg-foreground/[0.08]" : undefined}
+                  className={turn === undefined && candidate === scope ? "bg-foreground/[0.08]" : undefined}
                   onClick={() => setScope(workspaceId, candidate)}
                 >
                   <span>{SCOPE_LABELS[candidate]}</span>
@@ -452,7 +470,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
             </TooltipTrigger>
             <TooltipPopup side="top">{pinned ? "Follow the agent's folder again" : "Stay here when the agent moves"}</TooltipPopup>
           </Tooltip>
-          {scope === "branch" && reply?.base ? (
+          {turn === undefined && scope === "branch" && reply?.base ? (
             <div
               className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground"
               aria-label={`Comparing HEAD against ${reply.base}`}
