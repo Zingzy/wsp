@@ -290,6 +290,8 @@ describe("the sections the live list is drawn in", () => {
     const away = tiles.live.find(node => node.thread.id === "away")!;
     expect(away.children).toEqual([]);
     expect(away.thread.snoozedWorking).toBe(2);
+    // What it holds, so the root reads as selected while one of its hidden threads is open in the centre.
+    expect(away.thread.holds).toEqual(["away", "child", "grandchild"]);
     // A tree that is not snoozed carries no count, and one whose threads all rest stays out, as before.
     expect(tiles.live.find(node => node.thread.id === "here")!.thread.snoozedWorking).toBeUndefined();
     expect(shape(sidebarTiles([row("ws_a", "pr_1", [done("away", "ws_a", 30, null, { snoozedUntil }), done("child", "ws_a", 30, "away")])], { picked: null, nowMs: NOW }).live)).toEqual([]);

@@ -145,6 +145,9 @@ export interface TileItem {
   /** Set on the root of a snoozed tree while threads of it run: how many, drawn quietly on the one tile the tree
    * keeps, so a thread working under a snooze is still reachable through its root. */
   readonly snoozedWorking?: number;
+  /** Set with it: the fold keys of every thread the folded tree holds, the root first, so the root reads as selected
+   * while one of them is open in the centre. */
+  readonly holds?: readonly string[];
 }
 
 export type TileNode = ThreadNode<TileItem>;
@@ -182,7 +185,7 @@ export function sidebarTiles(
   for (const node of roots) {
     if (isSnoozed(node)) {
       const working = workingIn(node);
-      if (working > 0) snoozedWorking.push({ thread: { ...node.thread, snoozedWorking: working }, children: [] });
+      if (working > 0) snoozedWorking.push({ thread: { ...node.thread, snoozedWorking: working, holds: treeThreadIds(node) }, children: [] });
       continue;
     }
     const pinned = node.thread.thread?.pinnedAt != null;

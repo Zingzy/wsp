@@ -5058,8 +5058,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       bus.emit({ type: "thread.marked", workspaceId, threadIds: ids });
     }
   };
-  /** A thread that asks for the person ends the snooze standing on its tree, its own or its root's, as a snooze that
-   * ran out does: the thread reads as woken now and every window hears it. */
+  /** A thread that asks for the person or fails ends the snooze standing on its tree, its own or its root's, as a
+   * snooze that ran out does: the thread reads as woken now and every window hears it. A turn that finished does not,
+   * or a busy tree could never stay snoozed. */
   const endSnoozeFor = (row: Pick<SessionView, "threadId" | "rootThreadId">): void => {
     const now = clock.now();
     const standing = [...new Set([row.threadId, row.rootThreadId])].filter((id): id is string => id !== undefined && (threadRecords.get(id)?.snoozedUntil ?? 0) > now);
@@ -6486,6 +6487,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const endedAt = Date.now();
     s.view.status = reply ?? "failed";
     s.view.endedAt = endedAt;
+    if (s.view.status === "failed") endSnoozeFor(s.view);
     // A prompt the turn was stopped on goes with it, on this road as on the harness's own exit: nothing can answer
     // one whose process is gone, and a settled row still carrying it would read as waiting on a person forever.
     delete s.view.asking;
@@ -6893,6 +6895,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       if (!ended) view.status = status;
       view.endedAt ??= Date.now();
+      if (view.status === "failed") endSnoozeFor(view);
       // A pick this turn did not take landed on the thread's record alone; the row says it from here on, since
       // every client folds the thread's access off the row and the next turn runs at the record's.
       const kept = threadRecords.get(threadId)?.permissionMode;
