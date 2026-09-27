@@ -232,10 +232,22 @@ export function rewriteLock(lockPath: string, lock: HostLock): void {
   renameSync(next, lockPath);
 }
 
-/** Links a whole lock into place; false where a lock already stands. */
+/** What link() says on a file system with no hard links: exFAT, and some network mounts. */
+const NO_LINKS = new Set(["EPERM", "ENOTSUP", "EXDEV"]);
+
+/** Links a whole lock into place; false where a lock already stands. A file system with no hard links gets the
+ * exclusive create instead, so a state file kept on one still starts, with the moment between the file appearing
+ * and its words landing that the create has. */
 function linkInto(from: string, to: string): boolean {
   try {
     linkSync(from, to);
+    return true;
+  } catch (e) {
+    if (errnoCode(e) === "EEXIST") return false;
+    if (!NO_LINKS.has(errnoCode(e) ?? "")) throw e;
+  }
+  try {
+    writeFileSync(to, readFileSync(from), { flag: "wx" });
     return true;
   } catch (e) {
     if (errnoCode(e) === "EEXIST") return false;

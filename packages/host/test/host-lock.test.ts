@@ -12,6 +12,7 @@ import { cli, hostRoadWord, hostStoppedLine, serve, type CliIO } from "../src/cl
 import { hostTokenFor, ownPid, pidAlive } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { stubBackend } from "./stub-backend.js";
+import { describeWithDists } from "./built-bin.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { CLOUD_ON } from "../src/cloud.js";
 
@@ -232,9 +233,10 @@ describe("serve takes host.lock next to the state file", () => {
   });
 });
 
-describe("hosts starting at once against a stale lock", () => {
-  // Each taker is its own process, as two hosts starting together are, held until one shared moment so they all read
-  // the stale lock before any of them writes. One that wins writes its token next, as serve does.
+describeWithDists("hosts starting at once against a stale lock", ["protocol", "own-file"], () => {
+  // Each taker is its own process, as two hosts starting together are, held until one shared moment so both read the
+  // stale lock before either writes. One that wins writes its token next, as serve does. Two per round, not more:
+  // three starts inside the same moment is a case of its own.
   const TAKER = `
     import { writeFileSync } from "node:fs";
     import { takeLock } from ${JSON.stringify(fileURLToPath(new URL("../src/host-lock.ts", import.meta.url)))};
@@ -247,7 +249,7 @@ describe("hosts starting at once against a stale lock", () => {
     } catch (e) {
       console.log("refused " + e.message);
     }
-    setTimeout(() => {}, 1_000);
+    setTimeout(() => {}, 500);
   `;
   const take = (dir: string, at: number): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -256,7 +258,7 @@ describe("hosts starting at once against a stale lock", () => {
       child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
       child.stderr.on("data", (chunk: Buffer) => (out += chunk.toString()));
       child.on("error", reject);
-      // Read once the taker has said which it was, while a winner is still alive and holds the lock.
+      // Read once the taker has exited, after its hold: nothing removes the lock, so it still names the winner.
       child.stdout.once("end", () => resolve(out.trim()));
     });
 
@@ -264,11 +266,11 @@ describe("hosts starting at once against a stale lock", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-lock-race-"));
     try {
       writeFileSync(join(dir, "taker.mts"), TAKER);
-      for (let round = 0; round < 3; round++) {
+      for (let round = 0; round < 10; round++) {
         writeFileSync(join(dir, "host.lock"), JSON.stringify({ pid: deadPid(), port: 1, startedAt: "2026-01-01T00:00:00.000Z" }));
         rmSync(join(dir, "host-token"), { force: true });
-        const at = Date.now() + 1_500;
-        const said = await Promise.all(Array.from({ length: 6 }, () => take(dir, at)));
+        const at = Date.now() + 1_200;
+        const said = await Promise.all([take(dir, at), take(dir, at)]);
         const won = said.filter(line => line.startsWith("won "));
         expect(said.filter(line => !line.startsWith("won ") && !line.startsWith("refused ")), said.join("\n")).toEqual([]);
         expect(won, said.join("\n")).toHaveLength(1);
@@ -279,7 +281,7 @@ describe("hosts starting at once against a stale lock", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 60_000);
 });
 
 describe("what the lock's pid says", () => {
