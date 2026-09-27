@@ -7,7 +7,7 @@
 // made. A resting title takes the muted ink, so the tiles a person is waiting
 // on stand out. Renaming turns the title into the sidebar's one name box in the
 // same row, so the tile keeps its height while a name is typed.
-import type { MouseEvent, ReactNode } from "react";
+import type { DragEvent, MouseEvent, ReactNode } from "react";
 import { GitBranchIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
 import { THREAD_WORDS, WORKSPACE_WORDS } from "../actions/format.js";
@@ -105,6 +105,8 @@ export function ThreadTile({
   onRename,
   onRenameCancel,
   onRenameOpen,
+  onDragStart,
+  onDragEnd,
 }: {
   thread: SidebarThreadSnapshot;
   place: TilePlace;
@@ -127,6 +129,9 @@ export function ThreadTile({
   onRenameCancel: () => void;
   /** Opens the box on this tile, as the menu's Rename does; absent where the rename is refused. */
   onRenameOpen?: (() => void) | undefined;
+  /** The tile picked up to drop in another section; absent on a tile that is not dragged, one under a root. */
+  onDragStart?: ((event: DragEvent<HTMLElement>) => void) | undefined;
+  onDragEnd?: (() => void) | undefined;
 }) {
   const status = settled ? RESTING : threadStatusOf(thread);
   // Only a resting thread steps back; a failed one or one waiting on the person keeps the foreground ink.
@@ -143,6 +148,7 @@ export function ThreadTile({
       title={tileHover(thread.title, place, thread.harness, thread.asking)}
       className={TILE_CLASS}
       {...(renaming ? {} : { onClick: onSelect, onContextMenu })}
+      {...(renaming || onDragStart === undefined ? {} : { draggable: true, onDragStart, onDragEnd })}
     >
       <TileRows
         place={place}

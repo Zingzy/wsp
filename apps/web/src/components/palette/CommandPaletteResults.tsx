@@ -44,7 +44,7 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
   return (
     <CommandList>
       {props.groups.map((group) => (
-        <CommandGroup items={group.items} key={group.value}>
+        <CommandGroup items={group.items} key={group.value} data-palette-group={group.value}>
           <CommandGroupLabel className="ps-[9px]">{group.label}</CommandGroupLabel>
           <CommandCollection>
             {(item) =>

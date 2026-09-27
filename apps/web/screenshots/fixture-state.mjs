@@ -417,11 +417,20 @@ const threadsOn = (workspaceId, rows) => ({
       workspaceId,
       sessions: rows.map(([thread, minutes]) => turn(thread, minutes, workspaceId)),
       // A thread marked seen was shown by a window as its turn ended, and one marked settled was put away then too,
-      // both of which the host keeps on the thread's record.
+      // both of which the host keeps on the thread's record, as it keeps a pin and a snooze, which reads it too.
       threads: Object.fromEntries(
         rows
-          .filter(([thread]) => thread.seen === true || thread.settled === true)
-          .map(([thread, minutes]) => [threadId(thread.id), { harness: thread.agent ?? "claude", readAt: ago(minutes - 3), ...(thread.settled === true ? { settledAt: ago(minutes - 3) } : {}) }]),
+          .filter(([thread]) => thread.seen === true || thread.settled === true || thread.pinned === true || thread.snoozed === true)
+          .map(([thread, minutes]) => [
+            threadId(thread.id),
+            {
+              harness: thread.agent ?? "claude",
+              ...(thread.seen === true || thread.settled === true || thread.snoozed === true ? { readAt: ago(minutes - 3) } : {}),
+              ...(thread.settled === true ? { settledAt: ago(minutes - 3) } : {}),
+              ...(thread.pinned === true ? { pinnedAt: ago(10) } : {}),
+              ...(thread.snoozed === true ? { snoozedUntil: AT + 3 * 60 * 60_000 } : {}),
+            },
+          ]),
       ),
     },
   },
@@ -769,6 +778,10 @@ const tileThread = (id, title, over = {}) => ({
 /** A copy on a branch, as the record keeps the copy it was made of. */
 const copyOn = (name, branch) => ({ road: "clonefile", path: join(HOME, "wsp-work", name), source: projectDest("spoo-landing"), base: "abc1234", branch, carried: "deps-and-config" });
 
+/** The same sidebar with the person's marks on it: the relay pinned to the top, the paused fork's finish snoozed
+ * out of the list, and the projects dragged into an order of their own. */
+const tilesMarked = () => tiles({ marked: true });
+
 /** The sidebar the locked tile screens draw: a root on this computer stopped on a question, with three threads its
  * agent opened under it, one working beside it here and two on a Solari fork of the same project, one working and one
  * resting; then a working thread on the joined computer spoo, a finished one nobody has opened yet on a
@@ -776,7 +789,7 @@ const copyOn = (name, branch) => ({ road: "clonefile", path: join(HOME, "wsp-wor
  * three that were read and went quiet days ago, which fold into Settled. A fork carries no copy record and reads its branch off its own daemon, which no
  * stand-in machine answers for the project's folder, so its tiles show the agent's mark with no branch. One
  * workspace stands on this computer, for macInUse's reason, and each project wears a look, as a person picks one. */
-const tiles = () => {
+const tiles = ({ marked = false } = {}) => {
   const tree = { parent: "flaky", root: "flaky", startedBy: "agent" };
   const forkTree = { parentThreadId: threadId("flaky"), rootThreadId: threadId("flaky") };
   const spooPlace = place("p_spoo", "spoo", 1, { platform: "linux", os: "Ubuntu 24.04", runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, true);
@@ -817,8 +830,8 @@ const tiles = () => {
           14,
         ],
       ]),
-      threadsOn("ws_relay", [[tileThread("relay", "Move the relay to one callback helper", { status: "running" }), 45]]),
-      threadsOn("ws_dark", [[tileThread("dark", "Dark mode contrast pass", { agent: "codex" }), 183]]),
+      threadsOn("ws_relay", [[tileThread("relay", "Move the relay to one callback helper", { status: "running", pinned: marked }), 45]]),
+      threadsOn("ws_dark", [[tileThread("dark", "Dark mode contrast pass", { agent: "codex", snoozed: marked }), 183]]),
       threadsOn("ws_release", [[tileThread("release", "Release notes for 0.9", { status: "failed", settled: true }), 240]]),
       threadsOn("ws_coupons", [[tileThread("coupons", "Coupon codes at checkout", { seen: true }), 60 * 30]]),
       threadsOn("ws_pty", [[tileThread("pty", "Stop the daemon leaking ptys", { seen: true }), 60 * 50]]),
@@ -827,7 +840,10 @@ const tiles = () => {
     readsSince: 60 * 24 * 7,
     goldens: sealed(),
     places: { p_spoo: spooPlace },
-    preferences: { projectLook: { "pr_spoo-landing": landing, "pr_spoo-landing-cloud": landing, "pr_spoo-landing-spoo": landing, "pr_dark-contrast": landing, pr_wsp: { icon: "terminal", hue: "teal" } } },
+    preferences: {
+      projectLook: { "pr_spoo-landing": landing, "pr_spoo-landing-cloud": landing, "pr_spoo-landing-spoo": landing, "pr_dark-contrast": landing, pr_wsp: { icon: "terminal", hue: "teal" } },
+      ...(marked ? { projectOrder: ["pr_wsp", "pr_dark-contrast", "pr_spoo-landing-spoo"] } : {}),
+    },
   });
 };
 
@@ -878,6 +894,7 @@ const FIXTURES = {
   orchestrator: { build: orchestrator, cloud: "box" },
   "thread-states": { build: threadStates, cloud: "box" },
   tiles: { build: tiles, cloud: "solari" },
+  "tiles-marks": { build: tilesMarked, cloud: "solari" },
   "image-built": { build: imageBuilt },
   "long-prompt": { build: longPrompt },
 };
