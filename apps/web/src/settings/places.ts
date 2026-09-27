@@ -8,32 +8,10 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, HERE_PLACE_ID, JOINED_COMPUTER, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, provisionWord, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, hereName, isHere, isProviderPlace, placeName, placeOf, PLACE_BLOCKED_WORD, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, imageCopyStaysLine, isLocalWorkspace, landsOn, namesPlace, ownDaemonDown, plural, provisionWord, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionRow, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { PROVISION_OUTCOME_WORDS, WHERE_WORDS } from "./format.js";
-import { CLOUD_NAMES } from "./providers.js";
 
-/** What a person reads a row as: the name its owner gave the computer where it keeps one, a Mac's own "zingzy's
- * MacBook Pro"; a provider carries the name its own row in the provider table gives it, since the host words it by
- * the id WSP_PROVIDER holds and nobody types that; every other computer carries the name it reported. */
-export function placeName(place: PlaceView): string {
-  if (place.label !== undefined) return place.label;
-  if (!isProviderPlace(place)) return place.name;
-  return CLOUD_NAMES.find(row => row.id === place.name)?.name ?? place.name;
-}
-
-/** Whether this row is the computer the host runs on: the one predicate, read by id and never by position. */
-export const isHere = (place: PlaceView | undefined): boolean => place?.id === HERE_PLACE_ID;
-
-/** The computer the host runs on, by its own name, for every sentence that says where something is here; empty until
- * the places list holds that row, and every sentence that needs it waits with it (onceNamed). */
-export function hereName(places: readonly PlaceView[]): string {
-  const here = places.find(isHere);
-  return here === undefined ? "" : placeName(here);
-}
-
-/** Whether this row is the provider this host forks on rather than a computer somebody owns. The one reading, so a
- * third kind of row is a change here and at placeCpuWord and nowhere else. */
-export const isProviderPlace = (place: PlaceView): boolean => place.kind === "provider";
+export { hereName, isHere, isProviderPlace, placeName, placeOf };
 
 /** What one of this row's cpus is called: a provider's are virtual and a computer's are the cores it has. */
 export const placeCpuWord = (place: PlaceView): CpuWord => (isProviderPlace(place) ? "vCPU" : "cores");
@@ -115,14 +93,6 @@ export const projectOn = (place: PlaceView, projects: readonly ProjectView[]): P
  * somebody joined both fork, and the computer the app itself runs on does not, since its local mode is the one
  * workspace it already is. */
 export const placeTakesWorkspaces = (place: PlaceView): boolean => place.takesForks === true;
-
-/** Which row a workspace stands on, or nothing for one this list cannot place, read the protocol's one way so the
- * pane's Where row, the table's own holdings and the host's month total cannot disagree about which computer a
- * workspace is on. */
-export function placeOf(places: readonly PlaceView[], workspace: Pick<WorkspaceView, "kind" | "machineId" | "place" | "provider">): PlaceView | undefined {
-  const at = workspacePlaceId(workspace, places);
-  return at === undefined ? undefined : places.find(p => p.id === at);
-}
 
 /** The one state of the computer a workspace stands on, while that computer is not answering; null while it is,
  * and on every workspace at a provider, which reports no link at all. The sidebar row, the

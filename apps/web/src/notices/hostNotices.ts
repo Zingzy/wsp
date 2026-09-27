@@ -9,7 +9,7 @@
 // on the shell's own road, which speaks only while the app is not in front of
 // the person; the prompt and the finish make a sound unless the person turned
 // it off. The dock's badge counts the threads waiting on the person.
-import { GET_THE_APP_WORD, NEEDS_YOU, NOTIFY_ME, askingLine, foldThreads, initJobBuilding, initNeedsYouLine, threadKeyOf, threadNeedsYou, titleWithNeed, workspaceAwakeLine, type OutsideLine, type ReleaseView, type TurnResult } from "@wsp/protocol";
+import { GET_THE_APP_WORD, NEEDS_YOU, NOTIFY_ME, askingLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, threadFinishedLine, threadKeyOf, titleWithNeed, workspaceAwakeLine, type OutsideLine, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
@@ -40,7 +40,7 @@ export const HOST_NOTICE_WORDS = {
   away: (name: string): string => `${name} stopped answering`,
   aThread: "A thread",
   threadStopped: (title: string, said: string | undefined): string => `${title} stopped before it replied${said === undefined ? "" : `: ${said}`}`,
-  threadFinished: (title: string): string => `${title} finished`,
+  threadFinished: threadFinishedLine,
   gone: (name: string, reason: string): string => `${name} is gone: ${reason}`,
   imageNotBuilt: (said: string | undefined): string => (said === undefined ? "The image was not built" : `The image was not built: ${said}`),
   imageSealed: (version: number | undefined): string => (version === undefined ? "Image sealed" : `Image v${version} sealed`),
@@ -302,7 +302,7 @@ export function useHostNotices(): void {
   // somewhere else, so the window's own title carries the mark for either.
   const needed = useStore(s => s.initJob?.needsYou !== undefined || Object.values(s.sessions).some(rows => rows.some(row => row.asking !== undefined)));
   // Counted where the rows land, so a window showing a thread, which moves its read stamp, takes it off the dock.
-  const waiting = useStore(s => Object.values(s.sessions).reduce((sum, rows) => sum + foldThreads(rows).filter(threadNeedsYou).length, 0));
+  const waiting = useStore(s => needsYouCount(Object.values(s.sessions).flat()));
   const held = useRef<Held>({ road: null, opens: () => openComputer(undefined).run(), need: undefined, shown: false, absences: new Map(), jobsEnded: new Set(), released: undefined, results: new Map() });
   useEffect(() => {
     const h = held.current;

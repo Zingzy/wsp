@@ -21,6 +21,19 @@ describe("desktop icons", () => {
     expect(sizes).toContain(16);
   });
 
+  it("the menu bar's two template images are black on clear at 18 and 36 px, and staging puts them beside main", () => {
+    for (const name of ["trayTemplate", "trayAskTemplate"]) {
+      for (const [suffix, size] of [["", 18], ["@2x", 36]] as const) {
+        const bytes = readFileSync(new URL(`../src/tray/${name}${suffix}.png`, import.meta.url));
+        expect(bytes.subarray(1, 4).toString("ascii")).toBe("PNG");
+        expect([bytes.readUInt32BE(16), bytes.readUInt32BE(20)]).toEqual([size, size]);
+        // Colour type 6 is RGBA: the clear around the glyph is what lets the menu bar ink it.
+        expect(bytes.readUInt8(25)).toBe(6);
+      }
+    }
+    expect(readFileSync(`${desktop}scripts/stage.mjs`, "utf8")).toMatch(/cpSync\(join\(root, "src", "tray"\), join\(app, "main", "tray"\)/);
+  });
+
   it("electron-builder.yml points mac and win at them", () => {
     const yml = readFileSync(`${desktop}electron-builder.yml`, "utf8");
     expect(yml).toMatch(/^mac:\n(?:  .*\n)*  icon: build\/icon\.icns$/m);
