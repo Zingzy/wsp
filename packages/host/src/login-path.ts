@@ -12,7 +12,7 @@
 // lookup and spawn the host makes on the way reads the PATH this process has at
 // that moment. The read is once per process, so a road that follows another
 // pays nothing for saying so.
-import { execFile } from "node:child_process";
+import { spawnRun } from "@wsp/collect";
 import { loginPathLine } from "@wsp/protocol";
 
 /** The PATH launchd gives an app it starts. The order it comes in is not fixed, so the reading is a set. */
@@ -26,8 +26,9 @@ const SHELL_LIMIT_MS = 15_000;
 export interface LoginShellDeps {
   env: NodeJS.ProcessEnv;
   log(line: string): void;
-  /** Runs the login shell and answers with everything it printed; the real one unless a test hands over its own. */
-  read?: (shell: string) => Promise<string>;
+  /** Runs the login shell and answers with everything it printed, or nothing where it failed or ran past its limit;
+   * the real one unless a test hands over its own. */
+  read?: (shell: string) => Promise<string | undefined>;
 }
 
 /** Whether this launch has to ask the login shell: its PATH is launchd's own set, in any order and nothing else. */
@@ -36,11 +37,9 @@ export function needsLoginPath(env: NodeJS.ProcessEnv): boolean {
   return dirs.length === LAUNCHD_PATH.length && LAUNCHD_PATH.every(dir => dirs.includes(dir));
 }
 
-function runLoginShell(shell: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(shell, ["-ilc", 'printf %s "$PATH"'], { timeout: SHELL_LIMIT_MS, encoding: "utf8" }, (e, stdout) => (e === null ? resolve(stdout) : reject(e))).stdin?.end();
-  });
-}
+/** A job an rc file leaves in the background keeps the shell's output open past its exit, so the shell leads a
+ * process group that dies with the read, and its input is closed so an rc file that reads it does not wait. */
+const runLoginShell = (shell: string, script: string): Promise<string | undefined> => spawnRun(shell, ["-ilc", script], process.env, { timeoutMs: SHELL_LIMIT_MS });
 
 /** Puts the person's login shell PATH on the environment, or says in one line why the one this launch was given
  * stands. A shell that fails, times out or prints nothing changes nothing. */
@@ -51,11 +50,9 @@ export async function takeLoginPath(deps: LoginShellDeps): Promise<void> {
     deps.log(loginPathLine("SHELL names no login shell"));
     return;
   }
-  let out: string;
-  try {
-    out = await (deps.read ?? runLoginShell)(shell);
-  } catch (e) {
-    deps.log(loginPathLine(`${shell} failed: ${(e instanceof Error ? e.message : String(e)).split("\n")[0] ?? ""}`));
+  const out = await (deps.read ?? (sh => runLoginShell(sh, 'printf %s "$PATH"')))(shell);
+  if (out === undefined) {
+    deps.log(loginPathLine(`${shell} failed or ran past ${SHELL_LIMIT_MS / 1000} s`));
     return;
   }
   // printf ends without a newline, so the PATH is whatever follows the last one: an rc file that greets the person
@@ -89,13 +86,9 @@ export function loginEnv(): Promise<Readonly<Record<string, string>>> {
   return (loginEnvRead ??=
     shell === undefined || shell === ""
       ? Promise.resolve({})
-      : new Promise(resolve => {
-          const child = execFile(shell, ["-ilc", "env -0"], { timeout: SHELL_LIMIT_MS, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }, (e, stdout) => {
-            if (e !== null) console.error(loginPathLine(`${shell} failed to print its environment: ${e.message.split("\n")[0] ?? ""}`));
-            resolve(e === null ? loginEnvOf(stdout) : {});
-          });
-          // An rc file that reads its input would otherwise wait out the limit and leave every command server without it.
-          child.stdin?.end();
+      : runLoginShell(shell, "env -0").then(out => {
+          if (out === undefined) console.error(loginPathLine(`${shell} failed or ran past ${SHELL_LIMIT_MS / 1000} s printing its environment`));
+          return out === undefined ? {} : loginEnvOf(out);
         }));
 }
 

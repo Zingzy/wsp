@@ -913,7 +913,7 @@ describe("serveRuntime workspaces.exec", () => {
     other.close();
     // A command that has exited is reaped with its files once, and not signalled again when its socket goes.
     await new Promise(r => setTimeout(r, 50));
-    const kills = backend.machines[0]!.execLog.filter(cmd => cmd.includes("kill -TERM") || cmd.includes("kill -KILL"));
+    const kills = backend.machines[0]!.execLog.filter(cmd => !cmd.includes("echo WSP_CTX") && (cmd.includes("kill -TERM") || cmd.includes("kill -KILL")));
     expect(kills).toHaveLength(1);
     expect(kills[0]).toMatch(/kill -TERM -- -\$P .*kill -KILL -- -\$P .*rm -rf '\/tmp\/wsp-run\/[a-f0-9]{12}'\.\*/);
   });

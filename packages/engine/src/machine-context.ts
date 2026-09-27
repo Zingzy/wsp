@@ -117,9 +117,9 @@ export interface ContextProbe {
   shell: string;
   /** Aliases the login shell defines whose command is not on the machine. */
   aliases: { name: string; word: string }[];
-  /** Whether a login shell was opened to list them: false where wsp opens none, so an empty list is read as
-   * unasked rather than as a machine whose aliases all resolve. */
-  aliasesRead: boolean;
+  /** Why no list was read, so an empty list is read as unasked rather than as a machine whose aliases all resolve:
+   * `shared` where wsp opens no login shell, `late` where the one it opened had not answered by its bound. */
+  aliasesUnread?: "shared" | "late";
   /** Agents whose own file claims the hook wsp would use, by id; a module without a conflict check has no such hook. */
   conflicts: Set<string>;
   facts?: BuildFacts;
@@ -133,6 +133,10 @@ export type ProbeShells = "login" | "none";
 
 /** The word the probe prints in place of its alias lines where it opened no shell to read them. */
 const ALIASES_UNREAD = "unread";
+/** The word it prints where the shell it opened was stopped at its bound. */
+const ALIASES_LATE = "late";
+/** Seconds the login shell listing the aliases may take to start and answer. */
+const ALIAS_BOUND_S = 8;
 
 /** Words an alias may start with before the command it runs. */
 const ALIAS_PREFIX = "sudo|command|builtin|exec|env|nohup|noglob|nocorrect|time";
@@ -187,10 +191,15 @@ export const ALIAS_PROBES: Record<string, string> = {
   ].join("\n"),
 };
 
-/** Runs a command in the background and kills it at the bound, so a login shell that waits cannot hold the probe. */
+/** Runs a command as its own process group and kills the group at the bound or once the command ends, so neither a
+ * login shell that waits nor a job its rc file left holding the output open can hold the script or outlive it; fails
+ * where the bound ended it. SIGKILL, since an interactive shell ignores SIGTERM. */
 export function boundedCommand(seconds: number, cmd: string): string {
-  return `${cmd} & p=$!; ( sleep ${seconds}; kill $p 2>/dev/null ) >/dev/null 2>&1 & k=$!; wait $p; kill $k 2>/dev/null`;
+  return `set -m; ${cmd} & p=$!; ( sleep ${seconds}; kill -KILL -- -$p ) >/dev/null 2>&1 & k=$!; set +m; wait $p; r=$?; kill -KILL -- -$p -$k 2>/dev/null; [ $r -ne 137 ]`;
 }
+
+/** The login shell listing its aliases under the bound, and the word that says so where the bound stopped it. */
+const aliasScan = (sh: string): string => `${boundedCommand(ALIAS_BOUND_S, `${sh} -lic ${shellQuote(ALIAS_PROBES[sh]!)} </dev/null 2>/dev/null`)} || echo "ALIASES ${ALIASES_LATE}"`;
 
 /** One short exec that prints the facts between two markers: the kernel, the disk, what is installed, the secret
  * names, the aliases the login shell cannot resolve, each hook the person's file already claims, and the facts a
@@ -216,9 +225,9 @@ export function probeCommand(roots: GuestRoots = GUEST_ROOTS, path: string = TOO
       ? [`echo "ALIASES ${ALIASES_UNREAD}"`]
       : [
           "case $shell in",
-          `  zsh) ${boundedCommand(8, `zsh -lic ${shellQuote(ALIAS_PROBES["zsh"]!)} </dev/null 2>/dev/null`)} ;;`,
-          `  fish) ${boundedCommand(8, `fish -lic ${shellQuote(ALIAS_PROBES["fish"]!)} </dev/null 2>/dev/null`)} ;;`,
-          `  *) ${boundedCommand(8, `bash -lic ${shellQuote(ALIAS_PROBES["bash"]!)} </dev/null 2>/dev/null`)} ;;`,
+          `  zsh) ${aliasScan("zsh")} ;;`,
+          `  fish) ${aliasScan("fish")} ;;`,
+          `  *) ${aliasScan("bash")} ;;`,
           "esac",
         ]),
     ...CONTEXT_AGENTS.flatMap(a => (a.context.conflict === undefined ? [] : [`if ${a.context.conflict(roots)}; then echo "CONFLICT ${a.id}"; fi`])),
@@ -235,7 +244,7 @@ export function parseProbe(stdout: string): ContextProbe | undefined {
   const start = lines.indexOf("WSP_CTX");
   const end = lines.indexOf("WSP_CTX_END");
   if (start === -1 || end === -1 || end < start) return undefined;
-  const probe: ContextProbe = { overlay: false, has: new Set(), versions: parseVersions(lines.slice(start + 1, end).join("\n")), agents: [], secrets: [], shell: "bash", aliases: [], aliasesRead: true, conflicts: new Set() };
+  const probe: ContextProbe = { overlay: false, has: new Set(), versions: parseVersions(lines.slice(start + 1, end).join("\n")), agents: [], secrets: [], shell: "bash", aliases: [], conflicts: new Set() };
   for (const line of lines.slice(start + 1, end)) {
     const sp = line.indexOf(" ");
     const key = sp === -1 ? line : line.slice(0, sp);
@@ -270,7 +279,8 @@ export function parseProbe(stdout: string): ContextProbe | undefined {
         break;
       }
       case "ALIASES":
-        if (rest === ALIASES_UNREAD) probe.aliasesRead = false;
+        if (rest === ALIASES_UNREAD) probe.aliasesUnread = "shared";
+        else if (rest === ALIASES_LATE) probe.aliasesUnread = "late";
         break;
       case "CONFLICT":
         if (isAgent(rest)) probe.conflicts.add(rest);
@@ -304,8 +314,11 @@ const cdFact = (agent: ContextAgent | undefined): string => agent?.context.cd?.f
 
 const cdHowto = (agent: ContextAgent | undefined): string => agent?.context.cd?.howto ?? "- Work in a folder: cd <dir> && <cmd> on one line, or absolute paths.";
 
-/** What the document says in place of the alias list where no shell was opened to read one. */
-const ALIASES_UNREAD_LINE = "- Aliases: not read here. This computer's home is shared with every workspace on it, so wsp opens no login shell on it.";
+/** What the document says in place of the alias list where none was read, by why. */
+const ALIASES_UNREAD_LINE = {
+  shared: "- Aliases: not read here. This computer's home is shared with every workspace on it, so wsp opens no login shell on it.",
+  late: `- Aliases: not read. The login shell had not finished starting after ${ALIAS_BOUND_S} seconds, so wsp stopped it.`,
+};
 
 function missingList(items: readonly { label: string; note: string }[]): string {
   return items.map(m => `${m.label} (${m.note})`).join("; ");
@@ -347,7 +360,7 @@ export function renderMachineContext(input: ContextInput): string {
   workspace.push(`- Tools that did not install: ${facts.tools.length > 0 ? missingList(facts.tools) : "none"}.`);
   workspace.push(`- Agents that did not install: ${facts.agents.length > 0 ? missingList(facts.agents) : "none"}.`);
   workspace.push(`- Files left on the person's computer: ${facts.files.length > 0 ? facts.files.map(f => `${f.path} (${f.note})`).join("; ") : "none"}.`);
-  workspace.push(probe.aliasesRead ? `- Aliases whose command is not here: ${probe.aliases.length > 0 ? probe.aliases.map(a => `${a.name} runs ${a.word}`).join("; ") : "none"}.` : ALIASES_UNREAD_LINE);
+  workspace.push(probe.aliasesUnread === undefined ? `- Aliases whose command is not here: ${probe.aliases.length > 0 ? probe.aliases.map(a => `${a.name} runs ${a.word}`).join("; ") : "none"}.` : ALIASES_UNREAD_LINE[probe.aliasesUnread]);
 
   const tmux = probe.has.has("tmux");
   const howto: string[] = [];
