@@ -2811,8 +2811,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
   const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
   const hostId = opts.hostId ?? hostname();
-  /** What names this host's templates: the id's hex alone, in the class the provider's name field has taken. */
-  const templateHostId = templateHost(hostId);
 
   const vaultPathsOf = async (m: Machine): Promise<string[]> => {
     if (opts.vaultPaths) return opts.vaultPaths;
@@ -4100,6 +4098,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   });
 
   let owner = "";
+  /** The mark on every image this state makes: the host's id and this state file's owner, each in the class the
+   * provider's name field has taken. Two state files on one computer read one host id, and on Box a snapshot's name
+   * is its id, so the owner is what keeps one state's image from being the other's. */
+  const imageMark = (): string => templateHost(hostId) + templateHost(owner);
 
   /** The store holds the attempt's key and stamp before the provider hears of it: a retry the provider never answered
    * (the connection dropped, the process died) sends the same body under the same key and gets back the machine the
@@ -5762,7 +5764,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await syncDisk(entry.machine);
       const disk = await diskUse(entry.machine);
       const createdAt = new Date(clock.now()).toISOString();
-      const snapshotId = await entry.ws.checkpoint(projectSnapshotName(templateHostId, project.name, createdAt.replace(/[:.]/g, "-"))).catch((e: unknown) => {
+      const snapshotId = await entry.ws.checkpoint(projectSnapshotName(imageMark(), project.name, createdAt.replace(/[:.]/g, "-"))).catch((e: unknown) => {
         if (e instanceof NotFirstLifeError) throw e;
         const said = snapshotRefusedLine(name, answerOf(e), disk);
         console.warn(said);
@@ -7874,7 +7876,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(copy === undefined && recipe.vaultPaths !== undefined ? { vaultPaths: recipe.vaultPaths } : {}),
           keepBuilder: keep,
           name,
-          hostId: templateHostId,
+          hostId: imageMark(),
         }),
         at,
       );
@@ -7928,7 +7930,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...build,
           backend: b,
           name: key,
-          hostId: templateHostId,
+          hostId: imageMark(),
           labels: { ...build.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() },
           ...(prior !== undefined ? { manifest: prior } : {}),
         }),
@@ -8296,13 +8298,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async storage() {
       await ready();
       if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
-      return snapshotStorage(await backend.listSnapshots(), backend.pricing.snapshotStorage, { hostId: templateHostId, recorded: await recordedImages(), now: clock.now() });
+      return snapshotStorage(await backend.listSnapshots(), backend.pricing.snapshotStorage, { hostId: imageMark(), recorded: await recordedImages(), now: clock.now() });
     },
 
     async orphans() {
       await ready();
       if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
-      const read = { hostId: templateHostId, recorded: await recordedImages(), now: clock.now() };
+      const read = { hostId: imageMark(), recorded: await recordedImages(), now: clock.now() };
       const rows = await backend.listSnapshots();
       const snapshots = splitByOwner(rows, read);
       const templates = templatesOf(backend);
@@ -8411,7 +8413,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const v of manifest?.versions ?? []) {
         if (v.templateId !== undefined) continue;
         try {
-          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, goldenName(templateHostId, key, v.version));
+          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, goldenName(imageMark(), key, v.version));
           const current = await copyOf(places.wired, key);
           if (current === undefined) throw new Error(`golden ${key} was dropped while its versions were being promoted`);
           await putCopy(places.wired, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });
