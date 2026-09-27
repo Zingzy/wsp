@@ -291,7 +291,7 @@ describe("the words the clients print for the job", () => {
     const setup = { keys: { box: false, solari: true }, home: "/Users/me", agents: [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }, { id: "codex", name: "Codex", configured: false, takesTools: false }], pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 }, job: null };
     // One line per provider this computer can hold a key for, each in that provider's own words for its key.
     expect(initSetupLines(setup)).toEqual([
-      "Box API key: not set",
+      "Boat API key: not set",
       "Solari API key: saved",
       "Agents here: Claude Code (MCP added), Codex",
       "A 2 vCPU, 4 GB workspace costs about $0.11 an hour while it runs and naps when idle",

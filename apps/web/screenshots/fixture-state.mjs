@@ -590,7 +590,7 @@ const macAndVps = () =>
     },
   });
 
-/** One fork on Box by ASCII, asleep: no workspace on this computer at all, and no thread on it, since this person
+/** One fork on Boat, asleep: no workspace on this computer at all, and no thread on it, since this person
  * has run nothing yet. This is the persona who comes to paste a key, so nothing of theirs may be awake and
  * spending while they type one: two running forks and $2.44 read to a tester as money already gone on a cloud
  * nobody had given a key to, and the meter moving a cent while the screen said "naps to $0" read as the product

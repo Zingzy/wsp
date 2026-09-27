@@ -215,7 +215,7 @@ describe("command palette", () => {
     await waitFor(() => expect(palette()).not.toBeNull());
     // The provider its own record names, and, on a record that names none, what the machine is: a person picks a
     // workspace by its state and where it runs, and the id the provider minted for the machine names neither.
-    expect(metaOn("api")).toBe("Running on solari");
+    expect(metaOn("api")).toBe("Running on Solari");
     expect(metaOn("worker")).toBe("Stopped on a provider");
     // The open workspace says so at the row's right edge, apart from the facts under its title.
     expect(within(palette()!).getAllByText("Current task")).toHaveLength(1);

@@ -33,9 +33,9 @@ describe("provider modules", () => {
 
   it.runIf(CLOUD_ON)("takes Box when a person names it, key or no key, and hands the backend the key the environment holds", () => {
     expect(providerModule(pick({}, { WSP_PROVIDER: "box" })).id).toBe("box");
-    expect(providerModule(pick({ solari: "sk-x" }, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" })).id).toBe("box");
-    expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" }))).toBeInstanceOf(BoxBackend);
-    expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" })).capabilities).toMatchObject({ pauseMode: "disk", previewUrls: true });
+    expect(providerModule(pick({ solari: "sk-x" }, { WSP_PROVIDER: "box", BOAT_API_KEY: "box_x" })).id).toBe("box");
+    expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOAT_API_KEY: "box_x" }))).toBeInstanceOf(BoxBackend);
+    expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOAT_API_KEY: "box_x" })).capabilities).toMatchObject({ pauseMode: "disk", previewUrls: true });
   });
 
   it("takes the module that answers out of memory when a harness names it, and never otherwise", async () => {
@@ -74,7 +74,7 @@ describe("provider modules", () => {
 
   it.runIf(CLOUD_ON)("every registered backend, and the local kind outside the registry, declares a pause mode and a lifecycle together or neither, and says on its own whether it copies a disk and replaces a machine", () => {
     // Built the way the host builds them, with fake picks: a key that looks fake, a daemon nothing dials.
-    const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { BOX_API_KEY: "box_x" }))] as const);
+    const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { BOAT_API_KEY: "box_x" }))] as const);
     const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })]];
     const modes = Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.pauseMode]));
     expect(modes).toEqual({ box: "disk", solari: "memory", fake: "memory", none: undefined, local: undefined });
@@ -194,7 +194,7 @@ describe("provider modules", () => {
     // variable and no words for it would open a screen titled with a shell variable.
     expect(PROVIDER_MODULES.map(m => [m.id, m.keyEnv, m.keyName])).toEqual([
       ["fake", undefined, undefined],
-      ["box", BOX_KEY_ENV, "Box API key"],
+      ["box", BOX_KEY_ENV, "Boat API key"],
       ["solari", SOLARI_KEY_ENV, "Solari API key"],
       ["none", undefined, undefined],
     ]);

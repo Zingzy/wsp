@@ -270,6 +270,8 @@ import {
   escapeC1,
   jsonLine,
   withoutControlChars,
+  isProviderPlace,
+  providerKeyName,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
@@ -707,7 +709,7 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
   if (places.length === 0) return ["This host holds no computer. wsp add prints the join line for a computer you are sitting at."];
   const todayOf = (p: PlaceView): number | undefined => spend.find(s => s.place === p.id)?.todayUsd;
   const rows = places.map(p => [
-    p.name,
+    tableName(p),
     computerKindWord(p, platform),
     p.shape === undefined ? "" : String(p.shape.cpu),
     p.shape === undefined ? "" : fmtBytes(p.shape.memMb * 1024 * 1024),
@@ -1508,8 +1510,12 @@ export function workspaceLine(w: WorkspaceListing, places: ReadonlyMap<string, s
  * reads the name they gave the computer. Asked only when a row names one. */
 export async function placeNames(client: HostClient): Promise<Map<string, string>> {
   const { places } = await client.request<{ places: PlaceView[] }>("places.list");
-  return new Map(places.map(p => [p.id, p.name]));
+  return new Map(places.map(p => [p.id, tableName(p)]));
 }
+
+/** What a table calls a computer: the name a person types for it, and a provider by the name the app gives it, never
+ * the id stored state holds; either one names it after --on. */
+const tableName = (p: PlaceView): string => (isProviderPlace(p) ? providerKeyName(p.name) : p.name);
 
 /** Every project this host holds, as every director draws them. */
 export async function projectsOf(client: HostClient): Promise<ProjectView[]> {

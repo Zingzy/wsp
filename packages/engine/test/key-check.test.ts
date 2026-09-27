@@ -32,9 +32,9 @@ describe("the provider key check", () => {
     const check = await checkProviderKey(b);
     expect(check).toEqual({ state: "refused", said: "401 Unauthorized" });
     expect(keyCheckLine(check, "solari")).toBe("Solari refused this key: 401 Unauthorized");
-    expect(keyCheckLine(check, "box")).toBe("Box by ASCII refused this key: 401 Unauthorized");
+    expect(keyCheckLine(check, "box")).toBe("Boat refused this key: 401 Unauthorized");
     expect(keyCheckLine(check, "solari", true)).toBe("Solari refused the saved key: 401 Unauthorized");
-    expect(keyCheckLine(check, "box", true)).toBe("Box by ASCII refused the saved key: 401 Unauthorized");
+    expect(keyCheckLine(check, "box", true)).toBe("Boat refused the saved key: 401 Unauthorized");
   });
 
   it("a plan that may not read the account is the same refusal: the key alone will not do", async () => {
@@ -47,7 +47,7 @@ describe("the provider key check", () => {
     const check = await checkProviderKey(b);
     expect(check).toEqual({ state: "unchecked", said: "fetch failed" });
     expect(keyCheckLine(check, "solari")).toBe("Solari could not be reached to check the key: fetch failed");
-    expect(keyCheckLine(check, "box")).toBe("Box by ASCII could not be reached to check the key: fetch failed");
+    expect(keyCheckLine(check, "box")).toBe("Boat could not be reached to check the key: fetch failed");
     // Nothing about the key came back, so the saved wording does not turn it into a refusal either.
     expect(keyCheckLine(check, "solari", true)).toBe("Solari could not be reached to check the key: fetch failed");
   });

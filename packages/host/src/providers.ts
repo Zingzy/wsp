@@ -53,8 +53,8 @@ export const PROVIDER_ENV = "WSP_PROVIDER";
  * no provider anything. */
 export const NO_PROVIDER = "none";
 
-/** The Box by ASCII key. */
-export const BOX_KEY_ENV = "BOX_API_KEY";
+/** The Boat key. The provider's id stays box, the word stored state holds. */
+export const BOX_KEY_ENV = "BOAT_API_KEY";
 /** The Solari key. */
 export const SOLARI_KEY_ENV = "SOLARI_API_KEY";
 
