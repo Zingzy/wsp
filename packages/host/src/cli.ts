@@ -1842,6 +1842,8 @@ interface Command {
  * hands a fake host client where a real one would be dialled. */
 export interface CommandDeps {
   dial(statePath: string, opts: DialOpts): Promise<HostClient>;
+  /** Which ports wsp up finds held; this computer's own, read by binding them, when absent. */
+  ports?: PortProbes;
 }
 
 /** The dial every command line takes when the caller names no other. */
@@ -1932,7 +1934,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     json: false,
     host: "refused",
     cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
-    run: async (io, opts, values) => {
+    run: async (io, opts, values, _args, deps) => {
       if (values.service === true) return upServiceCommand(io, opts, systemService());
       // The lock is read before a port is stepped, a key is read or a daemon is dialled: each of those writes under
       // the home the other host is serving, and a start that is going to be refused must leave it as it found it.
@@ -1948,7 +1950,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       }
       // Which ports are free is settled before anything binds: a port another wsp or another program holds is one
       // sentence naming who holds it, and a pair nobody named is stepped over rather than refused.
-      const picked = await pickUpPorts(io, opts);
+      const picked = await pickUpPorts(io, opts, deps.ports);
       if (picked === undefined) return EXIT_CODES.provider;
       const handle = await up(io, { ...opts, ...picked.ports });
       // "Serving on 4401" is a claim about a host that serves, so it is said once one does: the state read, the

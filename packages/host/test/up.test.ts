@@ -10,7 +10,7 @@ import { BOX_API_URL } from "@wsp/engine";
 import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import { stateWriterHere } from "../src/version.js";
-import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
+import { cli, localWiring, SYSTEM_COMMAND_DEPS, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
 import { noProviderStorageLine } from "../src/storage.js";
 import { hostPlaceKeyPath } from "../src/places.js";
 import { serviceAddressHere, serviceManagerFor } from "../src/service.js";
@@ -120,18 +120,6 @@ describe("wsp up", () => {
 
   /** The folder a local daemon makes for its token and its manifest, which it removes when it closes. */
   const daemonFolders = (at: string): string[] => readdirSync(at).filter(name => name.startsWith("wsp-local-daemon-"));
-
-  /** The default app port held, so a start with no flags steps to the next port and has a step to say. A Mac
-   * already serving a host of its own holds it, and a case that cannot bind it reads that as the same held port:
-   * what the case needs is the port taken, not this listener in particular. */
-  async function heldDefaultPort(): Promise<() => Promise<void>> {
-    const server = createServer();
-    const bound = await new Promise<boolean>(resolve => {
-      server.once("error", () => resolve(false));
-      server.listen(DEFAULT_PORT, "127.0.0.1", () => resolve(true));
-    });
-    return bound ? () => new Promise<void>(resolve => server.close(() => resolve())) : (): Promise<void> => Promise.resolve();
-  }
 
   /** A host that has answered once, which is how every case here settles one before its teardown closes it: a
    * close that lands inside the first milliseconds of a start races the runtime's own listener. */
@@ -437,19 +425,16 @@ describe("wsp up", () => {
     // The reading this rule is from: a start refused on the shape of its state file printed "Serving on 4401 and
     // 4411" first, and nothing had bound a port. Every refusal a start throws comes after the port is picked.
     stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: 3 });
-    const release = await heldDefaultPort();
     const lines: string[] = [];
     const errors: string[] = [];
-    try {
-      // No --port, so the default port is the one asked for and the held one is stepped over: this is the line a
-      // person types beside a host that is already serving.
-      expect(await cli(["up", "--state", statePath], quietIO(lines, errors))).not.toBe(0);
-      expect(errors).toEqual([stateShapeUnreadableLine(statePath, 3)]);
-      expect(lines).toEqual([]);
-      expect(readdirSync(join(home, "state"))).toEqual(["state.json"]);
-    } finally {
-      await release();
-    }
+    // No --port, so the default port is the one asked for and the held one is stepped over: this is the line a
+    // person types beside a host that is already serving. Which ports are held is said here rather than read off
+    // this computer, where other hosts can hold every port the step may take.
+    const ports = { probe: async (port: number) => port === DEFAULT_PORT, listener: async () => undefined };
+    expect(await cli(["up", "--state", statePath], quietIO(lines, errors), undefined, undefined, undefined, {}, { ...SYSTEM_COMMAND_DEPS, ports })).not.toBe(0);
+    expect(errors).toEqual([stateShapeUnreadableLine(statePath, 3)]);
+    expect(lines).toEqual([]);
+    expect(readdirSync(join(home, "state"))).toEqual(["state.json"]);
   });
 
   it("wsp up records that it brought the host up, so wsp down has a road to stop it", async () => {
