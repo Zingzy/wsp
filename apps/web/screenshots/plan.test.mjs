@@ -46,6 +46,11 @@ describe("a click or wait word", () => {
     expect(stepFor("390:key:Escape", [1440, 390])).toEqual({ width: 390, key: "Escape" });
   });
 
+  it("reads a focus: word as focus on a data attribute, with no click", () => {
+    expect(stepFor("focus:surface-launcher-keys", [1440, 390])).toEqual({ focus: "[data-surface-launcher-keys]" });
+    expect(stepFor("390:focus:row-id=thread:redirect", [1440, 390])).toEqual({ width: 390, focus: `[data-row-id="thread:${threadId("redirect")}"]` });
+  });
+
   it("reads a type: word as typing into whatever the step before it focused", () => {
     expect(stepFor("type:/does/not/exist", [1440, 390])).toEqual({ type: "/does/not/exist" });
     expect(stepFor("390:type:/tmp", [1440, 390])).toEqual({ width: 390, type: "/tmp" });
@@ -221,6 +226,7 @@ describe("the surfaces list this repo ships", () => {
       "palette-threads",
       "palette-open",
       "panel-launcher",
+      "panel-launcher-mac",
       "tiles",
       "tiles-root",
       "tiles-picker",
@@ -248,7 +254,7 @@ describe("the surfaces list this repo ships", () => {
     // one width whose sidebar carries its control, and the thread status, the two switchers, the threads list, the
     // palette, the panel launcher and the tiles at the widest alone; the rest take every width the list shoots.
     const narrowed = read.surfaces.filter(s => s.widths.length < read.widths.length);
-    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["settings-computers-mac", [1440]], ["add-cloud", [1440, 390]], ["agents-add", [1440, 390]], ["agents-add-server", [1440, 390]], ["settings-image-built-mac", [1440]], ["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]], ["thread-status", [1440]], ["threads-computers", [1440]], ["threads-computers-shut", [1440]], ["threads-computer-picked", [1440]], ["threads-picker", [1440]], ["thread-list", [1440]], ["palette-threads", [1440]], ["palette-open", [1440]], ["panel-launcher", [1440]], ["tiles", [1440]], ["tiles-root", [1440]], ["tiles-picker", [1440]], ["tiles-settled-open", [1440]], ...["new-thread-dialog", "new-thread-held", "add-project", "export-dialog", "delete-dialog", "browser-empty", "diff-empty", "long-prompt", "composer-rest", "composer-running"].map(name => [name, [1440]])]);
+    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["settings-computers-mac", [1440]], ["add-cloud", [1440, 390]], ["agents-add", [1440, 390]], ["agents-add-server", [1440, 390]], ["settings-image-built-mac", [1440]], ["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]], ["thread-status", [1440]], ["threads-computers", [1440]], ["threads-computers-shut", [1440]], ["threads-computer-picked", [1440]], ["threads-picker", [1440]], ["thread-list", [1440]], ["palette-threads", [1440]], ["palette-open", [1440]], ["panel-launcher", [1440]], ["panel-launcher-mac", [1440]], ["tiles", [1440]], ["tiles-root", [1440]], ["tiles-picker", [1440]], ["tiles-settled-open", [1440]], ...["new-thread-dialog", "new-thread-held", "add-project", "export-dialog", "delete-dialog", "browser-empty", "diff-empty", "long-prompt", "composer-rest", "composer-running"].map(name => [name, [1440]])]);
     expect(shotPlan(read)).toHaveLength(read.surfaces.reduce((n, s) => n + s.widths.length, 0) * 2);
     // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
     expect(read.widths).toContain(1280);

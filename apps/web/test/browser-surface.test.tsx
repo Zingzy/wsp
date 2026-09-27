@@ -103,7 +103,7 @@ describe("availability", () => {
     await setup({ openBrowser: false, workspaces: [workspace(WS, "napping")] });
     expect(screen.queryByRole("button", { name: /Browser/ })).toBeNull();
     // The terminal card carries the same hint once the workspace naps, so match by count.
-    expect(screen.getAllByText("Available while the task is running.").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Available while this runs.").length).toBeGreaterThan(0);
   });
 });
 
