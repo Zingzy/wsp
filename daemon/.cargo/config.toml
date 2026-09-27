@@ -9,3 +9,6 @@ LIBSECCOMP_LIB_PATH = { value = "target/libseccomp", relative = true }
 TS_RS_EXPORT_DIR = { value = "../packages/protocol/src/generated", relative = true }
 TS_RS_LARGE_INT = "number"
 TS_RS_IMPORT_EXTENSION = "js"
+# At most four rustc at once: two cargo builds share the owner's ten-core Mac, and a fat-lto link needs gigabytes.
+[build]
+jobs = 4

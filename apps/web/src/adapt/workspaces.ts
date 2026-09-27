@@ -4,7 +4,7 @@
 // sidebarProjectGrouping.ts SidebarProjectSnapshot and Sidebar.logic.ts
 // resolveThreadStatusPill (commit 57a66608). Phase is the product word and
 // leads; machine state and reach only add when they diverge from it.
-import { foldThreads, IDLE_REASON, threadState, threadWordOf, waitingLine, workspaceStateOf, workspaceWord, type PauseMode, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, threadState, threadUnread, threadWordOf, waitingLine, workspaceStateOf, workspaceWord, type PauseMode, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicator } from "./view-model.js";
 
 export interface SidebarInput {
@@ -114,15 +114,6 @@ export function turnWait(state: WorkspaceState, workspace: { readonly name: stri
   }
 }
 
-/** The line a paused workspace puts under its last turn, where nothing is running and the next send is what wakes
- * it: the state, and what it napped after where the status that brought the nap said so. The window is read back
- * through the protocol's own marker, which the runtime writes the reason with, so neither side can reword it alone.
- * A window that was not open at the nap is told none of that and says the state alone rather than guessing. */
-export function pausedLine(reason: string | undefined): string {
-  const window = IDLE_REASON.windowIn(reason);
-  return window === undefined ? "paused" : `paused after ${window} idle`;
-}
-
 function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "project">): SidebarThreadSnapshot {
   return {
     id: thread.id,
@@ -141,6 +132,9 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     parentThreadId: thread.parentThreadId ?? null,
     asking: waitingLine(thread) ?? null,
     costUsd: thread.costUsd ?? null,
+    unread: threadUnread(thread),
+    readAt: thread.readAt !== undefined ? new Date(thread.readAt).toISOString() : null,
+    settledAt: thread.settledAt !== undefined ? new Date(thread.settledAt).toISOString() : null,
   };
 }
 

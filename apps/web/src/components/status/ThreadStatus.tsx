@@ -6,6 +6,7 @@
 import { cn } from "../../lib/utils.js";
 import { Crab } from "./Crab.js";
 import type { ThreadStatusInput } from "./kinds/index.js";
+import { RESTING } from "./kinds/resting.js";
 import { threadStatusOf } from "./threadStatusOf.js";
 import { WorkingSince } from "./WorkingSince.js";
 
@@ -16,6 +17,7 @@ export function ThreadStatus({
   thread,
   age,
   crab = false,
+  settled = false,
   className,
 }: {
   thread: ThreadStatusInput;
@@ -23,9 +25,12 @@ export function ThreadStatus({
   age?: string;
   /** Draw the crab inside the slot, for a surface with no row end of its own to put it at. */
   crab?: boolean;
+  /** The thread sits in the Settled fold, where the design's Settled row reads the age in the row's ink whatever the
+   * thread's state: the fold holds what a person has put away, so nothing in it calls for them. */
+  settled?: boolean;
   className?: string;
 }) {
-  const kind = threadStatusOf(thread);
+  const kind = settled ? RESTING : threadStatusOf(thread);
   const Glyph = kind.glyph;
   return (
     <span

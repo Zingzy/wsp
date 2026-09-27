@@ -65,7 +65,9 @@ const MAC_ROW: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", l
 
 function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: WorkspaceView[] }) {
   const create = vi.fn(async (_project: string, name: string) => ({ ...workspace("ws_new", name, "pr_1") }));
+  const settleThreads = vi.fn(async (_threadIds: readonly string[]) => {});
   const api = {
+    settleThreads,
     subscribe: () => () => {},
     listWorkspaces: async () => workspaces,
     listSessions: async () => [],
@@ -104,7 +106,7 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
       <WorkspaceSidebar />
     </SidebarProvider>,
   );
-  return { create };
+  return { create, settleThreads };
 }
 
 const rowIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-sidebar-row]")].map(row => row.dataset["rowId"] ?? "");
@@ -114,7 +116,8 @@ const HOUR = 60 * 60_000;
 const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
 
 /** Sessions for the store, one per thread, keyed by workspace. */
-const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number }>) => {
+/** A turn that ended was shown as it ended unless `readAgo` says the last showing was earlier. */
+const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number; readAgo?: number; settledAgo?: number }>) => {
   const by: Record<string, unknown[]> = {};
   for (const r of rows) {
     (by[r.ws] ??= []).push({
@@ -127,7 +130,8 @@ const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?:
       startedBy: r.parent === undefined ? "person" : "agent",
       ...(r.parent === undefined ? {} : { parentThreadId: r.parent }),
       startedAt: ago(r.startedAgo ?? HOUR),
-      ...(r.endedAgo === undefined ? {} : { endedAt: ago(r.endedAgo) }),
+      ...(r.endedAgo === undefined ? {} : { endedAt: ago(r.endedAgo), readAt: ago(r.readAgo ?? r.endedAgo) }),
+      ...(r.settledAgo === undefined ? {} : { settledAt: ago(r.settledAgo) }),
     });
   }
   return by;
@@ -327,7 +331,7 @@ describe("the sidebar's list of thread tiles", () => {
     expect(depthOf("write the migration")).toBe(0);
   });
 
-  it("folds every root quiet a day into Settled at the foot: its count shut and open, a hover fill, 12 px under the list, opened by its chevron and remembered", async () => {
+  it("folds every read root quiet two hours into Settled at the foot: its count shut and open, a hover fill, 12 px under the list, opened by its chevron and remembered", async () => {
     mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
     await act(async () => {
       useStore.setState({
@@ -357,4 +361,99 @@ describe("the sidebar's list of thread tiles", () => {
     await waitFor(() => expect(rowIds()).toEqual(["thread:th_live", "settled"]));
     expect(window.localStorage.getItem("wsp:sidebar-settled-open")).toBe("false");
   });
+
+  it("a thread on a paused workspace reads Done until it is opened, then its age, and its tile says nothing about the machine", async () => {
+    const napping = { ...workspace("ws_a", "pricing page", "pr_1"), phase: "napping" as const };
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [napping] });
+    const turn = { ws: "ws_a", id: "th_boat", prompt: "boat check", status: "completed", startedAgo: 6 * 60_000, endedAgo: 5 * 60_000 };
+    await act(async () => useStore.setState({ sessions: sessions([{ ...turn, readAgo: HOUR }]) } as never));
+    await waitFor(() => expect(screen.getByText("boat check")).toBeDefined());
+    const slot = (): HTMLElement => rowOf("boat check").querySelector<HTMLElement>("[data-thread-status]")!;
+    expect(slot().textContent).toBe("Done");
+    expect(slot().dataset["tone"]).toBe("done");
+    expect(rowOf("boat check").textContent).not.toMatch(/Paused|Stopped|Unreachable|Waking|Failed/);
+    expect(rowOf("boat check").querySelector("[data-tone=warning], [data-tone=failed]")).toBeNull();
+    await act(async () => useStore.setState({ sessions: sessions([turn]) } as never));
+    await waitFor(() => expect(slot().textContent).toBe("5m"));
+    expect(slot().dataset["tone"]).toBeUndefined();
+    expect(rowOf("boat check").textContent).not.toMatch(/Paused|Stopped|Unreachable/);
+  });
+
+  it("a live root's menu settles its whole tree, and the Settled row's own menu settles every read tree while an unseen one stays", async () => {
+    const { settleThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await act(async () => {
+      useStore.setState({
+        sessions: sessions([
+          { ws: "ws_a", id: "th_lead", prompt: "the lead", status: "completed", startedAgo: 20 * 60_000, endedAgo: 10 * 60_000 },
+          { ws: "ws_a", id: "th_builder", prompt: "its builder", parent: "th_lead", status: "completed", startedAgo: 15 * 60_000, endedAgo: 12 * 60_000 },
+          { ws: "ws_a", id: "th_unseen", prompt: "nobody looked", status: "completed", startedAgo: 9 * 60_000, endedAgo: 8 * 60_000, readAgo: HOUR },
+        ]),
+      } as never);
+    });
+    await waitFor(() => expect(screen.getByText("the lead")).toBeDefined());
+    // Nothing has settled yet, but there is a read tree to settle, so the row that settles it is there.
+    const fold = document.querySelector<HTMLElement>("[data-row-id=settled]")!;
+    expect(fold.querySelector("[data-group-count]")!.textContent).toBe("0");
+    const picked: string[][] = [];
+    const choose = (id: string) => (window.wsp = { contextMenu: async (items: Array<{ id: string; enabled?: boolean }>) => (picked.push(items.map(item => item.id)), id) } as never);
+    try {
+      choose("settle");
+      fireEvent.contextMenu(rowOf("the lead"));
+      await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_lead", "th_builder"]));
+      expect(picked[0]).toContain("settle");
+      // A thread under a root settles with it, so its own menu offers none.
+      fireEvent.contextMenu(rowOf("its builder"));
+      await waitFor(() => expect(picked).toHaveLength(2));
+      expect(picked[1]).not.toContain("settle");
+      settleThreads.mockClear();
+      choose("settle-read");
+      fireEvent.contextMenu(fold);
+      await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_lead", "th_builder"]));
+    } finally {
+      delete (window as { wsp?: unknown }).wsp;
+    }
+  });
+
+  it("keeps a failure on the list however long ago it was read, and folds it muted once settled by hand", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const failed = { ws: "ws_a", id: "th_broke", prompt: "it broke", status: "failed", startedAgo: 30 * HOUR, endedAgo: 29 * HOUR, readAgo: 28 * HOUR };
+    await act(async () => useStore.setState({ sessions: sessions([failed]) } as never));
+    await waitFor(() => expect(rowIds()).toEqual(["thread:th_broke", "settled"]));
+    expect(rowOf("it broke").querySelector("[data-thread-status]")!.textContent).toBe("Failed");
+    await act(async () => useStore.setState({ sessions: sessions([{ ...failed, settledAgo: HOUR }]) } as never));
+    await waitFor(() => expect(rowIds()).toEqual(["settled"]));
+    fireEvent.click(document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+    await waitFor(() => expect(rowIds()).toEqual(["settled", "thread:th_broke"]));
+    const slot = rowOf("it broke").querySelector<HTMLElement>("[data-thread-status]")!;
+    expect(slot.textContent).toBe("1d");
+    expect(slot.dataset["tone"]).toBeUndefined();
+  });
+
+  it("leaves the thread open in the centre on the list while it is read, and folds it once another is open", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await act(async () => useStore.setState({ sessions: sessions([{ ws: "ws_a", id: "th_long", prompt: "a long read", status: "completed", startedAgo: 5 * HOUR, endedAgo: 4 * HOUR }]) } as never));
+    await waitFor(() => expect(rowIds()).toEqual(["settled"]));
+    act(() => useStore.getState().select("ws_a", "th_long"));
+    await waitFor(() => expect(rowIds()).toEqual(["thread:th_long", "settled"]));
+    act(() => useStore.getState().select(null));
+    await waitFor(() => expect(rowIds()).toEqual(["settled"]));
+  });
+
+  it("settles by hand at once, and a turn after the settle brings the thread back to the list", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    const put = (row: Parameters<typeof sessions>[0][number]) => act(async () => useStore.setState({ sessions: sessions([row]) } as never));
+    await put({ ws: "ws_a", id: "th_one", prompt: "put away", status: "completed", startedAgo: 20 * 60_000, endedAgo: 10 * 60_000, settledAgo: 5 * 60_000 });
+    await waitFor(() => expect(rowIds()).toEqual(["settled"]));
+    await put({ ws: "ws_a", id: "th_one", prompt: "put away", status: "running", startedAgo: 60_000, settledAgo: 5 * 60_000 });
+    await waitFor(() => expect(rowIds()).toEqual(["thread:th_one"]));
+  });
+
+  it("scrolls its tiles under a hard edge with no fade, so a tile part way under the head never reads as a tile with its first row gone and its title dimmed", async () => {
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await waitFor(() => expect(screen.getByText("pricing page")).toBeDefined());
+    const scroller = document.querySelector<HTMLElement>("[data-sidebar-tree]")!.closest<HTMLElement>("[data-slot=scroll-area-viewport]")!;
+    expect(scroller).not.toBeNull();
+    expect(scroller.className).not.toMatch(/mask-/);
+  });
 });
+

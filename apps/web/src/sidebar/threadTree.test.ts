@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
-import { projectGroups, sidebarTiles, threadTree, type TileNode } from "./threadTree";
+import { projectGroups, rootHolding, settleableRoots, sidebarTiles, threadTree, treeSettle, type TileNode } from "./threadTree";
 
 const project = (id: string, name: string, computer = "here"): ProjectView => ({
   id,
@@ -21,10 +21,10 @@ const NOW = Date.parse("2026-09-26T12:00:00.000Z");
 const ago = (hours: number): string => new Date(NOW - hours * 3_600_000).toISOString();
 
 const thread = (id: string, workspaceId: string, parentThreadId: string | null = null, over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot =>
-  ({ id, threadId: id, sessionId: `s_${id}`, workspaceId, title: id, status: "running", startedAt: ago(1), endedAt: null, parentThreadId, asking: null, ...over }) as unknown as SidebarProjectSnapshot["threads"][number];
-/** A thread that finished `hours` ago. */
-const done = (id: string, workspaceId: string, hours: number, parentThreadId: string | null = null): SidebarThreadSnapshot =>
-  thread(id, workspaceId, parentThreadId, { status: "completed", startedAt: ago(hours + 0.1), endedAt: ago(hours) });
+  ({ id, threadId: id, sessionId: `s_${id}`, workspaceId, title: id, status: "running", startedAt: ago(1), endedAt: null, parentThreadId, asking: null, unread: false, readAt: null, settledAt: null, ...over }) as unknown as SidebarProjectSnapshot["threads"][number];
+/** A thread that finished `hours` ago and that a window showed as it finished. */
+const done = (id: string, workspaceId: string, hours: number, parentThreadId: string | null = null, over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot =>
+  thread(id, workspaceId, parentThreadId, { status: "completed", startedAt: ago(hours + 0.1), endedAt: ago(hours), readAt: ago(hours), ...over });
 
 const row = (id: string, projectId: string, threads: SidebarThreadSnapshot[] = [], parentThreadId?: string): SidebarProjectSnapshot =>
   ({
@@ -105,14 +105,56 @@ describe("the sidebar's tiles", () => {
     ]);
   });
 
-  it("folds a root into Settled once its whole tree has been quiet a day, and keeps it out while any thread in it is not", () => {
+  it("folds a root into Settled once its whole tree has been read and quiet two hours, and keeps it out while any thread in it is not", () => {
     const rows = [
-      row("ws_a", "pr_1", [done("quiet", "ws_a", 30), done("quiet-child", "ws_a", 26, "quiet"), done("recent", "ws_a", 2)]),
-      row("ws_b", "pr_1", [done("stale", "ws_b", 40), thread("busy-child", "ws_b", "stale"), done("failed", "ws_b", 50)]),
+      row("ws_a", "pr_1", [done("quiet", "ws_a", 3), done("quiet-child", "ws_a", 2.5, "quiet"), done("recent", "ws_a", 1.5)]),
+      row("ws_b", "pr_1", [done("stale", "ws_b", 40), thread("busy-child", "ws_b", "stale"), done("failed", "ws_b", 5, null, { status: "failed" })]),
     ];
     const { live, settled } = sidebarTiles(rows, { picked: null, nowMs: NOW });
-    expect(shape(live)).toEqual(["recent", ["stale", ["busy-child"]]]);
-    expect(shape(settled)).toEqual([["quiet", ["quiet-child"]], "failed"]);
+    expect(shape(live)).toEqual(["recent", "failed", ["stale", ["busy-child"]]]);
+    expect(shape(settled)).toEqual([["quiet", ["quiet-child"]]]);
+  });
+
+  it("keeps a tree live while any finish in it is unseen, however old, and folds it once opened; a failure stays until settled by hand", () => {
+    const unseen = (read: boolean) => [
+      row("ws_a", "pr_1", [done("lead", "ws_a", 30), done("builder", "ws_a", 29, "lead", read ? {} : { readAt: ago(40), unread: true })]),
+      row("ws_b", "pr_1", [done("broke", "ws_b", 31, null, { status: "failed", readAt: read ? ago(20) : null })]),
+    ];
+    expect(shape(sidebarTiles(unseen(false), { picked: null, nowMs: NOW }).live)).toEqual([["lead", ["builder"]], "broke"]);
+    const opened = sidebarTiles(unseen(true), { picked: null, nowMs: NOW });
+    expect(shape(opened.settled)).toEqual([["lead", ["builder"]]]);
+    expect(shape(opened.live)).toEqual(["broke"]);
+  });
+
+  it("leaves the tree of the thread open in the centre on the list while it is read, however quiet", () => {
+    const rows = [row("ws_a", "pr_1", [done("lead", "ws_a", 30), done("builder", "ws_a", 29, "lead")])];
+    expect(shape(sidebarTiles(rows, { picked: null, nowMs: NOW }).settled)).toEqual([["lead", ["builder"]]]);
+    expect(shape(sidebarTiles(rows, { picked: null, nowMs: NOW, open: "builder" }).live)).toEqual([["lead", ["builder"]]]);
+  });
+
+  it("folds a tree settled by hand at once, unread or not, and brings it back when a thread in it moves after the settle", () => {
+    const settledAt = ago(0.05);
+    const byHand = [row("ws_a", "pr_1", [done("lead", "ws_a", 0.1, null, { settledAt, readAt: null, unread: true }), done("builder", "ws_a", 0.2, "lead", { settledAt })])];
+    expect(shape(sidebarTiles(byHand, { picked: null, nowMs: NOW }).settled)).toEqual([["lead", ["builder"]]]);
+    // A message into the builder after the settle is a turn: running, then over, and the settle covers neither.
+    const moved = (over: Partial<SidebarThreadSnapshot>) => [row("ws_a", "pr_1", [byHand[0]!.threads[0]!, thread("builder", "ws_a", "lead", { settledAt, ...over })])];
+    expect(shape(sidebarTiles(moved({ startedAt: ago(0.01) }), { picked: null, nowMs: NOW }).live)).toEqual([["lead", ["builder"]]]);
+    expect(shape(sidebarTiles(moved({ status: "completed", startedAt: ago(0.02), endedAt: ago(0.01), readAt: ago(0.01) }), { picked: null, nowMs: NOW }).live)).toEqual([["lead", ["builder"]]]);
+    // So does a thread opened under it after the settle, which carries no settle of its own.
+    const grown = [row("ws_a", "pr_1", [...byHand[0]!.threads, done("reviewer", "ws_a", 0.01, "builder")])];
+    expect(shape(sidebarTiles(grown, { picked: null, nowMs: NOW }).live)).toEqual([["lead", [["builder", ["reviewer"]]]]]);
+  });
+
+  it("names what a settle takes: a root's whole tree, held while one of it works, and the read trees Settle all read takes", () => {
+    const rows = [
+      row("ws_a", "pr_1", [done("read", "ws_a", 0.5), done("read-child", "ws_a", 0.4, "read"), done("unseen", "ws_a", 0.5, null, { readAt: null, unread: true })]),
+      row("ws_b", "pr_1", [done("lead", "ws_b", 0.5), thread("working", "ws_b", "lead")]),
+    ];
+    const { live } = sidebarTiles(rows, { picked: null, nowMs: NOW });
+    expect(settleableRoots(live).map(node => node.thread.id)).toEqual(["read"]);
+    expect(treeSettle(rootHolding(live, "read-child")!)).toEqual({ threadIds: ["read", "read-child"], working: false });
+    expect(treeSettle(rootHolding(live, "working")!)).toEqual({ threadIds: ["lead", "working"], working: true });
+    expect(rootHolding(live, "nobody")).toBeUndefined();
   });
 
   it("never folds a thread stopped on a question, however long it has waited", () => {

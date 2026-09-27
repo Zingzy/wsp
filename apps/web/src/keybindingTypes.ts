@@ -32,6 +32,7 @@ export const KEYBINDING_COMMANDS = [
   "workspace.previous",
   "thread.next",
   "thread.previous",
+  "thread.settle",
   ...WORKSPACE_SELECT_SLOTS.map(workspaceSelectCommand),
 ] as const;
 export type KeybindingCommand = (typeof KEYBINDING_COMMANDS)[number];

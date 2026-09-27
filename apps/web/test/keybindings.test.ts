@@ -2,9 +2,10 @@
 // The copied matcher over our default rules: every default resolves on both
 // platforms, when-clauses gate the terminal chords, labels follow the platform,
 // and the Tab pair means what the sidebar body it is read in means by it.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { compileResolvedKeybindingsConfig, DEFAULT_KEYBINDINGS, DEFAULT_RESOLVED_KEYBINDINGS, parseKeybindingShortcut, parseKeybindingWhenExpression } from "../src/keybindingDefaults.js";
 import { useStore } from "../src/protocol/store.js";
+import { runShellCommand } from "../src/shell/shellCommands.js";
 import { browserTabClaimsShortcut, eventHoldKeys, formatShortcutLabel, resolveShortcutCommand, shortcutLabelForCommand, type ShortcutEventLike } from "../src/keybindings.js";
 
 const MAC = "MacIntel";
@@ -62,6 +63,14 @@ describe("default shortcuts", () => {
     expect(resolve(cmd(","), MAC)).toBe("settings.toggle");
     expect(resolve(ctrl(","), LINUX)).toBe("settings.toggle");
     expect(resolve(cmd(","), MAC, { terminalFocus: true })).toBe("settings.toggle");
+  });
+
+  it("mod+shift+e settles the open thread, Command on macOS and Control elsewhere, and leaves a terminal its own keys", () => {
+    expect(resolve(cmd("e", { shiftKey: true }), MAC)).toBe("thread.settle");
+    expect(resolve(cmd("E", { shiftKey: true }), MAC)).toBe("thread.settle");
+    expect(resolve(ctrl("e", { shiftKey: true }), LINUX)).toBe("thread.settle");
+    expect(resolve(cmd("e", { shiftKey: true }), MAC, { terminalFocus: true })).toBeNull();
+    expect(DEFAULT_KEYBINDINGS.filter(rule => rule.command === "thread.settle")).toHaveLength(1);
   });
 
   it("gates the terminal chords on terminalFocus and hands mod+n to chat otherwise", () => {
@@ -289,5 +298,22 @@ describe("the hold a chord carries", () => {
     expect(eventHoldKeys({ metaKey: false, ctrlKey: false, shiftKey: true, altKey: true })).toEqual(["Alt"]);
     expect(eventHoldKeys({ metaKey: true, ctrlKey: true, shiftKey: false, altKey: true })).toEqual(["Control", "Alt", "Meta"]);
     expect(eventHoldKeys({ metaKey: false, ctrlKey: false, shiftKey: false, altKey: false })).toEqual([]);
+  });
+});
+
+describe("the settle chord's command", () => {
+  it("settles the open thread's whole root tree, and nothing while a thread of it works", async () => {
+    const settleThreads = vi.fn(async (_ids: readonly string[]) => {});
+    const row = (id: string, over: Record<string, unknown> = {}) => ({ id: `s_${id}`, workspaceId: "ws_a", threadId: id, harness: "claude", status: "completed", startedAt: Date.now() - 60_000, endedAt: Date.now() - 30_000, readAt: Date.now() - 30_000, ...over });
+    const workspace = { id: "ws_a", name: "a", machineId: "m", phase: "running", golden: "", createdAt: "2026-09-27T00:00:00Z", project: { id: "pr", name: "pr", path: "/root", computer: "here" } };
+    const put = (builder: Record<string, unknown>) =>
+      useStore.setState({ workspaces: [workspace], statuses: {}, selectedId: "ws_a", selectedThreadId: "th_builder", settleThreads, sessions: { ws_a: [row("th_lead"), row("th_builder", { parentThreadId: "th_lead", ...builder })] } } as never);
+    put({});
+    runShellCommand("thread.settle", { workspaceId: "ws_a", toggleSidebar: () => {} } as never, []);
+    expect(settleThreads).toHaveBeenCalledWith(["th_lead", "th_builder"]);
+    settleThreads.mockClear();
+    put({ status: "running", endedAt: undefined });
+    runShellCommand("thread.settle", { workspaceId: "ws_a", toggleSidebar: () => {} } as never, []);
+    expect(settleThreads).not.toHaveBeenCalled();
   });
 });

@@ -330,6 +330,12 @@ export interface SidebarThreadSnapshot {
   /** What the thread has spent, as the protocol's fold adds its rows up; null where no turn of it reported a
    * figure, which is not the same as nothing spent. */
   readonly costUsd: number | null;
+  /** The latest turn ended and no window has shown the thread since, as the protocol's threadUnread reads it. */
+  readonly unread: boolean;
+  /** When a window last showed the thread and when the person settled it, as the host keeps them; null where it
+   * holds none. */
+  readonly readAt: string | null;
+  readonly settledAt: string | null;
 }
 
 /** A send whose thread the runtime has written no row for yet: what the sidebar draws in place of that row, so the

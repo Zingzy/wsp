@@ -2112,6 +2112,8 @@ async function history(client: HostClient, workspaceId: string): Promise<Session
 async function readThread(client: HostClient, thread: ThreadView, last: boolean): Promise<{ threadId: string; messages: ThreadMessage[] }> {
   const threadId = threadIdOf(thread);
   const events = await history(client, thread.workspaceId);
+  // A read is a showing, as a window's is: the stamp moves, so the thread stops reading Done here and in every window.
+  await client.request("sessions.read", { threadId: thread.id });
   return { threadId, messages: last ? threadReplyRows(events, threadId) : threadMessages(events, threadId) };
 }
 
@@ -4340,7 +4342,7 @@ export const ALL_VERBS: readonly Verb[] = [
     name: "thread read",
     usage: "wsp thread read <thread> [--last]",
     about:
-      "the thread's messages as the app lists them, oldest first: who each one is, when the runtime recorded it and the text, with every tool call folded to the one line the app's row reads; --last prints the final reply alone, the whole message its finished line carries. A tool's output and the agent's reasoning are no rows of it",
+      "the thread's messages as the app lists them, oldest first: who each one is, when the runtime recorded it and the text, with every tool call folded to the one line the app's row reads; --last prints the final reply alone, the whole message its finished line carries. A tool's output and the agent's reasoning are no rows of it. Reading marks the thread read, so it stops reading Done here and in the app",
     page: "agent",
     options: { last: { type: "boolean" } },
     run: async ctx => {
@@ -4354,7 +4356,7 @@ export const ALL_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "The thread's messages as the app lists them, oldest first: each one's who (person for the message that opened or steered a turn, agent for the agent's own words, tool for one call of its folded to a line, turn for the outcome, duration and cost the turn ended with), at, the ms epoch the runtime recorded it, and its text. With last true, the final reply alone, the whole message the thread's finished line carries, and a row under it saying so when the thread has started another turn since, so a report is never read as the one being written. This is how you read a thread you did not open, and how you read the report behind a line that reached you; the transcript is the host's, so nothing on a machine is touched and a paused workspace reads the same as a running one. A thread of many turns answers with all of them, so read one with last true when the report is what you are after. A call's output and the agent's reasoning are no rows of it. A thread whose rows the transcript's cap has dropped answers with none, which is an answer and not an error.",
+        "The thread's messages as the app lists them, oldest first: each one's who (person for the message that opened or steered a turn, agent for the agent's own words, tool for one call of its folded to a line, turn for the outcome, duration and cost the turn ended with), at, the ms epoch the runtime recorded it, and its text. With last true, the final reply alone, the whole message the thread's finished line carries, and a row under it saying so when the thread has started another turn since, so a report is never read as the one being written. This is how you read a thread you did not open, and how you read the report behind a line that reached you; the transcript is the host's, so nothing on a machine is touched and a paused workspace reads the same as a running one. A thread of many turns answers with all of them, so read one with last true when the report is what you are after. A call's output and the agent's reasoning are no rows of it. A thread whose rows the transcript's cap has dropped answers with none, which is an answer and not an error. Reading marks the thread read, as the app showing it does, so a finished thread stops reading Done in threads and in the app.",
       input: {
         thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them"),
         last: z.boolean().optional().describe("true answers with the final reply alone, the whole message the thread's finished line carries, with a row under it where the thread has started another turn since; absent answers with every message"),
