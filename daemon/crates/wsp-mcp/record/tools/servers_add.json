@@ -1,0 +1,76 @@
+{
+  "name": "servers_add",
+  "description": "Writes one MCP server into one agent's own config on one computer or workspace, the project's file with project from a workspace: a command with its arguments and the variables it is given, or an address with its headers. Every value is read by name off the environment the wsp tools run with and never goes into an answer: on this computer it goes into that file, a variable's value into the vault as well, and on any other the file names a variable and the value goes to the vault, which hands it to every turn. An argument or the address may name one of those variables as ${NAME}, an address's variables being only the ones it names: on this computer the value is put in place, on any other the name stays in the agent's own syntax, and an agent that reads no variable there is refused. A name already in the file is refused rather than written over. Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "what to call the server in the agent's config"
+      },
+      "agent": {
+        "type": "string",
+        "description": "the catalog id of the agent whose config takes it"
+      },
+      "workspace": {
+        "type": "string",
+        "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+      },
+      "on": {
+        "type": "string",
+        "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+      },
+      "command": {
+        "type": "string",
+        "description": "the line the server runs, the program and its arguments as a shell would split them, nothing expanded; or url"
+      },
+      "env": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "variables the server is given, or the address names as ${NAME}, each by its name, its value read off the same name in the environment the wsp tools run with; an argument or the address may name one as ${NAME}"
+      },
+      "url": {
+        "type": "string",
+        "description": "the server's https address; or command"
+      },
+      "header": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "headers sent to the address, each <name>=<VARIABLE>, its value read off that variable in the environment the wsp tools run with"
+      },
+      "project": {
+        "type": [
+          "boolean",
+          "string"
+        ],
+        "description": "put it in a project's file rather than the agent's own: true for the workspace's own project, or the project's name, as projects lists it, with on"
+      }
+    },
+    "required": [
+      "name",
+      "agent"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "file": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "file"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

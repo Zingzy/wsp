@@ -1,0 +1,175 @@
+{
+  "name": "skills",
+  "description": "Every skill on one computer or workspace, one row per folder name: its description off its SKILL.md, every folder it lives in with the agent whose own folder that is (none for the shared ~/.agents/skills) and where a folder links to, and whether it is the person's own, a project's inside a workspace, or a plugin's. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace": {
+        "type": "string",
+        "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+      },
+      "on": {
+        "type": "string",
+        "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+      }
+    },
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "target": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "placeId": {
+                "type": "string"
+              },
+              "project": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "placeId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "workspaceId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "workspaceId"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "home": {
+        "type": "string"
+      },
+      "user": {
+        "type": "string"
+      },
+      "readAt": {
+        "type": "string"
+      },
+      "stale": {
+        "type": "string",
+        "const": "napping"
+      },
+      "refused": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "projects": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "reach": {
+        "type": "string",
+        "enum": [
+          "here",
+          "relay",
+          "none"
+        ]
+      },
+      "skills": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "agent": {
+                    "type": "string"
+                  },
+                  "linkTo": {
+                    "type": "string"
+                  },
+                  "off": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "user",
+                "project",
+                "plugin"
+              ]
+            },
+            "project": {
+              "$ref": "#/properties/projects/items"
+            }
+          },
+          "required": [
+            "name",
+            "paths",
+            "scope"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "target",
+      "home",
+      "user",
+      "readAt",
+      "refused",
+      "skills"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

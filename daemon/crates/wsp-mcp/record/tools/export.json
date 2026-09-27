@@ -1,0 +1,119 @@
+{
+  "name": "export",
+  "description": "Brings a project folder and the agent sessions keyed to it home from the workspace's machine to this computer: the folder lands at `folder` (absolute, must not exist unless replace), the sessions in the agents' homes here keyed to it. `from` is the folder's path on the machine, the same path as `folder` when absent. The result says per agent what moved, what landed as transcripts only, and how many indexed rollouts were skipped.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace": {
+        "type": "string",
+        "description": "the workspace's name, or its id when two share a name"
+      },
+      "folder": {
+        "type": "string",
+        "description": "where the folder lands on this computer, absolute"
+      },
+      "from": {
+        "type": "string",
+        "description": "the folder's path on the machine; defaults to folder"
+      },
+      "replace": {
+        "type": "boolean",
+        "description": "remove what is at folder first; without it an existing folder is refused"
+      },
+      "agents": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "catalog ids of the agents whose sessions come home; absent means every agent with sessions for the folder"
+      }
+    },
+    "required": [
+      "workspace",
+      "folder"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "dest": {
+        "type": "string"
+      },
+      "files": {
+        "type": "number"
+      },
+      "bytes": {
+        "type": "number"
+      },
+      "excluded": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "agents": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "type": "string"
+            },
+            "files": {
+              "type": "number"
+            },
+            "bytes": {
+              "type": "number"
+            },
+            "outcome": {
+              "type": "string",
+              "enum": [
+                "moved",
+                "transcript-only",
+                "carried",
+                "nothing",
+                "failed"
+              ]
+            },
+            "sessions": {
+              "type": "number"
+            },
+            "skipped": {
+              "type": "number"
+            },
+            "error": {
+              "type": "string"
+            },
+            "rows": {
+              "type": "number"
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "agent",
+            "files",
+            "bytes",
+            "outcome"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "dest",
+      "files",
+      "bytes",
+      "excluded",
+      "agents"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

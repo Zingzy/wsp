@@ -1,0 +1,251 @@
+{
+  "name": "projects_add",
+  "description": "Records a project: one source on one computer, which every workspace of it is a copy for. A folder on the computer the app runs on is copied beside itself for each workspace, and a repo is cloned by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo without a computer to clone it, and a source already recorded on that computer are each refused in one line. The answer is the project, whose name is what new takes.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "source": {
+        "type": "string",
+        "description": "a folder on the computer the app runs on, or a repo's url"
+      },
+      "on": {
+        "type": "string",
+        "description": "the computer that clones the repo, by the name computers lists; a repo needs one and a folder takes none"
+      },
+      "name": {
+        "type": "string",
+        "description": "what to call the project here; the folder's or the repo's own last word without it"
+      },
+      "base": {
+        "type": "string",
+        "description": "the branch a workspace of the project starts on; the remote's own default branch at the clone without it"
+      }
+    },
+    "required": [
+      "source"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "project": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "computer": {
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "folder"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "path"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "git"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "url"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "github"
+                  },
+                  "repo": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "repo"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "gitlab"
+                  },
+                  "repo": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "repo"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "remote": {
+            "type": "string"
+          },
+          "defaultBranch": {
+            "type": "string"
+          },
+          "memoryKey": {
+            "type": "string"
+          },
+          "memoryDir": {
+            "type": "string"
+          },
+          "checkout": {
+            "type": "string"
+          },
+          "seeded": {
+            "type": "object",
+            "properties": {
+              "files": {
+                "type": "integer"
+              },
+              "bytes": {
+                "type": "integer"
+              },
+              "memory": {
+                "type": "string",
+                "enum": [
+                  "landed",
+                  "kept",
+                  "none"
+                ]
+              },
+              "memoryFiles": {
+                "type": "integer"
+              },
+              "commits": {
+                "type": "integer"
+              },
+              "at": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "files",
+              "bytes",
+              "memory",
+              "commits",
+              "at"
+            ],
+            "additionalProperties": false
+          },
+          "installed": {
+            "type": "object",
+            "properties": {
+              "row": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string"
+              },
+              "seconds": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "row",
+              "command",
+              "at",
+              "seconds"
+            ],
+            "additionalProperties": false
+          },
+          "image": {
+            "type": "object",
+            "properties": {
+              "snapshotId": {
+                "type": "string"
+              },
+              "builtAt": {
+                "type": "string"
+              },
+              "lockfileSha": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "snapshotId",
+              "builtAt"
+            ],
+            "additionalProperties": false
+          },
+          "base": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "lastAgent": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "computer",
+          "source",
+          "path",
+          "remote",
+          "defaultBranch",
+          "memoryKey",
+          "memoryDir",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "notice": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "project"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

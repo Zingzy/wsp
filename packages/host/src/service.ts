@@ -448,7 +448,7 @@ export interface HostProbe {
   (lock: HostLock): Promise<boolean>;
 }
 
-const PROBE_MS = 2_000;
+export const PROBE_MS = 2_000;
 
 export const httpProbe: HostProbe = async lock => {
   const stop = new AbortController();

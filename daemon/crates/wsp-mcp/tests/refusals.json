@@ -1,0 +1,172 @@
+[
+  {
+    "tool": "threads",
+    "arguments": {
+      "workspace": 5
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool threads: Expected string, received number at workspace"
+  },
+  {
+    "tool": "run",
+    "arguments": {},
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool run: Required at task"
+  },
+  {
+    "tool": "run",
+    "arguments": {
+      "workspace": "w",
+      "task": 3,
+      "agent": true
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool run: Expected string, received number at task\nExpected string, received boolean at agent"
+  },
+  {
+    "tool": "run",
+    "arguments": {
+      "workspace": {},
+      "task": []
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool run: Expected string, received object at workspace\nExpected string, received array at task"
+  },
+  {
+    "tool": "exec",
+    "arguments": {
+      "workspace": "w",
+      "argv": []
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool exec: Array must contain at least 1 element(s) at argv"
+  },
+  {
+    "tool": "exec",
+    "arguments": {
+      "workspace": "w",
+      "argv": [
+        1,
+        "a",
+        null
+      ]
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool exec: Expected string, received number at argv[0]\nExpected string, received null at argv[2]"
+  },
+  {
+    "tool": "exec",
+    "arguments": {
+      "workspace": "w",
+      "argv": "ls"
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool exec: Expected array, received string at argv"
+  },
+  {
+    "tool": "stop",
+    "arguments": {
+      "thread": null
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool stop: Expected string, received null at thread"
+  },
+  {
+    "tool": "delete",
+    "arguments": {
+      "workspace": "w",
+      "confirm": "yes"
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool delete: Expected boolean, received string at confirm"
+  },
+  {
+    "tool": "new",
+    "arguments": {
+      "name": "n",
+      "max_machines": -1
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Number must be greater than or equal to 0 at max_machines"
+  },
+  {
+    "tool": "new",
+    "arguments": {
+      "name": "n",
+      "max_machines": 1.5
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Expected integer, received float at max_machines"
+  },
+  {
+    "tool": "new",
+    "arguments": {
+      "name": "n",
+      "max_machines": -0.5
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Expected integer, received float at max_machines\nNumber must be greater than or equal to 0 at max_machines"
+  },
+  {
+    "tool": "new",
+    "arguments": {
+      "name": "n",
+      "max_machines": "2"
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Expected number, received string at max_machines"
+  },
+  {
+    "tool": "new",
+    "arguments": {
+      "name": "n",
+      "spawn": "maybe"
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Invalid enum value. Expected 'on' | 'off', received 'maybe' at spawn"
+  },
+  {
+    "tool": "new",
+    "arguments": {
+      "name": "n",
+      "spawn": 3
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool new: Expected 'on' | 'off', received number at spawn"
+  },
+  {
+    "tool": "skills_search",
+    "arguments": {
+      "query": "q",
+      "limit": 0
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool skills_search: Number must be greater than or equal to 1 at limit"
+  },
+  {
+    "tool": "skills_search",
+    "arguments": {
+      "query": "q",
+      "limit": 1000
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool skills_search: Number must be less than or equal to 50 at limit"
+  },
+  {
+    "tool": "threads_wait",
+    "arguments": {
+      "threads": []
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool threads_wait: Array must contain at least 1 element(s) at threads"
+  },
+  {
+    "tool": "threads_wait",
+    "arguments": {
+      "threads": [
+        "t"
+      ],
+      "timeout": 0
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool threads_wait: Number must be greater than 0 at timeout"
+  },
+  {
+    "tool": "skills_show",
+    "arguments": {
+      "skill": "x",
+      "project": 3
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool skills_show: Invalid input at project"
+  },
+  {
+    "tool": "recipe",
+    "arguments": {
+      "set": [
+        1
+      ]
+    },
+    "text": "MCP error -32602: Input validation error: Invalid arguments for tool recipe: Expected string, received number at set[0]"
+  }
+]

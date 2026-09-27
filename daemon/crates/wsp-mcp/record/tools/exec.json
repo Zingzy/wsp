@@ -1,0 +1,64 @@
+{
+  "name": "exec",
+  "description": "Runs a command on the workspace's machine as argv (each word as given; use sh -c for a shell line), in the folder cwd names or the one a thread would start in (the workspace's last used or only project, else its own folder), and returns its output lines, exit code and the folder it ran in. A non-zero exit is a result; the machine going away is an error.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace": {
+        "type": "string",
+        "description": "the workspace's name, or its id when two share a name"
+      },
+      "argv": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1
+      },
+      "cwd": {
+        "type": "string",
+        "description": "the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise"
+      }
+    },
+    "required": [
+      "workspace",
+      "argv"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "exitCode": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "output": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "cwd": {
+        "type": "string",
+        "description": "the folder the command ran in, as the host resolved it; absent only on a machine whose kind names no folder, where its own home is where the command ran"
+      }
+    },
+    "required": [
+      "exitCode",
+      "output"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

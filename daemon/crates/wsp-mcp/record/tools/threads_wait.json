@@ -1,0 +1,74 @@
+{
+  "name": "threads_wait",
+  "description": "Blocks until one of the named threads leaves running and answers with that thread's end: its id, status (completed, interrupted or failed), how long it worked, what it cost and the last line of its reply, the text being the one line a notify sends. One thread per call: a caller that started three builders calls this three times, dropping each returned id from the list, since a thread already over comes back at once and would come back again. With timeout, the seconds to wait before answering with nothing and timedOut true, so other work fits between calls; keep it under your own tool call limit and call again. This blocks, so it is for a shell script and not for your own conversation. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report. A caller that is not a wsp thread cannot be woken at all, so it takes the reply of one turn as the call returns, and hands work of more than one turn to a single coordinator thread on the local workspace. Never poll threads for a state change.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "threads": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "description": "thread ids, or prefixes that each pick one"
+      },
+      "timeout": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "description": "seconds to wait; absent waits until one of the threads finishes"
+      }
+    },
+    "required": [
+      "threads"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "finished": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "interrupted",
+              "failed"
+            ]
+          },
+          "durationMs": {
+            "type": "number"
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "reply": {
+            "type": "string",
+            "description": "the last non-empty line of the reply, or the error when there is no reply"
+          }
+        },
+        "required": [
+          "threadId",
+          "status"
+        ],
+        "additionalProperties": false,
+        "description": "the thread that left running; absent when the timeout passed first"
+      },
+      "timedOut": {
+        "type": "boolean",
+        "const": true,
+        "description": "set when the timeout passed with every named thread still running"
+      }
+    },
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

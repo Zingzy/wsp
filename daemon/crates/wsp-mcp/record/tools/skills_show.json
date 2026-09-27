@@ -1,0 +1,54 @@
+{
+  "name": "skills_show",
+  "description": "A skill's SKILL.md as text, its first 64 KB and the whole file's size: a skill on skills.sh by its <owner>/<repo>/<skill>, read by the host with nothing installed, or a skill already on one computer or workspace by its name. Nothing in it runs.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "skill": {
+        "type": "string",
+        "description": "an <owner>/<repo>/<skill> off skills_search, or the name of a skill skills lists"
+      },
+      "workspace": {
+        "type": "string",
+        "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+      },
+      "on": {
+        "type": "string",
+        "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+      },
+      "project": {
+        "type": [
+          "boolean",
+          "string"
+        ],
+        "description": "the project's skill of that name rather than the one that is not a project's: true from a workspace, or the project's name, as projects lists it, with on"
+      }
+    },
+    "required": [
+      "skill"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string"
+      },
+      "size": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "required": [
+      "text",
+      "size"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

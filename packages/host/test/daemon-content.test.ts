@@ -37,6 +37,9 @@ const isFixture = (name: string): boolean => name.endsWith(".json");
  * guest and a change there must not cut a version. An inline #[cfg(test)] module stays hashed: the file holding it
  * ships, and reading past it would cost a Rust parser here. */
 const underTests = (rel: string): boolean => /(^|\/)tests\//.test(rel);
+/** The tool server for an agent on the host's own computer: a feature the guest build leaves off, so no deploy
+ * carries a line of it and a change to it must not cut a version. */
+const hostOnly = (rel: string): boolean => rel.startsWith("wsp-mcp/");
 
 /** A file's text as the sha reads it. Two files carry the version itself, in Rust and in the fixture the Rust is
  * held to, and a sha over the version would move the moment it was recorded: the line and the key that hold it
@@ -52,14 +55,14 @@ function hashed(rel: string, text: string): string {
 }
 
 /** What a deploy leaves on a guest and this can hash: the Rust sources the binary is built from, each crate's
- * manifest and none of its tests/ folder, the lock that pins every dependency, the C library the Linux builds link
- * and the release it is pinned to, the contract fixtures the binary's words, numbers and frames are held to,
- * DAEMON_ROOTS_PATH and the work-score line the daemon reads through that contract, and the scripts the host
- * writes beside the binary, whose content outlives the deploy that wrote it. */
+ * manifest and none of its tests/ folder nor of the crate only the host's own build links, the lock that pins every
+ * dependency, the C library the Linux builds link and the release it is pinned to, the contract fixtures the
+ * binary's words, numbers and frames are held to, DAEMON_ROOTS_PATH and the work-score line the daemon reads through
+ * that contract, and the scripts the host writes beside the binary, whose content outlives the deploy that wrote it. */
 function daemonContentSha(daemonTree: string, scripts: string[]): string {
   const h = createHash("sha256");
   const crates = join(daemonTree, "crates");
-  for (const rel of relPaths(crates, isSource).filter(rel => !underTests(rel))) h.update(`crates/${rel}\n${hashed(`crates/${rel}`, readFileSync(join(crates, rel), "utf8"))}\n`);
+  for (const rel of relPaths(crates, isSource).filter(rel => !underTests(rel) && !hostOnly(rel))) h.update(`crates/${rel}\n${hashed(`crates/${rel}`, readFileSync(join(crates, rel), "utf8"))}\n`);
   for (const file of ["Cargo.toml", "Cargo.lock", "scripts/libseccomp-archive.sh"]) h.update(`${file}\n${readFileSync(join(daemonTree, file), "utf8")}\n`);
   const contract = join(daemonTree, "fixtures", "contract");
   for (const rel of relPaths(contract, isFixture)) h.update(`fixtures/contract/${rel}\n${hashed(`fixtures/contract/${rel}`, readFileSync(join(contract, rel), "utf8"))}\n`);
@@ -141,6 +144,21 @@ describe("what the recorded sha covers", () => {
     // A file that ships carries its own cases, and the sha reads the file whole rather than parsing Rust.
     const src = join(tree, "crates", "wsp-frames", "src", "lib.rs");
     writeFileSync(src, `${readFileSync(src, "utf8")}\n#[cfg(test)]\nmod added {}\n`);
+    expect(daemonContentSha(tree, deployedScripts())).not.toBe(base);
+  });
+
+  it("stays where it is when the crate only the host's own build links moves, and moves for the manifest that names it", () => {
+    const tree = copyOfDaemonTree();
+    const base = daemonContentSha(tree, deployedScripts());
+    const lib = join(tree, "crates", "wsp-mcp", "src", "lib.rs");
+    writeFileSync(lib, `${readFileSync(lib, "utf8")}\npub fn added() {}\n`);
+    writeFileSync(join(tree, "crates", "wsp-mcp", "src", "added.rs"), "pub fn added() {}\n");
+    const own = join(tree, "crates", "wsp-mcp", "Cargo.toml");
+    writeFileSync(own, `${readFileSync(own, "utf8")}\n[features]\nadded = []\n`);
+    expect(daemonContentSha(tree, deployedScripts())).toBe(base);
+    // The binary's own manifest is what turns the feature on, and it ships.
+    const bin = join(tree, "crates", "wsp-daemon-bin", "Cargo.toml");
+    writeFileSync(bin, readFileSync(bin, "utf8").replace('mcp = ["dep:wsp-mcp"]', 'mcp = ["dep:wsp-mcp"]\nadded = []'));
     expect(daemonContentSha(tree, deployedScripts())).not.toBe(base);
   });
 

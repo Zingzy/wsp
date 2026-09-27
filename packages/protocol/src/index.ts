@@ -4206,7 +4206,8 @@ export const DAEMON_VERSION = DAEMON_CONTENTS.length;
  * cannot reach nobody: a start script gained a PATH line under an unchanged version once and every machine already
  * running kept the old one. Left out: every file under a crate's tests/ folder, which is built for a test run
  * and no deploy installs, so test-only work cuts no version for a binary nobody's machine would read as new; an
- * inline #[cfg(test)] module stays hashed, since the file carrying it ships. Left out too: the rest of this file,
+ * inline #[cfg(test)] module stays hashed, since the file carrying it ships. Left out too: crates/wsp-mcp, the tool
+ * server a feature links into the host's own build and the guest build never does; the rest of this file,
  * which the binary reads only through the fixtures; hashing the protocol whole would turn every edit to it into a
  * redeploy of every machine. */
 export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;

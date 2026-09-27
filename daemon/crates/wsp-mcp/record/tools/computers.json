@@ -1,0 +1,425 @@
+{
+  "name": "computers",
+  "description": "Every computer this host holds, which is the whole of where work can run: the computer the app runs on, each box joined to it and each cloud account. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now; a cloud row carries its hourly rate. Every row carries its cap, threads at once on a computer and machines at once and spend per day on a cloud (the number the person set, else one thread per 2.5 GB of memory up to its cores, and 3 machines and $10 a day), and running, the threads running there now on a computer or the machines holding a slot on a cloud; a row whose running meets its cap is full. spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "computers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "computer",
+                "provider"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "default": {
+              "type": "boolean"
+            },
+            "os": {
+              "type": "string"
+            },
+            "shape": {
+              "type": "object",
+              "properties": {
+                "cpu": {
+                  "type": "number"
+                },
+                "memMb": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "cpu",
+                "memMb"
+              ],
+              "additionalProperties": false
+            },
+            "diskFreeBytes": {
+              "type": "integer"
+            },
+            "engine": {
+              "type": "string",
+              "enum": [
+                "none",
+                "docker",
+                "podman"
+              ]
+            },
+            "copies": {
+              "type": "string",
+              "enum": [
+                "reflink",
+                "snapshot",
+                "plain"
+              ]
+            },
+            "present": {
+              "type": "boolean"
+            },
+            "joinedAt": {
+              "type": "string"
+            },
+            "lastSeenAt": {
+              "type": "string"
+            },
+            "daemonVersion": {
+              "type": "integer"
+            },
+            "agents": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "agentVersions": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "signIns": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "signed-in",
+                  "vault-key",
+                  "none"
+                ]
+              }
+            },
+            "logins": {
+              "type": "string"
+            },
+            "rateUsdPerHour": {
+              "type": "number"
+            },
+            "sizes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "cpu": {
+                    "$ref": "#/properties/computers/items/properties/shape/properties/cpu"
+                  },
+                  "memMb": {
+                    "$ref": "#/properties/computers/items/properties/shape/properties/memMb"
+                  },
+                  "rateUsdPerHour": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "cpu",
+                  "memMb",
+                  "rateUsdPerHour"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "forks": {
+              "type": "object",
+              "properties": {
+                "running": {
+                  "type": "integer"
+                },
+                "room": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "running",
+                "room"
+              ],
+              "additionalProperties": false
+            },
+            "takesForks": {
+              "type": "boolean"
+            },
+            "road": {
+              "type": "object",
+              "properties": {
+                "ssh": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "from": {
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "back": {
+                  "type": "object",
+                  "properties": {
+                    "boxPort": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  },
+                  "required": [
+                    "boxPort"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "home": {
+              "type": "string"
+            },
+            "uptimeMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reportedAt": {
+              "type": "string"
+            },
+            "dialled": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "string"
+                },
+                "answered": {
+                  "type": "boolean"
+                },
+                "roundTripMs": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "said": {
+                  "type": "string",
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "at",
+                "answered"
+              ],
+              "additionalProperties": false
+            },
+            "blocked": {
+              "type": "string"
+            },
+            "build": {
+              "type": "string"
+            },
+            "buildStopped": {
+              "type": "boolean"
+            },
+            "buildsImages": {
+              "type": "boolean"
+            },
+            "provision": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "running",
+                    "done",
+                    "stopped"
+                  ]
+                },
+                "addId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "recipeAt": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "startedAt": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "finishedAt": {
+                  "type": "string"
+                },
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "outcome": {
+                        "type": "string",
+                        "enum": [
+                          "installed",
+                          "present",
+                          "failed",
+                          "skipped"
+                        ]
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "tool",
+                          "file",
+                          "server"
+                        ]
+                      },
+                      "note": {
+                        "type": "string"
+                      },
+                      "ms": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label",
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "at": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "index": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    },
+                    "of": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "index",
+                    "of"
+                  ],
+                  "additionalProperties": false
+                },
+                "said": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "addId",
+                "recipeAt",
+                "startedAt",
+                "rows"
+              ],
+              "additionalProperties": false
+            },
+            "cap": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "threads": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "threads"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "machines": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "spendPerDayUsd": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "machines",
+                    "spendPerDayUsd"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            "running": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "name",
+            "default"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "spend": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "place": {
+              "type": "string"
+            },
+            "todayUsd": {
+              "type": "number"
+            },
+            "monthUsd": {
+              "type": "number"
+            },
+            "rateUsdPerHour": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "place",
+            "todayUsd",
+            "monthUsd",
+            "rateUsdPerHour"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "computers",
+      "spend"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

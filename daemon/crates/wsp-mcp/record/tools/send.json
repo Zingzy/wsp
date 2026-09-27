@@ -1,0 +1,81 @@
+{
+  "name": "send",
+  "description": "Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever the thread's start named. A model or effort named here is the turn's; the thread runs on the agent and at the access its own turns ran at, which a message does not change; a turn that joins a running one keeps that one's. On a thread whose turn is not running the message starts a new turn (outcome `started`); when the turn is still running the message joins it (outcome `steered`) or waits for it and then runs (outcome `queued`), and the reply is that turn's. When the thread's turn has replied but its agent process is still running, the message waits for that process and runs as the thread's next turn (outcome `queued`), which the runtime says as `This thread replied, still working; the message runs as its next turn once that process exits`. A send is never refused for meeting a turn, and two sends keep the order they arrived in.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "thread": {
+        "type": "string"
+      },
+      "message": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string",
+        "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"
+      },
+      "effort": {
+        "type": "string",
+        "description": "the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"
+      },
+      "images": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: PNG, JPEG, GIF or WebP, at most 5 and 10 MB each. The host reads each file and sends its bytes, so the machine never reaches back for this computer’s files; a message to an agent that reads no image is refused naming that agent."
+      },
+      "detach": {
+        "type": "boolean",
+        "description": "true answers with the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever notify named; for a turn that runs for minutes or an hour, so this call does not block for it. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report."
+      }
+    },
+    "required": [
+      "thread",
+      "message"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "threadId": {
+        "type": "string"
+      },
+      "workspaceId": {
+        "type": "string"
+      },
+      "harness": {
+        "type": "string"
+      },
+      "text": {
+        "type": "string",
+        "description": "the reply, complete; absent under detach, where the turn is still running and its end reaches whoever the start's notify named"
+      },
+      "outcome": {
+        "type": "string",
+        "enum": [
+          "started",
+          "steered",
+          "queued"
+        ]
+      },
+      "afterCut": {
+        "type": "boolean",
+        "const": true
+      }
+    },
+    "required": [
+      "threadId",
+      "workspaceId",
+      "harness",
+      "outcome"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

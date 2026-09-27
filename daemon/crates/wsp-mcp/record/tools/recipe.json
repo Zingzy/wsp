@@ -1,0 +1,279 @@
+{
+  "name": "recipe",
+  "description": "The recipe for a machine, read off this computer and written to a file: every catalog agent and tool with its tick, why it has that tick, and what it adds to the machine, plus the commands the person's agents ran that no catalog row carries. tick names the rule: used ticks what their agents actually ran here, installed ticks what is on this computer, default ticks what the catalog ships on; an agent wsp cannot open a thread on is off unless installed. The file is the state, so a second call is not a fresh start: naming tick or project lets the rule decide every tick again and throws away the flips a call before it made, and a call that names neither keeps what the file says and puts its own flips on top. Sign-in answers stand through every call whatever the rule, since nothing but the person decides one. Put the heavy rows to the person with their sizes before anything is built, then flip rows with set and run `wsp init --recipe <out> --non-interactive --json` from a shell, handing the person each sign-in line it prints, since the sign-ins finish in their browser. Only names and counts are read; nothing a session held is returned.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "tick": {
+        "type": "string",
+        "enum": [
+          "used",
+          "installed",
+          "default"
+        ],
+        "description": "which rule decides every tick: used, installed, default. Naming it re-decides every row from the rule, so any flip an earlier call made goes; absent, the file's own rule and its ticks stand, and used decides a first call and any row the file does not carry"
+      },
+      "set": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "rows to flip, \"<id>=on\" or \"<id>=off\", applied over whatever decided the row: a catalog id, or the id recipe_scan gives a package one of this computer's own package managers has (alsoHere), which ticks that package as a row of its own and installs it by its own road. On a call that names tick or project they sit over the rule's fresh answer; on any other call they sit over the ticks already in the file"
+      },
+      "signin": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "what happens to a row's sign-in, \"<id>=copy|machine|later|key|skip|token\"; key brings the key files beside its login and the login still runs on the machine. An answer already in the file stands until a later call names that row again, whatever tick or project do to the ticks"
+      },
+      "add": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "tools neither the catalog carries nor this computer has, \"<id>=<install command>\"; the line runs on the machine as given after every catalog install, and such a row is never offered a sign-in. A package recipe_scan already lists under alsoHere is refused here and ticked with set instead, since it is a row of its own. Rows an earlier call added stand, whatever tick or project do to the ticks"
+      },
+      "add_check": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "what proves an added tool landed, \"<id>=<command that exits 0>\"; without one the id on PATH is the check"
+      },
+      "why": {
+        "type": "string",
+        "description": "what the rows this call adds are for, in your own words; absent, they say an agent added them"
+      },
+      "engine": {
+        "type": "boolean",
+        "description": "mark the recipe so every workspace from its image gets the place's container engine (Docker or podman) through a socket of its own, for a project whose compose file needs one; it stays in the file until edited out"
+      },
+      "project": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count. Naming one re-decides every tick from the rule, as tick does, so any flip an earlier call made goes"
+      },
+      "out": {
+        "type": "string",
+        "description": "where the recipe file goes, absolute; absent means the host's own recipe.json beside its state"
+      }
+    },
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "tick": {
+        "type": "string",
+        "enum": [
+          "used",
+          "installed",
+          "default"
+        ]
+      },
+      "at": {
+        "type": "string"
+      },
+      "out": {
+        "type": "string"
+      },
+      "agents": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "tool",
+                "custom"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "on": {
+              "type": "boolean"
+            },
+            "base": {
+              "type": "boolean"
+            },
+            "group": {
+              "type": "string",
+              "enum": [
+                "Always on the image",
+                "Your project needs",
+                "You use these",
+                "Installed here, never used",
+                "Added by your agent",
+                "Also in the catalog"
+              ]
+            },
+            "why": {
+              "type": "string"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "heavy": {
+              "type": "boolean"
+            },
+            "note": {
+              "type": "string"
+            },
+            "pin": {
+              "type": "object",
+              "properties": {
+                "tag": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "latest": {
+                  "type": "boolean",
+                  "const": true
+                }
+              },
+              "required": [
+                "tag"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "name",
+            "on",
+            "base",
+            "group",
+            "why",
+            "heavy"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "tools": {
+        "type": "array",
+        "items": {
+          "$ref": "#/properties/agents/items"
+        }
+      },
+      "totalBytes": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "heavy": {
+        "type": "array",
+        "items": {
+          "$ref": "#/properties/agents/items"
+        }
+      },
+      "commands": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "calls": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "sessions": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "name",
+            "calls",
+            "sessions"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "custom": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "custom"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "install": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "check": {
+              "type": "string",
+              "minLength": 1
+            },
+            "manager": {
+              "type": "string",
+              "minLength": 1
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "why": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "name",
+            "install",
+            "check",
+            "why"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "at",
+      "out",
+      "agents",
+      "tools",
+      "totalBytes",
+      "heavy",
+      "commands",
+      "custom"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

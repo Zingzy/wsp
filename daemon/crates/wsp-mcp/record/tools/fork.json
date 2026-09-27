@@ -1,0 +1,428 @@
+{
+  "name": "fork",
+  "description": "A sibling workspace from the source's image version (a new machine, not a copy of its live disk); with a task, its first thread is opened and the reply returned. When that first turn fails, the error still names the workspace, which exists: continue with run on it rather than forking again.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace": {
+        "type": "string",
+        "description": "the workspace's name, or its id when two share a name"
+      },
+      "name": {
+        "type": "string",
+        "description": "defaults to <source>-fork"
+      },
+      "size": {
+        "type": "string",
+        "description": "the machine size as <cpu>x<memGb>, like 2x4; absent takes the image's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered"
+      },
+      "task": {
+        "type": "string"
+      },
+      "agent": {
+        "type": "string",
+        "description": "the agent to run in the thread, one of claude, codex; absent means the host's default"
+      },
+      "model": {
+        "type": "string",
+        "description": "the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"
+      },
+      "effort": {
+        "type": "string",
+        "description": "the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"
+      },
+      "access": {
+        "type": "string",
+        "description": "the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"
+      },
+      "cwd": {
+        "type": "string",
+        "description": "the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise"
+      },
+      "notify": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "description": "who is told each time a turn of the new thread ends, each one a thread (by id, or a prefix of it) the line goes into as a message carrying that turn's whole reply, or me, which is the thread this call came out of when it came out of one and otherwise the person's app, where the line is its last reply line alone. Several targets each get the line once, which is how a builder's end reaches its orchestrator and a reviewer together; a target whose thread is gone by then falls back to the person, and the new thread's own id is refused. A wsp thread starts every child with --notify me and ends its turn, and each child's finished line wakes it with that child's whole report."
+      },
+      "spawn": {
+        "type": "string",
+        "enum": [
+          "on",
+          "off"
+        ],
+        "description": "whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is off, which is what every workspace made without it reads as"
+      },
+      "max_machines": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "how many machines may stand at once under one root thread when spawn is on; needs spawn on beside it, and defaults to 3"
+      },
+      "max_depth": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "how many levels deep the tree under a root thread may go when spawn is on; 1 is the root's own children and no further, which is the default, and it needs spawn on beside it"
+      }
+    },
+    "required": [
+      "workspace"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "workspace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "machineId": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "running",
+              "pausing",
+              "napping",
+              "waking",
+              "gone"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "cloud",
+              "local",
+              "ssh"
+            ]
+          },
+          "golden": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "project": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "computer": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "path",
+              "computer"
+            ],
+            "additionalProperties": false
+          },
+          "folder": {
+            "type": "string"
+          },
+          "home": {
+            "type": "string"
+          },
+          "claudeSessionId": {
+            "type": "string"
+          },
+          "gone": {
+            "type": "string"
+          },
+          "theme": {
+            "type": "object",
+            "properties": {
+              "dots": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "angle": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 360
+                    },
+                    "radius": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "required": [
+                    "angle",
+                    "radius"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 3
+              },
+              "harmony": {
+                "type": "string",
+                "enum": [
+                  "single",
+                  "complementary",
+                  "analogous",
+                  "splitComplementary",
+                  "triadic",
+                  "analogousThree"
+                ]
+              },
+              "grain": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "opacity": {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 1
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "light",
+                  "dark"
+                ]
+              }
+            },
+            "required": [
+              "dots",
+              "harmony",
+              "grain",
+              "opacity",
+              "mode"
+            ],
+            "additionalProperties": false
+          },
+          "glyph": {
+            "type": "string",
+            "enum": [
+              "terminal",
+              "code",
+              "bug",
+              "wrench",
+              "hammer",
+              "rocket",
+              "flask",
+              "database",
+              "cloud",
+              "globe",
+              "compass",
+              "map",
+              "book",
+              "feather",
+              "palette",
+              "leaf",
+              "star",
+              "bolt",
+              "key",
+              "shield",
+              "box",
+              "folder",
+              "chip",
+              "lamp"
+            ]
+          },
+          "daemonNote": {
+            "type": "string"
+          },
+          "daemonRefusedAt": {
+            "type": "object",
+            "properties": {
+              "machineId": {
+                "type": "string"
+              },
+              "at": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "machineId",
+              "at",
+              "why"
+            ],
+            "additionalProperties": false
+          },
+          "vaultedAt": {
+            "type": "string"
+          },
+          "vaultRefused": {
+            "type": "string"
+          },
+          "wakeRefused": {
+            "type": "string"
+          },
+          "agents": {
+            "type": "object",
+            "properties": {
+              "spawn": {
+                "type": "boolean"
+              },
+              "maxMachines": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "maxDepth": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "spawn",
+              "maxMachines",
+              "maxDepth"
+            ],
+            "additionalProperties": false
+          },
+          "parentThreadId": {
+            "type": "string"
+          },
+          "rootThreadId": {
+            "type": "string"
+          },
+          "parentWorkspaceId": {
+            "type": "string"
+          },
+          "place": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "copy": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "base": {
+                "type": "string"
+              },
+              "branch": {
+                "type": "string"
+              },
+              "carried": {
+                "type": "string",
+                "enum": [
+                  "deps-and-config",
+                  "config-only",
+                  "nothing"
+                ]
+              },
+              "fellBack": {
+                "type": "string"
+              },
+              "road": {
+                "type": "string",
+                "enum": [
+                  "clonefile",
+                  "worktree"
+                ]
+              },
+              "source": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "base",
+              "branch",
+              "carried",
+              "road",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "portBase": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "machineId",
+          "phase",
+          "golden",
+          "createdAt",
+          "project"
+        ],
+        "additionalProperties": false
+      },
+      "notice": {
+        "type": "string"
+      },
+      "turn": {
+        "type": "object",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "description": "the reply, complete; absent under detach, where the turn is still running and its end reaches whoever the start's notify named"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "started",
+              "steered",
+              "queued"
+            ]
+          },
+          "afterCut": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "threadId",
+          "workspaceId",
+          "harness",
+          "outcome"
+        ],
+        "additionalProperties": false
+      },
+      "failure": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "workspace"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

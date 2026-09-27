@@ -1,0 +1,52 @@
+{
+  "name": "skills_remove",
+  "description": "Removes one skill on one computer or workspace by its name, as the login it was added with: every folder skills lists for it and every link to it; a folder a link points to outside the skills folders stays. The skill wsp writes and a plugin's are always on and are refused; a napping workspace is not woken. The report there reads again at once.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "the skill's name, as skills lists it"
+      },
+      "workspace": {
+        "type": "string",
+        "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+      },
+      "on": {
+        "type": "string",
+        "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+      },
+      "project": {
+        "type": [
+          "boolean",
+          "string"
+        ],
+        "description": "the project's skill of that name rather than the one that is not a project's: true from a workspace, or the project's name, as projects lists it, with on"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "removed": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "removed"
+    ],
+    "additionalProperties": false,
+    "$schema": "http://json-schema.org/draft-07/schema#"
+  },
+  "execution": {
+    "taskSupport": "forbidden"
+  }
+}

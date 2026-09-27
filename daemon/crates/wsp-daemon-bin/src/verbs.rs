@@ -42,6 +42,22 @@ pub(crate) enum Verb {
         #[arg(last = true)]
         line: Vec<String>,
     },
+    /// The wsp tools for an agent on this computer: an MCP server on stdio, dialling the host the state file names as
+    /// the command line does. The state is named on purpose, since which file a bare wsp works on is the command
+    /// line's rule; the words after --wsp-argv are the wsp that brings a host up when none serves it.
+    #[cfg(feature = "mcp")]
+    Mcp {
+        #[arg(long, value_name = "file")]
+        state: PathBuf,
+        #[arg(long, value_name = "alias")]
+        host: Option<String>,
+        #[arg(long)]
+        scoped: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long = "wsp-argv", value_name = "word", action = clap::ArgAction::Append, allow_hyphen_values = true)]
+        wsp_argv: Vec<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -199,6 +215,8 @@ pub(crate) fn run(verb: Verb) -> i32 {
             )
         }
         Verb::Forward { wsp_argv, line } => wsp_guest::run_here(&line, &wsp_argv),
+        #[cfg(feature = "mcp")]
+        Verb::Mcp { state, host, scoped, json, wsp_argv } => wsp_mcp::run(&wsp_mcp::Args { state, host, scoped, json, wsp: wsp_argv }),
     }
 }
 
