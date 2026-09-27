@@ -63,7 +63,7 @@ export const BOX_BASE_TEMPLATE = "base";
 // Frozen: one shared object for every backend, so nothing shrinks a budget for everyone by accident.
 export const BOX_BUDGETS: LifecycleBudgets = Object.freeze({
   // A second attempt would be a stop that snapshots the disk for minutes and a resume that counts as a billed start
-  // against 5 a minute and 75 a day on the trial; a wake that fails its check goes straight to the rebuild.
+  // against 5 a minute and 75 a day on the trial; a wake that fails its check fails on the machine it has.
   wakeAttempts: 1,
   // The daemon's unit came back 14 to 85 s after the box read ready on every fork, template create and resume
   // measured (2026-09-11): the restored disk streams in behind the box and systemd starts the unit once its files

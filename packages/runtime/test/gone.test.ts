@@ -207,7 +207,7 @@ describe("a 404 settles the record gone through one road", () => {
       const record = await rt.workspaces.get(ws.id);
       expect(record.phase).toBe("gone");
       expect(record.gone).toMatch(/^machine m1 is gone at the provider: the pause found it gone at .* \(404 Sandbox not found\)$/);
-      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal("wake", record.gone));
+      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal(ws.name, "wake", record.gone));
     } finally {
       warn.mockRestore();
     }
@@ -220,7 +220,7 @@ describe("a 404 settles the record gone through one road", () => {
       const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       m.killed = true;
-      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("Workspace machine is gone; rebuild it to wake");
+      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("a's machine is gone with its disk, so work that was not pushed is lost; rebuild it to wake, which brings back its home folder from the last saved nap");
       const record = await rt.workspaces.get(ws.id);
       expect(record.phase).toBe("gone");
       expect(record.gone).toMatch(/^machine m1 is gone at the provider: the wake found it gone at \S+Z$/);
@@ -928,7 +928,7 @@ describe("a record marked gone recovers on a state read that says running", () =
     const ws = await createOn(t.rt, { golden: "snap_g", name: "a" });
     const m = t.backend.machines[0]!;
     m.killed = true;
-    await expect(t.rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal("wake", (await t.rt.workspaces.get(ws.id)).gone));
+    await expect(t.rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal(ws.name, "wake", (await t.rt.workspaces.get(ws.id)).gone));
     expect((await t.rt.workspaces.get(ws.id)).phase).toBe("gone");
     m.killed = false;
     return { ws, m };
@@ -1062,7 +1062,7 @@ describe("the awake meter across a verdict that did not hold", () => {
       expect(t.costs.at(-1)).toMatchObject({ phase: "running", awakeMs: 0 });
 
       m.killed = true;
-      await expect(t.rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal("wake", (await t.rt.workspaces.get(ws.id)).gone));
+      await expect(t.rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal(ws.name, "wake", (await t.rt.workspaces.get(ws.id)).gone));
       await until(() => t.costs.some(c => c.phase === "gone"));
       expect(t.costs.at(-1)).toMatchObject({ phase: "gone", rateUsdPerHour: 0, awakeMs: 0 });
 
@@ -1089,7 +1089,7 @@ describe("the awake meter across a verdict that did not hold", () => {
       const ws = await createOn(t.rt, { golden: "snap_g", name: "a" });
       const m = t.backend.machines[0]!;
       m.killed = true;
-      await expect(t.rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal("wake", (await t.rt.workspaces.get(ws.id)).gone));
+      await expect(t.rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal(ws.name, "wake", (await t.rt.workspaces.get(ws.id)).gone));
       await until(() => t.costs.some(c => c.phase === "gone"));
       t.fc.advance(GAP);
       expect(await t.rt.workspaces.rebuild(ws.id)).toMatchObject({ phase: "running", machineId: "m2" });

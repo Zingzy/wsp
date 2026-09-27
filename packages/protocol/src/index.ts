@@ -724,7 +724,7 @@ export const WorkspaceStatus = WorkspaceView.extend({
   /** Awake burn rate for this size; 0 never appears here (napping costs ride the cost event). */
   rateUsdPerHour: z.number(),
   facts: MachineFacts.optional(),
-  /** Why the runtime pushed this status outside the poll: a wake that had to retry or replace the machine, or "idle 20 min". */
+  /** Why the runtime pushed this status outside the poll: a wake that had to retry or failed, or "idle 20 min". */
   reason: z.string().optional(),
   /** Which ask a wake the provider has not taken is on, of the ones the host will make; absent unless the host is
    * asking again on its own. The numbers ride, never a sentence: the row and the Machine tab read the same
@@ -1614,8 +1614,6 @@ export const WorkspaceWokenEvent = z.object({
   type: z.literal("workspace.woken"),
   workspaceId: z.string(),
   machineId: z.string(),
-  /** True when the paused machine had vanished and a fresh golden fork replaced it. */
-  resurrected: z.boolean(),
 });
 /** The machine was replaced by a fresh golden fork carrying the vault: an
  * upgrade under a new size, or a rebuild of a zombie. Clients re-dial reach. */
@@ -3584,7 +3582,7 @@ export const SnapshotStoragePricing = z.object({ freeGb: z.number(), usdPerGbMon
 export type SnapshotStoragePricing = z.infer<typeof SnapshotStoragePricing>;
 
 export const LifecycleBudgets = z.object({
-  /** How many times a wake may resume the machine and check it before a fresh fork replaces it. Each attempt after
+  /** How many times a wake may resume the machine and check it before the wake fails. Each attempt after
    * the first is a pause and a resume; a provider that bills starts declares 1. */
   wakeAttempts: z.number().int().min(1),
   /** How long the guest's daemon gets to answer once the machine reads running, after a fork and after a resume

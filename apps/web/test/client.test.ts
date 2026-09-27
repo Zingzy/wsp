@@ -522,7 +522,7 @@ describe("ProtocolClient event cursor", () => {
     await replied();
 
     push(socket(0), { type: "workspace.napped", workspaceId: "ws_1", seq: 3 });
-    push(socket(0), { type: "workspace.woken", workspaceId: "ws_1", machineId: "m2", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, resurrected: false, seq: 4 });
+    push(socket(0), { type: "workspace.woken", workspaceId: "ws_1", machineId: "m2", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, seq: 4 });
     expect(seen).toHaveLength(2);
 
     await redial(client, socket(0));

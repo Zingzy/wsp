@@ -17,7 +17,7 @@ Review wsp changes against the laws this project has already paid for. Generic c
 
 ## Platform laws (from measured PoC/canary findings; RESULTS.md and the solari skill are the evidence)
 
-- Snapshot only first-life machines; wake-via-resurrect resets first-life; never snapshot after a cross-host restore (502s). The lifecycle types enforce this: code working around them is a blocker.
+- Snapshot only first-life machines; a wake never replaces a machine, only a rebuild and an image move do (each resets first-life); never snapshot after a cross-host restore (502s). The lifecycle types enforce this: code working around them is a blocker.
 - Guests: `bash -c` never `-lc` (login shells reset PATH); no pgrep (use /proc/[0-9]*/comm); stdin on `claude -p` is closed, or a stream-json channel the runtime writes and closes on purpose, never a silent open pipe; strip CLAUDE_CODE_*/CLAUDECODE env; CLAUDE_CONFIG_DIR never HOME.
 - Daemon reach: previewUrl + 10s app-level heartbeats + reconnect-with-resubscribe + inbox.rescan after reconnect. Anything assuming a quiet WS survives their ~30s idle sweep is a bug.
 - previewUrl survives naps (we depend on it; canary guards it); tokens expire at 60min (refresh at ~50).

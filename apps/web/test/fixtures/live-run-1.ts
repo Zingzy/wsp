@@ -108,7 +108,7 @@ export const LIVE_RUN_1_RESTART: ReadonlyArray<StampedEvent> = [
     },
   },
   // machine-1 again: the woken event's id matched the first run's, so no resurrection
-  { at: at(2894.1 + 512.7), event: { type: "workspace.woken", workspaceId: LIVE_WS, machineId: "machine-1", resurrected: false } },
+  { at: at(2894.1 + 512.7), event: { type: "workspace.woken", workspaceId: LIVE_WS, machineId: "machine-1" } },
 ];
 
 export function sessionEventsOf(stream: ReadonlyArray<StampedEvent>) {

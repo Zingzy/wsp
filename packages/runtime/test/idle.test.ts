@@ -537,13 +537,11 @@ describe("provider backstop on the fork spec", () => {
     expect(backend.machines[0]!.spec).toMatchObject({ onIdle: "pause", idleTimeoutMs: 40 * 60_000 });
   });
 
-  it("follows the per-workspace window, and a resurrected fork carries it too", async () => {
+  it("follows the per-workspace window, and a rebuilt fork carries it too", async () => {
     const { rt, backend } = testRuntime({ idle: { defaultWindowMs: 20 * 60_000 } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a", idleWindowMs: 5 * 60_000 });
     expect(backend.machines[0]!.spec).toMatchObject({ onIdle: "pause", idleTimeoutMs: 10 * 60_000 });
-    await rt.workspaces.nap(ws.id);
-    backend.machines[0]!.killed = true;
-    await rt.workspaces.wake(ws.id);
+    await rt.workspaces.rebuild(ws.id);
     expect(backend.machines[1]!.spec).toMatchObject({ onIdle: "pause", idleTimeoutMs: 10 * 60_000 });
   });
 

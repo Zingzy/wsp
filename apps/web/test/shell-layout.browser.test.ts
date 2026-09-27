@@ -939,7 +939,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       // The refusal rides the tooltip skin: hovering a dimmed row shows it.
       await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").first().hover();
       await page!.waitForSelector("[data-slot=tooltip-popup]");
-      expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe("Workspace machine is gone; rebuild it to wake");
+      expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to wake, which brings back its home folder from the last saved nap");
       const tipPath = join(SHOTS_DIR, `sidebar-context-menu-refusal-${theme}.png`);
       await page!.screenshot({ path: tipPath, clip: { x: 0, y: 0, width: 640, height: 520 } });
       console.info(`sidebar context menu refusal screenshot: ${tipPath}`);
