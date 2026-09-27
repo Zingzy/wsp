@@ -48,7 +48,7 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
     description: "Open your dev server or a URL.",
     icon: Globe2,
     shortcut: "B",
-    hint: "Available while the task is running.",
+    hint: "Available while this runs.",
     available: at => at.here || running(at),
     title: (surface, names) => {
       const snapshot = surface.resourceId ? names.previewSessions[surface.resourceId] : null;
@@ -66,7 +66,7 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
     description: "Start a shell here.",
     icon: TerminalSquare,
     shortcut: "T",
-    hint: "Available while the task is running.",
+    hint: "Available while this runs.",
     available: at => at.here || (running(at) && at.absent === null),
     // A panel terminal cannot open at all without a pty, so its card keeps the computer's own sentence.
     reason: computerSilent,
@@ -77,7 +77,7 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
     description: "Review the changes here.",
     icon: FileDiff,
     shortcut: "D",
-    hint: "Review changes once the task is running.",
+    hint: "Review the changes once it runs.",
     available: running,
     reason: at => (at.here ? NO_PROJECT_HERE : undefined),
   },
@@ -86,7 +86,7 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
     description: "Load, memory and disk.",
     icon: Cpu,
     shortcut: "M",
-    hint: "Available when a task is selected.",
+    hint: "Pick a thread to use it.",
     available: at => at.here || at.workspace !== null,
     readsHere: true,
   },
@@ -95,7 +95,7 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
     description: "Inspect and kill what runs.",
     icon: Activity,
     shortcut: "P",
-    hint: "Available while the task is running.",
+    hint: "Available while this runs.",
     // The pane carries the start button itself where this host can put the daemon back.
     available: at => at.here || (running(at) && (at.absent === null || at.absent.start !== undefined)),
     reason: computerSilent,
@@ -106,8 +106,8 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
     description: "Agents, skills and servers here.",
     icon: Bot,
     shortcut: "A",
-    hint: "Available when a task is selected.",
-    // A paused task answers its last report and is never woken for it.
+    hint: "Pick a thread to use it.",
+    // A paused workspace answers its last report and is never woken for it.
     available: at => at.workspace !== null,
   },
 };

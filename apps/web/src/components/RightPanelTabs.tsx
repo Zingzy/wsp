@@ -235,10 +235,8 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
   const isHighlighted = (action: SurfaceAction) =>
     highlightIndex !== -1 && availableActions[highlightIndex] === action;
 
-  const tileClass = cn(CARD_SURFACE, "flex w-full items-center gap-3 px-3 py-2.5 text-left");
-  // The keycap's hover, not the accent: on the dark themes the accent and the card are the same few percent of white.
-  const tileHover = "hover:bg-[color-mix(in_srgb,var(--foreground)_5%,var(--card))]";
-  const tileHighlight = "bg-[color-mix(in_srgb,var(--foreground)_5%,var(--card))]";
+  // py-2 and the hairline around 36px of text make a 54px tile, on the 4px pitch.
+  const tileClass = cn(CARD_SURFACE, "flex w-full items-center gap-3 px-3 py-2 text-left");
   const rowText = (action: SurfaceAction, line: string, head?: string) => {
     const Icon = action.icon;
     return (
@@ -290,9 +288,9 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
                 }
                 className={cn(
                   tileClass,
-                  "cursor-pointer transition-colors duration-150",
-                  tileHover,
-                  isHighlighted(action) && tileHighlight,
+                  // Not the accent: on the dark themes the accent and the card are the same few percent of white.
+                  "cursor-pointer transition-colors duration-150 hover:bg-card-hover",
+                  isHighlighted(action) && "bg-card-hover",
                 )}
               >
                 {rowText(action, action.description)}
