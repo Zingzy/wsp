@@ -241,6 +241,10 @@ export function workspaceState(input: WorkspaceStateInput): WorkspaceState {
   }
 }
 
+/** Whether a workspace is paused or on its way there: an expected state, often the work being done, so nothing that
+ * reads it may read it as a fault. */
+export const pausedOrPausing = (state: WorkspaceState): boolean => state === "paused" || state === "pausing";
+
 /** The one state word's key for a workspace as every client knows it: its phase, and the machine state and reach of
  * its status when one has arrived. A caller holding only the record passes null and reads the phase alone, which is
  * why a surface that shows a state asks for the status: the phase alone calls a paused or unreachable machine

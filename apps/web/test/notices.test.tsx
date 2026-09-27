@@ -15,7 +15,7 @@ import { useStore } from "../src/protocol/store.js";
 import { FIRST_PAGE, useSettingsStore } from "../src/settings/settingsStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { Shell } from "../src/App.js";
-import { CLOSE_NOTICE_LABEL } from "../src/notices/Notice.js";
+import { CLOSE_NOTICE_LABEL, NOTICE_KINDS } from "../src/notices/Notice.js";
 import { addNotice, NOTICE_MS, useNotices } from "../src/notices/store.js";
 import { caps } from "./caps.js";
 import { mountSettings, resetSettings, settingsApi, settle } from "./settings-harness.js";
@@ -56,10 +56,20 @@ function fakeApi(over: Partial<Api> = {}): Api {
 }
 
 /** The toasts a person can see: not on their way out, not held back past the limit. */
-const showing = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-notice]")].filter(el => !el.hasAttribute("data-ending-style") && !el.hasAttribute("data-limited"));
-const texts = (): string[] => showing().map(el => el.querySelector("h2")?.textContent ?? "");
+const showing = (): HTMLElement[] =>
+  [...document.querySelectorAll<HTMLElement>("[data-notice]")].filter(el => {
+    const toast = el.closest<HTMLElement>("[data-sonner-toast]");
+    return toast !== null && toast.dataset.removed !== "true" && toast.dataset.visible !== "false";
+  });
+const texts = (): string[] => showing().map(el => el.querySelector("[data-notice-title]")?.textContent ?? "");
+/** Sonner adds a toast on the next task and takes one off two frames later. */
+const tick = (ms = 50): void => act(() => void vi.advanceTimersByTime(ms));
 
 beforeEach(() => {
+  // Sonner takes a toast off on animation frames, which jsdom runs on whichever clock its first frame met; these run
+  // on the clock the case is on.
+  vi.stubGlobal("requestAnimationFrame", (run: FrameRequestCallback) => setTimeout(() => run(performance.now()), 16));
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
   window.localStorage.clear();
   useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, sessions: {}, ready: false, gaps: 0, settingsOpen: false, places: [], projects: [], placesRead: false, projectsRead: false, placesRefused: null, projectsRefused: null, preferences: DEFAULT_PREFERENCES });
   act(() => useNotices.getState().clear());
@@ -69,6 +79,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   act(() => useNotices.getState().clear());
+  vi.unstubAllGlobals();
 });
 
 function mountShell() {
@@ -88,8 +99,29 @@ describe("the toast", () => {
     expect(notice.closest('[data-slot="sidebar-inset"]')).not.toBeNull();
     expect(notice.closest("[data-app-sidebar]")).toBeNull();
     expect(notice.textContent).toContain("spoo was not paused: the provider refused");
-    expect(notice.querySelector("span")!.textContent).toBe("Error");
-    expect(notice.querySelector("span")!.className).toContain("text-destructive-foreground");
+  });
+
+  it("is an icon in its kind's tone, the sentence and one quieter line naming where, with no word column and no clock", async () => {
+    mountShell();
+    act(() => void addNotice({ kind: "error", text: "no answer from the provider", where: "api @ Solari" }));
+    await waitFor(() => expect(showing()).toHaveLength(1));
+    const notice = showing()[0]!;
+    const icon = notice.querySelector("svg[role=img]")!;
+    expect([icon.getAttribute("aria-label"), icon.getAttribute("class")]).toEqual([NOTICE_KINDS.error.word, expect.stringContaining("text-status-failed")]);
+    expect(notice.querySelector("[data-notice-title]")!.textContent).toBe("no answer from the provider");
+    expect(notice.querySelector("[data-notice-where]")!.textContent).toBe("api @ Solari");
+    expect(notice.textContent).not.toMatch(/\d\d:\d\d|Error/);
+  });
+
+  it("gives every kind its own glyph and tone out of the one table", async () => {
+    mountShell();
+    act(() => {
+      for (const kind of ["error", "done", "waiting", "note"] as const) addNotice({ kind, text: kind });
+    });
+    await waitFor(() => expect(showing()).toHaveLength(3));
+    const marks = showing().map(el => [el.dataset.kind, el.querySelector("svg[role=img]")!.getAttribute("aria-label")]);
+    expect(marks).toEqual((["note", "waiting", "done"] as const).map(kind => [kind, NOTICE_KINDS[kind].word]));
+    expect(new Set(Object.values(NOTICE_KINDS).map(k => k.tone)).size).toBe(4);
   });
 
   it("shows while Settings is open", async () => {
@@ -112,28 +144,33 @@ describe("the toast", () => {
     await waitFor(() => expect(texts()).toEqual(["three", "two"]));
   });
 
-  it("runs its action and goes, leaving the row in the list", async () => {
+  it("runs its action on the shared button and goes, leaving the row in the list", async () => {
     mountShell();
     const run = vi.fn();
     act(() => void addNotice({ kind: "waiting", text: "wsp needs you to sign in to claude", action: { word: "Open", run } }));
     await waitFor(() => expect(showing()).toHaveLength(1));
-    fireEvent.click(showing()[0]!.querySelector("[data-notice-action]")!);
+    const action = showing()[0]!.querySelector<HTMLElement>("[data-notice-action]")!;
+    expect(action.dataset.slot).toBe("button");
+    fireEvent.click(action);
     expect(run).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(showing()).toHaveLength(0));
     expect(useNotices.getState().notices).toHaveLength(1);
   });
 
-  it("goes after its time, and not while the pointer is over it", async () => {
+  it("goes after its time, and not while the pointer is over the stack", () => {
     vi.useFakeTimers();
     mountShell();
     act(() => void addNotice({ kind: "note", text: "held" }));
+    tick();
     expect(showing()).toHaveLength(1);
-    fireEvent.mouseEnter(document.querySelector("[data-notices]")!);
+    fireEvent.mouseEnter(document.querySelector("[data-sonner-toaster]")!);
     act(() => void vi.advanceTimersByTime(NOTICE_MS * 2));
     expect(showing()).toHaveLength(1);
-    fireEvent.mouseLeave(document.querySelector("[data-notices]")!);
+    fireEvent.mouseLeave(document.querySelector("[data-sonner-toaster]")!);
     act(() => void vi.advanceTimersByTime(NOTICE_MS + 100));
+    tick();
     expect(showing()).toHaveLength(0);
+    expect(useNotices.getState().toasts).toEqual([]);
   });
 
   it("Escape takes the newest away, and leaves it to a field that has the focus", async () => {
@@ -152,13 +189,26 @@ describe("the toast", () => {
     await waitFor(() => expect(texts()).toEqual(["older"]));
   });
 
-  it("a keyed notice stays until its wait ends, and then leaves the list too", async () => {
+  it("Option+T in a field types there and never pulls the focus into the stack", async () => {
+    mountShell();
+    act(() => void addNotice({ kind: "note", text: "standing" }));
+    await waitFor(() => expect(showing()).toHaveLength(1));
+    const field = document.createElement("textarea");
+    document.body.append(field);
+    field.focus();
+    fireEvent.keyDown(field, { key: "†", code: "KeyT", altKey: true });
+    expect(document.activeElement).toBe(field);
+    field.remove();
+  });
+
+  it("a keyed notice stays until its wait ends, and then leaves the list too", () => {
     vi.useFakeTimers();
     mountShell();
     act(() => void addNotice({ kind: "waiting", text: "a need", key: "need" }));
     act(() => void vi.advanceTimersByTime(NOTICE_MS * 3));
     expect(texts()).toEqual(["a need"]);
     act(() => useNotices.getState().end("need"));
+    tick();
     expect(showing()).toHaveLength(0);
     expect(useNotices.getState().notices).toHaveLength(0);
   });
@@ -176,14 +226,6 @@ describe("the notice itself", () => {
     expect(useNotices.getState().notices[0]!.text).toBe(`${"x".repeat(400)}…`);
   });
 
-  it("is named by its sentence", async () => {
-    mountShell();
-    act(() => void addNotice({ kind: "error", text: "spoo was not woken: no answer" }));
-    await waitFor(() => expect(showing()).toHaveLength(1));
-    const label = showing()[0]!.getAttribute("aria-labelledby");
-    expect(label === null ? null : document.getElementById(label)?.textContent).toBe("spoo was not woken: no answer");
-  });
-
   it("Escape with the focus in an older toast takes that one only", async () => {
     mountShell();
     act(() => {
@@ -191,7 +233,7 @@ describe("the notice itself", () => {
       addNotice({ kind: "note", text: "newer" });
     });
     await waitFor(() => expect(texts()).toEqual(["newer", "older"]));
-    const older = showing()[1]!;
+    const older = showing()[1]!.closest<HTMLElement>("[data-sonner-toast]")!;
     act(() => older.focus());
     fireEvent.keyDown(older, { key: "Escape" });
     await waitFor(() => expect(texts()).toEqual(["newer"]));
