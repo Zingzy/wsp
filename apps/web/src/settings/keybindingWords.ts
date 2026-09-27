@@ -19,6 +19,7 @@ export const KEYBINDING_WORDS: Record<KeybindingCommand, string> = {
   "workspace.previous": "Previous task",
   "thread.next": "Next thread",
   "thread.previous": "Previous thread",
+  "thread.settle": "Settle thread",
   "terminal.split": "Split the terminal",
   "terminal.new": "New terminal",
   "terminal.zoomIn": "Zoom in",

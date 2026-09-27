@@ -9,7 +9,7 @@ import { ThreadStatus } from "../src/components/status/ThreadStatus.js";
 import { threadStatusOf } from "../src/components/status/threadStatusOf.js";
 import { WorkingSince } from "../src/components/status/WorkingSince.js";
 
-const thread = (over: Partial<ThreadStatusInput> = {}): ThreadStatusInput => ({ status: "completed", asking: null, startedAt: null, ...over });
+const thread = (over: Partial<ThreadStatusInput> = {}): ThreadStatusInput => ({ status: "completed", asking: null, startedAt: null, unread: false, ...over });
 const slot = (container: HTMLElement): HTMLElement => container.querySelector<HTMLElement>("[data-thread-status]")!;
 
 describe("threadStatusOf", () => {
@@ -22,8 +22,15 @@ describe("threadStatusOf", () => {
     expect(threadStatusOf(thread({ status: "interrupted" })).id).toBe("resting");
   });
 
+  it("a finish nobody has seen reads Done, below a question, a running turn and a failure", () => {
+    expect(threadStatusOf(thread({ unread: true })).id).toBe("done");
+    expect(threadStatusOf(thread({ unread: true, asking: "Bash: ls" })).id).toBe("needs-you");
+    expect(threadStatusOf(thread({ unread: true, status: "running" })).id).toBe("working");
+    expect(threadStatusOf(thread({ unread: true, status: "failed" })).id).toBe("failed");
+  });
+
   it("the registry ends on the kind every thread reads as, so no thread falls through it", () => {
-    expect(THREAD_STATUS_KINDS.map(k => k.id)).toEqual(["needs-you", "working", "failed", "resting"]);
+    expect(THREAD_STATUS_KINDS.map(k => k.id)).toEqual(["needs-you", "working", "failed", "done", "resting"]);
     expect(THREAD_STATUS_KINDS.at(-1)!.is(thread({ status: "failed", asking: "x" }))).toBe(true);
   });
 });
@@ -76,6 +83,18 @@ describe("ThreadStatus", () => {
     expect(s.getAttribute("style")).toBeNull();
     expect(s.querySelector("svg")!.getAttribute("class")).toContain("lucide-circle-alert");
     expect(s.textContent).toBe("Failed");
+  });
+
+  it("a finish nobody has seen shows the check glyph and Done in the done ink, and no age", () => {
+    const { container } = render(<ThreadStatus thread={thread({ unread: true })} age="5m" />);
+    const s = slot(container);
+    expect(s.dataset.tone).toBe("done");
+    expect(s.dataset.threadStatus).toBe("done");
+    expect(s.classList).toContain("text-status-done");
+    expect(s.classList).toContain("font-medium");
+    expect(s.querySelector("svg")!.getAttribute("class")).toContain("lucide-circle-check");
+    expect(s.textContent).toBe(threadStateWord("done"));
+    expect(s.textContent).toBe("Done");
   });
 
   it("a resting thread shows its age alone, with no tone, so it keeps the row's ink", () => {
