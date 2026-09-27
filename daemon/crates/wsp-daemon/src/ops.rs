@@ -290,6 +290,9 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "git.pr"
             | "git.prState"
             | "git.prList"
+            | "git.discard"
+            | "git.commit"
+            | "fs.write"
             | "ports.watch"
             | "manifest.get"
             | "manifest.record"
@@ -737,12 +740,44 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
-        DaemonOp::GitDiff { cwd, scope, path, machine_id } => {
+        DaemonOp::GitDiff { cwd, scope, path, paths, whole, machine_id } => {
             let diff = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
-                git::git_diff(&runner, &at, scope, path.as_deref(), numbers::GIT_DIFF_CAP_BYTES).await
+                let paths = paths.unwrap_or_default();
+                git::git_diff(&runner, &at, scope, path.as_deref(), &paths, whole == Some(true), numbers::GIT_DIFF_CAP_BYTES).await
             };
             answer(id, diff.await)
+        }
+        DaemonOp::GitDiscard { cwd, path, machine_id } => {
+            let discarded = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                git::write::discard(&runner, &at, &path).await
+            };
+            answer(id, discarded.await)
+        }
+        DaemonOp::GitCommit { cwd, message, paths, machine_id } => {
+            let committed = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                git::write::commit(&runner, &at, &message, &paths).await
+            };
+            answer(id, committed.await)
+        }
+        DaemonOp::FsWrite { path, contents, machine_id } => {
+            let wrote = async {
+                // The folder resolves inside a root like any path; the leaf is the write's own to open, without
+                // following a link that stands in its place.
+                let requested = Path::new(&path);
+                let (Some(name), Some(parent)) = (requested.file_name(), requested.parent()) else {
+                    return Err(OpError::coded(DaemonErrorCode::BadRequest, format!("{path} names no file")));
+                };
+                let parent = match parent.to_string_lossy() {
+                    folder if folder.is_empty() => ".".to_owned(),
+                    folder => folder.into_owned(),
+                };
+                let (_, under, _) = road(ctx, machine_id.as_deref(), &parent, Reads).await?;
+                fs::write_file(under, name.to_owned(), path.clone(), contents, numbers::FS_WRITE_CAP_BYTES).await
+            };
+            answer(id, wrote.await)
         }
         DaemonOp::GitPush { cwd, base, machine_id } => {
             let pushed = async {
@@ -1021,6 +1056,9 @@ mod tests {
             "git.pr",
             "git.prState",
             "git.prList",
+            "git.discard",
+            "git.commit",
+            "fs.write",
             "fs.folders",
             "ports.watch",
             "manifest.get",
@@ -1256,8 +1294,8 @@ mod tests {
     }
 
     /// A files or git frame that names a workspace is answered for that workspace by the daemon of the computer
-    /// holding it. This bench runs no workspaces at all, which is every computer that is not a place: each of the
-    /// eight answers the one missing refusal, and the same frame without a workspace named resolves under this
+    /// holding it. This bench runs no workspaces at all, which is every computer that is not a place: each of them
+    /// answers the one missing refusal, and the same frame without a workspace named resolves under this
     /// daemon's own roots as it always has.
     #[tokio::test]
     async fn a_frame_that_names_a_workspace_this_daemon_does_not_run_is_refused_as_missing() {
@@ -1280,6 +1318,14 @@ mod tests {
         assert_eq!(search, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}));
         let diff = reply(&b, &sock, json!({"id": 1, "op": "git.diff", "cwd": "/root/repo", "scope": "branch", "machineId": "wsp-x"})).await;
         assert_eq!(diff, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}));
+        for frame in [
+            json!({"id": 1, "op": "git.discard", "cwd": "/root/repo", "path": "a.txt", "machineId": "wsp-x"}),
+            json!({"id": 1, "op": "git.commit", "cwd": "/root/repo", "message": "m", "paths": ["a.txt"], "machineId": "wsp-x"}),
+            json!({"id": 1, "op": "fs.write", "path": "/root/repo/a.txt", "contents": "x", "machineId": "wsp-x"}),
+        ] {
+            let out = reply(&b, &sock, frame.clone()).await;
+            assert_eq!(out, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}), "{frame}");
+        }
         // The same refusal a machine op on the link answers for a workspace this computer does not run, so a
         // workspace that is gone and a computer that runs none read as one thing.
         assert_eq!(wsp_runtime::no_such_workspace("wsp-x"), "no such workspace: wsp-x");
@@ -1599,6 +1645,32 @@ mod tests {
             reply(&b, &c, json!({"id": 6, "op": "tunnel.write", "tunnelId": "nobody", "data": ""})).await,
             json!({"id": 6, "ok": false, "code": "not-found", "error": "no such tunnel: nobody"})
         );
+    }
+
+    #[tokio::test]
+    async fn fs_write_saves_a_file_under_a_root_and_refuses_a_path_that_leaves_it_or_a_link_in_its_place() {
+        let b = bench();
+        let (c, _rx) = conn(None);
+        std::fs::write(b.root.path().join("note.txt"), "old\n").unwrap();
+        let saved = reply(&b, &c, json!({"id": 1, "op": "fs.write", "path": "note.txt", "contents": "new\n"})).await;
+        assert_eq!(saved, json!({"id": 1, "ok": true, "bytes": 4}));
+        assert_eq!(std::fs::read_to_string(b.root.path().join("note.txt")).unwrap(), "new\n");
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "secret\n").unwrap();
+        std::os::unix::fs::symlink(outside.path(), b.root.path().join("away")).unwrap();
+        let far = outside.path().join("secret.txt").to_string_lossy().into_owned();
+        for path in ["../secret.txt".to_owned(), "away/secret.txt".to_owned(), far] {
+            let out = reply(&b, &c, json!({"id": 2, "op": "fs.write", "path": path, "contents": "taken\n"})).await;
+            assert_eq!(out["code"], "outside-root", "{path}: {out}");
+        }
+        assert_eq!(std::fs::read_to_string(outside.path().join("secret.txt")).unwrap(), "secret\n");
+        std::os::unix::fs::symlink(b.root.path().join("note.txt"), b.root.path().join("link.txt")).unwrap();
+        assert_eq!(
+            reply(&b, &c, json!({"id": 3, "op": "fs.write", "path": "link.txt", "contents": "x"})).await,
+            json!({"id": 3, "ok": false, "code": "not-a-file", "error": "link.txt is not a regular file"})
+        );
+        assert_eq!(reply(&b, &c, json!({"id": 4, "op": "fs.write", "path": "..", "contents": "x"})).await["code"], "bad-request");
+        assert_eq!(std::fs::read_to_string(b.root.path().join("note.txt")).unwrap(), "new\n");
     }
 
     #[tokio::test]

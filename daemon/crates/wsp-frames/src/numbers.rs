@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 84;
+pub const DAEMON_VERSION: u32 = 85;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -102,6 +102,8 @@ pub const EXEC_TIMEOUT_MAX_MS: u32 = 600_000;
 pub const EXEC_DEADLINE_EXIT: i32 = 124;
 
 pub const FS_READ_CAP_BYTES: u64 = 2 * 1024 * 1024;
+/// The most one fs.write replaces a file with, the read cap's twin: a file a pane could not read whole it does not write.
+pub const FS_WRITE_CAP_BYTES: u64 = 2 * 1024 * 1024;
 pub const FS_LIST_CAP_ENTRIES: usize = 10_000;
 pub const FS_FILES_CAP_ENTRIES: usize = 20_000;
 /// Open pull requests, and open issues, one git.prList asks its host for.

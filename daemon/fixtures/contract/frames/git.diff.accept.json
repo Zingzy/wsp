@@ -24,5 +24,23 @@
     "cwd": "/root/repo",
     "scope": "branch",
     "machineId": "wsp-a"
+  },
+  {
+    "id": 1,
+    "op": "git.diff",
+    "cwd": "repo",
+    "scope": "head",
+    "paths": [
+      "src/a.ts",
+      "a*b.txt"
+    ]
+  },
+  {
+    "id": 1,
+    "op": "git.diff",
+    "cwd": "repo",
+    "scope": "head",
+    "path": "src/a.ts",
+    "whole": true
   }
 ]

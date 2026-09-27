@@ -269,6 +269,12 @@ pub struct FsReadReply {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FsWriteReply {
+    pub bytes: u64,
+}
+
 /// One folder a folder picker lists, and whether git tracks it; a repo a repos listing found carries its branch,
 /// absent on a detached head, and when git last wrote there, in ms.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -341,6 +347,27 @@ pub struct GitStatusReply {
 pub struct GitDiffFile {
     pub path: String,
     pub patch: String,
+    /// The id git gives the file's contents in the worktree now; absent for a file that is gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub blob: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GitDiscardReply {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitReply {
+    pub oid: String,
+    pub subject: String,
+    pub files_changed: u64,
+    pub insertions: u64,
+    pub deletions: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

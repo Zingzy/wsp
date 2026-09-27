@@ -18,6 +18,10 @@ import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js"
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
 import type { FsSearchReply as WireFsSearchReply } from "./generated/FsSearchReply.js";
+import type { GitCommitReply as WireGitCommitReply } from "./generated/GitCommitReply.js";
+import type { GitDiscardReply as WireGitDiscardReply } from "./generated/GitDiscardReply.js";
+import type { GitDiffFile as WireGitDiffFile } from "./generated/GitDiffFile.js";
+import type { FsWriteReply as WireFsWriteReply } from "./generated/FsWriteReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
@@ -3232,6 +3236,10 @@ type GitPrListReplyHeld = Held<Same<z.infer<typeof GitPrListReply>, GitPrListRep
 
 export const FsReadEncoding = z.enum(["utf8", "base64"]);
 export type FsReadEncoding = z.infer<typeof FsReadEncoding>;
+/** How many bytes an fs.write left in the file. */
+export const FsWriteReply = z.object({ bytes: z.number().int() });
+export type FsWriteReply = WireFsWriteReply;
+type FsWriteReplyHeld = Held<Same<z.infer<typeof FsWriteReply>, FsWriteReply>>;
 /** size is the whole file's byte length; content holds at most the first 2 MiB. */
 export const FsReadReply = z.object({ content: z.string(), size: z.number(), truncated: z.boolean() });
 export type FsReadReply = z.infer<typeof FsReadReply>;
@@ -3278,11 +3286,23 @@ export const GitStatusReply = z.object({
 export type GitStatusReply = z.infer<typeof GitStatusReply>;
 
 /** branch: working tree against the merge-base with the default branch;
- * unstaged: working tree against the index; staged: index against HEAD. */
-export const GitDiffScope = z.enum(["branch", "unstaged", "staged"]);
+ * unstaged: working tree against the index; staged: index against HEAD;
+ * head: working tree against HEAD with every untracked file as a new one, what a commit could take. */
+export const GitDiffScope = z.enum(["branch", "unstaged", "staged", "head"]);
 export type GitDiffScope = z.infer<typeof GitDiffScope>;
-export const GitDiffFile = z.object({ path: z.string(), patch: z.string() });
-export type GitDiffFile = z.infer<typeof GitDiffFile>;
+/** blob is the id git gives the file's worktree contents now, absent for a file that is gone: a viewed mark is kept
+ * against it, so a file that changes again reads unviewed with nothing compared anywhere. */
+export const GitDiffFile = z.object({ path: z.string(), patch: z.string(), blob: z.string().optional() });
+export type GitDiffFile = WireGitDiffFile;
+type GitDiffFileHeld = Held<Same<z.infer<typeof GitDiffFile>, GitDiffFile>>;
+/** The file a git.discard put back as HEAD has it. */
+export const GitDiscardReply = z.object({ path: z.string() });
+export type GitDiscardReply = WireGitDiscardReply;
+type GitDiscardReplyHeld = Held<Same<z.infer<typeof GitDiscardReply>, GitDiscardReply>>;
+/** The commit a git.commit made: its id, its subject, and what it changed as git's short stat counts it. */
+export const GitCommitReply = z.object({ oid: z.string(), subject: z.string(), filesChanged: z.number().int(), insertions: z.number().int(), deletions: z.number().int() });
+export type GitCommitReply = WireGitCommitReply;
+type GitCommitReplyHeld = Held<Same<z.infer<typeof GitCommitReply>, GitCommitReply>>;
 /** base is the ref the branch scope diffed against (null for other scopes);
  * truncated means the 2 MiB patch budget cut files or a patch short. */
 export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean() });
@@ -3459,6 +3479,10 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * to cwd, answered from `git ls-files` and kept until a folder holding one of them changes. */
   z.object({ id: reqId, op: z.literal("fs.files"), cwd: z.string(), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional(), machineId: z.string().optional() }),
+  /** Replaces an existing regular file's contents whole and answers an FsWriteReply: written beside it and renamed
+   * over, its mode and owner kept, never through a link standing where the file should be, and refused over
+   * FS_WRITE_CAP_BYTES. The folder resolves inside a root as fs.read's path does. */
+  z.object({ id: reqId, op: z.literal("fs.write"), path: z.string(), contents: z.string(), machineId: z.string().optional() }),
   /** Searches under one folder, resolved as fs.list resolves its path: files answers every file whose path below the
    * folder holds the query's letters in order, text every line of a text file there that holds the query, both
    * case-insensitive. The walk reads the folder's .gitignore and .ignore files, leaves hidden names out, never
@@ -3466,7 +3490,25 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * cap or its time budget stops it, with truncated set. */
   z.object({ id: reqId, op: z.literal("fs.search"), path: z.string(), query: z.string(), mode: FsSearchMode, machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string(), machineId: z.string().optional() }),
-  z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional(), machineId: z.string().optional() }),
+  /** paths names files from the checkout's top, each read as a letter-for-letter name; whole gives each patch its
+   * whole file in one hunk, which an editor over the new side needs. */
+  z.object({
+    id: reqId,
+    op: z.literal("git.diff"),
+    cwd: z.string(),
+    scope: GitDiffScope,
+    path: z.string().optional(),
+    paths: z.array(z.string()).optional(),
+    whole: z.boolean().optional(),
+    machineId: z.string().optional(),
+  }),
+  /** Puts one changed file back as HEAD has it, or removes it where HEAD has none, and answers a GitDiscardReply;
+   * a file with no change is refused by name. */
+  z.object({ id: reqId, op: z.literal("git.discard"), cwd: z.string(), path: z.string(), machineId: z.string().optional() }),
+  /** Commits the named files and no others, untracked ones added first, with the message on git's stdin, hooks
+   * and all, and answers a GitCommitReply. A held index is waited on once; git knowing no author, and a hook that
+   * says no, are refused in one sentence each. */
+  z.object({ id: reqId, op: z.literal("git.commit"), cwd: z.string(), message: z.string(), paths: z.array(z.string()), machineId: z.string().optional() }),
   /** Pushes the branch the checkout is on to its remote and answers a GitPushReply. The base branch itself is
    * refused: wsp makes no branch and pushes none of the branch the work started from. Without a base the
    * checkout's own default branch is read, which is what a project recorded without one was cloned at. */
@@ -4137,6 +4179,7 @@ const DAEMON_CONTENTS = [
   "4693a00a74c923f64a9062a65cac539d5ac7621da08fc623c63089a87b8231d7",
   "6064295b774d39defb1ba58ef099812ee1e4662bac2a1525c6d0061128450f2f",
   "12dc3a3741a25239969103531def3c28df0874e9233825d16f7063a84df345c6",
+  "c0470e9f2f892587971e39ad3cb4a65e887e682acff49ace2998e78b7ed79696",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4357,7 +4400,10 @@ const DAEMON_CONTENTS = [
  * Version 83 answers fs.search: the files under a folder whose path holds a query's letters in order, or the lines of text there that hold it, walked with the folder's ignore rules and never through a link, under a cap and a time budget.
  * Version 84 adds fs.files, every file of a checkout git would show, from git ls-files and kept until a folder holding one
  * of them changes, and git.prList, the repository's open pull requests and issues through the host's command line, an
- * empty list with a note where that command line is not there or nobody signed it in. */
+ * empty list with a note where that command line is not there or nobody signed it in.
+ * Version 85 writes into a copy: git.commit commits the files named with the message on stdin, git.discard puts one
+ * file back as HEAD has it, and fs.write replaces a file's contents whole; git.diff gains the head scope with untracked
+ * files as new, paths, whole files in one hunk, and each file's blob id. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

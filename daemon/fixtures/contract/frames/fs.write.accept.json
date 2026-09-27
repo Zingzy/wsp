@@ -1,0 +1,15 @@
+[
+  {
+    "id": 1,
+    "op": "fs.write",
+    "path": "repo/src/a.ts",
+    "contents": "export const a = 1;\n"
+  },
+  {
+    "id": 1,
+    "op": "fs.write",
+    "path": "/root/repo/a.txt",
+    "contents": "",
+    "machineId": "wsp-a"
+  }
+]
