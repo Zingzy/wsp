@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The files pane's two reads: one directory level, and one file under a byte cap. Disk work runs on the blocking
-//! pool so a slow volume never holds the runtime thread that answers every other socket.
+//! The files pane's reads: one directory level, one file under a byte cap, and a search under a folder. Disk work
+//! runs on the blocking pool so a slow volume never holds the runtime thread that answers every other socket.
 
 use std::collections::HashSet;
 use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use wsp_frames::{
-    numbers, words, DaemonErrorCode, FsEntry, FsEntryType, FsListReply, FsReadEncoding, FsReadReply, HostFolder, HostFolderListing,
+    numbers, words, DaemonErrorCode, FsEntry, FsEntryType, FsListReply, FsReadEncoding, FsReadReply, FsSearchHit, FsSearchMode,
+    FsSearchReply, HostFolder, HostFolderListing,
 };
 
 use crate::git::{run_git, Runs};
@@ -267,6 +269,101 @@ pub(crate) async fn read_file_bounded(file: PathBuf, encoding: FsReadEncoding, c
         Ok(FsReadReply { content, size, truncated })
     })
     .await
+}
+
+/// How long one search walks and how many bytes of files it reads in all before it answers what it has: on a
+/// computer somebody joined the daemon reads as root, and a search over a large home must not hold its disk.
+const SEARCH_BUDGET: Duration = Duration::from_secs(5);
+const SEARCH_BYTES: u64 = 256 * 1024 * 1024;
+/// How much of a matching line a text hit carries.
+const SEARCH_LINE_CHARS: usize = 240;
+
+/// Every file under `dir` whose path relative to it holds the query's letters in order (files), or every line of a
+/// text file there holding the query (text), both case-insensitive. The walk reads the folder's .gitignore and
+/// .ignore files, leaves hidden names out, and never follows a link, so a link inside the folder that points out of
+/// it is neither listed nor read. A file over the read cap or holding a NUL byte is not text.
+pub(crate) async fn search(dir: PathBuf, query: String, mode: FsSearchMode) -> Result<FsSearchReply, OpError> {
+    blocking(move || search_under(&dir, &query, mode, Instant::now() + SEARCH_BUDGET, SEARCH_BYTES)).await
+}
+
+fn search_under(dir: &Path, query: &str, mode: FsSearchMode, deadline: Instant, byte_budget: u64) -> Result<FsSearchReply, OpError> {
+    if !std::fs::metadata(dir)?.is_dir() {
+        return Err(OpError::coded(DaemonErrorCode::NotADirectory, format!("{} is not a directory", dir.display())));
+    }
+    let needle = query.to_lowercase();
+    let mut hits = Vec::new();
+    let mut read = 0u64;
+    let stopped = |hits: Vec<FsSearchHit>| Ok(FsSearchReply { hits, truncated: true });
+    let walk = ignore::WalkBuilder::new(dir)
+        .hidden(true)
+        .parents(false)
+        .git_global(false)
+        .require_git(false)
+        .follow_links(false)
+        .sort_by_file_name(|a, b| a.cmp(b))
+        .build();
+    for entry in walk {
+        if Instant::now() >= deadline {
+            return stopped(hits);
+        }
+        let Ok(entry) = entry else { continue };
+        if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+            continue;
+        }
+        let Ok(rel) = entry.path().strip_prefix(dir) else { continue };
+        let rel = rel.to_string_lossy().into_owned();
+        match mode {
+            FsSearchMode::Files => {
+                if !letters_in_order(&rel.to_lowercase(), &needle) {
+                    continue;
+                }
+                if hits.len() == numbers::FS_SEARCH_CAP_FILES {
+                    return stopped(hits);
+                }
+                hits.push(FsSearchHit { path: rel, line: None, text: None });
+            }
+            FsSearchMode::Text => {
+                let size = entry.metadata().map_or(u64::MAX, |meta| meta.len());
+                if size > numbers::FS_READ_CAP_BYTES {
+                    continue;
+                }
+                if read + size > byte_budget {
+                    return stopped(hits);
+                }
+                read += size;
+                let Some(bytes) = read_unlinked(entry.path(), size) else { continue };
+                if bytes.contains(&0) {
+                    continue;
+                }
+                for (index, line) in String::from_utf8_lossy(&bytes).lines().enumerate() {
+                    if !line.to_lowercase().contains(&needle) {
+                        continue;
+                    }
+                    if hits.len() == numbers::FS_SEARCH_CAP_HITS {
+                        return stopped(hits);
+                    }
+                    let text = line.chars().take(SEARCH_LINE_CHARS).collect();
+                    hits.push(FsSearchHit { path: rel.clone(), line: u32::try_from(index + 1).ok(), text: Some(text) });
+                }
+            }
+        }
+    }
+    Ok(FsSearchReply { hits, truncated: false })
+}
+
+/// A regular file's first `cap` bytes, opened without following a link: the walk saw a file, and a link swapped in
+/// since is refused rather than read.
+fn read_unlinked(path: &Path, cap: u64) -> Option<Vec<u8>> {
+    let file = std::fs::OpenOptions::new().read(true).custom_flags(nix::libc::O_NOFOLLOW).open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.take(cap).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+/// Whether every letter of `needle` appears in `hay` in order, which is what a finder's few typed letters mean.
+fn letters_in_order(hay: &str, needle: &str) -> bool {
+    let mut rest = hay.chars();
+    needle.chars().all(|want| rest.any(|have| have == want))
 }
 
 /// Bytes as text the way node's StringDecoder writes them: invalid sequences become U+FFFD, and a character cut

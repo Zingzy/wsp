@@ -6,7 +6,7 @@
 // was closed in this window and a browser tab on the same host keeps its own.
 // The host's reads the pages draw from live here too, so one reader in the
 // page serves the sidebar's search as well.
-import type { AccountView, DeviceView, InitSetup, PlaceSpend, PlaceView, ProjectView, SealedImageView, TerminalConfig } from "@wsp/protocol";
+import type { AccountView, DeviceView, EditorChoice, InitSetup, PlaceSpend, PlaceView, ProjectView, SealedImageView, TerminalConfig } from "@wsp/protocol";
 import { create } from "zustand";
 import type { AddRoad } from "./AddComputer.js";
 import { isSettingsGroupId, type SettingsGroupId } from "./groupIds.js";
@@ -61,9 +61,11 @@ export interface SettingsReads {
   readonly devicesRefused: boolean;
   readonly image: SealedImageView | null;
   readonly spend: ReadonlyArray<PlaceSpend>;
+  /** The editors installed on the computer the host runs on; null before an answer. */
+  readonly editors: ReadonlyArray<EditorChoice> | null;
 }
 
-export const NO_READS: SettingsReads = { setup: null, file: null, account: null, devices: null, devicesRefused: false, image: null, spend: [] };
+export const NO_READS: SettingsReads = { setup: null, file: null, account: null, devices: null, devicesRefused: false, image: null, spend: [], editors: null };
 
 export interface SettingsState {
   readonly at: SettingsAt;

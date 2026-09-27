@@ -19,6 +19,14 @@ describe("pane root", () => {
     expect(selectRoot(useRootStore.getState().byWorkspaceId, "ws_other", ["/root"])).toBe("/root");
   });
 
+  it("opens a copy nobody ran a thread in on the copy's own folder where the daemon lists it, and on the home where it does not", () => {
+    const copy = "/Users/dev/wsp-codex-reviews";
+    expect(selectRoot({}, WS, ["/Users/dev", "/Users/dev/wsp"], copy)).toBe(copy);
+    expect(selectRoot({}, WS, ["/Users/dev"], "/elsewhere/copy")).toBe("/Users/dev");
+    useRootStore.getState().follow(WS, "/Users/dev/wsp-codex-reviews/apps");
+    expect(selectRoot(useRootStore.getState().byWorkspaceId, WS, ["/Users/dev"], copy)).toBe("/Users/dev/wsp-codex-reviews/apps");
+  });
+
   it("stays where it was pinned while the thread moves, and follows again when unpinned", () => {
     useRootStore.getState().follow(WS, "/root/app");
     useRootStore.getState().pin(WS, "/root/app/docs");

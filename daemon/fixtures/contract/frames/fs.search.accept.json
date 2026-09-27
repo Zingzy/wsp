@@ -1,0 +1,24 @@
+[
+  {
+    "id": 1,
+    "op": "fs.search",
+    "path": "/root/repo",
+    "query": "rea",
+    "mode": "files"
+  },
+  {
+    "id": 1,
+    "op": "fs.search",
+    "path": "repo",
+    "query": "thing",
+    "mode": "text"
+  },
+  {
+    "id": 1,
+    "op": "fs.search",
+    "path": "/root/repo",
+    "query": "PANE_VIEWS",
+    "mode": "text",
+    "machineId": "wsp-a"
+  }
+]

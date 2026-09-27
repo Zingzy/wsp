@@ -18,6 +18,8 @@ export const CHORD_WORDS = {
 
 export const KEYBINDING_WORDS: Record<KeybindingCommand, string> = {
   "commandPalette.toggle": "Search",
+  "files.quickOpen": "Find a file",
+  "files.search": "Search in files",
   "settings.toggle": "Settings",
   "sidebar.toggle": "Toggle the sidebar",
   "terminal.toggle": "Toggle the terminal drawer",

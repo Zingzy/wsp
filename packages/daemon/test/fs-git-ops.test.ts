@@ -244,6 +244,31 @@ describe("fs.read", () => {
   });
 });
 
+describe("fs.search", () => {
+  const hits = (m: WireMsg) => (m["hits"] as { path: string }[]).map(h => h.path);
+
+  it("finds files by letters in order, leaving out what .gitignore names, hidden names and links", async () => {
+    const all = await c.request("fs.search", { path: "repo", query: "", mode: "files" });
+    expect(all.ok).toBe(true);
+    expect(hits(all)).toEqual(["docs.md", "feature.txt", "src/index.ts", "staged.txt", "untracked.txt"]);
+    expect(hits(await c.request("fs.search", { path: "repo", query: "SIDX", mode: "files" }))).toEqual(["src/index.ts"]);
+  });
+
+  it("answers each line holding the words with its number, and never reads through a link out of the root", async () => {
+    const res = await c.request("fs.search", { path: repo, query: "EXPORT CONST", mode: "text" });
+    expect(res["hits"]).toEqual([{ path: "src/index.ts", line: 1, text: "export const a = 2;" }]);
+    expect(res["truncated"]).toBe(false);
+    expect(hits(await c.request("fs.search", { path: "repo", query: "secret", mode: "text" }))).toEqual([]);
+  });
+
+  it("refuses a folder outside the root, by .. or through a link, with a typed error", async () => {
+    for (const path of ["..", outside, "repo/escape"]) {
+      const res = await c.request("fs.search", { path, query: "secret", mode: "text" });
+      expect([res.ok, res.code]).toEqual([false, "outside-root"]);
+    }
+  });
+});
+
 describe("git.status", () => {
   it("parses the branch header and every entry kind from porcelain v2", async () => {
     const res = await c.request("git.status", { cwd: "repo" });
