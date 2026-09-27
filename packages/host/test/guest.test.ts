@@ -7,7 +7,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentsOffRefusal, EXIT_CODES, guestHostFlagLine, guestNamesWorkspaceLine, guestNoFileLine, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestPersonsComputerLine, LOOPBACK, UNAUTHORIZED, type DaemonEvent } from "@wsp/protocol";
+import { agentsOffRefusal, EXIT_CODES, guestNoTokenRefusal, guestHostFlagLine, guestNamesWorkspaceLine, guestNoFileLine, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestPersonsComputerLine, LOOPBACK, UNAUTHORIZED, type DaemonEvent } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type GuestKindModule, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
@@ -54,13 +54,13 @@ describe("a guest session on the host", () => {
   const errText = (): string => replies().filter((m): m is { stream: string; text: string } => (m as { stream?: string }).stream === "err").map(m => m.text).join("");
   const exitCode = (): number | undefined => replies().map(m => (m as { exit?: number }).exit).find(code => code !== undefined);
 
-  const opened = (o: { token: string; kind?: "mcp" | "cli"; argv?: string[]; life?: string; session?: string }): DaemonEvent => ({
+  const opened = (o: { token: string; turnToken?: string | null; kind?: "mcp" | "cli"; argv?: string[]; life?: string; session?: string }): DaemonEvent => ({
     type: "guest.opened",
     session: o.session ?? "g0",
     life: o.life ?? "life-1",
     kind: o.kind ?? "cli",
     token: o.token,
-    turnToken: "turn-1",
+    ...(o.turnToken === null ? {} : { turnToken: o.turnToken ?? "turn-1" }),
     argv: o.argv ?? ["threads", "--json"],
     cwd: "/root",
   });
@@ -121,10 +121,21 @@ describe("a guest session on the host", () => {
   });
 
   describe("what a session is refused for", () => {
-    it("closes a launch that carried no token with the sentence the switch is turned on by, and dials nothing", async () => {
+    it("closes a turn's line that carried no thread's token with the sentence the switch is turned on by, and dials nothing", async () => {
+      // A turn is launched with a thread's token wherever its workspace's agents may spawn, so a turn without one
+      // was launched with the switch off.
       door.event(link, opened({ token: "" }));
       await settled(() => closes().length > 0);
       expect(closes()[0]!.params).toEqual({ session: "g0", error: agentsOffRefusal(workspaceId, "thread_new") });
+      expect(replies()).toEqual([]);
+    });
+
+    it("closes a line that carried neither token by saying it came from no turn, never by telling the person to turn the switch on", async () => {
+      // A `wsp exec` or a shell pane on the machine: turning the switch on changes nothing for it.
+      door.event(link, opened({ token: "", turnToken: null }));
+      await settled(() => closes().length > 0);
+      expect(closes()[0]!.params).toEqual({ session: "g0", error: guestNoTokenRefusal(workspaceId) });
+      expect(guestNoTokenRefusal(workspaceId)).not.toContain("--spawn on");
       expect(replies()).toEqual([]);
     });
 

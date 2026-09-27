@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { goldenRecipe, keySources, loadKeys, makeRuntime, readOnce, servesNothing, type HereAt, type Keys, type KeySources, type LoadedKeys, type ProviderEnv, type RunningWsp } from "@wsp/host";
-import { DEFAULT_PORT, isLocalWorkspace, LOOPBACK, type WorkspaceView } from "@wsp/protocol";
+import { isLocalWorkspace, type WorkspaceView } from "@wsp/protocol";
 import type { Runtime, Store } from "@wsp/runtime";
 
 export type Setup = { ready: true; runtime: Runtime } | { ready: false };
@@ -31,8 +31,7 @@ async function findKeys(statePath: string, sources?: KeySources): Promise<Loaded
 async function runtimeOf(opts: SetupOptions): Promise<Runtime> {
   const store = await readOnce(opts.statePath);
   const loaded = await findKeys(opts.statePath, opts.sources);
-  // The window's host binds loopback, so the address a fork dials is the relay's name, which reads no port.
-  const agents = opts.agents === undefined ? undefined : { at: { address: LOOPBACK, port: DEFAULT_PORT }, here: opts.agents.here, ...(opts.agents.run !== undefined ? { run: opts.agents.run } : {}) };
+  const agents = opts.agents === undefined ? undefined : { here: opts.agents.here, ...(opts.agents.run !== undefined ? { run: opts.agents.run } : {}) };
   const build = opts.runtimeFor ?? ((keys, path, env, over, wired) => makeRuntime(keys, path, goldenRecipe(), env, wired, undefined, undefined, over));
   return build(loaded.keys, opts.statePath, loaded.env, store, agents);
 }
