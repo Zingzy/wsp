@@ -93,7 +93,7 @@ describe("a guest session on the host", () => {
     store = memoryStore();
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     rt = createRuntime({ backend, store, adapters: {}, placeLinks: placeWiring(statePath) });
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
     await handle.addProject("https://github.com/dev/alpha.git", "default");
     workspaceId = (await handle.createWorkspace("alpha")).id;
@@ -105,10 +105,10 @@ describe("a guest session on the host", () => {
         return {};
       },
     };
-    const wsPort = handle.wsPort;
+    const port = handle.port;
     door = guestDoor({
       authorize: token => rt.devices.match(token).then(device => (device === undefined ? undefined : { kind: "device", device })),
-      hostUrl: () => `http://${LOOPBACK}:${wsPort}`,
+      hostUrl: () => `http://${LOOPBACK}:${port}`,
       kinds: { mcp: guestMcp(statePath), cli: guestCli(statePath, runningWsp()) },
     });
   });

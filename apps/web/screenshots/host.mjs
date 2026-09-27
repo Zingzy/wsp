@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The wsp host a fixture is served through, and the one place that knows how to
 // start one: a throwaway home, a fixture state written into it, the built
-// command on two free ports, and the wait until it answers. The screenshot run
+// command on a free port, and the wait until it answers. The screenshot run
 // and the persona lab both take this road, so the environment a fixture is
 // served under is written once rather than once per harness.
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, shellQuote, WEB_DIR_ENV } from "@wsp/protocol";
+import { CLOUD_ENV, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, shellQuote, WEB_DIR_ENV, wsUrlOf } from "@wsp/protocol";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -130,6 +130,8 @@ export function hostEnv({ home, state, personHome = homedir(), appDir, cloud, bi
     [PERSON_HOME_ENV]: personHome,
     ...(appDir === undefined ? {} : { [WEB_DIR_ENV]: appDir }),
     ...(personHome === home ? agentStores(home) : {}),
+    // A fixture that names a cloud is served with the cloud on; every other one as a fresh host is, with it off.
+    ...(cloud === undefined ? {} : { [CLOUD_ENV]: "1" }),
     ...(cloud === undefined || providerFor(state) !== "fake" ? {} : { [FAKE_AS_ENV]: cloud }),
     ...(standIn === undefined || providerFor(state) !== "fake" ? {} : { [FAKE_ROOT_ENV]: standIn }),
     // The records alone where no folder was named: the fixture's forks come up in the state it gave them and
@@ -149,7 +151,7 @@ export const agentStores = home => Object.fromEntries(agentStoreRows(home).map((
 
 /** The command line a fixture's host is served with. The address a machine dials this host at rides here rather
  * than in the environment, since that is where the command takes it. */
-export const hostArgv = ({ statePath, port, wsPort, advertise }) => [HOST_BIN, "up", "--state", statePath, "--port", String(port), "--ws-port", String(wsPort), ...(advertise === undefined ? [] : ["--advertise", advertise])];
+export const hostArgv = ({ statePath, port, advertise }) => [HOST_BIN, "up", "--state", statePath, "--port", String(port), ...(advertise === undefined ? [] : ["--advertise", advertise])];
 
 /** An executable script at `path`, its whole text given, interpreter line and all. */
 export function writeScript(path, text) {
@@ -224,7 +226,7 @@ export function writeHereAgents(home, here) {
  * `agents` names the fixture's own agents on this computer, which the host then reads in place of this computer's:
  * their stand-ins lead a path of the system's folders alone, and the newest versions are kept as already asked, so
  * no agent of the person's is run and no vendor is asked. A lab names none, since its testers' turns run real agents. */
-export async function startHost({ home, state, port, wsPort, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, records, advertise, agents, secrets = {} }) {
+export async function startHost({ home, state, port, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, records, advertise, agents, secrets = {} }) {
   const statePath = join(home, ".wsp", "state.json");
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
@@ -233,7 +235,7 @@ export async function startHost({ home, state, port, wsPort, logPath, detached =
   if (agents !== undefined) writeKeptLatest(statePath, agents.latest, Date.now());
   const path = agents === undefined ? await hostPath() : `${writeHereAgents(home, agents)}:${SYSTEM_PATH}`;
   const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn, records, path: `${writeHereLabel(home)}:${path}` });
-  const child = spawn(process.execPath, hostArgv({ statePath, port, wsPort, advertise }), {
+  const child = spawn(process.execPath, hostArgv({ statePath, port, advertise }), {
     cwd: home,
     env: { ...env, ...secrets },
     stdio: ["ignore", out, out],
@@ -261,11 +263,23 @@ export async function startHost({ home, state, port, wsPort, logPath, detached =
  * never started is the one fault a tester can neither work around nor see the cause of: every pane reads
  * unreachable and nothing on the screen says why. */
 export async function localReach(base, token) {
-  const answered = await fetch(`${base}/api/workspaces`, { headers: { authorization: `Bearer ${token}` } }).then(
-    r => (r.ok ? r.json() : undefined),
-    () => undefined,
-  );
-  return answered?.workspaces?.find(w => w.kind === "local")?.reach?.state;
+  const statuses = await new Promise(done => {
+    const ws = new WebSocket(wsUrlOf(base));
+    const finish = value => {
+      ws.close();
+      done(value);
+    };
+    ws.onerror = () => finish(undefined);
+    ws.onopen = () => ws.send(JSON.stringify({ id: 1, op: "auth", token }));
+    ws.onmessage = m => {
+      const reply = JSON.parse(String(m.data));
+      if (reply.id === 1) {
+        if (reply.ok === true) ws.send(JSON.stringify({ id: 2, op: "status.list" }));
+        else finish(undefined);
+      } else if (reply.id === 2) finish(reply.ok === true ? reply.statuses : undefined);
+    };
+  });
+  return statuses?.find(w => w.kind === "local")?.reach?.state;
 }
 
 /** SIGTERM to the pid this run started, and nothing else: four builders share this machine and a host found by port

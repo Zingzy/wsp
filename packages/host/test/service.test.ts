@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { parseArgs } from "node:util";
 import { dirname, join } from "node:path";
-import { EXIT_CODES, LABS_ENV, LOOPBACK, UPDATE_CHECK_ENV } from "@wsp/protocol";
+import { CLOUD_ENV, EXIT_CODES, LABS_ENV, LOOPBACK, UPDATE_CHECK_ENV } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SERVE_FLAGS, SHARED_OPTIONS, claudeKeyOnlyInThisShell, cli, downCommand, keyOnlyInThisShell, optsFor, statusCommand, upServiceCommand, hostStoppedLine, type CliIO, type ServeAsked, type ServiceDeps } from "../src/cli.js";
 import {
@@ -34,6 +34,7 @@ import type { HostClient } from "../src/verbs.js";
 import { runningWsp } from "../src/mcp-install.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 /** The fingerprint a pairing pinned, which every record written since wsp pinned keys carries. */
 const HOST_KEY = "SHA256:MVm4EO/x4dkERU6dZOt1s4N04aW619pwoUo/9Qpz40A";
@@ -64,7 +65,7 @@ const LOCAL_RECORD = {
 function planFor(at: ServiceAddress, over: Partial<ServicePlan> = {}): ServicePlan {
   return {
     ...at,
-    argv: ["/usr/bin/node", "/opt/wsp/bin.js", "up", "--state", at.statePath, "--port", "4400", "--ws-port", "4410", "--listen", "127.0.0.1"],
+    argv: ["/usr/bin/node", "/opt/wsp/bin.js", "up", "--state", at.statePath, "--port", "4400", "--listen", "127.0.0.1"],
     cwd: "/Users/z/work",
     env: { PATH: "/usr/bin:/bin" },
     logPath: join(dirname(at.statePath), "host.log"),
@@ -123,7 +124,7 @@ describe("one module per service manager", () => {
     const systemd = SERVICE_MANAGERS.systemd;
     expect(systemd.unit(at)).toEqual({ name: `wsp-host-${tag}.service`, path: `/Users/z/.config/systemd/user/wsp-host-${tag}.service` });
     const text = systemd.text(planFor(at));
-    expect(text).toContain("ExecStart='/usr/bin/node' '/opt/wsp/bin.js' 'up' '--state' '/Users/z/.wsp/state.json' '--port' '4400' '--ws-port' '4410' '--listen' '127.0.0.1'");
+    expect(text).toContain("ExecStart='/usr/bin/node' '/opt/wsp/bin.js' 'up' '--state' '/Users/z/.wsp/state.json' '--port' '4400' '--listen' '127.0.0.1'");
     // systemd reads WorkingDirectory= as a bare path and refuses a quoted one as not absolute; the unit never starts.
     expect(text).toContain("WorkingDirectory=/Users/z/work\n");
     expect(text).toContain("Environment='PATH=/usr/bin:/bin'");
@@ -217,6 +218,8 @@ describe("one module per service manager", () => {
   it("a service installed from a shell holding labs carries labs, since it would otherwise come up without the rows that shell was using", () => {
     expect(serviceEnv({ PATH: "/usr/bin", [LABS_ENV]: "1" })).toEqual({ PATH: "/usr/bin", [LABS_ENV]: "1" });
     expect(serviceEnv({ PATH: "/usr/bin", [LABS_ENV]: "" })).toEqual({ PATH: "/usr/bin" });
+    expect(serviceEnv({ PATH: "/usr/bin", [CLOUD_ENV]: "1" })).toEqual({ PATH: "/usr/bin", [CLOUD_ENV]: "1" });
+    expect(serviceEnv({ PATH: "/usr/bin", [CLOUD_ENV]: "" })).toEqual({ PATH: "/usr/bin" });
     expect(serviceEnv({ PATH: "/usr/bin" })).toEqual({ PATH: "/usr/bin" });
   });
 
@@ -328,7 +331,7 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
     if (failing.has(verb)) return { code: 3, output: `fake ${verb} refused` };
     if (verb === "load") {
       held = true;
-      if (starts && address !== undefined) writeFileSync(lockPath(address), JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, startedAt: new Date().toISOString() }));
+      if (starts && address !== undefined) writeFileSync(lockPath(address), JSON.stringify({ pid: process.pid, port: 4400, startedAt: new Date().toISOString() }));
       return { code: 0, output: "" };
     }
     if (verb === "unload") {
@@ -461,7 +464,7 @@ describe("installing, stopping and reading a service", () => {
     const lockPath = join(home, ".wsp", "host.lock");
     let polls = 0;
     const sleep = async (): Promise<void> => {
-      if (++polls === 2) writeFileSync(lockPath, JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, startedAt: new Date().toISOString() }));
+      if (++polls === 2) writeFileSync(lockPath, JSON.stringify({ pid: process.pid, port: 4400, startedAt: new Date().toISOString() }));
     };
     expect((await untilLock(at.statePath, true, 5_000, sleep))?.port).toBe(4400);
     expect(polls).toBe(2);
@@ -486,11 +489,11 @@ describe("installing, stopping and reading a service", () => {
   it("status is one row per fact: the host and where it serves, or that it does not, then the state file and the service", () => {
     const startedAt = new Date("2026-09-07T01:00:00.000Z").toISOString();
     const now = Date.parse("2026-09-07T03:05:00.000Z");
-    const lock = { pid: 42, port: 4400, wsPort: 4410, startedAt };
+    const lock = { pid: 42, port: 4400, startedAt };
     expect(statusLines(at.statePath, { lock, answering: true }, "fake service x, loaded", now)).toEqual([
       "host        running (pid 42, up 125m)",
       "app         http://127.0.0.1:4400",
-      `runtime ws  ws://127.0.0.1:4410 (token: ${join(home, ".wsp", "host-token")})`,
+      `runtime ws  ws://127.0.0.1:4400/ws (token: ${join(home, ".wsp", "host-token")})`,
       `state       ${at.statePath}`,
       "service     fake service x, loaded",
     ]);
@@ -515,7 +518,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     home = mkdtempSync(join(tmpdir(), "wsp-service-cli-"));
     mkdirSync(join(home, ".wsp"), { recursive: true });
     statePath = join(home, ".wsp", "state.json");
-    opts = { port: 4400, wsPort: 4410, named: true, address: LOOPBACK, statePath };
+    opts = { port: 4400, named: true, address: LOOPBACK, statePath };
     writeFileSync(statePath, JSON.stringify({ goldens: { default: SEALED_GOLDEN } }));
     vi.stubEnv("HOME", home);
     vi.stubEnv("WSP_HOME", join(home, ".wsp"));
@@ -550,7 +553,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(errors).toEqual([]);
     const plan = fake.plans[0]!;
     expect(plan.argv[0]).toBe(process.execPath);
-    expect(plan.argv.slice(2)).toEqual(["up", "--state", statePath, "--port", "4400", "--ws-port", "4410", "--listen", "127.0.0.1"]);
+    expect(plan.argv.slice(2)).toEqual(["up", "--state", statePath, "--port", "4400", "--listen", "127.0.0.1"]);
     expect(plan.env["PATH"]).toBeDefined();
     // The host this unit starts is the one registered to serve the state file, and the word is what lets it past
     // the check every other client on this computer is refused by.
@@ -559,7 +562,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(lines).toEqual([
       `fake service fake.${serviceTag(statePath)} is loaded; it serves again at every login`,
       "app         http://127.0.0.1:4400",
-      `runtime ws  ws://127.0.0.1:4410 (token: ${join(home, ".wsp", "host-token")})`,
+      `runtime ws  ws://127.0.0.1:4400/ws (token: ${join(home, ".wsp", "host-token")})`,
       `state       ${statePath}`,
       `log         ${join(home, ".wsp", "host.log")}`,
       "Stop it with wsp down.",
@@ -571,10 +574,10 @@ describe("wsp up --service, wsp down and wsp status", () => {
     const fake = svc();
     const shim = join(home, ".wsp", "bin", "wsp");
     expect(await upServiceCommand(quietIO(), { ...opts, running: { ...runningWsp(), shim } }, fake.deps)).toBe(0);
-    expect(fake.plans[0]!.argv).toEqual([shim, "up", "--state", statePath, "--port", "4400", "--ws-port", "4410", "--listen", "127.0.0.1"]);
+    expect(fake.plans[0]!.argv).toEqual([shim, "up", "--state", statePath, "--port", "4400", "--listen", "127.0.0.1"]);
   });
 
-  it("refuses before writing anything when the key is only in this shell, since the service starts without it", async () => {
+  it.runIf(CLOUD_ON)("refuses before writing anything when the key is only in this shell, since the service starts without it", async () => {
     vi.stubEnv("SOLARI_API_KEY", KEY);
     const fake = svc();
     const errors: string[] = [];
@@ -586,7 +589,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(keyOnlyInThisShell({ env: {}, cwd: home, statePath })).toBeUndefined();
   });
 
-  it("weighs the key of the row that .env beside the state names, which is the row the host it installs wires", async () => {
+  it.runIf(CLOUD_ON)("weighs the key of the row that .env beside the state names, which is the row the host it installs wires", async () => {
     // The reading this is from: the pick written beside the state file said box, the box key was exported in the
     // installing shell alone, and the preflight read the row off the shell, saw no provider and let the unit
     // through. The host it started wired box, its key gone with the shell, and forked with an empty one.
@@ -603,7 +606,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(fake.ran).toEqual([]);
   });
 
-  it("names the .env beside the state file the unit will serve, not the wsp home's", async () => {
+  it.runIf(CLOUD_ON)("names the .env beside the state file the unit will serve, not the wsp home's", async () => {
     // A service installed for a state file somewhere else reads its key from beside that file, so the line that
     // says where to put the key names the file its host will read.
     const folder = join(home, "elsewhere");
@@ -617,7 +620,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(fake.ran).toEqual([]);
   });
 
-  it("names the wired provider's own variable, and says nothing where that provider reads no key", () => {
+  it.runIf(CLOUD_ON)("names the wired provider's own variable, and says nothing where that provider reads no key", () => {
     const sources = (env: Record<string, string | undefined>) => ({ env, cwd: home, statePath });
     // The row the run is wired to is the one the line is about: a host being installed for Box with the Box key
     // only in the installing shell loses that key, and the line names it rather than another provider's.
@@ -651,7 +654,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(await upServiceCommand(quietIO([], none), opts, { ...svc().deps, manager: undefined })).toBe(1);
     expect(none[0]).toBe(noManagerLine("fake-os"));
 
-    writeFileSync(join(home, ".wsp", "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, startedAt: new Date().toISOString() }));
+    writeFileSync(join(home, ".wsp", "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, startedAt: new Date().toISOString() }));
     const busy: string[] = [];
     const held = svc();
     expect(await upServiceCommand(quietIO([], busy), opts, held.deps)).toBe(1);
@@ -669,12 +672,12 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(await upServiceCommand(quietIO(lines, errors), opts, fake.deps)).toBe(0);
     expect(errors).toEqual([]);
     expect(fake.ran.map(argv => argv[1])).toEqual(["load"]);
-    expect(fake.plans[0]!.argv.slice(2)).toEqual(["up", "--state", statePath, "--port", "4400", "--ws-port", "4410", "--listen", "127.0.0.1"]);
+    expect(fake.plans[0]!.argv.slice(2)).toEqual(["up", "--state", statePath, "--port", "4400", "--listen", "127.0.0.1"]);
   });
 
   it("the unit runs the wsp up the person typed: every flag that shapes a serving host is in ExecStart, read back by the same parse", async () => {
     keyInFile();
-    const typed = ["up", "--service", "--state", statePath, "--listen", "0.0.0.0", "--port", "4407", "--ws-port", "4433", "--provider", "box", "--advertise", "http://10.0.0.9:4407", "--no-relay"];
+    const typed = ["up", "--service", "--state", statePath, "--listen", "0.0.0.0", "--port", "4407", "--provider", "box", "--advertise", "http://10.0.0.9:4407", "--no-relay"];
     // Every flag of the table is in that line, so a row added to it and forgotten here fails rather than passing quietly.
     for (const flag of SERVE_FLAGS) expect(typed, `--${flag.name} is in the line this case types`).toContain(`--${flag.name}`);
     const asked = optsFor(parseArgs({ args: typed, options: SHARED_OPTIONS, allowPositionals: true }).values, process.env);
@@ -687,7 +690,6 @@ describe("wsp up --service, wsp down and wsp status", () => {
       "up",
       "--state", statePath,
       "--port", "4407",
-      "--ws-port", "4433",
       "--listen", "0.0.0.0",
       "--advertise", "http://10.0.0.9:4407",
       "--provider", "box",
@@ -695,11 +697,11 @@ describe("wsp up --service, wsp down and wsp status", () => {
     ]);
     // The words as the manager reads them, not only as argv: systemd takes one line, and each word is quoted there.
     expect(SERVICE_MANAGERS.systemd.text(fake.plans[0]!)).toContain(
-      `ExecStart='${process.execPath}' '${argv[1]!}' 'up' '--state' '${statePath}' '--port' '4407' '--ws-port' '4433' '--listen' '0.0.0.0' '--advertise' 'http://10.0.0.9:4407' '--provider' 'box' '--no-relay'`,
+      `ExecStart='${process.execPath}' '${argv[1]!}' 'up' '--state' '${statePath}' '--port' '4407' '--listen' '0.0.0.0' '--advertise' 'http://10.0.0.9:4407' '--provider' 'box' '--no-relay'`,
     );
     // The line in the unit is a line wsp reads: parsed again, it asks for exactly what the person asked for.
     const again = optsFor(parseArgs({ args: argv.slice(2), options: SHARED_OPTIONS, allowPositionals: true }).values, process.env);
-    const serving = (o: ServeAsked): unknown => [o.statePath, o.port, o.wsPort, o.address, o.advertise, o.provider, o.relay];
+    const serving = (o: ServeAsked): unknown => [o.statePath, o.port, o.address, o.advertise, o.provider, o.relay];
     expect(serving(again)).toEqual(serving(asked));
     // Only a word the person typed is spelled back, read the one way everything reads it: spaces are no address,
     // and a trailing slash is not part of one. Without --advertise the unit carries none, and every kind of
@@ -741,7 +743,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(await downCommand(quietIO([], alone), opts, fake.deps)).toBe(1);
     expect(alone[0]).toBe(`wsp down: no fake service for ${statePath}, and no host is serving it.`);
 
-    writeFileSync(join(home, ".wsp", "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, startedAt: new Date().toISOString() }));
+    writeFileSync(join(home, ".wsp", "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, startedAt: new Date().toISOString() }));
     const byHand: string[] = [];
     expect(await downCommand(quietIO([], byHand), opts, fake.deps)).toBe(1);
     expect(byHand[0]).toContain(`the host serving it (pid ${process.pid}) was started by hand`);
@@ -752,7 +754,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
 
   it("wsp down stops a host a verb started, by the pid its lock recorded, and says nothing serves the file now", async () => {
     // A pid the lock could really name: a lock whose process is gone is a crash leftover and no host at all.
-    const verbLock = JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, startedAt: new Date().toISOString(), startedBy: "verb" });
+    const verbLock = JSON.stringify({ pid: process.pid, port: 4400, startedAt: new Date().toISOString(), startedBy: "verb" });
     const fake = svc();
     writeFileSync(join(home, ".wsp", "host.lock"), verbLock);
     const lines: string[] = [];
@@ -772,7 +774,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
   it("wsp down stops the host wsp up started, whatever port it took, and says which line brought it up", async () => {
     // Both testers ended their session here: up started it, down refused to stop it, and they killed a pid by
     // hand. The pid comes off the lock that host wrote, so the port it ended up on decides nothing.
-    const upLock = JSON.stringify({ pid: process.pid, port: 4700, wsPort: 4710, startedAt: new Date().toISOString(), startedBy: "up" });
+    const upLock = JSON.stringify({ pid: process.pid, port: 4700, startedAt: new Date().toISOString(), startedBy: "up" });
     writeFileSync(join(home, ".wsp", "host.lock"), upLock);
     const fake = svc({ stop: pid => void (pid === process.pid && rmSync(join(home, ".wsp", "host.lock"), { force: true })) });
     const lines: string[] = [];
@@ -803,7 +805,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(after[0]).toContain(`running (pid ${process.pid}`);
     expect(after.slice(1, 4)).toEqual([
       "app         http://127.0.0.1:4400",
-      `runtime ws  ws://127.0.0.1:4410 (token: ${join(home, ".wsp", "host-token")})`,
+      `runtime ws  ws://127.0.0.1:4400/ws (token: ${join(home, ".wsp", "host-token")})`,
       `state       ${statePath}`,
     ]);
     expect(after[4]).toBe(`service     fake service fake.${serviceTag(statePath)}, loaded (${join(home, "fake-units", `${serviceTag(statePath)}.unit`)})`);
@@ -960,7 +962,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(claudeKeyOnlyInThisShell({ env: {}, cwd: home, statePath })).toBeUndefined();
   });
 
-  it("reads the keys off the sources it was handed, not off whatever .env sits in the folder wsp was run from", async () => {
+  it.runIf(CLOUD_ON)("reads the keys off the sources it was handed, not off whatever .env sits in the folder wsp was run from", async () => {
     const checkout = join(home, "checkout");
     mkdirSync(checkout, { recursive: true });
     writeFileSync(join(checkout, ".env"), `SOLARI_API_KEY=${KEY}\n`);

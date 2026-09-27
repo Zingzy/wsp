@@ -364,7 +364,7 @@ describe("Keybindings", () => {
 
 describe("About", () => {
   it("says the app's half and the host's in the shell, the host's alone in a tab, unknown where the shell names none, and Releases opens the releases page", async () => {
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: "0.1.5" };
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: "0.1.5" };
     window.wsp = { version: "0.1.3" };
     await mount({}, "about");
     expect(lineLabels()).toEqual([ABOUT_WORDS.app, ABOUT_WORDS.host]);
@@ -403,7 +403,7 @@ describe("About and the newest release", () => {
     ...over,
   });
   const shell = (app: string | undefined, host: string): void => {
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: host };
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { tokenHash: "a".repeat(64), wsPath: "/ws", paired: true, version: host };
     if (app === undefined) delete window.wsp;
     else window.wsp = { version: app };
   };
@@ -621,7 +621,7 @@ describe("About and the newest release", () => {
 
   it("draws no Restart on a page served to another computer, whose restart the host refuses", async () => {
     shell("0.2.0", "0.2.0");
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, tokenHash: "a".repeat(64), wsPath: "/ws", paired: false, version: "0.2.0" };
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { tokenHash: "a".repeat(64), wsPath: "/ws", paired: false, version: "0.2.0" };
     useStore.setState({ release: read("0.3.0", { installed: "0.3.0" }) });
     await mount({}, "about");
     expect(buttons()).not.toContain(ABOUT_WORDS.restartHost);

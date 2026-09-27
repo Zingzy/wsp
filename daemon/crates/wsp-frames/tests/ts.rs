@@ -24,7 +24,7 @@ fn a_field_the_wire_leaves_out_is_optional_and_never_null() {
     assert!(op.contains(r#"{ "op": "pty.create", cols?: number, rows?: number, shell?: string, "#), "{op}");
     assert!(!op.contains("| null"), "{op}");
     let event = decl::<DaemonEvent>();
-    assert!(event.contains(r#"{ "type": "daemon.hello", root: string, version?: number, }"#), "{event}");
+    assert!(event.contains(r#"{ "type": "pty.exit", ptyId: string, exitCode: number, signal?: number, }"#), "{event}");
     assert!(!event.contains("| null"), "{event}");
 }
 

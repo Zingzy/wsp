@@ -423,6 +423,11 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     /** Running while a held reply waits out the CLI's silence: its tasks are done, and this is the window it has to
      * wake its agent in before that reply is the turn's. */
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    /** Set when the CLI announces its agent again under a held reply: it woke the agent with the tasks' end (or a
+     * message), and that agent's own result is the next word. Nothing times it out: a woken agent running a
+     * foreground command, or thinking, prints nothing for as long as that takes (measured on 2.1.280: the init comes
+     * with the notification, the agent's first line only once its first block is whole). */
+    let woken = false;
     /** What the last error the CLI wrote into the stream itself was for, null where wsp claims no cause for it;
      * undefined until it writes one. */
     let refusalCause: TurnRefusal | null | undefined;
@@ -482,6 +487,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     const heldWithFinished = (result: TurnResult): TurnResult =>
       finishedAfter.length === 0 ? result : { ...result, text: [result.text ?? "", "", ...finishedAfter].join("\n") };
 
+    /** A reply given after a held one, timed from the turn's launch: the CLI times each result from what started
+     * it (the prompt, the wake, a message), so the held reply's figure and the wall time since it are the whole turn.
+     * The CLI's own figure is the floor, since a turn re-opened after a host restart replays its log in a moment. */
+    const spanned = (result: TurnResult): TurnResult => {
+      if (heldReply?.durationMs === undefined) return result;
+      return { ...result, durationMs: heldReply.durationMs + Math.max(Date.now() - heldAt, result.durationMs ?? 0) };
+    };
+
     /** The window the CLI gets to wake its agent in once a held reply's tasks are done. Any line it prints starts
      * the window again, since a CLI that is saying something is about to reply; silence through it means the tasks
      * ended with nobody woken, and the words the agent already gave are the turn's. */
@@ -499,7 +512,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         for await (const raw of stream.lines) {
           // A held reply waiting on nothing but silence: this line is the CLI saying something, so the window it has
           // to wake its agent in starts again.
-          if (heldReply !== undefined && backgroundTasks === 0) armSettle();
+          if (heldReply !== undefined && backgroundTasks === 0 && !woken) armSettle();
           const event = parseLine(raw);
           if (event === undefined) {
             const text = raw.trim();
@@ -549,7 +562,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             backgroundTasks = tasks.length;
             // The runtime reads this to know the turn is working while the agent waits, which holds its idle clock.
             onEvent({ type: "turn.tasks", sessionId: claudeSessionId, running: backgroundTasks });
-            if (heldReply !== undefined && backgroundTasks === 0) armSettle();
+            if (heldReply !== undefined && backgroundTasks === 0 && !woken) armSettle();
             if (backgroundTasks > 0 && settleTimer !== undefined) {
               clearTimeout(settleTimer);
               settleTimer = undefined;
@@ -572,6 +585,11 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               sawInit = true;
               harnessCwd = normalized.cwd;
               shellCwd = normalized.cwd;
+              if (heldReply !== undefined) {
+                woken = true;
+                if (settleTimer !== undefined) clearTimeout(settleTimer);
+                settleTimer = undefined;
+              }
             }
             if (normalized.type === "turn.delta" && normalized.kind === "tool_use" && shellCwd !== undefined && harnessCwd !== undefined) {
               const moved = shellCwdAfter(normalized.toolName, parseInput(normalized.text), shellCwd, harnessCwd);
@@ -587,16 +605,18 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               // again and its reply row written again, and the agent's later words are already in the pane as
               // their own lines.
               if (sawResult) continue;
+              woken = false;
+              const result = spanned(normalized.result);
               if (backgroundTasks > 0) {
                 // The agent replied while the CLI still reports work it started. The turn is not over: ending it
                 // here kills that work mid-write and nothing ever says what came of it, so the reply is kept, the
                 // channel stays open and the stream goes on being read until nothing of the agent's is running.
-                heldReply = normalized.result;
+                heldReply = result;
                 heldAt = Date.now();
                 finishedAfter.length = 0;
                 continue;
               }
-              deliver(normalized.result, normalized.sessionId);
+              deliver(result, normalized.sessionId);
               continue;
             }
             onEvent(normalized);
@@ -614,11 +634,20 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       // has nowhere to land.
       for (const askId of [...pending.keys()]) closeAsk(askId, "cancelled");
       settleAsked("gone");
+      const exitLine = (): string =>
+        streamError ?? harnessExitLine("claude", exitCode, env["PATH"], { reached: sawInit, ...(stream.signalled !== undefined ? { signal: stream.signalled } : {}) });
       if (turnResult === undefined && heldReply !== undefined) {
         // The hold ended with the process. Tasks still in the set were cut with it, which is the wall and every stop
-        // from outside; the words the agent gave stand whichever it was.
+        // from outside; the words the agent gave stand whichever it was. A woken agent was cut before its own reply,
+        // so the turn reads what ended it: the idle rule, the wall, or the process going.
         sawResult = true;
-        turnResult = interruptRequested ? { ...heldReply, status: "interrupted" } : backgroundTasks > 0 ? endedEarly(heldReply, backgroundTasks) : heldWithFinished(heldReply);
+        turnResult = interruptRequested
+          ? { ...heldReply, status: "interrupted" }
+          : woken
+            ? { ...heldReply, status: "failed", error: exitLine() }
+            : backgroundTasks > 0
+              ? endedEarly(heldReply, backgroundTasks)
+              : heldWithFinished(heldReply);
         onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }
       if (turnResult === undefined) {
@@ -627,10 +656,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             ? { ...emptyResult, status: "failed", error: noOutputError(emptyResult, stderrTail) }
             : interruptRequested
               ? { status: "interrupted" }
-              : {
-                  status: "failed",
-                  error: streamError ?? harnessExitLine("claude", exitCode, env["PATH"], { reached: sawInit, ...(stream.signalled !== undefined ? { signal: stream.signalled } : {}) }),
-                };
+              : { status: "failed", error: exitLine() };
         onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }
       onEvent({ type: "session.end", sessionId: claudeSessionId, exitCode, sawResult });

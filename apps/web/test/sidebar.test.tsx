@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, type PlaceView, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, type PlaceView, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
@@ -124,7 +124,7 @@ const PLACES: PlaceView[] = [
 ];
 /** What the dialog makes a workspace of: one project on the computer these tests fork at. */
 const PROJECTS: ProjectView[] = [
-  { id: "pr_1", name: "spoo-landing", computer: "box", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/var/lib/wsp/projects/pr_1/memory", createdAt: "t" },
+  { id: "pr_1", name: "spoo-landing", computer: "box", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/wsp/projects/pr_1/memory", createdAt: "t" },
 ];
 /** What a row calls the provider these tests fork at, through the one rule every surface names a computer by. */
 const BOX_NAME = placeName(PLACES[1]!);
@@ -458,19 +458,19 @@ describe("keyboard navigation", () => {
 describe("Solari out of reach from this computer", () => {
   it("a status whose probe never left this computer puts one muted mono line under the search row, and the line goes when a probe gets out again", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)]), "api");
-    expect(screen.queryByText(PROVIDER_UNREACHED_LINE)).toBeNull();
+    expect(screen.queryByText(MACHINE_UNREACHED_LINE)).toBeNull();
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "reachable", offline: true } }) }));
-    const line = await screen.findByText(PROVIDER_UNREACHED_LINE);
+    const line = await screen.findByText(MACHINE_UNREACHED_LINE);
     expect(line.closest("[data-sidebar-search]")).not.toBeNull();
     expect(line.className).toContain("font-mono");
     expect(line.className).not.toMatch(/border|bg-|badge|chip|destructive|warning|success/);
     expect(rowOf("api").textContent).not.toContain("Unreachable");
     // The line reads once, however many workspaces carry the flag.
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(WEB, { reach: { state: "napping", offline: true } }) }));
-    expect(screen.getAllByText(PROVIDER_UNREACHED_LINE)).toHaveLength(1);
+    expect(screen.getAllByText(MACHINE_UNREACHED_LINE)).toHaveLength(1);
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(WEB) }));
-    await waitFor(() => expect(screen.queryByText(PROVIDER_UNREACHED_LINE)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(MACHINE_UNREACHED_LINE)).toBeNull());
   });
 
   it("keeps the slot under the search row for the host's own two lines, never a workspace's link", async () => {
@@ -488,14 +488,14 @@ describe("Solari out of reach from this computer", () => {
     expect(slot.textContent).not.toContain("Nothing has answered");
     provideTerminals(API.id, null);
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "reachable", offline: true } }) }));
-    expect((await screen.findByText(PROVIDER_UNREACHED_LINE)).closest("[data-sidebar-search]")).not.toBeNull();
+    expect((await screen.findByText(MACHINE_UNREACHED_LINE)).closest("[data-sidebar-search]")).not.toBeNull();
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
   });
 });
 
 describe("a window on another computer while the wsp it shows is asleep", () => {
   const served = (here: boolean) => {
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: here, version: "0.0.0", ...(here ? { wsPort: 7788, tokenHash: "a".repeat(64) } : {}) };
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: here, version: "0.0.0", ...(here ? { tokenHash: "a".repeat(64) } : {}) };
   };
 
   afterEach(() => {

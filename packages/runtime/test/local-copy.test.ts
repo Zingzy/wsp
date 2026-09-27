@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeCopier, LocalBackend, projectStateKey } from "@wsp/engine";
 import { PATH_BOUND_DIR_NAMES } from "@wsp/catalog";
-import { copyPathFor, DAEMON_VERSION, EXIT_CODES, exitClassOf, HERE_PLACE_ID, IN_PLACE_ROAD, inPlaceRecordLine, PORT_BASE_FIRST, PORT_BASE_STEP, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { copyPathFor, DAEMON_VERSION, EXIT_CODES, exitClassOf, HERE_PLACE_ID, PORT_BASE_FIRST, PORT_BASE_STEP, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { COPY_SIZE_LINE_BYTES, createRuntime, NO_COPIER_HERE, type HarnessAdapterContext, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
@@ -295,51 +295,5 @@ describe("the daemon beside this host, before the first copy", () => {
     const its = await bare.rt.projects.add({ source: at });
     await bare.rt.workspaces.create({ project: its.id, name: "one" });
     expect(bare.copier.asks).toHaveLength(1);
-  });
-});
-
-describe("a record of the folder worked in place, which no host writes any more", () => {
-  it("is not served at boot: the host starts, its other workspaces serve, the record's threads are not listed and the log names the record, the folder and the fix", async () => {
-    const root = scratch();
-    const copier = fakeCopier();
-    const { adapter } = telling();
-    const folder = repo();
-    const local: LocalWiring = {
-      backend: new LocalBackend({ root }),
-      execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
-      home: () => join(root, ".claude"),
-      homeDir: root,
-      rootsPath: join(root, "roots"),
-      env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
-      platform: testPlatform(),
-      copier,
-    };
-    // A state an older host wrote: the project, the folder itself as its first workspace, a copy beside it, and a
-    // thread on each.
-    const store = memoryStore();
-    const first = createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter }, local });
-    const project = await first.projects.add({ source: folder });
-    const copy = await first.workspaces.create({ project: project.id, name: "two" });
-    await (await first.sessions.start(copy.id, { prompt: "on the copy" })).finished;
-    await first.close();
-    const inPlace = { ...(await store.get("workspaces", copy.id) as Record<string, unknown>), id: "ws_1nplace0", name: "one", copy: { road: IN_PLACE_ROAD, path: folder, source: folder, base: "", branch: "", carried: "nothing" } };
-    delete (inPlace as { portBase?: number }).portBase;
-    await store.put("workspaces", "ws_1nplace0", inPlace);
-    await store.put("sessions", "ws_1nplace0", { workspaceId: "ws_1nplace0", sessions: [{ id: "s_old", workspaceId: "ws_1nplace0", threadId: "t_old", status: "completed", harness: "claude", startedAt: 1, prompt: "in the folder", turnId: "turn_old" }] });
-
-    const warned: string[] = [];
-    const spy = vi.spyOn(console, "warn").mockImplementation((line: unknown) => void warned.push(String(line)));
-    try {
-      const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter }, local });
-      expect((await rt.workspaces.list()).map(w => w.id)).toEqual([copy.id]);
-      expect((await rt.sessions.list()).map(s => s.workspaceId)).toEqual([copy.id]);
-      await expect(rt.workspaces.get("ws_1nplace0")).rejects.toThrow("no such workspace");
-      expect(warned).toContain(inPlaceRecordLine("ws_1nplace0", folder));
-      // The record is left where it was for the person to move aside: nothing here rewrites their state file.
-      expect(await store.get("workspaces", "ws_1nplace0")).toMatchObject({ id: "ws_1nplace0" });
-      await rt.close();
-    } finally {
-      spy.mockRestore();
-    }
   });
 });

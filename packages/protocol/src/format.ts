@@ -1370,10 +1370,10 @@ export const IDLE_REASON = {
   windowIn: (reason: string | undefined): string | undefined => (reason === undefined ? undefined : (/^idle (\d+ min)$/.exec(reason)?.[1] ?? undefined)),
 } as const;
 
-/** The one line the sidebar puts above the rows while the probes fail before leaving this computer; the rows keep
- * their last word. It names what could not be reached, not the computer: the road out was up and every other name
- * resolved while this one did not (measured 2026-09-07). */
-export const PROVIDER_UNREACHED_LINE = "Solari cannot be reached from this computer";
+/** The one line the sidebar puts above the rows while a probe fails before leaving this computer; the rows keep
+ * their last word. It names neither the computer nor a provider: the road out can be up while one machine's name
+ * does not resolve (measured 2026-09-07), and the probe knows the machine it asked and nothing else. */
+export const MACHINE_UNREACHED_LINE = "A machine cannot be reached from this computer";
 
 /** What a window on another computer says while the wsp it shows has gone quiet: the computer that host runs on is
  * asleep or off, and the workspaces on every other computer keep working. It reads as a fact in the sidebar's own
@@ -1508,14 +1508,6 @@ export function noAdapterLine(harness: string, agents: readonly string[]): strin
  * access; the agent is picked where a thread is opened, so a second one is a second thread. */
 export function threadRunsOnLine(agent: string, asked: string): string {
   return `this thread runs on ${agent}; open a new thread to run ${asked}`;
-}
-
-/** The refusal of a send that names a thread and, beside it, a harness session that is not one of that thread's
- * turns: the named thread is the one the message goes into and its own session is what the turn resumes, so a
- * session of another thread, or one no thread here ran, would put another transcript under this thread's id and
- * read that transcript's access as this thread's. The sentence says back the two ids the caller gave and no more. */
-export function resumeNotOfThreadLine(resume: string, thread: string): string {
-  return `session ${resume} is not a turn of thread ${threadWord(thread)}; a send into a thread resumes that thread's own session`;
 }
 
 /** The refusal of a thread opened on no words: an empty or whitespace task would still start a process and a turn. */
@@ -1794,6 +1786,9 @@ export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
  * person who typed wsp new on a fresh home reads, and a variable named there is neither one of the sixteen words
  * nor true of the other providers. wsp add with no argument prints the words it takes. */
 export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; wsp add <provider> connects one, and wsp init then builds your image on it";
+
+/** The same refusal where no provider can be added at all: what is missing, and the one road that brings it. */
+export const NO_MACHINES_LINE = "this needs a machine wsp starts, and nothing here starts one; wsp add user@host joins a computer of yours that does";
 
 /** What an image build is refused with when no place this host holds runs workspaces: a joined computer whose doctor
  * said yes is such a place, and so is a provider with a key. The init job and the command line beside it both say it. */
@@ -2409,10 +2404,6 @@ export const THIS_COMPUTER = "this computer";
  * here is, a copy of the person's folder on this computer, is named the same way whichever road wrote the record. */
 export const thisComputerLine = (name: string, id: string, folder: string): string => `Workspace ${name} (${id}) is a copy of ${folder} on ${THIS_COMPUTER}; its threads run here, under your own sign-ins.`;
 
-/** What an ssh workspace's computer is, in every sentence and every row that names it: a computer of the person's
- * own that wsp reaches and never runs. The sidebar row prints it on line two, so it is a person's words. */
-export const OVER_SSH = "a computer over ssh";
-
 /** What a place's machine is, in every sentence and every row that names it: a computer of the person's own that
  * dialled this host and holds the link, so wsp drives it with the daemon protocol and never made it. */
 export const JOINED_COMPUTER = "a computer you joined";
@@ -2448,12 +2439,6 @@ export const COPY_WORD = "a copy";
  * row's hover text. The one home for the word, so a row in the app and a cell in the command line's table cannot
  * say two things about one workspace. */
 export const madeOfWord = (_road: CopyRoad): string => COPY_WORD;
-
-/** The one sentence a host logs for a record of a folder worked in place, which no host writes any more: the record
- * is not served, the host starts with the rest, and the sentence names the workspace, the folder and the fix, since
- * nobody reads the old shape and the owner ruled no migration. */
-export const inPlaceRecordLine = (workspaceId: string, folder: string): string =>
-  `workspace ${workspaceId} was recorded as ${folder} worked in place, and every workspace here is a copy now: it is not served, wsp new "<what you are working on>" makes a copy of the project, and the record goes when the state file is moved aside`;
 
 /** What a workspace's copy has for a network, in the same words: its own where the computer gives a copy one, else
  * the computer's own ports, with the port an app that reads PORT binds where the record carries a base, since two
@@ -2804,20 +2789,6 @@ export function noKindLine(kind: string): string {
   return `this host has no ${kind} backend wired, so it serves no ${kind} workspace`;
 }
 
-/** What a road is refused with when the record names no home on its machine: every path a turn runs there is built
- * from it, and the dial that records a workspace refuses a machine that names none, so a record without one is one
- * to make again rather than one to guess a folder for. */
-export function noMachineHomeLine(name: string): string {
-  return `${name} carries no home folder for its machine; add that computer again with wsp add user@host`;
-}
-
-/** What the roads that need a daemon are refused with on a machine reached over ssh: a daemon may well be running
- * there, and this host opens no road to it, so the panes that ride one have nothing to dial. The line names no
- * verb and promises no later try, since neither a person nor the host puts that road back. */
-export function noSshDaemonLine(name: string): string {
-  return `${name} is ${OVER_SSH}, and this host opens no road to a daemon on one, so its terminal, files and ports are not served`;
-}
-
 /** What import is refused with on a kind no road lands a folder on, said before the folder is read. Every kind
  * has a road today; the sentence stands for the next kind added without one, which is what the words table's
  * null import road means. */
@@ -3100,13 +3071,6 @@ export const ACCESS_REFUSED_WORDS = { said: "The turn refused it.", fix: "The ne
 
 /** Those two halves as the one line that slot holds. */
 export const ACCESS_REFUSED_LINE = `${ACCESS_REFUSED_WORDS.said} ${ACCESS_REFUSED_WORDS.fix}`;
-
-/** The one sentence a second workspace on a machine that already carries one is refused with. wsp forks a machine
- * for every workspace it makes and records one for every machine it does not, so one record stands on one machine
- * whatever the kind: this computer, or a machine reached over ssh. */
-export function alreadyRecorded(machine: string, name: string): string {
-  return `${machine} is already the workspace ${name}; one workspace stands on one machine`;
-}
 
 /** The one sentence a workspace on a machine wsp does not run refuses a verb that machine cannot take with. This
  * computer and a machine reached over ssh are not machines wsp forks, pauses or snapshots, so the verbs that move a

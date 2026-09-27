@@ -125,14 +125,14 @@ const BOXES: FakeBox[] = [
       procs: 37,
       address: "10.65.0.6",
       cgroup: "/sys/fs/cgroup/wsp/wsp-busy",
-      upper: "/var/lib/wsp/run/wsp-busy/upper",
+      upper: "/wsp/run/wsp-busy/upper",
     },
   },
   {
     id: "wsp-napping",
     state: "paused",
     labels: { [WSP_LABEL]: "1", [WORKSPACE_LABEL]: "ws_2b7d", [NAME_LABEL]: "beta" },
-    reading: { state: "paused", cpu: 1, memMb: 1024, address: "10.65.0.10", cgroup: "/sys/fs/cgroup/wsp/wsp-napping", upper: "/var/lib/wsp/run/wsp-napping/upper" },
+    reading: { state: "paused", cpu: 1, memMb: 1024, address: "10.65.0.10", cgroup: "/sys/fs/cgroup/wsp/wsp-napping", upper: "/wsp/run/wsp-napping/upper" },
   },
   { id: "wsp-went", state: "gone", labels: { [WSP_LABEL]: "1", [WORKSPACE_LABEL]: "ws_44ae", [NAME_LABEL]: "gamma" } },
 ];
@@ -376,7 +376,7 @@ describe("wsp status on a computer joined as a place", () => {
   it("the workspaces are read again while the watch runs, so a row follows what the computer is doing", async () => {
     joined();
     let send: ((e: DaemonEvent) => void) | undefined;
-    const boxes: FakeBox[] = [{ id: "wsp-busy", state: "running", reading: { state: "running", cpu: 2, memMb: 2048, memBytes: 700 * 1024 * 1024, cgroup: "/sys/fs/cgroup/wsp/wsp-busy", upper: "/var/lib/wsp/run/wsp-busy/upper" } }];
+    const boxes: FakeBox[] = [{ id: "wsp-busy", state: "running", reading: { state: "running", cpu: 2, memMb: 2048, memBytes: 700 * 1024 * 1024, cgroup: "/sys/fs/cgroup/wsp/wsp-busy", upper: "/wsp/run/wsp-busy/upper" } }];
     const daemon = fakeDaemon(out => {
       send = out;
       READINGS(out);

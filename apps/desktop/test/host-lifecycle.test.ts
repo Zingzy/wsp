@@ -17,7 +17,7 @@ import { ensureService, firstLaunch, homeOf, hostTokenMatches, openHost, running
 const PAGE = `<!doctype html>
 <html><head><title>wsp</title></head>
 <body><div id="root"></div>
-<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>
+<script>window.__WSP__ = window.__WSP__ || { token: "" };</script>
 </body></html>
 `;
 
@@ -50,10 +50,10 @@ function closeServer(server: Server | TcpServer): Promise<void> {
   return new Promise(resolve => server.close(() => resolve()));
 }
 
-async function bootOf(url: string): Promise<{ wsPort: number; tokenHash?: string; token?: string } | undefined> {
+async function bootOf(url: string): Promise<{ tokenHash?: string; token?: string } | undefined> {
   const html = await (await fetch(url)).text();
   const m = html.match(/window\.__WSP__ = (\{[^<]*\});<\/script>/);
-  return m ? (JSON.parse(m[1]!) as { wsPort: number; tokenHash?: string; token?: string }) : undefined;
+  return m ? (JSON.parse(m[1]!) as { tokenHash?: string; token?: string }) : undefined;
 }
 
 const digestOf = (token: string): string => createHash("sha256").update(token).digest("hex");
@@ -89,7 +89,7 @@ const ipv6Loopback = await new Promise<boolean>(resolve => {
 
 /** A lock and a token file as a host serving this state file leaves them beside it. */
 function serving(statePath: string, h: HostHandle, over: Record<string, unknown> = {}): void {
-  writeFileSync(join(statePath, "..", "host.lock"), JSON.stringify({ pid: process.pid, port: h.port, wsPort: h.wsPort, startedAt: new Date().toISOString(), ...over }));
+  writeFileSync(join(statePath, "..", "host.lock"), JSON.stringify({ pid: process.pid, port: h.port, startedAt: new Date().toISOString(), ...over }));
   writeFileSync(join(statePath, "..", "host-token"), `${h.authToken}\n`);
 }
 
@@ -101,7 +101,7 @@ function fakeLaunchd(statePath: string, runtime: () => Runtime = testRuntime): {
   let host: HostHandle | undefined;
   const load = async (): Promise<void> => {
     loaded = true;
-    host = await startHost({ runtime: runtime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    host = await startHost({ runtime: runtime(), webDir: fakeWebDir(), port: 0 });
     serving(statePath, host, { startedBy: "service" });
   };
   const run: ServiceRunner = async argv => {
@@ -226,12 +226,13 @@ describe("openHost", () => {
   });
 
   it("says in the app's log when a provider key is only in the shell that launched it, which the service starts without", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-x-fake");
     const lines: string[] = [];
     await open({}, lines);
-    expect(lines.join("\n")).toContain("SOLARI_API_KEY is only in this shell's environment");
+    expect(lines.join("\n")).toContain("ANTHROPIC_API_KEY is only in this shell's environment");
     await launchd.road.run(["launchctl", "bootout", "x"]);
     lines.length = 0;
-    writeFileSync(join(home, ".env"), "SOLARI_API_KEY=slr_live_fake_desktop_key\n");
+    writeFileSync(join(home, ".env"), "ANTHROPIC_API_KEY=sk-ant-x-fake\n");
     await open({}, lines);
     expect(lines.join("\n")).not.toContain("only in this shell");
   });
@@ -262,7 +263,7 @@ describe("openHost", () => {
   });
 
   it("a serving host means no unit written", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
     serving(statePath, existing);
     const session = await open();
     expect(session.url).toBe(`http://127.0.0.1:${existing.port}`);
@@ -435,19 +436,19 @@ describe("openHost", () => {
   it("starts the service rather than attaching to a wsp host on a port no lock beside this state file names", async () => {
     // Any login on this computer can bind a port and serve a page with the boot line in it; the lock beside the
     // state file is what says a host of the owner's is serving, and there is none here.
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
     const session = await open();
     expect(session.port).not.toBe(existing.port);
     expect(launchd.ran.map(argv => argv[1])).toEqual(["bootstrap"]);
   });
 
   it("attaches to the host named in host.lock when its page carries the digest of the token beside this state file, and sends that page nothing", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
     // The page passes through a recorder standing where the lock says the host is, so what the window sent to
     // settle the question is read: a squatter on that port would read the same bytes.
     const seen = await recording(existing.port);
     try {
-      const lock = { pid: process.pid, port: seen.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() };
+      const lock = { pid: process.pid, port: seen.port, startedAt: new Date().toISOString() };
       writeFileSync(join(home, "host.lock"), JSON.stringify(lock));
       writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
 
@@ -466,8 +467,8 @@ describe("openHost", () => {
   });
 
   it("refuses a loopback lock whose page carries another token's digest than the file beside the state, or none, and installs nothing", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
-    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() }));
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, startedAt: new Date().toISOString() }));
     writeFileSync(join(home, "host-token"), "a-token-of-some-other-host\n");
     await expect(open()).rejects.toThrow(/holds .*host\.lock on port \d+ but the page it serves carries another token's digest/);
     expect(launchd.ran).toEqual([]);
@@ -478,7 +479,7 @@ describe("openHost", () => {
     const barePort = await listen(bare);
     try {
       writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
-      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: barePort, wsPort: 0, startedAt: new Date().toISOString() }));
+      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: barePort, startedAt: new Date().toISOString() }));
       await expect(open()).rejects.toThrow(/but the page it serves carries another token's digest/);
     } finally {
       await closeServer(bare);
@@ -490,7 +491,7 @@ describe("openHost", () => {
     const squatter = createServer((_req, res) => res.end("<html>hello</html>"));
     const port = await listen(squatter);
     try {
-      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, wsPort: 0, startedAt: new Date().toISOString() }));
+      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }));
       await expect(open()).rejects.toThrow(/but no wsp host answers there/);
     } finally {
       await closeServer(squatter);
@@ -500,26 +501,26 @@ describe("openHost", () => {
   it.runIf(ipv6Loopback)("dials a loopback lock where its address says that host answers, not this computer's other loopback name", async () => {
     // A host up with --listen ::1 binds a loopback address, so its page carries its token's digest, and it answers
     // there and nowhere else.
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "::1", statePath });
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, listen: "::1", statePath });
     serving(statePath, existing, { address: "::1" });
     expect((await open()).url).toBe(`http://[::1]:${existing.port}`);
   });
 
   it("attaches through the lock alone to a host bound beyond this computer, whose page carries no digest by design", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "0.0.0.0", statePath });
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, listen: "0.0.0.0", statePath });
     // No token file is written and none is asked for: that page inlines no digest, and the lock is the whole reading.
-    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, address: "0.0.0.0", startedAt: new Date().toISOString() }));
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, address: "0.0.0.0", startedAt: new Date().toISOString() }));
     expect((await open()).url).toBe(`http://127.0.0.1:${existing.port}`);
   });
 
   it.runIf(process.getuid !== undefined && process.getuid() !== 0)("refuses a lock naming a process of another login, whatever answers on its port", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
     serving(statePath, existing, { pid: 1 });
     await expect(open()).rejects.toThrow(/but that process is not this login's/);
   });
 
   it("ignores a host.lock whose pid is gone and starts the service", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
     serving(statePath, existing, { pid: deadPid() });
     const session = await open();
     expect(session.port).toBe(launchd.host()!.port);
@@ -543,7 +544,7 @@ describe("the first launch, read off the host", () => {
   });
 
   async function served(runtime: Runtime): Promise<void> {
-    host = await startHost({ runtime, webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    host = await startHost({ runtime, webDir: fakeWebDir(), port: 0 });
     serving(statePath, host);
   }
 

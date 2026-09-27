@@ -242,7 +242,7 @@ const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
 /** What ends a builder this run could not: a record its dead holder left is stale to the next start, which stops it. */
 /** What to do about a machine this computer could not get the provider to kill, whichever road left it: the stop
  * on a signal and the failure that rolled back both end on it, so a person reads one answer for one machine. */
-export const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
+export const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from its provider's console.";
 /** The wizard's last line when the seal failed and its rollback could not get the provider to take the builder: it
  * is still up and still billing, so the id is named here rather than the outro saying it is gone. Its record is
  * kept beside it, so the next run takes up that same builder rather than booting a second one, and the sweep ends
@@ -978,7 +978,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // A person at a terminal gets the app served at the end, --yes or not; --non-interactive says an agent is driving,
   // and off a terminal nobody is here, so neither serves anything. Only a run that serves needs the ports.
   const serves = io.isTTY && opts.nonInteractive !== true && opts.handOff === undefined;
-  let ports: AppPorts = { port: opts.ports.port, wsPort: opts.ports.wsPort };
+  let ports: AppPorts = { port: opts.ports.port };
   if (serves) {
     const chosen = await pickPorts({ ports: opts.ports, statePath: opts.statePath, output: io.output });
     if (chosen === undefined) return { code: 1 };
@@ -1221,7 +1221,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     if (pids.length > 0 || blocking.some(b => b.foreignOwner !== undefined)) {
       listEarlier(blocking, attach);
       if (pids.length > 0) cancel(`Nothing was booted. Another wsp process (pid ${pids.join(", ")}) is using it; wait for it or stop that process, then run wsp init again.`, out);
-      else cancel("Nothing was booted. It belongs to another wsp setup: stop it from there, or from the Solari console if it is yours and forgotten; then run wsp init again.", out);
+      else cancel("Nothing was booted. It belongs to another wsp setup: stop it from there, or from its provider's console if it is yours and forgotten; then run wsp init again.", out);
       return "blocked";
     }
     return { ...(attach !== undefined ? { attach } : {}), stop: blocking };
@@ -1424,7 +1424,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         if (halt.signal.aborted || !isCapRefusal(e) || attempt + 1 >= retry.attempts) throw e;
         // The wait rides the stage's own block rather than a note beside it: a row that only says what the provider
         // last echoed reads as work, and the person cannot tell a queue from a stall.
-        stream.push({ type: "golden.stage", name: GOLDEN_NAME, stage: CAP_WAIT_STAGE, detail: `Solari account at its machine cap; waiting ${Math.round(retry.waitMs / 1000)}s for a slot (${attempt + 1}/${retry.attempts}). Nothing is killed.`, waiting: true });
+        stream.push({ type: "golden.stage", name: GOLDEN_NAME, stage: CAP_WAIT_STAGE, detail: `The account is at its machine cap; waiting ${Math.round(retry.waitMs / 1000)}s for a slot (${attempt + 1}/${retry.attempts}). Nothing is killed.`, waiting: true });
         waiting = true;
         await sleep(retry.waitMs, halt.signal);
         if (halt.signal.aborted) throw e;

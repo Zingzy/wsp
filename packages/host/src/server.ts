@@ -6,9 +6,9 @@ import { isIP, type Socket } from "node:net";
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes, type ProvisionPlan } from "@wsp/engine";
-import { API_UNAUTHORIZED, BOOT_SCRIPT, DEFAULT_PORT, DEVICE_OPS, deviceHeldRefusal, DEFAULT_WS_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, REQUEST_BODY_MAX_BYTES, REQUEST_BODY_NOT_JSON, REQUEST_BODY_TOO_LARGE, REQUEST_NOT_AN_OBJECT, WILDCARD, WS_PATH, authority, crossOriginRefusal, doorPortHeldLine, isLoopback, isObjectFrame, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
+import { BOOT_SCRIPT, DEFAULT_PORT, PAIR_CODE_TTL_MS, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, servedHostname, noSuchPlaceRefusal, recordRestoredLine, peerAddress, relayUrlOf, scopeOf, type BootPayload, type DoctorLineEvent, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, kindForComputer, nameTheProjectLine, copiesFolder } from "@wsp/protocol";
 import { sshHostsIn } from "./ssh-hosts.js";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, threadOf, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, tokenDigest, type AdmittedDevices, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceBackHolder, type PlaceDoctor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type RestartDoor, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { computerDoctor } from "./doctor.js";
 import { advertiseWord, hereUrl, reachAddresses, type HereAt } from "./pairing.js";
 import { NO_PROJECT_YET } from "./verbs.js";
@@ -39,12 +39,10 @@ export interface HostOptions {
   runtime: Runtime;
   /** The built web app: index.html plus its assets. */
   webDir: string;
-  /** HTTP port for the app (0 picks a free one). Default DEFAULT_PORT. */
+  /** The port the app and the runtime's WebSocket are served on (0 picks a free one). Default DEFAULT_PORT. */
   port?: number;
-  /** Port for serveRuntime's WS (0 picks a free one). Default DEFAULT_WS_PORT. */
-  wsPort?: number;
-  /** The address both servers bind. Default LOOPBACK; anything else serves a page that pairs for a device token of
-   * its own. No page on any address carries the host's token, and every JSON route asks for a token. */
+  /** The address the host binds. Default LOOPBACK; anything else serves a page that pairs for a device token of its
+   * own. No page on any address carries the host's token. */
   listen?: string;
   /** The address the person named with --advertise. It leads the addresses a computer you own is told to dial,
    * since somebody who names an address has said which one the other end can reach; what this computer answers on
@@ -55,9 +53,8 @@ export interface HostOptions {
   here?: HereAt;
   /** Auth token for the runtime WS; generated when omitted. */
   authToken?: string;
-  /** Envs baked into a workspace created from the JSON route, given the golden version it forks. */
+  /** Envs baked into a workspace createWorkspace makes, given the golden version it forks. */
   workspaceEnvs?: (golden: GoldenVersion) => Record<string, string>;
-  probeTimeoutMs?: number;
   /** Receives one line per machine a sweep killed, one per running machine the first sweep left alone, and one when a sweep fails;
    * also one per sign-in page opened, per port forwarded, refused or closed, and per frame the runtime refused. */
   log?: (line: string) => void;
@@ -106,11 +103,11 @@ export interface HostDoctorReaders {
   plan?(): Promise<ProvisionPlan | { noRecipe: string }>;
 }
 
-/** The roads to a workspace and its project that the app's routes and wsp init share, so a workspace made without a
+/** The roads to a workspace and its project that the host's handle and wsp init share, so a workspace made without a
  * host is the one the app would have made. */
 export interface WorkspaceRoads {
   /** Forks the golden's head into a new workspace, with the envs and labels the app's own create gives it. The
-   * caller is who asked, so a route reached with a thread's own token is held to what that thread may do. */
+   * caller is who asked, so a thread is held to what that thread may do. */
   createWorkspace(name: string, caller?: Caller, project?: string): Promise<CreatedWorkspace>;
   /** Records a project, the road every workspace starts from: a folder on this computer, or a repo a computer
    * clones when `on` names one. */
@@ -125,7 +122,6 @@ export interface WorkspaceRoads {
 
 export interface HostHandle extends WorkspaceRoads {
   port: number;
-  wsPort: number;
   authToken: string;
   /** Takes one device's token away and cuts the sockets it held, the same road the op takes: what the heartbeat's
    * reconcile of the account's own listing comes through, so a device the account dropped goes as one revoked at
@@ -301,7 +297,7 @@ function describeSpared(m: SparedMachine): string {
   const kind = kindOf(m.labels, m.builder);
   const cost = describeCost(m.rateUsdPerHour, m.ageMs);
   if (m.whose === "foreign") {
-    return `reap: left alone ${m.id}: ${kind} from another wsp setup (owner ${m.owner}), ${describeAge(m.ageMs)}, ${cost}; kill it from the Solari console if it is yours and forgotten`;
+    return `reap: left alone ${m.id}: ${kind} from another wsp setup (owner ${m.owner}), ${describeAge(m.ageMs)}, ${cost}; kill it from its provider's console if it is yours and forgotten`;
   }
   const who = m.whose === "own" ? `${kind} from this setup that no record claims` : `${kind} with no owner`;
   // An own workspace is recorded once its create grace is over; an own builder or smoke fork is killed then.
@@ -339,12 +335,6 @@ async function sweepOrphans(rt: Runtime, log: (line: string) => void, listSpared
   }
 }
 
-class NoGoldenError extends Error {
-  constructor() {
-    super("no image yet; run wsp init first");
-  }
-}
-
 /** `homes` is where each agent keeps its sessions on this computer, what the bundler carries beside a folder. */
 export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, string>>, opts: Pick<HostOptions, "workspaceEnvs"> = {}): WorkspaceRoads & { bundlerFor(source: string): ProjectBundler } {
   // One bundler road for the app's import op and the handle's own: a folder is read and packed the same either way.
@@ -363,7 +353,7 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
       if (project === undefined || (named === undefined && held.length !== 1)) throw new Error(held.length === 0 ? NO_PROJECT_YET : nameTheProjectLine(held.map(p => p.name)));
       const head = goldenHead(await rt.golden.get());
       // A copy of a folder here forks nothing, so it needs no image; every other computer's copy does.
-      if (!head && !copiesFolder(kindForComputer(project.computer))) throw new NoGoldenError();
+      if (!head && !copiesFolder(kindForComputer(project.computer))) throw new Error("no image yet; run wsp init first");
       return rt.workspaces.create(
         {
           project: project.id,
@@ -382,43 +372,6 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
   };
 }
 
-/** The JSON routes by the op each stands for on the socket, so the door a paired device meets here is the door it
- * meets there: a route added later names its op on this table and is held by the same list, and until it does a
- * paired device is refused it by its own name. */
-export const ROUTE_OPS: Readonly<Record<string, string>> = {
-  "GET /api/workspaces": "status.list",
-  "POST /api/workspaces": "workspaces.create",
-};
-
-/** What a caller is refused a route with, or nothing: a computer the person paired is held to the list of ops a
- * device may send, read by the op the route stands for and answered in the sentence the socket answers with. A
- * route with no op of its own is shut to such a device, so a route added later cannot be forgotten open. */
-export function routeRefusal(route: string, caller: Caller | undefined): string | undefined {
-  if (caller !== "paired") return undefined;
-  const op = ROUTE_OPS[route];
-  return op !== undefined && DEVICE_OPS.includes(op) ? undefined : deviceHeldRefusal(op ?? route);
-}
-
-/** A request's body as fields to read, or the status and the sentence the route answers instead: past the cap, no
- * JSON at all, or JSON of another shape. The one reading a route takes a body through, so no route reads a field
- * off a null and none of the three arrives as an exception the catch-all prints back to whoever sent it. */
-async function readJsonBody(req: IncomingMessage): Promise<{ body: Record<string, unknown> } | { status: number; error: string }> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req) {
-    size += (chunk as Buffer).length;
-    if (size > REQUEST_BODY_MAX_BYTES) return { status: 413, error: REQUEST_BODY_TOO_LARGE };
-    chunks.push(chunk as Buffer);
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-  } catch {
-    return { status: 400, error: REQUEST_BODY_NOT_JSON };
-  }
-  return isObjectFrame(parsed) ? { body: parsed } : { status: 400, error: REQUEST_NOT_AN_OBJECT };
-}
-
 /** Where a computer you own is told to dial this host, in the order its link tries them: the address the person
  * named with --advertise first, since somebody who names one has said which one the other end can reach, and what
  * this computer answers on after it, so a word that turns out to be wrong is not the only road back. The named word
@@ -435,7 +388,6 @@ export function doorAddresses(bound: string, port: number, advertise?: string, i
 export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const rt = opts.runtime;
   const authToken = opts.authToken ?? randomBytes(24).toString("base64url");
-  const probeTimeoutMs = opts.probeTimeoutMs ?? 2500;
   const webDir = resolvePath(opts.webDir);
   const log = opts.log ?? (() => {});
 
@@ -445,7 +397,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const address = opts.listen ?? LOOPBACK;
   // Reaching the loopback port is not being the person: another login on this computer reaches it too. The loopback
   // page carries the digest of the token for the shell to compare and never the token; beyond it the page pairs
-  // for a device token first. Every JSON route asks for a token on every address.
+  // for a device token first.
   const boundHere = isLoopback(address);
   let rtServer: RuntimeServer;
   const here: HereAt = opts.here ?? {};
@@ -484,29 +436,13 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const page = (here: boolean): string => {
     const terminalFont = terminalFontOf(opts.recipePath);
     return loadPage(webDir, {
-      ...(here ? { wsPort: rtServer.port, tokenHash: tokenDigest(authToken) } : {}),
+      ...(here ? { tokenHash: tokenDigest(authToken) } : {}),
       wsPath: WS_PATH,
       paired: here,
       version: VERSION,
       ...(terminalFont !== undefined ? { terminalFont } : {}),
       ...(here && opts.statePath !== undefined ? { statePath: opts.statePath } : {}),
     });
-  };
-
-  /** Who a request to the JSON routes is, or nothing when it is nobody: the token in an Authorization header and
-   * nothing else, on the loopback port as on every other, since reaching a port on this computer is what any login
-   * here can do. The runtime server owns the one reading of a token, and a token scoped to a thread names that
-   * thread here exactly as it does on a socket, so the routes are no wider a road into this host than the protocol
-   * is. The browser wsp init let in holds a device token read as the owner, here as on the socket. */
-  const callerOf = async (req: IncomingMessage): Promise<{ caller?: Caller } | undefined> => {
-    const who = await rtServer.authorize(bearerOf(req.headers.authorization));
-    if (who === undefined) return undefined;
-    if (who.kind !== "device" || who.device.here === true) return {};
-    const thread = threadOf(who.device);
-    // A device the person paired is that computer on these routes exactly as it is on a socket: the road is the
-    // host's own word here too, so the rule about what it may start on a workspace of this computer is one rule.
-    if (thread === undefined) return { caller: "paired" };
-    return ownRoad(req, doorSockets) ? { caller: { origin: thread.road, by: thread.by } } : undefined;
   };
 
   const handler = (hereFor: (req: IncomingMessage) => boolean) => (req: IncomingMessage, res: ServerResponse) => {
@@ -517,55 +453,8 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     };
     void (async () => {
       const path = new URL(req.url ?? "/", "http://localhost").pathname;
-      // Before the body is read and before anyone is named: a write asked for by a page at another name changes
-      // nothing here, whatever token it carries.
-      if (req.method !== "GET" && req.method !== "HEAD" && !originAllows(req)) {
-        sendJson(res, 403, { error: crossOriginRefusal(req.headers.origin ?? "", req.headers.host ?? "") });
-        return;
-      }
       if (req.method === "GET" && path === "/") {
         sendPage();
-        return;
-      }
-      const who = path.startsWith("/api/") ? await callerOf(req) : {};
-      if (who === undefined) {
-        sendJson(res, 401, { error: API_UNAUTHORIZED });
-        return;
-      }
-      // Before dispatch, by the op the route stands for: a paired device is held to the same list on both doors.
-      const held = routeRefusal(`${req.method} ${path}`, who.caller);
-      if (held !== undefined) {
-        sendJson(res, 401, { error: held });
-        return;
-      }
-      if (req.method === "GET" && path === "/api/workspaces") {
-        // A listing, not the app's own socket, so it joins the listing doors' run of probes and not the one a
-        // sidebar row's word rides.
-        sendJson(res, 200, { workspaces: await rt.status.list({ probeTimeoutMs, reader: "table" }, who.caller) });
-        return;
-      }
-      if (req.method === "POST" && path === "/api/workspaces") {
-        const read = await readJsonBody(req);
-        if (!("body" in read)) {
-          sendJson(res, read.status, { error: read.error });
-          return;
-        }
-        const body = read.body;
-        const name = typeof body.name === "string" ? body.name.trim() : "";
-        if (!name) {
-          sendJson(res, 400, { error: "a workspace needs a name" });
-          return;
-        }
-        let created: CreatedWorkspace;
-        try {
-          created = await createWorkspace(name, who.caller, typeof body.project === "string" ? body.project : undefined);
-        } catch (e) {
-          if (!(e instanceof NoGoldenError)) throw e;
-          sendJson(res, 409, { error: e.message });
-          return;
-        }
-        const { notice, ...workspace } = created;
-        sendJson(res, 200, { workspace, ...(notice !== undefined ? { notice } : {}) });
         return;
       }
       if (req.method === "GET" && sendAsset(res, webDir, path)) return;
@@ -573,7 +462,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       // naming no route of this host and no file of the bundle is the app itself, which reads the address it opened
       // on. A path carrying an extension or ending in a slash asked for a file that is not there and stays a miss,
       // so a script that moved never answers as a page.
-      if (req.method === "GET" && !path.startsWith("/api/") && extname(path) === "" && !path.endsWith("/")) {
+      if (req.method === "GET" && extname(path) === "" && !path.endsWith("/")) {
         sendPage();
         return;
       }
@@ -688,12 +577,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
           },
         };
 
-  // The runtime answers upgrades of WS_PATH on the server above as well as on its own port, so a client that
-  // reached the app through one forwarded port has the protocol on that same port.
+  // The runtime answers upgrades of WS_PATH on the server above and on the door, and on no port of its own, so the
+  // page and the protocol share one port and a client that reached the app through one forwarded port has both.
   try {
     rtServer = await serveRuntime(rt, {
-      port: opts.wsPort ?? DEFAULT_WS_PORT,
-      host: address,
       attach: [server, ...doorListeners],
       originAllowed: originAllows,
       ownRoad: req => ownRoad(req, doorSockets),
@@ -724,11 +611,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     await relay.close();
     throw e;
   }
-  here.url = hereUrl(address, rtServer.port);
-  bound();
   try {
     page(boundHere);
   } catch (e) {
+    bound();
     await relay.close();
     await rtServer.close();
     throw e;
@@ -740,12 +626,15 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       server.listen(opts.port ?? DEFAULT_PORT, address, resolve);
     });
   } catch (e) {
+    bound();
     await relay.close();
     await rtServer.close();
     throw e;
   }
   const addr = server.address();
   const port = typeof addr === "object" && addr !== null ? addr.port : (opts.port ?? DEFAULT_PORT);
+  here.url = hereUrl(address, port);
+  bound();
 
   // A sweep that outlives its period (a slow provider listing) must not be
   // joined by the next one: two sweeps would race to kill the same machines.
@@ -780,7 +669,6 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
 
   return {
     port,
-    wsPort: rtServer.port,
     authToken,
     revokeDevice: id => rtServer.revokeDevice(id),
     hereCode: async () => (await rt.devices.issue({ now: Date.now(), ttlMs: PAIR_CODE_TTL_MS, here: true })).code,

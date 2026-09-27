@@ -2,7 +2,7 @@
 // What a lab is made of, checked without a host, a build or a browser: the
 // fixtures a tester picks between, the provider and the environment each one
 // needs, the lines a lab prints, and the rules the driver reads a page with.
-import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
+import { CLOUD_ENV, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { TRANSCRIPT_LOADING } from "../src/transcript-words.js";
 import { spawnSync } from "node:child_process";
@@ -190,7 +190,7 @@ describe("the fixtures a lab serves", () => {
   });
 
   it("puts no two workspaces on one machine, since that is a sidebar wsp refuses to make", () => {
-    // The runtime refuses a second workspace on a machine that already carries one (`alreadyRecorded`), and this
+    // The runtime puts no second workspace on a machine that already carries one, and this
     // computer is one machine, so four local rows is a state nobody can reach. A tester read three rows and could
     // not say which computer two of them were on.
     for (const name of FIXTURE_NAMES) {
@@ -740,11 +740,11 @@ describe("what a lab tells the tester who starts it", () => {
   });
 
   it("names the address a machine dials this host at, since without one no thread's tools act as that thread", () => {
-    const argv = hostArgv({ statePath: "/lab/.wsp/state.json", port: 4123, wsPort: 4124, advertise: "http://127.0.0.1:4123" });
+    const argv = hostArgv({ statePath: "/lab/.wsp/state.json", port: 4123, advertise: "http://127.0.0.1:4123" });
     // The machines a lab's forks stand on are this computer, so the address is its own loopback. Without one the
     // runtime hands a turn no token: no opener on a thread a thread opened, no cap, no tree.
     expect(argv.slice(-2)).toEqual(["--advertise", "http://127.0.0.1:4123"]);
-    expect(hostArgv({ statePath: "/lab/.wsp/state.json", port: 4123, wsPort: 4124 })).not.toContain("--advertise");
+    expect(hostArgv({ statePath: "/lab/.wsp/state.json", port: 4123 })).not.toContain("--advertise");
   });
 
   it("starts a host on this computer's own path, not the path the shell that started the lab was given", async () => {
@@ -1146,6 +1146,8 @@ describe("the environment a fixture's host is started with", () => {
   it("tells the stand-in which cloud it is standing in for, and only where a stand-in is serving", () => {
     const forks = fixtureState("ascii-only");
     expect(hostEnv({ home, state: forks, cloud: "box" })[FAKE_AS_ENV]).toBe("box");
+    expect(hostEnv({ home, state: forks, cloud: "box" })[CLOUD_ENV]).toBe("1");
+    expect(hostEnv({ home, state: fixtureState("mac-only") })[CLOUD_ENV]).toBeUndefined();
     // A fixture of this computer's own machines runs under no provider at all, so there is nothing to stand in for.
     expect(hostEnv({ home, state: fixtureState("mac-only"), cloud: "box" })[FAKE_AS_ENV]).toBeUndefined();
   });

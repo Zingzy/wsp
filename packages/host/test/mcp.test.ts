@@ -32,6 +32,7 @@ const HERE_PLACE = hostname().toLowerCase();
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScripts, projectBundler, heldAgent, lastingAgent, scriptedAgent, doneOnlyAgent } from "./verbs-fixture.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 interface Called {
   text: string;
@@ -99,7 +100,7 @@ describe("the MCP server over the host", () => {
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
     rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath) });
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every call that makes one needs a project first; one project here, so
     // new takes the work alone.
     cloud = await projectOn(rt);
@@ -145,7 +146,7 @@ describe("the MCP server over the host", () => {
     handle = undefined;
     rt = createRuntime({ backend, store, adapters, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_mcp_key");
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
   }
 
@@ -157,7 +158,7 @@ describe("the MCP server over the host", () => {
     return rt.projects.add({ source: folder });
   }
 
-  it("offers the verbs as tools, each described", async () => {
+  it.runIf(CLOUD_ON)("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
     expect(tools.map(t => t.name).sort()).toEqual(["agents", "agents_addtools", "bring_back", "computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "restart", "run", "send", "servers", "servers_add", "servers_disable", "servers_enable", "servers_remove", "servers_tools", "setup", "skills", "skills_add", "skills_disable", "skills_enable", "skills_remove", "skills_search", "skills_show", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
@@ -194,7 +195,7 @@ describe("the MCP server over the host", () => {
     for (const t of tools) expect(WSP_SKILL, t.name).toContain(`\`${t.name}\``);
   });
 
-  it("snapshot takes a project image of the workspace as wsp snapshot does, and new with from forks it by that project's name or the snapshot id", async () => {
+  it.runIf(CLOUD_ON)("snapshot takes a project image of the workspace as wsp snapshot does, and new with from forks it by that project's name or the snapshot id", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
     const taken = await call("snapshot", { workspace: "alpha" });
@@ -243,7 +244,7 @@ describe("the MCP server over the host", () => {
     expect((nowhere.structured as { error?: string } | undefined)?.error ?? nowhere.text).toContain(noThreadTargetLine("workspace"));
   });
 
-  it("new and fork take size as <cpu>x<memGb>, which reaches the machine; one the provider does not offer is a tool error naming the list", async () => {
+  it.runIf(CLOUD_ON)("new and fork take size as <cpu>x<memGb>, which reaches the machine; one the provider does not offer is a tool error naming the list", async () => {
     const big = await call("new", { name: "big", size: "2x8" });
     expect(big.isError).toBe(false);
     expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
@@ -256,7 +257,7 @@ describe("the MCP server over the host", () => {
     expect(backend.machines).toHaveLength(2);
   });
 
-  it("a fork the provider refuses at the machine cap is a tool error naming the workspaces holding the slots", async () => {
+  it.runIf(CLOUD_ON)("a fork the provider refuses at the machine cap is a tool error naming the workspaces holding the slots", async () => {
     await call("new", { name: "first" });
     await call("new", { name: "t-cap" });
     const create = backend.create.bind(backend);
@@ -305,7 +306,7 @@ describe("the MCP server over the host", () => {
       ? Object.entries(value).flatMap(([k, v]) => [...(/url$/i.test(k) && !OWN_URL.test(`${at}.${k}`) ? [`${at}.${k}`] : []), ...routeValues(v, `${at}.${k}`)])
       : [];
 
-  it("no tool promises or answers with a route the provider minted: no field ends in Url and nothing carries a provider token", async () => {
+  it.runIf(CLOUD_ON)("no tool promises or answers with a route the provider minted: no field ends in Url and nothing carries a provider token", async () => {
     // A version sealed from a desktop builder forks desktop machines, and only a desktop machine streams a display.
     const head = SEALED_GOLDEN.versions[0]!;
     await store.put("goldens", copyKey("default", "default"), { ...SEALED_GOLDEN, versions: [{ ...head, kind: "desktop" as const }] });
@@ -380,7 +381,7 @@ describe("the MCP server over the host", () => {
     expect(served["access"]?.description).toContain("what a thread on that workspace starts at");
   });
 
-  it("fork makes a sibling from the source's golden version, by name or id, and a task opens its first thread", async () => {
+  it.runIf(CLOUD_ON)("fork makes a sibling from the source's golden version, by name or id, and a task opens its first thread", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
     const plain = await call("fork", { workspace: "alpha" });
@@ -395,7 +396,7 @@ describe("the MCP server over the host", () => {
     expect(sent.structured).toMatchObject({ workspace: expect.objectContaining({ name: "worker" }), turn: { threadId: thread!.threadId, workspaceId: worker.id, harness: "claude", text: "re: build it", outcome: "started" } });
   });
 
-  it("fork with a task whose first turn fails names the minted workspace beside the reason, so a retry does not mint another", async () => {
+  it.runIf(CLOUD_ON)("fork with a task whose first turn fails names the minted workspace beside the reason, so a retry does not mint another", async () => {
     await call("new", { name: "alpha" });
     const failed = await call("fork", { workspace: "alpha", name: "worker", task: "die" });
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
@@ -407,7 +408,7 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["alpha", "worker"]);
   });
 
-  it("fork and run under an agent the host has no adapter for are refused naming the agents it has; no machine is minted or woken", async () => {
+  it.runIf(CLOUD_ON)("fork and run under an agent the host has no adapter for are refused naming the agents it has; no machine is minted or woken", async () => {
     await call("new", { name: "alpha" });
     const refused = await call("fork", { workspace: "alpha", name: "worker", task: "hi", agent: "gpt9" });
     expect(refused).toEqual(failedWith('no adapter registered for harness "gpt9"; agents on this host: claude, codex. Name one of those with --agent.', "usage"));
@@ -419,7 +420,7 @@ describe("the MCP server over the host", () => {
     expect(await rt.sessions.list()).toEqual([]);
   });
 
-  it("an empty or whitespace task or message is refused in words by run, fork and send; no machine is minted or woken and nothing starts", async () => {
+  it.runIf(CLOUD_ON)("an empty or whitespace task or message is refused in words by run, fork and send; no machine is minted or woken and nothing starts", async () => {
     await call("new", { name: "alpha" });
     const first = await call("run", { workspace: "alpha", task: "first" });
     const threadId = (first.structured as { threadId: string }).threadId;
@@ -494,7 +495,7 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list())[0]!.phase).toBe("running");
   });
 
-  it("rebuild puts a new machine under a gone workspace and answers with it; one that still answers is a tool error in the row's own words", async () => {
+  it.runIf(CLOUD_ON)("rebuild puts a new machine under a gone workspace and answers with it; one that still answers is a tool error in the row's own words", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
     expect(await call("rebuild", { workspace: "alpha" })).toEqual(failedWith(goneRoadRefusal("running", "rebuild")));
@@ -533,7 +534,7 @@ describe("the MCP server over the host", () => {
     expect(await store.get("workspaces", alpha!.id)).toBeUndefined();
   });
 
-  it("image_remove without confirm removes nothing and answers with what would go; with confirm it deletes the snapshot and drops the record, and a workspace standing on it refuses", async () => {
+  it.runIf(CLOUD_ON)("image_remove without confirm removes nothing and answers with what would go; with confirm it deletes the snapshot and drops the record, and a workspace standing on it refuses", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
     const golden = await rt.workspaces.snapshot(alpha!.id);
@@ -607,7 +608,7 @@ describe("the MCP server over the host", () => {
     expect(row).toMatchObject({ harnessTitle: "Ticket 411 review", titleSource: "person" });
   });
 
-  it("run and fork take cwd, the folder the turn starts in; without it the workspace's project folder, else none", async () => {
+  it.runIf(CLOUD_ON)("run and fork take cwd, the folder the turn starts in; without it the workspace's project folder, else none", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
     const picked = await call("run", { workspace: "alpha", agent: "codex", task: "write tests", cwd: "/root/work/elsewhere" });
@@ -665,7 +666,7 @@ describe("the MCP server over the host", () => {
     expect(spoo.path).toBe("/root/spoo");
   });
 
-  it("run and fork take model, effort and access, send the first two; a new thread without a model runs the catalog's default and an unlisted value is refused with the list", async () => {
+  it.runIf(CLOUD_ON)("run and fork take model, effort and access, send the first two; a new thread without a model runs the catalog's default and an unlisted value is refused with the list", async () => {
     await call("new", { name: "alpha" });
     const picked = await call("run", { workspace: "alpha", task: "review it", model: "claude-sonnet-5", effort: "low", access: "plan" });
     expect(picked.isError).toBe(false);
@@ -707,7 +708,7 @@ describe("the MCP server over the host", () => {
     expect(claude.starts).toHaveLength(before);
   });
 
-  it("a cwd that is not absolute is refused by run and fork before anything is created or started", async () => {
+  it.runIf(CLOUD_ON)("a cwd that is not absolute is refused by run and fork before anything is created or started", async () => {
     await call("new", { name: "alpha" });
     const relative = await call("run", { workspace: "alpha", task: "look here", cwd: "packages/host" });
     expect(relative.isError).toBe(true);
@@ -919,7 +920,7 @@ describe("the MCP server over the host", () => {
     expect(await call("run", { workspace: "alpha", task: "x", notify: ["me"] })).toEqual(failedWith(NO_SUCH_TURN));
   });
 
-  it("fork with a task and notify me records the first turn's end in the new thread for the person", async () => {
+  it.runIf(CLOUD_ON)("fork with a task and notify me records the first turn's end in the new thread for the person", async () => {
     await call("new", { name: "alpha" });
     const sent = await call("fork", { workspace: "alpha", name: "worker", task: "build it", notify: ["me"] });
     expect(sent.isError).toBe(false);

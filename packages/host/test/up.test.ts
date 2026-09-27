@@ -5,7 +5,7 @@ import { platform, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRuntime, jsonFileStore, STATE_SHAPE_KEY, stateShapeUnreadableLine, stateWrittenByNewerLine, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_VERSION, DEFAULT_PORT, EXIT_CODES, PERSON_HOME_ENV, STATE_SHAPE, type ExecStream, type StateShape } from "@wsp/protocol";
+import { DAEMON_VERSION, DEFAULT_PORT, EXIT_CODES, PERSON_HOME_ENV, STATE_SHAPE, WS_PATH, type ExecStream, type StateShape } from "@wsp/protocol";
 import { BOX_API_URL } from "@wsp/engine";
 import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import { NO_PROJECT_YET } from "../src/verbs.js";
@@ -22,13 +22,14 @@ import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 runsFromItsOwnFolder();
 
 const PAGE = `<!doctype html>
 <html><head><script type="module" crossorigin src="/assets/app.js"></script></head>
 <body><div id="root"></div>
-<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>
+<script>window.__WSP__ = window.__WSP__ || { token: "" };</script>
 </body></html>
 `;
 
@@ -45,6 +46,9 @@ const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexp
 function quietIO(lines: string[] = [], errors: string[] = []): CliIO {
   return { log: l => lines.push(l), error: l => errors.push(l), ask: noPrompt, askSecret: noPrompt };
 }
+
+/** The shape document this build writes into a state file, which a host refuses a file without. */
+const shapeHere = (): StateShape => ({ shape: STATE_SHAPE, ...stateWriterHere(), at: new Date().toISOString() });
 
 describe("wsp up", () => {
   let dir: string;
@@ -80,9 +84,10 @@ describe("wsp up", () => {
     return createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {} });
   }
 
+  /** A state file in this build's shape, unless the case writes a shape document of its own. */
   function stateFile(data: object): void {
     mkdirSync(join(home, "state"), { recursive: true });
-    writeFileSync(statePath, JSON.stringify(data));
+    writeFileSync(statePath, JSON.stringify({ [STATE_SHAPE_KEY]: shapeHere(), ...data }));
   }
 
   /** A state holding this computer's own workspace, running on a project folder: listing the workspaces writes this
@@ -98,7 +103,7 @@ describe("wsp up", () => {
 
   /** The lock of a host that is alive, this process standing in for it, since the pid is what a second start reads. */
   function lockHeldHere(): HostLock {
-    const lock: HostLock = { pid: process.pid, port: 4400, wsPort: 4410, address: "127.0.0.1", startedBy: "up", startedAt: new Date().toISOString() };
+    const lock: HostLock = { pid: process.pid, port: 4400, address: "127.0.0.1", startedBy: "up", startedAt: new Date().toISOString() };
     mkdirSync(join(home, "state"), { recursive: true });
     writeFileSync(join(home, "state", "host.lock"), JSON.stringify(lock));
     return lock;
@@ -116,7 +121,7 @@ describe("wsp up", () => {
   /** The folder a local daemon makes for its token and its manifest, which it removes when it closes. */
   const daemonFolders = (at: string): string[] => readdirSync(at).filter(name => name.startsWith("wsp-local-daemon-"));
 
-  /** The default app port held, so a start with no flags steps to the next pair and has a step to say. A Mac
+  /** The default app port held, so a start with no flags steps to the next port and has a step to say. A Mac
    * already serving a host of its own holds it, and a case that cannot bind it reads that as the same held port:
    * what the case needs is the port taken, not this listener in particular. */
   async function heldDefaultPort(): Promise<() => Promise<void>> {
@@ -136,13 +141,13 @@ describe("wsp up", () => {
   }
 
   async function started(lines: string[]): Promise<HostHandle> {
-    const handle = await up(quietIO(lines), { port: 0, wsPort: 0, statePath, webDir, runtime: fileRuntime() });
+    const handle = await up(quietIO(lines), { port: 0, statePath, webDir, runtime: fileRuntime() });
     if (handle === undefined) throw new Error("up refused");
     handles.push(handle);
     return handle;
   }
 
-  it("serves the app over a state file with a sealed golden and prints the app, runtime and state lines", async () => {
+  it.runIf(CLOUD_ON)("serves the app over a state file with a sealed golden and prints the app, runtime and state lines", async () => {
     stateFile({ goldens: { default: SEALED_GOLDEN } });
     const lines: string[] = [];
     const handle = await started(lines);
@@ -151,7 +156,7 @@ describe("wsp up", () => {
     const tokenPath = join(home, "state", "host-token");
     expect(lines).toEqual([
       `app         http://127.0.0.1:${handle.port}`,
-      `runtime ws  ws://127.0.0.1:${handle.wsPort} (token: ${tokenPath})`,
+      `runtime ws  ws://127.0.0.1:${handle.port}${WS_PATH} (token: ${tokenPath})`,
       `state       ${statePath}`,
       noClaudeKeyNote(false),
     ]);
@@ -176,7 +181,7 @@ describe("wsp up", () => {
     const lines: string[] = [];
     const errors: string[] = [];
     const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home) });
-    const handle = await up(quietIO(lines, errors), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    const handle = await up(quietIO(lines, errors), { port: 0, statePath, webDir, runtime: rt });
     handles.push(handle);
     expect(errors).toEqual([]);
     expect(await rt.workspaces.list()).toEqual([]);
@@ -193,7 +198,7 @@ describe("wsp up", () => {
     });
     const lines: string[] = [];
     const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home) });
-    const handle = await up(quietIO(lines), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    const handle = await up(quietIO(lines), { port: 0, statePath, webDir, runtime: rt });
     if (handle === undefined) throw new Error("up refused a state with a local workspace");
     handles.push(handle);
     expect((await fetch(`http://127.0.0.1:${handle.port}/`)).status).toBe(200);
@@ -358,9 +363,9 @@ describe("wsp up", () => {
     // The same start on this home's own state file: the copy is brought up to date, in one line naming it.
     for (const h of handles.splice(0)) await h.close();
     const own = join(home, "state.json");
-    writeFileSync(own, JSON.stringify({ goldens: { default: SEALED_GOLDEN } }));
+    writeFileSync(own, JSON.stringify({ goldens: { default: SEALED_GOLDEN }, [STATE_SHAPE_KEY]: shapeHere() }));
     const mine: string[] = [];
-    handles.push(await answered(await up(quietIO(mine), { port: 0, wsPort: 0, statePath: own, webDir, runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(own, stateWriterHere()), adapters: {} }) })));
+    handles.push(await answered(await up(quietIO(mine), { port: 0, statePath: own, webDir, runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(own, stateWriterHere()), adapters: {} }) })));
     expect(readFileSync(stale, "utf8")).toBe(WSP_SKILL);
     expect(mine).toContain(skillsRefreshedLine(["~/.claude/skills/wsp/SKILL.md"]));
     expect(mine.filter(l => l.includes("skill"))).toHaveLength(1);
@@ -374,7 +379,7 @@ describe("wsp up", () => {
     localWorkspaceState(folder);
     const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: localWiring(home, process.env, undefined, statePath) });
     runtimes.push(rt);
-    handles.push(await answered(await up(quietIO(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt })));
+    handles.push(await answered(await up(quietIO(), { port: 0, statePath, webDir, runtime: rt })));
 
     // The state file's own folder holds this host's roots file, naming the project its workspace stands on.
     await vi.waitFor(() => expect(existsSync(join(home, "state", "roots"))).toBe(true), { timeout: 5_000 });
@@ -393,7 +398,7 @@ describe("wsp up", () => {
     const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const lines: string[] = [];
-      await expect(up(quietIO(lines), { port: 0, wsPort: 0, statePath, webDir })).rejects.toThrow(stateWrittenByNewerLine(statePath, wrote));
+      await expect(up(quietIO(lines), { port: 0, statePath, webDir })).rejects.toThrow(stateWrittenByNewerLine(statePath, wrote));
       // Whatever a reader built behind this start would have said lands on the log a moment after the throw.
       await new Promise(done => setTimeout(done, 50));
       expect(warned.mock.calls.flat().map(a => String(a)).join("\n")).not.toContain("was written by a newer wsp");
@@ -409,7 +414,7 @@ describe("wsp up", () => {
     // The key is the place wiring's, minted beside the state at its first read, so a start that refuses before it wires places leaves none.
     const wrote: StateShape = { shape: STATE_SHAPE + 1, wsp: "9.9.9", daemon: DAEMON_VERSION + 1, bin: "/Applications/wsp.app/Contents/Resources/bin.js", at: "2026-09-19T05:00:00.000Z" };
     stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: wrote });
-    await expect(up(quietIO(), { port: 0, wsPort: 0, statePath, webDir })).rejects.toThrow(stateWrittenByNewerLine(statePath, wrote));
+    await expect(up(quietIO(), { port: 0, statePath, webDir })).rejects.toThrow(stateWrittenByNewerLine(statePath, wrote));
     expect(existsSync(hostPlaceKeyPath(statePath))).toBe(false);
     expect(readdirSync(join(home, "state"))).toEqual(["state.json"]);
   });
@@ -419,7 +424,7 @@ describe("wsp up", () => {
     // host served it, minted its key and dialled the provider off a file it could not say the shape of.
     stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: 3 });
     // A reading that serves the copy hands back a host, which goes into the teardown rather than staying up.
-    const start = up(quietIO(), { port: 0, wsPort: 0, statePath, webDir }).then(handle => {
+    const start = up(quietIO(), { port: 0, statePath, webDir }).then(handle => {
       handles.push(handle);
       return handle;
     });
@@ -430,13 +435,13 @@ describe("wsp up", () => {
 
   it("a refused start prints the refusal and nothing before it, whichever refusal it is", async () => {
     // The reading this rule is from: a start refused on the shape of its state file printed "Serving on 4401 and
-    // 4411" first, and nothing had bound a port. Every refusal a start throws comes after the ports are picked.
+    // 4411" first, and nothing had bound a port. Every refusal a start throws comes after the port is picked.
     stateFile({ workspaces: {}, [STATE_SHAPE_KEY]: 3 });
     const release = await heldDefaultPort();
     const lines: string[] = [];
     const errors: string[] = [];
     try {
-      // No --port, so the default pair is the one asked for and the held one is stepped over: this is the line a
+      // No --port, so the default port is the one asked for and the held one is stepped over: this is the line a
       // person types beside a host that is already serving.
       expect(await cli(["up", "--state", statePath], quietIO(lines, errors))).not.toBe(0);
       expect(errors).toEqual([stateShapeUnreadableLine(statePath, 3)]);
@@ -453,9 +458,9 @@ describe("wsp up", () => {
     expect((JSON.parse(readFileSync(join(home, "state", "host.lock"), "utf8")) as HostLock).startedBy).toBe("up");
   });
 
-  it("a second wsp up beside a serving host is refused before it picks ports, reads keys or builds anything", async () => {
+  it("a second wsp up beside a serving host is refused before it picks a port, reads keys or builds anything", async () => {
     // The reading this rule is from: the second start printed the lock's sentence and had by then stepped to the
-    // next pair of ports, rewritten the roots file under the live home and started a daemon of its own against it.
+    // next port, rewritten the roots file under the live home and started a daemon of its own against it.
     const folder = localWorkFolder(home);
     localWorkspaceState(folder);
     const lock = lockHeldHere();
@@ -463,10 +468,10 @@ describe("wsp up", () => {
     const lines: string[] = [];
     const errors: string[] = [];
 
-    expect(await cli(["up", "--port", "0", "--ws-port", "0", "--state", statePath], quietIO(lines, errors))).not.toBe(0);
+    expect(await cli(["up", "--port", "0", "--state", statePath], quietIO(lines, errors))).not.toBe(0);
 
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain(`(pid ${lock.pid}) is already serving ${statePath} on port ${lock.port} (ws ${lock.wsPort})`);
+    expect(errors[0]).toContain(`(pid ${lock.pid}) is already serving ${statePath} on port ${lock.port}.`);
     expect(lines.join("\n")).not.toContain("Serving on");
     // The home is as the refusal found it: no roots file this start wrote, no pairing key it minted.
     expect(readdirSync(join(home, "state")).sort()).toEqual(["host.lock", "state.json"]);
@@ -481,7 +486,7 @@ describe("wsp up", () => {
     const children = (): number => process.getActiveResourcesInfo().filter(r => r === "ChildProcess").length;
     const before = children();
 
-    await expect(up(quietIO(), { port: 0, wsPort: 0, statePath, webDir })).rejects.toThrow(`(pid ${lock.pid}) is already serving ${statePath}`);
+    await expect(up(quietIO(), { port: 0, statePath, webDir })).rejects.toThrow(`(pid ${lock.pid}) is already serving ${statePath}`);
 
     // The refusal reaches the caller only once the runtime it was thrown past has been closed: the daemon sync this
     // start fired as it listed the workspaces has run to its end, which its roots file is the trace of, and the
@@ -505,7 +510,7 @@ describe("wsp up", () => {
     writeFileSync(held.unit.path, "a unit this computer's manager holds\n");
     const errors: string[] = [];
     try {
-      expect(await cli(["up", "--port", "0", "--ws-port", "0", "--state", statePath], quietIO([], errors))).toBe(EXIT_CODES.provider);
+      expect(await cli(["up", "--port", "0", "--state", statePath], quietIO([], errors))).toBe(EXIT_CODES.provider);
       expect(errors).toEqual([`${statePath} is served by the ${held.words} ${held.unit.name}, which is not running; wsp up --service --state ${statePath} starts it again`]);
       // Nothing bound and nothing took the lock, which is the whole point: the records stay as the service left them.
       expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
@@ -519,7 +524,7 @@ describe("wsp up", () => {
       // person types reads the lock's own refusal instead, naming the pid and how to stop it.
       vi.stubEnv(STARTED_BY_ENV, "");
       const second: string[] = [];
-      expect(await cli(["up", "--port", "0", "--ws-port", "0", "--state", statePath], quietIO([], second))).not.toBe(0);
+      expect(await cli(["up", "--port", "0", "--state", statePath], quietIO([], second))).not.toBe(0);
       expect(second.join("\n")).toContain(`is already serving ${statePath}`);
       expect(second.join("\n")).not.toContain("which is not running");
     } finally {
@@ -537,7 +542,7 @@ describe("wsp up", () => {
     const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {}, local: wiring });
     runtimes.push(rt);
 
-    handles.push(await answered(await up(quietIO(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt })));
+    handles.push(await answered(await up(quietIO(), { port: 0, statePath, webDir, runtime: rt })));
 
     expect((JSON.parse(readFileSync(join(home, "state", "host.lock"), "utf8")) as HostLock).startedBy).toBe("service");
     expect(STARTED_BY_ENV in process.env).toBe(false);
@@ -551,7 +556,7 @@ describe("wsp up", () => {
       writeFileSync(join(home, ".env"), `SOLARI_API_KEY=slr_live_fake_home_key\nWSP_PROVIDER=box\n`);
       const folder = join(dir, "elsewhere");
       mkdirSync(folder, { recursive: true });
-      writeFileSync(join(folder, "state.json"), JSON.stringify({ workspaces: {} }));
+      writeFileSync(join(folder, "state.json"), JSON.stringify({ workspaces: {}, [STATE_SHAPE_KEY]: shapeHere() }));
       if (beside !== undefined) writeFileSync(join(folder, ".env"), beside);
       // Nothing of a provider in this shell either: the files are the only places a key or a pick is, so a shell
       // that exported one cannot decide a case here.
@@ -568,7 +573,7 @@ describe("wsp up", () => {
 
     /** The start every case here takes: the flags a person types, read into the environment every verb is handed. */
     async function serving(state: string, lines: string[]): Promise<HostHandle> {
-      const handle = await up(quietIO(lines), { ...optsFor({ state, port: "0", "ws-port": "0" }, process.env), webDir });
+      const handle = await up(quietIO(lines), { ...optsFor({ state, port: "0" }, process.env), webDir });
       handles.push(handle);
       return handle;
     }
@@ -583,7 +588,7 @@ describe("wsp up", () => {
       expect(readdirSync(folder)).not.toContain(".env");
     });
 
-    it("takes the pick out of the .env beside that state, and a wired provider gets no such line", async () => {
+    it.runIf(CLOUD_ON)("takes the pick out of the .env beside that state, and a wired provider gets no such line", async () => {
       const { state, dialled } = elsewhere("WSP_PROVIDER=box\n");
       const lines: string[] = [];
       await serving(state, lines);
@@ -598,7 +603,7 @@ describe("wsp up", () => {
 
   it("wsp up refuses a flag it does not answer in and starts nothing", async () => {
     const errors: string[] = [];
-    const code = await cli(["up", "--json", "--port", "0", "--ws-port", "0", "--state", statePath], quietIO([], errors));
+    const code = await cli(["up", "--json", "--port", "0", "--state", statePath], quietIO([], errors));
     expect(code).toBe(3);
     expect(errors[0]).toContain("Unknown option '--json' for wsp up");
     expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
@@ -621,16 +626,15 @@ describe("wsp up", () => {
     expect(initSource).not.toMatch(/startHost\(/);
   });
 
-  it("--port alone derives the websocket port, and every command of the shared parse works on that one pair", () => {
-    expect(optsFor({ port: "4401", state: statePath })).toMatchObject({ port: 4401, wsPort: 4411, named: true });
-    expect(optsFor({ state: statePath })).toMatchObject({ port: 4400, wsPort: 4410, named: false });
-    expect(optsFor({ port: "4401", "ws-port": "9000", state: statePath })).toMatchObject({ port: 4401, wsPort: 9000, named: true });
-    // wsp up, wsp init and the rest read their pair from this one call, so neither can derive it its own way: the
+  it("--port names the one port, and every command of the shared parse reads it from one call", () => {
+    expect(optsFor({ port: "4401", state: statePath })).toMatchObject({ port: 4401, named: true });
+    expect(optsFor({ state: statePath })).toMatchObject({ port: 4400, named: false });
+    // wsp up, wsp init and the rest read their port from this one call, so neither can derive it its own way: the
     // parse calls optsFor once (the second hit is its own declaration) and optsFor is the only reader of the rule.
     const cliSource = readFileSync(new URL("../src/cli.ts", import.meta.url), "utf8");
     expect(cliSource.match(/optsFor\(/g)).toHaveLength(2);
     expect(cliSource.match(/portsAsked\(/g)).toHaveLength(1);
-    expect(cliSource).not.toMatch(/\b(4400|4410)\b/);
+    expect(cliSource).not.toMatch(/\b4400\b/);
   });
 
   it("the state files a taken port is asked about are this run's and this computer's default, each once", () => {

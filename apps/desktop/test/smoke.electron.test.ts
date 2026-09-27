@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, computerNameHere, placeWiring, serve, serviceManagerFor, servingHost, shimPath, startHost, stopService, systemRunner, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { GET_THE_APP_WORD, HOST_WORDS } from "@wsp/protocol";
-import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runtime";
+import { DAEMON_VERSION, GET_THE_APP_WORD, HOST_WORDS, STATE_SHAPE } from "@wsp/protocol";
+import { createRuntime, memoryStore, STATE_SHAPE_KEY, tokenDigest, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
@@ -45,9 +45,13 @@ const GOLDEN = {
   ],
 };
 
+/** A state file's text as this build writes one: the collections and the shape document a host reads a file by. */
+const stateText = (collections: Record<string, unknown>): string =>
+  JSON.stringify({ ...collections, [STATE_SHAPE_KEY]: { shape: STATE_SHAPE, wsp: "smoke", daemon: DAEMON_VERSION, bin: "smoke", at: "2026-09-01T00:00:00.000Z" } });
+
 /** What wsp init leaves behind once a golden is sealed, in the store's on-disk shape. */
 function seedGolden(home: string): void {
-  writeFileSync(join(home, "state.json"), JSON.stringify({ goldens: { default: GOLDEN } }));
+  writeFileSync(join(home, "state.json"), stateText({ goldens: { default: GOLDEN } }));
 }
 
 /** One local workspace record as wsp add and wsp new --local leave it, in the store's on-disk shape: a project of
@@ -77,11 +81,14 @@ function seedLocalWorkspace(home: string): void {
     computer: "here",
     source: { kind: "folder", path: folder },
     path: folder,
+    remote: "",
     defaultBranch: "main",
+    memoryKey: folder.replace(/[^A-Za-z0-9]/g, "-"),
+    memoryDir: join(home, ".claude", "projects", folder.replace(/[^A-Za-z0-9]/g, "-"), "memory"),
     createdAt: LOCAL_WORKSPACE.createdAt,
   };
   const workspace = { ...LOCAL_WORKSPACE, copy: { road: "clonefile", path: `${folder}-first`, source: folder, base: "", branch: "main", carried: "deps-and-config" }, portBase: 3100 };
-  writeFileSync(join(home, "state.json"), JSON.stringify({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
+  writeFileSync(join(home, "state.json"), stateText({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
 }
 
 /** A second workspace of the same project on this computer, beside the seeded one. */
@@ -113,9 +120,9 @@ function seedAccountHost(home: string, alias: string, url: string, token: string
 
 /** The lock and the token file a host serving this home left beside its state, which is what the window reads to
  * attach to it: a page on a port is no reason to, whoever is serving there. */
-function seedServingLock(home: string, at: { port: number; wsPort: number; token: string }): void {
+function seedServingLock(home: string, at: { port: number; token: string }): void {
   mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: at.port, wsPort: at.wsPort, startedAt: new Date().toISOString() }));
+  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: at.port, startedAt: new Date().toISOString() }));
   writeFileSync(join(home, "host-token"), `${at.token}\n`);
 }
 
@@ -155,7 +162,7 @@ function windowAt(app: ElectronApplication, url: RegExp): Promise<Page> {
   );
 }
 
-const PAGE = `<!doctype html><html><head><title>wsp</title></head><body><script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script></body></html>`;
+const PAGE = `<!doctype html><html><head><title>wsp</title></head><body><script>window.__WSP__ = window.__WSP__ || { token: "" };</script></body></html>`;
 
 function fakeWebDir(): string {
   const webDir = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-web-"));
@@ -177,7 +184,7 @@ function testRuntime(seedGolden = false, env: Record<string, string> = {}): Runt
 }
 
 function fixtureHost(): Promise<HostHandle> {
-  return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+  return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
 }
 
 /** A pid that was real a moment ago and is not alive now. */
@@ -359,9 +366,9 @@ async function registerWorker(frame: Frame): Promise<string> {
   return frame.evaluate(() => (window as unknown as { registerWorker(): Promise<string> }).registerWorker());
 }
 
-async function bootOf(page: Page): Promise<{ wsPort: number; tokenHash: string; token?: string }> {
+async function bootOf(page: Page): Promise<{ tokenHash: string; token?: string }> {
   await page.waitForLoadState("domcontentloaded");
-  return page.evaluate(() => (window as unknown as { __WSP__: { wsPort: number; tokenHash: string; token?: string } }).__WSP__);
+  return page.evaluate(() => (window as unknown as { __WSP__: { tokenHash: string; token?: string } }).__WSP__);
 }
 
 interface DesktopWindow {
@@ -598,7 +605,6 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(await win.title()).toBe("wsp");
     expect(boot.tokenHash).toMatch(DIGEST);
     expect(boot.token).toBeUndefined();
-    expect(boot.wsPort).toBeGreaterThan(0);
     expect(appWindows(launched.app)).toHaveLength(1);
 
     // The unit is this launch's own, under its temp home, and it runs the wsp command the app wrote.
@@ -674,11 +680,11 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     // A host over the stub backend with two workspaces, serving the built web app, so the switcher has cards to
     // draw. The app attaches to it rather than starting its own, so nothing here needs a provider key or a golden
     // on disk, and the workspaces are made through the runtime's own road instead of written into the store.
-    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0 });
     await seedProject(existing);
     const api = await existing.createWorkspace("api");
     const web = await existing.createWorkspace("web");
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, wsPort: existing!.wsPort, token: existing!.authToken }));
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     await win.waitForSelector(`[data-row-id='ws:${api.id}']`);
     await win.waitForSelector(`[data-row-id='ws:${web.id}']`);
@@ -991,10 +997,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   });
 
   it("attached to a host of a later release, says so in a notice with the releases page behind its button", async () => {
-    existing = await startHost({ runtime: testRuntime(true, LABS_ON), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(true, LABS_ON), webDir: workspaceAsset("web"), port: 0 });
     const stand = await hostOfVersion(existing, "9.9.9");
     standIn = stand.server;
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, wsPort: existing!.wsPort, token: existing!.authToken }));
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const notice = win.locator("[data-notice]", { hasText: VERSION_LINE });
     await notice.waitFor();
@@ -1012,10 +1018,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   });
 
   it("attached to a host of an earlier release, asks for the app's own host and offers nothing to download", async () => {
-    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0 });
     const stand = await hostOfVersion(existing, "0.0.1");
     standIn = stand.server;
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, wsPort: existing!.wsPort, token: existing!.authToken }));
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const notice = win.locator("[data-notice]", { hasText: VERSION_LINE });
     await notice.waitFor();
@@ -1024,8 +1030,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   });
 
   it("attached to a host of its own release, says nothing at all", async () => {
-    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, wsPort: existing!.wsPort, token: existing!.authToken }));
+    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0 });
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     await win.waitForSelector("[data-slot=sidebar-container]");
     // The page asks the shell for its hosts on load and says the versions once that answers; a second ask answers
@@ -1044,7 +1050,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     vi.stubEnv("SOLARI_API_KEY", FAKE_SOLARI);
     vi.stubEnv("HOME", user);
     vi.stubEnv("WSP_HOME", custom);
-    existing = await serve(quiet, { port: 0, wsPort: 0, statePath: join(custom, "state.json"), webDir: fakeWebDir(), runtime: testRuntime(true) });
+    existing = await serve(quiet, { port: 0, statePath: join(custom, "state.json"), webDir: fakeWebDir(), runtime: testRuntime(true) });
     vi.unstubAllEnvs();
     // The host wrote every file of its own under the home it serves and nothing under the person's own.
     expect(existsSync(join(custom, "host.lock"))).toBe(true);
@@ -1062,10 +1068,10 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
 
   it("a right-click on a workspace row builds the native menu from the workspace registry through the bridge", async () => {
     // A host over the stub backend with one workspace, serving the built web app, so the sidebar has a row to right-click.
-    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
+    existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0 });
     await seedProject(existing);
     const first = await existing.createWorkspace("first");
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, wsPort: existing!.wsPort, token: existing!.authToken }));
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const row = `[data-row-id='ws:${first.id}']`;
     await win.waitForSelector(row);
@@ -1176,7 +1182,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     launched = await launch({ WSP_HOME: undefined }, home => {
       const custom = join(home, "old-home");
       mkdirSync(custom);
-      writeFileSync(join(custom, "host.lock"), JSON.stringify({ pid: deadPid(), port: 1, wsPort: 2, startedAt: "2026-09-01T00:00:00.000Z" }));
+      writeFileSync(join(custom, "host.lock"), JSON.stringify({ pid: deadPid(), port: 1, startedAt: "2026-09-01T00:00:00.000Z" }));
     });
     const page = await windowAt(launched.app, ONBOARDING_URL);
     await page.waitForLoadState("domcontentloaded");

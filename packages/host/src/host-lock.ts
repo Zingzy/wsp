@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One state file, one host: the lock names the process serving it and the
-// ports it bound, so a second host refuses and other local tools find it.
+// port it bound, so a second host refuses and other local tools find it.
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { authority, isWildcard, LOOPBACK, relayUrlOf, type HostShape } from "@wsp/protocol";
+import { authority, isWildcard, LOOPBACK, relayUrlOf, WS_PATH, type HostShape } from "@wsp/protocol";
 import { ownFolder } from "@wsp/own-file";
 import type { HostStarter } from "./host-start.js";
 
 export interface HostLock {
   pid: number;
   port: number;
-  wsPort: number;
   /** The address the host bound, absent on a lock a host of an earlier build wrote, which bound this computer alone. */
   address?: string;
   startedAt: string;
@@ -51,8 +50,6 @@ function isHostLock(v: unknown): v is HostLock {
     typeof v.pid === "number" &&
     "port" in v &&
     typeof v.port === "number" &&
-    "wsPort" in v &&
-    typeof v.wsPort === "number" &&
     "startedAt" in v &&
     typeof v.startedAt === "string"
   );
@@ -93,7 +90,7 @@ function readLock(path: string): HostLock | undefined {
 
 function heldBy(lock: HostLock, statePath: string): Error {
   return new Error(
-    `another wsp host (pid ${lock.pid}) is already serving ${statePath} on port ${lock.port} (ws ${lock.wsPort}). ` +
+    `another wsp host (pid ${lock.pid}) is already serving ${statePath} on port ${lock.port}. ` +
       (lock.startedBy !== undefined ? "wsp down stops it, or point --state at a different file." : "Stop it first, or point --state at a different file."),
   );
 }
@@ -149,11 +146,11 @@ export function hostLogPath(statePath: string): string {
  * apart, since they are two roads in and not two spellings of one: the first is the object the lock and the init
  * hand-over both carry, and the second is a name a relay gave this host, which only a caller that read the relay
  * record can know. */
-export function addressLines(statePath: string, at: { port: number; wsPort: number; address?: string }, publicHostname?: string): string[] {
+export function addressLines(statePath: string, at: { port: number; address?: string }, publicHostname?: string): string[] {
   const bound = at.address ?? LOOPBACK;
   return [
     `app         http://${authority(bound, at.port)}`,
-    `runtime ws  ws://${authority(bound, at.wsPort)} (token: ${hostTokenPath(statePath)})`,
+    `runtime ws  ws://${authority(bound, at.port)}${WS_PATH} (token: ${hostTokenPath(statePath)})`,
     stateLine(statePath),
     ...(publicHostname !== undefined ? [publicAddressLine(publicHostname)] : []),
   ];
@@ -203,9 +200,9 @@ export function refuseIfServed(lockPath: string, statePath: string): void {
   if (held !== undefined && pidAlive(held.pid)) throw heldBy(held, statePath);
 }
 
-/** Seeded with the requested ports so a refusal during startup can name them;
- * rewritten with the bound ports once the host is up. */
-export function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number; address?: string; startedBy?: HostStarted }): HostLock {
+/** Seeded with the requested port so a refusal during startup can name it;
+ * rewritten with the bound port once the host is up. */
+export function takeLock(lockPath: string, statePath: string, ports: { port: number; address?: string; startedBy?: HostStarted }): HostLock {
   refuseIfServed(lockPath, statePath);
   const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
   // The state file, its blobs and the host token sit here, so the folder is the owner's before the lock is taken.

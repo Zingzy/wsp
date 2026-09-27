@@ -4,10 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV } from "@wsp/protocol";
-import { BoxBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, landsBytes, type MachineBackend } from "@wsp/engine";
+import { BoxBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, landsBytes, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { keysOf } from "../src/env-keys.js";
 import { BOX_KEY_ENV, PROVIDER_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, isPlace, placeIdOf, placeProviders, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderModule } from "../src/providers.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 /** A computer's environment as the rows read it: the provider key rides in it under the row's own variable, which
  * is where every layer a key is read through puts it. */
@@ -17,7 +18,7 @@ const pick = (keys: Record<string, string> = {}, env: Record<string, string | un
 });
 
 describe("provider modules", () => {
-  it("takes the module the keys name and nothing else when nothing is said", () => {
+  it.runIf(CLOUD_ON)("takes the module the keys name and nothing else when nothing is said", () => {
     expect(providerModule(pick()).id).toBe("none");
     expect(providerBackendFor(pick())).toBeInstanceOf(NoProviderBackend);
     expect(providerModule(pick({ solari: "sk-ant-x" })).id).toBe("solari");
@@ -30,7 +31,7 @@ describe("provider modules", () => {
     expect(providerEnvWith({}, { [FAKE_AS_ENV]: "solari" })).toMatchObject({ [FAKE_AS_ENV]: "solari" });
   });
 
-  it("takes Box when a person names it, key or no key, and hands the backend the key the environment holds", () => {
+  it.runIf(CLOUD_ON)("takes Box when a person names it, key or no key, and hands the backend the key the environment holds", () => {
     expect(providerModule(pick({}, { WSP_PROVIDER: "box" })).id).toBe("box");
     expect(providerModule(pick({ solari: "sk-x" }, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" })).id).toBe("box");
     expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" }))).toBeInstanceOf(BoxBackend);
@@ -66,30 +67,30 @@ describe("provider modules", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("every row is reachable and the last one answers for any computer", () => {
-    expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["box", "fake", "solari", "none"]);
+  it.runIf(CLOUD_ON)("every row is reachable and the last one answers for any computer", () => {
+    expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["fake", "box", "solari", "none"]);
     expect(PROVIDER_MODULES.at(-1)!.selects(pick())).toBe(true);
   });
 
-  it("every registered backend, and the two kinds outside the registry, declares a pause mode and a lifecycle together or neither, and says on its own whether it copies a disk and replaces a machine", () => {
+  it.runIf(CLOUD_ON)("every registered backend, and the local kind outside the registry, declares a pause mode and a lifecycle together or neither, and says on its own whether it copies a disk and replaces a machine", () => {
     // Built the way the host builds them, with fake picks: a key that looks fake, a daemon nothing dials.
     const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { BOX_API_KEY: "box_x" }))] as const);
-    const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })], ["ssh", new SshBackend()]];
+    const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })]];
     const modes = Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.pauseMode]));
-    expect(modes).toEqual({ box: "disk", solari: "memory", fake: "memory", none: undefined, local: undefined, ssh: undefined });
+    expect(modes).toEqual({ box: "disk", solari: "memory", fake: "memory", none: undefined, local: undefined });
     for (const [, b] of all) expect(b.capabilities.pauseMode === undefined || ["memory", "disk"].includes(b.capabilities.pauseMode)).toBe(true);
     // The runtime reads the budgets only where a pause exists, so the two are declared together or not at all.
     for (const [id, b] of all) expect([id, b.lifecycle !== undefined]).toEqual([id, b.capabilities.pauseMode !== undefined]);
     // Which providers copy a machine's disk into an image, the one fact the snapshot verb reads: a fork that boots
     // cold is still snapshotted, so this row is its own and never liveCloneForks.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false });
     // Which life a copy may be taken from is each provider's own row: Solari refuses a machine that was resumed,
     // and a box's named snapshot reads the disk as it stands.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.snapshotsAnyLife]))).toEqual({ box: true, solari: false, fake: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.snapshotsAnyLife]))).toEqual({ box: true, solari: false, fake: true, none: false, local: false });
     // Which providers stand a fresh machine in for one a workspace is on, the fact the rebuild and the image move
     // read. Each verb has its own row here, so a provider added tomorrow answers for every road rather than being
     // read off a neighbour's flag.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.replacesMachine]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.replacesMachine]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false });
     for (const [, b] of all) if (b.lifecycle !== undefined) {
       expect(b.lifecycle.budgets.wakeAttempts).toBeGreaterThanOrEqual(1);
       expect(b.lifecycle.budgets.daemonAnswersMs).toBeGreaterThan(0);
@@ -100,7 +101,7 @@ describe("provider modules", () => {
     expect(optsFor({ state: "/tmp/wsp-providers/state.json", provider: "box" }).providerEnv).toMatchObject({ WSP_PROVIDER: "box" });
   });
 
-  it("a host told which provider to fork on holds that module, and a key saved later swaps inside the same words", async () => {
+  it.runIf(CLOUD_ON)("a host told which provider to fork on holds that module, and a key saved later swaps inside the same words", async () => {
     const rt = makeRuntime({}, "/tmp/wsp-providers/state.json", goldenRecipe({}), { WSP_PROVIDER: "box", [BOX_KEY_ENV]: "box_x" });
     try {
       const held = providerSlotOf(rt)!.current();
@@ -117,7 +118,7 @@ describe("provider modules", () => {
     }
   });
 
-  it("a key is checked against its own provider, whatever this computer forks on", () => {
+  it.runIf(CLOUD_ON)("a key is checked against its own provider, whatever this computer forks on", () => {
     // The words a run picks a provider out of are not the words a typed key is checked under: a person typing a
     // cloud key on a computer that forks containers is asking about the key.
     expect(providerModule(pick({ solari: "slr_live_fake" })).id).toBe("solari");
@@ -126,7 +127,7 @@ describe("provider modules", () => {
     expect(providerModule(providerEnvWithKey({ WSP_PROVIDER: "box" }, "box_fake")).id).toBe("box");
   });
 
-  it("a key saved for a provider by name goes under that row's variable and leaves the wired provider alone", () => {
+  it.runIf(CLOUD_ON)("a key saved for a provider by name goes under that row's variable and leaves the wired provider alone", () => {
     // The app's Connect a provider names which provider the key is for, so a person connecting one provider on a
     // computer set up for another is not silently saving their key under the other one's variable.
     expect(providerKeySet({}, "ascii_live_fake", "box")).toEqual({ [BOX_KEY_ENV]: "ascii_live_fake" });
@@ -145,7 +146,7 @@ describe("provider modules", () => {
     expect(providerKeySet({}, "x", "nowhere")).toBeUndefined();
   });
 
-  it("every provider a key can be saved for is read off the table, each under the variable its own row names", () => {
+  it.runIf(CLOUD_ON)("every provider a key can be saved for is read off the table, each under the variable its own row names", () => {
     expect(providerKeyRows()).toEqual({ box: BOX_KEY_ENV, solari: SOLARI_KEY_ENV });
   });
 
@@ -161,7 +162,7 @@ describe("provider modules", () => {
     for (const m of PROVIDER_MODULES) for (const name of m.envNames) expect(providerEnvNames()).toContain(name);
   });
 
-  it("the pick rides the same layers as the keys: the word wsp add wrote in a file is read, the shell and the line in front of it", () => {
+  it.runIf(CLOUD_ON)("the pick rides the same layers as the keys: the word wsp add wrote in a file is read, the shell and the line in front of it", () => {
     const beside = { WSP_PROVIDER: "box" };
     // The layers as a host reads them: the environment it started in, its folder's .env, then the file beside its
     // state. A word written into that file is the pick, which is what wsp add's own sentence promises.
@@ -176,7 +177,7 @@ describe("provider modules", () => {
     expect(providerEnvWith({}, {}, [{}, {}, { WSP_PROVIDER: "" }])[PROVIDER_ENV]).toBeUndefined();
   });
 
-  it("the environment a provider is picked out of carries every registered row's key, taken from the first layer that holds it", () => {
+  it.runIf(CLOUD_ON)("the environment a provider is picked out of carries every registered row's key, taken from the first layer that holds it", () => {
     const layers: Record<string, string>[] = [{ WSP_PROVIDER: "box" }, { [BOX_KEY_ENV]: "from-cwd", [SOLARI_KEY_ENV]: "" }, { [BOX_KEY_ENV]: "from-home", [SOLARI_KEY_ENV]: "solari-from-home" }];
     const env = providerEnvWith({}, layers[0]!, layers);
     // Every variable a row declares, and each from the first layer with something in it: an empty line is no key.
@@ -188,19 +189,19 @@ describe("provider modules", () => {
     expect(keysOf({ [SOLARI_KEY_ENV]: "slr_live_fake", [BOX_KEY_ENV]: "box_fake", ANTHROPIC_API_KEY: "sk-ant-x-fake" })).toEqual({ anthropic: "sk-ant-x-fake" });
   });
 
-  it("a row that reads a key declares the words its screen is titled with, and a row that reads none declares neither", () => {
+  it.runIf(CLOUD_ON)("a row that reads a key declares the words its screen is titled with, and a row that reads none declares neither", () => {
     // What the key screen is titled and what it says to set are the row's own, declared together: a row with a
     // variable and no words for it would open a screen titled with a shell variable.
     expect(PROVIDER_MODULES.map(m => [m.id, m.keyEnv, m.keyName])).toEqual([
-      ["box", BOX_KEY_ENV, "Box API key"],
       ["fake", undefined, undefined],
+      ["box", BOX_KEY_ENV, "Box API key"],
       ["solari", SOLARI_KEY_ENV, "Solari API key"],
       ["none", undefined, undefined],
     ]);
     for (const m of PROVIDER_MODULES) expect([m.id, m.keyEnv === undefined]).toEqual([m.id, m.keyName === undefined]);
   });
 
-  it("the places a copy of the image can be built at are the providers this computer is set up for, each once", () => {
+  it.runIf(CLOUD_ON)("the places a copy of the image can be built at are the providers this computer is set up for, each once", () => {
     // Named without its key is not added: a computer nobody had typed a key on listed the row anyway, which New
     // workspace then priced at the wired provider's rates.
     expect(placeProviders({ WSP_PROVIDER: "box" }).map(m => m.id)).not.toContain("box");
@@ -218,7 +219,7 @@ describe("provider modules", () => {
     expect(ids).toEqual(PROVIDER_MODULES.filter(m => ids.includes(m.id)).map(m => m.id));
   });
 
-  it("the table a host builds copies through answers the wired place with the runtime's own backend and every other with its module's", () => {
+  it.runIf(CLOUD_ON)("the table a host builds copies through answers the wired place with the runtime's own backend and every other with its module's", () => {
     const wired = { id: "box" };
     const env: Record<string, string> = { WSP_PROVIDER: "box", [BOX_KEY_ENV]: "box_fake", [SOLARI_KEY_ENV]: "slr_live_fake" };
     const own = new BoxBackend({ apiKey: "box_fake" });
@@ -285,7 +286,7 @@ describe("provider modules", () => {
     expect(providerPlaces(() => "solari", own, () => both).list().filter(id => id === "solari")).toEqual(["solari"]);
   });
 
-  it("the row a key typed here is put to is the picked one, or the one a key alone would wire", () => {
+  it.runIf(CLOUD_ON)("the row a key typed here is put to is the picked one, or the one a key alone would wire", () => {
     // Wired to a provider that reads a key: that row's variable, whatever else this computer holds.
     expect(providerKeyRow({ WSP_PROVIDER: "box" })?.keyEnv).toBe(BOX_KEY_ENV);
     expect(providerKeyRow({ WSP_PROVIDER: "box", [SOLARI_KEY_ENV]: "slr_live_fake" })?.keyEnv).toBe(BOX_KEY_ENV);
@@ -295,7 +296,7 @@ describe("provider modules", () => {
     expect(providerKeyRow({ WSP_PROVIDER: "fake" })).toBeUndefined();
   });
 
-  it("stamps a stand-in's machines with the provider it stands in for, so no row reads the stand-in's own word", () => {
+  it.runIf(CLOUD_ON)("stamps a stand-in's machines with the provider it stands in for, so no row reads the stand-in's own word", () => {
     // A harness serving a fixture of one cloud's machines says which cloud, and every row about those machines
     // reads it: a tester met "fake" where a person reads which provider they are paying.
     expect(wiredProviderId({ WSP_PROVIDER: "fake", [FAKE_AS_ENV]: "solari" })).toBe("solari");

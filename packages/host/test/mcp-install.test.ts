@@ -16,6 +16,7 @@ import { shimPath } from "../src/shim.js";
 import { noHostServingLine } from "../src/verbs.js";
 import { SKILL_NAME, WSP_SKILL } from "../src/skill.js";
 import { VERSION } from "../src/version.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 /** wsp run from a checkout: node given the bundle's path, and no wsp on PATH is that file. */
 const PROC: RunningWsp = { execPath: "/opt/node/bin/node", execArgv: ["--disable-warning=ExperimentalWarning"], argv: ["/opt/node/bin/node", "/opt/wsp/dist/bin.js", "mcp", "install"], version: "0.1.2", PATH: "/usr/bin:/bin" };
@@ -241,7 +242,7 @@ describe("installing the MCP server for a local agent", () => {
     expect(agentPage()).toContain("--json");
   });
 
-  it("--agent belongs to mcp install alone, a command with no JSON to print refuses --json, and mcp --help says its own usage", async () => {
+  it.runIf(CLOUD_ON)("--agent belongs to mcp install alone, a command with no JSON to print refuses --json, and mcp --help says its own usage", async () => {
     // Which shared-parse commands print JSON is the command table's fact: init prints each sign-in hand-off as one
     // object per line and takes the flag; recipe parses its own flags and prints its table as one object.
     expect(PROSE_COMMANDS).toEqual([

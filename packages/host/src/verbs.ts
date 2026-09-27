@@ -275,6 +275,8 @@ import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
 import type { RelayTerminal } from "./signin-relay.js";
 import { gitRootOf } from "./repo-root.js";
+import { CLOUD_ON } from "./cloud.js";
+import { cloudText } from "./skill.js";
 import { dialAddress, heldOrStarted, hostTokenFor, hostTokenPath, POLL_MS, SERVICE_WAIT_MS, servingHost } from "./host-lock.js";
 import type { HostStarter } from "./host-start.js";
 import { addressNotPairedLine, aimAddress, aimHolds, aimName, aimedHost, deviceRefusedLine, dialWindowMs, hostSideOnlyFix, hostSideOnlyLine, noAnswerRefusal, noAnswerWithin, READ_THE_HOSTS, stateIgnoredLine, wsUrlOf, wspHome, writeHost, type HostAim, type HostPick } from "./hosts.js";
@@ -350,7 +352,7 @@ export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim 
   if (lock === undefined) throw new Error(noHostServingLine(statePath));
   const token = hostTokenFor(statePath);
   if (token === undefined) throw authRefusal(`the host's token file is missing: ${hostTokenPath(statePath)}`);
-  return { url: `ws://${authority(dialAddress(lock), lock.wsPort)}`, token };
+  return { url: wsUrlOf(`http://${authority(dialAddress(lock), lock.port)}`), token };
 }
 
 /** Where the wsp command's forwarder dials for a line aimed at the host serving this state file on this computer:
@@ -881,6 +883,12 @@ export interface CliVerb {
   run(ctx: VerbContext): Promise<number>;
   tool: Tool;
   readsHere?: string;
+  /** Only means something on a cloud: with none registered the line prints on no page, its tool is not served, and
+   * typing it is refused by the flag. */
+  cloud?: true;
+  /** The flags that only mean something on a cloud, each named as the tool's input is too: with none registered they
+   * leave the verb's table, usage and tool, and typing one is refused by the flag. */
+  cloudFlags?: readonly string[];
 }
 
 /** A verb the tool door alone offers, with why the command line has no such line. */
@@ -1914,13 +1922,10 @@ export async function notifyOf(client: HostClient, refs: readonly string[]): Pro
 
 /** The start a message to an existing thread makes: the thread named to the runtime, which resumes its latest turn
  * or, on a thread whose harness never announced a session, runs the message as its first turn; under the thread's own
- * agent, with any pick named for this turn. A row from before threads had ids resumes by its session, and one with
- * neither is refused: a start naming nothing would open a new thread in silence. */
+ * agent, with any pick named for this turn. */
 export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {}, images: readonly string[] = [], elsewhere = false): Record<string, unknown> {
-  if (thread.threadId === undefined && thread.claudeSessionId === undefined) throw new Error(`thread ${thread.id} has no session to resume yet`);
-  const target = thread.threadId !== undefined ? { thread: thread.threadId } : { resume: thread.claudeSessionId };
   const attachments = imagesFrom(images, elsewhere);
-  return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, ...target, ...(attachments.length > 0 ? { attachments } : {}), ...picksOf(picks) };
+  return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, thread: thread.threadId ?? thread.id, ...(attachments.length > 0 ? { attachments } : {}), ...picksOf(picks) };
 }
 
 /** A reply the protocol schema refuses: the host process predates or postdates this command's build. */
@@ -3111,11 +3116,12 @@ const AgentsOnIn = z.string().optional().describe("the computer to read, by the 
 const AGENTS_ON_WORDS = "the computer to read, by the name wsp computers shows; this computer without it, and a workspace names its own";
 const AGENTS_READ_WORDS = "Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.";
 
-export const VERBS: readonly Verb[] = [
+/** Every verb, the cloud's among them; VERBS below is the table this process answers. */
+export const ALL_VERBS: readonly Verb[] = [
   {
     name: "computers",
     usage: "wsp computers",
-    about: "your computers: this Mac, each box you added and each cloud account, with what each has, whether it is connected, how many workspaces it holds, what runs there against its cap and what each cloud spent today",
+    about: "your computers: this Mac, each box you added<!-- cloud --> and each cloud account<!-- /cloud -->, with what each has, whether it is connected, how many workspaces it holds and what runs there against its cap<!-- cloud -->, and what each cloud spent today<!-- /cloud -->",
     page: "front",
     options: {},
     run: async ctx => {
@@ -3126,7 +3132,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on, each box joined to it and each cloud account. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now; a cloud row carries its hourly rate. Every row carries its cap, threads at once on a computer and machines at once and spend per day on a cloud (the number the person set, else one thread per 2.5 GB of memory up to its cores, and 3 machines and $10 a day), and running, the threads running there now on a computer or the machines holding a slot on a cloud; a row whose running meets its cap is full. spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
+        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on<!-- cloud -->, each box joined to it and each cloud account<!-- /cloud --><!-- no cloud --> and each box joined to it<!-- /no cloud -->. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now<!-- cloud -->; a cloud row carries its hourly rate<!-- /cloud -->. Every row carries its cap, threads at once on a computer<!-- cloud --> and machines at once and spend per day on a cloud<!-- /cloud --> (the number the person set, else one thread per 2.5 GB of memory up to its cores<!-- cloud -->, and 3 machines and $10 a day<!-- /cloud -->), and running, the threads running there now on a computer<!-- cloud --> or the machines holding a slot on a cloud<!-- /cloud -->; a row whose running meets its cap is full.<!-- cloud --> spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on.<!-- /cloud --> A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
       input: {},
       output: { computers: z.array(PlaceView), spend: z.array(PlaceSpend) },
       call: async (_args, deps) => asJson(await readComputers(await deps.client())),
@@ -3815,6 +3821,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "new",
+    cloudFlags: ["from"],
     usage: 'wsp new [<project>] "<what you are working on>" [--from <project image>] [--size <cpu>x<memGb>] [--engine] [--spawn on|off] [--max-machines <n>] [--max-depth <n>]',
     about: "a workspace: a copy of the project's computer with the project inside, named by the work; with one project the name of it is not needed, and --engine gives the copy the computer's Docker or podman through a socket that sees its own containers alone",
     page: "front",
@@ -3829,7 +3836,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "A workspace for one piece of work: a copy of the project's computer with the project inside, named by the work. The project decides where it lands, so nothing else says where. On the computer the app runs on the workspace is a copy of the project's folder beside it, with a port of its own. With from, it forks a project image instead of the computer's own image head.",
+        "A workspace for one piece of work: a copy of the project's computer with the project inside, named by the work. The project decides where it lands, so nothing else says where. On the computer the app runs on the workspace is a copy of the project's folder beside it, with a port of its own." + (CLOUD_ON ? " With from, it forks a project image instead of the computer's own image head." : ""),
       input: {
         project: z.string().optional().describe("the project this work is on, by the name or the id projects lists; needed once you have more than one project"),
         name: z.string().describe("what you are working on, which is the workspace's name and what run and every other verb take"),
@@ -3901,6 +3908,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "snapshot",
+    cloud: true,
     usage: "wsp snapshot <workspace>",
     about: "a project image of the workspace: your image plus the project as it is now, ready to fork",
     page: "agent",
@@ -3921,6 +3929,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "fork",
+    cloud: true,
     usage: 'wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>] [--send "<task>" [run\'s flags]]',
     about: "a new machine from the source's image version, not a copy of its live disk; --size as new's",
     page: "agent",
@@ -4055,6 +4064,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "rebuild",
+    cloud: true,
     usage: "wsp rebuild <workspace>",
     about: "replaces a gone workspace's machine from its image and prints the state of the new one",
     page: "app",
@@ -4102,6 +4112,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "image build",
+    cloud: true,
     usage: "wsp image build <place> [--force]",
     about: "builds this host's image at a place from the record, its sign-ins coming from the vault and no sign-in run again",
     page: "agent",
@@ -4126,6 +4137,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "image export",
+    cloud: true,
     usage: "wsp image export <file>",
     about: "writes the image record and your sign-ins to one encrypted file, sealed to a passphrase you type",
     page: "agent",
@@ -4143,6 +4155,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "image move",
+    cloud: true,
     usage: "wsp image move <workspace>",
     about: "moves the workspace onto the newest version of its image and prints what of the image's own files it kept",
     page: "app",
@@ -4172,6 +4185,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "image remove",
+    cloud: true,
     usage: "wsp image remove <snapshot id> [--yes]",
     about: "deletes a project image's snapshot at the provider and drops its record; refused while a workspace stands on it",
     page: "app",
@@ -4545,7 +4559,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "The folders directly inside one folder on the person's own computer, or on a box they added, one level at a time, as the app's import dialog browses them: each folder's absolute path, whether git tracks it, and how many hidden ones the level holds. Browse this to name a folder for import instead of guessing a path. The roots are that computer's home folder and the folder of every project on it; a path outside those is refused, and folder absent lists the home folder. A cloud account keeps no computer to browse and is refused. Folders only: no file is named and nothing is read.",
+        "The folders directly inside one folder on the person's own computer, or on a box they added, one level at a time, as the app's import dialog browses them: each folder's absolute path, whether git tracks it, and how many hidden ones the level holds. Browse this to name a folder for import instead of guessing a path. The roots are that computer's home folder and the folder of every project on it; a path outside those is refused, and folder absent lists the home folder.<!-- cloud --> A cloud account keeps no computer to browse and is refused.<!-- /cloud --> Folders only: no file is named and nothing is read.",
       input: {
         folder: z.string().optional().describe("the folder to list, absolute and inside the roots; absent lists the home folder"),
         hidden: z.boolean().optional().describe("true lists the hidden folders too, which are otherwise only counted"),
@@ -4562,7 +4576,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "setup",
     usage: "wsp setup",
-    about: "the cloud setup on this host as the app's Set up cloud machines modal reads it: which keys are held (never their values), the agents here, what a machine costs, and the init job's phase, rows and progress when one runs or ran",
+    about: "the setup on this host as the app's Settings reads it: which keys are held (never their values), the agents here<!-- cloud -->, what a machine costs<!-- /cloud -->, and the init job's phase, rows and progress when one runs or ran",
     page: "app",
     options: {},
     run: async ctx => {
@@ -4573,7 +4587,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "The cloud setup on this host, as the app's Set up cloud machines modal reads it: which keys the host holds (their presence, never a value), the agents on this computer and whether each carries the wsp tools, what a machine costs, and the init job when one runs or ran: its road, phase, screens, rows and progress. The rows are the image's stages, each sign-in with the page the person opens on this computer and the code it asks for while it waits, then its state, and the first workspace once forked. Read it to tell the person where the build is and which sign-in waits for them; the build is started from the app's sidebar row, and wsp init --recipe from a shell is the same run.",
+        "The setup on this host, as the app's Settings reads it: which keys the host holds (their presence, never a value), the agents on this computer and whether each carries the wsp tools<!-- cloud -->, what a machine costs<!-- /cloud -->, and the init job when one runs or ran: its road, phase, screens, rows and progress. The rows are the image's stages, each sign-in with the page the person opens on this computer and the code it asks for while it waits, then its state, and the first workspace once forked. Read it to tell the person where the build is and which sign-in waits for them; the build is started from the app's Settings, and wsp init --recipe from a shell is the same run.",
       input: {},
       output: { setup: InitSetup },
       call: async (_args, deps) => asJson({ setup: await initSetup(await deps.client()) }),
@@ -4654,6 +4668,42 @@ export const VERBS: readonly Verb[] = [
     }),
   },
 ];
+
+const isCloudVerb = (v: Verb): boolean => "cloud" in v && v.cloud === true;
+
+/** A verb with its cloud flags gone from its table, its usage and its tool, for a process with no cloud registered. */
+function withoutCloudFlags(v: Verb): Verb {
+  const dropped = "cloudFlags" in v ? (v.cloudFlags ?? []) : [];
+  if (dropped.length === 0 || !("run" in v)) return v;
+  const options = Object.fromEntries(Object.entries(v.options).filter(([name]) => !dropped.includes(name)));
+  const usage = dropped.reduce((line, name) => line.replace(new RegExp(` \\[--${name}\\b[^\\]]*\\]`), ""), v.usage);
+  if (!hasTool(v)) return { ...v, options, usage };
+  const input = Object.fromEntries(Object.entries(v.tool.input).filter(([name]) => !dropped.includes(name.replaceAll("_", "-"))));
+  return { ...v, options, usage, tool: { ...v.tool, input } };
+}
+
+/** A verb in the words this process says it in: its phrase and its tool's description, each span kept or dropped by
+ * its cloud mark, as the skill's are. */
+function inCloudWords(v: Verb): Verb {
+  const worded = "about" in v ? { ...v, about: cloudText(v.about, CLOUD_ON) } : v;
+  return hasTool(worded) ? { ...worded, tool: { ...worded.tool, description: cloudText(worded.tool.description, CLOUD_ON) } } : worded;
+}
+
+/** The verbs this process answers: every one where a cloud is registered, and with none, every one but the cloud's,
+ * each without its cloud flags. What the pages, the tool server and the skill's rows are all built from. */
+export const VERBS: readonly Verb[] = (CLOUD_ON ? ALL_VERBS : ALL_VERBS.filter(v => !isCloudVerb(v)).map(withoutCloudFlags)).map(inCloudWords);
+
+/** The line a person typed, as the cloud line it is when no cloud is registered here: the verb it opens, or that
+ * verb with the cloud flag it carries. Nothing where the line means something without one. */
+export function cloudLineOf(argv: ReadonlyArray<string>): string | undefined {
+  if (CLOUD_ON) return undefined;
+  const opens = (v: Verb): boolean => v.name.split(" ").every((w, i) => argv[i] === w);
+  const verb = [...ALL_VERBS].sort((a, b) => b.name.length - a.name.length).find(opens);
+  if (verb === undefined) return undefined;
+  if (isCloudVerb(verb)) return `wsp ${verb.name}`;
+  const typed = ("cloudFlags" in verb ? (verb.cloudFlags ?? []) : []).find(name => argv.some(w => w === `--${name}` || w.startsWith(`--${name}=`)));
+  return typed === undefined ? undefined : `wsp ${verb.name} --${typed}`;
+}
 
 /** The entries the command line answers, in the help's order. */
 export const CLI_VERBS: readonly (CliVerb | CliOnlyVerb)[] = VERBS.filter((v): v is CliVerb | CliOnlyVerb => "run" in v);

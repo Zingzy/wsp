@@ -131,7 +131,7 @@ describe("Add a project", () => {
     await settle();
     fireEvent.change(t.field(), { target: { value: "https://github.com/dev/spoo.git" } });
     expect(t.rows()).toHaveLength(0);
-    expect(t.dialog().textContent).toContain("A repository address is cloned on a box, Solari or ASCII. Projects on zingzy's MacBook Pro are folders you already have.");
+    expect(t.dialog().textContent).toContain("A repository address is cloned on a computer you added. Projects on zingzy's MacBook Pro are folders you already have.");
     expect(t.addButton().disabled).toBe(true);
   });
 

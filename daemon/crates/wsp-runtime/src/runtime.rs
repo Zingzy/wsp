@@ -399,7 +399,7 @@ impl Runtime {
             if !dir.join("state.json").is_file() {
                 let _ = fs::remove_dir_all(&dir);
                 if cgroup.exists() {
-                    crate::freeze::wait_unpopulated(&cgroup, KILL_PATIENCE).map_err(io_at(&cgroup))?;
+                    crate::cgroup::wait_unpopulated(&cgroup, KILL_PATIENCE).map_err(io_at(&cgroup))?;
                     fs::remove_dir(&cgroup).map_err(io_at(&cgroup))?;
                 }
                 return Ok(());
@@ -410,7 +410,7 @@ impl Runtime {
             let Ok(state) = State::load(&dir) else {
                 if cgroup.exists() {
                     fs::write(cgroup.join("cgroup.kill"), "1").map_err(io_at(&cgroup))?;
-                    crate::freeze::wait_unpopulated(&cgroup, KILL_PATIENCE).map_err(io_at(&cgroup))?;
+                    crate::cgroup::wait_unpopulated(&cgroup, KILL_PATIENCE).map_err(io_at(&cgroup))?;
                 }
                 if let (true, Some(init)) = (ours, init.as_ref()) {
                     wait_reaped(init.pid, KILL_PATIENCE)?;
@@ -438,7 +438,7 @@ impl Runtime {
             // youki's delete reads the init's /proc entry and waits well under a second for the cgroup to empty; a
             // wait for the processes to leave and for the init to be reaped first, so the delete finds a stopped
             // container and an empty cgroup.
-            crate::freeze::wait_unpopulated(&cgroup, KILL_PATIENCE).map_err(io_at(&cgroup))?;
+            crate::cgroup::wait_unpopulated(&cgroup, KILL_PATIENCE).map_err(io_at(&cgroup))?;
             if let (true, Some(pid)) = (ours, pid) {
                 wait_reaped(pid, KILL_PATIENCE)?;
             }
@@ -537,7 +537,7 @@ fn term_under(cgroup: &Path, init: Option<i32>, patience: Duration) -> Result<()
     let mut signalled: Vec<i32> = Vec::new();
     // The first read is the one that can say why a stop asked nothing; every read after it is a poll, and a
     // cgroup that went while the wait ran is a workspace that ended itself.
-    let mut listing = crate::freeze::pids_under(cgroup).map_err(io_at(cgroup))?;
+    let mut listing = crate::cgroup::pids_under(cgroup).map_err(io_at(cgroup))?;
     loop {
         let last = held_back(&listing, init);
         let asking: Vec<i32> = listing.iter().copied().filter(|pid| !last.contains(pid) && !signalled.contains(pid)).collect();
@@ -550,13 +550,13 @@ fn term_under(cgroup: &Path, init: Option<i32>, patience: Duration) -> Result<()
             break;
         }
         std::thread::sleep(Duration::from_millis(10));
-        listing = crate::freeze::pids_under(cgroup).unwrap_or_default();
+        listing = crate::cgroup::pids_under(cgroup).unwrap_or_default();
     }
     let Some(init) = init else { return Ok(()) };
     // The init alone, which forwards it to the boot command: one signal ends the pair, and the kernel takes
     // whatever is left of the namespace with them.
     let _ = kill(Pid::from_raw(init), Signal::SIGTERM);
-    while !crate::freeze::pids_under(cgroup).unwrap_or_default().is_empty() && Instant::now() < deadline {
+    while !crate::cgroup::pids_under(cgroup).unwrap_or_default().is_empty() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }
     Ok(())
@@ -576,7 +576,7 @@ fn held_back(pids: &[i32], init: Option<i32>) -> Vec<i32> {
 fn boot_child_in(cgroup: &Path, init: &Init, patience: Duration) -> Result<i32, Error> {
     let deadline = Instant::now() + patience;
     loop {
-        if let Some(child) = boot_child(&crate::freeze::pids_under(cgroup).unwrap_or_default(), init.pid) {
+        if let Some(child) = boot_child(&crate::cgroup::pids_under(cgroup).unwrap_or_default(), init.pid) {
             return Ok(child);
         }
         if !alive(init) {

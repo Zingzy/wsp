@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use wsp_frames::RequestId;
 use wsp_runtime::bundle::{self, Init, Layout, Workspace};
-use wsp_runtime::freeze;
+use wsp_runtime::cgroup;
 use wsp_runtime::net::Network;
 use wsp_runtime::ops::{Ops, WSP_LABEL};
 use wsp_runtime::runtime;
@@ -98,15 +98,15 @@ async fn a_reading_carries_the_sizes_and_the_paths_always_and_the_live_figures_o
 fn the_process_count_is_the_cgroup_and_every_cgroup_under_it() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("cgroup.procs"), "101\n102\n").unwrap();
-    assert_eq!(freeze::pids_in(dir.path()).unwrap(), 2);
+    assert_eq!(cgroup::pids_in(dir.path()).unwrap(), 2);
     // What a container engine inside a workspace makes: its containers hold their processes in cgroups of their
     // own, and a count of the top one alone would read a busy workspace as holding two processes.
     let nested = dir.path().join("engine").join("container");
     fs::create_dir_all(&nested).unwrap();
     fs::write(dir.path().join("engine").join("cgroup.procs"), "").unwrap();
     fs::write(nested.join("cgroup.procs"), "201\n202\n203\n").unwrap();
-    assert_eq!(freeze::pids_in(dir.path()).unwrap(), 5);
-    assert!(freeze::pids_in(&dir.path().join("no-such-cgroup")).is_err());
+    assert_eq!(cgroup::pids_in(dir.path()).unwrap(), 5);
+    assert!(cgroup::pids_in(&dir.path().join("no-such-cgroup")).is_err());
 }
 
 #[test]

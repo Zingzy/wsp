@@ -86,7 +86,7 @@ describe("the agents report on the wire", () => {
     expect(() => AgentsSignInEvent.parse({ ...waiting, state: "maybe" })).toThrow();
     expect(AgentsChangedEvent.parse({ type: "agents.changed", target: { placeId: "here" } })).toMatchObject({ target: { placeId: "here" } });
     expect(EventUnion.parse({ type: "agents.changed", seq: 3 })).toMatchObject({ type: "agents.changed" });
-    expect(SignInLine.parse({ command: "codex login --device-auth", env: { CODEX_HOME: "/var/lib/wsp/logins/codex" }, prepare: "mkdir -p x", status: "codex login status" })).toMatchObject({ prepare: "mkdir -p x" });
+    expect(SignInLine.parse({ command: "codex login --device-auth", env: { CODEX_HOME: "/wsp/logins/codex" }, prepare: "mkdir -p x", status: "codex login status" })).toMatchObject({ prepare: "mkdir -p x" });
   });
 
   it("the skills acts name a target and a skill, the search and the skills.sh read name none, and all are shut to threads and paired devices", () => {

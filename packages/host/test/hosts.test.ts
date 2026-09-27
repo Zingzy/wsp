@@ -32,7 +32,7 @@ const record = (url: string, id = "d_1a2b3c4d"): HostRecord => ({ url, deviceId:
 /** A state folder whose lock names this process, which is a host serving it as far as every reader is concerned. */
 function servedState(port = 4400): string {
   const dir = tempDir("hosts-state");
-  writeFileSync(join(dir, "host.lock"), JSON.stringify({ pid: process.pid, port, wsPort: port + 10, startedAt: "2026-09-11T10:00:00.000Z" }));
+  writeFileSync(join(dir, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: "2026-09-11T10:00:00.000Z" }));
   writeFileSync(join(dir, "host-token"), "host-token\n");
   return join(dir, "state.json");
 }
@@ -292,7 +292,7 @@ describe("the account hosts a line falls to", () => {
 describe("where a verb dials", () => {
   it("gives the loopback address and the host's own token for a host on this computer", () => {
     const statePath = servedState(4500);
-    expect(hostAddress(statePath, { env: {}, home: tempDir("hosts-none") })).toEqual({ url: "ws://127.0.0.1:4510", token: "host-token" });
+    expect(hostAddress(statePath, { env: {}, home: tempDir("hosts-none") })).toEqual({ url: `ws://127.0.0.1:4500${WS_PATH}`, token: "host-token" });
   });
 
   it("gives the alias's address with the runtime's path and the device token it holds there", () => {

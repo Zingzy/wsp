@@ -20,6 +20,7 @@ import { KEY_LAYER_WORDS } from "../src/env-keys.js";
 import type { InitIO } from "../src/init.js";
 import type { HostHandle, WorkspaceRoads } from "../src/server.js";
 import { copyingFake, createOn, projectOn } from "./verbs-fixture.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 const ENTER = "\r";
 /** The code the fake host mints for the browser init opens, which the address the run opens carries. */
@@ -97,7 +98,7 @@ function fake(over: { tty?: boolean; nonInteractive?: boolean; yes?: boolean; js
     yes: over.yes ?? false,
     ...(over.nonInteractive === true ? { nonInteractive: true } : {}),
     statePath: join(root, "state.json"),
-    ports: { port: 0, wsPort: 0, named: true },
+    ports: { port: 0, named: true },
     upCommand: "wsp up",
     // A workspace here is a folder of the person's own worked in place, so the tick needs a folder to record.
     importFolder: repo,
@@ -105,7 +106,7 @@ function fake(over: { tty?: boolean; nonInteractive?: boolean; yes?: boolean; js
     roads,
     host: async rt => {
       counters.hosts += 1;
-      return { port: 4400, wsPort: 4410, authToken: "tok", revokeDevice: async () => false, hereCode: async () => CODE, door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...roads(rt), close: async () => void (counters.closed += 1) };
+      return { port: 4400, authToken: "tok", revokeDevice: async () => false, hereCode: async () => CODE, door: { open: async () => ({ port: 4420, addresses: ["http://192.168.1.20:4420"] }), port: () => 4420, close: async () => {} }, ...roads(rt), close: async () => void (counters.closed += 1) };
     },
   };
   const press = async (...keys: string[]): Promise<void> => {
@@ -141,11 +142,17 @@ function fake(over: { tty?: boolean; nonInteractive?: boolean; yes?: boolean; js
 }
 
 describe("wsp init with no provider key", () => {
-  it("names the file a key goes in with the one spelling every other line about those files uses", () => {
+  it.runIf(CLOUD_ON)("names the file a key goes in with the one spelling every other line about those files uses", () => {
     expect(noKeyLines("wsp up").join("\n")).toContain(KEY_LAYER_WORDS);
   });
 
-  it("says there is no provider before it does anything, makes this computer the workspace, and opens the app on it", async () => {
+  it.runIf(!CLOUD_ON)("with the cloud off says what this computer's copy is and names no provider, key or cloud", () => {
+    const said = noKeyLines("wsp up").join("\n");
+    for (const word of ["provider", "key", "cloud", "Solari"]) expect(said).not.toContain(word);
+    expect(said).toContain("It makes your first workspace a copy of a folder");
+  });
+
+  it.runIf(CLOUD_ON)("says there is no provider before it does anything, makes this computer the workspace, and opens the app on it", async () => {
     const f = fake({ tty: true });
     const run = runLocalInit(f.opts, f.io);
     await f.until(ALSO_LOCAL_QUESTION);

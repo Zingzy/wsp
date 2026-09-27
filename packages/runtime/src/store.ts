@@ -15,9 +15,6 @@ export interface Store {
   getBlob(collection: string, id: string): Promise<Buffer | undefined>;
   putBlob(collection: string, id: string, bytes: Buffer): Promise<void>;
   deleteBlob(collection: string, id: string): Promise<void>;
-  /** What wrote this state and in which shape, as the last save recorded it; nothing where the store was written
-   * before the document existed. Read by a refusal that has to name the build a person should run instead. */
-  shape(): Promise<StateShape | undefined>;
 }
 
 type Data = Record<string, Record<string, unknown>>;
@@ -40,6 +37,11 @@ const shapeNow = (writer: StateWriter): StateShape => ({ shape: STATE_SHAPE, ...
 export const stateWrittenByNewerLine = (statePath: string, wrote: StateShape): string =>
   `${statePath} was written by a newer wsp (state shape ${wrote.shape}; this wsp reads ${STATE_SHAPE}; written ${wrote.at} by ${stateWriterWords(wrote)}): run that wsp, or move the file aside`;
 
+/** Why a host will not read a state file an older wsp wrote, or one written before the shape document existed:
+ * nothing reads an older shape, so the file is moved aside and this host starts a fresh one. */
+export const stateWrittenByOlderLine = (statePath: string, wrote: StateShape | undefined): string =>
+  `${statePath} holds state in an older shape (${wrote === undefined ? "none recorded" : `shape ${wrote.shape}, written ${wrote.at} by ${stateWriterWords(wrote)}`}; this wsp reads shape ${STATE_SHAPE}): move the file aside and this wsp starts a fresh one`;
+
 /** Why a host will not read a state file that is there and is not one this build can read, whether its bytes do not
  * parse or what they parse to is no object of collections: whatever is in it is still in it, and a read that
  * answered an empty store would have the next save write one record and this build's document over all of it. A
@@ -56,12 +58,10 @@ export const stateNotAnObjectLine = (statePath: string, held: unknown): string =
 
 /** Why a host will not read a state file whose shape document is not one: the document is what says which build
  * wrote the file and in which shape its records are, so a key that is present and unreadable leaves no reading of
- * the file at all, where an absent key is a file written before the document existed and is read as one. */
+ * the file at all. */
 export const stateShapeUnreadableLine = (statePath: string, document: unknown): string =>
   `${statePath} has a ${STATE_SHAPE_KEY} that is not a shape document (${JSON.stringify(document)}), so no wsp can say which build wrote it or in which shape: move the file aside, or put back the document a wsp writes`;
 
-/** A store with no file behind it carries no shape document: the document says which build wrote a state file and
- * which shape its records are in, and nothing here outlives the process that made it. */
 export function memoryStore(): Store {
   const data: Data = {};
   const blobs = new Map<string, Buffer>();
@@ -90,9 +90,6 @@ export function memoryStore(): Store {
     async deleteBlob(collection, id) {
       blobs.delete(`${collection}/${id}`);
     },
-    async shape() {
-      return undefined;
-    },
   };
 }
 
@@ -101,12 +98,12 @@ export function jsonFileStore(path: string, writer: StateWriter): Store {
    * an empty store, which is the first wsp up on a fresh home; a file that is there and is no state this build can
    * read, its bytes, what they parse to or its shape document, is refused here, before a read answers anything and
    * before a save could write one record and this build's document over records nothing read. */
-  const read = (): { data: Data; wrote?: StateShape } => {
+  const read = (): { data: Data; wrote?: StateShape; fresh?: true } => {
     let text: string;
     try {
       text = readFileSync(path, "utf8");
     } catch (e) {
-      if ((e as { code?: string }).code === "ENOENT") return { data: {} };
+      if ((e as { code?: string }).code === "ENOENT") return { data: {}, fresh: true };
       throw e;
     }
     let held: unknown;
@@ -122,11 +119,13 @@ export function jsonFileStore(path: string, writer: StateWriter): Store {
     if (!wrote.success) throw new Error(stateShapeUnreadableLine(path, document));
     return { data: collections as Data, wrote: wrote.data };
   };
-  /** One state file, one shape: a file a newer wsp wrote is refused here, before a read answers anything and
-   * before a write could put this build's shape over it. */
+  /** One state file, one shape: a file in any other is refused here, before a read answers anything and before a
+   * write could put this build's shape over it. A file that is not there is a fresh home and reads empty. */
   const load = (): Data => {
-    const { data, wrote } = read();
-    if (wrote !== undefined && wrote.shape > STATE_SHAPE) throw new Error(stateWrittenByNewerLine(path, wrote));
+    const { data, wrote, fresh } = read();
+    if (fresh) return data;
+    if (wrote === undefined || wrote.shape < STATE_SHAPE) throw new Error(stateWrittenByOlderLine(path, wrote));
+    if (wrote.shape > STATE_SHAPE) throw new Error(stateWrittenByNewerLine(path, wrote));
     return data;
   };
   // The file holds every running turn's token and every unspent pairing code, so it is the owner's: writeOwn says
@@ -171,9 +170,6 @@ export function jsonFileStore(path: string, writer: StateWriter): Store {
     async deleteBlob(collection, id) {
       load();
       rmSync(blobPath(collection, id), { force: true });
-    },
-    async shape() {
-      return read().wrote;
     },
   };
 }
