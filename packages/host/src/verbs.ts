@@ -271,7 +271,7 @@ import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
 import type { RelayTerminal } from "./signin-relay.js";
 import { gitRootOf } from "./repo-root.js";
-import { dialAddress, hostTokenFor, hostTokenPath, servingHost } from "./host-lock.js";
+import { dialAddress, heldOrStarted, hostTokenFor, hostTokenPath, servingHost } from "./host-lock.js";
 import type { HostStarter } from "./host-start.js";
 import { addressNotPairedLine, aimAddress, aimHolds, aimName, aimedHost, deviceRefusedLine, dialWindowMs, hostSideOnlyFix, hostSideOnlyLine, noAnswerRefusal, noAnswerWithin, READ_THE_HOSTS, stateIgnoredLine, wsUrlOf, wspHome, writeHost, type HostAim, type HostPick } from "./hosts.js";
 import { readDeviceKeyPair } from "./account.js";
@@ -396,9 +396,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
   const aim = opts.aim ?? aimedHost(statePath, opts);
   // Nothing serves this state file here and the line needs one: start it rather than telling the person to. Every
   // other aim is a host somewhere else, which this computer cannot start and must not try to.
-  if (aim.kind === "here" && opts.start !== undefined && servingHost(statePath) === undefined) {
-    await opts.start(statePath, opts.say ?? (line => void process.stderr.write(`${line}\n`)));
-  }
+  if (aim.kind === "here") await heldOrStarted(statePath, opts.start, opts.say ?? (line => void process.stderr.write(`${line}\n`)));
   // An address with no token beside it opens nothing: this computer holds a token only under a name.
   if (aim.kind === "url" && aim.token === undefined && opts.admit === undefined) throw usageRefusal(addressNotPairedLine(aim.url), READ_THE_HOSTS);
   const { url, token } = hostAddress(statePath, { aim });
@@ -1322,7 +1320,7 @@ export function renameLine(renamed: Renamed): string {
 
 /** What a delete does to this workspace's machine, in its kind's own words: both lines about what a delete takes
  * read the one entry, so neither can say the other kind's sentence. */
-const onDelete = (workspace: WorkspaceView): MachineOnDelete => onDeleteOf(workspaceKind(workspace), workspace.copy);
+const onDelete = (workspace: WorkspaceView): MachineOnDelete => onDeleteOf(workspaceKind(workspace), workspace.copy, workspace.machineId);
 
 /** What dropping a workspace takes off this computer, counted before anyone is asked: its record and its threads. */
 export interface Dropping {
@@ -1351,7 +1349,7 @@ export function forgotLine(f: Dropping): string {
 
 /** The one confirmation a delete asks, in the words every client shows: what a forget takes, and the machine too. */
 export function deleteQuestion(d: Dropping): string {
-  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy)}`;
+  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId)}`;
 }
 
 /** The one confirmation a project image's removal asks: the id, and what goes with it. */
@@ -4123,7 +4121,7 @@ export const VERBS: readonly Verb[] = [
         // The command line asks a person before this and the app will; over MCP the second call is that step, so a
         // machine is never killed by one tool call the caller made on its own.
         if (confirm !== true) {
-          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy)} Ask the person, then call delete again with confirm true.`, going), isError: true };
+          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId)} Ask the person, then call delete again with confirm true.`, going), isError: true };
         }
         await deleteWorkspace(client, d);
         return asText(deletedLine(d), going);

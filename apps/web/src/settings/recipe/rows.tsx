@@ -17,9 +17,10 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/toolt
 import { TONE_FILL, TONE_TEXT } from "../../lib/tone.js";
 import { MICRO_LABEL } from "../../lib/microLabel.js";
 import { cn } from "../../lib/utils.js";
+import { CARD_SURFACE } from "../rows.js";
 
 export const STATE_WORD = "shrink-0 font-mono text-xs tabular-nums text-muted-foreground";
-export const CARD = "w-full overflow-hidden rounded-[10px] border border-border bg-card text-left";
+export const CARD = cn(CARD_SURFACE, "w-full text-left");
 
 /** A size cell: tabular mono in the tone the protocol gave it. */
 export function SizeCell({ tone, children, className }: { tone: SizeTone; children: ReactNode; className?: string }) {

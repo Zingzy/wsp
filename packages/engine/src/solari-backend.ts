@@ -1,4 +1,4 @@
-import { machineUnreachableLine, moveTimedOutLine, providerRoadRetryLine, RESUME_UNANSWERED, type Capabilities } from "@wsp/protocol";
+import { machineUnreachableLine, moveTimedOutLine, providerRoadRetryLine, RESUME_UNANSWERED, snapshotListedRefusedLine, snapshotListedWaitLine, type Capabilities } from "@wsp/protocol";
 import { ExecFailedError, MachineUnreachableError, MoveUnansweredError, NapRefusedError, NotFirstLifeError, ResumeUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isCapped, isMissing, isNetworkError, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
@@ -72,12 +72,10 @@ export const REQUEST_ID_HEADER = "x-request-id";
 /** Solari's published Starter pricing: per vCPU-hour plus per GB-hour (2 vCPU, 4 GB comes to about $0.11/hr). */
 const rateUsdPerHour = (size: { cpu: number; memMb: number }): number => size.cpu * 0.035 + (size.memMb / 1024) * 0.01;
 
-/** The Starter plan clamps every sandbox to 2 vCPU, so the rows differ by memory alone. 4 GB is the shape of every
- * machine measured so far; 8 GB is the next value the create API takes and has not been measured on this account. */
-const SIZES: readonly { cpu: number; memMb: number }[] = [
-  { cpu: 2, memMb: 4096 },
-  { cpu: 2, memMb: 8192 },
-];
+/** Only the size a fork has been measured coming up at: a fork asked for 2 vCPU and 8 GB counted 4 GB in its guest
+ * (fleet setup 2026-09-27), and the create's view echoes whatever was asked, so a row this table lists unmeasured is
+ * a size the picker sells and the machine does not have. */
+const SIZES: readonly { cpu: number; memMb: number }[] = [{ cpu: 2, memMb: 4096 }];
 
 /** The price table, readable with no key: the Starter clamp doubles as the assumed shape for specs that never named a
  * size, and the setup screen says what a machine costs before any key is typed. */
@@ -114,6 +112,13 @@ const EXEC_FAILED = "exec failed";
 
 /** The provider's 409 to a pause of a machine whose memory and disk together pass about 10 GB (measured 2026-09-23). */
 const NOT_PAUSABLE = "Not pausable";
+
+/** The provider's 404 to a fork of a snapshot its own listing still held, five times on 2026-09-27, each time
+ * answered by the same call about a minute later. */
+const SNAPSHOT_NOT_FOUND = "Snapshot not found";
+/** How long a fork of a listed snapshot is asked again, and how often. */
+export const SNAPSHOT_LISTED_MS = 3 * 60_000;
+export const SNAPSHOT_LISTED_EVERY_MS = 15_000;
 
 // Frozen: one shared object every SolariBackend hands out, so nothing shrinks a budget for everyone by accident.
 export const SOLARI_LIFECYCLE: Lifecycle = Object.freeze({
@@ -242,7 +247,30 @@ export class SolariBackend implements MachineBackend {
     }
   }
 
+  /** A fork the provider answers "Snapshot not found" is read against its listing: a snapshot the listing holds is
+   * not gone, so the fork is asked again under a key of its own inside a bound, and only an unlisted one is missing. */
   async create(spec: MachineSpec): Promise<Machine> {
+    const started = this.clock.now();
+    for (let ask = 1; ; ask++) {
+      try {
+        return await this.createOnce(spec, (ask === 1 ? spec.idempotencyKey : undefined) ?? crypto.randomUUID());
+      } catch (e) {
+        const snapshot = spec.fromSnapshot;
+        if (snapshot === undefined || !isMissing(e) || (e as Error).message !== SNAPSHOT_NOT_FOUND) throw e;
+        const listed = await this.listSnapshots().then(rows => rows.some(r => r.id === snapshot), () => false);
+        if (!listed) throw e;
+        const waited = this.clock.now() - started;
+        if (waited + SNAPSHOT_LISTED_EVERY_MS > SNAPSHOT_LISTED_MS) {
+          const message = snapshotListedRefusedLine(snapshot, waited);
+          throw Object.assign(new Error(message), e, { kind: "transient", message });
+        }
+        console.warn(snapshotListedWaitLine(snapshot, SNAPSHOT_LISTED_EVERY_MS, waited));
+        await this.clock.sleep(SNAPSHOT_LISTED_EVERY_MS);
+      }
+    }
+  }
+
+  private async createOnce(spec: MachineSpec, key: string): Promise<Machine> {
     // Only /sandboxes and /desktops honour the key (measured 2026-09-04); one key rides every retry of this call, so a
     // retried 5xx replays the machine the first try booted instead of booting a second.
     const { value: res, reply } = await this.call<{ sandboxId: string; kind: MachineKind; streamUrl?: string; state?: SandboxView["state"]; createdAt?: string }>(
@@ -260,7 +288,7 @@ export class SolariBackend implements MachineBackend {
         ...(spec.onIdle ? { lifecycle: { onTimeout: spec.onIdle } } : {}),
         ...(spec.idleTimeoutMs ? { timeoutMs: Math.min(spec.idleTimeoutMs, IDLE_TIMEOUT_MAX_MS) } : {}),
       },
-      { "Idempotency-Key": spec.idempotencyKey ?? crypto.randomUUID() },
+      { "Idempotency-Key": key },
     );
     // The create response has carried no createdAt (measured 2026-09-04); when it does, it rides on seen for information and nothing reads it.
     const seen = res.createdAt !== undefined ? { state: stateOf(res.state ?? "running"), createdAt: res.createdAt } : undefined;

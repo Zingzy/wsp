@@ -130,11 +130,11 @@ export interface McpFormat {
    * it now reads. A value that is one reference to a name `held` holds, or the text just wrote, stands as the person
    * wrote it, its default dropped where it has one; one that only reads like a reference is a value, and a reference
    * to a name nobody holds travels as its default where it has one and leaves its server `unread` where it has none,
-   * in an address always. `only` names one server of
-   * the file's own table and leaves every other as it is. A `known` value standing whole in an argument or the
-   * address is written as its variable's reference too, and throws where the agent expands none there. `held` names
-   * what servers.env holds and an earlier file of the same copy wrote, the names a reference may read. Throws when
-   * the text is not the format. */
+   * in an address always. A reference in an argument or the command is weighed the same way, its default moving under
+   * a name of its own. `only` names one server of the file's own table and leaves every other as it is. A `known`
+   * value standing whole in an argument, the command or the address is written as its variable's reference too, and
+   * throws where the agent expands none there. `held` names what servers.env holds and an earlier file of the same
+   * copy wrote, the names a reference may read. Throws when the text is not the format. */
   refer(text: string, only?: string, known?: readonly KnownValue[], held?: ReadonlySet<string>): Promise<McpReferred>;
   /** The server's transport as its agent starts it, every reference this format writes read from `value`, and each
    * value read that way; or the first variable it reads that has no value and no default. A command's name and
@@ -190,6 +190,16 @@ const refers = (v: string, named: (v: string) => WholeRef | undefined, held: (na
   const ref = named(v);
   return ref !== undefined && ref.fallback === undefined && held(ref.name);
 };
+
+/** Names every machine's environment defines, which a reference may read though servers.env holds none of them. */
+const EVERY_MACHINE: ReadonlySet<string> = new Set(["HOME", "USER", "LOGNAME", "PATH", "PWD", "SHELL", "TMPDIR", "LANG"]);
+
+/** Whether a reference may read `name` on the copy: servers.env holds it or an earlier file wrote it (`outside`), this
+ * file writes it (`writes`), or every machine defines it, except inside an address the reference does not fill whole. */
+const readable =
+  (outside: ReadonlySet<string>, writes: ReadonlySet<string>) =>
+  (name: string, inAddress = false): boolean =>
+    outside.has(name) || writes.has(name) || (!inAddress && EVERY_MACHINE.has(name));
 
 /** Why a server that reads a variable nobody holds at `path` travels nowhere; never the variable, which for a
  * literal that reads like a reference is its value. */
@@ -333,13 +343,14 @@ function knownStands(strings: readonly string[], known: readonly KnownValue[], s
   stillStands(strings, [{ name: server, values: Object.fromEntries(known.filter(([, v]) => v !== "")) }]);
 }
 
-/** Each argument and address of a definition, by its path inside it: `args`, a command written as a list past its
- * first word, `url` and `httpUrl`. */
+/** Each argument, command and address of a definition, by its path inside it: `args`, `command` as a string or a
+ * list, `url` and `httpUrl`. */
 function argStrings(def: Record<string, unknown>): [JSONPath, string, string][] {
   const out: [JSONPath, string, string][] = [];
-  for (const [key, from] of [["args", 0], ["command", 1]] as const) {
+  for (const key of ["args", "command"]) {
     const list = def[key];
-    if (Array.isArray(list)) list.forEach((v, i) => i >= from && typeof v === "string" && out.push([[key, i], v, "an argument"]));
+    if (Array.isArray(list)) list.forEach((v, i) => typeof v === "string" && out.push([[key, i], v, key === "command" && i === 0 ? "the command" : "an argument"]));
+    else if (key === "command" && typeof list === "string") out.push([[key], list, "the command"]);
   }
   for (const key of ["url", "httpUrl"]) {
     const v = def[key];
@@ -714,13 +725,17 @@ export function editJson(text: string, edits: readonly JsonEdit[]): string {
   return editJsonc(text, root, edits);
 }
 
-/** The servers under `key` of a JSON object, each read by the format's own entry shape. */
-function jsonServers(root: Record<string, unknown>, key: string, scope: McpServer["scope"], server: JsonShape["server"]): McpServer[] {
-  const table = root[key];
+/** The servers under the shape's key of a JSON object, each read by the format's own entry shape, with the variables
+ * its OAuth secrets read. */
+function jsonServers(root: Record<string, unknown>, shape: JsonShape, scope: McpServer["scope"]): McpServer[] {
+  const table = root[shape.key];
   if (!isObject(table)) return [];
   return Object.entries(table).flatMap(([name, raw]) => {
-    const s = server(name, raw, scope);
-    return s === undefined ? [] : [s];
+    const s = shape.server(name, raw, scope);
+    if (s === undefined) return [];
+    const oauth = tree(tree(raw)?.oauth) ?? {};
+    const secrets = (shape.oauthSecrets ?? []).map(k => oauth[k]).filter((v): v is string => typeof v === "string");
+    return [secrets.length === 0 ? s : { ...s, envRefs: [...new Set([...s.envRefs, ...refsIn(secrets, shape.ref)])] }];
   });
 }
 
@@ -885,6 +900,8 @@ interface JsonShape {
   refOf(variable: string): string;
   /** The keys of a server's `oauth` table whose secret the agent reads with `ref`'s variables expanded. */
   oauthSecrets?: readonly string[];
+  /** Where the file keeps servers its agent starts outside `key`, as a dotted path; the writer reads none there. */
+  elsewhere?(root: Tree): string | undefined;
 }
 
 /** What `${X:-d}` reads as where X has no value: `d`; nothing for a reference with no default. */
@@ -931,18 +948,24 @@ function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
   };
   return async (text, only, known = [], outside = new Set()) => {
     const root = jsonObject(text);
+    const beside = only === undefined ? shape.elsewhere?.(root) : undefined;
+    if (beside !== undefined) throw new Error(`the file keeps servers under ${beside}, whose values wsp does not write by name, so the file stays on this computer`);
     const tables = serverTables(root, only === undefined);
     const edits: JsonEdit[] = [];
     const servers: McpReferred["servers"] = [];
     const defs: { at: JSONPath; name: string; def: Tree; values: Record<string, string> }[] = [];
+    type Lost = { at: JSONPath; name: string; inAddress: boolean };
+    const weighed: { table: (typeof tables)[number]; name: string; values: Record<string, string>; mine: JsonEdit[]; shown: Tree; unread?: string; lost: Lost[] }[] = [];
     const asked = tables.flatMap(table => Object.entries(table.servers).flatMap(([name, raw]) => (tree(raw) === undefined || (only !== undefined && name !== only) ? [] : [{ table, name, def: tree(raw)! }])));
     // What the file writes is read before any reference is weighed, so the order of its keys and servers decides nothing.
     const writes = new Set(asked.flatMap(({ name, def }) => literalNames(name, def)));
-    const held = (n: string): boolean => outside.has(n) || writes.has(n);
+    const held = readable(outside, writes);
     for (const { table, name, def } of asked) {
       const values: Record<string, string> = {};
       const mine: JsonEdit[] = [];
       let unread: string | undefined;
+      // A reference with no default is weighed once every server's moved values are known, so one reading another's stands.
+      const lost: Lost[] = [];
       /** The value that travels for `v`: undefined where it stands as written, is written bare, or the server reads
        * a variable nobody holds; the default where it is a reference to such a variable with one. */
       const literalOf = (v: string, path: JSONPath, form: (v: string) => WholeRef | undefined, where: string): string | undefined => {
@@ -953,7 +976,7 @@ function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
           return undefined;
         }
         if (ref !== undefined && ref.fallback === undefined) {
-          unread ??= unreadLine([...table.at, name, ...path]);
+          lost.push({ at: [...table.at, name, ...path], name: ref.name, inAddress: false });
           return undefined;
         }
         if (ref === undefined && names(v)) throw new Error(`${name}'s ${where} mixes a value with a variable, so it cannot travel by name; make it one or the other`);
@@ -992,18 +1015,42 @@ function jsonReferrer(shape: JsonShape): McpFormat["refer"] {
         mine.push([[...table.at, name, "oauth", k], shape.refOf(n)]);
       }
       const shown: Tree = { ...def };
-      for (const key of ["url", "httpUrl"]) {
-        const url = def[key];
-        if (typeof url !== "string") continue;
-        const bared = url.replace(new RegExp(shape.ref.source, "g"), m => {
+      for (const [path, v] of argStrings(def)) {
+        const [key, i] = path as [string, number | undefined];
+        const address = key === "url" || key === "httpUrl";
+        let moved = 0;
+        // An argument's default for a name nobody holds is a literal and moves under a name of its own; an address's drops its server.
+        const bared = v.replace(new RegExp(shape.ref.source, "g"), m => {
           const ref = bare(m)!;
-          if (!held(ref.name)) unread ??= unreadLine([...table.at, name, key]);
-          return refers(m, bare, held) ? m : shape.refOf(ref.name);
+          const inAddress = address && m !== v;
+          const reads = (n: string): boolean => held(n, inAddress);
+          if (refers(m, bare, reads)) return m;
+          if (reads(ref.name)) return shape.refOf(ref.name);
+          if (ref.fallback === undefined) {
+            lost.push({ at: [...table.at, name, ...path], name: ref.name, inAddress });
+            return m;
+          }
+          if (address) {
+            unread ??= unreadLine([...table.at, name, ...path]);
+            return m;
+          }
+          if (ref.fallback === "") return "";
+          const n = mcpHeaderVariable(name, [...path, ...(moved > 0 ? [moved] : [])].join("."));
+          moved++;
+          if (values[n] !== undefined || Object.hasOwn(dict(def[shape.envKey]), n)) throw new Error(`${name} sets ${n}, the name the default in ${[...table.at, name, ...path].join(".")} would travel under; rename it`);
+          values[n] = ref.fallback;
+          return shape.refOf(n);
         });
-        if (bared === url) continue;
-        shown[key] = bared;
-        mine.push([[...table.at, name, key], bared]);
+        if (bared === v) continue;
+        shown[key] = i === undefined ? bared : (shown[key] as unknown[]).map((x, j) => (j === i ? bared : x));
+        mine.push([[...table.at, name, ...path], bared]);
       }
+      weighed.push({ table, name, values, mine, shown, lost, ...(unread !== undefined ? { unread } : {}) });
+    }
+    const holds = readable(outside, new Set([...writes, ...weighed.flatMap(w => Object.keys(w.values))]));
+    for (const { table, name, values, mine, shown, unread: early, lost } of weighed) {
+      const gone = lost.find(l => !holds(l.name, l.inAddress));
+      const unread = early ?? (gone === undefined ? undefined : unreadLine(gone.at));
       const project = table.project !== undefined ? { project: table.project } : {};
       if (unread !== undefined) {
         servers.push({ name, ...project, values: {}, unread });
@@ -1069,9 +1116,9 @@ function jsonFormat(shape: JsonShape): McpFormat {
       }
       if (!isObject(root)) return [];
       const off = new Set(shape.off?.(root) ?? []);
-      const own = jsonServers(root, shape.key, "user", shape.server).map(s => (off.has(s.name) ? { ...s, disabled: true as const } : s));
+      const own = jsonServers(root, shape, "user").map(s => (off.has(s.name) ? { ...s, disabled: true as const } : s));
       const project = shape.projects && isObject(root.projects) ? root.projects[home] : undefined;
-      return isObject(project) ? [...own, ...jsonServers(project, shape.key, "home", shape.server)] : own;
+      return isObject(project) ? [...own, ...jsonServers(project, shape, "home")] : own;
     },
     place: (text, name, server) => {
       const root = jsonObject(text);
@@ -1170,6 +1217,12 @@ export const OPENCODE_JSON: McpFormat = jsonFormat({
   ref: OPENCODE_REF,
   refOf: v => `{env:${v}}`,
   oauthSecrets: ["clientSecret", "client_secret"],
+  // A table there with a `type` or `enabled` that is not an object is one server called servers (v2-compat.ts, 1.18.27).
+  elsewhere: root => {
+    const nested = tree(tree(root.mcp)?.servers);
+    if (nested === undefined || Object.keys(nested).length === 0) return undefined;
+    return ["type", "enabled"].some(k => Object.hasOwn(nested, k) && tree(nested[k]) === undefined) ? undefined : "mcp.servers";
+  },
   server: (name, raw, scope) => {
     if (!isObject(raw)) return undefined;
     const off = raw.enabled === false ? { disabled: true as const } : {};
@@ -1611,7 +1664,7 @@ async function referCodex(text: string, only?: string, known: readonly KnownValu
   const next: Record<string, unknown> = { ...table };
   let changed = false;
   const writes = new Set(Object.entries(table).flatMap(([name, raw]) => (!isObject(raw) || (only !== undefined && name !== only) ? [] : [...Object.keys(dict(raw["http_headers"])).map(h => mcpHeaderVariable(name, h)), ...Object.keys(dict(raw["env"]))])));
-  const held = (n: string): boolean => outside.has(n) || writes.has(n);
+  const held = readable(outside, writes);
   for (const [name, raw] of Object.entries(table)) {
     if (!isObject(raw)) throw unread(`mcp_servers.${name}`);
     for (const key of ["http_headers", "env"]) {

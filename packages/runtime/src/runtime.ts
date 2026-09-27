@@ -2811,8 +2811,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const vaultCapBytes = opts.wake?.vaultCapBytes ?? VAULT_CAP_BYTES;
   const defaultIdleWindowMs = opts.idle?.defaultWindowMs ?? DEFAULT_IDLE_WINDOW_MS;
   const hostId = opts.hostId ?? hostname();
-  /** What names this host's templates: the id's hex alone, in the class the provider's name field has taken. */
-  const templateHostId = templateHost(hostId);
 
   const vaultPathsOf = async (m: Machine): Promise<string[]> => {
     if (opts.vaultPaths) return opts.vaultPaths;
@@ -4100,6 +4098,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   });
 
   let owner = "";
+  /** The mark on every image this state makes: the host's id and this state file's owner, each in the class the
+   * provider's name field has taken. Two state files on one computer read one host id, and on Box a snapshot's name
+   * is its id, so the owner is what keeps one state's image from being the other's. */
+  const imageMark = (): string => templateHost(hostId) + templateHost(owner);
 
   /** The store holds the attempt's key and stamp before the provider hears of it: a retry the provider never answered
    * (the connection dropped, the process died) sends the same body under the same key and gets back the machine the
@@ -5302,6 +5304,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const nameGiven = (name: string): string => name.trim();
   /** Names whose fork is between its check and its first machine: held here so two forks asked for together cannot both land. */
   const forking = new Set<string>();
+  /** Creates that failed before any machine was recorded, by the id their stages carried: every client keeps a row
+   * for one until it is deleted, so resolve and delete reach it here. */
+  const failedCreates = new Map<string, WorkspaceView>();
   /** Why a fork of this name is refused, or nothing when the name is free: one entry holds it, whatever it is doing
    * (a delete in flight says so), or a fork of it is under way. A name never names two workspaces, and a fork and a
    * delete of one name never interleave. */
@@ -5451,6 +5456,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw Object.assign(new Error(refusal), { kind: "conflict" });
       }
       forking.add(o.name);
+      // A create asked again under the name supersedes the one that failed under it, and every client's row of it.
+      for (const [failedId, failed] of failedCreates) {
+        if (failed.name !== o.name) continue;
+        failedCreates.delete(failedId);
+        bus.emit({ type: "workspace.deleted", workspaceId: failedId });
+      }
       const id = `ws_${randomBytes(4).toString("hex")}`;
       const began = clock.now();
       // Who asked rides every stage from the first, which is emitted before the fork has a record: the stream's
@@ -5491,8 +5502,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
         // The id dies with a failed create, so nothing could ever retry under its key.
         await store.delete(CREATES, `workspace/${id}`);
-        report("failed", e instanceof Error ? e.message : String(e));
+        const said = e instanceof Error ? e.message : String(e);
+        report("failed", said);
         if (kept !== undefined) bus.emit({ type: "workspace.created", workspace: view(kept.record) });
+        else failedCreates.set(id, { id, name: o.name, machineId: "", phase: "gone", kind, golden: o.golden ?? "", createdAt: new Date(began).toISOString(), project: refOf(project), gone: said });
         throw e;
       } finally {
         forking.delete(o.name);
@@ -5536,6 +5549,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = exact ?? started[0];
       if (entry === undefined) {
         if (scope !== undefined) throw notFoundRefusal(noWorkspaceRefusal(ref));
+        const failed = [...failedCreates.values()].find(v => v.id === ref || v.name === ref);
+        if (failed !== undefined) return failed;
         // A computer somebody joined is a place, and a place is no workspace: the word is answered with the road to
         // one there rather than with absence, since the person typed the name of something this host does hold.
         const place = (await placeDoor?.find(ref)) ?? [];
@@ -5762,7 +5777,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await syncDisk(entry.machine);
       const disk = await diskUse(entry.machine);
       const createdAt = new Date(clock.now()).toISOString();
-      const snapshotId = await entry.ws.checkpoint(projectSnapshotName(templateHostId, project.name, createdAt.replace(/[:.]/g, "-"))).catch((e: unknown) => {
+      const snapshotId = await entry.ws.checkpoint(projectSnapshotName(imageMark(), project.name, createdAt.replace(/[:.]/g, "-"))).catch((e: unknown) => {
         if (e instanceof NotFirstLifeError) throw e;
         const said = snapshotRefusedLine(name, answerOf(e), disk);
         console.warn(said);
@@ -5797,6 +5812,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async delete(id, origin) {
       spawnGuard("delete", origin);
+      if (scopeOf(origin) === undefined && !live.has(id) && failedCreates.delete(id)) {
+        bus.emit({ type: "workspace.deleted", workspaceId: id });
+        return;
+      }
       const entry = await entryOf(id, origin);
       if (entry.deleting) return entry.deleting;
       entry.deleting = (async () => {
@@ -7874,7 +7893,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(copy === undefined && recipe.vaultPaths !== undefined ? { vaultPaths: recipe.vaultPaths } : {}),
           keepBuilder: keep,
           name,
-          hostId: templateHostId,
+          hostId: imageMark(),
         }),
         at,
       );
@@ -7928,7 +7947,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...build,
           backend: b,
           name: key,
-          hostId: templateHostId,
+          hostId: imageMark(),
           labels: { ...build.labels, [WSP_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() },
           ...(prior !== undefined ? { manifest: prior } : {}),
         }),
@@ -8296,13 +8315,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async storage() {
       await ready();
       if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
-      return snapshotStorage(await backend.listSnapshots(), backend.pricing.snapshotStorage, { hostId: templateHostId, recorded: await recordedImages(), now: clock.now() });
+      return snapshotStorage(await backend.listSnapshots(), backend.pricing.snapshotStorage, { hostId: imageMark(), recorded: await recordedImages(), now: clock.now() });
     },
 
     async orphans() {
       await ready();
       if (!backend.capabilities.snapshotListing || backend.listSnapshots === undefined) return undefined;
-      const read = { hostId: templateHostId, recorded: await recordedImages(), now: clock.now() };
+      const read = { hostId: imageMark(), recorded: await recordedImages(), now: clock.now() };
       const rows = await backend.listSnapshots();
       const snapshots = splitByOwner(rows, read);
       const templates = templatesOf(backend);
@@ -8411,7 +8430,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const v of manifest?.versions ?? []) {
         if (v.templateId !== undefined) continue;
         try {
-          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, goldenName(templateHostId, key, v.version));
+          const { templateId, sharing } = await promoteVersion(templates, v.snapshotId, goldenName(imageMark(), key, v.version));
           const current = await copyOf(places.wired, key);
           if (current === undefined) throw new Error(`golden ${key} was dropped while its versions were being promoted`);
           await putCopy(places.wired, key, { ...current, versions: current.versions.map(x => (x.version === v.version ? { ...x, templateId } : x)) });
@@ -9093,7 +9112,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * silence as a machine that died. */
   const awayLine = (record: WorkspaceRecord): string | undefined => {
     const at = workspacePlace(record);
-    if (at === undefined || placeDoor === undefined || placeDoor.link(at) !== undefined) return undefined;
+    if (at === undefined || placeDoor === undefined || !placeAway(at)) return undefined;
     return absentComputer(placeDoor.nameOf(at), null).sentence;
   };
 
