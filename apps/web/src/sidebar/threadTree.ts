@@ -12,7 +12,7 @@
 import type { ProjectView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
 import { workspaceRowId } from "./rowGrammar.js";
-import { isThreadArchived, isThreadWorking, nestSpawnedThreads, sortSettledThreadsForSidebar, sortThreadsForSidebar, threadForest, type ThreadNode } from "./Sidebar.logic.js";
+import { isThreadSettleable, isThreadSettled, isThreadWorking, nestSpawnedThreads, sortSettledThreadsForSidebar, sortThreadsForSidebar, threadForest, type ThreadNode } from "./Sidebar.logic.js";
 
 /** One project of the sidebar: the record the host holds for it, and its workspaces. */
 export interface ProjectGroup {
@@ -136,8 +136,8 @@ export interface TileItem {
 export type TileNode = ThreadNode<TileItem>;
 
 /** The sidebar's list: root tiles across every workspace newest first, each with the tiles its agents opened under
- * it, parted into the live list and the Settled fold, which holds every root whose whole tree is threads that have
- * been quiet a day. Under a picked project only that project's roots are listed, children kept wherever they run. */
+ * it, parted into the live list and the Settled fold, which holds every root whose whole tree is settled threads.
+ * Under a picked project only that project's roots are listed, children kept wherever they run. */
 export function sidebarTiles(projects: ReadonlyArray<SidebarProjectSnapshot>, { picked, nowMs }: { picked: string | null; nowMs: number }): { live: TileNode[]; settled: TileNode[] } {
   const items = projects.flatMap((runs): TileItem[] => {
     const forkedBy = runs.workspace.parentThreadId ?? null;
@@ -147,13 +147,34 @@ export function sidebarTiles(projects: ReadonlyArray<SidebarProjectSnapshot>, { 
   const roots = threadForest(sortThreadsForSidebar(items)).filter(node => picked === null || node.thread.runs.workspace.project.id === picked);
   const live: TileNode[] = [];
   const settled: TileNode[] = [];
-  for (const node of roots) (isQuiet(node, nowMs) ? settled : live).push(node);
+  for (const node of roots) (everyTile(node, thread => isThreadSettled(thread, nowMs)) ? settled : live).push(node);
   const bySettle = new Map(settled.map(node => [node.thread.thread!, node]));
   return { live, settled: sortSettledThreadsForSidebar([...bySettle.keys()]).map(thread => bySettle.get(thread)!) };
 }
 
-/** Every tile of the tree is a thread with nothing running, nothing asked and a day since it last moved. */
-function isQuiet({ thread: { thread }, children }: TileNode, nowMs: number): boolean {
-  if (thread === null || thread.asking !== null || isThreadWorking(thread) || !isThreadArchived(thread, nowMs)) return false;
-  return children.every(child => isQuiet(child, nowMs));
+/** Every tile of the tree is a thread, and each passes the test; a workspace tile with no thread passes none. */
+function everyTile({ thread: { thread }, children }: TileNode, test: (thread: SidebarThreadSnapshot) => boolean): boolean {
+  return thread !== null && test(thread) && children.every(child => everyTile(child, test));
+}
+
+/** The fold keys of every thread a tree holds, the root first: what a settle of the root sends. */
+export function treeThreadIds({ thread: { thread }, children }: TileNode): string[] {
+  return [...(thread === null ? [] : [thread.id]), ...children.flatMap(treeThreadIds)];
+}
+
+/** What a settle of a root takes: every thread of its tree, and whether one of them is working, which holds it. */
+export function treeSettle(node: TileNode): { threadIds: string[]; working: boolean } {
+  const works = ({ thread: { thread }, children }: TileNode): boolean => (thread !== null && isThreadWorking(thread)) || children.some(works);
+  return { threadIds: treeThreadIds(node), working: works(node) };
+}
+
+/** The live roots "Settle all read" takes: every tree whose threads have all been read and are quiet. */
+export function settleableRoots(live: ReadonlyArray<TileNode>): TileNode[] {
+  return live.filter(node => everyTile(node, isThreadSettleable));
+}
+
+/** The root tree a thread hangs in, among the roots given; undefined for a thread none of them holds. */
+export function rootHolding(roots: ReadonlyArray<TileNode>, threadId: string): TileNode | undefined {
+  const holds = (node: TileNode): boolean => node.thread.thread?.id === threadId || node.children.some(holds);
+  return roots.find(holds);
 }

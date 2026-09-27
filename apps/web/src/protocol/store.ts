@@ -249,6 +249,11 @@ interface State {
    * the sidebar. True once the runtime dropped it; its refusal for a thread whose turn reached its agent is false
    * and a toast. */
   forgetThread(opts: { threadId: string; workspaceId: string }): Promise<boolean>;
+  /** Tells the host this window showed the thread; the thread.marked it answers with reloads the rows in every
+   * window. A refusal says nothing: nobody asked for it, and the thread reads Done until the next showing. */
+  readThread(threadId: string): Promise<void>;
+  /** Settles the threads by hand through the host, a root and every thread under it; a refusal is a toast. */
+  settleThreads(threadIds: readonly string[]): Promise<void>;
   /** Names the workspace through the runtime, which holds the name on this computer, and puts the record it answers
    * with in place of the row. True once the runtime took the name; a refusal (a name another workspace holds, a blank
    * one) is false and a toast, so the caller can leave the name where a person can still see it. */
@@ -735,6 +740,18 @@ export const useStore = create<State>((set, get) => {
         return false;
       }
     },
+    async readThread(threadId) {
+      await get().api?.readThread?.(threadId).catch((e: unknown) => console.warn(`read stamp not taken: ${e instanceof Error ? e.message : String(e)}`));
+    },
+    async settleThreads(threadIds) {
+      const api = get().api;
+      if (!api?.settleThreads || threadIds.length === 0) return;
+      try {
+        await api.settleThreads(threadIds);
+      } catch (e: unknown) {
+        noticeFailure(e);
+      }
+    },
     async renameWorkspace({ workspaceId, name }) {
       const api = get().api;
       if (!api?.renameWorkspace) return false;
@@ -839,6 +856,9 @@ export const useStore = create<State>((set, get) => {
     },
     applyEvent(e) {
       switch (e.type) {
+        case "thread.marked":
+          void get().reloadSessions(e.workspaceId);
+          return;
         case "workspace.renamed":
           // The record alone changed: the row and its status take the name, and nothing about the machine moves.
           set(s => ({

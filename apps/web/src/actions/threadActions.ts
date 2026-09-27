@@ -2,12 +2,13 @@
 // The thread's actions, one registry: what a thread row's context menu offers
 // for one session. Stop takes the runtime's session id, the one
 // sessions.interrupt is keyed by; the rename opens the name for editing on
-// the row by the thread's own key, and the row sends it.
-import { LinkIcon, PencilIcon, SquareIcon, Trash2Icon } from "lucide-react";
+// the row by the thread's own key, and the row sends it. A settle takes a root
+// thread with every thread under it.
+import { ArchiveIcon, LinkIcon, PencilIcon, SquareIcon, Trash2Icon } from "lucide-react";
 import type { HarnessCatalog, SessionStatus, WorkspaceState } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { addressLink } from "../protocol/address.js";
-import { CLIENT_CANNOT_STOP, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal } from "./format.js";
+import { CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal } from "./format.js";
 import type { ActionEntry } from "./registry.js";
 
 export interface ThreadTarget {
@@ -32,11 +33,18 @@ export interface ThreadTarget {
   readonly state: WorkspaceState;
   /** What the runtime said about a machine that is gone, for the refusal that names it. */
   readonly goneWords?: string | undefined;
+  /** The tree a settle takes where this thread is a root: its fold key and every one under it, and whether one of
+   * them is working. Null on a thread under another, which settles with its root. */
+  readonly settle: { readonly threadIds: ReadonlyArray<string>; readonly working: boolean } | null;
 }
 
 /** One thread as its actions read it: the row, the agent's catalog row for the machine it runs on, and that
  * machine's state, as workspaceTarget does for a workspace row. */
-export function threadTarget(thread: SidebarThreadSnapshot, machine: { catalog: HarnessCatalog | null; state: WorkspaceState; goneWords?: string | undefined }): ThreadTarget {
+export function threadTarget(
+  thread: SidebarThreadSnapshot,
+  machine: { catalog: HarnessCatalog | null; state: WorkspaceState; goneWords?: string | undefined },
+  settle: ThreadTarget["settle"] = null,
+): ThreadTarget {
   return {
     id: thread.id,
     threadId: thread.threadId,
@@ -49,6 +57,7 @@ export function threadTarget(thread: SidebarThreadSnapshot, machine: { catalog: 
     catalog: machine.catalog,
     state: machine.state,
     ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}),
+    settle,
   };
 }
 
@@ -61,6 +70,8 @@ export interface ThreadVerbs {
   /** Drops a thread no turn ever ran on through the host; the surface that draws the rows leaves it out when its
    * client has no road to the op. */
   readonly forget?: ((thread: { threadId: string; workspaceId: string }) => void) | undefined;
+  /** Settles threads by hand through the host, by fold key; left out by a client with no road to the op. */
+  readonly settle?: ((threadIds: ReadonlyArray<string>) => Promise<void>) | undefined;
   readonly copyText: (text: string) => Promise<void>;
 }
 
@@ -76,6 +87,16 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     title: () => THREAD_WORDS.stop,
     refusal: (target, verbs) => (target.status !== "running" ? THREAD_NOT_RUNNING : verbs.stop === undefined ? CLIENT_CANNOT_STOP : null),
     run: (target, verbs) => verbs.stop?.(target.sessionId),
+  },
+  {
+    id: "settle",
+    group: "state",
+    icon: () => ArchiveIcon,
+    shortcutCommand: "thread.settle",
+    applies: target => target.settle !== null,
+    title: () => THREAD_WORDS.settle,
+    refusal: (target, verbs) => (verbs.settle === undefined ? CLIENT_CANNOT_SETTLE : target.settle?.working ? THREAD_TREE_WORKING : null),
+    run: (target, verbs) => (target.settle === null ? undefined : verbs.settle?.(target.settle.threadIds)),
   },
   {
     id: "rename",
@@ -102,5 +123,21 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     title: () => THREAD_WORDS.forget,
     refusal: (target, verbs) => threadForgetRefusalFor(target, verbs.forget !== undefined),
     run: (target, verbs) => (target.threadId === null ? undefined : verbs.forget?.({ threadId: target.threadId, workspaceId: target.workspaceId })),
+  },
+];
+
+/** The Settled fold's own row: what it settles is every live tree whose threads have all been read and are quiet. */
+export interface SettledFoldTarget {
+  readonly threadIds: ReadonlyArray<string>;
+}
+
+export const settledFoldActions: ReadonlyArray<ActionEntry<SettledFoldTarget, ThreadVerbs>> = [
+  {
+    id: "settle-read",
+    group: "state",
+    icon: () => ArchiveIcon,
+    title: () => THREAD_WORDS.settleRead,
+    refusal: (target, verbs) => (verbs.settle === undefined ? CLIENT_CANNOT_SETTLE : target.threadIds.length === 0 ? NOTHING_READ_TO_SETTLE : null),
+    run: (target, verbs) => verbs.settle?.(target.threadIds),
   },
 ];

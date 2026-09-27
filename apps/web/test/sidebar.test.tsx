@@ -211,20 +211,21 @@ describe("tiles from the fixture wire", () => {
         [status(API), status(WEB)],
         [
           session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
-          session("s2", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60 * 60_000), endedAt: iso(-50 * 60_000) }),
+          session("s2", "ws_a", { status: "completed", prompt: "upgrade node", startedAt: iso(-60 * 60_000), endedAt: iso(-50 * 60_000), readAt: iso(-50 * 60_000) }),
           session("s3", "ws_b", { status: "failed", claudeSessionId: "59094224-bb3d", startedAt: iso(-20 * 60_000), endedAt: iso(-19 * 60_000) }),
         ],
       ),
       "fix the port list",
     );
-    expect(rowIds()).toEqual(["thread:s1", "thread:s3", "thread:s2"]);
+    expect(rowIds()).toEqual(["thread:s1", "thread:s3", "thread:s2", "settled"]);
     expect(rowOf("fix the port list").querySelector("[data-tile-where]")!.textContent).toBe(`the-project @ ${BOX_NAME}`);
     // The one slot at row one's right edge: the state word while a thread is one a person acts on, the age once it rests.
     expect(threadState(rowOf("fix the port list"))).toBe("Working");
     expect(threadTime(rowOf("upgrade node"))).toBe("50m");
     // A session without a prompt falls back to the harness session id.
     expect(threadState(rowOf("59094224-bb3d"))).toBe("Failed");
-    expect(screen.queryByText(/Settled/i)).toBeNull();
+    // Nothing has been quiet long enough to fold, but the read thread can be settled, so the fold's row is there at 0.
+    expect(screen.getByRole("button", { name: "Settled 0" })).toBeDefined();
     expect(document.querySelector("[data-sidebar-tree]")!.textContent).not.toMatch(/[·•]/);
   });
 
@@ -845,7 +846,7 @@ describe("one lifted tile", () => {
       fakeApi(
         [API, WEB],
         [status(API), status(WEB)],
-        [session("s1", "ws_a", { prompt: "hello", threadId: "thr_1", startedAt: iso(-60_000) }), session("s2", "ws_a", { status: "completed", prompt: "done", threadId: "thr_2", startedAt: iso(-3 * 24 * 60 * 60_000), endedAt: iso(-2 * 24 * 60 * 60_000) })],
+        [session("s1", "ws_a", { prompt: "hello", threadId: "thr_1", startedAt: iso(-60_000) }), session("s2", "ws_a", { status: "completed", prompt: "done", threadId: "thr_2", startedAt: iso(-3 * 24 * 60 * 60_000), endedAt: iso(-2 * 24 * 60 * 60_000), readAt: iso(-2 * 24 * 60 * 60_000) })],
       ),
       "hello",
     );

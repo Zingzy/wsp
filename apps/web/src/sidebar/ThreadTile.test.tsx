@@ -7,7 +7,7 @@ import { SidebarProvider } from "../components/ui/sidebar.js";
 import { ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
 
 const thread = (over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot => {
-  const base = { id: "th_1", threadId: "th_1", sessionId: "s_1", workspaceId: "ws_a", title: "Cart total rounding", status: "running" as const, ran: true, startedAt: "2026-09-17T00:00:00.000Z", endedAt: null, harness: "claude", startedBy: "person" as const, project: "spoo", parentThreadId: null, asking: null, costUsd: null };
+  const base = { id: "th_1", threadId: "th_1", sessionId: "s_1", workspaceId: "ws_a", title: "Cart total rounding", status: "running" as const, ran: true, startedAt: "2026-09-17T00:00:00.000Z", endedAt: null, harness: "claude", startedBy: "person" as const, project: "spoo", parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null };
   const merged = { ...base, ...over };
   return { ...merged, indicator: threadIndicator({ status: merged.status, ...(merged.asking === null ? {} : { asking: merged.asking }) }) };
 };
@@ -42,6 +42,20 @@ const slot = (): HTMLElement => tile().querySelector<HTMLElement>("[data-thread-
 afterEach(cleanup);
 
 describe("a thread tile", () => {
+  it("a finish nobody has seen says Done in the slot and keeps its title in the foreground ink; opened, it rests with its age and a muted title", () => {
+    mount({ over: { status: "completed", endedAt: "2026-09-17T00:05:00.000Z", unread: true } });
+    expect(slot().textContent).toBe("Done");
+    expect(slot().dataset["tone"]).toBe("done");
+    const title = tile().querySelector("[data-thread-title]")!;
+    expect(title.className).toContain("text-sidebar-foreground");
+    expect(title.className).not.toContain("text-sidebar-muted-foreground");
+    expect(rows()[2]!.querySelector("canvas")).toBeNull();
+    cleanup();
+    mount({ over: { status: "completed", endedAt: "2026-09-17T00:05:00.000Z", unread: false } });
+    expect(slot().textContent).toBe("3m");
+    expect(tile().querySelector("[data-thread-title]")!.className).toContain("text-sidebar-muted-foreground");
+  });
+
   it("is three rows: where it runs with the status at the right, the title, then the agent's mark and the branch", () => {
     mount({ over: { status: "failed" } });
     expect(rows()).toHaveLength(3);

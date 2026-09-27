@@ -51,10 +51,10 @@ export const TURN_IDLE_MS = 10 * 60_000;
  * percent of one core clears it, which a vitest batch or a packager does many times over; a harness process waking
  * on its own timers stays under it, so a turn nothing is working on is still cut at TURN_IDLE_MS. */
 export const TURN_WORK_TICKS_PER_S = 5;
-/** How long a thread sits idle before the sidebar folds it out of that workspace's shelf into its Archived group.
- * The fold reads the thread's own last activity, so a thread that takes a new turn leaves the archive by itself and
- * there is no archived flag anywhere to set or clear. */
-export const THREAD_ARCHIVE_MS = 24 * 60 * 60_000;
+/** How long a thread a person has read sits quiet before the sidebar folds it into Settled. The fold reads the
+ * thread's own last activity, so a thread that takes a new turn leaves Settled by itself; one nobody has read since
+ * its turn ended never folds by time. */
+export const THREAD_SETTLE_MS = 2 * 60 * 60_000;
 /** The longest one turn may run however much it prints, a safety cap only; a per-workspace setting is a follow-up. */
 export const TURN_WALL_MS = 6 * 60 * 60_000;
 /** How long a harness gets to exit on its own after the result its turn ended on, before the runtime ends it and its
@@ -916,6 +916,13 @@ export const SessionView = z.object({
    * computer's, and on a turn that is over. It is never written down: a pid outlives nothing, and the computer is
    * free to hand it to a stranger the moment the turn ends. */
   pid: z.number().int().optional(),
+  /** When a window last showed this row's thread, ms epoch on the host's clock; where no window has since the host
+   * began keeping the stamp, that beginning, or the turn's own end where it ended before. The host keeps it per thread and stamps it on every row of the thread
+   * as it answers a listing; the row itself never writes it down. */
+  readAt: z.number().optional(),
+  /** When the person settled this row's thread by hand, kept and stamped as readAt is; absent on a thread nobody
+   * settled. Activity after it brings the thread back. */
+  settledAt: z.number().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -954,6 +961,9 @@ export const ThreadView = z.object({
   costUsd: z.number().optional(),
   /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
   pid: z.number().int().optional(),
+  /** The thread's read and settled stamps, as SessionView carries them; threadUnread reads the first. */
+  readAt: z.number().optional(),
+  settledAt: z.number().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -1002,6 +1012,8 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.asking !== undefined ? { asking: latest.asking } : {}),
       ...(latest.waitingOn !== undefined ? { waitingOn: latest.waitingOn } : {}),
       ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
+      ...(latest.readAt !== undefined ? { readAt: latest.readAt } : {}),
+      ...(latest.settledAt !== undefined ? { settledAt: latest.settledAt } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
@@ -1973,6 +1985,10 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
 /** What a set that turned server icons off answers when their folder would not go: the record is kept all the same. */
 export const serverIconsLeftLine = (folder: string, reason: string): string =>
   `Server icons are off, but ${folder} could not be deleted: ${reason}. Delete it by hand.`;
+
+/** A thread's read or settled stamp moved, by any window: the workspace's rows are read again to pick it up. */
+export const ThreadMarkedEvent = z.object({ type: z.literal("thread.marked"), workspaceId: z.string(), threadIds: z.array(z.string()) });
+export type ThreadMarkedEvent = z.infer<typeof ThreadMarkedEvent>;
 
 /** The host's record changed, by any client; every socket gets the whole record. */
 export const PreferencesChangedEvent = z.object({ type: z.literal("preferences.changed"), preferences: Preferences });
@@ -3001,6 +3017,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionPermissionEvent.extend(sequenced),
   SessionPermissionClosedEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
+  ThreadMarkedEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
   PortCloseEvent.extend(sequenced),
   InboxFileEvent.extend(sequenced),
@@ -5399,6 +5416,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * Takes the runtime's thread id, the one the rows carry, not a session id; refused with threadForgetRefusal's
    * sentence once a turn reached the agent. */
   z.object({ id: reqId, op: z.literal("sessions.forget"), threadId: z.string() }),
+  /** A window showed the thread: its read stamp moves to now, and every window hears thread.marked. Takes the
+   * thread's fold key, as ThreadView.id carries it. */
+  z.object({ id: reqId, op: z.literal("sessions.read"), threadId: z.string() }),
+  /** The person settled these threads by hand, a root and every thread under it: each takes a settled stamp and a
+   * read stamp of now, and every window hears thread.marked. Takes fold keys. */
+  z.object({ id: reqId, op: z.literal("sessions.settle"), threadIds: z.array(z.string()).min(1) }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -5782,6 +5805,8 @@ export const DEVICE_OPS: readonly string[] = [
   "sessions.list",
   "sessions.history",
   "sessions.forget",
+  "sessions.read",
+  "sessions.settle",
   "golden.get",
   "image.get",
   "snapshots.list",
@@ -6010,7 +6035,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
+export { needsYouLine, threadState, threadStateWord, threadUnread, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeCapRefusal, placeFullLine, placeRoom, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";

@@ -24,6 +24,9 @@ const thread = (id: string, over: Partial<SidebarThreadSnapshot> = {}): SidebarT
   parentThreadId: "thr_lead",
   asking: null,
   costUsd: null,
+  unread: false,
+  readAt: null,
+  settledAt: null,
   ...over,
 });
 

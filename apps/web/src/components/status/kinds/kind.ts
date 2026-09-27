@@ -6,7 +6,7 @@ import type { LucideIcon } from "lucide-react";
 import type { SidebarThreadSnapshot } from "../../../adapt/index.js";
 
 /** What a thread's status is read off, the fields every surface that shows a thread holds. */
-export type ThreadStatusInput = Pick<SidebarThreadSnapshot, "status" | "asking" | "startedAt">;
+export type ThreadStatusInput = Pick<SidebarThreadSnapshot, "status" | "asking" | "startedAt" | "unread">;
 
 /** The suffix of the theme token a status is inked in: `input` is drawn in `--status-input`. */
 export type StatusTone = "input" | "working" | "failed" | "done";

@@ -39,6 +39,8 @@ export const THREAD_WORDS = {
   rename: "Rename thread",
   copyLink: "Copy thread link",
   forget: "Forget thread",
+  settle: "Settle thread",
+  settleRead: "Settle all read",
 } as const;
 
 export const TERMINAL_WORDS = {
@@ -145,6 +147,9 @@ export const CLIENT_CANNOT_STOP = "This client cannot stop a turn";
 export const THREAD_HAS_NO_ID = "This thread has no id yet";
 export const CLIENT_CANNOT_RENAME = "This client cannot rename a thread";
 export const CLIENT_CANNOT_FORGET_THREAD = "This client cannot forget a thread";
+export const CLIENT_CANNOT_SETTLE = "This client cannot settle a thread";
+export const THREAD_TREE_WORKING = "A thread in it is still working";
+export const NOTHING_READ_TO_SETTLE = "No read thread to settle";
 
 /** Why the forget cannot run, or null when it can. The runtime owns the rule and raises the same sentence; the row
  * reads it off the fold so the menu says why without asking the host. */

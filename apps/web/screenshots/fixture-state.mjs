@@ -316,7 +316,10 @@ const metered = (workspaces, meters = {}) =>
 
 /** One store as the JSON file holds it: one object per collection, keyed the way the runtime keys it. Every
  * fixture below builds one. */
-const store = ({ projects, workspaces, sessions = {}, transcripts = {}, goldens, images, places, meters, preferences }) => ({
+/** `readsSince` is when the host began keeping read stamps, minutes ago: a turn that ended after it and whose thread
+ * says `seen` nowhere reads Done. Without it the host starts keeping them as it comes up, and every thread reads seen. */
+const store = ({ projects, workspaces, sessions = {}, transcripts = {}, goldens, images, places, meters, preferences, readsSince }) => ({
+  ...(readsSince === undefined ? {} : { reads: { since: { at: ago(readsSince) } } }),
   projects: Object.fromEntries(projects.map(p => [p.id, p])),
   workspaces: Object.fromEntries(workspaces.map(w => [w.id, w])),
   sessions,
@@ -408,7 +411,14 @@ const place = (id, name, minutes, over = {}, holdsWorkspaces = false) => ({
  * replays the last turn, so a thread out of order here heads the page with one title and fills it with another
  * turn's words. */
 const threadsOn = (workspaceId, rows) => ({
-  sessions: { [workspaceId]: { workspaceId, sessions: rows.map(([thread, minutes]) => turn(thread, minutes, workspaceId)) } },
+  sessions: {
+    [workspaceId]: {
+      workspaceId,
+      sessions: rows.map(([thread, minutes]) => turn(thread, minutes, workspaceId)),
+      // A thread marked seen was shown by a window as its turn ended, which the host keeps on the thread's record.
+      threads: Object.fromEntries(rows.filter(([thread]) => thread.seen === true).map(([thread, minutes]) => [threadId(thread.id), { harness: thread.agent ?? "claude", readAt: ago(minutes - 3) }])),
+    },
+  },
   transcripts: { [workspaceId]: { workspaceId, events: rows.flatMap(([thread, minutes]) => replay(thread, minutes, workspaceId)) } },
 });
 
@@ -694,10 +704,11 @@ const orchestrator = () => {
       fork("ws_docs", "docs", "fk_run_3", { ...tree, project: "pr_docs", phase: "napping", createdAt: new Date(ago(60 * 8 - 4)).toISOString() }),
     ],
     ...merge(
-      threadsOn("ws_here", [[root, 120]]),
-      threadsOn("ws_api", [[spawned("api-move", REDIRECT, "migrate", "migrate"), 100]]),
-      threadsOn("ws_web", [[spawned("web-move", CHART, "migrate", "migrate"), 90]]),
-      threadsOn("ws_docs", [[spawned("docs-move", DOCS_READ, "migrate", "migrate"), 85]]),
+      // Inside the two quiet hours a read tree folds after, whatever minute of the hour AT was rounded down from.
+      threadsOn("ws_here", [[root, 55]]),
+      threadsOn("ws_api", [[spawned("api-move", REDIRECT, "migrate", "migrate"), 45]]),
+      threadsOn("ws_web", [[spawned("web-move", CHART, "migrate", "migrate"), 40]]),
+      threadsOn("ws_docs", [[spawned("docs-move", DOCS_READ, "migrate", "migrate"), 35]]),
     ),
     goldens: sealed(),
     meters: Object.fromEntries([
@@ -754,8 +765,9 @@ const copyOn = (name, branch) => ({ road: "clonefile", path: join(HOME, "wsp-wor
 
 /** The sidebar the locked tile screens draw: a root on this computer stopped on a question, with three threads its
  * agent opened under it, one working beside it here and two on a Solari fork of the same project, one working and one
- * resting; then a working, a resting and a failed thread on the joined computer spoo, and three that went quiet days
- * ago and fold into Settled. A fork carries no copy record and reads its branch off its own daemon, which no
+ * resting; then a working and a failed thread on the joined computer spoo, a finished one nobody has opened yet on a
+ * Solari fork that has since paused, which reads Done and nothing about the pause, and three that were read and went
+ * quiet days ago and fold into Settled. A fork carries no copy record and reads its branch off its own daemon, which no
  * stand-in machine answers for the project's folder, so its tiles show the agent's mark with no branch. One
  * workspace stands on this computer, for macInUse's reason, and each project wears a look, as a person picks one. */
 const tiles = () => {
@@ -770,13 +782,14 @@ const tiles = () => {
       { ...project("spoo-landing", CLOUD, 60 * 30), id: "pr_spoo-landing-cloud" },
       { ...project("spoo-landing", "p_spoo", 60 * 30), id: "pr_spoo-landing-spoo" },
       project("wsp", "p_spoo", 60 * 30),
+      project("dark-contrast", CLOUD, 60 * 30),
     ],
     workspaces: [
       workspace("ws_flaky", THIS_COMPUTER, { project: "pr_spoo-landing", copy: copyOn("spoo-landing-flaky", "fix/checkout-flakes") }),
       fork("ws_solari", "spoo-landing", "fk_tile_1", { ...forkTree, project: "pr_spoo-landing-cloud" }),
       onSpoo("ws_relay", "relay", "pr_wsp", "relay-one-helper"),
       onSpoo("ws_release", "release", "pr_wsp", "release-0.9"),
-      onSpoo("ws_dark", "dark-contrast", "pr_spoo-landing-spoo", "fix/dark-contrast"),
+      fork("ws_dark", "dark-contrast", "fk_tile_2", { phase: "napping", project: "pr_dark-contrast" }),
       onSpoo("ws_coupons", "coupons", "pr_spoo-landing-spoo", "feat/coupons"),
       onSpoo("ws_pty", "pty", "pr_wsp", "fix/pty-leak"),
       onSpoo("ws_diff", "diff-viewer", "pr_spoo-landing-spoo", "spike/diff-viewer"),
@@ -787,7 +800,7 @@ const tiles = () => {
         [{ ...tileThread("address", "Address form race", { status: "running", agent: "codex" }), ...tree }, 6],
       ]),
       threadsOn("ws_solari", [
-        [{ ...tileThread("coupon", "Coupon expiry test"), ...tree }, 35],
+        [{ ...tileThread("coupon", "Coupon expiry test", { seen: true }), ...tree }, 35],
         [
           {
             ...tileThread("cart", "Cart total rounding", { status: "running" }),
@@ -800,14 +813,15 @@ const tiles = () => {
       ]),
       threadsOn("ws_relay", [[tileThread("relay", "Move the relay to one callback helper", { status: "running" }), 45]]),
       threadsOn("ws_dark", [[tileThread("dark", "Dark mode contrast pass", { agent: "codex" }), 183]]),
-      threadsOn("ws_release", [[tileThread("release", "Release notes for 0.9", { status: "failed" }), 240]]),
-      threadsOn("ws_coupons", [[tileThread("coupons", "Coupon codes at checkout"), 60 * 30]]),
-      threadsOn("ws_pty", [[tileThread("pty", "Stop the daemon leaking ptys"), 60 * 50]]),
-      threadsOn("ws_diff", [[tileThread("diff", "Try the new diff viewer", { agent: "codex" }), 60 * 24 * 6]]),
+      threadsOn("ws_release", [[tileThread("release", "Release notes for 0.9", { status: "failed", seen: true }), 240]]),
+      threadsOn("ws_coupons", [[tileThread("coupons", "Coupon codes at checkout", { seen: true }), 60 * 30]]),
+      threadsOn("ws_pty", [[tileThread("pty", "Stop the daemon leaking ptys", { seen: true }), 60 * 50]]),
+      threadsOn("ws_diff", [[tileThread("diff", "Try the new diff viewer", { agent: "codex", seen: true }), 60 * 24 * 6]]),
     ),
+    readsSince: 60 * 24 * 7,
     goldens: sealed(),
     places: { p_spoo: spooPlace },
-    preferences: { projectLook: { "pr_spoo-landing": landing, "pr_spoo-landing-cloud": landing, "pr_spoo-landing-spoo": landing, pr_wsp: { icon: "terminal", hue: "teal" } } },
+    preferences: { projectLook: { "pr_spoo-landing": landing, "pr_spoo-landing-cloud": landing, "pr_spoo-landing-spoo": landing, "pr_dark-contrast": landing, pr_wsp: { icon: "terminal", hue: "teal" } } },
   });
 };
 

@@ -202,6 +202,23 @@ in one slot, gap 4, tabular, weight 500 when toned.
 In a one-line row the slot is 88px, right-aligned, 12px, and the crab follows
 the time. A held thread's reason rides the hover title, never the slot.
 
+Done is read off the host's read stamp for the thread, so every window and
+`wsp threads` say it together, and a window showing the thread clears it. A
+paused machine adds nothing to a tile: no word, no tone, no line. Its thread
+reads Done until opened and its age after; the open thread says Paused, one
+quiet word in the rule line under the last turn, with Wake beside it.
+
+### The Settled fold
+
+The last row of the list: SETTLED in the section caps, the count, the
+chevron. It holds every root whose whole tree a person has read and left
+quiet two hours, or settled by hand: Settle on a root tile's menu or
+mod+shift+E takes the root and every thread under it, and the fold row's own
+menu holds Settle all read. A Done nobody has opened or a Failed nobody has
+looked at never folds by time. Any new turn or message brings a tree back.
+The list scrolls under a hard edge, never a fade: a faded tile part way
+under the head reads as a tile with no first row.
+
 The crab is the Whimsy Loaders pixel crab as is (https://www.whimsically.app/loaders,
 by Sasha); credit it in THIRD_PARTY_NOTICES in the change that brings it in
 (the owner's ruling, 2026-09-26). A 16×14 css box, canvas at the device ratio,
@@ -311,6 +328,8 @@ in place, this list decides.
 - Do not redesign what was kept. The open thread and the sidebar top stay as
   they are (2026-09-26).
 - Working is rose pink, never orange or blue (2026-09-26).
+- A paused machine is not a fault: it adds no mark to a tile, and only a turn
+  that failed reads Failed (2026-09-27).
 - Nothing animates at rest but the crab, which holds still under reduced
   motion.
 - No fake or sample data in the shipped app; the mockup's rows are the

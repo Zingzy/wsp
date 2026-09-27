@@ -224,7 +224,7 @@ export function WorkspaceTile({
 
 /** A send in flight is working by the fact of having been sent, read through the same status as the runtime's own
  * rows, so the two tiles cannot say different things about the same thread. */
-const LAUNCHED: ThreadStatusInput = { status: "running", asking: null, startedAt: null };
+const LAUNCHED: ThreadStatusInput = { status: "running", asking: null, startedAt: null, unread: false };
 
 /** The send the runtime has written no row for yet, in the tile's own grammar. Not a button: the thread it stands
  * for has no id to select until the runtime answers, and the transcript the person is looking at is already it. */
@@ -243,7 +243,7 @@ export function ThreadLaunchTile({ launch, place, branch }: { launch: Launch; pl
   );
 }
 
-const CREATE_FAILED: ThreadStatusInput = { status: "failed", asking: null, startedAt: null };
+const CREATE_FAILED: ThreadStatusInput = { status: "failed", asking: null, startedAt: null, unread: false };
 
 /** A workspace still being made, in the tile's grammar: where it will run, its name, and the step the create is
  * waiting on in row three, with the whole of it on the hover text. A refused create says Failed in the slot. */

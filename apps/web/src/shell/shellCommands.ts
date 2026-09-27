@@ -24,9 +24,9 @@ import { failureOf } from "../protocol/failure.js";
 import { useStore } from "../protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { absenceOf } from "../settings/places.js";
-import { sidebarThreadOrder } from "../sidebar/Sidebar.logic.js";
+import { sidebarThreadOrder, topSidebarThread } from "../sidebar/Sidebar.logic.js";
 import { currentWorkspaceId } from "../adapt/workspaces.js";
-import { threadTree } from "../sidebar/threadTree.js";
+import { rootHolding, sidebarTiles, threadTree, treeSettle } from "../sidebar/threadTree.js";
 import { workspaceOrHere } from "../terminal/computer.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { resetTerminalZoom, stepTerminalZoom } from "../terminal/fontSetting.js";
@@ -219,6 +219,21 @@ export function cycleThreadSwitcher(step: 1 | -1, hold: ReadonlyArray<string>): 
   switcher.openAt(targets, fromOpen ? stepSwitcherAt(targets.length, 0, step) : step === 1 ? 0 : targets.length - 1, selectedId, hold);
 }
 
+/** The open thread's root tree, settled by hand as the tile's menu settles it: the thread the centre shows, else the
+ * workspace's top thread, and nothing while a thread of the tree works or the tree is settled already. */
+export function settleOpenThread(): void {
+  const { selectedId, selectedThreadId, settleThreads } = useStore.getState();
+  const projects = sidebarProjects();
+  const runs = projects.find(project => project.id === selectedId);
+  if (runs === undefined) return;
+  const open = (selectedThreadId === null ? undefined : runs.threads.find(thread => thread.threadId === selectedThreadId)) ?? topSidebarThread(runs.threads);
+  if (open === null) return;
+  const root = rootHolding(sidebarTiles(projects, { picked: null, nowMs: Date.now() }).live, open.id);
+  if (root === undefined) return;
+  const settle = treeSettle(root);
+  if (!settle.working) void settleThreads(settle.threadIds);
+}
+
 /** The hold let go: the highlighted workspace, or thread, becomes the open one. */
 export function commitWorkspaceSwitch(): void {
   const state = useWorkspaceSwitcher.getState();
@@ -298,6 +313,9 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       return;
     case "thread.previous":
       cycleThreadSwitcher(-1, hold);
+      return;
+    case "thread.settle":
+      settleOpenThread();
       return;
     default: {
       const _exhaustive: never = command;
