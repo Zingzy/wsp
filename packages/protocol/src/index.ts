@@ -5416,8 +5416,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * Takes the runtime's thread id, the one the rows carry, not a session id; refused with threadForgetRefusal's
    * sentence once a turn reached the agent. */
   z.object({ id: reqId, op: z.literal("sessions.forget"), threadId: z.string() }),
-  /** A window showed the thread: its read stamp moves to now, and every window hears thread.marked. Takes the
-   * thread's fold key, as ThreadView.id carries it. */
+  /** A window showed the thread, or `wsp thread read` read it: its read stamp moves to now, and every window hears
+   * thread.marked. Takes the thread's fold key, as ThreadView.id carries it. */
   z.object({ id: reqId, op: z.literal("sessions.read"), threadId: z.string() }),
   /** The person settled these threads by hand, a root and every thread under it: each takes a settled stamp and a
    * read stamp of now, and every window hears thread.marked. Takes fold keys. */
@@ -5748,6 +5748,7 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.interrupt",
   "sessions.steer",
   "sessions.rename",
+  "sessions.read",
 ];
 
 /** The ops a computer the person paired may send with no role of its own, and the whole of them, for the reason

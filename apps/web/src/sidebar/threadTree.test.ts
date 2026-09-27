@@ -111,17 +111,25 @@ describe("the sidebar's tiles", () => {
       row("ws_b", "pr_1", [done("stale", "ws_b", 40), thread("busy-child", "ws_b", "stale"), done("failed", "ws_b", 5, null, { status: "failed" })]),
     ];
     const { live, settled } = sidebarTiles(rows, { picked: null, nowMs: NOW });
-    expect(shape(live)).toEqual(["recent", ["stale", ["busy-child"]]]);
-    expect(shape(settled)).toEqual([["quiet", ["quiet-child"]], "failed"]);
+    expect(shape(live)).toEqual(["recent", "failed", ["stale", ["busy-child"]]]);
+    expect(shape(settled)).toEqual([["quiet", ["quiet-child"]]]);
   });
 
-  it("keeps a tree live while any finish in it is unseen or any failure unopened, however old, and folds it once opened", () => {
+  it("keeps a tree live while any finish in it is unseen, however old, and folds it once opened; a failure stays until settled by hand", () => {
     const unseen = (read: boolean) => [
       row("ws_a", "pr_1", [done("lead", "ws_a", 30), done("builder", "ws_a", 29, "lead", read ? {} : { readAt: ago(40), unread: true })]),
       row("ws_b", "pr_1", [done("broke", "ws_b", 31, null, { status: "failed", readAt: read ? ago(20) : null })]),
     ];
     expect(shape(sidebarTiles(unseen(false), { picked: null, nowMs: NOW }).live)).toEqual([["lead", ["builder"]], "broke"]);
-    expect(shape(sidebarTiles(unseen(true), { picked: null, nowMs: NOW }).settled)).toEqual([["lead", ["builder"]], "broke"]);
+    const opened = sidebarTiles(unseen(true), { picked: null, nowMs: NOW });
+    expect(shape(opened.settled)).toEqual([["lead", ["builder"]]]);
+    expect(shape(opened.live)).toEqual(["broke"]);
+  });
+
+  it("leaves the tree of the thread open in the centre on the list while it is read, however quiet", () => {
+    const rows = [row("ws_a", "pr_1", [done("lead", "ws_a", 30), done("builder", "ws_a", 29, "lead")])];
+    expect(shape(sidebarTiles(rows, { picked: null, nowMs: NOW }).settled)).toEqual([["lead", ["builder"]]]);
+    expect(shape(sidebarTiles(rows, { picked: null, nowMs: NOW, open: "builder" }).live)).toEqual([["lead", ["builder"]]]);
   });
 
   it("folds a tree settled by hand at once, unread or not, and brings it back when a thread in it moves after the settle", () => {

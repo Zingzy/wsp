@@ -228,7 +228,7 @@ export function settleOpenThread(): void {
   if (runs === undefined) return;
   const open = (selectedThreadId === null ? undefined : runs.threads.find(thread => thread.threadId === selectedThreadId)) ?? topSidebarThread(runs.threads);
   if (open === null) return;
-  const root = rootHolding(sidebarTiles(projects, { picked: null, nowMs: Date.now() }).live, open.id);
+  const root = rootHolding(sidebarTiles(projects, { picked: null, nowMs: Date.now(), open: open.id }).live, open.id);
   if (root === undefined) return;
   const settle = treeSettle(root);
   if (!settle.working) void settleThreads(settle.threadIds);

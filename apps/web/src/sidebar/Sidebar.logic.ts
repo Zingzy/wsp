@@ -248,16 +248,16 @@ function isThreadSeen(thread: SettleInput): boolean {
 
 /** Whether the thread belongs in the Settled fold: nothing running and nothing asked, and either the person settled it
     by hand with nothing happening since, or a window has shown it since it ended and it has been quiet
-    THREAD_SETTLE_MS since then, counted from the later of its last activity and that showing, so a thread opened
-    after hours away stays on the list while it is read. A thread nobody has seen since it finished or failed stays
-    out until it is opened, and one whose times are all missing has no quiet to read, so it stays out rather than
-    falling into a group kept shut. */
-export function isThreadSettled(thread: SettleInput, nowMs: number): boolean {
+    THREAD_SETTLE_MS since then, counted from the later of its last activity and that showing. Three threads never
+    fold by time and wait for a hand: one nobody has seen since it finished, one whose turn failed, and the one open
+    in the centre, which `open` names, so a thread being read does not leave the list under the reader. One whose
+    times are all missing has no quiet to read, so it stays out rather than falling into a group kept shut. */
+export function isThreadSettled(thread: SettleInput, nowMs: number, open = false): boolean {
   if (thread.asking !== null || isThreadWorking(thread)) return false;
   const last = lastActivityMs(thread);
   const settled = toSortableTimestamp(thread.settledAt ?? undefined);
   if (settled !== null && (last === null || settled >= last)) return true;
-  if (last === null || !isThreadSeen(thread)) return false;
+  if (open || thread.status === "failed" || last === null || !isThreadSeen(thread)) return false;
   return nowMs - Math.max(last, toSortableTimestamp(thread.readAt ?? undefined) ?? last) >= THREAD_SETTLE_MS;
 }
 

@@ -1984,10 +1984,13 @@ describe("wsp verbs over the host", () => {
       [alpha!.project.name, "alpha", a!.threadId!, "claude", "Done", "cli", alpha!.project.computer, "first task"],
       [beta!.project.name, "beta", b!.threadId!, "codex", "Done", "person", beta!.project.computer, "from the app"],
     ]);
-    // A window showing one moves its stamp on the host, and the command line reads it at once.
+    // A window showing one moves its stamp on the host, and so does reading it here; both read Idle at once.
     await rt.sessions.read(b!.threadId!);
     const read = await run("threads");
     expect(read.io.lines[0]!.split("\n").slice(1).map(r => r.split(/ {2,}/)[4])).toEqual(["Done", "Idle"]);
+    expect((await run("thread", "read", a!.threadId!)).code).toBe(0);
+    const both = await run("threads");
+    expect(both.io.lines[0]!.split("\n").slice(1).map(r => r.split(/ {2,}/)[4])).toEqual(["Idle", "Idle"]);
 
     const scoped = await run("threads", "beta", "--json");
     expect(scoped.code).toBe(0);

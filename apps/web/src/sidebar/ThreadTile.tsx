@@ -97,6 +97,7 @@ export function ThreadTile({
   time,
   depth,
   active,
+  settled = false,
   renaming,
   saving,
   onSelect,
@@ -114,6 +115,8 @@ export function ThreadTile({
   /** How many tiles of the tree stand over this one. */
   depth: number;
   active: boolean;
+  /** The tile sits in the Settled fold: it rests, its age muted and its title stepped back, whatever its state. */
+  settled?: boolean;
   /** The name is being typed on this tile: row two holds the input instead of the title. */
   renaming: boolean;
   /** That name is on its way to the machine: the field stays exactly as it is and takes no second Enter. */
@@ -125,7 +128,7 @@ export function ThreadTile({
   /** Opens the box on this tile, as the menu's Rename does; absent where the rename is refused. */
   onRenameOpen?: (() => void) | undefined;
 }) {
-  const status = threadStatusOf(thread);
+  const status = settled ? RESTING : threadStatusOf(thread);
   // Only a resting thread steps back; a failed one or one waiting on the person keeps the foreground ink.
   const idle = status === RESTING;
   return (
@@ -143,7 +146,7 @@ export function ThreadTile({
     >
       <TileRows
         place={place}
-        status={<ThreadStatus thread={thread} age={time} />}
+        status={<ThreadStatus thread={thread} age={time} settled={settled} />}
         title={
           renaming ? (
             <span className="flex h-[18px] min-w-0">

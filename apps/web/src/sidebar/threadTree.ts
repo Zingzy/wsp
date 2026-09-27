@@ -138,7 +138,10 @@ export type TileNode = ThreadNode<TileItem>;
 /** The sidebar's list: root tiles across every workspace newest first, each with the tiles its agents opened under
  * it, parted into the live list and the Settled fold, which holds every root whose whole tree is settled threads.
  * Under a picked project only that project's roots are listed, children kept wherever they run. */
-export function sidebarTiles(projects: ReadonlyArray<SidebarProjectSnapshot>, { picked, nowMs }: { picked: string | null; nowMs: number }): { live: TileNode[]; settled: TileNode[] } {
+export function sidebarTiles(
+  projects: ReadonlyArray<SidebarProjectSnapshot>,
+  { picked, nowMs, open = null }: { picked: string | null; nowMs: number; /** The thread open in the centre, by fold key. */ open?: string | null },
+): { live: TileNode[]; settled: TileNode[] } {
   const items = projects.flatMap((runs): TileItem[] => {
     const forkedBy = runs.workspace.parentThreadId ?? null;
     if (runs.threads.length === 0) return [{ id: workspaceRowId(runs.id), parentThreadId: forkedBy, startedAt: runs.workspace.createdAt, runs, thread: null }];
@@ -147,7 +150,7 @@ export function sidebarTiles(projects: ReadonlyArray<SidebarProjectSnapshot>, { 
   const roots = threadForest(sortThreadsForSidebar(items)).filter(node => picked === null || node.thread.runs.workspace.project.id === picked);
   const live: TileNode[] = [];
   const settled: TileNode[] = [];
-  for (const node of roots) (everyTile(node, thread => isThreadSettled(thread, nowMs)) ? settled : live).push(node);
+  for (const node of roots) (everyTile(node, thread => isThreadSettled(thread, nowMs, thread.id === open)) ? settled : live).push(node);
   const bySettle = new Map(settled.map(node => [node.thread.thread!, node]));
   return { live, settled: sortSettledThreadsForSidebar([...bySettle.keys()]).map(thread => bySettle.get(thread)!) };
 }

@@ -175,7 +175,13 @@ export function WorkspaceSidebar() {
   const named = useMemo(() => placeNames(places), [places]);
   // A pick for a project this host no longer holds reads as every project.
   const picked = pickStored === null ? null : groups.find(group => group.project.id === pickStored) ?? null;
-  const tiles = useMemo(() => sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs }), [projects, picked, nowMs]);
+  // The thread the centre shows, which the time fold leaves alone while it is on screen.
+  const open = useMemo(() => {
+    const runs = fleet.find(p => p.id === selectedId);
+    if (runs === undefined) return null;
+    return ((selectedThreadId === null ? undefined : runs.threads.find(t => t.threadId === selectedThreadId)) ?? topSidebarThread(runs.threads))?.id ?? null;
+  }, [fleet, selectedId, selectedThreadId]);
+  const tiles = useMemo(() => sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs, open }), [projects, picked, nowMs, open]);
   const [readBranches, setReadBranches] = useState<Record<string, string>>({});
   const branchRead = useCallback((workspaceId: string, branch: string) => setReadBranches(held => (held[workspaceId] === branch ? held : { ...held, [workspaceId]: branch })), []);
   // One landing per project, for the pause mode a copy's phase verb reads. Asked here, where the tiles are drawn,
@@ -258,7 +264,7 @@ export function WorkspaceSidebar() {
   /** One tile's item with the tiles its agents opened under it. The first tile of a copy in the tree, a root or a
    * tile whose opener runs on another copy, carries every one of that copy's verbs after the thread's own. A tile's verbs reach
    * the machine its own copy runs on, so a thread on a machine that is gone is refused wherever it is drawn. */
-  const tileItem = (node: TileNode, depth: number, above: string | null): ReactNode => {
+  const tileItem = (node: TileNode, depth: number, above: string | null, settled = false): ReactNode => {
     const { thread: item, children } = node;
     const { runs, thread } = item;
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);
@@ -296,6 +302,7 @@ export function WorkspaceSidebar() {
           time={restingAge(thread)}
           depth={depth}
           active={selectedId === thread.workspaceId && (selectedThreadId === null ? thread.threadId === null : selectedThreadId === thread.id)}
+          settled={settled}
           renaming={renaming?.rowId === rowId}
           saving={renaming?.rowId === rowId && renaming.saving}
           onSelect={() => select(thread.workspaceId, thread.threadId)}
@@ -309,7 +316,7 @@ export function WorkspaceSidebar() {
     return (
       <li key={item.id} data-thread-item className={cn("min-w-0", depth > 0 && RAIL_ITEM_CLASS)}>
         {tile}
-        {children.length > 0 ? <ul className={CHILD_LIST_CLASS}>{children.map(child => tileItem(child, depth + 1, runs.id))}</ul> : null}
+        {children.length > 0 ? <ul className={CHILD_LIST_CLASS}>{children.map(child => tileItem(child, depth + 1, runs.id, settled))}</ul> : null}
       </li>
     );
   };
@@ -472,7 +479,7 @@ export function WorkspaceSidebar() {
                 </button>
               </li>
             ) : null}
-            {settledOpen ? tiles.settled.map(node => tileItem(node, 0, null)) : null}
+            {settledOpen ? tiles.settled.map(node => tileItem(node, 0, null, true)) : null}
             {ready && groups.length > 0 && launchItems.length + tiles.live.length + tiles.settled.length + made.length === 0 ? (
               <li data-thread-selection-safe>
                 <p data-k="no-workspaces" className="px-2 py-6 text-center text-[13px] text-muted-foreground">

@@ -846,7 +846,7 @@ describe("one lifted tile", () => {
       fakeApi(
         [API, WEB],
         [status(API), status(WEB)],
-        [session("s1", "ws_a", { prompt: "hello", threadId: "thr_1", startedAt: iso(-60_000) }), session("s2", "ws_a", { status: "completed", prompt: "done", threadId: "thr_2", startedAt: iso(-3 * 24 * 60 * 60_000), endedAt: iso(-2 * 24 * 60 * 60_000), readAt: iso(-2 * 24 * 60 * 60_000) })],
+        [session("s1", "ws_a", { prompt: "hello", threadId: "thr_1", startedAt: iso(-60_000) }), session("s2", "ws_a", { status: "completed", prompt: "done", threadId: "thr_2", startedAt: iso(-3 * 24 * 60 * 60_000), endedAt: iso(-2 * 24 * 60 * 60_000), readAt: iso(-2 * 24 * 60 * 60_000), settledAt: iso(-24 * 60 * 60_000) })],
       ),
       "hello",
     );

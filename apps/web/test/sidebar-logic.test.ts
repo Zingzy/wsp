@@ -82,14 +82,19 @@ describe("the Settled fold's rule", () => {
     const day = 24 * 60 * 60_000;
     expect(isThreadSettled(quietFor(day, { readAt: at(60_000) }), NOW)).toBe(false);
     expect(isThreadSettled(quietFor(day, { readAt: at(THREAD_SETTLE_MS) }), NOW)).toBe(true);
+    // The thread open in the centre stays however long it has been read, and still folds when settled by hand.
+    expect(isThreadSettled(quietFor(day, { readAt: at(THREAD_SETTLE_MS) }), NOW, true)).toBe(false);
+    expect(isThreadSettled(quietFor(day, { settledAt: at(60_000) }), NOW, true)).toBe(true);
   });
 
-  it("a finish nobody has seen and a failure nobody has opened never settle by time; opening either lets it", () => {
+  it("a finish nobody has seen never settles by time until it is opened, and a failure never does at all", () => {
     const week = 7 * 24 * 60 * 60_000;
     expect(isThreadSettled(quietFor(week, { readAt: null }), NOW)).toBe(false);
     expect(isThreadSettled(quietFor(week, { readAt: at(week + 1) }), NOW)).toBe(false);
     expect(isThreadSettled(quietFor(week, { status: "failed", readAt: null }), NOW)).toBe(false);
-    expect(isThreadSettled(quietFor(week, { status: "failed", readAt: at(week - 5) }), NOW)).toBe(true);
+    expect(isThreadSettled(quietFor(week, { status: "failed", readAt: at(week - 5) }), NOW)).toBe(false);
+    // Put away by hand, a failure folds like any other.
+    expect(isThreadSettled(quietFor(week, { status: "failed", readAt: at(week - 5), settledAt: at(week - 10) }), NOW)).toBe(true);
     expect(isThreadSettleable(quietFor(60_000, { readAt: null }))).toBe(false);
     expect(isThreadSettleable(quietFor(60_000))).toBe(true);
   });

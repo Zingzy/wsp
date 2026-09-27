@@ -309,6 +309,10 @@ describe("ChatView", () => {
     // One word and the action: no sentence about why, no alarm tone, nothing that reads as a fault.
     expect(line.textContent).toBe("PausedWake");
     expect(line.querySelector("[role=alert], [data-slot=alert], [class*=warning], [class*=error], [class*=destructive]")).toBeNull();
+    // The button takes the button type, not the rule line's mono.
+    expect(within(line).getByRole("button", { name: "Wake" }).className).toContain("font-sans");
+    expect(within(line).getByRole("button", { name: "Wake" }).className).toContain("text-[13px]");
+    expect(within(line).getByRole("button", { name: "Wake" }).className).toContain("font-medium");
     fireEvent.click(within(line).getByRole("button", { name: "Wake" }));
     expect(woken).toEqual([WS]);
     // It is the workspace's line, not a turn's: a running workspace draws none.

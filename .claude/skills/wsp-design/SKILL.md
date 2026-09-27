@@ -214,8 +214,10 @@ The last row of the list: SETTLED in the section caps, the count, the
 chevron. It holds every root whose whole tree a person has read and left
 quiet two hours, or settled by hand: Settle on a root tile's menu or
 mod+shift+E takes the root and every thread under it, and the fold row's own
-menu holds Settle all read. A Done nobody has opened or a Failed nobody has
-looked at never folds by time. Any new turn or message brings a tree back.
+menu holds Settle all read. A Done nobody has opened, any Failed and the
+thread open in the centre never fold by time; they wait for a hand. Inside
+the fold every tile rests whatever its state: its age in the row's ink, no
+tone, no glyph, the title muted. Any new turn or message brings a tree back.
 The list scrolls under a hard edge, never a fade: a faded tile part way
 under the head reads as a tile with no first row.
 

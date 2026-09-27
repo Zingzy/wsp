@@ -166,7 +166,7 @@ export function ChatView({
       {view.settled !== null && !settledOnReply ? <SettledFooter turn={view.settled} openedCostUsd={openedSpend(opened)} onThisComputer={onThisComputer} /> : null}
       {paused !== null ? (
         <TimelineRuleLine data-workspace-paused line={paused}>
-          <Button size="xs" variant="outline" onClick={() => void wake(workspaceId)}>
+          <Button size="xs" variant="outline" className="font-sans text-[13px] font-medium" onClick={() => void wake(workspaceId)}>
             Wake
           </Button>
         </TimelineRuleLine>
