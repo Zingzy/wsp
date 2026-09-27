@@ -581,6 +581,21 @@
       ]
     },
     {
+      "name": "panel-launcher-mac",
+      "at": "/",
+      "steps": [
+        "row-id=thread:redirect",
+        "focus:surface-launcher-keys",
+        "key:ArrowDown",
+        "key:ArrowDown"
+      ],
+      "wait": "surface-launcher-keys",
+      "mac": true,
+      "widths": [
+        1440
+      ]
+    },
+    {
       "name": "tiles",
       "at": "/",
       "fixture": "tiles",
