@@ -616,3 +616,65 @@ describe("the process a finished turn leaves", () => {
     expect(launch.wires[0]!.order).toEqual([]);
   });
 });
+
+describe("a side question on a Codex thread", () => {
+  const FORK = "01a0e2d0-0000-7000-8000-000000000001";
+  const forking = (onTurn: (self: Wire) => void) =>
+    launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/fork")
+            self.push('{"id":"wsp-initialize","result":{}}', `{"id":"wsp-thread","result":{"thread":{"id":"${FORK}","ephemeral":true,"forkedFromId":"${THREAD_ID}"},"model":"gpt-5.6-sol"}}`);
+          if (message.method === "turn/start") onTurn(self);
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+
+  it("forks the thread ephemeral and read-only on its own server, asks the question on the fork, and reads the answer", async () => {
+    const launch = forking(self =>
+      self.push(
+        `{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"You are in /root/app; you last asked me to count."},"threadId":"${FORK}","turnId":"t1"}}`,
+        `{"method":"thread/tokenUsage/updated","params":{"threadId":"${FORK}","turnId":"t1","tokenUsage":{"last":{"inputTokens":900,"cachedInputTokens":880,"outputTokens":12,"reasoningOutputTokens":0,"totalTokens":912},"total":{}}}}`,
+        `{"method":"turn/completed","params":{"threadId":"${FORK}","turn":{"id":"t1","items":[],"status":"completed"}}}`,
+      ),
+    );
+    const adapter = adapterOver(launch);
+    const answer = await adapter.aside!({ session: THREAD_ID, question: "which folder are you in?", cwd: "/root/app", model: "gpt-5.5" });
+    expect(answer).toEqual({ text: "You are in /root/app; you last asked me to count.", usage: { input_tokens: 900, cached_input_tokens: 880, cache_write_input_tokens: 0, output_tokens: 12, reasoning_output_tokens: 0 } });
+    const call = launch.calls[0]!;
+    expect(call.command).toBe("cd '/root/app' && codex app-server");
+    const fork = parse(call.input!.at(-1)!);
+    expect(fork.method).toBe("thread/fork");
+    expect(fork.params).toMatchObject({ threadId: THREAD_ID, ephemeral: true, sandbox: "read-only", approvalPolicy: "never", model: "gpt-5.5" });
+    expect(String((fork.params as Json).developerInstructions)).toContain("Run nothing");
+    const turn = launch.wires[0]!.written.find(m => m.method === "turn/start")!;
+    expect(turn.params).toEqual({ threadId: FORK, input: [{ type: "text", text: "which folder are you in?" }] });
+    expect(launch.wires[0]!.closed).toBe(true);
+  });
+
+  it("refuses every approval the fork asks for, so a side question never runs anything", async () => {
+    const launch = forking(self =>
+      self.push(
+        `{"id":3,"method":"item/commandExecution/requestApproval","params":{"threadId":"${FORK}","turnId":"t1","itemId":"c1","command":"ls","startedAtMs":1}}`,
+        `{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"I would rather not run that."},"threadId":"${FORK}","turnId":"t1"}}`,
+        `{"method":"turn/completed","params":{"threadId":"${FORK}","turn":{"id":"t1","items":[],"status":"completed"}}}`,
+      ),
+    );
+    const answer = await adapterOver(launch).aside!({ session: THREAD_ID, question: "list the files" });
+    expect(answer.text).toBe("I would rather not run that.");
+    expect(launch.wires[0]!.written.find(m => m.id === 3)).toEqual({ id: 3, result: { decision: "decline" } });
+  });
+
+  it("rejects in the server's words when the fork fails, and in the sign-in line when it failed for want of one", async () => {
+    const refused = launcher(seed => {
+      const w = wire({ onWrite: (m, self) => void (m.method === "thread/fork" && self.push('{"error":{"code":-32600,"message":"no rollout found for thread id"},"id":"wsp-thread"}')) });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    await expect(adapterOver(refused).aside!({ session: THREAD_ID, question: "x" })).rejects.toThrow("codex could not open the thread: no rollout found for thread id");
+    const unsigned = forking(self => self.push(`{"method":"turn/completed","params":{"threadId":"${FORK}","turn":{"id":"t1","items":[],"status":"failed","error":{"message":"unexpected status 401 Unauthorized: Missing bearer"}}}}`));
+    await expect(adapterOver(unsigned).aside!({ session: THREAD_ID, question: "x" })).rejects.toThrow(NOT_SIGNED_IN);
+  });
+});

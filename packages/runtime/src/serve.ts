@@ -1426,6 +1426,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "sessions.search":
               send({ id: msg.id, ok: true, ...(await rt.sessions.search(msg.query, origin)) });
               return;
+            case "sessions.aside":
+              send({ id: msg.id, ok: true, ...(await rt.sessions.aside(msg.sessionId, msg.question, origin)) });
+              return;
             case "sessions.steer":
               send({ id: msg.id, ok: true, ...(await rt.sessions.steer(msg.sessionId, { prompt: msg.prompt, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) }, origin)) });
               return;

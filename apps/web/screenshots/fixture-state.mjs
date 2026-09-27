@@ -92,10 +92,18 @@ export const HERE_LABEL = "zingzy's MacBook Pro";
 /** The agents on this computer in every fixture, which the harness stands in for under the throwaway home: what each
  * agent's own version flag and sign-in status command say, by catalog id, the newest version each vendor is taken to
  * have published, and the MCP servers in the agents' own files. A server with tools is a stand-in command that
- * answers them; one without is written as given and never started. */
+ * answers them; one without is written as given and never started. Claude answers a side question after a wait long
+ * enough for the asking shot and short enough for the answered one. */
 export const HERE_AGENTS = {
   agents: {
-    claude: { version: "2.1.283 (Claude Code)", status: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }) },
+    claude: {
+      version: "2.1.283 (Claude Code)",
+      status: JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }),
+      aside: {
+        afterS: 8,
+        text: "I'm in the spoo folder on this computer. You last asked why the short links were 302ing twice, and I moved the trailing-slash rewrite ahead of the canonical host check so each form redirects once.",
+      },
+    },
     codex: { version: "codex-cli 0.155.0", status: "Logged in using ChatGPT" },
   },
   latest: { claude: "2.1.283", codex: "0.155.0" },
@@ -148,6 +156,8 @@ const turn = (thread, minutes, workspaceId = "ws_api") => ({
   startedAt: ago(minutes),
   ...(thread.status === "running" ? { run: `run_${thread.id}` } : { endedAt: ago(minutes - 3) }),
   ...(thread.asking === undefined ? {} : { asking: thread.asking }),
+  // The agent's own session, which a side question copies; only a thread a shot asks one of names it.
+  ...(thread.session === undefined ? {} : { claudeSessionId: thread.session }),
   cwd: thread.cwd ?? projectDest("spoo"),
   model: "opus",
   permissionMode: "default",
@@ -496,7 +506,7 @@ const macInUse = () =>
       onPlace("ws_hetzner", "box-build", "p_hetzner", { cpu: 2, memMb: 4096 }, "pr_box-build"),
     ],
     ...merge(
-      threadsOn("ws_api", [[CHART, 300], [REDIRECT, 45], [SEARCH, 12], [spawned("migration", MIGRATION, "search", "search"), 9]]),
+      threadsOn("ws_api", [[CHART, 300], [{ ...REDIRECT, session: uuidFor("claude:redirect") }, 45], [SEARCH, 12], [spawned("migration", MIGRATION, "search", "search"), 9]]),
       threadsOn("ws_hetzner", [[{ ...CHART, id: "chart-box" }, 200], [{ ...REDIRECT, id: "redirect-box" }, 30]]),
     ),
     places: {

@@ -38,6 +38,8 @@ describe("the agents wsp can open a thread on", () => {
     for (const id of ["claude", "codex"] as const) {
       const adapter = HARNESS_ADAPTERS[id]({ machine, workspaceId: "ws_1", execStream: machineExecStream(machine), home: () => "/root/.state", env: {}, signInRefusal: signInRefusalLine({ kind: "cloud" }), vault: {}, loginStands: () => false });
       expect(adapter.steers, id).toBe(true);
+      // And a side question: Claude Code on a fork with its tools off, Codex on an ephemeral read-only fork.
+      expect(typeof adapter.aside, id).toBe("function");
     }
     // Both take the servers on their launch: Claude Code as --mcp-config, Codex as config overrides.
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "claude"))).toBe(true);

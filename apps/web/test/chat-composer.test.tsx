@@ -4,7 +4,7 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -50,7 +50,7 @@ const SCREEN_COMMANDS = [
 ];
 const CLAUDE_CATALOG: HarnessCatalog = { harness: "claude", label: "Claude Code", source: "table", version: null, models: [], efforts: [], contextWindows: [], permissionModes: [], steers: false, renames: false, images: false, screenCommands: SCREEN_COMMANDS };
 
-function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}, statuses: WorkspaceStatus[] = []) {
+function fixtureApi(workspaces: WorkspaceView[], history: Record<string, SessionEvent[]> = {}, statuses: WorkspaceStatus[] = [], more: Partial<Api> = {}) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
   const started: StartSessionOptions[] = [];
   const interrupted: string[] = [];
@@ -77,6 +77,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
       started.push(opts);
       return { id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running", prompt: opts.prompt, startedAt: 0 };
     },
+    ...more,
   };
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
   return { api, started, interrupted, emit };
@@ -476,6 +477,71 @@ function expectPlainLine(words: string): void {
   expect(line.querySelector("svg")).toBeNull();
   expect(document.querySelector("[data-composer-banner-surface]")).toBeNull();
 }
+
+describe("a side question from the composer", () => {
+  /** The thread's row as the runtime lists it: the id a side question names the thread by. */
+  const row: SessionView = { id: "sess_local_1", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: "sess_0001", threadId: "thr_0001", prompt: "go", startedAt: 0 };
+  const asking = (asides: boolean) => {
+    const asked: Array<{ sessionId: string; question: string }> = [];
+    let answer: (text: string) => void = () => {};
+    const fixture = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() }, [], {
+      listSessions: async () => [row],
+      listHarnesses: async () => [{ ...CLAUDE_CATALOG, ...(asides ? { asides: true } : {}) }],
+      askAside: (sessionId, question) => {
+        asked.push({ sessionId, question });
+        return new Promise(resolve => (answer = text => resolve({ text })));
+      },
+    });
+    return { ...fixture, asked, answer: (text: string) => act(() => answer(text)) };
+  };
+  const btwItem = () => document.querySelector<HTMLElement>('[data-composer-item-id="provider-slash-command:claude:btw"]');
+
+  it("lists /btw under wsp's own heading only where the agent's catalog says it takes one", async () => {
+    const off = asking(false);
+    const view = await setup(off.api);
+    await screen.findByText(/Server is live at :3000\./);
+    await typeInto(composerEditor(), "/");
+    await waitFor(() => expect(menuItem("compact")).not.toBeNull());
+    expect(btwItem()).toBeNull();
+    view.unmount();
+    useComposerDraftStore.setState({ drafts: {}, queues: {} });
+
+    const on = asking(true);
+    await setup(on.api);
+    await screen.findByText(/Server is live at :3000\./);
+    await typeInto(composerEditor(), "/");
+    await waitFor(() => expect(btwItem()).not.toBeNull());
+    expect(groupLabels()).toEqual(["Commands", "wsp"]);
+  });
+
+  it("a /btw send asks the host, starts no turn, and the sheet goes from asking to the answer and away on Esc", async () => {
+    const { api, started, asked, answer } = asking(true);
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/btw");
+    await waitFor(() => expect(screen.queryByRole("status")?.textContent).toBe("/btw takes a question after it"));
+    await press(editor, "Escape");
+    await press(editor, "Enter");
+    expect(asked).toEqual([]);
+    await typeInto(editor, " what did I last ask?");
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    await press(editor, "Escape");
+    await press(editor, "Enter");
+    await waitFor(() => expect(asked).toEqual([{ sessionId: "sess_local_1", question: "what did I last ask?" }]));
+    expect(started).toHaveLength(0);
+    expect(draft()).toBe("");
+    const sheet = await screen.findByRole("dialog");
+    expect(sheet.querySelector('[data-k="aside-asking"]')).not.toBeNull();
+    answer("You asked for a hello world server on :3000.");
+    await waitFor(() => expect(sheet.querySelector('[data-k="aside-answer"]')?.textContent).toContain("You asked for a hello world server on :3000."));
+    await act(async () => { fireEvent.keyDown(sheet, { key: "Escape" }); });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Nothing of it reached the thread: no row in the transcript, no turn.
+    expect(screen.queryByText(/hello world server/)).toBeNull();
+    expect(started).toHaveLength(0);
+  });
+});
 
 describe("composer while the workspace is not live", () => {
   it("a paused workspace takes words: no line above the box, the placeholder as always, and the send button reads Wake and send", async () => {

@@ -6,8 +6,9 @@
 // reads out of the harness's own store when the runtime asks what that harness
 // calls a session (SessionTitleReader), what it writes back into that store
 // when a thread is named (SessionRenamer), and what it answers when the runtime
-// asks the harness itself to name a thread (SessionTitleMaker), and how it
-// takes an image with a turn (AttachmentRoad). It sits here, beside the wire types,
+// asks the harness itself to name a thread (SessionTitleMaker), what it
+// answers when a person asks a question beside a thread (SessionAsker), and
+// how it takes an image with a turn (AttachmentRoad). It sits here, beside the wire types,
 // so no adapter owns the interface its siblings implement. The runtime folds
 // these into the SessionEvent shapes in index.ts that clients read, which is
 // why the vocabulary they share (DeltaKind, TurnResult, SessionHarness) is
@@ -280,3 +281,28 @@ export interface TitleTurn {
  * thread.
  */
 export type SessionTitleMaker = (turn: TitleTurn, exec: (command: string) => Promise<string>) => Promise<string | null>;
+
+/** A question asked beside a thread: the harness's own session it is asked of, as that harness keys it, the words,
+ * and the folder and model the thread's latest turn ran at, where the row knows them. */
+export interface AsideQuestion {
+  session: string;
+  question: string;
+  cwd?: string;
+  model?: string;
+}
+
+/** The harness's answer to a side question, and what it reported spending on it where it reports usage. */
+export interface AsideAnswer {
+  text: string;
+  usage?: Record<string, unknown>;
+}
+
+/**
+ * Asks the harness a question on a copy of one of its sessions that nothing keeps: the session's own transcript is
+ * not written, no tool runs, and the copy is gone once the answer is read. It runs on the same road a turn does, the
+ * adapter's own exec stream with the turn's environment, since the question has to reach the session's store with
+ * the login a turn uses and a harness spoken to over a line channel needs to be written to and read from while it
+ * runs. Rejects with the harness's own words when it answered nothing. Absent on an adapter whose harness cannot
+ * copy a session.
+ */
+export type SessionAsker = (question: AsideQuestion) => Promise<AsideAnswer>;

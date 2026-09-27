@@ -1503,6 +1503,24 @@ export function noAdapterLine(harness: string, agents: readonly string[]): strin
   return `no adapter registered for harness "${harness}"; agents on this host: ${agents.join(", ") || "none"}`;
 }
 
+/** The refusal of a side question on a thread whose agent never announced a session: there is no conversation of
+ * its own to copy and ask. */
+export const ASIDE_NO_SESSION_LINE = "this thread's agent has not started a conversation yet, so there is nothing to ask about; wait for its first reply";
+
+/** The refusal of a side question with no words in it. */
+export const BLANK_ASIDE_LINE = "a side question needs words to ask";
+
+/** The refusal of a side question on a thread whose agent cannot copy a session. A message the thread should keep is
+ * a send, which every agent takes. */
+export function asideUnsupportedLine(harness: string): string {
+  return `${harness} takes no side question; send it as a message and the thread keeps it`;
+}
+
+/** Why a side question came back with no answer: the harness said nothing for the whole wall and was stopped. */
+export function asideWallLine(ms: number): string {
+  return `the side question had no answer after ${fmtDuration(ms)} and was stopped`;
+}
+
 /** The refusal of a send into a thread that names another agent. A thread's rows carry the agent its turns ran on
  * and the harness session those turns wrote, which another agent would open as a transcript of its own, at its own
  * access; the agent is picked where a thread is opened, so a second one is a second thread. */

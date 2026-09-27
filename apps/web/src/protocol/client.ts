@@ -23,6 +23,7 @@ import {
   PortForward,
   SessionAccessOutcome,
   SessionAnswerOutcome,
+  SessionAsideResult,
   SessionInterruptOutcome,
   SessionRenameResult,
   SessionSearchResult,
@@ -518,6 +519,9 @@ export interface Api {
   restoreThreads?(threadIds: readonly string[]): Promise<void>;
   /** The threads whose messages or replies hold the words, searched on the host, one hit each with a snippet. */
   searchMessages?(query: string): Promise<SessionSearchResult>;
+  /** Asks the thread's agent a question beside the thread, by any of its session ids, on a copy of its session the
+   * host keeps nowhere. Optional so fixtures that never ask one need not fake it; a client without it offers no /btw. */
+  askAside?(sessionId: string, question: string): Promise<SessionAsideResult>;
   /** What each harness's CLI takes at launch; the composer's pickers render from it, and every start rides the model,
    * effort, context window and access resolved out of it. With a workspace the runtime asks the binaries on its
    * machine, else its table answers. Optional so fixtures without pickers need not fake it; without it the composer
@@ -769,6 +773,7 @@ export function makeApi(c: ProtocolClient): Api {
     restoreThreads: async threadIds => void (await c.request("sessions.restore", { threadIds })),
     // Parsed, not trusted: a hit names a thread the palette opens.
     searchMessages: async query => SessionSearchResult.parse(await c.request<Record<string, unknown>>("sessions.search", { query })),
+    askAside: async (sessionId, question) => SessionAsideResult.parse(await c.request<Record<string, unknown>>("sessions.aside", { sessionId, question })),
     // Parsed, not trusted: a picker renders only values the wire type vouches for.
     listHarnesses: async workspaceId =>
       HarnessCatalog.array().parse((await c.request<{ harnesses?: unknown }>("harnesses.list", workspaceId !== undefined ? { workspaceId } : {})).harnesses),

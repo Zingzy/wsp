@@ -72,6 +72,38 @@
       "settleMs": 700
     },
     {
+      "name": "btw-asking",
+      "at": "/",
+      "widths": [1440, 390],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:/btw which folder are you in and what did I last ask?",
+        "key:Enter"
+      ],
+      "wait": "k=aside-asking"
+    },
+    {
+      "name": "btw-answered",
+      "at": "/",
+      "widths": [1440, 390],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:/btw which folder are you in and what did I last ask?",
+        "key:Enter"
+      ],
+      "wait": "k=aside-answer"
+    },
+    {
       "name": "machine",
       "at": "/",
       "steps": [

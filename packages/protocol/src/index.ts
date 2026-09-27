@@ -64,6 +64,9 @@ export const TURN_WALL_MS = 6 * 60 * 60_000;
  * all day never carries more than the one it is on: seven finished turns' processes were found alive on one guest,
  * the oldest fourteen hours past its reply, and the box read load 25 while idle (2026-09-08). */
 export const RUN_EXIT_MS = 10_000;
+/** The longest a side question may run before its process is ended: a copy of a session with no tools answers in one
+ * reply, so a harness still silent this long is stuck, and a stuck one holds the machine's memory for nobody. */
+export const ASIDE_WALL_MS = 3 * 60_000;
 /** How long a turn's process gets to go on the graceful signal before its group is killed, on either road: what the
  * guest's reap waits between its TERM and its KILL, and what a host gives the turns on this computer as it stops. */
 export const RUN_STOP_MS = 2_000;
@@ -1139,6 +1142,9 @@ export const HarnessCatalog = z.object({
    * it, as with mcpServers, so the picker says what a pick does to the turn in front of the person before the pick
    * rather than under the box after it. Read it through movesRunningAccess: absent is a no. */
   movesAccess: z.boolean().optional(),
+  /** Whether a person may ask this harness a question beside a thread (sessions.aside), answered on a copy of the
+   * thread's session that nothing keeps. The adapter in this host declares it, as with mcpServers; absent is a no. */
+  asides: z.boolean().optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -5539,6 +5545,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * host for the query, case aside: one hit per thread with a snippet around the words. Reads only what the host
    * still holds of each transcript. */
   z.object({ id: reqId, op: z.literal("sessions.search"), query: z.string() }),
+  /** A question asked beside a thread, answered by the thread's harness on a copy of its session with no tools, off the
+   * thread's latest row: its folder, its model and its agent. Replies with a SessionAsideResult. Nothing is recorded:
+   * the transcript, the rows and the harness's own session are as they were. Takes any of the thread's session ids. */
+  z.object({ id: reqId, op: z.literal("sessions.aside"), sessionId: z.string(), question: z.string() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -6079,6 +6089,10 @@ export type SessionSearchHit = z.infer<typeof SessionSearchHit>;
 export const SessionSearchResult = z.object({ hits: z.array(SessionSearchHit) });
 export type SessionSearchResult = z.infer<typeof SessionSearchResult>;
 
+/** The harness's answer to a side question, which the host keeps nowhere. */
+export const SessionAsideResult = z.object({ text: z.string() });
+export type SessionAsideResult = z.infer<typeof SessionAsideResult>;
+
 // --- session start (how the turn the caller asked for came to be) --------------
 
 /** started: a turn of its own began. steered: the thread's turn was running and took the message mid-way, so
@@ -6242,4 +6256,4 @@ export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
 export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
-export type { AdapterAttachOptions, AdapterEvent, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

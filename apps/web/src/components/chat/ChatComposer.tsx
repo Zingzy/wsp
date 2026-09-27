@@ -49,6 +49,8 @@
 // the agent as a command it does not have, and come back as a question about
 // a stray slash with a turn's price on it. A slash command nobody announced
 // with words after it still goes as text, since the words may be meant.
+// Where the agent takes a side question, /btw and a question goes to the host
+// instead, starts no turn and opens the sheet its answer lands in.
 // The checkout row under the composer picks the folder a fresh thread starts
 // in; a resumed one is started where its harness last said it was. The
 // model, effort, context window and access picks in the box's footer ride a
@@ -69,7 +71,8 @@ import { useThreadStart } from "../../files/root";
 import { useLinkDownLine } from "../../terminal/paneWords";
 import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
-import { catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
+import { asideQuestion, catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
+import { AsideSheet } from "./AsideSheet";
 import { canPickFolder, ComposerCheckoutRow, HomeCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import { composerCommandGroups, type ComposerCommandGroup } from "./composerCommandGroups";
@@ -211,7 +214,11 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const computer = useComputerName(workspaceId);
   const linkDown = useLinkDownLine(workspaceId);
   const { harness } = thread.view;
-  const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
+  // A side question copies the thread's own session, so it is offered only on a thread that has a row to name it by.
+  const asides = harnessCatalog?.asides === true && latestRow !== null && api?.askAside !== undefined;
+  const [aside, setAside] = useState<{ question: string; answer?: string; error?: string } | null>(null);
+  const asked = useRef(0);
+  const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog), asides }), [asides, harness, harnessCatalog, harnessId]);
   // A daemon this host started is not the road a turn takes, so its absence leaves the box open on this computer.
   const daemonOnly = absent?.start !== undefined;
   const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated, agents: harnessCatalogs.length > 0, absent: absent !== null, daemonOnly });
@@ -414,6 +421,21 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     [api, appendLocalError, appendUserTurn, folderStart, harnessId, hold, images, into, launched, launching, pinned, restoreImages, sendImagesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
+  /** Asks the host beside the thread and draws the answer in the sheet; an answer landing after the sheet closed is dropped. */
+  const askAside = useCallback(
+    (question: string) => {
+      const method = api?.askAside;
+      if (method === undefined || latestRow === null) return;
+      const id = ++asked.current;
+      setAside({ question });
+      void method(latestRow.id, question).then(
+        result => asked.current === id && setAside({ question, answer: result.text }),
+        (err: unknown) => asked.current === id && setAside({ question, error: err instanceof Error ? err.message : String(err) }),
+      );
+    },
+    [api, latestRow],
+  );
+
   const send = useCallback(() => {
     // The same reading the slot and the send button are already wearing: an Enter that lands here leaves the draft
     // where it was typed and that line standing.
@@ -421,6 +443,13 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     const snapshot = editorRef.current?.readSnapshot() ?? { value: draft.prompt, cursor: draft.cursor };
     const prompt = snapshot.value.trim();
     if (prompt === "") return;
+    // A side question is the host's to answer and never a turn, so it goes whether or not the thread is working.
+    const question = asides ? asideQuestion(prompt) : null;
+    if (question !== null) {
+      setDraft(workspaceId, EMPTY_DRAFT);
+      askAside(question);
+      return;
+    }
     // A command the CLI runs only in its own terminal would come back as not available, so the draft stays for
     // editing and the line names the wsp control that serves it instead.
     const screen = screenCommandTyped(harnessCatalog, prompt);
@@ -454,7 +483,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     }
     enqueue(threadKey, prompt, held ? "head" : "tail");
     release(threadKey);
-  }, [busy, draft, enqueue, harnessCatalog, held, images, onStart, release, searchKey, sendHeld, sending, setDraft, start, threadKey, workspace, workspaceId]);
+  }, [askAside, asides, busy, draft, enqueue, harnessCatalog, held, images, onStart, release, searchKey, sendHeld, sending, setDraft, start, threadKey, workspace, workspaceId]);
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];
@@ -749,6 +778,15 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
           />
         )}
       </ComposerSurface.Shell>
+      {aside !== null ? (
+        <AsideSheet
+          {...aside}
+          onClose={() => {
+            asked.current += 1;
+            setAside(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

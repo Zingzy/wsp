@@ -189,17 +189,24 @@ const serverScript = (name, tools) => {
   return `while IFS= read -r line; do\n  ${id}\n  case "$line" in\n    *'"method":"initialize"'*) ${hello} ;;\n    *'"method":"tools/list"'*) ${listed} ;;\n  esac\ndone`;
 };
 
+/** A stand-in's answer to a side question: the result line a print-mode run ends on, after the fixture's wait, so a
+ * shot can catch the sheet still asking and a later one the answer. */
+const asideScript = aside =>
+  aside === undefined
+    ? ""
+    : `case " $* " in\n  *" --fork-session "*) sleep ${aside.afterS}; printf '%s\\n' ${shellQuote(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: aside.text }))}; exit 0 ;;\nesac\n`;
+
 /** This computer's agents as a fixture has them, all under the throwaway home: a stand-in for each agent's command that
- * says the fixture's version and sign-in, a stand-in command for each server with tools, and each agent's own MCP
- * file written by the catalog's module for its format. Answers the folder the commands are in, which leads the host's
- * path. */
+ * says the fixture's version and sign-in and answers a side question where the fixture gives it one, a stand-in
+ * command for each server with tools, and each agent's own MCP file written by the catalog's module for its format.
+ * Answers the folder the commands are in, which leads the host's path. */
 export function writeHereAgents(home, here) {
   const bin = join(home, ".local", "bin");
   mkdirSync(bin, { recursive: true });
   for (const [id, said] of Object.entries(here.agents)) {
     const agent = CATALOG_AGENTS.find(a => a.id === id);
     if (agent === undefined) throw new Error(`the fixture names an agent the catalog does not have: ${id}`);
-    writeScript(join(bin, agent.bin), sh(`case "$1" in\n  --version) printf '%s\\n' ${shellQuote(said.version)} ;;\n  *) printf '%s\\n' ${shellQuote(said.status)} ;;\nesac`));
+    writeScript(join(bin, agent.bin), sh(`${asideScript(said.aside)}case "$1" in\n  --version) printf '%s\\n' ${shellQuote(said.version)} ;;\n  *) printf '%s\\n' ${shellQuote(said.status)} ;;\nesac`));
   }
   const transports = new Map(
     here.servers.map(s => {

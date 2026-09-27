@@ -29,6 +29,7 @@ import type {
   McpServerSpec,
   PermissionAsk,
   PermissionOutcome,
+  SessionAsker,
   SessionRenamer,
   SessionTitleMaker,
   SessionTitleReader,
@@ -45,6 +46,7 @@ import {
   initializeLine,
   readMessage,
   refuseRequestLine,
+  threadForkLine,
   threadResumeLine,
   threadStartLine,
   turnInterruptLine,
@@ -133,6 +135,8 @@ export interface CodexAdapter {
   renameSession: SessionRenamer;
   /** Asks the CLI itself, in one read-only turn, for a name for a thread it has just replied in. */
   titleFor: SessionTitleMaker;
+  /** Answers a question about a thread on an ephemeral fork of it, leaving the thread as it was. */
+  aside: SessionAsker;
   readonly env: Readonly<Record<string, string>>;
 }
 
@@ -252,6 +256,10 @@ function itemDeltas(done: boolean, item: Item, sessionId: string): AdapterEvent[
   }
 }
 
+/** What a side question's fork is told, since no Codex turn can run with its tools off. */
+const ASIDE_INSTRUCTIONS =
+  "The person is asking a side question about this conversation while its work goes on elsewhere. Answer it from the conversation so far, briefly. Run nothing, edit nothing and call no tool.";
+
 /** The two approvals the server raises as a person's allow or deny; every other request it sends is refused. */
 const APPROVALS: Readonly<Record<string, string>> = {
   "item/commandExecution/requestApproval": "command_execution",
@@ -274,6 +282,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     model?: string;
     cwd?: string;
     turnLine?: (threadId: string) => string;
+    /** A side question's own run: every approval it raises is declined here and it joins no registry. */
+    aside?: true;
     onEvent: (event: AdapterEvent) => void;
   }): CodexSession => {
     const { stream, localId, startedAt } = o;
@@ -365,6 +375,10 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       const toolName = APPROVALS[method];
       if (toolName === undefined) {
         void stream.write(refuseRequestLine(id, method));
+        return;
+      }
+      if (o.aside === true) {
+        void stream.write(decisionLine(id, "decline"));
         return;
       }
       const itemId = str(params.itemId);
@@ -565,7 +579,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         await endAfterResult(stream, graceMs, graceMs);
       },
     };
-    sessions.set(localId, session);
+    if (o.aside !== true) sessions.set(localId, session);
     return session;
   };
 
@@ -593,6 +607,25 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       turnLine: threadId => turnStartLine({ threadId, text: options.prompt, ...(images !== undefined ? { images } : {}), ...(options.effort !== undefined ? { effort: options.effort } : {}) }),
       onEvent: options.onEvent,
     });
+  };
+
+  /** A question put to a copy of the thread: an ephemeral fork writes no rollout, so the thread's own history and its
+   * store are left as they were, and a read-only sandbox that asks nobody is the nearest a Codex turn comes to having
+   * no tools. */
+  const aside: SessionAsker = async o => {
+    const command = buildCommand({ ...(o.cwd !== undefined ? { cwd: o.cwd } : {}) });
+    const fork = threadForkLine({ threadId: o.session, ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), ...(o.model !== undefined ? { model: o.model } : {}), developerInstructions: ASIDE_INSTRUCTIONS });
+    const result = await follow({
+      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, fork] }),
+      localId: randomUUID(),
+      startedAt: Date.now(),
+      command,
+      turnLine: threadId => turnStartLine({ threadId, text: o.question }),
+      aside: true,
+      onEvent: () => {},
+    }).finished;
+    if (result.status !== "completed") throw new Error(result.error ?? "codex did not answer the question");
+    return { text: result.text ?? "", ...(result.usage !== undefined ? { usage: result.usage } : {}) };
   };
 
   const attach = deps.exec.attach?.bind(deps.exec);
@@ -623,6 +656,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     sessions,
     steers: true,
     mcpServers: true,
+    aside,
     probeCatalog,
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
     renameSession: (threadId, title, exec) => exec(renameCommand({ home: deps.home, threadId, title })).then(parseRename),

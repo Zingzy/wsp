@@ -80,7 +80,7 @@ export function newSessionId(): string {
   return randomUUID();
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface BuildCommandOptions {
   /** Fresh session: the self-generated UUID passed as --session-id. */
@@ -105,7 +105,7 @@ export interface BuildCommandOptions {
 // Model names carry a context suffix like "claude-opus-5[1m]"; nothing else a catalog value needs is outside this set.
 const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._:\[\]-]*$/;
 
-function slugFlag(flag: string, name: string, value: string | undefined): string[] {
+export function slugFlag(flag: string, name: string, value: string | undefined): string[] {
   if (value === undefined) return [];
   if (!SLUG_RE.test(value)) throw new Error(`${name} must be a plain slug, got "${value}"`);
   return [`${flag} ${shellQuote(value)}`];

@@ -890,7 +890,7 @@ describe("runtime wire types", () => {
     for (const op of wire.DEVICE_OPS) expect(wire.RUNTIME_OPS, op).toContain(op);
     expect(new Set(wire.DEVICE_OPS).size).toBe(wire.DEVICE_OPS.length);
     const held = [
-      "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.rename", "sessions.answer", "sessions.access", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
+      "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.rename", "sessions.answer", "sessions.access", "sessions.aside", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
       "places.add", "places.update", "places.remove", "places.dial", "places.cap", "places.loginLanded", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
       "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
       "image.export", "host.folders", "agents.read", "servers.tools", "servers.icon", "agents.signIn", "servers.signIn", "agents.signInCode", "agents.signInStop", "agents.signInLine", "agents.key", "agents.addTools", "skills.search", "skills.get", "skills.preview", "skills.add", "skills.remove", "skills.toggle", "servers.add", "servers.remove", "servers.toggle", "project.seed.plan", "project.plan", "project.import", "project.export",
