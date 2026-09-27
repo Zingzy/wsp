@@ -4,7 +4,7 @@
 // fold its own live rows through the same function, so the two cannot count
 // one computer two ways. One rule per kind of place, so a third kind is one
 // entry in the table below.
-import { plural } from "./format.js";
+import { plural, SPEND_LIMIT_LINE } from "./format.js";
 import type { CloudCap, PlaceCap, PlaceCapSet, PlaceKind, PlaceView, ThreadView, WorkspaceSize, WorkspaceView } from "./index.js";
 import { HERE_PLACE_ID } from "./place-word.js";
 import { isLocalWorkspace, workspaceState } from "./workspace-state.js";
@@ -141,9 +141,13 @@ export function placeFullLine(place: Pick<PlaceView, "kind" | "name" | "cap" | "
   return place.forks?.room === 0 ? `no room on ${place.name}` : undefined;
 }
 
+/** The spend a day stops new work on this place at: nothing on a kind with no spend limit or a row with no cap. */
+export function placeSpendLimit(place: Pick<PlaceView, "kind" | "cap">): number | undefined {
+  return place.cap === undefined ? undefined : PLACE_CAPS[place.kind].spendLimit(place.cap);
+}
+
 /** The sentence a cloud at its day's spend says. Nothing without a spend figure, which is never guessed. */
 export function placeAtLimitLine(place: Pick<PlaceView, "kind" | "cap">, spentTodayUsd: number | undefined): string | undefined {
-  if (place.cap === undefined || spentTodayUsd === undefined) return undefined;
-  const limit = PLACE_CAPS[place.kind].spendLimit(place.cap);
-  return limit !== undefined && spentTodayUsd >= limit ? "spend limit reached today" : undefined;
+  const limit = placeSpendLimit(place);
+  return limit !== undefined && spentTodayUsd !== undefined && spentTodayUsd >= limit ? SPEND_LIMIT_LINE : undefined;
 }

@@ -11,6 +11,8 @@ import { connect as netConnect } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
 import {
+  dayStart,
+  spendCapRefusal,
   NO_PLACE_INSTALLER,
   PLACE_CODE_REFUSAL,
   PLACE_DOOR_REFUSAL,
@@ -94,6 +96,7 @@ import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { NO_AGENTS_READER, type AgentsActs, type AgentsOn, type AgentsReader, type ServerIcons, type ServersActs, type SkillsActs } from "../src/agents-read.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, fakeLocal, projectOn } from "./stub-backend.js";
+import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
@@ -977,6 +980,48 @@ describe("a place's cap and what runs there", () => {
       expect((await running())["solari"]).toBe(0);
     } finally {
       for (const end of ends.values()) end();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("a cloud's spend per day", () => {
+  const HOUR = 3_600_000;
+
+  it("refuses a new machine on a cloud once its spend today reaches its spend per day, passes one under it, and leaves the running ones and this computer's copies alone", async () => {
+    const root = mkdtempSync(joinPath(tmpdir(), "wsp-spend-cap-"));
+    try {
+      const backend = stubBackend();
+      // An hour into a local day, so the hours below all fall in it whatever zone this runs in.
+      const fc = fakeClock(dayStart(Date.parse("2026-09-16T12:00:00.000Z")) + HOUR);
+      runtime = createRuntime({ backend, places: wiredPlace("solari", backend), store: memoryStore(), adapters: {}, clock: fc.clock, idle: { defaultWindowMs: 24 * HOUR }, placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }), local: fakeLocal(root) });
+      srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+      const c = await WsClient.connect(srv.port, { token: "host-token" });
+      expect(await c.request("places.cap", { placeId: "solari", spendPerDayUsd: 0.2 })).toMatchObject({ ok: true });
+      c.close();
+      const opened = async (name: string) => {
+        const made = await createOn(runtime!, { on: "solari", golden: "snap_g", name });
+        await until(async () => (await runtime!.status.history(made.id)).length === 1);
+        return made;
+      };
+
+      const first = await opened("first");
+      fc.advance(HOUR);
+      // An hour at $0.11 is under $0.20.
+      const second = await opened("second");
+      fc.advance(HOUR / 2);
+      // An hour and a half of the first and half an hour of the second is $0.22.
+      await expect(createOn(runtime, { on: "solari", golden: "snap_g", name: "third" })).rejects.toThrow(spendCapRefusal("solari", 0.22, 0.2));
+      const phases = Object.fromEntries((await runtime.workspaces.list()).map(w => [w.id, w.phase]));
+      expect(phases).toEqual({ [first.id]: "running", [second.id]: "running" });
+      // A copy on this computer costs nothing, so no cloud's spend refuses it.
+      await expect(createOn(runtime, { on: HERE_PLACE_ID, name: "mac" })).resolves.toMatchObject({ name: "mac" });
+      // A higher spend per day lets the next machine through the same day.
+      const again = await WsClient.connect(srv.port, { token: "host-token" });
+      expect(await again.request("places.cap", { placeId: "solari", spendPerDayUsd: 1 })).toMatchObject({ ok: true });
+      again.close();
+      await expect(createOn(runtime, { on: "solari", golden: "snap_g", name: "third" })).resolves.toMatchObject({ name: "third" });
+    } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });

@@ -2620,6 +2620,15 @@ export function spawnCapRefusal(rootThreadId: string, standing: number, cap: num
   return `thread ${threadWord(rootThreadId)} already holds ${standing} of its ${cap} machines; delete one before forking another`;
 }
 
+/** What a cloud at its spend per day says: its row's state sentence and the head of the refusal below. */
+export const SPEND_LIMIT_LINE = "spend limit reached today";
+
+/** The one sentence a new machine on a cloud at its spend per day is refused with; the machines already running there
+ * are left running. */
+export function spendCapRefusal(name: string, todayUsd: number, capUsd: number): string {
+  return `${SPEND_LIMIT_LINE} on ${name} (${spendMeterWord(todayUsd, capUsd)}); raise its spend per day or start the machine after midnight`;
+}
+
 /** The one sentence a spawn deeper than the workspace allows is refused with. */
 export function spawnDepthRefusal(threadId: string, depth: number, cap: number): string {
   return `thread ${threadWord(threadId)} is ${depth} deep under its root and this workspace allows ${cap}; a thread this deep may not spawn`;
@@ -3665,6 +3674,12 @@ export function placeWorkspacesParts(view: PlaceView, count: number, monthUsd?: 
 
 /** What a place has taken since the first of the month, the clause every surface that says it says. */
 export const spentThisMonth = (usd: number): string => `${fmtCost(usd)} this month`;
+
+/** What a cloud has spent today over its spend per day, the SPEND cell and the meter's figure: the limit is a number
+ * the person typed, so it reads as typed, in whole dollars where it has no cents. */
+export function spendMeterWord(todayUsd: number, capUsd: number): string {
+  return `${fmtCost(todayUsd)}/${Number.isInteger(capUsd) ? `$${capUsd}` : fmtCost(capUsd)}`;
+}
 
 /** The Spend row of a place's detail: the month behind it, what it burns right now and how many workspaces that is
  * across. A row burning nothing says so with the rate rather than dropping the clause, since a $0.00/hr that is

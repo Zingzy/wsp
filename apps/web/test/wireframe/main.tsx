@@ -547,7 +547,7 @@ const api = {
   // The one road Bring back takes; the screen about a wsp whose host carries no such request has none.
   ...(screen === "bring-back-roadless" ? {} : { bringBack: async () => ({ branch: "agent/stripe-import", base: "main", ahead: 1, uncommitted: 0, stat: [] }) }),
   daemon: { open: () => () => {} },
-  spend: async () => (settings ? [{ place: "solari", monthUsd: 1.2, rateUsdPerHour: 0.11 }] : []),
+  spend: async () => (settings ? [{ place: "solari", todayUsd: 0.26, monthUsd: 1.2, rateUsdPerHour: 0.11 }] : []),
   image: async () =>
     !settings || screen === "settings-image-nothing" || screen === "settings-image-recipe" || screen === "settings-image-recipe-last" || BUILD_SCREENS.includes(screen) || params.get("image") === "none"
       ? { image: null, copies: [], projects: [] }
