@@ -12,18 +12,20 @@ export {
   type WorkspaceStatus,
 } from "./server.js";
 export {
+  claudeKeyOnlyInThisShell,
   cli,
   devCheckoutState,
+  downCommand,
   goldenRecipe,
+  keyOnlyInThisShell,
   keySources,
   loadKeys,
   localWiring,
   localWorkFolder,
   makeRuntime,
-  readOnce,
   serve,
-  servesNothing,
   stopOnSignals,
+  systemService,
   terminalIO,
   wspHome,
   HELP,
@@ -31,8 +33,10 @@ export {
   type Keys,
   type KeySources,
   type LoadedKeys,
+  type ServiceDeps,
   type StopProcess,
 } from "./cli.js";
+export { SERVICE_MANAGERS, httpProbe, installService, logTail, noManagerLine, runAll, runFailureLine, serviceAddressHere, serviceEnv, serviceManagerFor, serviceTag, stopService, systemRunner, untilServing, type HostProbe, type RunFailure, type ServiceManager, type ServicePlan, type ServiceRunner } from "./service.js";
 export { LAUNCHD_PATH, adoptLoginPath, needsLoginPath, takeLoginPath, type LoginShellDeps } from "./login-path.js";
 export { SECTION_BEGIN, SECTION_END, sectionText } from "./agents-md.js";
 export { runBin } from "./entry.js";
@@ -41,7 +45,7 @@ export { shimPath } from "./shim.js";
 export { agentsHere, type AgentHere } from "./agents-here.js";
 export { installEach, mcpServerSpec, runningWsp, thisComputersPath, type InstallReport, type RunningWsp } from "./mcp-install.js";
 export { writeKeptLatest } from "./agent-latest.js";
-export { dialAddress, hostLogPath, hostTokenFor, lockPathFor, ownPid, servingHost, type HostLock } from "./host-lock.js";
+export { STARTED_BY_ENV, dialAddress, hostLogPath, hostTokenFor, lockPathFor, ownPid, servingHost, type HostLock } from "./host-lock.js";
 export { JoinRefused, joinCommand, placeHere, type JoinRefusalAbout } from "./places.js";
 export { SERVING_HOME_SH, defaultHomeIn, homeNamed, servingHome } from "./serving-home.js";
 export { accountAim, accountHosts, accountRecords, aimedAlias, aimedHost, aliasFrom, isUrl, listHosts, noSuchHostLine, readHost, removeHost, severalAccountHostsLine, writeHost, type AccountAim, type HostEntry, type HostRecord } from "./hosts.js";

@@ -99,7 +99,7 @@ export function latestWords(reading: ReleaseReading, running: string, fix: (vers
 
 export interface ReleaseWatchOptions {
   statePath: string;
-  shape: HostShape;
+  shape?: HostShape;
   /** The version this process runs. */
   running: string;
   /** The version the files it was started from carry now. */
@@ -146,7 +146,7 @@ export function releaseWatch(opts: ReleaseWatchOptions): ReleaseWatch {
 
   const view = (): ReleaseView => {
     const restartRefusal = opts.restart === undefined ? HOST_NO_RESTART_LINE : opts.restart.refusal;
-    const own = { shape: opts.shape, ...(restartRefusal !== undefined ? { restartRefusal } : {}), ...(installed !== opts.running ? { installed } : {}) };
+    const own = { ...(opts.shape !== undefined ? { shape: opts.shape } : {}), ...(restartRefusal !== undefined ? { restartRefusal } : {}), ...(installed !== opts.running ? { installed } : {}) };
     if (off()) return { state: "off", ...own };
     const update = opts.update !== undefined && kept.latest !== undefined && releaseAbove(kept, opts.running) ? opts.update(kept.latest.version) : undefined;
     return {

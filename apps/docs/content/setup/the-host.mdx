@@ -2,7 +2,7 @@ import { Callout } from 'scalar-mdx-components'
 
 # The host
 
-The host is the process that owns your machines and your keys. The first command that needs one starts it, the desktop app is it in a window, and everything else, the command line, the MCP tools, a browser tab, is a client of it.
+The host is the process that owns your machines and your keys. The desktop app installs it as your computer's own service on its first launch, the first command that needs one starts it where there is no app, and everything else, the app's window, the command line, the MCP tools, a browser tab, is a client of it.
 
 ## The host a command starts
 
@@ -13,7 +13,7 @@ wsp threads
 wsp down
 ```
 
-A line that needs the host serving this state file and finds none starts one for itself, detached, on a free port, and says so in one line on stderr with the log to read. A free port because another host, the app's or one under a service manager, often holds the default; every client dials the address the lock records. `wsp down` stops a host started that way, by the pid its lock names.
+A line that needs the host serving this state file and finds none starts one for itself, detached, on a free port, and says so in one line on stderr with the log to read. A free port because another host, often one under a service manager, holds the default; every client dials the address the lock records. `wsp down` stops a host started that way, by the pid its lock names.
 
 ## wsp up
 
@@ -37,15 +37,17 @@ wsp down
 wsp status
 ```
 
+The desktop app takes this road on its first launch, so a person with the app never types it. It writes the unit with the `wsp` command it installs, `~/.wsp/bin/wsp up --state ~/.wsp/state.json`, loads it and opens once the host answers. Closing the window or quitting the app leaves the host serving, and it comes back after a restart of the computer. Quit asks whether to stop wsp too: Quit and stop wsp interrupts the threads running on this computer, then does what `wsp down` does. A launch that finds the unit running anything else, an older app's command or the node a terminal's `wsp up --service` named, writes it again, and only while nothing serves, so opening the app never restarts a host that is running. A unit that runs the app's command is left as it stands, with whatever flags it was given. A window on a host on another computer installs nothing here.
+
 `--service` hands the same line to your computer's service manager, a launchd agent on macOS at `~/Library/LaunchAgents/com.wsp.host.<tag>.plist` or a systemd user unit on Linux at `~/.config/systemd/user/wsp-host-<tag>.service`, one per state file. It starts now and again at every login; on Linux, `loginctl enable-linger` keeps it up between logins.
 
-The unit holds no key. It carries `PATH`, `WSP_HOME`, `WSP_LABS`, `WSP_UPDATE_CHECK` and the variables that pick a provider, each only where the installing shell set it, and reads the same `~/.wsp/.env` a terminal run reads, which is why a key exported only in the installing shell is refused before anything is written. The unit pins the node and the wsp it was run from by path, so an nvm switch or a brew upgrade stops the service at the next login rather than running a different binary.
+The unit holds no key. It carries `PATH`, `WSP_HOME`, `WSP_LABS`, `WSP_UPDATE_CHECK` and the variables that pick a provider, each only where the installing shell set it, and reads the same `~/.wsp/.env` a terminal run reads, which is why a key exported only in the installing shell is refused before anything is written. The unit pins the node and the wsp it was run from by path, so an nvm switch or a brew upgrade stops the service at the next login rather than running a different binary. Run through the app's `wsp` command, it names that command instead, which the app rewrites on every launch, so an update of the app moves the service with it.
 
 After loading, `wsp up --service` waits up to twenty seconds until the lock exists and the port answers a request. The lock alone is not proof, since a host that cannot bind takes the lock and dies under restart, over and over. On failure it prints the last twenty lines of the log.
 
 `wsp down` stops the service and takes the unit away; running turns keep going until the next host adopts them. `wsp status` prints whether a host is serving this state file, its ports, its token file, what keeps it there and the latest release off `release.json`, with a non-zero exit code when none does.
 
-An install of a newer wsp under a running host changes its files, not the process. Settings > About then says which version the files carry and, where a restart brings the host back, offers Restart host: the service exits and its manager starts it on the new files, a host a command started for itself starts its successor on the same ports, and the app relaunches. `wsp restart` takes the same road from the command line or an agent's tools and answers once the new host serves. A host `wsp up` holds in a terminal is restarted from that terminal. A restart drops every open terminal pane on this computer, every open localhost forward and any sign-in in progress; a forward comes back when the workspace prints its URL again, and running turns continue.
+An install of a newer wsp under a running host changes its files, not the process. Settings > About then says which version the files carry and, where a restart brings the host back, offers Restart host: the service exits and its manager starts it on the new files, and a host a command started for itself starts its successor on the same ports. `wsp restart` takes the same road from the command line or an agent's tools and answers once the new host serves. A host `wsp up` holds in a terminal is restarted from that terminal. A restart drops every open terminal pane on this computer, every open localhost forward and any sign-in in progress; a forward comes back when the workspace prints its URL again, and running turns continue.
 
 ## What it keeps
 
