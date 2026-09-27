@@ -78,6 +78,7 @@
         1440,
         390
       ],
+      "reason": "The side question's sheet rides the composer, whose 1280 layout composer-thread already shoots; 390 is where the sheet reflows, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -97,6 +98,7 @@
         1440,
         390
       ],
+      "reason": "The side question's sheet rides the composer, whose 1280 layout composer-thread already shoots; 390 is where the sheet reflows, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -471,7 +473,8 @@
       "mac": true,
       "widths": [
         1440
-      ]
+      ],
+      "reason": "What this shot adds is the Mac window's glass behind the page; the page itself is shot at every width in settings-computers."
     },
     {
       "name": "settings-account",
@@ -505,6 +508,7 @@
         1440,
         390
       ],
+      "reason": "A 440px dialog over Settings, whose content is capped at 760px, so 1280 draws it as 1440 does; 390 is where both reflow, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -522,6 +526,7 @@
         1440,
         390
       ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -541,6 +546,7 @@
         1440,
         390
       ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -595,7 +601,8 @@
       "mac": true,
       "widths": [
         1440
-      ]
+      ],
+      "reason": "What this shot adds is the Mac window's glass behind the page; the page itself is shot at every width in settings-image-built."
     },
     {
       "name": "settings-image-recipe",
@@ -701,6 +708,7 @@
         1440,
         390
       ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -717,6 +725,7 @@
         1440,
         390
       ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -751,6 +760,7 @@
       "widths": [
         1440
       ],
+      "reason": "The New thread dialog is 440px at every desktop width, opened from the sidebar's project picker, which 390 hides behind its toggle. Judged against the mockup's 1440 render.",
       "fixture": "mac-and-boxes"
     },
     {
@@ -765,7 +775,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "The first run is one centred column, so 1280 draws it as 1440 does; 390 is where it reflows, which is shot here."
     },
     {
       "name": "creating-workspace",
@@ -788,6 +799,7 @@
         1440,
         390
       ],
+      "reason": "The creation log sits in the thread's column, whose 1280 layout composer-thread already shoots; 390 is where it reflows, which is shot here.",
       "fresh": true
     },
     {
@@ -811,6 +823,7 @@
         1440,
         390
       ],
+      "reason": "The creation log sits in the thread's column, whose 1280 layout composer-thread already shoots; 390 is where it reflows, which is shot here.",
       "fresh": true
     },
     {
@@ -835,6 +848,7 @@
         1440,
         390
       ],
+      "reason": "Fresh: each shot makes a workspace on a host of its own, so it is shot once. The creation log sits in the thread's column, which composer-thread shoots at every width.",
       "fresh": true
     },
     {
@@ -844,7 +858,8 @@
       "wait": "thread-status=working",
       "widths": [
         1440
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections."
     },
     {
       "name": "threads-computers",
@@ -856,7 +871,8 @@
       "wait": "computer-switcher-menu",
       "widths": [
         1440
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections."
     },
     {
       "name": "threads-computers-shut",
@@ -865,7 +881,8 @@
       "wait": "k=computer-switcher",
       "widths": [
         1440
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections."
     },
     {
       "name": "threads-computer-picked",
@@ -878,7 +895,8 @@
       "wait": "k=computer-switcher",
       "widths": [
         1440
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections."
     },
     {
       "name": "threads-picker",
@@ -890,7 +908,8 @@
       "wait": "project-switcher-menu",
       "widths": [
         1440
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections."
     },
     {
       "name": "thread-list",
@@ -902,7 +921,8 @@
       "wait": "thread-rows",
       "widths": [
         1440
-      ]
+      ],
+      "reason": "The Threads list under an opener's transcript is shot at every width in opener-transcript; this one is the same list over the thread-states fixture, judged at 1440."
     },
     {
       "name": "palette-threads",
@@ -916,6 +936,7 @@
       "widths": [
         1440
       ],
+      "reason": "The palette is a popup capped at 576px, the same at every desktop width. Judged against the mockup's 1440 render; its narrow form is not in the design's reading.",
       "settleMs": 700
     },
     {
@@ -930,6 +951,7 @@
       "widths": [
         1440
       ],
+      "reason": "The palette is a popup capped at 576px, the same at every desktop width. Judged against the mockup's 1440 render; its narrow form is not in the design's reading.",
       "settleMs": 700
     },
     {
@@ -943,6 +965,7 @@
       "widths": [
         1440
       ],
+      "reason": "The palette is a popup capped at 576px, the same at every desktop width. Judged against the mockup's 1440 render; its narrow form is not in the design's reading.",
       "settleMs": 700
     },
     {
@@ -954,7 +977,8 @@
       "wait": "surface-launcher-keys",
       "widths": [
         1440
-      ]
+      ],
+      "reason": "The launcher sits in the right panel, which is 28rem at both 1280 and 1440, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render."
     },
     {
       "name": "panel-launcher-mac",
@@ -969,7 +993,8 @@
       "mac": true,
       "widths": [
         1440
-      ]
+      ],
+      "reason": "What this shot adds is the Mac window's glass behind the launcher; the launcher itself is shot in panel-launcher."
     },
     {
       "name": "tiles",
@@ -981,7 +1006,8 @@
       "wait": "row-id=thread:cart",
       "widths": [
         1440
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections."
     },
     {
       "name": "tiles-root",
@@ -993,7 +1019,8 @@
       "wait": "row-id=thread:flaky",
       "widths": [
         1440
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections."
     },
     {
       "name": "tiles-picker",
@@ -1006,7 +1033,8 @@
       "wait": "project-switcher-menu",
       "widths": [
         1440
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections."
     },
     {
       "name": "tiles-settled-open",
@@ -1020,6 +1048,7 @@
       "widths": [
         1440
       ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections.",
       "height": 1100
     },
     {
@@ -1034,6 +1063,7 @@
       "widths": [
         1440
       ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws it as 1440 does. Judged against the mockup's 1440 render; the sidebar at 390 is shot in sidebar and tiles-sections.",
       "height": 600
     },
     {
@@ -1047,6 +1077,7 @@
       "widths": [
         1440
       ],
+      "reason": "Fresh: opening the thread stamps it read, so each shot takes a host of its own and it is shot once. The tiles themselves are shot in tiles and tiles-sections.",
       "fresh": true
     },
     {
@@ -1062,7 +1093,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here."
     },
     {
       "name": "tiles-marks",
@@ -1077,7 +1109,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here."
     },
     {
       "name": "tiles-picker-ordered",
@@ -1093,7 +1126,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here."
     },
     {
       "name": "tiles-snooze",
@@ -1110,7 +1144,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here."
     },
     {
       "name": "tiles-snoozed-working",
@@ -1124,7 +1159,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here."
     },
     {
       "name": "tiles-attempt-group",
@@ -1141,6 +1177,7 @@
         1440,
         390
       ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here.",
       "settleMs": 700
     },
     {
@@ -1159,6 +1196,7 @@
         1440,
         390
       ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here.",
       "settleMs": 700
     },
     {
@@ -1182,6 +1220,7 @@
         1440,
         390
       ],
+      "reason": "The model picker's menu and its chips ride the composer, whose 1280 layout composer-thread already shoots; 390 is where the chips wrap, which is shot here.",
       "settleMs": 700
     },
     {
@@ -1194,6 +1233,7 @@
       ],
       "wait": "k=rewind-to-here",
       "widths": [1440],
+      "reason": "A hover over a reply in the transcript, which a touch at 390 has no form of; the transcript at 1280 and 390 is shot in composer-thread.",
       "settleMs": 700
     },
     {
@@ -1211,6 +1251,7 @@
       ],
       "wait": "k=rewind-refusal",
       "widths": [1440, 390],
+      "reason": "A 440px dialog, the same at every desktop width, so 1280 draws it as 1440 does; 390 is where it reflows, which is shot here.",
       "settleMs": 700
     },
     {
@@ -1230,6 +1271,7 @@
       ],
       "wait": "k=rewind-refusal",
       "widths": [1440, 390],
+      "reason": "A 440px dialog, the same at every desktop width, so 1280 draws it as 1440 does; 390 is where it reflows, which is shot here.",
       "settleMs": 1200
     },
     {
@@ -1247,6 +1289,7 @@
       ],
       "wait": "k=rewind-refusal",
       "widths": [1440, 390],
+      "reason": "A 440px dialog, the same at every desktop width, so 1280 draws it as 1440 does; 390 is where it reflows, which is shot here.",
       "settleMs": 700
     },
     {
@@ -1256,6 +1299,7 @@
       "widths": [
         1440
       ],
+      "reason": "A 440px dialog, the same at every desktop width. Judged against the mockup's 1440 render; the dialog's narrow form is not in the design's reading.",
       "steps": [
         "key:ControlOrMeta+k",
         "type:create task",
@@ -1270,6 +1314,7 @@
       "widths": [
         1440
       ],
+      "reason": "A 440px dialog, the same at every desktop width. Judged against the mockup's 1440 render; the dialog's narrow form is not in the design's reading.",
       "steps": [
         "key:ControlOrMeta+k",
         "type:create task",
@@ -1284,6 +1329,7 @@
       "widths": [
         1440
       ],
+      "reason": "A 440px dialog over Settings, the same at every desktop width; add-project-clone-here shoots the dialog at 390.",
       "steps": [
         "k=settings-row",
         "k=settings-projects",
@@ -1298,6 +1344,7 @@
         1440,
         390
       ],
+      "reason": "A 440px dialog over Settings, whose content is capped at 760px, so 1280 draws it as 1440 does; 390 is where both reflow, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -1315,6 +1362,7 @@
       "widths": [
         1440
       ],
+      "reason": "A 440px dialog, the same at every desktop width. Judged against the mockup's 1440 render; the dialog's narrow form is not in the design's reading.",
       "steps": [
         "row-id=thread:redirect",
         "key:ControlOrMeta+k",
@@ -1330,6 +1378,7 @@
       "widths": [
         1440
       ],
+      "reason": "A 440px dialog, the same at every desktop width. Judged against the mockup's 1440 render; the dialog's narrow form is not in the design's reading.",
       "steps": [
         "row-id=thread:redirect",
         "key:ControlOrMeta+k",
@@ -1345,6 +1394,7 @@
       "widths": [
         1440
       ],
+      "reason": "The browser pane sits in the right panel, which is 28rem at both 1280 and 1440. Judged against the mockup's 1440 render; the panel at 390 is shot in files-tree.",
       "steps": [
         "row-id=thread:redirect",
         "surface-launch=preview"
@@ -1358,6 +1408,7 @@
       "widths": [
         1440
       ],
+      "reason": "The diff pane sits in the right panel, which is 28rem at both 1280 and 1440. Judged against the mockup's 1440 render; the panel at 390 is shot in files-tree.",
       "steps": [
         "row-id=thread:redirect",
         "surface-launch=diff"
@@ -1370,6 +1421,7 @@
       "at": "/",
       "fixture": "changes",
       "widths": [1440, 390],
+      "reason": "The right panel is min(42vw, 28rem), which is 28rem at both 1280 and 1440, so 1280 draws this pane as 1440 does; 390 is where the panel takes the window, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -1386,6 +1438,7 @@
       "at": "/",
       "fixture": "changes",
       "widths": [1440, 390],
+      "reason": "The right panel is min(42vw, 28rem), which is 28rem at both 1280 and 1440, so 1280 draws this pane as 1440 does; 390 is where the panel takes the window, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -1403,6 +1456,7 @@
       "at": "/",
       "fixture": "changes",
       "widths": [1440, 390],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger"
@@ -1417,6 +1471,7 @@
       "widths": [
         1440
       ],
+      "reason": "Pins how a long pasted prompt folds in the transcript; the composer and transcript at 1280 and 390 are shot in composer-thread.",
       "steps": [
         "row-id=thread:brief"
       ],
@@ -1430,6 +1485,7 @@
       "widths": [
         1440
       ],
+      "reason": "Pins the composer at rest over the tiles fixture; the composer at 1280 and 390 is shot in composer-thread.",
       "steps": [
         "row-id=thread:coupon"
       ],
@@ -1443,6 +1499,7 @@
       "widths": [
         1440
       ],
+      "reason": "Pins the composer while a turn runs over the tiles fixture; the composer at 1280 and 390 is shot in composer-thread.",
       "steps": [
         "row-id=thread:cart"
       ],
@@ -1456,6 +1513,7 @@
         1440,
         390
       ],
+      "reason": "The right panel is min(42vw, 28rem), which is 28rem at both 1280 and 1440, so 1280 draws this pane as 1440 does; 390 is where the panel takes the window, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -1474,6 +1532,7 @@
         1440,
         390
       ],
+      "reason": "The right panel is min(42vw, 28rem), which is 28rem at both 1280 and 1440, so 1280 draws this pane as 1440 does; 390 is where the panel takes the window, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -1493,6 +1552,7 @@
         1440,
         390
       ],
+      "reason": "The finder is the palette's popup, capped at 576px, so 1280 draws it as 1440 does; 390 is where it narrows, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -1512,6 +1572,7 @@
         1440,
         390
       ],
+      "reason": "The finder is the palette's popup, capped at 576px, so 1280 draws it as 1440 does; 390 is where it narrows, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -1532,6 +1593,7 @@
         1440,
         390
       ],
+      "reason": "The right panel is min(42vw, 28rem), which is 28rem at both 1280 and 1440, so 1280 draws this pane as 1440 does; 390 is where the panel takes the window, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -1549,6 +1611,7 @@
         1440,
         390
       ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -1573,7 +1636,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "The sidebar is 256px at every desktop width, so 1280 draws these tiles as 1440 does; 390 opens it over the page, which is shot here."
     },
     {
       "name": "settings-computers-icons",
@@ -1589,7 +1653,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here."
     },
     {
       "name": "agents-page-mac",
@@ -1604,7 +1669,8 @@
       "mac": true,
       "widths": [
         1440
-      ]
+      ],
+      "reason": "What this shot adds is the Mac window's glass behind the page; the page itself is shot in agents-page."
     },
     {
       "name": "settings-image-recipe-mac",
@@ -1621,7 +1687,8 @@
       "mac": true,
       "widths": [
         1440
-      ]
+      ],
+      "reason": "What this shot adds is the Mac window's glass behind the page; the page itself is shot at every width in settings-image-recipe."
     },
     {
       "name": "thread-open",
@@ -1636,7 +1703,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "The Open button sits at the right of the page header at its own width, so 1280 draws it as 1440 does; 390 is where the header narrows, which is shot here."
     },
     {
       "name": "thread-open-menu",
@@ -1652,7 +1720,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "The Open menu drops from the page header's right edge at its own width, so 1280 draws it as 1440 does; 390 is where the header narrows, which is shot here."
     },
     {
       "name": "thread-open-menu-mac",
@@ -1665,7 +1734,8 @@
       "mac": true,
       "widths": [
         1440
-      ]
+      ],
+      "reason": "What this shot adds is the Mac window's glass behind the menu; the menu itself is shot in thread-open-menu."
     },
     {
       "name": "thread-open-fork",
@@ -1681,7 +1751,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "The Open button sits at the right of the page header at its own width, so 1280 draws it as 1440 does; 390 is where the header narrows, which is shot here."
     },
     {
       "name": "agents-page",
@@ -1698,7 +1769,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here."
     },
     {
       "name": "settings-image-recipe-rows-mac",
@@ -1718,6 +1790,7 @@
       "widths": [
         1440
       ],
+      "reason": "What this shot adds is the Mac window's glass behind the recipe's rows; the rows themselves are shot at every width in settings-image-recipe.",
       "fresh": true
     },
     {
@@ -1734,7 +1807,8 @@
       "widths": [
         1440,
         390
-      ]
+      ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here."
     },
     {
       "name": "settings-editor-open",
@@ -1751,6 +1825,7 @@
         1440,
         390
       ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
       "settleMs": 600
     },
     {
@@ -1768,7 +1843,8 @@
       "fresh": true,
       "widths": [
         1440
-      ]
+      ],
+      "reason": "What this shot adds is the Mac window with its transparency turned off; the thread under it is shot at every width in composer-thread."
     },
     {
       "name": "transparency-on-mac",
@@ -1780,7 +1856,8 @@
       "mac": true,
       "widths": [
         1440
-      ]
+      ],
+      "reason": "What this shot adds is the Mac window with its transparency on; the thread under it is shot at every width in composer-thread."
     },
     {
       "name": "settings-computer-threads",
@@ -1798,6 +1875,7 @@
         1440,
         390
       ],
+      "reason": "Settings caps its content at 760px, so 1280 draws this page as 1440 does; 390 is where it reflows, which is shot here.",
       "fixture": "tiles",
       "height": 3400
     }
