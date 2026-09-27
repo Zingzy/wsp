@@ -16,7 +16,7 @@ import { devicesCards } from "./devices.js";
 import { generalCards } from "./general.js";
 import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, SETTINGS_WORDS } from "./format.js";
 import { SETTINGS_GROUP_IDS, type SettingsGroupId } from "./groupIds.js";
-import { keybindingsCards } from "./keybindings.js";
+import { KEYBINDING_DEFAULTS, keybindingsCards, keybindingsOffDefaults } from "./keybindings.js";
 import { PRIVACY_DEFAULTS, privacyCards, privacyOffDefaults } from "./privacy.js";
 import { projectSubPages, projectsCards } from "./projects.js";
 import { normalizeSearchText } from "../lib/utils.js";
@@ -49,7 +49,7 @@ const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
   devices: { name: DEVICES_WORDS.title, glyph: SmartphoneIcon, cards: devicesCards },
   account: { name: ACCOUNT_WORDS.title, glyph: UserIcon, cards: accountCards },
   privacy: { name: PRIVACY_WORDS.title, glyph: ShieldIcon, restore: { off: privacyOffDefaults, patch: PRIVACY_DEFAULTS }, cards: privacyCards },
-  keybindings: { name: KEYBINDINGS_WORDS.title, glyph: KeyboardIcon, cards: keybindingsCards },
+  keybindings: { name: KEYBINDINGS_WORDS.title, glyph: KeyboardIcon, restore: { off: keybindingsOffDefaults, patch: KEYBINDING_DEFAULTS }, cards: keybindingsCards },
   about: { name: ABOUT_WORDS.title, glyph: InfoIcon, cards: aboutCards, meta: aboutMeta },
 };
 

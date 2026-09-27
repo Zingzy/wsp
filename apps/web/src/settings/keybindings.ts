@@ -3,10 +3,16 @@
 // and the chord's keycaps at the right, worded per platform, a command with
 // two chords showing both, and the three keys that are not rules under them.
 // A rule whose chord a browser tab keeps for itself is not drawn in a tab.
-// Nothing here is editable and the group has no defaults.
+// A command's keycaps are the button that changes its chord, the person's own
+// chord replacing all of its defaults; the nine jumps share a line one chord
+// cannot stand for, and the fixed keys are not rules, so both stay as drawn.
+import { createElement } from "react";
+import type { Preferences, PreferencesPatch } from "@wsp/protocol";
 import { DEFAULT_KEYBINDINGS, parseKeybindingShortcut } from "../keybindingDefaults.js";
+import { rulesWith } from "../keybindingOverrides.js";
 import { browserTabClaimsShortcut, formatShortcutLabel } from "../keybindings.js";
-import { isWorkspaceSelectCommand, WORKSPACE_SELECT_SLOTS, workspaceSelectCommand, type KeybindingCommand, type KeybindingRule } from "../keybindingTypes.js";
+import { isWorkspaceSelectCommand, KEYBINDING_COMMANDS, WORKSPACE_SELECT_SLOTS, workspaceSelectCommand, type KeybindingCommand, type KeybindingRule } from "../keybindingTypes.js";
+import { ChordKeys } from "./ChordKeys.js";
 import { KEYBINDINGS_WORDS } from "./format.js";
 import { JUMP_WORD, KEYBINDING_WORDS } from "./keybindingWords.js";
 import type { SettingsCardData, SettingsLineData } from "./rows.js";
@@ -22,6 +28,12 @@ const TERMINAL: readonly KeybindingCommand[] = ["terminal.split", "terminal.new"
 export interface KeybindingsRead {
   readonly platform: string;
   readonly desktopShell: boolean;
+}
+
+/** What a page that can change chords adds: the person's own chords as the record holds them and the one write. */
+export interface KeybindingsEdit {
+  readonly overrides: Readonly<Record<string, string>>;
+  readonly write: (patch: PreferencesPatch) => void;
 }
 
 /** The chords of one command as the page draws them: every rule for it that reaches this shell, each label one
@@ -41,12 +53,16 @@ export function chordsOf(rules: ReadonlyArray<KeybindingRule>, command: Keybindi
   return labels.map(label => [label]);
 }
 
-function linesOf(rules: ReadonlyArray<KeybindingRule>, commands: readonly KeybindingCommand[], read: KeybindingsRead): SettingsLineData[] {
+function linesOf(rules: ReadonlyArray<KeybindingRule>, commands: readonly KeybindingCommand[], read: KeybindingsRead, edit?: KeybindingsEdit): SettingsLineData[] {
   return commands.flatMap(command => {
     const keys = chordsOf(rules, command, read);
     if (keys.length === 0) return [];
     const jump = isWorkspaceSelectCommand(command);
-    return [{ kind: "line" as const, id: jump ? "workspace.select" : command, label: jump ? JUMP_WORD : KEYBINDING_WORDS[command], keys, ...(jump ? { keysJoiner: "to" } : {}), attrs: { "data-command": jump ? "workspace.select" : command } }];
+    const control =
+      edit === undefined || jump
+        ? undefined
+        : createElement(ChordKeys, { command, keys, rules, defaults: DEFAULT_KEYBINDINGS, overridden: edit.overrides[command] !== undefined, platform: read.platform, write: edit.write });
+    return [{ kind: "line" as const, id: jump ? "workspace.select" : command, label: jump ? JUMP_WORD : KEYBINDING_WORDS[command], keys, ...(jump ? { keysJoiner: "to" } : {}), ...(control === undefined ? {} : { control }), attrs: { "data-command": jump ? "workspace.select" : command } }];
   });
 }
 
@@ -60,15 +76,22 @@ function fixedLines(read: KeybindingsRead): SettingsLineData[] {
   ];
 }
 
-export function keybindingCards(rules: ReadonlyArray<KeybindingRule>, read: KeybindingsRead): SettingsCardData[] {
+export function keybindingCards(rules: ReadonlyArray<KeybindingRule>, read: KeybindingsRead, edit?: KeybindingsEdit): SettingsCardData[] {
   return [
-    { id: "shell", items: linesOf(rules, SHELL, read) },
-    { id: "work", head: KEYBINDINGS_WORDS.workspacesAndThreads, items: linesOf(rules, WORK, read) },
-    { id: "terminal", head: KEYBINDINGS_WORDS.terminal, items: linesOf(rules, TERMINAL, read) },
+    { id: "shell", items: linesOf(rules, SHELL, read, edit) },
+    { id: "work", head: KEYBINDINGS_WORDS.workspacesAndThreads, items: linesOf(rules, WORK, read, edit) },
+    { id: "terminal", head: KEYBINDINGS_WORDS.terminal, items: linesOf(rules, TERMINAL, read, edit) },
     { id: "fixed", head: KEYBINDINGS_WORDS.fixed, items: fixedLines(read) },
   ];
 }
 
 export function keybindingsCards(ctx: SettingsContext): SettingsCardData[] {
-  return keybindingCards(DEFAULT_KEYBINDINGS, { platform: ctx.platform, desktopShell: ctx.desktopShell });
+  const overrides = ctx.preferences.keybindings;
+  return keybindingCards(rulesWith(DEFAULT_KEYBINDINGS, overrides), { platform: ctx.platform, desktopShell: ctx.desktopShell }, { overrides, write: ctx.setPreferences });
 }
+
+/** The one patch Restore defaults writes: every command back on its defaults. */
+export const KEYBINDING_DEFAULTS: PreferencesPatch = { keybindings: Object.fromEntries(KEYBINDING_COMMANDS.map(command => [command, null])) };
+
+/** Whether any command this build dispatches wears a chord of the person's own. */
+export const keybindingsOffDefaults = (p: Preferences): boolean => KEYBINDING_COMMANDS.some(command => p.keybindings[command] !== undefined);

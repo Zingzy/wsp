@@ -11,6 +11,10 @@ files:
   - assets/**
   - package.json
 afterPack: scripts/after-pack.mjs
+# wsp:// links open the app on what they name: the bundle's Info.plist on macOS, the desktop entry on Linux.
+protocols:
+  - name: wsp
+    schemes: [wsp]
 # The app is written in en-US alone, and Chromium falls back to it; the other 219 locale folders were 47 MB unpacked.
 electronLanguages: [en-US]
 mac:

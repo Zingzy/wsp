@@ -285,3 +285,10 @@ export async function localFontFaces(requested: string, index: () => Promise<Fon
   }
   return out;
 }
+
+/** Every installed family by name, once each and sorted as a person reads them: what the font pickers offer. A
+ * family whose name starts with a dot is one macOS keeps for itself and does not list. */
+export async function fontFamilies(index: () => Promise<FontFile[]>): Promise<string[]> {
+  const names = new Set((await index()).map(f => f.family.trim()).filter(family => family.length > 0 && !family.startsWith(".")));
+  return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
