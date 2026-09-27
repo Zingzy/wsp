@@ -8,6 +8,7 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { bootPayload } from "../boot.js";
 import type { TerminalViewportConfig } from "../components/ThreadTerminalDrawer.js";
+import { openTerminalPath } from "../files/open.js";
 import { useStore } from "../protocol/store.js";
 import { terminalFontSize } from "./ghostty/surface.js";
 import { terminalBaseSize } from "./ghosttyConfig.js";
@@ -92,12 +93,16 @@ export function useTerminalFont(): { family: string; detected: string | undefine
 }
 
 /** The viewport config for the effective family and this workspace's sizing, saying whether the viewer typed the
- * family, since a typed family beats the one in their terminal config file where a detected one does not; its
- * identity changes only with those, so a chunk of output never rebuilds it. */
+ * family, since a typed family beats the one in their terminal config file where a detected one does not, and
+ * opening a clicked path in the Files pane; its identity changes only with those, so a chunk of output never
+ * rebuilds it. */
 export function useTerminalViewportConfig(workspaceId: string): TerminalViewportConfig {
   const family = useSyncExternalStore(subscribe, effectiveTerminalFont, effectiveTerminalFont);
   const chosenFont = useSyncExternalStore(subscribe, chosen, chosen) !== "";
   const source = useStore(s => s.preferences.terminalSize);
   const zoom = useStore(s => terminalZoomOf(s.preferences.terminalZoom, workspaceId));
-  return useMemo(() => ({ font: family !== undefined ? { family } : {}, chosenFont, sizing: { source, zoom } }), [family, chosenFont, source, zoom]);
+  return useMemo(
+    () => ({ font: family !== undefined ? { family } : {}, chosenFont, sizing: { source, zoom }, onPathActivate: (text: string) => openTerminalPath(workspaceId, text) }),
+    [family, chosenFont, source, zoom, workspaceId],
+  );
 }

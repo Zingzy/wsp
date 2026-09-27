@@ -46,6 +46,8 @@ describe("a wsp:// link on the page", () => {
     open({ kind: "settings", id: "keybindings" });
     expect(useStore.getState().settingsOpen).toBe(true);
     expect(useSettingsStore.getState().at).toEqual({ kind: "group", group: "keybindings" });
+    open({ kind: "settings", id: "general" });
+    expect(useSettingsStore.getState().at).toEqual({ kind: "group", group: "general" });
     expect(errors()).toEqual([]);
   });
 
@@ -53,10 +55,9 @@ describe("a wsp:// link on the page", () => {
     open({ kind: "thread", id: "th_gone" });
     open({ kind: "workspace", id: "ws_gone" });
     open({ kind: "project", id: "pr_gone" });
-    open({ kind: "settings", id: "general" });
     open({ kind: "settings", id: "nowhere" });
     expect(useStore.getState()).toMatchObject({ selectedId: "ws_a", settingsOpen: false, projectHome: null });
-    expect(errors().toReversed()).toEqual([LINK_WORDS.gone("thread"), LINK_WORDS.gone("workspace"), LINK_WORDS.gone("project"), LINK_WORDS.gone("settings"), LINK_WORDS.gone("settings")]);
+    expect(errors().toReversed()).toEqual([LINK_WORDS.gone("thread"), LINK_WORDS.gone("workspace"), LINK_WORDS.gone("project"), LINK_WORDS.gone("settings")]);
     expect(LINK_WORDS.gone("thread")).toBe("That link names a thread this wsp does not have.");
   });
 

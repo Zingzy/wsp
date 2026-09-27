@@ -80,6 +80,9 @@ export const TUNNEL_CAP = 64;
 export const FS_READ_CAP_BYTES = 2 * 1024 * 1024;
 /** Entries one fs.list carries; total counts the rest. */
 export const FS_LIST_CAP_ENTRIES = 10_000;
+/** Paths one fs.search in files mode carries, and hits one in text mode carries; truncated says the walk stopped there. */
+export const FS_SEARCH_CAP_FILES = 5_000;
+export const FS_SEARCH_CAP_HITS = 500;
 /** Bytes of patch one git.diff carries across its files, cut at a line. */
 export const GIT_DIFF_CAP_BYTES = 2 * 1024 * 1024;
 /** Bytes of a pty's output kept for the next client to attach. */
