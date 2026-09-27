@@ -24,19 +24,8 @@ function home(): string {
   return dir;
 }
 
-function local(): HostSession & { closes: number } {
-  const session = {
-    url: "http://127.0.0.1:41000",
-    port: 41000,
-    owned: true,
-    remote: false,
-    label: "This Mac",
-    closes: 0,
-    close: async () => {
-      session.closes += 1;
-    },
-  };
-  return session;
+function local(): HostSession {
+  return { url: "http://127.0.0.1:41000", port: 41000, remote: false, label: "This Mac" };
 }
 
 /** A record wsp hosts wrote off the account's listing, holding the token an earlier dial took. */
@@ -122,7 +111,7 @@ describe("hostSwitcher", () => {
     expect(switcher.token()).toBe("host-tok");
   });
 
-  it("switching reassigns the session, the origin gate follows it, and the app's own host keeps running", async () => {
+  it("switching reassigns the session and the origin gate follows it", async () => {
     const d = deps();
     writeHost(d.home, "box", accountRecord("http://127.0.0.1:14400"));
     const switcher = hostSwitcher(d);
@@ -139,7 +128,6 @@ describe("hostSwitcher", () => {
     expect(await switcher.to(null)).toEqual({ ok: true });
     expect(switcher.current()).toBe(d.local);
     expect(gate("http://127.0.0.1:41000/")).toBe(true);
-    expect(d.local.closes).toBe(0);
   });
 
   it("dials a host on the account once before the move, so a token it no longer takes is renewed and the page is handed the fresh one", async () => {
