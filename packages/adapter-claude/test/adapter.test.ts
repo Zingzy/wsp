@@ -990,7 +990,8 @@ describe("a reply given while the agent's background work runs", () => {
     await until(() => dones(events).length === 1);
     m.end(0);
     const result = await session.finished;
-    expect(result).toMatchObject({ status: "completed", text: "The background sleep finished with exit code 0 and printed `done`.", durationMs: 3600, costUsd: 0.28360375 });
+    // Timed from the launch: the held reply's figure, then the woken reply's own, since these lines land at once.
+    expect(result).toMatchObject({ status: "completed", text: "The background sleep finished with exit code 0 and printed `done`.", durationMs: 10657 + 3600, costUsd: 0.28360375 });
     // One reply, and the woken agent's words reached the pane before it.
     expect(dones(events)).toHaveLength(1);
     const texts = events.filter(e => e.type === "turn.delta" && e.kind === "text").map(e => (e.type === "turn.delta" ? e.text : ""));
