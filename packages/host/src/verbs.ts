@@ -1274,7 +1274,7 @@ async function broughtBack(client: HostClient, workspaceId: string, title?: stri
 /** What a bring back reads as: where the branch went and how far it is over the base, git's own diffstat under it,
  * then the pull request or why there is none, and last what stayed behind in the workspace. The push's lines come
  * first whatever the pull request half said, since that half runs after the branch has landed on the remote. */
-function broughtBackLine(name: string, back: BringBackResult): string {
+export function broughtBackLine(name: string, back: BringBackResult): string {
   const commits = `${back.ahead} commit${back.ahead === 1 ? "" : "s"}`;
   const left = `${back.uncommitted} change${back.uncommitted === 1 ? "" : "s"}`;
   return [

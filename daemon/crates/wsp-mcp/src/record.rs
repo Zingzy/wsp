@@ -99,6 +99,7 @@ pub struct Words {
     /// Command lines, each with the words the TypeScript split gives it, or none where a quote is never closed.
     #[cfg(test)]
     pub command_words: HashMap<String, Option<Vec<String>>>,
+    pub workspaces: crate::tools::workspace::Words,
 }
 
 pub fn words() -> Words {
