@@ -1,0 +1,106 @@
+{
+  "tool": "skills_add",
+  "cases": [
+    {
+      "case": "copies",
+      "arguments": {
+        "skill": "zingzy/skills/code\u0085review",
+        "agent": [
+          "codex",
+          "zed-x"
+        ]
+      },
+      "replies": {
+        "skills.add": "{\"id\":1,\"ok\":true,\"added\":{\"agents\":[{\"path\":\"~/.codex/skills/code-review\",\"agent\":\"codex\"},{\"agent\":\"zed-x\",\"path\":\"~/.zed\\n/skills\"}],\"path\":\"~/.agents/skills/code-review\",\"more\":1}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"codereview is in ~/.agents/skills/code-review, and in Codex's ~/.codex/skills/code-review, zed-x's ~/.zed /skills.\"}],\"structuredContent\":{\"path\":\"~/.agents/skills/code-review\",\"agents\":[{\"agent\":\"codex\",\"path\":\"~/.codex/skills/code-review\"},{\"agent\":\"zed-x\",\"path\":\"~/.zed\\n/skills\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "skills.add",
+          "target": {
+            "placeId": "here"
+          },
+          "skill": "zingzy/skills/code\u0085review",
+          "agents": [
+            "codex",
+            "zed-x"
+          ]
+        }
+      ]
+    },
+    {
+      "case": "alone",
+      "arguments": {
+        "skill": "plain"
+      },
+      "replies": {
+        "skills.add": "{\"id\":1,\"ok\":true,\"added\":{\"path\":\"~/.agents/skills/plain\",\"agents\":[]}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"plain is in ~/.agents/skills/plain.\"}],\"structuredContent\":{\"path\":\"~/.agents/skills/plain\",\"agents\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "skills.add",
+          "target": {
+            "placeId": "here"
+          },
+          "skill": "plain"
+        }
+      ]
+    },
+    {
+      "case": "a project on a computer",
+      "arguments": {
+        "skill": "o/r/s",
+        "on": "place-solari",
+        "project": "api",
+        "agent": []
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
+        "skills.add": "{\"id\":1,\"ok\":true,\"added\":{\"path\":\"/root/api/.agents/skills/s\",\"agents\":[]}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"s is in /root/api/.agents/skills/s.\"}],\"structuredContent\":{\"path\":\"/root/api/.agents/skills/s\",\"agents\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "skills.add",
+          "target": {
+            "placeId": "place-solari",
+            "project": "api"
+          },
+          "skill": "o/r/s",
+          "project": true
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "skill": "o/r/s",
+        "workspace": "landing"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
+        "skills.add": "{\"id\":1,\"ok\":false,\"error\":\"landing is napping, and its skills are read and changed only while it runs; wake it first\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"landing is napping, and its skills are read and changed only while it runs; wake it first\"}],\"structuredContent\":{\"error\":\"landing is napping, and its skills are read and changed only while it runs; wake it first\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "landing"
+        },
+        {
+          "op": "skills.add",
+          "target": {
+            "workspaceId": "ws_1"
+          },
+          "skill": "o/r/s"
+        }
+      ]
+    }
+  ]
+}

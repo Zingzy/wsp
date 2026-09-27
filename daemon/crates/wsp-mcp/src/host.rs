@@ -42,6 +42,11 @@ impl Host {
         Host { args: args.clone(), env: env.clone(), home: aim::wsp_home(env), held: Mutex::new(None) }
     }
 
+    /// The environment the server runs in, which a tool reads a value it sends by name from.
+    pub fn env(&self) -> &Env {
+        &self.env
+    }
+
     /// The socket the last call opened while it is still open; a fresh dial otherwise. Two calls at once share one
     /// dial, since the second waits on the first's.
     pub async fn client(&self) -> Result<Arc<Client>, Failure> {
