@@ -28,15 +28,24 @@ export const SKILL_HEAD_BYTES = 4096;
 
 const END = "\x1eEND";
 
-/** Reads the list the finder prints, a line naming each root and then one line per file under it (whether its folder is
- * a link, whether it is turned off, its path), and prints the records: where each linked folder points comes off one ls,
- * and every frontmatter off the one awk, each file cut at `cap` bytes. Only a newline in a name splits a line. */
+/** Reads the list the finder prints, a line naming each root and then one line per file found under any of them
+ * (whether its folder is a link, whether it is turned off, its path), and prints a record for each root the file sits
+ * two or three folders below: where each linked folder points comes off one ls, and every frontmatter off the one awk,
+ * each file cut at `cap` bytes. Only a newline in a name splits a line. */
 const FRONTMATTERS = String.raw`function q(s,  o, i) { o = ""; while ((i = index(s, "\047")) > 0) { o = o substr(s, 1, i - 1) "\047\\\047\047"; s = substr(s, i + 1) } return "\047" o s "\047" }
-/^r/ { r = substr($0, 2); next }
+/^r/ { T[++t] = substr($0, 2); next }
 {
-  n++; R[n] = r; K[n] = substr($0, 2, 1); O[n] = substr($0, 3, 1); f = substr($0, 4); F[n] = f
-  d = f; if (match(f, "/[^/]*$")) d = substr(f, 1, RSTART - 1); D[n] = d
-  if (K[n] == "1" && !(d in L)) { L[d] = ""; cmd = cmd " " q(d) }
+  k = substr($0, 2, 1); o = substr($0, 3, 1); f = substr($0, 4)
+  if (f in S) next
+  S[f] = 1
+  d = f; if (match(f, "/[^/]*$")) d = substr(f, 1, RSTART - 1)
+  for (i = 1; i <= t; i++) {
+    if (index(f, T[i] "/") != 1) continue
+    rel = substr(f, length(T[i]) + 2); up = gsub("/", "/", rel)
+    if (up < 1 || up > 2) continue
+    n++; R[n] = T[i]; K[n] = k; O[n] = o; F[n] = f; D[n] = d
+  }
+  if (k == "1" && !(d in L)) { L[d] = ""; cmd = cmd " " q(d) }
 }
 END {
   if (cmd != "") {
@@ -69,18 +78,20 @@ END {
 
 /** Prints, per SKILL.md found under each root (two or three folders down: a category folder is allowed, links are
  * followed), the root, the skill's folder, where that folder links, whether it is turned off (a SKILL.md.off with no
- * SKILL.md beside it), and the frontmatter lines alone. The processes it starts do not grow with the skills. */
+ * SKILL.md beside it), and the frontmatter lines alone. One find walks every root, so the processes it starts grow
+ * with neither the skills nor the roots. A line that names no file, a piece of a name with a newline in it, is dropped
+ * rather than read as a path under some other root. */
 const SCRIPT = [
-  'for r in "$@"; do',
-  '  [ -d "$r" ] || continue',
-  "  printf 'r%s\\n' \"$r\"",
-  '  find -L "$r" -mindepth 2 -maxdepth 3 \\( -name SKILL.md -o -name SKILL.md.off \\) -type f 2>/dev/null | while IFS= read -r f; do',
+  '{',
+  "  printf 'r%s\\n' \"$@\"",
+  '  find -L "$@" -mindepth 2 -maxdepth 3 \\( -name SKILL.md -o -name SKILL.md.off \\) -type f 2>/dev/null | while IFS= read -r f; do',
+  '    [ -f "$f" ] || continue',
   '    d=${f%/*}',
   '    o=0; case $f in *.off) [ -f "$d/SKILL.md" ] && continue; o=1;; esac',
   '    l=0; [ -L "$d" ] && l=1',
   "    printf 'f%s%s%s\\n' \"$l\" \"$o\" \"$f\"",
   "  done",
-  `done | LC_ALL=C awk -v cap=${SKILL_HEAD_BYTES} '${FRONTMATTERS}' && printf '\\036END\\n'`,
+  `} | LC_ALL=C awk -v cap=${SKILL_HEAD_BYTES} '${FRONTMATTERS}' && printf '\\036END\\n'`,
 ].join("\n");
 
 /** A one-line YAML value as a string: a quoted one is what its quotes hold, a plain one ends where a comment starts. */
