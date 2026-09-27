@@ -10,8 +10,11 @@ import {
   placeCapOf,
   placeCapRefusal,
   placeRoom,
+  placeSpendLimit,
   placeStateOf,
   runningOn,
+  SPEND_LIMIT_LINE,
+  spendCapRefusal,
   threadsAtOnce,
   type PlaceProvision,
 } from "@wsp/protocol";
@@ -119,6 +122,15 @@ describe("the word a place's row says", () => {
     expect(placeStateOf({ ...solari, cap: { machines: 3, spendPerDayUsd: 0 } }, null, 0).word).toBe("At limit");
     // A computer has no spend limit whatever figure is handed in.
     expect(placeStateOf(spoo, null, 100).word).toBe("Ready");
+  });
+
+  it("reads a spend limit only off a cloud's cap, and the refusal opens with the row's own sentence", () => {
+    expect(placeSpendLimit(solari)).toBe(10);
+    expect(placeSpendLimit({ ...solari, cap: { machines: 3, spendPerDayUsd: 0 } })).toBe(0);
+    expect(placeSpendLimit(spoo)).toBeUndefined();
+    expect(placeSpendLimit({ ...solari, cap: undefined })).toBeUndefined();
+    expect(placeStateOf(solari, null, 10).sentence).toBe(SPEND_LIMIT_LINE);
+    expect(spendCapRefusal("solari", 10.02, 10)).toBe(`${SPEND_LIMIT_LINE} on solari ($10.02/$10); raise its spend per day or start the machine after midnight`);
   });
 
   it("puts blocked, then not answering, then At limit, then Full, then the recipe, then behind", () => {

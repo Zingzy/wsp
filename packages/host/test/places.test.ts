@@ -540,6 +540,24 @@ describe("the table wsp places prints", () => {
     expect(printed.slice(1).map(line => column(line, "STATE", "LAST SEEN"))).toEqual(["Ready", "Full", "Ready", "no answer"]);
   });
 
+  it("says on the computers table what a cloud spent today against its spend per day, nothing on a computer, and At limit once it reaches it", () => {
+    const places: PlaceView[] = [
+      { ...rows[0]!, cap: { threads: 6 }, running: 0 },
+      { ...rows[1]!, cap: { threads: 2 }, running: 0 },
+      { ...rows[2]!, cap: { machines: 3, spendPerDayUsd: 10 }, running: 1 },
+    ];
+    const spend = (todayUsd: number) => [{ place: rows[2]!.id, todayUsd, monthUsd: 40, rateUsdPerHour: 0.11 }];
+    const cells = (printed: string[], name: string, next: string): string[] => printed.slice(1).map(line => line.slice(printed[0]!.indexOf(name), printed[0]!.indexOf(next)).trim());
+    const under = computerLines(places, "darwin", spend(2.314));
+    expect(cells(under, "SPEND", "STATE")).toEqual(["", "", "$2.31/$10"]);
+    expect(cells(under, "STATE", "LAST SEEN")).toEqual(["Ready", "Ready", "Ready"]);
+    const at = computerLines(places, "darwin", spend(10));
+    expect(cells(at, "SPEND", "STATE")).toEqual(["", "", "$10.00/$10"]);
+    expect(cells(at, "STATE", "LAST SEEN")).toEqual(["Ready", "Ready", "At limit"]);
+    // With no spend read the cell is left empty rather than guessed at zero.
+    expect(cells(computerLines(places, "darwin"), "SPEND", "STATE")).toEqual(["", "", ""]);
+  });
+
   it("says how many forks a place holds of how many it takes, and nothing there for one that has not said yet", () => {
     const printed = placeLines([
       { ...rows[1]!, forks: { running: 1, room: 2 } },
