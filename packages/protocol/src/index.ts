@@ -17,6 +17,8 @@ import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouE
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
+import type { GitCheckpointReply as WireGitCheckpointReply } from "./generated/GitCheckpointReply.js";
+import type { GitRestoreReply as WireGitRestoreReply } from "./generated/GitRestoreReply.js";
 import type { FsSearchReply as WireFsSearchReply } from "./generated/FsSearchReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
@@ -3230,6 +3232,15 @@ export const GitPrListReply = z.object({ items: z.array(HostItem), note: z.strin
 export type GitPrListReply = WireGitPrListReply;
 type GitPrListReplyHeld = Held<Same<z.infer<typeof GitPrListReply>, GitPrListReply>>;
 
+/** A checkpoint's ref, the commit it names, and whether its tree differs from the one that ref named before. */
+export const GitCheckpointReply = z.object({ ref: z.string(), commit: z.string(), changed: z.boolean() });
+export type GitCheckpointReply = WireGitCheckpointReply;
+type GitCheckpointReplyHeld = Held<Same<z.infer<typeof GitCheckpointReply>, GitCheckpointReply>>;
+/** The checkpoint of the tree as it stood before a restore, which restores it again, and how many files moved. */
+export const GitRestoreReply = z.object({ before: z.string(), files: z.number().int() });
+export type GitRestoreReply = WireGitRestoreReply;
+type GitRestoreReplyHeld = Held<Same<z.infer<typeof GitRestoreReply>, GitRestoreReply>>;
+
 export const FsReadEncoding = z.enum(["utf8", "base64"]);
 export type FsReadEncoding = z.infer<typeof FsReadEncoding>;
 /** size is the whole file's byte length; content holds at most the first 2 MiB. */
@@ -3479,6 +3490,13 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** The repository's open pull requests and issues through that same command line, answered as a GitPrListReply.
    * No command line for the host, or one nobody signed in, is an empty list with the note saying so. */
   z.object({ id: reqId, op: z.literal("git.prList"), cwd: z.string(), machineId: z.string().optional() }),
+  /** Records the checkout's whole tree at a turn's end as a commit outside every branch, under the ref the daemon
+   * names from the copy's folder, the thread and the turn, and answers a GitCheckpointReply. HEAD, the index and
+   * the branch never move. */
+  z.object({ id: reqId, op: z.literal("git.checkpoint"), cwd: z.string(), thread: z.string(), turn: z.string(), machineId: z.string().optional() }),
+  /** Puts the tree back to one of this copy's checkpoints, recording the tree as it stood first, and answers a
+   * GitRestoreReply whose before restores it again. */
+  z.object({ id: reqId, op: z.literal("git.restore"), cwd: z.string(), checkpoint: z.string(), machineId: z.string().optional() }),
   /** Replies with a HostFolderListing: one level of folders on the computer this daemon runs on, for the folder
    * picker of a computer somebody owns. The roots are the home of the login the daemon runs as and each of
    * `projects` the home does not hold; `dir` absent lists the home, and so does a folder inside the roots that is
@@ -4137,6 +4155,7 @@ const DAEMON_CONTENTS = [
   "4693a00a74c923f64a9062a65cac539d5ac7621da08fc623c63089a87b8231d7",
   "6064295b774d39defb1ba58ef099812ee1e4662bac2a1525c6d0061128450f2f",
   "12dc3a3741a25239969103531def3c28df0874e9233825d16f7063a84df345c6",
+  "72caf5d7798b2577c18ff92954903baf3527f86af1cdee7ea7e4108333002e30",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4357,7 +4376,10 @@ const DAEMON_CONTENTS = [
  * Version 83 answers fs.search: the files under a folder whose path holds a query's letters in order, or the lines of text there that hold it, walked with the folder's ignore rules and never through a link, under a cap and a time budget.
  * Version 84 adds fs.files, every file of a checkout git would show, from git ls-files and kept until a folder holding one
  * of them changes, and git.prList, the repository's open pull requests and issues through the host's command line, an
- * empty list with a note where that command line is not there or nobody signed it in. */
+ * empty list with a note where that command line is not there or nobody signed it in.
+ * Version 85 adds git.checkpoint, a turn's whole tree recorded as a commit outside every branch under
+ * refs/wsp/checkpoints/<copy>/<thread>/<turn>, and git.restore, which puts the tree back to one of the copy's own
+ * checkpoints after recording the tree as it stood; a worktree copy's removal deletes its checkpoint refs. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

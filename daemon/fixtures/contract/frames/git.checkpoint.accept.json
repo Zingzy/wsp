@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "op": "git.checkpoint",
+    "cwd": "/Users/dev/spoo-fix-login",
+    "thread": "thr_01a0e365",
+    "turn": "turn_3"
+  },
+  {
+    "id": 2,
+    "op": "git.checkpoint",
+    "cwd": "/root/wsp-boat",
+    "thread": "thr_01a0e365",
+    "turn": "turn_3",
+    "machineId": "wsp-a"
+  }
+]

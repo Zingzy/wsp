@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "op": "git.restore",
+    "cwd": "/root/repo"
+  },
+  {
+    "id": 1,
+    "op": "git.restore",
+    "checkpoint": "refs/wsp/checkpoints/repo/thr_1/turn_1"
+  },
+  {
+    "id": 1,
+    "op": "git.restore",
+    "cwd": "/root/repo",
+    "checkpoint": null
+  }
+]
