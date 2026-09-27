@@ -3600,10 +3600,11 @@ export const VERBS: readonly Verb[] = [
       "the command line records a project with wsp add, the same word that joins a computer and takes a provider's key; those two belong at the terminal the host runs at, so the tool door carries the project half alone",
     tool: tool({
       description:
-        "Records a project: one source on one computer, which every workspace of it is a copy for. A folder on the computer the app runs on is copied beside itself for each workspace, and a repo is cloned by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo without a computer to clone it, and a source already recorded on that computer are each refused in one line. The answer is the project, whose name is what new takes.",
+        "Records a project: one source on one computer, which every workspace of it is a copy for. A folder on the computer the app runs on is copied beside itself for each workspace. A repo is cloned into the empty folder named with into on the computer the app runs on, which is then a folder project there, or by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo with neither into nor on, a folder to clone into that holds something, and a source already recorded on that computer are each refused in one line, and a clone that fails says git's own last line. The answer is the project, whose name is what new takes.",
       input: {
         source: z.string().describe("a folder on the computer the app runs on, or a repo's url"),
-        on: z.string().optional().describe("the computer that clones the repo, by the name computers lists; a repo needs one and a folder takes none"),
+        on: z.string().optional().describe("the computer that clones the repo, by the name computers lists; a folder, and a repo cloned with into, take none"),
+        into: z.string().optional().describe("an absolute path on the computer the app runs on, absent or an empty folder, to clone the repo into; the project is then that folder"),
         name: z.string().optional().describe("what to call the project here; the folder's or the repo's own last word without it"),
         base: z.string().optional().describe("the branch a workspace of the project starts on; the remote's own default branch at the clone without it"),
       },
@@ -3615,6 +3616,7 @@ export const VERBS: readonly Verb[] = [
           ...(args.on !== undefined ? { on: args.on } : {}),
           ...(args.name !== undefined ? { name: args.name } : {}),
           ...(args.base !== undefined ? { base: args.base } : {}),
+          ...(args.into !== undefined ? { into: args.into } : {}),
         });
         const named = await placeNames(client).catch(() => new Map<string, string>());
         // What landed and is not what was asked for rides the answer: an add that stands with the commits left

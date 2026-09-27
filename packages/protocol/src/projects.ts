@@ -97,10 +97,68 @@ export function projectSourceOf(word: string, kind: Exclude<ReturnType<typeof so
 export const sameSourceRefusal = (name: string, computer: string): string =>
   `that source is already a project on ${computer}, ${name}; one source on one computer is one project`;
 
-/** Why a repo's url with no computer named records nothing: this computer copies a folder of yours and clones
- * nothing, so a url needs the computer that clones it, with the ones that do. */
+/** Why a repo's url with no computer and no folder named records nothing: it is cloned into a folder here or by
+ * another computer that clones, and which is the person's to say, with the other computers that clone. */
 export const noComputerForSourceLine = (word: string, computers: readonly string[]): string =>
-  `${word} is a repo, and ${THIS_COMPUTER} takes a folder of yours; name the computer that clones it with --on ${computers.length === 0 ? "<computer>, once you have added one" : computers.join(" | ")}`;
+  `${word} is a repo: clone it here with --into <folder>${computers.length === 0 ? "" : `, or name the computer that clones it with --on ${computers.join(" | ")}`}`;
+
+/** Why a repo on this computer records nothing without a folder: the clone goes where the person says. */
+export const cloneIntoNeeded = (word: string): string => `${word} is a repo; name the empty folder to clone it into with --into <folder>`;
+
+/** Why a repo on a computer that holds no projects records nothing. */
+export const takesNoProjectLine = (computer: string): string => `${computer} holds no projects yet; add the project on ${THIS_COMPUTER}, or on a computer that clones`;
+
+/** Why a folder that holds something is no place to clone into: the clone would land among files that are not its. */
+export const cloneIntoTakenLine = (folder: string): string => `${folder} is not an empty folder; clone into an empty one or one that does not exist yet`;
+
+/** Why --into beside a computer that is not this one is refused: the folder is this computer's, and that computer
+ * clones where it keeps its own checkouts. */
+export const INTO_IS_HERE_LINE = `--into is a folder on ${THIS_COMPUTER}; drop --on to clone here, or drop --into to clone on that computer`;
+
+/** Why --into beside a folder is refused: the folder is the project where it already is. */
+export const INTO_TAKES_A_REPO_LINE = "--into is where a repo is cloned; a folder is a project where it already is";
+
+const CLONE_HOST = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
+const SCP_FORM = /^[A-Za-z0-9_.][\w.-]*@[A-Za-z0-9][A-Za-z0-9.-]*:[^\s-][^\s]*$/;
+const OWNER_REPO = /^[\w.][\w.-]*\/[\w.][\w.-]*$/;
+
+/** Why a repo word is not one this computer clones, or nothing where it is: an https url, an ssh url, git's scp form
+ * or owner/repo, with no credentials in it, no host or path that git or ssh could read as an option, and no
+ * transport of git's that runs a command or reads this computer's own files. */
+export function cloneUrlRefusal(word: string): string | undefined {
+  const refused = `${word} is not a repo address wsp clones; give its https or ssh url, or owner/repo`;
+  if (/\s/.test(word) || word.startsWith("-")) return refused;
+  let kind: ReturnType<typeof sourceKind>;
+  try {
+    kind = sourceKind(word);
+  } catch {
+    return refused;
+  }
+  if (kind === "github" || kind === "gitlab") return OWNER_REPO.test(word.replace(/^(github|gitlab)\.com\//, "")) ? undefined : refused;
+  if (kind !== "git") return refused;
+  if (SCP_FORM.test(word)) return undefined;
+  let url: URL;
+  try {
+    url = new URL(word);
+  } catch {
+    return refused;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "ssh:") return refused;
+  if (url.password !== "" || (url.protocol === "https:" && url.username !== "")) return refused;
+  if (!CLONE_HOST.test(url.hostname) || url.pathname.length <= 1) return refused;
+  return undefined;
+}
+
+/** What a sign-in failure reads like from git, ssh and gh: a private repo answers "not found" to a clone with no
+ * login rather than admitting it exists. */
+const SIGN_IN_FAILURE = /authentication failed|could not read username|terminal prompts disabled|permission denied \(publickey\)|not found|could not resolve to a repository|gh auth login|HTTP 40[13]/i;
+
+/** What a failed clone says: git's own last line, and where it failed for want of a login, how to give it one. */
+export function cloneFailedLine(said: string): string {
+  const last = said.trimEnd().split("\n").at(-1)?.trim() ?? "";
+  if (last === "") return "the clone failed and said nothing";
+  return SIGN_IN_FAILURE.test(said) ? `${last}; sign in with gh auth login, or use the repo's ssh url` : last;
+}
 
 /** Why a folder on this computer seeding a project on another computer needs the person's answer first: what git
  * ignores in that folder is theirs, and nothing of it leaves this computer until they have read the menu and
@@ -110,10 +168,7 @@ export const seedChoiceNeeded = (folder: string): string =>
 
 /** Why a folder that is no repo is not a project: a workspace of it starts on a branch, and a folder with no git
  * in it has none. */
-export const NOT_A_REPO_LINE = "is not a git repo; git init makes it one, or name a repo's url with --on <computer>";
-
-/** Why a repo's url on this computer records nothing: this computer copies the folder you already have. */
-export const gitOnThisMacRefusal = `${THIS_COMPUTER} takes a folder of yours, which every workspace here is a copy of; a repo's url is for a computer that clones it, named with --on <computer>`;
+export const NOT_A_REPO_LINE = "is not a git repo; git init makes it one, or add a repo's url with --into <folder> or --on <computer>";
 
 /** Why a folder on a computer that is not this one records nothing: nothing carries a folder there yet, so its
  * project is the repo that computer can clone. */

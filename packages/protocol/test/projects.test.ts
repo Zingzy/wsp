@@ -4,7 +4,7 @@
 // this computer belongs to: the command line, the runtime and the app all
 // read these here.
 import { describe, expect, it } from "vitest";
-import { addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, landsOn, MEMORY_KEPT_CLAUSE, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, workspaceLands, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { cloneFailedLine, cloneUrlRefusal, noComputerForSourceLine, addedProjectLine, addedProjectOn, addingProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, landsOn, MEMORY_KEPT_CLAUSE, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectRemovedOnComputerLine, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, workspaceLands, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -68,8 +68,9 @@ describe("what one word to wsp add names", () => {
 
   it("which sources a computer takes is its kind's own row, so no road decides it for itself", () => {
     // A computer that clones takes a repo any of the three ways it can be named, and a folder on this computer,
-    // which it clones from that folder's own remote and seeds what git ignores onto.
-    expect(kindWords("local").projectSources).toEqual(["folder"]);
+    // which it clones from that folder's own remote and seeds what git ignores onto. This computer clones a repo
+    // into a folder the person names and works that folder.
+    expect(kindWords("local").projectSources).toEqual(["git", "github", "gitlab", "folder"]);
     expect(kindWords("cloud").projectSources).toEqual(["git", "github", "gitlab", "folder"]);
     expect(kindWords("ssh").projectSources).toEqual([]);
     // Copying the folder beside itself is its own word: a computer that clones takes a folder as a source and
@@ -79,7 +80,7 @@ describe("what one word to wsp add names", () => {
 
   it("the refusals name the project, the folder and the computer", () => {
     expect(sameSourceRefusal("spoo-landing", "spoo")).toBe("that source is already a project on spoo, spoo-landing; one source on one computer is one project");
-    expect(NOT_A_REPO_LINE).toBe("is not a git repo; git init makes it one, or name a repo's url with --on <computer>");
+    expect(NOT_A_REPO_LINE).toBe("is not a git repo; git init makes it one, or add a repo's url with --into <folder> or --on <computer>");
   });
 });
 
@@ -276,5 +277,31 @@ describe("where a workspace of a project lands", () => {
     expect(landsOn("Solari", solari)).toBe(true);
     expect(landsOn("hetzner", box)).toBe(true);
     expect(landsOn("p_2", solari)).toBe(false);
+  });
+});
+
+describe("a repo cloned on this computer", () => {
+  it("takes an https url, an ssh url, git's scp form and owner/repo, and nothing a transport or an option could hide in", () => {
+    for (const word of ["https://github.com/spoo-me/spoo.me", "https://gitlab.example.com:8443/team/app.git", "ssh://git@github.com/spoo-me/spoo.me.git", "ssh://git@host.example:2222/srv/app.git", "git@github.com:spoo-me/spoo.me.git", "spoo-me/spoo.me", "gitlab.com/team/app"]) {
+      expect(cloneUrlRefusal(word), word).toBeUndefined();
+    }
+    for (const word of ["file:///etc", "ext::sh -c touch% /tmp/x", "http://github.com/a/b", "git://github.com/a/b", "https://user:token@github.com/a/b", "https://-oProxyCommand=x/a/b", "ssh://-oProxyCommand=evil/x", "git@-oProxyCommand=x:a/b", "git@host:-x/y", "https://github.com/a/b --upload-pack=x", "-uhttps://github.com/a/b", "-a/b", "https://", "ssh://git@github.com"]) {
+      expect(cloneUrlRefusal(word), word).toBe(`${word} is not a repo address wsp clones; give its https or ssh url, or owner/repo`);
+    }
+  });
+
+  it("says git's own last line when a clone fails, and how to sign in when the failure is a sign-in", () => {
+    expect(cloneFailedLine("Cloning into '/x'...\nfatal: destination path '/x' already exists and is not an empty directory.\n")).toBe("fatal: destination path '/x' already exists and is not an empty directory.");
+    const signIn = "; sign in with gh auth login, or use the repo's ssh url";
+    expect(cloneFailedLine("Cloning into '/x'...\nfatal: could not read Username for 'https://github.com': terminal prompts disabled\n")).toBe(`fatal: could not read Username for 'https://github.com': terminal prompts disabled${signIn}`);
+    expect(cloneFailedLine("remote: Repository not found.\nfatal: repository 'https://github.com/me/private.git/' not found\n")).toBe(`fatal: repository 'https://github.com/me/private.git/' not found${signIn}`);
+    expect(cloneFailedLine("git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n")).toBe(`fatal: Could not read from remote repository.${signIn}`);
+    expect(cloneFailedLine("GraphQL: Could not resolve to a Repository with the name 'me/private'. (repository)\n")).toBe(`GraphQL: Could not resolve to a Repository with the name 'me/private'. (repository)${signIn}`);
+    expect(cloneFailedLine("")).toBe("the clone failed and said nothing");
+  });
+
+  it("a url with no computer names both roads: here into a folder, or a computer that clones", () => {
+    expect(noComputerForSourceLine("https://github.com/a/b", ["spoo"])).toBe("https://github.com/a/b is a repo: clone it here with --into <folder>, or name the computer that clones it with --on spoo");
+    expect(noComputerForSourceLine("a/b", [])).toBe("a/b is a repo: clone it here with --into <folder>");
   });
 });

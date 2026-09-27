@@ -142,7 +142,7 @@ describe("a folder seeding a project on a computer that clones", () => {
     // The clone carries the remote the folder's own origin gave, and it lands at the path the project has inside
     // every workspace of it, which is where the install then runs: an install that writes an absolute path names
     // what the workspaces read rather than the folder the computer keeps the checkout in.
-    expect(ran).toContain(`git clone ${REMOTE} ${project.path}`);
+    expect(ran).toContain(`git clone -- ${REMOTE} ${project.path}`);
     expect(ran).toContain(`cd '${project.path}' && npm ci`);
     expect(specs(backend)[0]?.binds).toEqual([
       { source: `/wsp/projects/${project.id}`, target: `/wsp/projects/${project.id}` },
@@ -319,7 +319,7 @@ describe("a computer that keeps no image of its own", () => {
     answering(backend, cmd => (cmd.startsWith("ls -A") ? { exitCode: 0, stdout: "package-lock.json\n", stderr: "" } : undefined));
     const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
     expect(specs(backend)[0]?.fromSnapshot).toBeUndefined();
-    expect(commands(backend)).toContain(`git clone ${REMOTE}`);
+    expect(commands(backend)).toContain(`git clone -- ${REMOTE}`);
     expect(project.installed).toMatchObject({ command: "npm ci" });
     // The machine the work ran in is stopped, and the project's memory sits where that computer's own agent
     // reads it.
@@ -391,7 +391,7 @@ describe("an ssh remote a box could not open", () => {
     answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
     const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
     expect(project.remote).toBe("https://github.com/spoo-me/frontend.git");
-    expect(commands(backend)).toContain("git clone https://github.com/spoo-me/frontend.git");
+    expect(commands(backend)).toContain("git clone -- https://github.com/spoo-me/frontend.git");
   });
 
   it("a remote on a host the catalog carries no command line for is cloned as it stands", async () => {
@@ -507,7 +507,7 @@ describe("a repo added by url on a computer the person owns", () => {
     expect(project.memoryDir).toBe("/root/.claude-cfg/projects/-srv-landing-906/memory");
     expect(project.memoryKey).toBe("-srv-landing-906");
     const ran = commands(backend);
-    expect(ran).toContain("git clone https://github.com/spoo-me/spoo-ts /srv/landing-906");
+    expect(ran).toContain("git clone -- https://github.com/spoo-me/spoo-ts /srv/landing-906");
     expect(ran).not.toContain("/root/landing-906");
     // The worker the work ran in binds wsp's folder at its own path and the checkout where the workspaces read it.
     expect(specs(backend)[0]?.binds).toEqual([

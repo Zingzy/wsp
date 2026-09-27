@@ -5647,6 +5647,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
     on: z.string().optional(),
     name: z.string().optional(),
     base: z.string().optional(),
+    /** The folder on this computer a repo is cloned into, absent or empty; the project is then that folder. */
+    into: z.string().optional(),
     /** What the person chose off the seed menu; required where the source is a folder on this computer and that
      * folder is seeding a computer that clones, since nothing of theirs leaves this computer unasked. */
     seed: SeedChoice.optional(),

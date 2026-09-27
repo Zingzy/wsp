@@ -47,7 +47,7 @@ export interface ProjectSourceModule<S extends ProjectSource = ProjectSource> {
 /** The clone every source but a host's own command line takes: git itself, at the branch the record names when it
  * names one, so a fork starts on the branch the project was recorded with. */
 const gitClone = (o: { remote: string; dest: string; branch?: string }): string =>
-  shellLine(["git", "clone", ...(o.branch !== undefined ? ["--branch", o.branch] : []), o.remote, o.dest]);
+  shellLine(["git", "clone", ...(o.branch !== undefined ? ["--branch", o.branch] : []), "--", o.remote, o.dest]);
 
 /** The default branch a remote's HEAD names, as the clone will take it: `main` where nothing could be read, which
  * is what git itself falls back to and what the record then carries. */
@@ -101,7 +101,7 @@ function hostModule(host: GitHost): ProjectSourceModule<Extract<ProjectSource, {
     },
     // The command line takes owner/repo, which the https url the record keeps is read back to: one word on the
     // record, and the clone the host's own command makes of it.
-    cloneCommand: o => host.clone(ownerRepoOf(o.remote) ?? o.remote, o.dest),
+    cloneCommand: o => shellLine(host.clone(ownerRepoOf(o.remote) ?? o.remote, o.dest)),
     cli: { bin: host.cli, setupGit: host.setupGit, missing: computer => noGitCliLine(host, computer) },
   };
 }
