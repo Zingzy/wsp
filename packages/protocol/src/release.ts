@@ -14,9 +14,8 @@ export type ReleaseLatest = z.infer<typeof ReleaseLatest>;
 export const ReleaseState = z.enum(["checking", "read", "unreached", "off"]);
 export type ReleaseState = z.infer<typeof ReleaseState>;
 
-/** How this host came up, which decides whether a restart brings it back: the desktop app's own, or one of the three
- * roads the lock records. */
-export const HostShape = z.enum(["app", "verb", "up", "service"]);
+/** How this host came up, which decides whether a restart brings it back: one of the three roads the lock records. */
+export const HostShape = z.enum(["verb", "up", "service"]);
 export type HostShape = z.infer<typeof HostShape>;
 
 /** `latest` stands whenever the host ever read one, whatever the last ask did, and is absent under `off`, so a person
@@ -25,7 +24,7 @@ export type HostShape = z.infer<typeof HostShape>;
  * running one, which is what a reinstall under a running host looks like. `update` is the line that moves this host
  * onto `latest` on the road it was installed by, present only while `latest` is above it. `restartRefusal` is the
  * sentence host.restart answers where it would not bring this host back, in the words of the road it came up on, and
- * absent where it does. */
+ * absent where it does. `shape` is absent on a host none of the three roads brought up. */
 export const ReleaseView = z.object({
   state: ReleaseState,
   latest: ReleaseLatest.optional(),
@@ -33,7 +32,7 @@ export const ReleaseView = z.object({
   triedAt: z.string().optional(),
   installed: z.string().optional(),
   update: z.string().optional(),
-  shape: HostShape,
+  shape: HostShape.optional(),
   restartRefusal: z.string().optional(),
 });
 export type ReleaseView = z.infer<typeof ReleaseView>;

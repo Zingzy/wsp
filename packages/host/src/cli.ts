@@ -13,7 +13,6 @@ import { collect, computeRecipe, expand, nodeHost, scanProject, seedMenu, type M
 import {
   HARNESS_ADAPTERS,
   createRuntime,
-  goldenHead,
   hostIdentity,
   jsonFileStore,
   localExecStream,
@@ -30,7 +29,7 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
-import { authRefusal, cloudOffRefusal, FORWARD_ENV, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
+import { authRefusal, cloudOffRefusal, FORWARD_ENV, holdsNothing, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
 import { CLOUD_ON } from "./cloud.js";
 import { noMachinesLine, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
@@ -647,6 +646,9 @@ export interface SharedOpts extends ServeAsked {
   /** What brings a host up when none serves this state file, as the verbs are handed one. Set by the run, not by
    * the flags, and read only by the words whose work is the host's; absent leaves a line to read the refusal. */
   start?: HostStarter;
+  /** How this process was started, set by the run: what the host wsp up serves writes into an agent's config and
+   * runs its turns' wsp as, and what the unit wsp up --service writes runs. */
+  running?: RunningWsp;
 }
 
 /** The environment the caller runs in decides the home, the same reading the verbs take, so a run with its own
@@ -1263,18 +1265,17 @@ export interface ServeOptions {
    * desktop hands in its shim, the npm command the default reading. */
   running?: RunningWsp;
   /** Which command line road brought this host up, written into its lock so wsp down can stop it. The wsp up road
-   * hands in its own word; the app's road hands in none, and nothing stops the app's host from a terminal. */
+   * hands in its own word; a host served inside another process hands in none, and nothing stops it from a terminal. */
   startedBy?: HostStarted;
-  /** How this host restarts itself where no command line road brought it up: the desktop hands in its relaunch. */
+  /** How this host restarts itself where no command line road brought it up. */
   restart?: RestartRoad;
   /** Filled with the loopback address a turn on this computer dials once the host binds. A caller that hands in its
    * own runtime hands in the cell that runtime's reach reads; absent, the host makes one for the runtime it builds. */
   here?: HereAt;
 }
 
-/** The road the desktop window brings a host up on, which is wsp up's: the state file it serves is one wsp init
- * wrote, so a computer with no provider key serves the machines it does have rather than being asked for one by a
- * window that can ask nothing. */
+/** A host served inside the calling process, over wsp up's key reading: a computer with no provider key serves the
+ * machines it does have rather than being asked for one. */
 export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noProviderKey: "local" });
@@ -1291,20 +1292,15 @@ export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> 
  * their own work, where one of them warns with the whole error and its stack behind a line of its own. It comes
  * before the wiring a runtime is built with, which mints this host's pairing key beside the state file on its own
  * first read: a start refused here leaves the home as it found it. Read here, the refusal is this start's, thrown
- * once and printed once, and the store is handed on so the file is not read twice over. One reading, taken by wsp
- * up and by the app's first launch before either makes a runtime. */
-export async function readOnce(statePath: string): Promise<Store> {
+ * once and printed once, and the store is handed on so the file is not read twice over. */
+async function readOnce(statePath: string): Promise<Store> {
   const store = jsonFileStore(statePath, stateWriterHere());
   await store.keys("workspaces");
   return store;
 }
 
-/** Whether the state has anything for the app to show: a sealed golden to fork from, or any workspace record, this
- * computer's included. One reading, asked by wsp up and by the desktop's first launch; what each does with the
- * answer is its own, since the app has onboarding screens to open and the command line records this computer and
- * serves at once. */
-export async function servesNothing(rt: Runtime): Promise<boolean> {
-  return goldenHead(await rt.golden.get()) === undefined && (await rt.workspaces.list()).length === 0;
+async function servesNothing(rt: Runtime): Promise<boolean> {
+  return holdsNothing(await rt.golden.get(), await rt.workspaces.list());
 }
 
 export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
@@ -1425,7 +1421,7 @@ async function hostFor(
       admitted,
       release: releaseWatch({
         statePath: opts.statePath,
-        shape: started ?? "app",
+        ...(started !== undefined ? { shape: started } : {}),
         running: VERSION,
         installed: installedVersion,
         ...(road !== undefined ? { restart: road } : {}),
@@ -1528,13 +1524,17 @@ export function systemService(): ServiceDeps {
   return { platform: os, manager: serviceManagerFor(os), run: systemRunner, waitMs: SERVICE_WAIT_MS, keys: { env: process.env, cwd: process.cwd() }, answers: httpProbe, dial: dialHost, stop: pid => process.kill(pid, "SIGTERM"), here: home => openHere(home) };
 }
 
-/** The line the service runs: this node and this wsp, serving the state file, the ports, the address and the
- * provider the install was given. Every word is spelled out, since a service has no cwd of the person's to read a
- * default from and no shell of theirs to read a variable from. */
-function serviceArgv(asked: ServeAsked): string[] {
+/** The line the service runs: this node and this wsp, or the app's shim where this wsp runs behind one, serving the
+ * state file, the ports, the address and the provider the install was given. Every word is spelled out, since a
+ * service has no cwd of the person's to read a default from and no shell of theirs to read a variable from. The
+ * shim is the app's program because the app's binary is node only under the variable the shim sets, which a unit
+ * naming that binary would start without, and because the shim's path outlives an update that moves the bundle. */
+export function serviceArgv(asked: ServeAsked, run: Pick<RunningWsp, "shim"> = {}): string[] {
+  const serving = ["up", ...SERVE_FLAGS.flatMap(flag => flag.words(asked))];
+  if (run.shim !== undefined) return [run.shim, ...serving];
   const bin = process.argv[1];
   if (bin === undefined) throw new Error("wsp up --service needs the path wsp was started from, and this process has none");
-  return [process.execPath, resolve(bin), "up", ...SERVE_FLAGS.flatMap(flag => flag.words(asked))];
+  return [process.execPath, resolve(bin), ...serving];
 }
 
 /** A host already holds the state file, so the service would only start a second one that refuses the lock. */
@@ -1573,7 +1573,7 @@ export function claudeKeyOnlyInThisShell(sources: KeySources): string | undefine
   return `note: ANTHROPIC_API_KEY is only in this shell's environment, so the service starts without it and the workspaces it forks get no claude credentials. Put it in ${envFileFor(sources.statePath)} to carry it over.`;
 }
 
-export async function upServiceCommand(io: CliIO, opts: ServeAsked, deps: ServiceDeps): Promise<number> {
+export async function upServiceCommand(io: CliIO, opts: ServeAsked & Pick<SharedOpts, "running">, deps: ServiceDeps): Promise<number> {
   const manager = deps.manager;
   if (manager === undefined) {
     io.error(noManagerLine(deps.platform));
@@ -1603,7 +1603,7 @@ export async function upServiceCommand(io: CliIO, opts: ServeAsked, deps: Servic
   // where every other client on this computer is told to start the service instead. It is the host's own mark and
   // not a service's, so the agent on a joined computer, whose unit comes out of the same serviceEnv, carries none.
   const env = { ...serviceEnv(process.env), [STARTED_BY_ENV]: "service" };
-  const { unit, installed, failure } = await installService(manager, { ...at, argv: serviceArgv(opts), cwd: process.cwd(), env, logPath }, deps.run);
+  const { unit, installed, failure } = await installService(manager, { ...at, argv: serviceArgv(opts, opts.running), cwd: process.cwd(), env, logPath }, deps.run);
   if (failure !== undefined) {
     io.error(`wsp up --service: ${runFailureLine(failure)}`);
     if (installed) io.error(`the ${manager.words} ${unit.name} is still there at ${unit.path}; wsp down takes it away.`);
@@ -2680,7 +2680,7 @@ export async function cli(
     }
     return failed(io, values.json === true, usageRefusal(`wsp --help takes a page, and got ${word}.`, `The pages are ${HELP_PAGES.map(p => `wsp --help ${p}`).join(", ")} and wsp host --help.`));
   }
-  const opts = { ...optsFor(values, env, line => io.error(line)), ...starts };
+  const opts = { ...optsFor(values, env, line => io.error(line)), ...starts, running: run };
   const found = findCommand(asked);
   const json = values.json === true;
   if (found === undefined) {

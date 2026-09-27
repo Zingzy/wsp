@@ -278,7 +278,7 @@ describe("the host's reading of the newest release", () => {
     const statePath = stateIn();
     mkdirSync(join(statePath, "..", ".env"));
     const lines: string[] = [];
-    const watch = releaseWatch({ statePath, shape: "app", running: "0.2.0", installed: () => "0.2.0", env: {}, fetch: fakeGithub([]).fetch, log: line => lines.push(line) });
+    const watch = releaseWatch({ statePath, running: "0.2.0", installed: () => "0.2.0", env: {}, fetch: fakeGithub([]).fetch, log: line => lines.push(line) });
     watch.start();
     await vi.advanceTimersByTimeAsync(RELEASE_FIRST_MS);
     watch.close();
@@ -298,7 +298,7 @@ describe("the host's reading of the newest release", () => {
   it("asks thirty seconds after the host starts, then every six hours, and never after it closes", async () => {
     vi.useFakeTimers({ now: Date.parse("2026-09-24T12:00:00.000Z") });
     const github = fakeGithub([ok(), notModified(), notModified()]);
-    const watch = releaseWatch({ statePath: stateIn(), shape: "app", running: "0.2.0", installed: () => "0.2.0", env: {}, fetch: github.fetch });
+    const watch = releaseWatch({ statePath: stateIn(), running: "0.2.0", installed: () => "0.2.0", env: {}, fetch: github.fetch });
     watch.start();
     await vi.advanceTimersByTimeAsync(RELEASE_FIRST_MS - 1);
     expect(github.asked).toHaveLength(0);
