@@ -335,6 +335,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "sessions.steer": "the composer's send-now on a queued row; wsp send already joins a running turn wherever its harness steers",
       "sessions.access": "the access picker moving a running turn, the person's guard on an agent; wsp run takes --access when the thread opens",
       "sessions.aside": "a side question is read once and kept nowhere; a message a thread should keep is `wsp send`",
+      "sessions.rewind": "a rewind is a person's judgement in front of the transcript; an agent that wants an earlier state starts a new thread",
     };
     expect(RUNTIME_OPS.filter(op => op.startsWith("sessions.") && !verbs.includes(`"${op}"`)).sort()).toEqual(Object.keys(WINDOW_ONLY).sort());
     for (const [op, why] of Object.entries(WINDOW_ONLY)) expect(why, `${op} says why it has no verb`).toMatch(/\S/);

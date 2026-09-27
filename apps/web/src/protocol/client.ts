@@ -24,6 +24,7 @@ import {
   SessionAccessOutcome,
   SessionAnswerOutcome,
   SessionAsideResult,
+  SessionRewindResult,
   SessionInterruptOutcome,
   SessionRenameResult,
   SessionSearchResult,
@@ -522,6 +523,11 @@ export interface Api {
   /** Asks the thread's agent a question beside the thread, by any of its session ids, on a copy of its session the
    * host keeps nowhere. Optional so fixtures that never ask one need not fake it; a client without it offers no /btw. */
   askAside?(sessionId: string, question: string): Promise<SessionAsideResult>;
+  /** Rewinds a thread to the end of one of its turns, with the files or the conversation alone. Optional so fixtures
+   * that never rewind need not fake it; a client without it offers no Rewind to here. */
+  rewindThread?(threadId: string, turnId: string, files: boolean): Promise<SessionRewindResult>;
+  /** Puts back the files the thread's last rewind replaced. */
+  undoRewind?(threadId: string): Promise<SessionRewindResult>;
   /** What each harness's CLI takes at launch; the composer's pickers render from it, and every start rides the model,
    * effort, context window and access resolved out of it. With a workspace the runtime asks the binaries on its
    * machine, else its table answers. Optional so fixtures without pickers need not fake it; without it the composer
@@ -776,6 +782,8 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: a hit names a thread the palette opens.
     searchMessages: async query => SessionSearchResult.parse(await c.request<Record<string, unknown>>("sessions.search", { query })),
     askAside: async (sessionId, question) => SessionAsideResult.parse(await c.request<Record<string, unknown>>("sessions.aside", { sessionId, question })),
+    rewindThread: async (threadId, turnId, files) => SessionRewindResult.parse(await c.request<Record<string, unknown>>("sessions.rewind", { threadId, turnId, files })),
+    undoRewind: async threadId => SessionRewindResult.parse(await c.request<Record<string, unknown>>("sessions.rewind", { threadId, undo: true })),
     // Parsed, not trusted: a picker renders only values the wire type vouches for.
     listHarnesses: async workspaceId =>
       HarnessCatalog.array().parse((await c.request<{ harnesses?: unknown }>("harnesses.list", workspaceId !== undefined ? { workspaceId } : {})).harnesses),

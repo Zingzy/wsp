@@ -98,13 +98,13 @@ import { formatWorkspaceRelativePath } from "../../lib/filePathDisplay";
 import { AssistantSelectionToolbar, QUOTE_SOURCE_ATTRIBUTE, type QuotedSelection } from "./AssistantSelectionToolbar";
 
 const NOOP_OPEN_TURN_DIFF = (_turnId: TurnId, _filePath?: string) => {};
-const NOOP_REVERT_USER_MESSAGE = (_messageId: MessageId) => {};
+const NOOP_REWIND = (_messageId: MessageId) => {};
 const NOOP_ANSWER_PERMISSION = (_sessionId: string, _askId: string, _optionId: string) => {};
 const NOOP_ANCHOR_READY = (_messageId: MessageId, _anchorIndex: number) => {};
 const NOOP_IS_AT_END_CHANGE = (_isAtEnd: boolean) => {};
 const NOOP_MANUAL_NAVIGATION = () => {};
 const EMPTY_TURN_DIFF_SUMMARIES: ReadonlyMap<MessageId, TurnDiffSummary> = new Map();
-const EMPTY_REVERT_TURN_COUNTS: ReadonlyMap<MessageId, number> = new Map();
+const EMPTY_REWINDABLE: ReadonlySet<MessageId> = new Set();
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -121,8 +121,9 @@ interface TimelineRowSharedState {
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<ProviderSkill>;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
-  revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
-  onRevertUserMessage: (messageId: MessageId) => void;
+  /** The replies Rewind to here stands on: the last reply of each earlier turn that kept something to rewind to. */
+  rewindableMessageIds: ReadonlySet<MessageId>;
+  onRewind: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenFile: ((path: string, line?: number) => void) | undefined;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -146,7 +147,6 @@ export interface MachineWait {
 interface TimelineRowActivityState {
   isWorking: boolean;
   isPreparingWorktree: boolean;
-  isRevertingCheckpoint: boolean;
   latestTurnId: TurnId | null;
   machineWait: MachineWait | null;
 }
@@ -198,11 +198,10 @@ export interface MessagesTimelineProps {
   turnDiffSummaryByAssistantMessageId?: ReadonlyMap<MessageId, TurnDiffSummary>;
   threadKey: string;
   onOpenTurnDiff?: (turnId: TurnId, filePath?: string) => void;
-  revertTurnCountByUserMessageId?: ReadonlyMap<MessageId, number>;
-  onRevertUserMessage?: (messageId: MessageId) => void;
+  rewindableMessageIds?: ReadonlySet<MessageId>;
+  onRewind?: (messageId: MessageId) => void;
   /** Answers a relayed permission prompt; the turn it blocks runs or is refused as the option says. */
   onAnswerPermission?: (sessionId: string, askId: string, optionId: string) => void;
-  isRevertingCheckpoint?: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenFile?: (path: string, line?: number) => void;
   markdownCwd: string | undefined;
@@ -248,10 +247,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   turnDiffSummaryByAssistantMessageId = EMPTY_TURN_DIFF_SUMMARIES,
   threadKey,
   onOpenTurnDiff = NOOP_OPEN_TURN_DIFF,
-  revertTurnCountByUserMessageId = EMPTY_REVERT_TURN_COUNTS,
-  onRevertUserMessage = NOOP_REVERT_USER_MESSAGE,
+  rewindableMessageIds = EMPTY_REWINDABLE,
+  onRewind = NOOP_REWIND,
   onAnswerPermission = NOOP_ANSWER_PERMISSION,
-  isRevertingCheckpoint = false,
   onImageExpand,
   onOpenFile,
   markdownCwd,
@@ -527,8 +525,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       turnDiffSummaryByAssistantMessageId,
-      revertTurnCountByUserMessageId,
-      onRevertUserMessage,
+      rewindableMessageIds,
+      onRewind,
       onAnswerPermission,
       onImageExpand,
       onOpenFile,
@@ -548,8 +546,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       turnDiffSummaryByAssistantMessageId,
-      revertTurnCountByUserMessageId,
-      onRevertUserMessage,
+      rewindableMessageIds,
+      onRewind,
       onAnswerPermission,
       onImageExpand,
       onOpenFile,
@@ -566,11 +564,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     () => ({
       isWorking,
       isPreparingWorktree,
-      isRevertingCheckpoint,
       latestTurnId: latestTurn?.turnId ?? null,
       machineWait,
     }),
-    [isRevertingCheckpoint, isWorking, isPreparingWorktree, latestTurn?.turnId, machineWait],
+    [isWorking, isPreparingWorktree, latestTurn?.turnId, machineWait],
   );
 
   // Stable renderItem — no closure deps. Row components read shared state
@@ -1000,8 +997,6 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const canRevertAgentWork =
-    typeof ctx.revertTurnCountByUserMessageId.get(row.message.id) === "number";
   // The pixels are this tab's, held under the request id its own send carried; a transcript from a reload or another
   // client has the runtime's records and draws their words.
   const images = useSentImages(row.message.requestId);
@@ -1030,7 +1025,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             </TooltipPopup>
           </Tooltip>
           <div className="flex items-center gap-0.5">
-            {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
             {row.message.text.trim().length > 0 && (
               <MessageCopyButton text={row.message.text} variant="ghost" />
             )}
@@ -1041,27 +1035,17 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   );
 }
 
-function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
+/** Rewind to here on an earlier reply: kept off a thread that is working, since a rewind never stops a turn. */
+function RewindButton({ messageId }: { messageId: MessageId }) {
   const ctx = use(TimelineRowCtx);
   const activity = use(TimelineRowActivityCtx);
-
+  if (activity.isWorking) return null;
   return (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            disabled={activity.isRevertingCheckpoint || activity.isWorking}
-            onClick={() => ctx.onRevertUserMessage(messageId)}
-            aria-label="Revert to this message"
-          />
-        }
-      >
-        <Undo2Icon className="size-3" />
+      <TooltipTrigger render={<Button type="button" size="xs" variant="ghost" onClick={() => ctx.onRewind(messageId)} aria-label="Rewind to here" data-k="rewind-to-here" />}>
+        <Undo2Icon className="size-3.5" />
       </TooltipTrigger>
-      <TooltipPopup side="top">Revert to this message</TooltipPopup>
+      <TooltipPopup side="top">Rewind to here</TooltipPopup>
     </Tooltip>
   );
 }
@@ -1111,6 +1095,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         {row.showAssistantMeta ? (
           <div className="mt-1.5 flex items-center gap-3.5 text-[13px] tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
             <AssistantCopyButton row={row} />
+            {ctx.rewindableMessageIds.has(row.message.id) ? <RewindButton messageId={row.message.id} /> : null}
             {!row.message.streaming && (
               <Tooltip>
                 <TooltipTrigger

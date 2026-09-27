@@ -886,6 +886,7 @@ export const useStore = create<State>((set, get) => {
     applyEvent(e) {
       switch (e.type) {
         case "thread.marked":
+        case "thread.rewound":
           void get().reloadSessions(e.workspaceId);
           return;
         case "workspace.renamed":

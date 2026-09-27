@@ -74,6 +74,14 @@ export type AdapterEvent =
       sessionId: string;
       running: number;
     }
+  | {
+      /** The harness's own name for the point this turn ended at, sent once per turn: what cutting the thread's
+       * conversation back to this turn, or to the one before the next, is asked with (Claude Code's uuid of the
+       * turn's last message, Codex's turn id). Read by the runtime alone, which keeps it with the turn. */
+      type: "turn.anchor";
+      sessionId: string;
+      anchor: string;
+    }
   | { type: "permission.ask"; sessionId: string; ask: PermissionAsk }
   | {
       type: "permission.close";
@@ -306,3 +314,11 @@ export interface AsideAnswer {
  * copy a session.
  */
 export type SessionAsker = (question: AsideQuestion) => Promise<AsideAnswer>;
+
+/**
+ * Cuts a session's conversation back to just before one of its turns, in the harness's own history, and runs no
+ * turn: `beforeTurn` is the anchor that turn announced, the first one cut. Files are not its business. Rejects with
+ * the harness's own words when it would not. Absent on an adapter whose harness cuts at its next turn instead
+ * (resumesAt) or cannot cut at all.
+ */
+export type SessionReverter = (o: { session: string; beforeTurn: string; cwd?: string }) => Promise<void>;

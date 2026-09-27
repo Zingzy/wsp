@@ -55,6 +55,10 @@ describe("a click or wait word", () => {
     expect(stepFor("menu:row-id=thread:redirect", [1440, 390])).toEqual({ menu: `[data-row-id="thread:${threadId("redirect")}"]` });
   });
 
+  it("reads a hover: word as the pointer resting on a data attribute, for a control that only shows under it", () => {
+    expect(stepFor("hover:k=rewind-to-here", [1440, 390])).toEqual({ hover: '[data-k="rewind-to-here"]' });
+  });
+
   it("reads a type: word as typing into whatever the step before it focused", () => {
     expect(stepFor("type:/does/not/exist", [1440, 390])).toEqual({ type: "/does/not/exist" });
     expect(stepFor("390:type:/tmp", [1440, 390])).toEqual({ width: 390, type: "/tmp" });
@@ -260,6 +264,10 @@ describe("the surfaces list this repo ships", () => {
       "tiles-attempt-group",
       "tiles-attempt-keep",
       "composer-multi-pick",
+      "timeline-rewind-hover",
+      "rewind-dialog",
+      "rewind-dialog-refused",
+      "rewind-dialog-files-only",
       "new-thread-dialog",
       "new-thread-held",
       "add-project",
@@ -282,7 +290,7 @@ describe("the surfaces list this repo ships", () => {
     expect(read.surfaces.filter(s => s.remote).map(s => s.name)).toEqual(["host-asleep"]);
     // The surfaces that change what their host holds, a workspace made or a thread stamped read by opening it, which
     // take a host of their own for every shot.
-    expect(read.surfaces.filter(s => s.fresh).map(s => s.name)).toEqual(["creating-workspace", "tiles-paused-done"]);
+    expect(read.surfaces.filter(s => s.fresh).map(s => s.name)).toEqual(["creating-workspace", "tiles-paused-done", "rewind-dialog-refused"]);
     // Those served from a state of their own: an image that is built cannot stand in the same state file as one
     // that never was, a thread whose agent opened threads elsewhere needs the workspaces those threads run on, and
     // a person on the first run has no project added.
@@ -295,9 +303,10 @@ describe("the surfaces list this repo ships", () => {
     expect(clouded.map(s => [s.name, fixtureCloud(s.fixture)])).toEqual([["add-cloud", "box"]]);
     // The side question, the first run, the Add surfaces and the keybinding and clone states are shot at the two widths a design reading is held to, New workspace at the
     // one width whose sidebar carries its control, and the thread status, the two switchers, the threads list, the
-    // palette, the panel launcher and the tiles at the widest alone; the rest take every width the list shoots.
+    // palette, the panel launcher and the tiles at the widest alone, as is a reply under the pointer, since a phone has
+    // no pointer to rest; the rest take every width the list shoots.
     const narrowed = read.surfaces.filter(s => s.widths.length < read.widths.length);
-    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["btw-asking", [1440, 390]], ["btw-answered", [1440, 390]], ["settings-computers-mac", [1440]], ["add-cloud", [1440, 390]], ["agents-add", [1440, 390]], ["agents-add-server", [1440, 390]], ["settings-image-built-mac", [1440]], ["settings-keybindings-capture", [1440, 390]], ["settings-keybindings-refused", [1440, 390]], ["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]], ["thread-status", [1440]], ["threads-computers", [1440]], ["threads-computers-shut", [1440]], ["threads-computer-picked", [1440]], ["threads-picker", [1440]], ["thread-list", [1440]], ["palette-threads", [1440]], ["palette-search-messages", [1440]], ["palette-open", [1440]], ["panel-launcher", [1440]], ["panel-launcher-mac", [1440]], ["tiles", [1440]], ["tiles-root", [1440]], ["tiles-picker", [1440]], ["tiles-settled-open", [1440]], ["tiles-scrolled", [1440]], ["tiles-paused-done", [1440]], ["tiles-sections", [1440, 390]], ["tiles-marks", [1440, 390]], ["tiles-picker-ordered", [1440, 390]], ["tiles-snooze", [1440, 390]], ["tiles-attempt-group", [1440, 390]], ["tiles-attempt-keep", [1440, 390]], ["composer-multi-pick", [1440, 390]], ...["new-thread-dialog", "new-thread-held", "add-project"].map(name => [name, [1440]]), ["add-project-clone-here", [1440, 390]], ...["export-dialog", "delete-dialog", "browser-empty", "diff-empty", "long-prompt", "composer-rest", "composer-running"].map(name => [name, [1440]]), ...["files-tree", "files-file", "file-finder", "file-search", "files-stopped", "settings-editor"].map(name => [name, [1440, 390]])]);
+    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["btw-asking", [1440, 390]], ["btw-answered", [1440, 390]], ["settings-computers-mac", [1440]], ["add-cloud", [1440, 390]], ["agents-add", [1440, 390]], ["agents-add-server", [1440, 390]], ["settings-image-built-mac", [1440]], ["settings-keybindings-capture", [1440, 390]], ["settings-keybindings-refused", [1440, 390]], ["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]], ["thread-status", [1440]], ["threads-computers", [1440]], ["threads-computers-shut", [1440]], ["threads-computer-picked", [1440]], ["threads-picker", [1440]], ["thread-list", [1440]], ["palette-threads", [1440]], ["palette-search-messages", [1440]], ["palette-open", [1440]], ["panel-launcher", [1440]], ["panel-launcher-mac", [1440]], ["tiles", [1440]], ["tiles-root", [1440]], ["tiles-picker", [1440]], ["tiles-settled-open", [1440]], ["tiles-scrolled", [1440]], ["tiles-paused-done", [1440]], ["tiles-sections", [1440, 390]], ["tiles-marks", [1440, 390]], ["tiles-picker-ordered", [1440, 390]], ["tiles-snooze", [1440, 390]], ["tiles-attempt-group", [1440, 390]], ["tiles-attempt-keep", [1440, 390]], ["composer-multi-pick", [1440, 390]], ["timeline-rewind-hover", [1440]], ...["rewind-dialog", "rewind-dialog-refused", "rewind-dialog-files-only"].map(name => [name, [1440, 390]]), ...["new-thread-dialog", "new-thread-held", "add-project"].map(name => [name, [1440]]), ["add-project-clone-here", [1440, 390]], ...["export-dialog", "delete-dialog", "browser-empty", "diff-empty", "long-prompt", "composer-rest", "composer-running"].map(name => [name, [1440]]), ...["files-tree", "files-file", "file-finder", "file-search", "files-stopped", "settings-editor"].map(name => [name, [1440, 390]])]);
     expect(shotPlan(read)).toHaveLength(read.surfaces.reduce((n, s) => n + s.widths.length, 0) * 2);
     // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
     expect(read.widths).toContain(1280);

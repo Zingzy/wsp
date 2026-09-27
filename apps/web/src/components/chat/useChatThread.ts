@@ -166,6 +166,8 @@ function ownPlace(e: SessionEvent): string | undefined {
       return e.requestId === undefined ? undefined : `session.steer:${e.turnId}:${e.requestId}`;
     case "session.notify":
       return `session.notify:${e.turnId}:${e.notify}`;
+    case "session.checkpoint":
+      return `session.checkpoint:${e.turnId}`;
     default: {
       const _exhaustive: never = e;
       return undefined;
@@ -557,6 +559,8 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   const [viewed, setViewed] = useState({ workspaceId, threadId });
   const [hydratedFor, setHydratedFor] = useState<string | null>(null);
   const hydratedRef = useRef<string | null>(null);
+  /** Moves when a rewind on this workspace lands: its transcript lost turns, so the thread is read again. */
+  const [rewinds, setRewinds] = useState(0);
   /** The view key a pin named for the transcript already in hand: that reading needs no reply, and asking for one
    * would drop what the socket pushes between the ask and it. Taken once, so a gap still rebuilds. */
   const carriedRef = useRef<string | null>(null);
@@ -615,10 +619,14 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
       current = false;
       hydratedRef.current = null;
     };
-  }, [api, workspaceId, threadId, viewKey, gaps]);
+  }, [api, workspaceId, threadId, viewKey, gaps, rewinds]);
 
   const onEvent = useCallback(
     (e: ProtocolEvent) => {
+      if (e.type === "thread.rewound" && e.workspaceId === workspaceId) {
+        setRewinds(n => n + 1);
+        return;
+      }
       if (hydratedRef.current !== viewKey) return;
       if (!isSessionEvent(e) || e.workspaceId !== workspaceId) return;
       setState(s => reduceEvent(s, e, now(), threadId));

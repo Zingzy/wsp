@@ -217,6 +217,9 @@
                 ],
                 "additionalProperties": false
               },
+              "rewoundAt": {
+                "type": "number"
+              },
               "projectName": {
                 "type": "string"
               },
@@ -472,6 +475,9 @@
                   "whileState"
                 ],
                 "additionalProperties": false
+              },
+              "rewoundAt": {
+                "type": "number"
               },
               "projectName": {
                 "type": "string"

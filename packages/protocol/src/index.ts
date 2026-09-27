@@ -957,6 +957,9 @@ export const SessionView = z.object({
   wokeAt: z.number().optional(),
   /** The sidebar section the person dragged the thread into, held only while the thread is still as it was then. */
   section: ThreadPlacement.optional(),
+  /** When the thread was last rewound, while the files that rewind replaced can still be put back: until the
+   * thread's next turn ends. Kept and stamped as readAt is. */
+  rewoundAt: z.number().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -1004,6 +1007,8 @@ export const ThreadView = z.object({
   snoozedUntil: z.number().optional(),
   wokeAt: z.number().optional(),
   section: ThreadPlacement.optional(),
+  /** As SessionView.rewoundAt: set while Undo rewind can put the files back. */
+  rewoundAt: z.number().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -1058,6 +1063,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.snoozedUntil !== undefined ? { snoozedUntil: latest.snoozedUntil } : {}),
       ...(latest.wokeAt !== undefined ? { wokeAt: latest.wokeAt } : {}),
       ...(latest.section !== undefined ? { section: latest.section } : {}),
+      ...(latest.rewoundAt !== undefined ? { rewoundAt: latest.rewoundAt } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
@@ -1162,6 +1168,9 @@ export const HarnessCatalog = z.object({
   /** Whether a person may ask this harness a question beside a thread (sessions.aside), answered on a copy of the
    * thread's session that nothing keeps. The adapter in this host declares it, as with mcpServers; absent is a no. */
   asides: z.boolean().optional(),
+  /** Whether rewinding a thread of this harness cuts its conversation too, in the harness's own history; absent is a
+   * no, and a rewind there puts back the files alone while the harness keeps every turn it ran. */
+  rewindsConversation: z.boolean().optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -1576,6 +1585,18 @@ export const SessionPermissionClosedEvent = z.object({
 });
 export type SessionPermissionClosedEvent = z.infer<typeof SessionPermissionClosedEvent>;
 
+/** What a turn left to rewind to, written once the turn is over: the checkpoint of the copy's files at its end
+ * (absent where none could be taken, a folder that is not a checkout or a daemon that did not answer) and the
+ * harness's own name for the point its conversation ended at (absent where the harness names none). A rewind cuts
+ * the turns after it and puts these back. */
+export const SessionCheckpointEvent = z.object({
+  type: z.literal("session.checkpoint"),
+  ...sessionScope,
+  ref: z.string().optional(),
+  anchor: z.string().optional(),
+});
+export type SessionCheckpointEvent = z.infer<typeof SessionCheckpointEvent>;
+
 /** The events sessions.history replays: what a chat transcript folds. */
 export const SessionEvent = z.discriminatedUnion("type", [
   SessionStartEvent,
@@ -1586,6 +1607,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionNotifyEvent,
   SessionPermissionEvent,
   SessionPermissionClosedEvent,
+  SessionCheckpointEvent,
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
@@ -2086,6 +2108,11 @@ export const serverIconsLeftLine = (folder: string, reason: string): string =>
  * rows are read again to pick it up. */
 export const ThreadMarkedEvent = z.object({ type: z.literal("thread.marked"), workspaceId: z.string(), threadIds: z.array(z.string()) });
 export type ThreadMarkedEvent = z.infer<typeof ThreadMarkedEvent>;
+
+/** A thread was rewound, or a rewind undone: its transcript lost the turns after the one it kept, so every window
+ * holding the thread reads its history and its rows again. */
+export const ThreadRewoundEvent = z.object({ type: z.literal("thread.rewound"), workspaceId: z.string(), threadId: z.string() });
+export type ThreadRewoundEvent = z.infer<typeof ThreadRewoundEvent>;
 
 /** The host's record changed, by any client; every socket gets the whole record. */
 export const PreferencesChangedEvent = z.object({ type: z.literal("preferences.changed"), preferences: Preferences });
@@ -3127,8 +3154,10 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionNotifyEvent.extend(sequenced),
   SessionPermissionEvent.extend(sequenced),
   SessionPermissionClosedEvent.extend(sequenced),
+  SessionCheckpointEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
+  ThreadRewoundEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
   PortCloseEvent.extend(sequenced),
   InboxFileEvent.extend(sequenced),
@@ -5618,6 +5647,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * thread's latest row: its folder, its model and its agent. Replies with a SessionAsideResult. Nothing is recorded:
    * the transcript, the rows and the harness's own session are as they were. Takes any of the thread's session ids. */
   z.object({ id: reqId, op: z.literal("sessions.aside"), sessionId: z.string(), question: z.string() }),
+  /** Rewinds a thread to the end of one of its turns: the turns after it leave the transcript and, where the harness
+   * cuts its own history, the conversation, and with files the copy's tree goes back to that turn's checkpoint after
+   * the tree as it stands is checkpointed. undo instead puts back the files the thread's last rewind replaced. */
+  z.object({ id: reqId, op: z.literal("sessions.rewind"), threadId: z.string(), turnId: z.string().optional(), files: z.boolean().optional(), undo: z.boolean().optional() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -6161,6 +6194,10 @@ export type SessionSearchResult = z.infer<typeof SessionSearchResult>;
 /** The harness's answer to a side question, which the host keeps nowhere. */
 export const SessionAsideResult = z.object({ text: z.string() });
 export type SessionAsideResult = z.infer<typeof SessionAsideResult>;
+/** What a rewind did: how many turns left the conversation, and how many files the copy's tree wrote or removed
+ * where the files went back too. */
+export const SessionRewindResult = z.object({ turns: z.number().int(), files: z.number().int().optional() });
+export type SessionRewindResult = z.infer<typeof SessionRewindResult>;
 
 // --- session start (how the turn the caller asked for came to be) --------------
 
@@ -6326,4 +6363,4 @@ export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
 export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
-export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionReverter, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

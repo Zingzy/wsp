@@ -6,7 +6,7 @@
 import type { AccessParams } from "./command.js";
 
 /** The ids of the requests a turn sends once each; a steer is numbered, since a turn may take several. */
-export const REQUEST = { initialize: "wsp-initialize", thread: "wsp-thread", turn: "wsp-turn", interrupt: "wsp-interrupt" } as const;
+export const REQUEST = { initialize: "wsp-initialize", thread: "wsp-thread", turn: "wsp-turn", interrupt: "wsp-interrupt", revert: "wsp-revert" } as const;
 
 /** A request id as the server sends one: a string or an integer, echoed back as it came. */
 export type RequestId = string | number;
@@ -48,6 +48,12 @@ export function threadForkLine(o: { threadId: string; cwd?: string; model?: stri
     method: "thread/fork",
     params: { threadId: o.threadId, ephemeral: true, sandbox: "read-only", approvalPolicy: "never", ...named({ cwd: o.cwd, model: o.model }), developerInstructions: o.developerInstructions },
   });
+}
+
+/** The thread's persisted history cut to the turns before one: that turn and every later one leave it. Files are
+ * not the server's to touch here. */
+export function threadRevertLine(o: { threadId: string; beforeTurnId: string }): string {
+  return line({ id: REQUEST.revert, method: "thread/revert", params: { threadId: o.threadId, beforeTurnId: o.beforeTurnId } });
 }
 
 const textInput = (text: string) => ({ type: "text", text });
