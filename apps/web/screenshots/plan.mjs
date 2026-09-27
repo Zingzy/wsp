@@ -90,12 +90,13 @@ const stepWords = step =>
 
 const surfaceFrom = (raw, index, widths) => {
   if (raw === null || typeof raw !== "object") fail(`surface ${index} is not an object`);
-  const { name, at, steps, wait, settleMs, fixture, remote, fresh, height } = raw;
+  const { name, at, steps, wait, settleMs, fixture, remote, fresh, mac, height } = raw;
   if (typeof name !== "string" || !NAME.test(name)) fail(`surface ${index} needs a name of lowercase words and dashes, got ${JSON.stringify(name)}`);
   if (typeof at !== "string" || !at.startsWith("/")) fail(`${name}: "at" is the route or hash the page opens, starting with /`);
   if (steps !== undefined && !Array.isArray(steps)) fail(`${name}: "steps" is an array of data attribute words, key presses and typed words`);
   if (settleMs !== undefined && (typeof settleMs !== "number" || settleMs < 0)) fail(`${name}: "settleMs" is a count of milliseconds`);
   if (remote !== undefined && typeof remote !== "boolean") fail(`${name}: "remote" says whether the page is served to another computer`);
+  if (mac !== undefined && typeof mac !== "boolean") fail(`${name}: "mac" says whether the page is drawn as the Mac window, over its glass`);
   if (fresh !== undefined && typeof fresh !== "boolean") fail(`${name}: "fresh" says whether the shot changes what the host holds, and so takes a host of its own`);
   if (height !== undefined && (!Number.isInteger(height) || height < 1)) fail(`${name}: "height" is the window height in whole pixels, for a surface taller than its width's window`);
   const own = raw.widths;
@@ -111,6 +112,7 @@ const surfaceFrom = (raw, index, widths) => {
     widths: own ?? widths,
     remote: remote === true,
     fresh: fresh === true,
+    mac: mac === true,
     ...(height !== undefined ? { height } : {}),
   };
 };
@@ -144,7 +146,7 @@ export function shotPlan(list) {
       for (const surface of list.surfaces) {
         if (!surface.widths.includes(width)) continue;
         const steps = surface.steps.filter(s => s.width === undefined || s.width === width).map(({ width: _kept, ...step }) => step);
-        shots.push({ name: surface.name, at: surface.at, steps, wait: surface.wait, ...(surface.fixture === undefined ? {} : { fixture: surface.fixture }), settleMs: surface.settleMs, remote: surface.remote, fresh: surface.fresh, theme, width, height: surface.height ?? list.heights[width], file: shotName(surface.name, theme, width) });
+        shots.push({ name: surface.name, at: surface.at, steps, wait: surface.wait, ...(surface.fixture === undefined ? {} : { fixture: surface.fixture }), settleMs: surface.settleMs, remote: surface.remote, fresh: surface.fresh, mac: surface.mac, theme, width, height: surface.height ?? list.heights[width], file: shotName(surface.name, theme, width) });
       }
     }
   }
@@ -161,7 +163,7 @@ export function indexMarkdown(list, written, meta) {
   for (const surface of list.surfaces) {
     const rows = plan.filter(s => s.name === surface.name && has.has(s.file));
     if (rows.length === 0) continue;
-    const road = `Route \`${surface.at}\`${surface.remote ? ", served to a window on another computer" : ""}${surface.steps.length > 0 ? `, then ${surface.steps.map(s => `${stepWords(s)}${s.width === undefined ? "" : ` (at ${s.width} only)`}`).join(", ")}` : ""}${surface.fixture === undefined ? "" : `, served from the ${surface.fixture} fixture`}.`;
+    const road = `Route \`${surface.at}\`${surface.remote ? ", served to a window on another computer" : ""}${surface.mac ? ", drawn as the Mac window over a stand-in desktop" : ""}${surface.steps.length > 0 ? `, then ${surface.steps.map(s => `${stepWords(s)}${s.width === undefined ? "" : ` (at ${s.width} only)`}`).join(", ")}` : ""}${surface.fixture === undefined ? "" : `, served from the ${surface.fixture} fixture`}.`;
     lines.push(`## ${surface.name}`, "", road, "", "| theme | width | file |", "| --- | --- | --- |");
     for (const row of rows) lines.push(`| ${row.theme} | ${row.width} | [${row.file}](${row.file}) |`);
     lines.push("");

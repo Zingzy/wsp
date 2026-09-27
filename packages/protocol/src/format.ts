@@ -1387,6 +1387,16 @@ export function providerRoadRetryLine(call: string, code: string, tryNumber: num
   return `${call} did not leave this computer (${code}); try ${tryNumber} of ${tries}`;
 }
 
+/** A fork the provider refused as "Snapshot not found" while its own listing holds that snapshot, asked again. */
+export function snapshotListedWaitLine(snapshotId: string, waitMs: number, waitedMs: number): string {
+  return `the provider lists snapshot ${snapshotId} yet answered "Snapshot not found"; asking again in ${fmtDuration(waitMs)} (${fmtDuration(waitedMs)} so far)`;
+}
+
+/** The same refusal once the wait for it has run out: the snapshot is listed, so it is not gone. */
+export function snapshotListedRefusedLine(snapshotId: string, waitedMs: number): string {
+  return `the provider lists snapshot ${snapshotId} yet answered "Snapshot not found" for ${fmtDuration(waitedMs)}; it is not gone, so ask again in a minute`;
+}
+
 /** When a turn is over, in the one sentence every door the agent reads quotes whole: the skill, the tool
  * descriptions, the command line's help and the machine's own context. The reply comes back at once from a follow;
  * the row settles only at the process exit, since a harness can keep working after it answers. */
@@ -2620,6 +2630,15 @@ export function spawnCapRefusal(rootThreadId: string, standing: number, cap: num
   return `thread ${threadWord(rootThreadId)} already holds ${standing} of its ${cap} machines; delete one before forking another`;
 }
 
+/** What a cloud at its spend per day says: its row's state sentence and the head of the refusal below. */
+export const SPEND_LIMIT_LINE = "spend limit reached today";
+
+/** The one sentence a new machine on a cloud at its spend per day is refused with; the machines already running there
+ * are left running. */
+export function spendCapRefusal(name: string, todayUsd: number, capUsd: number): string {
+  return `${SPEND_LIMIT_LINE} on ${name} (${spendMeterWord(todayUsd, capUsd)}); raise its spend per day or start the machine after midnight`;
+}
+
 /** The one sentence a spawn deeper than the workspace allows is refused with. */
 export function spawnDepthRefusal(threadId: string, depth: number, cap: number): string {
   return `thread ${threadWord(threadId)} is ${depth} deep under its root and this workspace allows ${cap}; a thread this deep may not spawn`;
@@ -3665,6 +3684,12 @@ export function placeWorkspacesParts(view: PlaceView, count: number, monthUsd?: 
 
 /** What a place has taken since the first of the month, the clause every surface that says it says. */
 export const spentThisMonth = (usd: number): string => `${fmtCost(usd)} this month`;
+
+/** What a cloud has spent today over its spend per day, the SPEND cell and the meter's figure: the limit is a number
+ * the person typed, so it reads as typed, in whole dollars where it has no cents. */
+export function spendMeterWord(todayUsd: number, capUsd: number): string {
+  return `${fmtCost(todayUsd)}/${Number.isInteger(capUsd) ? `$${capUsd}` : fmtCost(capUsd)}`;
+}
 
 /** The Spend row of a place's detail: the month behind it, what it burns right now and how many workspaces that is
  * across. A row burning nothing says so with the rate rather than dropping the clause, since a $0.00/hr that is

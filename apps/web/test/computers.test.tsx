@@ -162,7 +162,7 @@ describe("the Computers list", () => {
   });
 
   it("draws a cloud row once this host holds its key, named as a person reads it, with what it took this month in its own row and no foot under the card", async () => {
-    const api = computersApi({ spend: async () => [{ place: "solari", monthUsd: 1.23, rateUsdPerHour: 0.11 }] } as Partial<Api>, setupOf({ keys: { solari: true } })).api;
+    const api = computersApi({ spend: async () => [{ place: "solari", todayUsd: 0.26, monthUsd: 1.23, rateUsdPerHour: 0.11 }] } as Partial<Api>, setupOf({ keys: { solari: true } })).api;
     useStore.setState({ places: [here, solari], workspaces: [atSolari("ws_s")] });
     await mountComputers(api);
     expect(listIds()).toEqual(["here", "solari"]);
@@ -612,7 +612,7 @@ describe("the cloud's page", () => {
 
   it("carries the spend as a line, the Image card with what the image holds and Edit in it, the copies as lines and Remove saying the key is forgotten, while the key is held", async () => {
     const api = computersApi(
-      { image: async () => ({ image: IMAGE, copies: [copy], projects: [] }), spend: async () => [{ place: "solari", monthUsd: 4.12, rateUsdPerHour: 0.16 }], initStart: async () => ({}) as InitJob } as Partial<Api>,
+      { image: async () => ({ image: IMAGE, copies: [copy], projects: [] }), spend: async () => [{ place: "solari", todayUsd: 0.38, monthUsd: 4.12, rateUsdPerHour: 0.16 }], initStart: async () => ({}) as InitJob } as Partial<Api>,
       setupOf({ keys: { solari: true } }),
     ).api;
     useStore.setState({ places: [here, { ...solari, buildsImages: true }], workspaces: [atSolari("ws_y"), atSolari("ws_z")] });

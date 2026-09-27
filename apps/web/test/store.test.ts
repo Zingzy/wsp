@@ -419,7 +419,7 @@ describe("store creations", () => {
     await flush();
     expect(await useStore.getState().createWorkspace("pr_1", "beta")).toBeNull();
     const failed = useStore.getState().creations[0]!;
-    expect(failed.failed?.title).toBe("The provider refused: no more tasks can run there now");
+    expect(failed.failed?.title).toBe("Couldn't start beta: the provider has no room to start another now");
     expect(failed.lines.map(l => l.stage)).toEqual(["fork-requested", "failed"]);
     expect(useStore.getState().selectedId).toBe(failed.key);
 
@@ -432,7 +432,7 @@ describe("store creations", () => {
     api.createWorkspace = async () => { throw new Error("no golden image yet"); };
     await useStore.getState().createWorkspace("pr_1", "gamma");
     const again = useStore.getState().creations[0]!;
-    expect(again.failed).toEqual({ title: "Could not create the task", detail: "no golden image yet" });
+    expect(again.failed).toEqual({ title: "Couldn't start gamma", detail: "no golden image yet" });
     // No failed stage arrived, so the refusal is the failing line.
     expect(again.lines.map(l => [l.stage, l.message])).toEqual([["failed", "no golden image yet"]]);
     useStore.getState().dismissCreation(again.key);
@@ -471,10 +471,29 @@ describe("store creations", () => {
     expect(useStore.getState().creations).toEqual([expect.objectContaining({ key: "creating:ws_far", name: "far", workspaceId: "ws_far", failed: null })]);
     expect(useStore.getState().creations[0]!.lines).toHaveLength(2);
     emit(stage({ workspaceId: "ws_far", name: "far", stage: "failed", message: "boom" }));
-    expect(useStore.getState().creations[0]!.failed).toEqual({ title: "Could not create the task", detail: "boom" });
+    expect(useStore.getState().creations[0]!.failed).toEqual({ title: "Couldn't start far", detail: "boom" });
     emit({ type: "workspace.created", workspace: view("ws_far") });
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().selectedId).toBe("ws_a");
+  });
+
+  it("a failed create leaves on a delete from any client, and its own dismiss asks the runtime to delete it", async () => {
+    const { api, emit } = fakeApi([view("ws_a")], []);
+    const deleted: string[] = [];
+    api.deleteWorkspace = async id => void deleted.push(id);
+    useStore.getState().bind(api);
+    await flush();
+    emit(stage({ workspaceId: "ws_far", name: "far", stage: "failed", message: "Snapshot not found" }));
+    expect(useStore.getState().creations[0]!.failed).toEqual({ title: "Couldn't start far", detail: "Snapshot not found" });
+    useStore.getState().select("creating:ws_far");
+    emit({ type: "workspace.deleted", workspaceId: "ws_far" });
+    expect(useStore.getState().creations).toEqual([]);
+    expect(useStore.getState().selectedId).toBeNull();
+
+    emit(stage({ workspaceId: "ws_two", name: "far", stage: "failed", message: "Snapshot not found" }));
+    useStore.getState().dismissCreation("creating:ws_two");
+    expect(deleted).toEqual(["ws_two"]);
+    expect(useStore.getState().creations).toEqual([]);
   });
 
   it("asks the runtime whatever the image says: a project on this computer forks nothing, and a refusal is the runtime's own on the creation view", async () => {

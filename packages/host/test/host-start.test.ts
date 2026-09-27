@@ -9,9 +9,8 @@ import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EXIT_CODES, exitClassOf } from "@wsp/protocol";
 import { cli, HOST_STARTS_ITSELF, localWiring, serve, type CliIO } from "../src/cli.js";
-import { hostLogPath, lockPathFor, servingHost, startedByEnv, STARTED_BY_ENV, type HostLock } from "../src/host-lock.js";
+import { hostLogPath, lockPathFor, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, type HostLock } from "../src/host-lock.js";
 import { hostExitedLine, hostStarter, noHostAnsweredLine, serviceServesStateLine, startingHostLine, type HostStarter } from "../src/host-start.js";
-import { SERVICE_WAIT_MS } from "../src/service.js";
 import { dialer } from "../src/mcp.js";
 import { dialHost, noHostServingLine } from "../src/verbs.js";
 import type { HostHandle } from "../src/server.js";
@@ -257,6 +256,26 @@ describe("a verb starts the host when none serves", () => {
     expect(await cli(["remove", "nowhere", "--state", statePath], quietIO([], removing), undefined, {}, here.start)).toBe(1);
     expect(here.calls).toEqual([statePath]);
     expect(removing.join("\n")).not.toContain("no wsp host is serving");
+  });
+
+  it("wsp init --on with no host starts one and asks it for the place, where it refused before", async () => {
+    const here = servingStarter();
+    const errors: string[] = [];
+    await cli(["init", "--on", "box", "--yes", "--state", statePath], quietIO([], errors), undefined, {}, here.start);
+    expect(here.calls).toEqual([statePath]);
+    // The stub host has no place of that name, and saying so is the host's own answer to the ask.
+    expect(errors).toEqual([startingHostLine(statePath, hostLogPath(statePath)), "no place named box; you have default"]);
+  });
+
+  it("wsp init --on --json is refused before anything starts: the build would be the host's, whose objects wsp setup --json reads", async () => {
+    const here = servingStarter();
+    const lines: string[] = [];
+    const errors: string[] = [];
+    expect(await cli(["init", "--on", "box", "--json", "--state", statePath], quietIO(lines, errors), undefined, {}, here.start)).toBe(EXIT_CODES.usage);
+    expect(here.calls).toEqual([]);
+    expect(lines).toEqual([]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("wsp setup --json");
   });
 
   it("wsp threads with no host starts one, says so on stderr, and prints the answer on stdout", async () => {

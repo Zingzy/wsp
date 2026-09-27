@@ -36,7 +36,7 @@ const creation: Creation = {
   workspaceId: "ws_beta",
   lines,
   failed: {
-    title: "The provider refused: no more workspaces can run there now",
+    title: "Couldn't start beta: the provider has no room to start another now",
     detail: FAILED,
   },
 };

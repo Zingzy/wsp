@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { THREAD_SETTLE_MS, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
-import { RequestError } from "../src/protocol/client.js";
+import { DisconnectedError, RequestError } from "../src/protocol/client.js";
 import { openedBy, threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
@@ -149,17 +149,22 @@ describe("row labels", () => {
 describe("new workspace helpers", () => {
   it("a concurrency refusal keeps the runtime's words, which name the machines holding the slots, under the cap title", () => {
     const line = "both machine slots are in use: first, t-cap. Pause one or wait for a nap.";
-    const explained = explainCreateRefusal(new RequestError(line, "concurrency"));
-    expect(explained.title).toMatch(/no more tasks/i);
+    const explained = explainCreateRefusal(new RequestError(line, "concurrency"), "beta");
+    expect(explained.title).toBe("Couldn't start beta: the provider has no room to start another now");
     expect(explained.detail).toBe(line);
   });
 
   it("other failures keep their message under a plain title", () => {
-    expect(explainCreateRefusal(new Error("no golden image yet"))).toEqual({
-      title: "Could not create the task",
+    expect(explainCreateRefusal(new Error("no golden image yet"), "beta")).toEqual({
+      title: "Couldn't start beta",
       detail: "no golden image yet",
     });
-    expect(explainCreateRefusal("boom").detail).toBe("boom");
+    expect(explainCreateRefusal("boom", "beta").detail).toBe("boom");
+  });
+
+  it("names what was being made, never task or workspace", () => {
+    const refusals = [new RequestError("slots full", "concurrency"), new DisconnectedError("lost"), new Error("boom")];
+    for (const e of refusals) expect(explainCreateRefusal(e, "beta").title).not.toMatch(/\b(tasks?|workspaces?)\b/i);
   });
 });
 

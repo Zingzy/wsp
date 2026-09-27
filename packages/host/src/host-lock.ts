@@ -5,6 +5,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { authority, isWildcard, LOOPBACK, relayUrlOf, type HostShape } from "@wsp/protocol";
 import { ownFolder } from "@wsp/own-file";
+import type { HostStarter } from "./host-start.js";
 
 export interface HostLock {
   pid: number;
@@ -34,6 +35,14 @@ const MARKS: readonly HostStarted[] = ["verb", "service"];
 
 /** What the environment says started this process, and nothing where nothing did. */
 export const startedByEnv = (env: Readonly<Record<string, string | undefined>>): HostStarted | undefined => MARKS.find(word => word === env[STARTED_BY_ENV]);
+
+/** How often a wait on a host coming up or going down on this computer reads the lock again. */
+export const POLL_MS = 200;
+
+/** A load, a stop or a start is a process coming up or going down on this computer, not a network call. One number
+ * for every road that waits on one, so a service, a verb's own child and a line waiting out a restart are given the
+ * same patience. */
+export const SERVICE_WAIT_MS = 20_000;
 
 function isHostLock(v: unknown): v is HostLock {
   return (
@@ -175,6 +184,13 @@ export function dialAddress(lock: { address?: string }): string {
 export function servingHost(statePath: string): HostLock | undefined {
   const held = readLock(lockPathFor(statePath));
   return held !== undefined && pidAlive(held.pid) ? held : undefined;
+}
+
+/** The host serving this state file here, started first when none does and the line was handed a starter; nothing
+ * where none serves and nothing may start one. Only for a line aimed at this computer: a host elsewhere is not
+ * this computer's to start. */
+export async function heldOrStarted(statePath: string, start: HostStarter | undefined, say: (line: string) => void): Promise<HostLock | undefined> {
+  return servingHost(statePath) ?? (await start?.(statePath, say));
 }
 
 /** One state file, one host. A lock whose pid is gone is a crash leftover and

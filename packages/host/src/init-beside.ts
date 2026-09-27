@@ -21,7 +21,7 @@ export interface DoorClient {
   request<T extends Record<string, unknown>>(op: string, params?: Record<string, unknown>): Promise<T>;
   events(): Promise<void>;
   onFrame(fn: (frame: Record<string, unknown>) => void): () => void;
-  closed: Promise<void>;
+  closed: Promise<number | void>;
   closeWords(): string;
 }
 

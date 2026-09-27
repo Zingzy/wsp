@@ -15,6 +15,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { DAEMON_TOKEN_PATH, EXIT_CODES, FORWARD_ENV, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, shellQuote, TURN_TOKEN_ENV, VerbFailure } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import type { RestartRoad } from "../src/restart.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
@@ -185,7 +186,7 @@ describe("the agent contract on the command line and the tool door", () => {
     // The confirming read a gone verdict waits for runs on the same tick: this backend's 404 is the whole truth, so
     // the wait only buys the contract a five second pause on the road to a rebuild.
     const agents = agentHome(join(dir, "agents"));
-    rt = createRuntime({
+    const runtime = (): Runtime => createRuntime({
       backend,
       store,
       adapters: { claude: claude.adapter, codex: bornDeadAgent(prompt => `re: ${prompt}`).adapter },
@@ -216,7 +217,19 @@ describe("the agent contract on the command line and the tool door", () => {
       // machine here because the place already stands on the record.
       places: { wired: "default", backend: place => (place === "default" || place === "elsewhere" ? backend : undefined), list: () => ["default", "elsewhere"] },
     });
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    // The verb's road as the host takes it: this host closes, and one over the same store serves the file again.
+    const road: RestartRoad = {
+      shape: "verb",
+      restart: async () => {
+        await handle?.close();
+        rt = runtime();
+        vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_contract_key");
+        handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt, restart: road });
+        vi.stubEnv("SOLARI_API_KEY", "");
+      },
+    };
+    rt = runtime();
+    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt, restart: road });
     // A workspace is one project's copy, so every line that makes one needs a project first.
     await rt.projects.add({ source: "https://github.com/dev/alpha.git", on: "default" });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -393,6 +406,7 @@ describe("the agent contract on the command line and the tool door", () => {
     const rebuilt = (await last("rebuild", "rebuild", alpha)) as { workspace: { id: string; machineId: string } };
     expect(rebuilt.workspace.id).toBe(alpha);
     await last("delete", "delete", alpha, "--yes");
+    expect(await last("restart", "restart")).toEqual({ running: [] });
     const served = CLI_VERBS.filter(hasTool);
     expect(served.filter(v => v.tool.stream !== undefined).map(v => [v.name, v.tool.stream])).toEqual([["fork", ["workspace", "notice"]], ["exec", ["output"]]]);
 
