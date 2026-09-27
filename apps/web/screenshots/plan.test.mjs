@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { fixtureState, threadId } from "./fixture-state.mjs";
+import { fixtureCloud, fixtureState, threadId } from "./fixture-state.mjs";
 import { indexMarkdown, readSurfaces, selectorFor, shotName, shotPlan, stepFor } from "./plan.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -264,7 +264,13 @@ describe("the surfaces list this repo ships", () => {
     // Those served from a state of their own: an image that is built cannot stand in the same state file as one
     // that never was, a thread whose agent opened threads elsewhere needs the workspaces those threads run on, and
     // a person on the first run has no project added.
-    expect(read.surfaces.filter(s => s.fixture !== undefined).map(s => s.fixture)).toEqual(["orchestrator", "orchestrator", "orchestrator", "image-built", "image-built", "image-built", "mac-and-boxes", "mac-only", "mac-and-boxes", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "thread-states", "tiles", "tiles", "tiles", "tiles", "tiles", "tiles", "mac-and-boxes", "mac-and-boxes", "long-prompt", "tiles", "tiles", "ascii-only"]);
+    // Read off the list itself, so a surface added there is not a second edit here, and held to the rule a fixture
+    // keeps: a surface that opens the cloud road is served from one that names a cloud, since every other fixture's
+    // host runs with the cloud off.
+    const listed = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")).surfaces;
+    expect(read.surfaces.map(s => s.fixture)).toEqual(listed.map(s => s.fixture));
+    const clouded = listed.filter(s => (s.steps ?? []).some(word => word.endsWith("add-cloud-button")));
+    expect(clouded.map(s => [s.name, fixtureCloud(s.fixture)])).toEqual([["add-cloud", "box"]]);
     // The first run and the Add surfaces are shot at the two widths a design reading is held to, New workspace at the
     // one width whose sidebar carries its control, and the thread status, the two switchers, the threads list, the
     // palette, the panel launcher and the tiles at the widest alone; the rest take every width the list shoots.

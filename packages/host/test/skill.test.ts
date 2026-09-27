@@ -7,13 +7,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
-import { INSTRUCTIONS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, WSP_SKILL, agentsLine, instructionsOf } from "../src/skill.js";
+import { INSTRUCTIONS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, WSP_SKILL, agentsLine, instructionsOf, skillFor } from "../src/skill.js";
+import { CLOUD_ON } from "../src/cloud.js";
 import { hasTool, CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
 import { SERVICE_MANAGERS } from "../src/service.js";
 
 describe("the wsp skill", () => {
-  it("is the repo's skills/wsp/SKILL.md, with the frontmatter name and a one-line description without a colon or a quote", () => {
-    expect(WSP_SKILL).toBe(readFileSync(new URL("../../../skills/wsp/SKILL.md", import.meta.url), "utf8"));
+  it("is the repo's skills/wsp/SKILL.md as this process reads it, with the frontmatter name and a one-line description without a colon or a quote", () => {
+    expect(WSP_SKILL).toBe(skillFor(readFileSync(new URL("../../../skills/wsp/SKILL.md", import.meta.url), "utf8"), CLOUD_ON));
     const [open, name, description, close] = WSP_SKILL.split("\n");
     expect(open).toBe("---");
     expect(name).toBe(`name: ${SKILL_NAME}`);
@@ -181,15 +182,18 @@ describe("the wsp skill", () => {
     expect(setup).toContain("starting the host for <path>; its log is <path>, and wsp down stops it");
     expect(setup).toContain("no host answered for <path> within 20.0s");
     expect(setup).toContain(thisComputerLine("<name>", "ws_...", "<folder>"));
-    expect(setup).toContain("Solari API key: no terminal to ask on; set SOLARI_API_KEY in the environment, ./.env, or ~/.wsp/.env.");
     expect(setup).toContain("wsp init --recipe ~/.wsp/recipe.json");
     expect(setup).toContain("--non-interactive --json > /tmp/wsp-init.jsonl");
     expect(setup).toContain('{"event":"sign-in","tool":"gh","label":"GitHub CLI login","browserUrl":"https://github.com/login/device","code":"8F4A-C21B","nextCommand":"open \'https://github.com/login/device\'","waitSeconds":960}');
     expect(setup).toContain('{"event":"sign-in-result","tool":"gh","label":"GitHub CLI login","state":"signed-in"}');
     expect(setup).toContain("Hand that line to the person as it comes");
-    expect(setup).toContain("SOLARI_API_KEY=");
+    if (CLOUD_ON) {
+      expect(setup).toContain("Solari API key: no terminal to ask on; set SOLARI_API_KEY in the environment, ./.env, or ~/.wsp/.env.");
+      expect(setup).toContain("SOLARI_API_KEY=");
+      expect(setup).toContain("wsp snapshot first");
+    }
     expect(setup).toContain("Do not ask them to paste a key into this conversation");
-    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", `--signin <id>=${LOGIN_CHOICES.join("|")}`, "--project <folder>", "wsp new dev", "wsp snapshot first", "wsp run first"]) expect(setup, step).toContain(step);
+    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", `--signin <id>=${LOGIN_CHOICES.join("|")}`, "--project <folder>", "wsp new dev", "wsp run first"]) expect(setup, step).toContain(step);
     // Eight steps, since nothing in the walkthrough starts or restarts a host by hand any more.
     expect(setup.split("\n").filter(l => /^\d+\. /.test(l))).toHaveLength(8);
   });
@@ -240,7 +244,7 @@ describe("the wsp skill", () => {
 
   it("the MCP instructions are the skill's opening paragraph, the walkthrough's, the line pointing back at the skill and the command line, and the rules", () => {
     const skill = `---\nname: x\ndescription: y\n---\n\n# x\n\nOne.\nTwo.\n\n${SETUP_HEADING}\n\nThree.\n\n1. Not this.\n\n${RULES_HEADING}\n\nFour.\n\n- A rule.\n\n## Later\n\nNor this.\n`;
-    expect(instructionsOf(skill, ["claude"]).startsWith("One. Two. Three. The agents this host runs threads on, the only values run and fork take as agent: claude. The steps, with the exact line to run")).toBe(true);
+    expect(instructionsOf(skill, ["claude"]).startsWith(`One. Two. Three. ${agentsLine(["claude"])} The steps, with the exact line to run`)).toBe(true);
     expect(instructionsOf(skill, ["claude"]).endsWith("Four.\n- A rule.")).toBe(true);
     expect(instructionsOf(skill, ["claude"])).not.toContain("Not this.");
     expect(() => instructionsOf("---\nname: x\n", ["claude"])).toThrow("never closes");
@@ -249,7 +253,7 @@ describe("the wsp skill", () => {
     expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n`, ["claude"])).toThrow(`the skill has no ${RULES_HEADING} section`);
     expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n\n${RULES_HEADING}\n\nFour.\n`, ["claude"])).toThrow(`${RULES_HEADING} has no rules`);
     expect(INSTRUCTIONS).toBe(instructionsOf(WSP_SKILL, THREAD_AGENTS));
-    expect(INSTRUCTIONS.startsWith("wsp runs cloud machines called workspaces")).toBe(true);
+    expect(INSTRUCTIONS.startsWith(CLOUD_ON ? "wsp runs cloud machines called workspaces" : "wsp runs machines called workspaces")).toBe(true);
     // A caller holding only the tools reads the whole sequence here or nowhere: health check, the recipe from what
     // their agents used, the question about the heavy rows, the person's init line, then the host started here.
     expect(INSTRUCTIONS).toContain("The road is a health check");
@@ -269,12 +273,12 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).not.toContain("## ");
   });
 
-  it("the rules for running work on a machine are ten lines stated as facts about machines, and the instructions carry the same lines", () => {
+  it("the rules for running work on a machine are ten lines stated as facts about machines, nine with no cloud, and the instructions carry the same lines", () => {
     const from = WSP_SKILL.indexOf(`\n${RULES_HEADING}\n`);
     expect(from, RULES_HEADING).toBeGreaterThan(-1);
     const section = WSP_SKILL.slice(from, WSP_SKILL.indexOf("\n## ", from + 1));
     const rules = section.split("\n").filter(line => line.startsWith("- "));
-    expect(rules).toHaveLength(10);
+    expect(rules).toHaveLength(CLOUD_ON ? 10 : 9);
     // The two roads to a child's end open the section: which one holds is the first thing a caller has to decide.
     expect(rules[0]).toContain(NOTIFY_CALLER);
     expect(rules[1]).toContain(COORDINATOR_HANDOFF);
@@ -289,10 +293,15 @@ describe("the wsp skill", () => {
     // on, the golden, the count, the worktree, the send, the restart, the pause, the person reading along.
     expect(section).toContain("the one `wsp add <folder>` and `wsp new \"<what you are working on>\"` make");
     expect(section).toContain("a quick subtask or a second harness");
-    expect(section).toContain("Fork a cloud workspace for builds that run beside each other");
-    expect(section).toContain("anything that should not touch this computer");
-    expect(section).toContain("`wsp snapshot <workspace>`");
-    expect(section).toContain("`wsp new <name> --from <that image>`");
+    if (CLOUD_ON) {
+      expect(section).toContain("Fork a cloud workspace for builds that run beside each other");
+      expect(section).toContain("anything that should not touch this computer");
+      expect(section).toContain("`wsp snapshot <workspace>`");
+      expect(section).toContain("`wsp new <name> --from <that image>`");
+    } else {
+      expect(section).not.toContain("wsp snapshot");
+      expect(section).not.toContain("--from");
+    }
     expect(section).toContain("on 2 vCPU and 4 GB one thread runs tests or a build at a time");
     expect(section).toContain("its own git worktree");
     expect(section).toContain("`pnpm install --offline`");
@@ -307,7 +316,7 @@ describe("the wsp skill", () => {
     const named = (id: string): boolean => new RegExp(`\\b${id}\\b`).test(INSTRUCTIONS);
     for (const id of THREAD_AGENTS) expect(named(id), id).toBe(true);
     for (const a of CATALOG_AGENTS) if (!THREAD_AGENTS.some(id => id === a.id)) expect(named(a.id), a.id).toBe(false);
-    expect(INSTRUCTIONS).toContain(`take as agent: ${THREAD_AGENTS.join(", ")}.`);
-    expect(agentsLine(["claude", "codex"])).toBe("The agents this host runs threads on, the only values run and fork take as agent: claude, codex.");
+    expect(INSTRUCTIONS).toContain(` as agent: ${THREAD_AGENTS.join(", ")}.`);
+    expect(agentsLine(["claude", "codex"])).toBe(`The agents this host runs threads on, the only values ${CLOUD_ON ? "run and fork take" : "run takes"} as agent: claude, codex.`);
   });
 });

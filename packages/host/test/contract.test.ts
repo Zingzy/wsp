@@ -13,7 +13,8 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { DAEMON_TOKEN_PATH, EXIT_CODES, FORWARD_ENV, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { CLOUD_ENV, DAEMON_TOKEN_PATH, EXIT_CODES, FORWARD_ENV, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import type { RestartRoad } from "../src/restart.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -339,19 +340,22 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(await last("rename", "rename", "alpha", "renamed")).toMatchObject({ was: "alpha", workspace: { name: "renamed" } });
     await last("rename", "rename", "renamed", "alpha");
     // A snapshot takes a first-life machine, so it comes before the pause that resumes it.
-    const { projectGolden } = (await last("snapshot", "snapshot", "alpha")) as { projectGolden: { snapshotId: string } };
+    const snapped = CLOUD_ON ? ((await last("snapshot", "snapshot", "alpha")) as { projectGolden: { snapshotId: string } }) : undefined;
     await last("pause", "pause", "alpha");
     await last("wake", "wake", "alpha");
     // Already on the golden's head, so the move is the answer alone: the workspace untouched and nothing kept.
-    expect(await last("image move", "image", "move", "alpha")).toEqual({ workspace: expect.objectContaining({ name: "alpha" }), moved: false, kept: [] });
+    if (CLOUD_ON) expect(await last("image move", "image", "move", "alpha")).toEqual({ workspace: expect.objectContaining({ name: "alpha" }), moved: false, kept: [] });
     // The seeded golden was sealed before records existed, so the record reads off its head and holds no sign-ins.
     expect(await last("image", "image")).toMatchObject({ image: expect.objectContaining({ version: 1 }), copies: [expect.objectContaining({ place: "default" })], projects: expect.any(Array) });
-    expect(await last("image remove", "image", "remove", projectGolden.snapshotId, "--yes")).toEqual({ projectGolden: expect.objectContaining({ snapshotId: projectGolden.snapshotId }), alreadyGone: false });
-    // A place already standing on the record answers with the copy it holds and builds nothing, which is the road
-    // that costs no machine: the record and that place's copy are written here at one hash.
-    await store.put("images", "default", RECORD);
-    await store.put("goldens", copyKey("elsewhere", "default"), { ...SEALED_GOLDEN, versions: [{ ...SEALED_GOLDEN.versions[0]!, snapshotId: "snap_elsewhere", imageHash: RECORD.hash }] });
-    expect(await last("image build", "image", "build", "elsewhere")).toEqual({ copy: expect.objectContaining({ place: "elsewhere", version: 1, hash: RECORD.hash }), built: false });
+    if (snapped !== undefined) {
+      const { projectGolden } = snapped;
+      expect(await last("image remove", "image", "remove", projectGolden.snapshotId, "--yes")).toEqual({ projectGolden: expect.objectContaining({ snapshotId: projectGolden.snapshotId }), alreadyGone: false });
+      // A place already standing on the record answers with the copy it holds and builds nothing, which is the road
+      // that costs no machine: the record and that place's copy are written here at one hash.
+      await store.put("images", "default", RECORD);
+      await store.put("goldens", copyKey("elsewhere", "default"), { ...SEALED_GOLDEN, versions: [{ ...SEALED_GOLDEN.versions[0]!, snapshotId: "snap_elsewhere", imageHash: RECORD.hash }] });
+      expect(await last("image build", "image", "build", "elsewhere")).toEqual({ copy: expect.objectContaining({ place: "elsewhere", version: 1, hash: RECORD.hash }), built: false });
+    }
     const opened = (await last("run", "run", "alpha", "hello")) as { threadId: string; text: string };
     expect(opened).toMatchObject({ threadId: expect.any(String), text: "re: hello", outcome: "started" });
     await last("send", "send", opened.threadId, "again");
@@ -380,15 +384,21 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(ran.code).toBe(0);
     expect(objects(ran.io)).toEqual([{ type: "exec.output", execId: expect.any(String), text: "ok" }, { exitCode: 0, cwd: "/root/alpha" }]);
     covered.set("exec", objects(ran.io).at(-1));
-    const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--json");
-    expect(forked.code).toBe(0);
-    const forkLines = objects(forked.io) as Record<string, unknown>[];
-    expect(forkLines.filter(o => "workspace" in o)).toEqual([{ workspace: expect.objectContaining({ name: "worker" }) }]);
-    expect(forkLines.at(-1)).toEqual({ turn: expect.objectContaining({ text: "re: build it", outcome: "started" }) });
-    covered.set("fork", forkLines.at(-1));
-    const plain = await run("fork", "alpha", "--name", "sibling", "--json");
-    expect(plain.code).toBe(0);
-    expect(objects(plain.io).at(-1)).toEqual({ workspace: expect.objectContaining({ name: "sibling" }) });
+    if (CLOUD_ON) {
+      const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--json");
+      expect(forked.code).toBe(0);
+      const forkLines = objects(forked.io) as Record<string, unknown>[];
+      expect(forkLines.filter(o => "workspace" in o)).toEqual([{ workspace: expect.objectContaining({ name: "worker" }) }]);
+      expect(forkLines.at(-1)).toEqual({ turn: expect.objectContaining({ text: "re: build it", outcome: "started" }) });
+      covered.set("fork", forkLines.at(-1));
+      const plain = await run("fork", "alpha", "--name", "sibling", "--json");
+      expect(plain.code).toBe(0);
+      expect(objects(plain.io).at(-1)).toEqual({ workspace: expect.objectContaining({ name: "sibling" }) });
+    } else {
+      expect((await run("new", "worker")).code).toBe(0);
+      // The rebuild below is the cloud's, so with none the delete runs on a machine that still answers.
+      await last("delete", "delete", alpha, "--yes");
+    }
     // Recipe verbs read the computer HOME and PATH name: an empty one here, so nothing of this box is read.
     const empty = join(dir, "empty");
     mkdirSync(join(empty, "bin"), { recursive: true });
@@ -401,14 +411,16 @@ describe("the agent contract on the command line and the tool door", () => {
     await last("forget", "forget", worker.id, "--yes");
     // A machine killed at the provider settles its record on the next verb that reads the machine, and gone is the
     // one state a rebuild takes; the workspace comes back on a fresh machine under the same id.
-    const stale = await run("wake", "alpha", "--json");
-    expect(stale.code).toBe(1);
-    const rebuilt = (await last("rebuild", "rebuild", alpha)) as { workspace: { id: string; machineId: string } };
-    expect(rebuilt.workspace.id).toBe(alpha);
-    await last("delete", "delete", alpha, "--yes");
+    if (CLOUD_ON) {
+      const stale = await run("wake", "alpha", "--json");
+      expect(stale.code).toBe(1);
+      const rebuilt = (await last("rebuild", "rebuild", alpha)) as { workspace: { id: string; machineId: string } };
+      expect(rebuilt.workspace.id).toBe(alpha);
+      await last("delete", "delete", alpha, "--yes");
+    }
     expect(await last("restart", "restart")).toEqual({ running: [] });
     const served = CLI_VERBS.filter(hasTool);
-    expect(served.filter(v => v.tool.stream !== undefined).map(v => [v.name, v.tool.stream])).toEqual([["fork", ["workspace", "notice"]], ["exec", ["output"]]]);
+    expect(served.filter(v => v.tool.stream !== undefined).map(v => [v.name, v.tool.stream])).toEqual([...(CLOUD_ON ? [["fork", ["workspace", "notice"]]] : []), ["exec", ["output"]]]);
 
     for (const verb of served) {
       const value = covered.get(verb.name);
@@ -457,7 +469,8 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(failure(relative.io).class).toBe("usage");
     const dangling = await run("fork", "alpha", "--model", "claude-sonnet-5", "--json");
     expect(dangling.code).toBe(3);
-    expect(failure(dangling.io)).toEqual({ error: '--model says how a thread opens, and this line opens none. Add --send "<task>", or drop --model.', class: "usage", exit: 3 });
+    const refused = CLOUD_ON ? '--model says how a thread opens, and this line opens none. Add --send "<task>", or drop --model.' : `wsp fork needs the cloud, which is off on this computer: start the host with ${CLOUD_ENV}=1 to turn it on.`;
+    expect(failure(dangling.io)).toEqual({ error: refused, class: "usage", exit: 3 });
 
     // A name this host holds nothing by is a value nothing takes, however far down the line it was read.
     const missing = await run("pause", "nope", "--json");
@@ -638,8 +651,8 @@ describe("the agent contract on the command line and the tool door", () => {
     // computer the person owns. A cloud row is in the places list only once its key is held, so this rule is what
     // says which road would ask rather than a state a run can be put in.
     expect(doctorKeyAsk({ kind: "provider" })).toEqual({ anthropic: true });
-    expect(doctorKeyAsk({ kind: "computer" })).toEqual({ anthropic: false, noSolari: "local" });
-    expect(doctorKeyAsk()).toEqual({ anthropic: false, noSolari: "local" });
+    expect(doctorKeyAsk({ kind: "computer" })).toEqual({ anthropic: false, noProviderKey: "local" });
+    expect(doctorKeyAsk()).toEqual({ anthropic: false, noProviderKey: "local" });
   });
 
   it("the tool door answers a failure as a tool error whose structured content is the same object with the same class", async () => {
