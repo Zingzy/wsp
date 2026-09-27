@@ -465,7 +465,7 @@ export function WorkspaceSidebar() {
             {settledOpen ? tiles.settled.map(node => tileItem(node, 0, null)) : null}
             {ready && groups.length > 0 && launchItems.length + tiles.live.length + tiles.settled.length + made.length === 0 ? (
               <li data-thread-selection-safe>
-                <p data-k="no-workspaces" className="flex h-9 items-center px-2 text-[13px] text-muted-foreground">
+                <p data-k="no-workspaces" className="px-2 py-6 text-center text-[13px] text-muted-foreground">
                   {PROJECT_WORDS.noWorkspaces}
                 </p>
               </li>

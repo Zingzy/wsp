@@ -45,12 +45,21 @@ describe("New workspace asks one thing", () => {
     // One field, and no base branch, no size and no image caption anywhere on the card.
     expect(screen.getByRole("dialog").querySelectorAll("input")).toHaveLength(1);
     expect(screen.getByRole("dialog").textContent).not.toMatch(/branch|Size|image/i);
+    // No close glyph: Esc, named in the footer, and Cancel close it.
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    expect(screen.getByRole("dialog").querySelector("[data-slot=dialog-footer] [data-slot=kbd]")?.textContent).toBe("Esc");
   });
 
-  it("holds Create while the question has no answer, says why on hover, and creates on Enter with the one project's id", () => {
+  it("holds Create while the question has no answer, says why in the slot under the lines, and creates on Enter with the one project's id", () => {
     const t = mount([project("pr_1", "spoo")], { pr_1: HERE });
     expect(t.create().getAttribute("data-held")).toBe("");
-    expect(t.create().getAttribute("title")).toBe(SAY_THE_WORK);
+    expect(t.create().getAttribute("title")).toBeNull();
+    const slot = () => document.querySelector("[data-k=new-workspace-slot]")!;
+    expect(slot().textContent).toBe("zingzy's MacBook Pro shares zingzy's MacBook Pro's ports");
+    fireEvent.keyDown(t.field(), { key: "Enter" });
+    expect(t.onCreate).not.toHaveBeenCalled();
+    expect(slot().textContent).toBe(SAY_THE_WORK);
+    expect(slot().querySelector("[data-k=waiting]")).not.toBeNull();
     fireEvent.change(t.field(), { target: { value: " pricing page " } });
     expect(t.create().getAttribute("data-held")).toBeNull();
     fireEvent.keyDown(t.field(), { key: "Enter" });

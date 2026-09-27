@@ -11,6 +11,7 @@ import { resetBrowsers } from "../src/browser/model.js";
 import { REACH_REASK_FLOOR_MS, REACH_REFRESH_WITH_MS_LEFT } from "../src/browser/reach.js";
 import { resetBrowserTabs, useBrowserTabs } from "../src/browser/tabs.js";
 import { RightPanel } from "../src/shell/RightPanel.js";
+import { PREVIEW_EMPTY } from "../src/components/preview/PreviewEmptyState.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
@@ -109,7 +110,7 @@ describe("availability", () => {
 describe("servers list", () => {
   it("starts on the empty state and says so", async () => {
     await setup();
-    expect(screen.getByText("No preview yet")).toBeDefined();
+    expect(screen.getByText(PREVIEW_EMPTY)).toBeDefined();
     expect(address().value).toBe("");
   });
 
@@ -125,7 +126,7 @@ describe("servers list", () => {
     expect(serverCard(8080).textContent).toContain("Listening");
     emit(close(WS, 8080));
     expect(screen.queryByRole("button", { name: /localhost:8080/ })).toBeNull();
-    expect(screen.queryByText("No preview yet")).toBeNull();
+    expect(screen.queryByText(PREVIEW_EMPTY)).toBeNull();
   });
 
   it("a repeated port.open does not duplicate the card, and another workspace's ports never show", async () => {

@@ -18,7 +18,7 @@
 // not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, FolderSearchIcon, GitBranchIcon, LoaderCircleIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { hiddenFolder, isMacMachine, REPO_STATE_WORDS, type FolderMachine } from "@wsp/protocol";
+import { hiddenFolder, isMacMachine, type FolderMachine } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { FOLDER_GHOST_WITH_WALK, FolderPathField, folderPathRefusal, useFolderPick, type FolderRefusal } from "../../files/FolderPathField";
 import { useWorkspaceListing } from "../../files/listing";
@@ -271,7 +271,7 @@ export function ComposerCheckoutRow({
   // A view on a turn names that turn's folder; a view about to open a thread names the one the thread will start in.
   const folder = pickable ? startFolder : (cwd ?? startFolder);
   const canPick = wire !== null && roots.length > 0 && folder !== null;
-  const branch = useBranch(wire, folder, !running, linkWord);
+  const branch = useBranch(wire, folder, true, linkWord, { running, moved: thread.view.entries.length });
 
   useEffect(() => {
     if (cwd !== null) follow(workspaceId, cwd);
@@ -310,17 +310,8 @@ export function ComposerCheckoutRow({
             {BRANCH_NOTE}
           </TooltipPopup>
         </Tooltip>
-      ) : REPO_STATE_WORDS[branch.kind].word === "" ? (
-        <span className={branchSlotClass} data-composer-branch={branch.kind} />
       ) : (
-        <Tooltip>
-          <TooltipTrigger render={<span className={branchSlotClass} tabIndex={0} data-composer-branch={branch.kind} />}>
-            {REPO_STATE_WORDS[branch.kind].word}
-          </TooltipTrigger>
-          <TooltipPopup side="top" align="end" className="max-w-80">
-            {REPO_STATE_WORDS[branch.kind].note}
-          </TooltipPopup>
-        </Tooltip>
+        <span className={branchSlotClass} data-composer-branch={branch.kind} />
       )}
     </ComposerSurface.ContextStrip>
   );
