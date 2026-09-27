@@ -17,8 +17,8 @@ export interface GitHost {
   setupGit: string;
   /** The line that says whether the command is signed in on the computer. */
   status: string;
-  /** The line that clones through the command, which reads the login rather than a remote's own credentials. */
-  clone(ownerRepo: string, dest: string): string;
+  /** The argv that clones through the command, which reads the login rather than a remote's own credentials. */
+  clone(ownerRepo: string, dest: string): readonly string[];
 }
 
 export const GIT_HOSTS: readonly GitHost[] = [
@@ -29,7 +29,7 @@ export const GIT_HOSTS: readonly GitHost[] = [
     httpsUrl: ownerRepo => `https://github.com/${ownerRepo}.git`,
     setupGit: "gh auth setup-git",
     status: "gh auth status",
-    clone: (ownerRepo, dest) => `gh repo clone ${ownerRepo} ${dest}`,
+    clone: (ownerRepo, dest) => ["gh", "repo", "clone", ownerRepo, dest],
   },
   {
     id: "gitlab",
@@ -38,7 +38,7 @@ export const GIT_HOSTS: readonly GitHost[] = [
     httpsUrl: ownerRepo => `https://gitlab.com/${ownerRepo}.git`,
     setupGit: "glab auth git-credential",
     status: "glab auth status",
-    clone: (ownerRepo, dest) => `glab repo clone ${ownerRepo} ${dest}`,
+    clone: (ownerRepo, dest) => ["glab", "repo", "clone", ownerRepo, dest],
   },
 ];
 

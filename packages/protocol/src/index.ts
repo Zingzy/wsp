@@ -18,6 +18,7 @@ import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js"
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
+import type { LinkTarget } from "./app-address.js";
 import { rootsPathIn } from "./project-path.js";
 import { ReleaseChangedEvent } from "./release.js";
 import { shellQuote } from "./shell-quote.js";
@@ -1875,6 +1876,10 @@ export type ComputerLook = z.infer<typeof ComputerLook>;
 /** A theme's id, one per side. The shape is checked here; which ids exist is the app's registry, which reads an id it
  * does not know as that side's default, so a theme added later needs nothing from the host. */
 export const ThemeId = z.string().min(1);
+/** A chord as the app spells it; which keys exist is the app's to say. */
+const ChordText = z.string().min(1).max(64);
+/** A font family by name, as the computer's font list or a person's typing names it. */
+const FontFamily = z.string().max(128);
 /** Each side's theme before a person picks one. */
 const THEME_PICK_DEFAULTS = { lightTheme: "paper", darkTheme: "graphite" } as const;
 
@@ -1909,6 +1914,12 @@ export const Preferences = z.object({
   /** Whether the host asks each agent's vendor for its newest version. On unless the person turns it off, and
    * WSP_UPDATE_CHECK=0 in the host's environment stops it whatever this says; defaulted as serverIcons is. */
   agentVersions: z.boolean().default(true),
+  /** The person's own chord for a command, by command id, in the app's chord spelling (mod+shift+b): it replaces every
+   * default chord that command has. Which commands and chords exist is the app's, so the shape alone is checked here. */
+  keybindings: z.record(z.string(), ChordText).default({}),
+  /** The family the app's text and its code are drawn in, empty for the system stack. The terminal keeps its own. */
+  appFont: FontFamily.default(""),
+  codeFont: FontFamily.default(""),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -1923,7 +1934,8 @@ export const cloudFromEnv = (env: Readonly<Record<string, string | undefined>>):
 
 /** What preferences.set takes: any of the record's fields but labs, which is the host's to say; a null sidebarWidth
  * clears it back to the default, terminalZoom and access name only the workspaces they move, a null entry dropping
- * that workspace's zoom or pick, and a null target clears the last target. Strict, so a field this record dropped
+ * that workspace's zoom or pick, keybindings names only the commands it moves, a null entry putting that command
+ * back on its defaults, and a null target clears the last target. Strict, so a field this record dropped
  * is refused rather than written into a state file nothing reads. */
 export const PreferencesPatch = Preferences.omit({ labs: true })
   .partial()
@@ -1934,11 +1946,12 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
     projectLook: z.record(z.string(), ProjectLook.nullable()).optional(),
     computerLook: z.record(z.string(), ComputerLook.nullable()).optional(),
     target: PreferencesTarget.nullable().optional(),
+    keybindings: z.record(z.string(), ChordText.nullable()).optional(),
   })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, keybindings: {}, appFont: "", codeFont: "", labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1971,6 +1984,9 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     computerLook: perWorkspace(current.computerLook, patch.computerLook),
     serverIcons: patch.serverIcons ?? current.serverIcons,
     agentVersions: patch.agentVersions ?? current.agentVersions,
+    keybindings: perWorkspace(current.keybindings, patch.keybindings),
+    appFont: patch.appFont ?? current.appFont,
+    codeFont: patch.codeFont ?? current.codeFont,
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
@@ -2108,6 +2124,8 @@ export interface DesktopBridge {
   readonly bundleHover?: string;
   /** The installed faces for a family and its Nerd Font variants, from this computer's font directories. */
   localFonts(family: string): Promise<LocalFontFace[]>;
+  /** Every font family installed on this computer, by name: what the app and code font pickers offer. */
+  fontFamilies(): Promise<string[]>;
   /** The system folder picker; the absolute path chosen, or nothing when it was dismissed. */
   pickFolder(): Promise<string | undefined>;
   /** The absolute path of a file or folder dropped on the window from the desktop, which the page itself cannot
@@ -2132,6 +2150,9 @@ export interface DesktopBridge {
   /** A click on that notification, after the shell has raised its window: the page opens the build screen. Returns
    * the unsubscribe. */
   onNeedsYouOpen(handler: () => void): () => void;
+  /** A wsp:// link the system handed the shell while the page was up, read down to what it names: the page opens it
+   * and does nothing to it. Only the app's own host's page is told. Returns the unsubscribe. */
+  onOpen(handler: (target: LinkTarget) => void): () => void;
   /** The device token the shell holds for the host that served this page, when the window is on a host somewhere
    * else; nothing on the app's own host, whose page carries its own token. The token never rides in the page. */
   hostToken(): Promise<string | undefined>;
@@ -5615,6 +5636,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
     on: z.string().optional(),
     name: z.string().optional(),
     base: z.string().optional(),
+    /** The folder on this computer a repo is cloned into, absent or empty; the project is then that folder. */
+    into: z.string().optional(),
     /** What the person chose off the seed menu; required where the source is a folder on this computer and that
      * folder is seeding a computer that clones, since nothing of theirs leaves this computer unasked. */
     seed: SeedChoice.optional(),
@@ -6084,7 +6107,7 @@ export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
-export { addressFromHash, appHash, openingHash, pairingCodeOf, workspaceHash, type AppAddress } from "./app-address.js";
+export { addressFromHash, addressFromLink, appHash, linkFromHash, linkHash, openingHash, pairingCodeOf, workspaceHash, LINK_KINDS, type AppAddress, type LinkKind, type LinkTarget } from "./app-address.js";
 export * from "./app-ports.js";
 export * from "./release.js";
 export * from "./init-job.js";
