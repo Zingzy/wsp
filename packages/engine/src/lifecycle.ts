@@ -1,13 +1,14 @@
 import type { Machine, MachineSpec, PreviewReach } from "./machine.js";
-import { GuestUnusableError, isMissing } from "./errors.js";
+import { wakeFailedLine } from "@wsp/protocol";
+import { isMissing } from "./errors.js";
 import { DAEMON_PORT, refreshPreviewToken } from "./preview.js";
 
 export interface WorkspaceHooks {
   goldenSnapshot: string;
-  /** How many times a wake may resume and check the machine before a fresh fork replaces it: the backend's number,
+  /** How many times a wake may resume and check the machine before it fails: the backend's number,
    * read off its lifecycle by whoever builds the hooks. */
   wakeAttempts: number;
-  /** Fresh fork from the golden image; used when a paused machine vanished or on upgrade. */
+  /** Fresh fork from the golden image, for the person's rebuild or upgrade; a wake never calls it. */
   resurrect?: (spec?: Partial<MachineSpec>) => Promise<Machine>;
   /** Export durable state (vault) off a machine before it is replaced; `drop` names guest paths the archive leaves
    * behind, so what stands at each on the replacement is left alone. */
@@ -35,7 +36,6 @@ export type ProviderMove = "pause" | "resume";
 export type WorkspacePhase = "running" | "napping" | "waking";
 
 export interface WakeResult {
-  resurrected: boolean;
   /** Present when the wake did not go straight through: every fault met on the way, in order. */
   reason?: string;
 }
@@ -122,35 +122,19 @@ export class Workspace {
   /** `landed` is a resume wsp already sent that the provider took without its call ever answering: the first attempt
    * sends no second one and goes straight to the check.
    *
-   * Done when the resumed machine passes the wake check, not when resume()
-   * returns: Solari has handed back a machine reporting running whose guest
-   * never served again (resume fell back to a fresh host at default size).
-   * Such a machine gets one more pause+resume, then a golden fork with the
-   * stashed vault replaces it and the zombie is killed. */
+   * Done when the resumed machine passes the wake check, not when resume() returns: Solari has handed back a machine
+   * reporting running whose guest never served again. Such a machine gets its backend's attempts, and then the wake
+   * fails with the machine still under it. A wake never replaces the machine: its disk holds the agents' sessions and
+   * the work nobody pushed, which a fresh fork of the image does not, so a replacement is the person's rebuild. */
   async wake(o: { landed?: boolean } = {}): Promise<WakeResult> {
-    if (this.phase === "running") return { resurrected: false };
+    if (this.phase === "running") return {};
     this.phase = "waking";
     try {
       const faults: string[] = [];
       for (let attempt = 1; attempt <= this.hooks.wakeAttempts; attempt++) {
         // A resume that landed without its call is a resume: the check below still runs and first life still ends,
         // since what a backend's snapshot rule turns on is the machine having been resumed, not who heard about it.
-        if (attempt > 1 || o.landed !== true) {
-          try {
-            await this.move("resume");
-          } catch (e) {
-            // A guest the provider left running but unusable answers nothing a second resume would mend, so it
-            // takes the road a vanished machine takes: no check, no re-pause, straight to the fresh fork.
-            if (e instanceof GuestUnusableError) {
-              faults.push(e.message);
-              break;
-            }
-            if (!isMissing(e)) throw e;
-            // Paused machines can vanish after hours (PoC overnight-pause finding).
-            faults.push(`machine ${this.machine.id} vanished while paused`);
-            break;
-          }
-        }
+        if (attempt > 1 || o.landed !== true) await this.move("resume");
         // The resumed machine is asked for its routes again before anything dials it: the check below goes through
         // daemonReach, and a route cached before the nap is nobody's promise.
         this.preview.byPort.clear();
@@ -158,7 +142,7 @@ export class Workspace {
         const fault = this.hooks.wakeCheck ? await this.hooks.wakeCheck(this.machine) : undefined;
         if (fault === undefined) {
           this.phase = "running";
-          return faults.length === 0 ? { resurrected: false } : { resurrected: false, reason: faults.join("; ") };
+          return faults.length === 0 ? {} : { reason: faults.join("; ") };
         }
         faults.push(`attempt ${attempt}: ${fault}`);
         if (attempt < this.hooks.wakeAttempts) {
@@ -167,11 +151,7 @@ export class Workspace {
           });
         }
       }
-      const reason = faults.join("; ");
-      if (!this.hooks.resurrect) throw new Error(`wake failed: ${reason}`);
-      await this.replace(this.hooks.resurrect);
-      this.phase = "running";
-      return { resurrected: true, reason };
+      throw new Error(wakeFailedLine(this.machine.id, faults.join("; ")));
     } catch (e) {
       this.phase = "napping";
       throw e;

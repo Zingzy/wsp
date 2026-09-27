@@ -1254,7 +1254,7 @@ const MACHINE_DOWN: ReadonlySet<WorkspaceState> = new Set<WorkspaceState>(["paus
  * pause. The runtime refuses a gone workspace too; the refusal here exists to carry the verb's own action word. */
 export async function awake(client: HostClient, workspace: WorkspaceView, action: string, tell: (line: string) => void): Promise<Woken> {
   const before = workspaceState({ phase: workspace.phase });
-  if (before === "gone") throw new Error(goneRefusal(action, workspace.gone));
+  if (before === "gone") throw new Error(goneRefusal(workspace.name, action, workspace.gone));
   if (before !== "running") tell(`waking ${workspace.name}`);
   const woken = (await client.request<{ workspace: WorkspaceOut }>("workspaces.wake", { workspaceId: workspace.id })).workspace;
   return { workspace: woken, woke: MACHINE_DOWN.has(before) && workspaceState({ phase: woken.phase }) === "running" };
@@ -3983,7 +3983,7 @@ export const ALL_VERBS: readonly Verb[] = [
       for (const dependent of ["agent", ...PICK_FLAGS, "cwd", "notify"]) if (task === undefined && flag(ctx.flags, dependent) !== undefined) throw usageRefusal(`--${dependent} says how a thread opens, and this line opens none.`, `Add --send "<task>", or drop --${dependent}.`);
       const client = await ctx.client();
       const source = await workspaceOf(client, ref);
-      if (workspaceState({ phase: source.phase }) === "gone") throw new Error(goneRefusal("fork", source.gone));
+      if (workspaceState({ phase: source.phase }) === "gone") throw new Error(goneRefusal(source.name, "fork", source.gone));
       // Resolved and checked before the machine is minted, so a bad reference or pick costs nothing. The picks are
       // checked against the source's machine, since the fork's own comes from the golden that machine runs.
       const notify = await notifyOf(client, flagList(ctx.flags, "notify"));

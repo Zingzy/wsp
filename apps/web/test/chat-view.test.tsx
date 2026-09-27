@@ -268,7 +268,7 @@ describe("ChatView", () => {
     expect(useStore.getState().workspaces[0]!.phase).toBe("waking");
     await screen.findByText(/^waking api on solari/);
     expect(screen.queryByRole("button", { name: "Wake" })).toBeNull();
-    emit({ type: "workspace.woken", workspaceId: WS, machineId: "m1", resurrected: false });
+    emit({ type: "workspace.woken", workspaceId: WS, machineId: "m1" });
     emit({ type: "workspace.status", status: { ...status, phase: "running", machineState: "running", reach: { state: "unreachable" } } });
     await screen.findByText("waiting for api to answer");
     expect(screen.queryByRole("button", { name: "Wake" })).toBeNull();

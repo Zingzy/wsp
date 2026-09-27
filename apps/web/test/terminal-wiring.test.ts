@@ -130,7 +130,7 @@ describe("wireTerminals", () => {
     expect(getLive("ws_run").snapshot().samples.length).toBeGreaterThan(0);
     expect(getProcs("ws_run").snapshot().reach).toBe("unreachable");
 
-    emit({ type: "workspace.woken", workspaceId: "ws_run", machineId: "m_ws_run", resurrected: false });
+    emit({ type: "workspace.woken", workspaceId: "ws_run", machineId: "m_ws_run" });
     await until(() => getTerminals("ws_run")!.status() === "live");
     // The new socket was asked to watch again: a sample newer than the last one before the nap arrives.
     const beforeWake = getLive("ws_run").snapshot().samples.length;

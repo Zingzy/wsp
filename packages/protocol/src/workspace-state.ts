@@ -480,8 +480,9 @@ export function placeDialRoad(place: { present?: boolean | undefined; road?: { r
 }
 
 /** Why an action that needs the machine (send, import, export) cannot run in this state; null while running.
- * goneWords are the provider's, quoted when the caller holds them (the runtime does, the composer does not). */
-export function actionRefusal(state: WorkspaceState, action: string, goneWords?: string): string | null {
+ * goneWords are the provider's, quoted when the caller holds them (the runtime does, the composer does not), and
+ * name is the workspace's, which the gone sentence leads with where the caller holds the record. */
+export function actionRefusal(state: WorkspaceState, action: string, goneWords?: string, name?: string): string | null {
   switch (state) {
     case "running":
       return null;
@@ -493,7 +494,7 @@ export function actionRefusal(state: WorkspaceState, action: string, goneWords?:
     case "unreachable":
       return `Workspace is unreachable; ${action}s open when the machine answers`;
     case "gone":
-      return goneRefusal(action, goneWords);
+      return goneRefusal(name, action, goneWords);
     default: {
       const _exhaustive: never = state;
       return null;
@@ -522,8 +523,8 @@ export const SEND_BLOCK_WORDS: Record<SendBlock, string> = {
 /** Why a turn cannot be sent, one sentence per kind; null while running. The composer draws every row; the runtime
  * throws the state rows, so the two say the same thing about a machine. A thread whose turn replied but still runs
  * has stillWorkingLine, which says the message waits for it. */
-export function sendRefusal(kind: SendRefusalKind, goneWords?: string): string | null {
-  return isBlock(kind) ? SEND_BLOCK_WORDS[kind] : actionRefusal(kind, "send", goneWords);
+export function sendRefusal(kind: SendRefusalKind, goneWords?: string, name?: string): string | null {
+  return isBlock(kind) ? SEND_BLOCK_WORDS[kind] : actionRefusal(kind, "send", goneWords, name);
 }
 
 const isBlock = (kind: SendRefusalKind): kind is SendBlock => kind in SEND_BLOCK_WORDS;
@@ -618,9 +619,11 @@ export function goneRoadRefusal(state: WorkspaceState, road: "rebuild" | "forget
 }
 
 /** The one sentence for a verb a gone machine cannot take (send, wake, fork), with the provider's words when the
- * caller holds them; rebuild and delete are the roads out. */
-export function goneRefusal(action: string, words?: string): string {
-  const sentence = `Workspace machine is gone; rebuild it to ${action}`;
+ * caller holds them; rebuild and delete are the roads out. It says what went with the disk and what the rebuild
+ * brings back, the home folder the last saved nap stored, and nothing more. Led by the workspace's name where the
+ * caller holds it. */
+export function goneRefusal(name: string | undefined, action: string, words?: string): string {
+  const sentence = `${name ?? "This workspace"}'s machine is gone with its disk, so work that was not pushed is lost; rebuild it to ${action}, which brings back its home folder from the last saved nap`;
   return words === undefined || words === "" ? sentence : `${sentence} (${words})`;
 }
 

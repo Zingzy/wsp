@@ -934,7 +934,7 @@ describe("store workspaces", () => {
     emit({ type: "workspace.napped", workspaceId: "ws_a" });
     expect(useStore.getState().workspaces[0]!.phase).toBe("napping");
     expect(useStore.getState().statuses["ws_a"]?.phase).toBe("napping");
-    emit({ type: "workspace.woken", workspaceId: "ws_a", machineId: "m2", resurrected: true });
+    emit({ type: "workspace.woken", workspaceId: "ws_a", machineId: "m2" });
     expect(useStore.getState().workspaces[0]!).toMatchObject({ phase: "running", machineId: "m2" });
     emit({ type: "workspace.upgraded", workspaceId: "ws_a", machineId: "m3" });
     expect(useStore.getState().workspaces[0]!.machineId).toBe("m3");
@@ -1011,7 +1011,7 @@ describe("store workspaces", () => {
     emit({ type: "workspace.gone", workspaceId: "ws_a", machineId: "m1", reason: "machine m1 is gone at the provider: Not found" });
     expect(useStore.getState().workspaces[0]!.gone).toBe("machine m1 is gone at the provider: Not found");
     // The verdict did not hold: the machine was there all along, so nothing is left saying it was not.
-    emit({ type: "workspace.woken", workspaceId: "ws_a", machineId: "m1", resurrected: false });
+    emit({ type: "workspace.woken", workspaceId: "ws_a", machineId: "m1" });
     expect(useStore.getState().workspaces[0]!).toMatchObject({ phase: "running", machineId: "m1" });
     expect(useStore.getState().workspaces[0]!.gone).toBeUndefined();
   });

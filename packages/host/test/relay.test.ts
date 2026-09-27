@@ -160,6 +160,12 @@ function relayRuntime(guestUrl: string, goldenRecipe?: GoldenRecipe): { rt: Runt
   return { rt: createRuntime({ backend, store, adapters: {}, daemonToken: TOKEN, ...(goldenRecipe !== undefined ? { goldenRecipe } : {}) }), backend };
 }
 
+/** Nothing answers on the guest route, so a wake would fail its check on the same machine: a test that wakes has its
+ * machines answer for their own daemon, which the wake asks before any route. */
+function answersItsDaemon(backend: StubBackend): void {
+  for (const m of backend.machines) m.daemonAnswers = async () => true;
+}
+
 /** Ports this file has handed out, none of them twice: the kernel hands an ephemeral port back out while it is free
  * (a repeat in 3 of 100 draws of 17 ports), and the relay folds a second event for a port it already forwards into
  * that one forward, so a test whose ports collide waits for a row that never comes. */
@@ -357,7 +363,7 @@ describe("callback relay over a fake daemon link", () => {
   });
 
   it("keeps a guest session across a nap, so the open the machine names on the redial runs its kind module once", async () => {
-    const { rt } = relayRuntime("http://guest.test");
+    const { rt, backend } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
     const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
     const token = (await rt.devices.mint("thread t1", { kind: "thread", threadId: "t1", workspaceId: ws.id, rootThreadId: "t1" }, Date.now())).deviceToken;
@@ -386,6 +392,7 @@ describe("callback relay over a fake daemon link", () => {
     // second time here is a second wsp new.
     await rt.workspaces.nap(ws.id);
     await until(() => !first.open);
+    answersItsDaemon(backend);
     await rt.workspaces.wake(ws.id);
     await until(() => fake.links.length >= 2);
     const second = fake.links[1]!;
@@ -1393,7 +1400,7 @@ describe("localhost forwards over a fake daemon link", () => {
   });
 
   async function setup(o: { idle?: number; guestPorts?: number[] } = {}) {
-    const { rt } = relayRuntime("http://guest.test");
+    const { rt, backend } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
     const clock = fakeClock();
     const lines: string[] = [];
@@ -1418,7 +1425,7 @@ describe("localhost forwards over a fake daemon link", () => {
     await until(() => fake.links.length >= 1);
     const link = fake.links[0]!;
     await until(() => link.ops.some(x => x.op === "ports.watch"));
-    return { rt, fake, clock, lines, events, ws, link, guestPorts };
+    return { rt, backend, fake, clock, lines, events, ws, link, guestPorts };
   }
 
   it("the default idle window is ten minutes", () => {
@@ -1718,7 +1725,7 @@ describe("localhost forwards over a fake daemon link", () => {
   });
 
   it("a nap pauses the idle clock and keeps the row; the wake resumes it, closes a port the workspace no longer listens on, and says so in one line per link", async () => {
-    const { rt, fake, clock, lines, events, ws, link, guestPorts } = await setup({ idle: 10_000 });
+    const { rt, backend, fake, clock, lines, events, ws, link, guestPorts } = await setup({ idle: 10_000 });
     const a = await freePort();
     const b = await freePort();
     link.emit({ type: "localhost.url", port: a });
@@ -1736,6 +1743,7 @@ describe("localhost forwards over a fake daemon link", () => {
 
     // The machine kept a; b is gone.
     guestPorts.push(a);
+    answersItsDaemon(backend);
     await rt.workspaces.wake(ws.id);
     await until(() => fake.links.length === 2);
     await until(() => relay!.forwards().length === 1);
@@ -1756,7 +1764,7 @@ describe("localhost forwards over a fake daemon link", () => {
   });
 
   it("a nap closes a callback forward saying the workspace napped; a delete closes a url forward for good", async () => {
-    const { rt, fake, lines, ws, link, guestPorts } = await setup();
+    const { rt, backend, fake, lines, ws, link, guestPorts } = await setup();
     const p = await freePort();
     const q = await freePort();
     link.emit({ type: "callback.port", port: p });
@@ -1766,6 +1774,7 @@ describe("localhost forwards over a fake daemon link", () => {
     await until(() => relay!.forwards().length === 1);
     expect(lines).toContain(`task-1: stopped forwarding localhost:${p} (the workspace napped)`);
     guestPorts.push(q);
+    answersItsDaemon(backend);
     await rt.workspaces.wake(ws.id);
     await until(() => fake.links.length === 2 && lines.some(l => l.includes("awake again")));
     expect(relay!.forwards()).toMatchObject([{ port: q, kind: "url" }]);
