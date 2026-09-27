@@ -4,7 +4,7 @@
 // sidebarProjectGrouping.ts SidebarProjectSnapshot and Sidebar.logic.ts
 // resolveThreadStatusPill (commit 57a66608). Phase is the product word and
 // leads; machine state and reach only add when they diverge from it.
-import { foldThreads, threadState, threadUnread, threadWordOf, waitingLine, workspaceStateOf, workspaceWord, type PauseMode, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, threadNeedsYou, threadState, threadUnread, threadWordOf, waitingLine, workspaceStateOf, workspaceWord, type PauseMode, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicator } from "./view-model.js";
 
 export interface SidebarInput {
@@ -135,6 +135,10 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     unread: threadUnread(thread),
     readAt: thread.readAt !== undefined ? new Date(thread.readAt).toISOString() : null,
     settledAt: thread.settledAt !== undefined ? new Date(thread.settledAt).toISOString() : null,
+    needsYou: threadNeedsYou(thread),
+    pinnedAt: thread.pinnedAt !== undefined ? new Date(thread.pinnedAt).toISOString() : null,
+    snoozedUntil: thread.snoozedUntil !== undefined ? new Date(thread.snoozedUntil).toISOString() : null,
+    section: thread.section ?? null,
   };
 }
 

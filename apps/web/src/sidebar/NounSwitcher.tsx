@@ -3,10 +3,11 @@
 // computers: a row naming "All ..." or the one row picked, and under it a
 // menu on the app's popover primitive with a search field, "All ...", one row
 // per thing with its gear and "Add a ..." at its foot. Picking filters what
-// the list under it shows and nothing else. With nothing to pick the head is
-// held.
+// the list under it shows and nothing else. Where the caller keeps an order,
+// a row is dragged onto another to go before it, while nothing is typed in the
+// search. With nothing to pick the head is held.
 import { CheckIcon, ChevronDownIcon, PlusIcon, SearchIcon, SettingsIcon, type LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Popover, PopoverPopup, PopoverTrigger } from "../components/ui/popover.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { cn, normalizeSearchText } from "../lib/utils.js";
@@ -34,6 +35,13 @@ type Option = Omit<SwitcherRow, "id"> & { readonly id: string | null };
 
 const MENU_ROW_CLASS = "group/option flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2 text-left text-sm text-foreground outline-none";
 
+/** The ids with one moved to stand just before another. */
+export function movedBefore(ids: ReadonlyArray<string>, moved: string, before: string): string[] {
+  const rest = ids.filter(id => id !== moved);
+  const at = rest.indexOf(before);
+  return at < 0 ? [...ids] : [...rest.slice(0, at), moved, ...rest.slice(at)];
+}
+
 /** The rows the menu lists for a query: "All ..." always, then every row whose name holds the typed text, case aside. */
 function switcherOptions(rows: ReadonlyArray<SwitcherRow>, words: Pick<SwitcherWords, "all">, allGlyph: ReactNode, query: string): Option[] {
   const q = normalizeSearchText(query);
@@ -51,6 +59,7 @@ export function NounSwitcher({
   onSettings,
   action,
   onContextMenu,
+  onReorder,
 }: {
   /** What the head, its menu and their rows are keyed by in the page, "project" or "computer". */
   noun: string;
@@ -65,8 +74,11 @@ export function NounSwitcher({
   /** A glyph the head shows on hover beside its chevron, with its room kept at rest so nothing moves. */
   action?: ReactNode;
   onContextMenu?: (event: MouseEvent<HTMLElement>) => void;
+  /** Keeps a new order of the rows, every id in it; absent where the rows keep the order they are given. */
+  onReorder?: (ids: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [dragged, setDragged] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const headRef = useRef<HTMLButtonElement>(null);
@@ -76,6 +88,27 @@ export function NounSwitcher({
   const held = rows.length === 0;
   /** The id of one menu row, which the field names as its active descendant while the keys are on it. */
   const optionId = (id: string | null): string => `${noun}-switcher-option-${id ?? "all"}`;
+  /** What lets a row be dragged onto another, where the caller keeps an order and nothing narrows the rows. */
+  const dragOf = (id: string | null) => {
+    if (onReorder === undefined || id === null || query !== "") return {};
+    return {
+      draggable: true,
+      onDragStart: (event: DragEvent<HTMLElement>) => {
+        event.dataTransfer.setData("text/plain", id);
+        event.dataTransfer.effectAllowed = "move";
+        setDragged(id);
+      },
+      onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (dragged !== null) event.preventDefault();
+      },
+      onDrop: (event: DragEvent<HTMLElement>) => {
+        event.preventDefault();
+        if (dragged !== null && dragged !== id) onReorder(movedBefore(rows.map(row => row.id), dragged, id));
+        setDragged(null);
+      },
+      onDragEnd: () => setDragged(null),
+    };
+  };
   const addRowId = `${noun}-switcher-option-add`;
 
   useEffect(() => {
@@ -189,6 +222,7 @@ export function NounSwitcher({
                 data-active={index === active || undefined}
                 onMouseEnter={() => setActive(index)}
                 onClick={() => choose(option)}
+                {...dragOf(option.id)}
                 className={cn(MENU_ROW_CLASS, index === active && "bg-accent text-accent-foreground")}
               >
                 {option.glyph}

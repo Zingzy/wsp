@@ -591,6 +591,20 @@
       "settleMs": 700
     },
     {
+      "name": "palette-search-messages",
+      "at": "/",
+      "fixture": "thread-states",
+      "steps": [
+        "key:ControlOrMeta+k",
+        "type:canonical"
+      ],
+      "wait": "palette-group=messages-search",
+      "widths": [
+        1440
+      ],
+      "settleMs": 700
+    },
+    {
       "name": "palette-open",
       "at": "/",
       "fixture": "thread-states",
@@ -706,6 +720,69 @@
         1440
       ],
       "fresh": true
+    },
+    {
+      "name": "tiles-sections",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "1440:row-id=thread:cart",
+        "390:key:Escape",
+        "390:sidebar=trigger"
+      ],
+      "wait": "section-head=needs-you",
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
+      "name": "tiles-marks",
+      "at": "/",
+      "fixture": "tiles-marks",
+      "steps": [
+        "1440:row-id=thread:cart",
+        "390:key:Escape",
+        "390:sidebar=trigger"
+      ],
+      "wait": "section-head=pinned",
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
+      "name": "tiles-picker-ordered",
+      "at": "/",
+      "fixture": "tiles-marks",
+      "steps": [
+        "1440:row-id=thread:cart",
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=project-switcher"
+      ],
+      "wait": "project-switcher-menu",
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
+      "name": "tiles-snooze",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "1440:row-id=thread:cart",
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "menu:row-id=thread:relay",
+        "menu-item=snooze"
+      ],
+      "wait": "snooze-preset=hour",
+      "widths": [
+        1440,
+        390
+      ]
     },
     {
       "name": "new-thread-dialog",

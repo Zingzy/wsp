@@ -7,7 +7,7 @@ import { SidebarProvider } from "../components/ui/sidebar.js";
 import { ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
 
 const thread = (over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapshot => {
-  const base = { id: "th_1", threadId: "th_1", sessionId: "s_1", workspaceId: "ws_a", title: "Cart total rounding", status: "running" as const, ran: true, startedAt: "2026-09-17T00:00:00.000Z", endedAt: null, harness: "claude", startedBy: "person" as const, project: "spoo", parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null };
+  const base = { id: "th_1", threadId: "th_1", sessionId: "s_1", workspaceId: "ws_a", title: "Cart total rounding", status: "running" as const, ran: true, startedAt: "2026-09-17T00:00:00.000Z", endedAt: null, harness: "claude", startedBy: "person" as const, project: "spoo", parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null, needsYou: false, pinnedAt: null, snoozedUntil: null, section: null };
   const merged = { ...base, ...over };
   return { ...merged, indicator: threadIndicator({ status: merged.status, ...(merged.asking === null ? {} : { asking: merged.asking }) }) };
 };

@@ -1,11 +1,11 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/Sidebar.logic.ts at 57a66608 (MIT).
 // Pure sidebar logic over wsp thread snapshots. Kept: traversal, the row
 // class, the thread status model, timestamps, sort, search and the idle shelf. Left out: context menus, pinned reorder,
-// snooze, project scope menus, prewarm leases and the router-bound helpers,
+// project scope menus, prewarm leases and the router-bound helpers,
 // which model state wsp's wire does not carry. Contract types are hand-written
 // against the wsp thread snapshot (startedAt and endedAt instead of createdAt,
 // updatedAt and the turn projection).
-import { THREAD_SETTLE_MS, type SessionStatus } from "@wsp/protocol";
+import { THREAD_SETTLE_MS, type SessionStatus, type ThreadSection } from "@wsp/protocol";
 import { cn } from "../lib/utils";
 import { activeThreadAnchorTimestampMs, toSortableTimestamp } from "./threadSort";
 
@@ -135,6 +135,20 @@ export function isThreadWorking(thread: SidebarThreadStatusInput): boolean {
   return resolveSidebarThreadStatus(thread) === "working";
 }
 
+/** A thread as the sections read it: its state, whether it asks and whether a finish of it sits unseen. */
+export interface SectionInput extends SidebarThreadStatusInput {
+  readonly asking: string | null;
+  readonly unread: boolean;
+}
+
+/** The section a thread's own state files it under: a question or a failure waits on the person, a running turn
+    works, a finish nobody has seen is Done and the rest rests in Idle. */
+export function threadSection(thread: SectionInput): ThreadSection {
+  if (thread.asking !== null || thread.status === "failed") return "needs-you";
+  if (isThreadWorking(thread)) return "working";
+  return thread.unread ? "done" : "idle";
+}
+
 /** NaN-safe Date.parse for sort comparators: a malformed timestamp must not
     poison the whole ordering, so it sinks to the epoch instead. */
 export function parseTimestampMs(isoDate: string): number {
@@ -249,15 +263,16 @@ function isThreadSeen(thread: SettleInput): boolean {
 /** Whether the thread belongs in the Settled fold: nothing running and nothing asked, and either the person settled it
     by hand with nothing happening since, or a window has shown it since it ended and it has been quiet
     THREAD_SETTLE_MS since then, counted from the later of its last activity and that showing. Three threads never
-    fold by time and wait for a hand: one nobody has seen since it finished, one whose turn failed, and the one open
-    in the centre, which `open` names, so a thread being read does not leave the list under the reader. One whose
+    fold by time and wait for a hand: one nobody has seen since it finished, one whose turn failed, and one `held`
+    names: the one open in the centre, so a thread being read does not leave the list under the reader, and one in a
+    tree the person pinned. One whose
     times are all missing has no quiet to read, so it stays out rather than falling into a group kept shut. */
-export function isThreadSettled(thread: SettleInput, nowMs: number, open = false): boolean {
+export function isThreadSettled(thread: SettleInput, nowMs: number, held = false): boolean {
   if (thread.asking !== null || isThreadWorking(thread)) return false;
   const last = lastActivityMs(thread);
   const settled = toSortableTimestamp(thread.settledAt ?? undefined);
   if (settled !== null && (last === null || settled >= last)) return true;
-  if (open || thread.status === "failed" || last === null || !isThreadSeen(thread)) return false;
+  if (held || thread.status === "failed" || last === null || !isThreadSeen(thread)) return false;
   return nowMs - Math.max(last, toSortableTimestamp(thread.readAt ?? undefined) ?? last) >= THREAD_SETTLE_MS;
 }
 

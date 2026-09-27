@@ -103,6 +103,7 @@ export function filterCommandPaletteGroups(input: {
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   settingsSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  messageSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const isActionsFilter = input.query.startsWith(">");
   const searchQuery = isActionsFilter ? input.query.slice(1) : input.query;
@@ -144,6 +145,13 @@ export function filterCommandPaletteGroups(input: {
         value: "threads-search",
         label: "Threads",
         items: input.threadSearchItems,
+      });
+    }
+    if (input.messageSearchItems && input.messageSearchItems.length > 0) {
+      searchableGroups.push({
+        value: "messages-search",
+        label: "In messages",
+        items: input.messageSearchItems,
       });
     }
   }

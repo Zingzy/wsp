@@ -6,6 +6,7 @@
 // Nothing here says what a workspace is made of: that pair of words is the
 // protocol's table (madeOfWord, portsWord), so a row in the app and a cell in
 // the command line's table cannot say two things about one workspace.
+import { threadStateWord, type ThreadSection } from "@wsp/protocol";
 import { onceNamed } from "../settings/format.js";
 
 /** The one word for the act, read by the plus on a project, the palette row and the dialog's own title: three
@@ -84,4 +85,19 @@ export const ADD_PROJECT_WORDS = {
   cloneIntoPlaceholder: (name: string) => `An empty folder, like ~/code/${name}`,
   boxSays: (name: string) => `Repos on ${name} show here soon. Paste a repository address above to clone it there.`,
   providerSays: (name: string) => `${name} clones a project from its repository address. Paste one above.`,
+} as const;
+
+/** The live list's section heads, in the design's caps, and the Settled fold's. */
+export const SECTION_WORDS: Record<"pinned" | ThreadSection, string> = {
+  pinned: "Pinned",
+  "needs-you": threadStateWord("waiting"),
+  working: threadStateWord("running"),
+  done: threadStateWord("done"),
+  idle: threadStateWord("completed"),
+};
+
+/** The snooze's pick of times. */
+export const SNOOZE_WORDS = {
+  custom: "Until",
+  snooze: "Snooze",
 } as const;
