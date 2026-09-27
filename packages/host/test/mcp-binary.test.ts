@@ -167,6 +167,20 @@ const SKILLS_SH: SkillsFetch = async url => {
   return new Response("{}", { status: 404 });
 };
 
+/** Tools called with nothing on the host to act on, each refused as its verb is refused: the failure object the verb
+ * prints on stderr under --json, and its sentence as the text. `after` goes behind the line's own flags. */
+const REFUSED_CALLED: readonly { tool: string; argv: string[]; after?: string[]; arguments: Record<string, unknown> }[] = [
+  { tool: "stop", argv: ["stop", "nope"], arguments: { thread: "nope" } },
+  { tool: "thread_rename", argv: ["thread", "rename", "nope", "t"], arguments: { thread: "nope", title: "t" } },
+  { tool: "thread_forget", argv: ["thread", "forget", "nope"], arguments: { thread: "nope" } },
+  { tool: "thread_allow", argv: ["thread", "allow", "nope"], arguments: { thread: "nope" } },
+  { tool: "thread_deny", argv: ["thread", "deny", "nope"], arguments: { thread: "nope" } },
+  { tool: "threads_wait", argv: ["threads", "wait", "nope"], arguments: { threads: ["nope"] } },
+  { tool: "send", argv: ["send", "nope", "m"], arguments: { thread: "nope", message: "m" } },
+  { tool: "run", argv: ["run", "nope", "t"], arguments: { workspace: "nope", task: "t" } },
+  { tool: "exec", argv: ["exec", "nope"], after: ["--", "true"], arguments: { workspace: "nope", argv: ["true"] } },
+];
+
 const suite = MCP_BIN !== undefined ? describe : describe.skip;
 
 suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_MCP_BIN to a wsp-daemon built with --features mcp)" : ""}`, () => {
@@ -285,6 +299,16 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
         return;
       }
       expect(result.content).toEqual([{ type: "text", text: jsonLine(printed, 2) }]);
+    });
+
+    it.each(REFUSED_CALLED)("refuses $tool as its verb refuses it, the failure object and its sentence", async ({ tool, argv, after, arguments: args }) => {
+      const io = captured();
+      expect(await cli([...argv, "--json", "--state", statePath, ...(after ?? [])], io, undefined, env, false)).not.toBe(0);
+      const printed = JSON.parse(io.errors.at(-1)!) as { error: string };
+      const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], env, [callOf(1, tool, args)]);
+      expect(code).toBe(0);
+      const { result } = JSON.parse(out[0]!) as { result: { content: { type: string; text: string }[]; structuredContent: unknown; isError?: boolean } };
+      expect(result).toEqual({ content: [{ type: "text", text: printed.error }], structuredContent: printed, isError: true });
     });
   });
 });

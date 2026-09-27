@@ -2264,14 +2264,14 @@ function turnStream(ctx: VerbContext): { text(t: string, messageId?: string): vo
  * `answer` is the road another terminal takes: the verb, its help row and the line printed after that pick; absent
  * where no verb carries the road. One row per answer, so an answer added later is a row here and reaches the keys,
  * the verbs and every line at once. */
-interface AnswerRoad {
+export interface AnswerRoad {
   key: string;
   effect: PermissionEffect;
   does?: string;
   answer?: { verb: string; about: string; said: string };
 }
 
-const ANSWER_ROADS: readonly AnswerRoad[] = [
+export const ANSWER_ROADS: readonly AnswerRoad[] = [
   { key: "y", effect: "allow", does: "run it", answer: { verb: "allow", about: "answers the prompt the thread is stopped on and lets the call run", said: "allowed" } },
   { key: "n", effect: "deny", does: "refuse it", answer: { verb: "deny", about: "answers the prompt the thread is stopped on and refuses the call", said: "denied" } },
   { key: "a", effect: "mode" },
@@ -2324,7 +2324,7 @@ export function noSuchAnswerLine(threadId: string, verb: string): string {
 
 /** What a pick the host would not take came to, one line per outcome it can answer with; `answered` is the only one
  * that is not a failure and has no line here. */
-const ANSWER_WORDS: Readonly<Record<Exclude<SessionAnswerOutcome, "answered">, string>> = {
+export const ANSWER_WORDS: Readonly<Record<Exclude<SessionAnswerOutcome, "answered">, string>> = {
   gone: "the prompt closed before the answer reached it",
   unsupported: "this thread's agent raises no prompt this host can answer",
   "not-found": "this host holds no turn of that thread",
@@ -2398,7 +2398,7 @@ function answering(ctx: VerbContext, say: (line: string) => void): { opened(ask:
 export const THREAD_PREFIX_WORD = "wsp thread read, wsp send and wsp stop take its first characters";
 
 /** The first line a thread's opening prints: its id, and where it went when no workspace was named. */
-const openedThreadLine = (threadId: string, opened: ((threadId: string) => string) | undefined): string => (opened === undefined ? `thread ${threadId}` : opened(threadId));
+export const openedThreadLine = (threadId: string, opened: ((threadId: string) => string) | undefined): string => (opened === undefined ? `thread ${threadId}` : opened(threadId));
 
 /** The same line at a terminal, where a person has to retype the id to say anything else to the thread. The tool
  * door prints it without the clause: an agent holding the id passes it whole. */
@@ -3808,9 +3808,9 @@ export const ALL_VERBS: readonly Verb[] = [
   {
     name: "recipe",
     readsHere: "the agents, package managers and history it reads are this computer's own",
-    usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--engine] [--project <folder>] [--out <path>]`,
+    usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--why <words>] [--engine] [--project <folder>] [--out <path>]`,
     about:
-      `write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=${LOGIN_CHOICES.join("|")} answers a sign-in by catalog id, later leaving it to the first time the tool is needed on the workspace and key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --engine marks the recipe so every workspace from its image gets the place's Docker or podman through a socket of its own (a project whose compose file needs one), and stays in the file until you edit it out; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe`,
+      `write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=${LOGIN_CHOICES.join("|")} answers a sign-in by catalog id, later leaving it to the first time the tool is needed on the workspace and key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there and --why <words> what the rows it adds are for; --engine marks the recipe so every workspace from its image gets the place's Docker or podman through a socket of its own (a project whose compose file needs one), and stays in the file until you edit it out; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe`,
     page: "agent",
     options: {
       out: { type: "string" },
@@ -3819,11 +3819,13 @@ export const ALL_VERBS: readonly Verb[] = [
       signin: { type: "string", multiple: true },
       add: { type: "string", multiple: true },
       "add-check": { type: "string", multiple: true },
+      why: { type: "string" },
       engine: { type: "boolean" },
       project: { type: "string", multiple: true },
     },
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp recipe takes no positional arguments; wsp recipe scan is its one subcommand.", usageIs(ctx));
+      const why = flag(ctx.flags, "why");
       const tick = flag(ctx.flags, "tick");
       if (tick !== undefined && !isRecipeTick(tick)) throw usageRefusal(`--tick takes one of ${RECIPE_TICKS.join(", ")}, and got ${JSON.stringify(tick)}.`, "Name one of those.");
       const out = resolve(flag(ctx.flags, "out") ?? smallRecipePath(ctx.statePath));
@@ -3838,6 +3840,7 @@ export const ALL_VERBS: readonly Verb[] = [
           signin: flagList(ctx.flags, "signin"),
           add: flagList(ctx.flags, "add"),
           addCheck: flagList(ctx.flags, "add-check"),
+          ...(why !== undefined ? { why } : {}),
           ...projectsFlag(ctx.flags),
           ...(ctx.alsoHere !== undefined ? { alsoHere: ctx.alsoHere } : {}),
         },
@@ -4871,6 +4874,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "bring back body": "the pull request's body, which needs a title beside it",
   tree: "indent the threads an agent opened under the one that opened them",
   watch: "draw the table again every second where it stands, until Ctrl-C; it needs a terminal to redraw on",
+  why: "what the rows this line adds are for, in your own words; the rows say an agent added them without it",
   yes: "go ahead without being asked",
 };
 
