@@ -2498,8 +2498,7 @@ describe("a turn the host comes back to", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const h = machineRuns();
-    const agents = { reach: { url: "http://10.0.0.2:4700" } };
-    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter }, agents });
+    const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
     const ws = await createOn(rt1, { golden: "snap_g", name: "a", agents: { spawn: true, maxMachines: 3, maxDepth: 1 } });
     await rt1.sessions.start(ws.id, { prompt: "coordinate the builders" });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
@@ -2510,7 +2509,7 @@ describe("a turn the host comes back to", () => {
     expect(stored.sessions.map(s => [s.status, s.scopeDeviceId])).toEqual([["running", device.id]]);
     await rt1.close();
 
-    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter }, agents });
+    const rt2 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
     expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
     // The load's sweep spares a device whose thread is running, so the re-opened turn is what hands it back.
     expect((await rt2.devices.list()).map(d => d.id)).toEqual([device.id]);

@@ -8,7 +8,6 @@
 // holds a token to their box and to take one away.
 import { networkInterfaces } from "node:os";
 import { authority, fmtDuration, isLoopback, isWildcard, LOOPBACK, pairToken, relayUrlOf, SEAL_UNSERVED, usageRefusal, type DeviceView } from "@wsp/protocol";
-import type { HostReach } from "@wsp/runtime";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, hostSideOnlyFix, hostSideOnlyLine, type HostAim, type HostPick } from "./hosts.js";
@@ -35,22 +34,11 @@ export function reachAddresses(bound: string, interfaces = networkInterfaces()):
 }
 
 /** The address the person named with --advertise, as an address: one reading of a blank and of a trailing slash,
- * since the flag, the rule a turn is told by and the words spelled back into a service unit all ask the same
- * question. Nothing where they named none, or only spaces. */
+ * since the flag, the addresses a joining box is told and the words spelled back into a service unit all ask the
+ * same question. Nothing where they named none, or only spaces. */
 export function advertiseWord(word: string | undefined): string | undefined {
   const said = word?.trim().replace(/\/+$/, "") ?? "";
   return said === "" ? undefined : said;
-}
-
-/** The address a machine dials this host at, the one rule for it: what the person named with --advertise, else the
- * address the host bound turned into a url, and for a wildcard the first address this computer answers on that
- * leaves it. Loopback is what is left when nothing else answers, which is a host no machine can reach; the runtime
- * hands out no token to a turn when it is told none, and this is what a person overrides with --advertise. */
-export function advertisedUrl(bound: string, port: number, asked?: string, interfaces = networkInterfaces()): string | undefined {
-  const named = advertiseWord(asked);
-  if (named !== undefined) return named;
-  const at = reachAddresses(bound, interfaces)[0] ?? LOOPBACK;
-  return isLoopback(at) ? undefined : `http://${authority(at, port)}`;
 }
 
 /** Where a process on this computer dials a host bound there, at that port: the bound address itself when it is
@@ -66,36 +54,6 @@ export function hereUrl(bound: string, port: number): string | undefined {
  * and on a bind with no loopback. */
 export interface HereAt {
   url?: string;
-}
-
-/** What a turn's launch is told about this host, for the kinds that need it. The address the person named with
- * --advertise stands above the name a relay carries this host under: somebody who names an address has said which
- * one the other end can reach, and a relay name they never asked for is a guess. Where they named none, the relay's
- * name is what a machine somewhere else dials, since that one works from anywhere, else what this computer answers
- * on; and the port travels only where the host bound the wildcard. That last one is the whole rule about a kind's
- * own address: a host on the wildcard answers on every address this computer has, the ones a machine knows of its
- * own included, and a host bound to one address answers there and nowhere else, however a machine would rather
- * reach it. The url is read at each turn: a quick tunnel is given a new name every time its connector runs. `here`
- * is apart from all of them, since a token for this computer's loopback never leaves it. */
-export function hostReach(
-  at: { address: string; port: number },
-  asked: string | undefined,
-  publicAt: () => string | undefined,
-  interfaces = networkInterfaces(),
-  here: HereAt = {},
-): HostReach {
-  const advertise = advertiseWord(asked);
-  return {
-    ...(advertise !== undefined ? { advertise } : {}),
-    get url(): string | undefined {
-      const relayed = advertise === undefined ? publicAt() : undefined;
-      return relayed !== undefined ? relayUrlOf(relayed) : advertisedUrl(at.address, at.port, asked, interfaces);
-    },
-    get here(): string | undefined {
-      return here.url;
-    },
-    ...(isWildcard(at.address) ? { port: at.port } : {}),
-  };
 }
 
 /** What wsp host pair prints: the token, how long it stands, and the addresses to hand the person at the other
