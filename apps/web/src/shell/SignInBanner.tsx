@@ -17,7 +17,7 @@ export function SignInBanner() {
   const entries = Object.entries(pages);
   if (entries.length === 0) return null;
   return (
-    <div className="flex shrink-0 flex-col gap-2 p-2" data-testid="sign-in-banner">
+    <div className="flex shrink-0 flex-col" data-testid="sign-in-banner">
       {entries.map(([key, { workspaceId, url }]) => {
         const host = hostOf(url);
         return (
@@ -28,10 +28,10 @@ export function SignInBanner() {
               {workspaces.find(w => w.id === workspaceId)?.name ?? workspaceId}
             </AlertTitle>
             <AlertAction>
-              <Button size="compact" variant="outline" onClick={() => window.open(url, "_blank", "noopener,noreferrer")}>
+              <Button size="xs" variant="outline" onClick={() => window.open(url, "_blank", "noopener,noreferrer")}>
                 Open
               </Button>
-              <Button size="compact" variant="ghost" onClick={() => dismiss(key)}>
+              <Button size="xs" variant="ghost" onClick={() => dismiss(key)}>
                 Dismiss
               </Button>
             </AlertAction>

@@ -469,6 +469,10 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('data-user-message-collapsed="true"');
     expect(markup).toContain('data-user-message-fade="true"');
     expect(markup).toContain('data-user-message-footer="true"');
+    // The toggle stands at the right end of the faded band at the clamp's foot, not in a row under it, and the words fade to
+    // nothing above it so no blank strip sits between the text and the toggle.
+    expect(markup).toContain('class="flex items-center justify-end absolute inset-x-0 bottom-0" data-user-message-footer="true"');
+    expect(markup).toContain("transparent calc(100% - 1.5rem)");
   });
 
   it("marks a steered user message with the muted mono word and nothing else; a plain one carries no mark", () => {

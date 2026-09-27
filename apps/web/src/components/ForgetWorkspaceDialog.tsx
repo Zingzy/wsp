@@ -10,6 +10,7 @@ import { deleteNotice, forgetNotice, workspaceKind, type WorkspaceView } from "@
 import { CLIENT_CANNOT_DELETE, CLIENT_CANNOT_FORGET } from "../actions/format.js";
 import { errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
+import { RefusalSlot } from "../settings/sheetParts.js";
 import { AlertDialog, AlertDialogClose, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogPopup, AlertDialogTitle } from "./ui/alert-dialog.js";
 import { Button, NEUTRAL_RING } from "./ui/button.js";
 
@@ -70,11 +71,9 @@ export function ForgetWorkspaceDialog({
           </AlertDialogTitle>
           <AlertDialogDescription>{act === "delete" ? deleteNotice(threads, workspaceKind(workspace), workspace.copy) : forgetNotice(threads)}</AlertDialogDescription>
         </AlertDialogHeader>
-        {refusal && (
-          <p className="text-[11px] text-muted-foreground" data-k="forget-refusal">
-            {refusal}
-          </p>
-        )}
+        <div className="px-5 pt-2">
+          <RefusalSlot k="forget-refusal" {...(refusal ? { said: refusal } : {})} />
+        </div>
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>Cancel</AlertDialogClose>
           <Button variant="destructive" disabled={busy} onClick={() => void forget()} data-k="end-workspace">

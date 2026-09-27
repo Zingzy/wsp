@@ -29,6 +29,8 @@ export interface RunOptions {
   env?: Readonly<Record<string, string>>;
   /** How long the child may run before it is killed; two minutes when unset. */
   timeoutMs?: number;
+  /** Kills the child and every process under it when it aborts, and a run asked after that starts nothing. */
+  signal?: AbortSignal;
 }
 
 export interface HostExec {

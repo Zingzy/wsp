@@ -8,7 +8,7 @@ import { Button } from "../components/ui/button.js";
 
 export function DisconnectedBanner({ reconnecting }: { reconnecting: boolean }) {
   return (
-    <Alert className="m-2 shrink-0" data-disconnected-banner={reconnecting ? "reconnecting" : "closed"}>
+    <Alert className="shrink-0" data-disconnected-banner={reconnecting ? "reconnecting" : "closed"}>
       <Unplug />
       <AlertTitle>{reconnecting ? "wsp is not running, reconnecting." : "wsp is not running."}</AlertTitle>
       <AlertDescription>
@@ -18,7 +18,7 @@ export function DisconnectedBanner({ reconnecting }: { reconnecting: boolean }) 
       </AlertDescription>
       {reconnecting ? null : (
         <AlertAction>
-          <Button size="compact" variant="outline" onClick={() => window.location.reload()}>
+          <Button size="xs" variant="outline" onClick={() => window.location.reload()}>
             Reload
           </Button>
         </AlertAction>

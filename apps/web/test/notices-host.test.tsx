@@ -453,6 +453,21 @@ describe("a workspace gone and a newer release", () => {
   });
 });
 
+describe("the workspace a notice names", () => {
+  it("names this computer's own workspace by the computer's name, never its host name or this Mac", () => {
+    const itself: WorkspaceView = { ...WS, name: "zingzys-MacBook-Pro.local", kind: "local", golden: "" };
+    const here = { id: "here", kind: "computer", name: "zingzys-MacBook-Pro.local", label: "zingzy's MacBook Pro", present: true } as unknown as PlaceView;
+    act(() => useStore.setState({ workspaces: [itself], places: [here, BOX] }));
+    emit(ENDED);
+    emit(ASKED);
+    emit({ type: "session.notify", workspaceId: "ws_1", sessionId: "s1", turnId: "turn_1", threadId: "thr_1", text: "all green", notify: "me" });
+    emit({ type: "workspace.gone", workspaceId: "ws_1", machineId: "m1", reason: "the machine is gone" });
+    expect(notices().map(n => n.where)).toEqual(["zingzy's MacBook Pro", "zingzy's MacBook Pro", "zingzy's MacBook Pro", "zingzy's MacBook Pro"]);
+    expect(texts()).toContain(HOST_NOTICE_WORDS.gone("zingzy's MacBook Pro", "the machine is gone"));
+    for (const n of notices()) expect(`${n.text} ${n.where}`).not.toMatch(/zingzys-MacBook-Pro\.local|this Mac/);
+  });
+});
+
 describe("the noise", () => {
   it("presence, naps, wakes, forwards, projects, creates and image stages are said nowhere", () => {
     emit({ type: "place.present", placeId: "pl_box", from: "10.0.0.9" });

@@ -18,8 +18,8 @@ export function NotRunning({ workspaceId }: { workspaceId: string }) {
   return (
     <Empty className="flex-1">
       <EmptyHeader>
-        <EmptyTitle>The task is not running.</EmptyTitle>
-        <EmptyDescription>{absent?.sentence ?? "A diff is read over the task's daemon; wake it to read one."}</EmptyDescription>
+        <EmptyTitle>The thread is not running.</EmptyTitle>
+        <EmptyDescription>{absent?.sentence ?? "A diff is read over the thread's daemon; wake it to read one."}</EmptyDescription>
       </EmptyHeader>
     </Empty>
   );

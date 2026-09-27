@@ -6,7 +6,9 @@ import { DEFAULT_PREFERENCES, type Capabilities, type PlaceView, type ProjectVie
 import { workspaceActions } from "../actions/workspaceActions.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
 import type { Api } from "../protocol/client.js";
+import { provideDaemonWire } from "../files/wire.js";
 import { useStore } from "../protocol/store.js";
+import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../terminal/link.js";
 import { WorkspaceSidebar } from "./WorkspaceSidebar.js";
 import { PROJECT_WORDS } from "./words.js";
 
@@ -167,6 +169,84 @@ describe("the sidebar's list of thread tiles", () => {
     const tile = document.querySelector<HTMLElement>("[data-row-id='ws:ws_a']")!;
     expect(tile.querySelector("[data-thread-title]")!.textContent).toBe("zingzy's MacBook Pro");
     expect(tile.textContent).not.toContain("zingzys-MacBook-Pro.local");
+  });
+
+  describe("a fork's branch", () => {
+    const { copy: _copy, ...bare } = workspace("ws_f", "cart rounding", "pr_1");
+    const fork: WorkspaceView = { ...bare, kind: "cloud", machineId: "fk_1", golden: "snap_g", project: { ...bare.project, path: "/root/spoo" } };
+    const asked: string[] = [];
+    const wireAnswering = (answer: () => Promise<Record<string, unknown>>): TerminalWire => ({
+      request: async (op, params) => {
+        if (op !== "git.status") throw new Error(`no ${op}`);
+        asked.push(String(params?.["cwd"]));
+        return answer();
+      },
+    });
+    const linked = (id: string, wire: TerminalWire): WorkspaceTerminals => {
+      const terms = new WorkspaceTerminals(wire);
+      provideDaemonWire(id, wire);
+      provideTerminals(id, terms);
+      return terms;
+    };
+    const three = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-row-id='ws:${id}']`)!.children[2] as HTMLElement;
+    afterEach(() => {
+      cleanup();
+      asked.length = 0;
+      for (const id of ["ws_f", "ws_a"]) {
+        provideDaemonWire(id, null);
+        provideTerminals(id, null);
+      }
+    });
+
+    it("shows the branch git.status names in its project's folder once its link is up, and keeps it while the link is down", async () => {
+      const terms = linked("ws_f", wireAnswering(async () => ({ branch: { oid: "abc", head: "fix/cart-rounding", ahead: 0, behind: 0 }, entries: [], root: "/root/spoo" })));
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
+      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
+      expect(three("ws_f").querySelector("[data-tile-branch]")).toBeNull();
+      await act(async () => terms.feedStatus("live"));
+      await waitFor(() => expect(three("ws_f").querySelector("[data-tile-branch]")?.textContent).toBe("fix/cart-rounding"));
+      expect(three("ws_f").querySelector(".lucide-git-branch")).not.toBeNull();
+      expect(asked).toEqual(["/root/spoo"]);
+      act(() => terms.feedStatus("connecting"));
+      expect(three("ws_f").querySelector("[data-tile-branch]")?.textContent).toBe("fix/cart-rounding");
+      expect(asked).toEqual(["/root/spoo"]);
+    });
+
+    it("reads a fork's branch once however many tiles it has, and every tile shows it", async () => {
+      const terms = linked("ws_f", wireAnswering(async () => ({ branch: { oid: "abc", head: "fix/cart-rounding", ahead: 0, behind: 0 }, entries: [], root: "/root/spoo" })));
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
+      await act(async () => {
+        useStore.setState({ sessions: sessions([{ ws: "ws_f", id: "th_one", prompt: "round the total once" }, { ws: "ws_f", id: "th_two", prompt: "pin the cart order" }]) } as never);
+      });
+      await waitFor(() => expect(rowIds()).toEqual(["thread:th_one", "thread:th_two"]));
+      await act(async () => terms.feedStatus("live"));
+      const branches = (): string[] => rowIds().map(id => document.querySelector(`[data-row-id='${id}'] [data-tile-branch]`)?.textContent ?? "");
+      await waitFor(() => expect(branches()).toEqual(["fix/cart-rounding", "fix/cart-rounding"]));
+      expect(asked).toEqual(["/root/spoo"]);
+    });
+
+    it("keeps the empty row three at the tile's height where git names no branch or nothing answers", async () => {
+      const terms = linked("ws_f", wireAnswering(async () => Promise.reject(Object.assign(new Error("not a git repository"), { code: "not-a-git-repo" }))));
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
+      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
+      await act(async () => terms.feedStatus("live"));
+      await waitFor(() => expect(asked).toEqual(["/root/spoo"]));
+      const tile = document.querySelector<HTMLElement>("[data-row-id='ws:ws_f']")!;
+      expect(tile.children).toHaveLength(3);
+      expect(tile.className).toContain("h-[68px]");
+      expect(three("ws_f").className).toContain("h-3.5");
+      expect(three("ws_f").querySelector("[data-tile-branch]")).toBeNull();
+      expect(three("ws_f").querySelector(".lucide-git-branch")).toBeNull();
+    });
+
+    it("shows a copy's branch off its record and asks its daemon nothing", async () => {
+      const terms = linked("ws_a", wireAnswering(async () => ({ branch: { oid: "abc", head: "somewhere-else", ahead: 0, behind: 0 }, entries: [], root: "/Users/dev/pr_1" })));
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_a"]));
+      await act(async () => terms.feedStatus("live"));
+      expect(three("ws_a").querySelector("[data-tile-branch]")?.textContent).toBe("agent/pricing-page");
+      expect(asked).toEqual([]);
+    });
   });
 
   it("under a picked project lists that project's tiles alone, and All projects brings every tile back", async () => {

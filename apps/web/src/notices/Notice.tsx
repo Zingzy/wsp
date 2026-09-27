@@ -6,9 +6,12 @@ import { XIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Button } from "../components/ui/button.js";
 import { cn } from "../lib/utils.js";
-import { NOTICE_LIMIT, noticeTimeout, useNotices, type Notice as NoticeRecord } from "./store.js";
+import { NOTICE_LIMIT, noticeTimeout, useNotices, type Notice as NoticeRecord, type NoticeKind } from "./store.js";
 
 export const CLOSE_NOTICE_LABEL = "Close this message";
+
+/** The word in front of a notice's sentence, one per kind. */
+export const NOTICE_KIND_WORD: Readonly<Record<NoticeKind, string>> = { error: "Error", done: "Done", waiting: "Waiting", note: "Note" };
 
 const clock = (at: number): string => {
   const d = new Date(at);
@@ -37,18 +40,18 @@ function Notice({ toast }: { toast: Toast.Root.ToastObject<{ notice: NoticeRecor
       )}
     >
       <div className="flex items-start gap-3 px-3 py-2.5">
-        <span className={cn("w-12 shrink-0 font-mono text-[11px] leading-5", notice.kind === "error" ? "text-destructive-foreground" : "text-muted-foreground")}>{notice.kind}</span>
+        <span className={cn("w-14 shrink-0 text-[13px] leading-5", notice.kind === "error" ? "text-destructive-foreground" : "text-muted-foreground")}>{NOTICE_KIND_WORD[notice.kind]}</span>
         <div className="min-w-0 flex-1">
           <Toast.Title className="line-clamp-2 break-words text-[13px] leading-5 font-normal text-foreground">{notice.text}</Toast.Title>
-          <Toast.Description data-notice-when="" className="flex min-w-0 gap-3 font-mono text-[11px] leading-4 text-muted-foreground tabular-nums">
+          <Toast.Description data-notice-when="" className="flex min-w-0 gap-3 text-[11px] leading-4 text-muted-foreground">
             {notice.where === undefined ? null : <span className="truncate">{notice.where}</span>}{" "}
-            <span className="shrink-0">{clock(notice.at)}</span>
+            <span className="shrink-0 font-mono tabular-nums">{clock(notice.at)}</span>
           </Toast.Description>
         </div>
         {action !== undefined ? (
           <Toast.Action
             data-notice-action=""
-            render={<Button size="xs" variant="outline" className="shrink-0 font-mono" />}
+            render={<Button size="xs" variant="outline" className="shrink-0" />}
             onClick={() => {
               action.run();
               useNotices.getState().dismiss(notice.id);

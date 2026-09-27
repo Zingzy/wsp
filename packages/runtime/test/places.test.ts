@@ -4981,6 +4981,13 @@ describe("the agents on a computer you own", () => {
     expect((await c.request("agents.read", { target: { placeId } })).ok).toBe(true);
     expect(asked.at(-1)).toMatchObject({ kind: "box", signIns: { claude: "none", codex: "signed-in" } });
   });
+
+  it("closes the reader with the runtime, which is what ends the agents' commands still running", async () => {
+    let closed = 0;
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, agentsReader: { ...reading([], []), close: () => closed++ } });
+    await rt.close();
+    expect(closed).toBe(1);
+  });
 });
 
 describe("the forward a computer dials back through", () => {

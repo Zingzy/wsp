@@ -10,7 +10,7 @@ import { onceNamed } from "../settings/format.js";
 
 /** The one word for the act, read by the plus on a project, the palette row and the dialog's own title: three
  * surfaces offering one act, so none of them can name it differently. */
-export const NEW_WORKSPACE = "New task";
+export const NEW_WORKSPACE = "New thread";
 
 /** The one question a workspace is made by, asked on the first run and in the dialog: one question, one wording,
  * and its ghost is a piece of work rather than a name shaped like a machine's. */
@@ -56,7 +56,7 @@ export const COMPUTER_SWITCHER_WORDS = {
 } as const;
 
 /** Why Create waits on the one question the dialog asks. */
-export const SAY_THE_WORK = "say what you are working on";
+export const SAY_THE_WORK = "Say what you are working on first.";
 
 /** The sheet that records a project: one source on one computer, and nothing else. The computer pick appears only
  * where there is a computer beyond this one and the source is a repository address, which is what says which road
