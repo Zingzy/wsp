@@ -1399,10 +1399,7 @@ async function hostFor(
           restart: () => (serving === undefined ? Promise.reject(new Error("the host is still starting")) : road.restart(serving)),
         };
   try {
-    // Minted and written before the host binds: startHost binds the page, then sweeps and lists at the provider
-    // before it returns, and a client that read the page in that gap had no token file to hold it to (the app's
-    // first launch after installing the service waited out a slow listing and quit). Other local tools read it off the
-    // disk; the socket never sees it in a URL.
+    // Written before startHost binds: a client can read the page while the host is still listing at the provider.
     const authToken = randomBytes(24).toString("base64url");
     const tokenPath = hostTokenPath(opts.statePath);
     writeOwn(dirname(tokenPath), basename(tokenPath), authToken);

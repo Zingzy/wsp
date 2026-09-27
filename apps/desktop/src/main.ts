@@ -571,7 +571,7 @@ app
   })
   .catch((e: unknown) => {
     const why = e instanceof Error ? e.message : String(e);
-    // Said to the log as well: a launch nobody is watching read as one that quit with no reason.
+    // A launch nobody watches has only its log to say why it quit.
     io.error(`wsp could not start: ${why}`);
     dialog.showErrorBox("wsp could not start", why);
     app.quit();
