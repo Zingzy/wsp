@@ -63,7 +63,7 @@ import { buildBesideHost } from "./init-beside.js";
 import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
 import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, refuseIfServed, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
+import { addressLines, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, refuseIfServed, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
 import { startOnce } from "./start-once.js";
 import {
@@ -77,7 +77,6 @@ import {
   serviceAddressHere,
   serviceEnv,
   serviceManagerFor,
-  SERVICE_WAIT_MS,
   serviceReading,
   statusLines,
   stopService,
@@ -1700,7 +1699,7 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
     io.error(`the ${manager.words} ${unit.name} is gone, but the host it started (pid ${lock.pid}) is still serving ${opts.statePath}.`);
     return 1;
   }
-  io.log(`${manager.words} ${unit.name} stopped; nothing serves ${opts.statePath} now`);
+  io.log(`${manager.words} ${unit.name} stopped; nothing serves ${opts.statePath} now, and its running turns keep going until the next host adopts them`);
   return 0;
 }
 
