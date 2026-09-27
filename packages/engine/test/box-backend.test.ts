@@ -506,7 +506,7 @@ describe("BoxBackend against a fake Box API", () => {
     const { machine } = machineOn(api);
     const e = await machine.exec("true").catch((err: unknown) => err);
     expect(e).toBeInstanceOf(GuestUnusableError);
-    expect((e as Error).message).toContain("Box by ASCII left bx_tumrjngm running but nothing on it can run");
+    expect((e as Error).message).toContain("Boat left bx_tumrjngm running but nothing on it can run");
     expect((e as Error).message).toContain("libtinfo.so.6");
     expect((e as GuestUnusableError).status).toBe(200);
     // A command of its own that fails, even with a loader error of its own kind, is still a command's exit code.
@@ -525,7 +525,7 @@ describe("BoxBackend against a fake Box API", () => {
     const { machine } = machineOn(api);
     const e = await machine.exec("true").catch((err: unknown) => err);
     expect(e).toBeInstanceOf(GuestUnusableError);
-    expect((e as Error).message).toBe("Box by ASCII left bx_tumrjngm running but nothing on it can run: undefined is not an object (evaluating 'D.stdout.on')");
+    expect((e as Error).message).toBe("Boat left bx_tumrjngm running but nothing on it can run: undefined is not an object (evaluating 'D.stdout.on')");
     // The status the provider answered with rides along: a caller that keys its creates spends the key on it.
     expect((e as GuestUnusableError).status).toBe(500);
     // Every other refusal of the endpoint keeps its own kind.
@@ -542,7 +542,7 @@ describe("BoxBackend against a fake Box API", () => {
     const { backend } = backendOn(api);
     const e = await backend.create({ kind: "sandbox" }).catch((err: unknown) => err);
     expect(e).toBeInstanceOf(GuestUnusableError);
-    expect((e as Error).message).toContain("Box by ASCII left bx_d1 running but nothing on it can run");
+    expect((e as Error).message).toContain("Boat left bx_d1 running but nothing on it can run");
     expect(api.calls().filter(c => c.startsWith("DELETE"))).toEqual(["DELETE /boxes/bx_d1"]);
   });
 

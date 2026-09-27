@@ -24,7 +24,7 @@ const captured = (): CliIO & { lines: string[]; errors: string[] } => {
 };
 
 /** Every word a cloud goes by: the two providers, the one's product and the other's company. */
-const CLOUD_WORDS = ["Solari", "ASCII", "Box by ASCII", "Boat"];
+const CLOUD_WORDS = ["Solari", "ASCII", "Boat"];
 
 /** Where the word cloud stands with the cloud off, each with why. */
 const CLOUD_ALLOWED: string[] = [

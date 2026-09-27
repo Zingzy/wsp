@@ -266,7 +266,7 @@ describe("ChatView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Wake" }));
     await waitFor(() => expect(wakes).toEqual([WS]));
     expect(useStore.getState().workspaces[0]!.phase).toBe("waking");
-    await screen.findByText(/^waking api on solari/);
+    await screen.findByText(/^waking api on Solari/);
     expect(screen.queryByRole("button", { name: "Wake" })).toBeNull();
     emit({ type: "workspace.woken", workspaceId: WS, machineId: "m1" });
     emit({ type: "workspace.status", status: { ...status, phase: "running", machineState: "running", reach: { state: "unreachable" } } });
@@ -283,11 +283,11 @@ describe("ChatView", () => {
     emit({ type: "session.start", ...scope, prompt: "hi" });
     const status = { ...workspace, machineState: "paused" as const, reach: { state: "napping" as const }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
     emit({ type: "workspace.status", status: { ...status, phase: "waking" } });
-    const line = await screen.findByText(/^waking api on solari/);
+    const line = await screen.findByText(/^waking api on Solari/);
     const row = line.closest<HTMLElement>("[data-machine-wait]")!;
     expect(row.className).toContain("font-mono");
     expect(row.className).toContain("text-[11px]");
-    expect(row.textContent).toMatch(/^waking api on solari \d+s$/);
+    expect(row.textContent).toMatch(/^waking api on Solari \d+s$/);
     expect(row.querySelector("[role=alert], [data-slot=alert]")).toBeNull();
   });
 
@@ -893,7 +893,7 @@ describe("a file a reply names", () => {
 });
 
 describe("the threads a thread opened", () => {
-  const BENCH: WorkspaceView = { id: "ws_bench", name: "spoo-bench", machineId: "m2", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "ascii", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
+  const BENCH: WorkspaceView = { id: "ws_bench", name: "spoo-bench", machineId: "m2", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "box", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
   const PARENT = "thr_lead";
   const scoped = { workspaceId: WS, sessionId: "sess_lead", turnId: "turn_lead", threadId: PARENT };
   const lead: SessionEvent[] = [
@@ -919,8 +919,8 @@ describe("the threads a thread opened", () => {
     });
     expect(document.querySelector("[data-thread-rows-head]")!.textContent).toBe("Threads");
     expect(opened.map(row => [row.querySelector("a")!.textContent, row.querySelector("[data-thread-place]")!.textContent, row.querySelector<HTMLElement>("[data-thread-status]")!.dataset.threadStatus])).toEqual([
-      ["benchmark the new index", "ascii", "working"],
-      ["rewrite the web client", "solari", "failed"],
+      ["benchmark the new index", "Boat", "working"],
+      ["rewrite the web client", "Solari", "failed"],
     ]);
     expect(document.querySelector("[data-thread-rows]")!.textContent).not.toMatch(/·|opened| on /);
     const link = opened[0]!.querySelector<HTMLAnchorElement>("a")!;

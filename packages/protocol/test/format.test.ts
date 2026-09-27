@@ -960,8 +960,8 @@ describe("loginPathLine", () => {
 
 describe("guestUnusableLine", () => {
   it("names the provider, the machine it left running and what the guest said when nothing on it would run", () => {
-    expect(guestUnusableLine("Box by ASCII", "bx_tumrjngm", "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24"))
-      .toBe("Box by ASCII left bx_tumrjngm running but nothing on it can run: bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24");
+    expect(guestUnusableLine("Boat", "bx_tumrjngm", "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24"))
+      .toBe("Boat left bx_tumrjngm running but nothing on it can run: bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24");
   });
 });
 
