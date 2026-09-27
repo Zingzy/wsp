@@ -10,7 +10,7 @@ import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, 
 import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, FONT_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, NOTIFY_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, ACCOUNT_WORDS, AWAKE_WORDS, DEVICES_WORDS, FONT_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, NOTIFY_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { builtWhen } from "../src/settings/image.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
 import { CHORD_WORDS, JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
@@ -283,7 +283,7 @@ describe("General", () => {
     const { api, sets } = settingsApi({ editorList: async () => editors } as Partial<Api>);
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
-    expect(rowTitles()).toEqual([GENERAL_WORDS.editor]);
+    expect(rowTitles()).toEqual([GENERAL_WORDS.editor, AWAKE_WORDS.keepAwake("")]);
     expect(descriptionOf("editor")).toBe(GENERAL_WORDS.editorDescription);
     const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=editor]")!;
     expect(select.textContent).toBe("Cursor");
@@ -318,6 +318,31 @@ describe("Appearance", () => {
     await settle();
     expect(sets.at(-1)).toMatchObject({ notifySound: true });
     expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+describe("Keeping the computer awake", () => {
+  it("is one switch on General, on by default, that writes the record", async () => {
+    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>);
+    mountSettings({ api, at: { kind: "group", group: "general" } });
+    await settle();
+    expect(descriptionOf("keep-awake")).toBe(AWAKE_WORDS.keepAwakeDescription);
+    expect(`${AWAKE_WORDS.keepAwake("")} ${AWAKE_WORDS.keepAwakeDescription}`).not.toMatch(/host|daemon|service/i);
+    const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=keep-awake]")!;
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle());
+    await settle();
+    expect(sets).toEqual([{ keepAwake: false }]);
+    expect(useStore.getState().preferences.keepAwake).toBe(false);
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("names the computer it keeps awake, once the computers are read", async () => {
+    useStore.setState({ places: [here, box] });
+    mountSettings({ api: settingsApi({ editorList: async () => [] } as Partial<Api>).api, at: { kind: "group", group: "general" } });
+    await settle();
+    expect(rowTitles()).toContain("Keep zingzy's MacBook Pro awake");
+    expect(document.querySelector("[data-k=keep-awake]")!.getAttribute("aria-label")).toBe("Keep zingzy's MacBook Pro awake");
   });
 });
 
