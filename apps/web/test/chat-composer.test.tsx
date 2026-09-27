@@ -19,7 +19,7 @@ import { useComposerModesStore } from "../src/components/chat/composerModesStore
 import { useComposerOptionsStore } from "../src/components/chat/composerOptionsStore.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { requestComposerFocus, requestNewThread } from "../src/shell/shellRequests.js";
-import { CHAT_HARNESS, CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
+import { CHAT_HARNESS, CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { lastNotice } from "./notice-text.js";
@@ -485,7 +485,7 @@ describe("fast and plan", () => {
   const toggle = (mode: string) => document.querySelector<HTMLButtonElement>(`[data-composer-mode='${mode}']`);
 
   beforeEach(() => {
-    useComposerModesStore.setState({ fast: {}, planFrom: {} });
+    useComposerModesStore.setState({ fast: {}, plan: {}, planFrom: {} });
     useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {} });
   });
 
@@ -494,6 +494,10 @@ describe("fast and plan", () => {
     await setup(withModes(api));
     await waitFor(() => expect(toggle("fast")).not.toBeNull());
     expect(toggle("fast")!.getAttribute("aria-pressed")).toBe("false");
+    // In the tall composer the toggles wear the pickers' type beside them, not the strip's mono.
+    const pickerType = document.querySelector<HTMLElement>("[data-composer-picker='model']")!.className.match(/text-\[\d+px\]/)?.[0];
+    expect(toggle("fast")!.className).not.toContain("font-mono");
+    expect(toggle("fast")!.className).toContain(pickerType);
     act(() => toggle("fast")!.click());
     await waitFor(() => expect(toggle("fast")!.getAttribute("aria-pressed")).toBe("true"));
     await typeInto(composerEditor(), "quick one");
@@ -515,20 +519,45 @@ describe("fast and plan", () => {
     expect(started[0]!.fast).toBeUndefined();
   });
 
-  it("plan moves the thread's access to plan, and turning it off puts back the mode it came from", async () => {
+  it("plan is this thread's alone: the send carries plan, the workspace's default access stays, and the access picker offers no plan", async () => {
     const { api, started } = fixtureApi([workspace]);
     await setup(withModes(api));
     act(() => void useStore.getState().setPreferences({ access: { [WS]: "acceptEdits" } }));
     await waitFor(() => expect(toggle("plan")).not.toBeNull());
     act(() => toggle("plan")!.click());
     await waitFor(() => expect(toggle("plan")!.getAttribute("aria-pressed")).toBe("true"));
+    expect(useStore.getState().preferences.access[WS]).toBe("acceptEdits");
+    // The picker keeps the other modes and shows the one the thread goes back to.
+    const picker = document.querySelector<HTMLElement>("[data-composer-picker='access']")!;
+    expect(picker.dataset["access"]).toBe("acceptEdits");
+    act(() => picker.click());
+    await waitFor(() => expect(document.querySelector("[data-composer-option='acceptEdits']")).not.toBeNull());
+    expect(document.querySelector("[data-composer-option='plan']")).toBeNull();
+    await press(document.activeElement as HTMLElement, "Escape");
     await typeInto(composerEditor(), "plan it");
     await press(composerEditor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]!.permissionMode).toBe("plan");
+    expect(useStore.getState().preferences.access[WS]).toBe("acceptEdits");
+  });
+
+  it("on a thread that has run, plan moves that thread's access and turning it off puts back the mode it came from", async () => {
+    const moved: Array<[string, string]> = [];
+    const { api } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
+    const row = { id: "sess_0001", workspaceId: WS, harness: "claude", status: "completed" as const, startedBy: "person" as const, permissionMode: "acceptEdits", claudeSessionId: "sess_0001", startedAt: CHAT_T0 };
+    await setup({ ...withModes(api), listSessions: async () => [row], setSessionAccess: async (id, mode) => (moved.push([id, mode]), "set") });
+    await screen.findByText(/Server is live at :3000\./);
+    await waitFor(() => expect(toggle("plan")).not.toBeNull());
+    const before = useStore.getState().preferences.access[WS];
+    act(() => toggle("plan")!.click());
+    await waitFor(() => expect(toggle("plan")!.getAttribute("aria-pressed")).toBe("true"));
     act(() => toggle("plan")!.click());
     await waitFor(() => expect(toggle("plan")!.getAttribute("aria-pressed")).toBe("false"));
-    expect(useStore.getState().preferences.access[WS]).toBe("acceptEdits");
+    expect(moved).toEqual([
+      ["sess_0001", "plan"],
+      ["sess_0001", "acceptEdits"],
+    ]);
+    expect(useStore.getState().preferences.access[WS]).toBe(before);
   });
 });
 

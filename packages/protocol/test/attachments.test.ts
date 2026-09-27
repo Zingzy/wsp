@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -22,11 +22,13 @@ import {
   IMAGE_TYPE_WORDS,
   imagePathIn,
   imageTypeOf,
+  dropFilesLine,
   landFilesLine,
   noImagesLine,
   notAFileLine,
   safeFileName,
   sendFilesDir,
+  threadFilesDir,
   threadImagesDir,
   turnImagesDir,
 } from "../src/index.js";
@@ -194,10 +196,14 @@ describe("the words every road reads rather than spelling again", () => {
 });
 
 describe("where a file the person attached lands: inside the thread's own folder, and nowhere else", () => {
-  it("one folder per send under the folder's .wsp-files, named by the request id where it is a plain one", () => {
+  it("one folder per thread under the folder's .wsp-files and one per send inside it, each named by its id where that is a plain one", () => {
     expect(FILES_DIR).toBe(".wsp-files");
-    expect(sendFilesDir("/root/spoo", "req_a", "minted")).toBe("/root/spoo/.wsp-files/req_a");
-    for (const nasty of ["../../../etc", "a/b", "..", "", "-rf"]) expect(sendFilesDir("/root/spoo", nasty, "minted")).toBe("/root/spoo/.wsp-files/minted");
+    expect(threadFilesDir("/root/spoo", "thr_1")).toBe("/root/spoo/.wsp-files/thr_1");
+    expect(sendFilesDir("/root/spoo", "thr_1", "req_a", "minted")).toBe("/root/spoo/.wsp-files/thr_1/req_a");
+    for (const nasty of ["../../../etc", "a/b", "..", "", "-rf"]) {
+      expect(sendFilesDir("/root/spoo", "thr_1", nasty, "minted")).toBe("/root/spoo/.wsp-files/thr_1/minted");
+      expect(threadFilesDir("/root/spoo", nasty)).toBe("/root/spoo/.wsp-files/thread");
+    }
   });
 
   it("a name is one plain path segment, whatever the client sent", () => {
@@ -219,31 +225,74 @@ describe("where a file the person attached lands: inside the thread's own folder
     for (const name of ["../x", "/etc/passwd", "..", "a/../../b"]) expect(filePathIn(dir, name, taken).startsWith(`${dir}/`)).toBe(true);
   });
 
-  it("the landing refuses a .wsp-files that is a link, makes the send's folder fresh and ignores the lot to git", () => {
-    expect(landFilesLine("/root/my spoo", "/root/my spoo/.wsp-files/req_a")).toBe(
-      "cd '/root/my spoo' && [ ! -L .wsp-files ] && mkdir -p .wsp-files && { [ -e .wsp-files/.gitignore ] || [ -L .wsp-files/.gitignore ] || printf '*\\n' > .wsp-files/.gitignore; } && mkdir '/root/my spoo/.wsp-files/req_a'",
-    );
-  });
-
-  it("run for real, it readies a fresh folder once, and refuses a link that would carry the files out of the copy", () => {
+  it("run for real in a checkout, the landing keeps git's status clean through the copy's own exclude, never a .gitignore", () => {
     const root = mkdtempSync(join(tmpdir(), "wsp-files-"));
     try {
       const copy = join(root, "my copy");
       mkdirSync(copy);
+      const git = (...args: string[]) => spawnSync("git", args, { cwd: copy, encoding: "utf8" });
+      git("init", "-q");
       const run = (dir: string) => spawnSync("bash", ["-c", landFilesLine(copy, dir)]).status;
-      expect(run(sendFilesDir(copy, "req_a", "m"))).toBe(0);
-      expect(readFileSync(join(copy, ".wsp-files", ".gitignore"), "utf8")).toBe("*\n");
-      expect(existsSync(join(copy, ".wsp-files", "req_a"))).toBe(true);
+      expect(run(sendFilesDir(copy, "thr_1", "req_a", "m"))).toBe(0);
+      expect(run(sendFilesDir(copy, "thr_1", "req_b", "m"))).toBe(0);
+      writeFileSync(join(sendFilesDir(copy, "thr_1", "req_a", "m"), "report.pdf"), "%PDF");
+      expect(git("status", "--porcelain").stdout).toBe("");
+      expect(readFileSync(join(copy, ".git", "info", "exclude"), "utf8").split("\n").filter(line => line === ".wsp-files/")).toHaveLength(1);
+      expect(existsSync(join(copy, ".gitignore"))).toBe(false);
+      expect(existsSync(join(copy, ".wsp-files", ".gitignore"))).toBe(false);
       // The same send's folder is never reused: a second landing into it is refused.
-      expect(run(sendFilesDir(copy, "req_a", "m"))).not.toBe(0);
+      expect(run(sendFilesDir(copy, "thr_1", "req_a", "m"))).not.toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("run for real, it lands in a folder that is no checkout, and refuses every link that would carry the files out of the copy", () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-files-"));
+    try {
+      const plain = join(root, "plain");
+      mkdirSync(plain);
+      expect(spawnSync("bash", ["-c", landFilesLine(plain, sendFilesDir(plain, "thr_1", "req_a", "m"))]).status).toBe(0);
       const outside = join(root, "outside");
       mkdirSync(outside);
       const planted = join(root, "planted");
       mkdirSync(planted);
       symlinkSync(outside, join(planted, ".wsp-files"));
-      expect(spawnSync("bash", ["-c", landFilesLine(planted, sendFilesDir(planted, "req_b", "m"))]).status).not.toBe(0);
-      expect(existsSync(join(outside, "req_b"))).toBe(false);
-      expect(existsSync(join(outside, ".gitignore"))).toBe(false);
+      expect(spawnSync("bash", ["-c", landFilesLine(planted, sendFilesDir(planted, "thr_1", "req_b", "m"))]).status).not.toBe(0);
+      const thread = join(root, "thread");
+      mkdirSync(join(thread, ".wsp-files"), { recursive: true });
+      symlinkSync(outside, join(thread, ".wsp-files", "thr_1"));
+      expect(spawnSync("bash", ["-c", landFilesLine(thread, sendFilesDir(thread, "thr_1", "req_c", "m"))]).status).not.toBe(0);
+      // An exclude file planted as a link is not written through.
+      const linked = join(root, "linked");
+      mkdirSync(linked);
+      spawnSync("git", ["init", "-q"], { cwd: linked });
+      const bait = join(outside, "bait");
+      writeFileSync(bait, "");
+      rmSync(join(linked, ".git", "info", "exclude"), { force: true });
+      symlinkSync(bait, join(linked, ".git", "info", "exclude"));
+      spawnSync("bash", ["-c", landFilesLine(linked, sendFilesDir(linked, "thr_1", "req_d", "m"))]);
+      expect(readFileSync(bait, "utf8")).toBe("");
+      expect(readdirSync(outside).sort()).toEqual(["bait"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("run for real, dropping a thread's files takes its folder alone, and a .wsp-files that is a link is left untouched", () => {
+    const root = mkdtempSync(join(tmpdir(), "wsp-files-"));
+    try {
+      const copy = join(root, "copy");
+      for (const thread of ["thr_1", "thr_2"]) mkdirSync(sendFilesDir(copy, thread, "req_a", "m"), { recursive: true });
+      expect(spawnSync("bash", ["-c", dropFilesLine(copy, ["thr_1", "../../outside"])]).status).toBe(0);
+      expect(readdirSync(join(copy, ".wsp-files"))).toEqual(["thr_2"]);
+      const outside = join(root, "outside");
+      mkdirSync(join(outside, "thr_2"), { recursive: true });
+      const planted = join(root, "planted");
+      mkdirSync(planted);
+      symlinkSync(outside, join(planted, ".wsp-files"));
+      spawnSync("bash", ["-c", dropFilesLine(planted, ["thr_2"])]);
+      expect(existsSync(join(outside, "thr_2"))).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

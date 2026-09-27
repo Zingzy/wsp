@@ -312,6 +312,21 @@ describe("the prompt stash", () => {
   });
 });
 
+describe("a restore over a full stash", () => {
+  it("takes the entry before the draft goes onto the stash, so the one restored is never the one dropped", async () => {
+    const { api } = fixtureApi();
+    await setup(api);
+    for (let n = 19; n >= 0; n--) usePromptStashStore.getState().stash({ id: `e${n}`, createdAt: "2026-09-27T10:00:00Z", prompt: `stashed ${n}`, files: [], dropped: [] });
+    expect(usePromptStashStore.getState().entries).toHaveLength(20);
+    await typeInto(composerEditor(), "the draft in the box");
+    fireEvent.click(document.querySelector<HTMLElement>("[data-composer-stash-word]")!);
+    fireEvent.click(await screen.findByRole("button", { name: "Restore stashed prompt: stashed 19" }));
+    await waitFor(() => expect(useComposerDraftStore.getState().drafts[WS]?.prompt).toBe("stashed 19"));
+    expect(usePromptStashStore.getState().entries.map(e => e.prompt).slice(0, 2)).toEqual(["the draft in the box", "stashed 0"]);
+    expect(usePromptStashStore.getState().entries).toHaveLength(20);
+  });
+});
+
 describe("what the composer will not take at all", () => {
   it("paste and drop answer to the same state the picker does: nothing is taken while a send is blocked", async () => {
     const { api } = fixtureApi();

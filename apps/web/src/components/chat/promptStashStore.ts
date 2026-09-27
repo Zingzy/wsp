@@ -95,6 +95,8 @@ interface PromptStashState {
   stash(entry: PromptStashEntry): boolean;
   /** Takes an entry off the list, for a restore or a delete. */
   take(id: string): PromptStashEntry | null;
+  /** Puts an entry taken off the list back at its place, where a restore could not go on. */
+  putBack(entry: PromptStashEntry, at: number): void;
   /** Reads the list again from storage, which another tab may have written. */
   reload(): void;
 }
@@ -115,6 +117,13 @@ export const usePromptStashStore = create<PromptStashState>()((set, get) => ({
     persist(next);
     set({ entries: next });
     return entry;
+  },
+  putBack(entry, at) {
+    const next = [...get().entries];
+    next.splice(Math.max(0, at), 0, entry);
+    const kept = next.slice(0, MAX_STASH_ENTRIES);
+    persist(kept);
+    set({ entries: kept });
   },
   reload() {
     set({ entries: read() });

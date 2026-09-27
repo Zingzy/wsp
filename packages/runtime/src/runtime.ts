@@ -226,7 +226,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -1845,6 +1845,9 @@ interface ThreadRecord {
   pinnedAt?: number;
   snoozedUntil?: number;
   section?: ThreadPlacement;
+  /** The folders this thread's attached files landed in, which a forget of the thread or a delete of its workspace
+   * takes them off. */
+  filesIn?: string[];
 }
 
 interface SessionIndexRecord {
@@ -3090,7 +3093,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * workspace and drops the oldest finished ones while the transcript keeps the thread, so the events are where a
    * long-lived thread's own facts survive. Nothing from before a fact was recorded, and the start then fills what
    * its catalog marks. */
-  const resumedFact = (workspaceId: string, resume: string, fact: "cwd" | "permissionMode"): string | undefined => {
+  const resumedFact = (workspaceId: string, resume: string, fact: "cwd" | "permissionMode" | "model"): string | undefined => {
     const rows = [...sessions.values()];
     for (let i = rows.length - 1; i >= 0; i--) {
       const view = rows[i]!.view;
@@ -5808,6 +5811,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         try {
           delete entry.deleteSaid;
           endSessions(id, DELETED_REASON);
+          // Before the machine goes: on a computer somebody owns the folders the files landed in outlive the workspace.
+          await dropThreadFiles(entry, [...threadRecords].flatMap(([threadId, held]) => (held.workspaceId === id ? [threadId] : [])));
           // A machine wsp never forked reads running whatever is asked of it, so only a forked one is read back.
           if (!kindWords(entry.record.kind).driven) {
             await entry.machine.kill().catch((e: unknown) => {
@@ -6217,7 +6222,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * The turn's files that are not images, landed in the folder the thread works in, where its agent reads them at
    * any access and the person's copy holds them: one command readies this send's own folder, then each file goes by
    * the machine's byte road. Answers the paths, which the agent's prompt names. They stay once the turn ends, since
-   * a later turn of the thread may read them again, and git lists none of them.
+   * a later turn of the thread may read them again, and go when the thread is forgotten or its workspace deleted.
    */
   const landFiles = async (entry: LiveWorkspace, folder: string, dir: string, files: readonly Attachment[]): Promise<string[]> => {
     if (files.length === 0) return [];
@@ -6231,6 +6236,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       paths.push(path);
     }
     return paths;
+  };
+
+  /** Takes these threads' attached files off the folders their turns ran in, which are the person's own copy: nothing
+   * reads them once the thread is gone. One command per folder, and a machine that is not running, or does not
+   * answer, keeps them. */
+  const dropThreadFiles = async (entry: LiveWorkspace, threadIds: Iterable<string>): Promise<void> => {
+    if (entry.record.phase !== "running") return;
+    const byFolder = new Map<string, string[]>();
+    for (const threadId of threadIds) {
+      for (const folder of threadRecords.get(threadId)?.filesIn ?? []) byFolder.set(folder, [...(byFolder.get(folder) ?? []), threadId]);
+    }
+    for (const [folder, threads] of byFolder) {
+      await entry.machine.exec(dropFilesLine(folder, threads), { timeoutMs: INLINE_EXEC_MS }).catch((e: unknown) => {
+        console.warn(`attached files of ${threads.join(", ")} not removed from ${folder}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }
   };
 
   /** Takes one send's images off the machine once the turn they were sent for is over, whatever it came to: the
@@ -7222,6 +7243,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let images: TurnImage[] = [];
       let imagesDir: string | undefined;
       let filePaths: string[] = [];
+      let filesFolder: string | undefined;
       let landed = (o.attachments?.length ?? 0) === 0;
       // This send's own folder on the machine, named by the request id it minted: the landing runs before any turn is
       // registered, so two sends arriving together both pass the wait, and a folder they shared would leave the first
@@ -7245,7 +7267,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const picked = o.permissionMode === undefined && catalog !== undefined ? await pickedAccess(workspaceId) : undefined;
         const picksFor = (session: string | undefined): StartPicks => {
           const access = o.permissionMode ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, threadId, session) ?? picked));
-          return startPicks(catalog, { ...o, permissionMode: access }, session === undefined);
+          return startPicks(catalog, { ...o, permissionMode: access }, session === undefined, session === undefined ? undefined : resumedFact(workspaceId, session, "model"));
         };
         // A pick the lists do not carry is refused here, before this send waits on anything; the picks themselves
         // are decided below the loop, against the session this send turns out to resume.
@@ -7281,7 +7303,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             landed = true;
             ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, sendDir, (o.attachments ?? []).filter(a => isImage(a.mediaType))));
             const landing = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? folder;
-            filePaths = await landFiles(entry, landing, sendFilesDir(landing, o.requestId, randomUUID()), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
+            filePaths = await landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, randomUUID()), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
+            if (filePaths.length > 0) filesFolder = landing;
             refuse();
             continue;
           }
@@ -7340,6 +7363,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // its rows said this turn runs at, so it is read the one way from now on. Persisted with the row as the turn
         // announces itself and at its end.
         if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}) });
+        const record = threadRecords.get(threadId)!;
+        if (filesFolder !== undefined && !(record.filesIn ?? []).includes(filesFolder)) threadRecords.set(threadId, { ...record, filesIn: [...(record.filesIn ?? []), filesFolder] });
         launched();
         // The turn is running; what the record failed to remember must not read as a start that failed.
         await rememberAgent(heldProject, harness).catch((e: unknown) => console.warn(`the agent for ${heldProject.name} was not remembered: ${e instanceof Error ? e.message : String(e)}`));
@@ -7607,10 +7632,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       // The same absence a name nothing holds gets: a sentence of its own would tell a thread of another tree that
       // the thread it named is there, and the refusal past this gate says its turn ran.
-      if ((await entryOfRow({ threadId, workspaceId }, origin)) === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
+      const entry = await entryOfRow({ threadId, workspaceId }, origin);
+      if (entry === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       // A record is written once a turn was handed over, so a thread with a record and no row left is one whose
       // turns ran and fell off the index cap; the rows alone would read it as a thread that never ran.
       if (threadRan(held.map(([, s]) => s.view)) || (held.length === 0 && record !== undefined)) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
+      // A launch that never got going can still have landed the files its send carried.
+      await dropThreadFiles(entry, [threadId]);
       for (const [id] of held) sessions.delete(id);
       threadRecords.delete(threadId);
       // Spliced rather than replaced: a turn of another thread on this workspace holds the array itself, and its

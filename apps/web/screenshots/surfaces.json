@@ -202,8 +202,7 @@
         "390:key:Escape",
         "390:key:Escape",
         "composer-mode=fast",
-        "composer-picker=access",
-        "composer-option=plan",
+        "composer-mode=plan",
         "testid=composer-editor",
         "type:plan the move to the new billing api"
       ],

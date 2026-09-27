@@ -176,15 +176,24 @@ export function imagePathIn(dir: string, index: number, mediaType: string): stri
   return `${dir}/${index + 1}.${type.ext}`;
 }
 
-/** The folder a thread's attached files land in, under the folder the thread works in: inside the copy, where the
- * agent reads at any access, and ignored by git through the .gitignore the landing leaves in it. */
+/** The folder attached files land in, under the folder the thread works in: inside the copy, where the agent reads
+ * at any access, and kept out of git by an entry in the copy's own exclude file rather than the person's .gitignore. */
 export const FILES_DIR = ".wsp-files";
 
-/** Where one send's files land: its own folder under the thread folder's FILES_DIR, named by the request id the
- * client minted where that is a plain id, for the reason turnImagesDir gives. */
-export function sendFilesDir(folder: string, requestId: string | undefined, minted: string): string {
-  const name = requestId !== undefined && PLAIN_ID.test(requestId) ? requestId : minted;
-  return `${folder.replace(/\/+$/, "")}/${FILES_DIR}/${name}`;
+/** The line the copy's exclude file carries for FILES_DIR, matching it in any folder of the checkout. */
+const EXCLUDE_LINE = `${FILES_DIR}/`;
+
+const plainOr = (id: string | undefined, fallback: string): string => (id !== undefined && PLAIN_ID.test(id) ? id : fallback);
+
+/** One thread's files under a folder: removing it removes every send of that thread and nothing of another. */
+export function threadFilesDir(folder: string, threadId: string): string {
+  return `${folder.replace(/\/+$/, "")}/${FILES_DIR}/${plainOr(threadId, "thread")}`;
+}
+
+/** Where one send's files land: its own folder under its thread's, named by the request id the client minted where
+ * that is a plain id, for the reason turnImagesDir gives. */
+export function sendFilesDir(folder: string, threadId: string, requestId: string | undefined, minted: string): string {
+  return `${threadFilesDir(folder, threadId)}/${plainOr(requestId, minted)}`;
 }
 
 /** The longest name a file lands under, its extension kept. */
@@ -212,12 +221,23 @@ export function filePathIn(dir: string, name: string | undefined, taken: Set<str
   return `${dir}/${landed}`;
 }
 
-/** The one command that readies a send's folder before its files land: the thread folder's FILES_DIR is refused where
- * it is a link, since the bytes would follow it out of the copy, a .gitignore of * goes in once so git lists none of
- * it, and the send's own folder is made fresh, never one already there. */
+/** The one command that readies a send's folder before its files land. FILES_DIR and the thread's folder are
+ * refused where either is a link, since the bytes would follow it out of the copy. In a checkout the copy's own
+ * exclude file gains FILES_DIR once, so git's status stays clean without touching a file the person commits; an
+ * exclude file that is a link is left alone, and a folder that is no checkout has no status to keep. The send's own
+ * folder is made fresh, never one already there. */
 export function landFilesLine(folder: string, dir: string): string {
-  const ignore = `${FILES_DIR}/.gitignore`;
-  return `cd ${shellQuote(folder)} && [ ! -L ${FILES_DIR} ] && mkdir -p ${FILES_DIR} && { [ -e ${ignore} ] || [ -L ${ignore} ] || printf '*\\n' > ${ignore}; } && mkdir ${shellQuote(dir)}`;
+  const thread = shellQuote(dir.slice(0, dir.lastIndexOf("/")));
+  const exclude = `x=$(git -c core.fsmonitor=false rev-parse --git-path info/exclude 2>/dev/null) && [ ! -L "$x" ] && { grep -qxF '${EXCLUDE_LINE}' "$x" 2>/dev/null || { mkdir -p "$(dirname "$x")" && printf '%s\\n' '${EXCLUDE_LINE}' >> "$x"; }; }`;
+  return `cd ${shellQuote(folder)} && [ ! -L ${FILES_DIR} ] && mkdir -p ${FILES_DIR} && { ${exclude} || true; } && [ ! -L ${thread} ] && mkdir -p ${thread} && mkdir ${shellQuote(dir)}`;
+}
+
+/** The one command that takes these threads' files off a folder: each thread's own folder under FILES_DIR, and
+ * nothing where FILES_DIR is a link, since the removal would follow it out of the copy. An id that is not a plain
+ * one names no folder. */
+export function dropFilesLine(folder: string, threadIds: readonly string[]): string {
+  const dirs = threadIds.filter(id => PLAIN_ID.test(id)).map(id => shellQuote(`${FILES_DIR}/${id}`));
+  return dirs.length === 0 ? "true" : `cd ${shellQuote(folder)} && [ ! -L ${FILES_DIR} ] && rm -rf -- ${dirs.join(" ")}`;
 }
 
 /** The refusal of a message whose files could not land in the thread's folder: its FILES_DIR is a link, or the

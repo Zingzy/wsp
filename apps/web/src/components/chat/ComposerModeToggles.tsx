@@ -20,7 +20,9 @@ function Toggle({ on, label, title, icon, onClick, mode, tight }: { on: boolean;
       data-composer-mode={mode}
       onClick={onClick}
       className={cn(
-        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 font-mono text-[12px] transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-3.5",
+        "inline-flex shrink-0 items-center rounded-md px-2 transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-ring",
+        // In the box beside the pickers, their type; in the strip under the one-line composer, the strip's mono.
+        tight ? "h-7 gap-1.5 font-mono text-[12px] [&_svg]:size-3.5" : "h-8 gap-2 text-[15px] [&_svg]:size-4",
         on ? "bg-[color-mix(in_srgb,var(--foreground)_7%,transparent)] text-foreground" : "text-muted-foreground hover:bg-[color-mix(in_srgb,var(--foreground)_4%,transparent)] hover:text-foreground",
       )}
     >

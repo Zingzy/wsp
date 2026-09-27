@@ -6,7 +6,7 @@
 // road can be read byte for byte.
 import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { attachedFilesPrompt, filesNotLandedLine, imagePathIn, landFilesLine, noImagesLine, sendRefusal, threadImagesDir, turnImagesDir, type AdapterEvent, type AttachmentRoad, type TurnImage, type TurnResult } from "@wsp/protocol";
+import { attachedFilesPrompt, dropFilesLine, filesNotLandedLine, imagePathIn, landFilesLine, noImagesLine, sendRefusal, threadImagesDir, turnImagesDir, type AdapterEvent, type AttachmentRoad, type TurnImage, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
@@ -104,7 +104,7 @@ describe("a file that is not an image", () => {
       const handle = await rt.sessions.start(ws.id, { prompt: "what is the first heading?", attachments: [pdf()], requestId: "req_a" });
       await handle.finished;
       const folder = handle.view().cwd!;
-      const dir = `${folder}/.wsp-files/req_a`;
+      const dir = `${folder}/.wsp-files/${handle.view().threadId!}/req_a`;
       expect(since().execs).toContain(landFilesLine(folder, dir));
       expect(since().puts.map(put => [put.path, put.body.toString()])).toEqual([[`${dir}/report.pdf`, "%PDF-1.7 heading"]]);
       expect(agent.starts[0]!.prompt).toBe(attachedFilesPrompt("what is the first heading?", [`${dir}/report.pdf`]));
@@ -119,7 +119,7 @@ describe("a file that is not an image", () => {
     const { rt, ws, since } = await workspaceOn({ claude: claude.factory });
     const handle = await rt.sessions.start(ws.id, { prompt: "read", attachments: [pdf("../../.ssh/authorized_keys"), pdf("../../.ssh/authorized_keys")], requestId: "../../etc" });
     await handle.finished;
-    const files = `${handle.view().cwd!}/.wsp-files/`;
+    const files = `${handle.view().cwd!}/.wsp-files/${handle.view().threadId!}/`;
     const paths = since().puts.map(put => put.path);
     expect(paths).toHaveLength(2);
     for (const path of paths) {
@@ -128,6 +128,42 @@ describe("a file that is not an image", () => {
       expect(path.slice(files.length).split("/")).toHaveLength(2);
     }
     expect(paths.map(path => path.split("/").at(-1))).toEqual(["authorized_keys", "2-authorized_keys"]);
+  });
+
+  it("go with the workspace when it is deleted, one removal per folder for every thread that landed there", async () => {
+    const claude = recording("inline");
+    const { rt, ws, since } = await workspaceOn({ claude: claude.factory });
+    const one = await rt.sessions.start(ws.id, { prompt: "read", attachments: [pdf()], requestId: "req_a" });
+    await one.finished;
+    const two = await rt.sessions.start(ws.id, { prompt: "and this", attachments: [pdf()], requestId: "req_b" });
+    await two.finished;
+    const folder = one.view().cwd!;
+    await rt.workspaces.delete(ws.id);
+    expect(since().execs.filter(cmd => cmd.includes("rm -rf"))).toEqual([dropFilesLine(folder, [one.view().threadId!, two.view().threadId!])]);
+  });
+
+  it("go with a thread that is forgotten, its launch having landed them before it failed", async () => {
+    const landed: string[] = [];
+    const neverRan: HarnessAdapterFactory = () => ({
+      steers: false,
+      attachments: "inline",
+      start: (options: HarnessStartOptions) => {
+        landed.push(options.prompt);
+        const result: TurnResult = { status: "failed", error: "no sign-in" };
+        const finished = (async () => {
+          options.onEvent({ type: "turn.done", sessionId: SESSION_ID, result });
+          options.onEvent({ type: "session.end", sessionId: SESSION_ID, exitCode: 1, sawResult: false });
+          return result;
+        })();
+        return { localId: SESSION_ID, finished, interrupt: async () => {} };
+      },
+    });
+    const { rt, ws, since } = await workspaceOn({ claude: neverRan });
+    const handle = await rt.sessions.start(ws.id, { prompt: "read", attachments: [pdf()], requestId: "req_a" });
+    await handle.finished.catch(() => {});
+    expect(landed[0]).toContain("/.wsp-files/");
+    await rt.sessions.forget(handle.view().threadId!);
+    expect(since().execs).toContain(dropFilesLine(handle.view().cwd!, [handle.view().threadId!]));
   });
 
   it("is refused in one line, with nothing put, where the folder could not be readied", async () => {

@@ -449,7 +449,7 @@ describe("the MCP server over the host", () => {
     writeFileSync(notes, "%PDF-1.7 nope");
     expect((await call("send", { thread: threadId, message: "look", files: [notes] })).isError).toBe(false);
     expect(claude.starts.at(-1)!.images).toBeUndefined();
-    expect(claude.starts.at(-1)!.prompt).toMatch(/^look\n\nAttached files:\n- \S+\/\.wsp-files\/[^/]+\/notes\.pdf$/);
+    expect(claude.starts.at(-1)!.prompt).toMatch(/^look\n\nAttached files:\n- \S+\/\.wsp-files\/[^/]+\/[^/]+\/notes\.pdf$/);
     const huge = join(dir, "huge.pdf");
     writeFileSync(huge, Buffer.alloc(11 * 1024 * 1024));
     expect(await call("send", { thread: threadId, message: "look", files: [huge] })).toEqual(failedWith("huge.pdf is 11 MB, over the 10 MB a file may be. Drop that one and send the rest.", "usage"));

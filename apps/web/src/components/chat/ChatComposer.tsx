@@ -333,19 +333,43 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const setFast = useComposerModesStore(s => s.setFast);
   const planFrom = useComposerModesStore(s => s.planFrom[threadKey]);
   const setPlanFrom = useComposerModesStore(s => s.setPlanFrom);
+  const planPicked = useComposerModesStore(s => s.plan[threadKey]);
+  const setPlan = useComposerModesStore(s => s.setPlan);
   const fastOffered = pickedModel?.fast === true;
   const fastOn = fastOffered && (fastPicked ?? latestRow?.fast === true);
   const planOffered = harnessCatalog?.permissionModes.some(mode => mode.value === PLAN_ACCESS) === true;
-  const planOn = picks?.permissionMode === PLAN_ACCESS;
+  // Plan is the thread's alone: a hand toggle on this thread, else what its latest row runs at, which sessions.access
+  // moves. It never goes through the access pick, which is what writes the workspace's default for the next thread.
+  const planOn = planOffered && (planPicked ?? latestRow?.permissionMode === PLAN_ACCESS);
+  const moveThreadAccess = useCallback(
+    (mode: string) => {
+      if (pickTarget !== null) void api?.setSessionAccess?.(pickTarget.sessionId, mode).catch(() => {});
+    },
+    [api, pickTarget],
+  );
   const togglePlan = useCallback(() => {
     if (planOn) {
-      accessPick.pick(planFrom ?? markedDefault(harnessCatalog?.permissionModes ?? [])?.value ?? PLAN_ACCESS);
+      const back = planFrom ?? markedDefault(harnessCatalog?.permissionModes ?? [])?.value;
+      setPlan(threadKey, false);
       setPlanFrom(threadKey, null);
+      if (back !== undefined) moveThreadAccess(back);
       return;
     }
-    if (picks?.permissionMode != null) setPlanFrom(threadKey, picks.permissionMode);
-    accessPick.pick(PLAN_ACCESS);
-  }, [accessPick, harnessCatalog, picks, planFrom, planOn, setPlanFrom, threadKey]);
+    if (picks?.permissionMode != null && picks.permissionMode !== PLAN_ACCESS) setPlanFrom(threadKey, picks.permissionMode);
+    setPlan(threadKey, true);
+    moveThreadAccess(PLAN_ACCESS);
+  }, [harnessCatalog, moveThreadAccess, picks, planFrom, planOn, setPlan, setPlanFrom, threadKey]);
+  // An access picked while plan is on is the thread leaving plan for it.
+  const pickAccess = useCallback(
+    (mode: string) => {
+      if (planOn) {
+        setPlan(threadKey, false);
+        setPlanFrom(threadKey, null);
+      }
+      accessPick.pick(mode);
+    },
+    [accessPick, planOn, setPlan, setPlanFrom, threadKey],
+  );
   const stopAttempt = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId ? stop : null;
   const steerAttempt = steered !== null && runningTurn !== null && steered.turnId === runningTurn.turnId ? steered : null;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
@@ -523,6 +547,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
             ...folderStart,
             ...(attachments.length > 0 ? { attachments } : {}),
             ...sendPicks(pinned, startOptions),
+            ...(planOn && !pinned ? { permissionMode: PLAN_ACCESS } : {}),
             ...(fastOn ? { fast: true } : {}),
           }),
         )
@@ -534,7 +559,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
           appendLocalError(err instanceof Error ? err.message : String(err));
         });
     },
-    [api, appendLocalError, appendUserTurn, fastOn, files, folderStart, harnessId, hold, into, launched, launching, pinned, restoreFiles, sendFilesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
+    [api, appendLocalError, appendUserTurn, fastOn, planOn, files, folderStart, harnessId, hold, into, launched, launching, pinned, restoreFiles, sendFilesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
   /** Asks the host beside the thread and draws the answer in the sheet; an answer landing after the sheet closed is dropped. */
@@ -700,13 +725,19 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     return true;
   }, [draft.prompt, putFiles, setDraft, takeFiles, workspaceId]);
 
-  /** Brings a stashed prompt back with its files; a draft already in the box goes onto the stash first, so a restore
-   * never overwrites words. */
+  /** Brings a stashed prompt back with its files; a draft already in the box goes onto the stash, so a restore never
+   * overwrites words. The entry comes off first, so a full stash never drops the very entry being restored, and it
+   * goes back where it was when the draft cannot be stashed. */
   const restoreStashed = useCallback(
     (entry: PromptStashEntry) => {
       const prompt = editorRef.current?.readSnapshot().value ?? draft.prompt;
-      if ((prompt.trim() !== "" || files.length > 0) && !stashDraft()) return;
-      if (usePromptStashStore.getState().take(entry.id) === null) return;
+      const store = usePromptStashStore.getState();
+      const at = store.entries.findIndex(candidate => candidate.id === entry.id);
+      if (store.take(entry.id) === null) return;
+      if ((prompt.trim() !== "" || files.length > 0) && !stashDraft()) {
+        usePromptStashStore.getState().putBack(entry, at);
+        return;
+      }
       putFiles(workspaceId, entry.files.map(fileFromStash));
       setDraft(workspaceId, { prompt: entry.prompt, cursor: collapseExpandedComposerCursor(entry.prompt, entry.prompt.length) });
       setStashOpen(false);
@@ -979,7 +1010,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                           compact && !tall ? "row-start-1" : "row-start-2",
                         )}
                       >
-                        <ComposerOptionPickers compact={compact} workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} onOtherFolder={openFolderPicker} />
+                        <ComposerOptionPickers compact={compact} workspaceId={workspaceId} thread={thread} onPickAccess={pickAccess} onOtherFolder={openFolderPicker} />
                         {compact ? null : modes}
                       </div>
                       <div data-chat-composer-actions="right" className={cn("col-start-3 flex shrink-0 items-center justify-self-end", compact && !tall ? "row-start-1" : "row-start-2 self-end")}>
@@ -1003,7 +1034,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
           access={
             compact ? (
               <>
-                <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} />
+                <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={pickAccess} />
                 {modes}
               </>
             ) : null

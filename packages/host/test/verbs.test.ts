@@ -3904,7 +3904,7 @@ describe("wsp verbs over the host", () => {
       expect(opened.code).toBe(0);
       const start = claude.starts.at(-1)!;
       expect(start.images).toBeUndefined();
-      expect(start.prompt).toMatch(/^look\n\nAttached files:\n- \S+\/\.wsp-files\/[^/]+\/notes\.pdf$/);
+      expect(start.prompt).toMatch(/^look\n\nAttached files:\n- \S+\/\.wsp-files\/[^/]+\/[^/]+\/notes\.pdf$/);
       expect(opened.io.streamed).toContain("[file 28 B notes.pdf]");
     });
 
@@ -3936,6 +3936,17 @@ describe("wsp verbs over the host", () => {
       const [row] = await rt.sessions.list();
       expect((await run("send", row!.threadId!, "--fast", "again")).code).toBe(0);
       expect(claude.starts.at(-1)!.fast).toBe(true);
+    });
+
+    it("--fast on a send that names no model is checked against the model the thread runs on", async () => {
+      await run("new", "alpha");
+      expect((await run("run", "alpha", "--model", "claude-haiku-4-5-20251001", "hello")).code).toBe(0);
+      const haiku = (await rt.sessions.list()).at(-1)!;
+      const starts = claude.starts.length;
+      const refused = await run("send", haiku.threadId!, "--fast", "again");
+      expect(refused.code).toBe(EXIT_CODES.usage);
+      expect(refused.io.errors[0]).toContain(noFastLine("Haiku 4.5"));
+      expect(claude.starts).toHaveLength(starts);
     });
   });
 });

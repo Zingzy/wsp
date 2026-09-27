@@ -1307,11 +1307,11 @@ export interface StartPicks {
   fast?: boolean;
 }
 
-/** Why a start asked for fast on a model that has no faster output. */
 /** The access mode that reads and plans and changes nothing, under the one word every agent's list carries it by:
  * Claude Code's own mode, and on Codex a read-only run told to plan. The composer's plan toggle picks it. */
 export const PLAN_ACCESS = "plan";
 
+/** Why a start asked for fast on a model that has no faster output. */
 export const noFastLine = (model: string): string => `${model} has no fast mode; pick a model that offers it, or send without it`;
 
 /**
@@ -1335,12 +1335,13 @@ function listed(subject: string, word: string, options: ReadonlyArray<HarnessOpt
   throw Object.assign(new Error(said), { offered: options.length });
 }
 
-function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined): void {
+function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined, runsOn: string | undefined): void {
   if (catalog.models.length > 0) listed(catalog.harness, "model", catalog.models, picks.model, catalog.legacyModels);
   const chosen = modelOf(catalog, model);
   if (catalog.efforts.length > 0) listed(chosen?.efforts !== undefined ? chosen.label : catalog.harness, "effort", effortsFor(catalog, chosen), picks.effort);
   if (catalog.permissionModes.length > 0) listed(catalog.harness, "access mode", catalog.permissionModes, picks.permissionMode);
-  if (picks.fast === true && chosen !== null && chosen.fast !== true) throw new Error(noFastLine(chosen.label));
+  const fastOn = modelOf(catalog, model ?? runsOn);
+  if (picks.fast === true && fastOn !== null && fastOn.fast !== true) throw Object.assign(new Error(noFastLine(fastOn.label)), { kind: "invalid" });
 }
 
 /** The picks a start runs with, checked against the catalog: a value a list does not carry is refused naming the
@@ -1348,10 +1349,11 @@ function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: strin
  * start that opens a thread without a model runs the one the catalog marks default, and without an effort the one
  * effortsFor marks for that model, so every door runs what the composer shows; a resume keeps the thread's own.
  * Without a catalog (a harness the runtime has no table row for) every value passes and no default is filled. Only
- * the three picks and fast come out, whatever else rides in; fast only where it was asked for. */
-export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPicks, opensThread: boolean): StartPicks {
+ * the three picks and fast come out, whatever else rides in; fast only where it was asked for. `runsOn` is the model a
+ * resumed thread already runs on, which a fast asked for with no model named is checked against. */
+export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPicks, opensThread: boolean, runsOn?: string): StartPicks {
   const model = picks.model ?? (opensThread && catalog !== undefined ? markedDefault(catalog.models)?.value : undefined);
-  if (catalog !== undefined) checkedAgainst(catalog, picks, model);
+  if (catalog !== undefined) checkedAgainst(catalog, picks, model, runsOn);
   const effort = picks.effort ?? (opensThread && catalog !== undefined ? markedDefault(effortsFor(catalog, modelOf(catalog, model)))?.value : undefined);
   // The access is filled in like the other two, so what the picker shows is what the CLI is told: an unnamed access
   // used to reach the adapter as nothing, which every adapter here reads as its own skip-everything flag. On a
@@ -6270,7 +6272,7 @@ export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
 export { compareVersions } from "./semver.mjs";
-export { attachedFilesPrompt, Attachment, attachmentBytes, attachmentLine, AttachmentRecord, attachmentRecord, FILE_MAX_BYTES, FILE_MAX_WORDS, FILES_AFTER_TURN, FILES_DIR, FILES_MAX, filePathIn, filesBlocked, filesNotLandedLine, filesRefusal, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, imagePathIn, imageTypeOf, isImage, landFilesLine, noImagesLine, notAFileLine, safeFileName, sendFilesDir, threadImagesDir, turnImagesDir, UNTYPED_FILE } from "./attachments.js";
+export { attachedFilesPrompt, Attachment, attachmentBytes, attachmentLine, AttachmentRecord, attachmentRecord, FILE_MAX_BYTES, FILE_MAX_WORDS, FILES_AFTER_TURN, FILES_DIR, FILES_MAX, filePathIn, filesBlocked, filesNotLandedLine, filesRefusal, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, imagePathIn, imageTypeOf, isImage, dropFilesLine, landFilesLine, noImagesLine, notAFileLine, safeFileName, sendFilesDir, threadFilesDir, threadImagesDir, turnImagesDir, UNTYPED_FILE } from "./attachments.js";
 export * from "./oom.js";
 export { accruedAt, accruedPast, appendCostPoint, COST_HISTORY_CAP, dayStart, monthStart, rateAt, spentSince } from "./cost-history.js";
 export { leadAsk, openAsk, ThreadMessage, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";

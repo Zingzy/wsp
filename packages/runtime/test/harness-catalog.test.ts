@@ -308,6 +308,9 @@ describe("startPicks", () => {
     expect(startPicks(claude, { fast: false }, true)).not.toHaveProperty("fast");
     expect(() => startPicks(claude, { model: "claude-haiku-4-5-20251001", fast: true }, true)).toThrow("Haiku 4.5 has no fast mode");
     expect(startPicks(claude, { fast: true }, false)).toEqual({ fast: true });
+    // A resume that names no model is checked against the one the thread runs on.
+    expect(startPicks(claude, { fast: true }, false, "claude-opus-5-5")).toEqual({ fast: true });
+    expect(() => startPicks(claude, { fast: true }, false, "claude-haiku-4-5-20251001")).toThrow("Haiku 4.5 has no fast mode");
   });
 
   it("listedPick keeps a remembered pick this list carries and drops one it does not, which is not a refusal", () => {

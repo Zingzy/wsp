@@ -33,7 +33,8 @@
 import { ChevronDownIcon, CircleSlashIcon, FolderIcon, FolderOpenIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { ACCESS_REFUSED_LINE, accessReachLine, kindForComputer, workspaceAccess, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef, type ProjectView, type SessionView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, kindForComputer, markedDefault, PLAN_ACCESS, workspaceAccess, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef, type ProjectView, type SessionView } from "@wsp/protocol";
+import { useComposerModesStore } from "./composerModesStore";
 import { baseName } from "../../files/entries";
 import { useChosenFolder, useDefaultProject, useProject, useRootStore } from "../../files/root";
 import { projectHomeKey, useHarnessCatalog, useHarnessCatalogs, useLatestSession, useProjects, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
@@ -238,9 +239,18 @@ function ReasoningPicker({
 }
 
 /** What the agent may do without asking: its own menu, with what a pick does to a running turn over the list. */
+/** The modes the access picker lists: every one the agent takes but plan, which is the composer's own toggle. */
+const pickerModes = (modes: ReadonlyArray<HarnessOption>): ReadonlyArray<HarnessOption> => modes.filter(mode => mode.value !== PLAN_ACCESS);
+
+/** What the access picker shows for a thread in plan: the mode it goes back to once plan is off. */
+function usePlanReturn(threadKey: string): string | undefined {
+  return useComposerModesStore(s => s.planFrom[threadKey]);
+}
+
 function AccessPicker({
-  modes,
+  modes: offered,
   picks,
+  returnTo,
   className,
   /** What a pick does to the turn running now, over the access list; nothing while no turn runs and the pick only starts one. */
   note,
@@ -248,13 +258,16 @@ function AccessPicker({
 }: {
   modes: ReadonlyArray<HarnessOption>;
   picks: ResolvedPicks;
+  returnTo: string | undefined;
   note: string | null;
   onPickAccess: (mode: string) => void;
   className?: string;
 }) {
-  const access = modes.find(o => o.value === picks.permissionMode);
+  const modes = pickerModes(offered);
+  const shown = picks.permissionMode === PLAN_ACCESS ? (returnTo ?? markedDefault(modes)?.value ?? null) : picks.permissionMode;
+  const access = modes.find(o => o.value === shown);
   const label = accessLabel(access);
-  const Icon = (picks.permissionMode !== null ? ACCESS_ICONS[picks.permissionMode] : undefined) ?? ShieldIcon;
+  const Icon = (shown !== null ? ACCESS_ICONS[shown] : undefined) ?? ShieldIcon;
   return (
     <Menu>
       <MenuTrigger
@@ -262,7 +275,7 @@ function AccessPicker({
         className={cn(triggerClass, className)}
         aria-label={`${ACCESS_WORD}: ${label}`}
         data-composer-picker="access"
-        data-access={picks.permissionMode ?? undefined}
+        data-access={shown ?? undefined}
       >
         <Icon className="size-4 shrink-0" aria-hidden />
         <span className="truncate">{label}</span>
@@ -273,7 +286,7 @@ function AccessPicker({
           <MenuGroupLabel>Access</MenuGroupLabel>
           {note !== null ? <MenuGroupLabel data-composer-access-reach>{note}</MenuGroupLabel> : null}
           <MenuRadioGroup
-            value={picks.permissionMode}
+            value={shown}
             onValueChange={next => {
               const mode = modes.find(o => o.value === next);
               if (mode !== undefined) onPickAccess(mode.value);
@@ -411,6 +424,7 @@ export function ComposerOptionPickers({
   // Only a home's send opens a copy per model; a send anywhere else lands in the one thread on screen.
   const home = useStore(s => s.projects.some(p => projectHomeKey(p.id) === workspaceId));
   const added = useMultiPicks(workspaceId);
+  const returnTo = usePlanReturn(thread.threadKey);
   if (catalog === null || picks === null) return null;
   const efforts = effortsFor(catalog, model);
   const contextWindows = contextWindowsFor(catalog, model);
@@ -447,7 +461,7 @@ export function ComposerOptionPickers({
       {!compact && catalog.permissionModes.length > 0 ? (
         <>
           <BarRule />
-          <AccessPicker modes={catalog.permissionModes} picks={picks} note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null} onPickAccess={onPickAccess} />
+          <AccessPicker modes={catalog.permissionModes} picks={picks} returnTo={returnTo} note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null} onPickAccess={onPickAccess} />
         </>
       ) : null}
       {!compact && projects.length > 0 && canPickFolder(thread) ? <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} /> : null}
@@ -458,11 +472,13 @@ export function ComposerOptionPickers({
 /** The access picker alone, sized for the strip under the one-line composer. */
 export function ComposerAccessPicker({ workspaceId, thread, onPickAccess }: { workspaceId: string; thread: ChatThreadHandle; onPickAccess: (mode: string) => void }) {
   const { catalog, picks } = useComposerPicks(workspaceId, thread);
+  const returnTo = usePlanReturn(thread.threadKey);
   if (catalog === null || picks === null || catalog.permissionModes.length === 0) return null;
   return (
     <AccessPicker
       modes={catalog.permissionModes}
       picks={picks}
+      returnTo={returnTo}
       note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null}
       onPickAccess={onPickAccess}
       className="h-7 gap-1.5 px-2 text-sm text-muted-foreground sm:h-6 sm:text-xs [&_svg]:size-3"

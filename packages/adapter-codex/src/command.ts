@@ -81,6 +81,7 @@ export interface AccessParams {
  * with the plan mode's instructions as the thread's developer instructions. */
 export function accessParams(mode: string | undefined): AccessParams {
   if (mode === undefined || mode === NO_SANDBOX) return { sandbox: NO_SANDBOX, approvalPolicy: "never" };
+  // Plan's developer instructions replace the person's own for the thread: codex takes one value for them.
   if (mode === PLAN_ACCESS) return { sandbox: "read-only", approvalPolicy: "never", developerInstructions: CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS };
   const sandboxed = SANDBOXED.find(m => m === mode);
   if (sandboxed === undefined) throw new Error(`permissionMode must be one of ${[...SANDBOXED, NO_SANDBOX, PLAN_ACCESS].join(", ")}, got "${mode}"`);
