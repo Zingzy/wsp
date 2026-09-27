@@ -331,16 +331,112 @@ describe("openHost", () => {
     expect(ready.session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
   });
 
-  it("a lock whose process never lets go is still refused, once the wait for it has run out", async () => {
+  it("a lock whose page answers as something else is refused at once, as a squatter always was", async () => {
     const squatter = createServer((_req, res) => res.end("<html>hello</html>"));
     const port = await listen(squatter);
     try {
       writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }));
-      await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 400 } })).rejects.toThrow(/but no wsp host answers there/);
+      const t0 = Date.now();
+      await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } })).rejects.toThrow(/but no wsp host answers there/);
+      expect(Date.now() - t0).toBeLessThan(1_000);
       expect(launchd.ran).toEqual([]);
     } finally {
       await closeServer(squatter);
     }
+  });
+
+  it("a lock whose page answers with another token's digest is refused at once", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    serving(statePath, existing);
+    writeFileSync(join(home, "host-token"), "a-token-of-some-other-host\n");
+    const t0 = Date.now();
+    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } })).rejects.toThrow(/another token's digest/);
+    expect(Date.now() - t0).toBeLessThan(1_000);
+  });
+
+  it("a lock of another login, its page answering, is refused at once", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    serving(statePath, existing, { pid: 1 });
+    const t0 = Date.now();
+    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } })).rejects.toThrow(/not this login's/);
+    expect(Date.now() - t0).toBeLessThan(1_000);
+  });
+
+  it("a host that has taken the lock and not yet bound its page is waited for, and the launch attaches once it answers", async () => {
+    // Between taking its lock and binding, a host reads its computers, which waits on every box that does not
+    // answer: 30 s on the dev home with four unreachable boxes. Its pid stays the same the whole time.
+    const probe = createTcpServer();
+    const port = await listen(probe);
+    await closeServer(probe);
+    const at = statePath;
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString(), startedBy: "service" }));
+    setTimeout(() => {
+      void startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port }).then(h => {
+        existing = h;
+        serving(at, h, { startedBy: "service" });
+      });
+    }, 600);
+    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } });
+    expect(ready.session.url).toBe(`http://127.0.0.1:${port}`);
+    expect(launchd.ran).toEqual([]);
+  });
+
+  it("the service's new host is waited for past the start's own wait while it holds the lock and binds late, as a host reading unreachable boxes does", async () => {
+    // What the ticket's launch met: nothing served, the unit loaded, and the host the manager started took its lock
+    // at once but answered on its port only after the start's twenty seconds.
+    const probe = createTcpServer();
+    const port = await listen(probe);
+    await closeServer(probe);
+    const at = statePath;
+    let loaded = false;
+    const road = {
+      ...launchd.road,
+      waitMs: 400,
+      run: async (argv: readonly string[]) => {
+        if (argv[1] === "print") return loaded ? { code: 0, output: "" } : { code: 113, output: "Could not find service" };
+        if (argv[1] === "bootstrap") {
+          loaded = true;
+          writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString(), startedBy: "service" }));
+          setTimeout(() => {
+            void startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port }).then(h => {
+              existing = h;
+              serving(at, h, { startedBy: "service" });
+            });
+          }, 1_000);
+        }
+        return { code: 0, output: "" };
+      },
+    };
+    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: road });
+    expect(ready.session.url).toBe(`http://127.0.0.1:${port}`);
+  });
+
+  it("a host that holds the lock and never answers is given up on, once the longer wait for a starting host has run out", async () => {
+    const probe = createTcpServer();
+    const port = await listen(probe);
+    await closeServer(probe);
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString(), startedBy: "service" }));
+    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 200 } })).rejects.toThrow(/no wsp host answers there/);
+  });
+
+  it("a launch whose read meets the host closing its page before it lets go of its lock ends on the next host", async () => {
+    // The order the real host shuts down in: its page closes, then its lock goes (cli.ts, the close road), so the read
+    // fails while the lock still names the host that answered.
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    serving(statePath, existing, { startedBy: "service" });
+    const going = existing;
+    let dials = 0;
+    const dial: typeof dialHost = async (path, o) => {
+      if (dials++ === 0) {
+        await going.close();
+        existing = undefined;
+        const lock = join(home, "host.lock");
+        setTimeout(() => rmSync(lock, { force: true }), 300);
+      }
+      return dialHost(path, o);
+    };
+    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: launchd.road }, dial);
+    expect(ready.session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
   });
 
   it("a launch that reads nothing from the host it attached to, which is still serving, says why rather than dialling again", async () => {
