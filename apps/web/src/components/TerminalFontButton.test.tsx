@@ -27,7 +27,7 @@ describe("terminal font button and card", () => {
   });
 
   it("opens on click, names the detected font as what empty means, and commits a typed family on blur", async () => {
-    (window as unknown as { __WSP__: unknown }).__WSP__ = { wsPort: 1, token: "", terminalFont: "Hack" };
+    (window as unknown as { __WSP__: unknown }).__WSP__ = { token: "", terminalFont: "Hack" };
     render(<Harness />);
     expect(screen.getByTestId("family").textContent).toBe("Hack");
     expect(screen.queryByRole("textbox", { name: "Terminal font" })).toBeNull();

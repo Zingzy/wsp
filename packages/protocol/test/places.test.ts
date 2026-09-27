@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PLACE_PORT,
   DEFAULT_PORT,
-  DEFAULT_WS_PORT,
   EventUnion,
   GUEST_DAEMON_DIR,
   GUEST_WSP_BIN,
@@ -53,7 +52,6 @@ import {
   PROC_FILESYSTEMS_PATH,
   placeDaemonPaths,
   placeLinkTranscript,
-  sshDaemonPaths,
   workFolderIn,
   workspacePlaceId,
   wspBinIn,
@@ -161,10 +159,6 @@ describe("the kinds a workspace can be", () => {
 });
 
 describe("where a daemon on somebody's own computer keeps things", () => {
-  it("is one function under two names, so the ssh road and the place road cannot put a token in two folders", () => {
-    expect(placeDaemonPaths).toBe(sshDaemonPaths);
-  });
-
   it("names the work folder by the one rule this computer's own workspace reads", () => {
     expect(workFolderIn("/Users/maya/")).toBe("/Users/maya/wsp-work");
     expect(placeDaemonPaths("/Users/maya").tokenPath).toBe("/Users/maya/.wsp/daemon-token");
@@ -242,10 +236,9 @@ describe("the address a person types on the join screen", () => {
 });
 
 describe("the port the door for computers you own answers on", () => {
-  it("sits the offset above the app port and is not the runtime's own", () => {
+  it("sits the offset above the app port", () => {
     expect(DEFAULT_PLACE_PORT).toBe(DEFAULT_PORT + 20);
     expect(PLACE_PORT_OFFSET).toBe(20);
-    expect(DEFAULT_PLACE_PORT).not.toBe(DEFAULT_WS_PORT);
   });
 });
 

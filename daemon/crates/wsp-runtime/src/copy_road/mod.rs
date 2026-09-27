@@ -186,15 +186,8 @@ fn tried<'a>(roads: &'a [&'a dyn CopyRoad], ask: &CopyAsk) -> Result<Vec<&'a dyn
     }
 }
 
-/// Why the folder somebody works in place is never taken away: it is theirs, and the record that named it is all
-/// a delete has to drop.
-pub const IN_PLACE_STAYS: &str = "a folder worked in place is the person's own; a delete takes its record and nothing on disk";
-
 /// The copy taken away by the road that made it, which is the road the record carries.
 pub fn remove(from: &Path, to: &Path, road: CopyRoadName) -> Result<(), String> {
-    if road == CopyRoadName::InPlace {
-        return Err(IN_PLACE_STAYS.to_owned());
-    }
     if ROADS.is_empty() {
         return Err(NOT_THIS_COMPUTER.to_owned());
     }
@@ -377,15 +370,6 @@ mod tests {
         assert_eq!(worktree::Worktree.settling(), Settling::Made);
         #[cfg(target_os = "macos")]
         assert_eq!(clonefile::Clonefile.settling(), Settling::OwnRepo);
-    }
-
-    #[test]
-    fn a_folder_worked_in_place_is_never_removed() {
-        let dir = tempfile::tempdir().unwrap();
-        let from = dir.path().join("work");
-        repo(&from);
-        assert_eq!(remove(&from, &from, CopyRoadName::InPlace).unwrap_err(), IN_PLACE_STAYS);
-        assert!(from.join("README.md").exists());
     }
 
     #[cfg(not(target_os = "macos"))]

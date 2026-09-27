@@ -260,8 +260,10 @@ describe("chat tab hydration", () => {
 });
 
 describe("chat tab composer", () => {
-  it("enter sends exactly one turn with resume, queues the next while in flight, and sends it when the turn ends", async () => {
-    const { api, started, emit } = fixtureApi([workspace]);
+  it("enter sends exactly one turn into the remembered session's thread, queues the next while in flight, and sends it when the turn ends", async () => {
+    const remembered: SessionView = { id: "sess_0000", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: CLAUDE_SID, threadId: "thr_a", prompt: "hello", startedAt: T0 };
+    const { api, started, emit } = fixtureApi([workspace], {}, [remembered]);
+    const turn = { ...scope, threadId: "thr_a" };
     await setup(api);
     const editor = composerEditor();
 
@@ -269,7 +271,7 @@ describe("chat tab composer", () => {
     expect(editor.textContent).toBe("fix the flaky test");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "fix the flaky test", resume: CLAUDE_SID });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "fix the flaky test", thread: "thr_a" });
 
     // Local echo of the user turn; the draft is gone and the send button says why it waits.
     expect(screen.getByText("fix the flaky test")).toBeDefined();
@@ -281,12 +283,12 @@ describe("chat tab composer", () => {
     expect(editor.textContent).toBe("");
     expect((screen.getByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement).value).toBe("again");
 
-    emit({ type: "session.start", ...scope });
+    emit({ type: "session.start", ...turn, prompt: "fix the flaky test" });
     expect(stopButton()).toBeDefined();
-    emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
-    emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
+    emit({ type: "session.done", ...turn, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
+    emit({ type: "session.end", ...turn, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", resume: "sess_0001" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_a" });
     expect(screen.queryByRole("textbox", { name: "Queued message" })).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
   });
@@ -379,7 +381,7 @@ describe("chat tab send after a harness died before its init", () => {
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
   });
 
-  it("a dead new thread read back from history is named on the next send, with no resume: the workspace's remembered session is not resumed into it", async () => {
+  it("a dead new thread read back from history is named on the next send: the workspace's remembered session is not sent into instead", async () => {
     const { api, started } = fixtureApi([workspace], { [WS]: [...STARTED, ...DEATH] });
     await setup(api);
     await screen.findByText(/exited before init/);
@@ -392,9 +394,9 @@ describe("chat tab send after a harness died before its init", () => {
     expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_dead" });
   });
 
-  it("pinned from the sidebar, a dead thread's next send names it with no resume; the retry lands under the pin, which stays, its queued row released there, and a reload keeps both", async () => {
+  it("pinned from the sidebar, a dead thread's next send names it; the retry lands under the pin, which stays, its queued row released there, and a reload keeps both", async () => {
     const history: Record<string, SessionEvent[]> = { [WS]: [...DEATH, ...STARTED] };
-    // The runtime stamps a row's session id only when the harness announces one, so the dead row has none to resume.
+    // The runtime stamps a row's session id only when the harness announces one, so the dead row is passed over and the send names the pin.
     const { api, started, emit } = fixtureApi([workspace], history, [deadRow]);
     // The runtime records an event before it pushes it, so a reload finds the retry in the reply.
     const record = (e: SessionEvent) => { history[WS] = [...history[WS]!, e]; emit(e); };
@@ -433,7 +435,7 @@ describe("chat tab send after a harness died before its init", () => {
 
     for (const e of RETRY.slice(2)) record(e);
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", thread: "thr_dead" });
   });
 
   it("on the latest view of a dead thread, another client's start with the same text during the send is kept out; the send's start under the dead thread takes the queued row from the workspace id", async () => {
@@ -471,7 +473,7 @@ describe("chat tab send after a harness died before its init", () => {
 
     for (const e of RETRY.slice(2)) emit(e);
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", thread: "thr_dead" });
   });
 
   it("pinned to a dead thread, another client's start with the same text during the send moves neither the pin nor the queued row; the send's start under the pin keeps both there and releases the row", async () => {
@@ -514,7 +516,7 @@ describe("chat tab send after a harness died before its init", () => {
 
     for (const e of RETRY.slice(2)) record(e);
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", thread: "thr_dead" });
   });
 
   it("pinned to a dead thread and left mid-send for another thread, the retry's start under the dead thread releases the queued row there, past another client's same-text start; the pin stays where the person went, and the row goes when they come back", async () => {
@@ -556,7 +558,7 @@ describe("chat tab send after a harness died before its init", () => {
     act(() => useStore.getState().select(WS, "thr_dead"));
     await screen.findByText("Second time lucky.");
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_retry" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", thread: "thr_dead" });
   });
   it("on a fresh thread, another client's start with the same text during the send stays out; the start carrying the send's request id opens the thread and takes the queued row", async () => {
     const { api, started, emit } = fixtureApi([workspace], { [WS]: STARTED });
@@ -595,7 +597,7 @@ describe("chat tab send after a harness died before its init", () => {
     emit({ type: "session.done", ...fresh, result: { status: "completed", durationMs: 1000, costUsd: 0.001 } });
     emit({ type: "session.end", ...fresh, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", resume: "sess_0002" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then this", thread: "thr_b" });
   });
 });
 
@@ -603,7 +605,7 @@ describe("chat tab pinned thread whose session.start fell off the transcript cap
   const TAIL: SessionEvent[] = CHAT_STREAM.slice(1).map(e => ({ ...e, threadId: "thr_a" }));
   const row: SessionView = { id: "sess_0001", workspaceId: WS, harness: "claude", status: "completed", claudeSessionId: "sess_0001", threadId: "thr_a", prompt: "hello", startedAt: T0 };
 
-  it("the next send resumes the session the thread's row remembers, not the workspace's latest", async () => {
+  it("the next send names the thread the pinned row carries, not the workspace's latest", async () => {
     const { api, started } = fixtureApi([workspace], { [WS]: TAIL }, [row]);
     await setup(api, "thr_a");
     await screen.findByText(/Server is live at :3000\./);
@@ -612,12 +614,12 @@ describe("chat tab pinned thread whose session.start fell off the transcript cap
     await typeInto(editor, "more");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(1));
-    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "more", resume: "sess_0001" });
+    expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "more", thread: "thr_a" });
   });
 });
 
 describe("chat tab new thread", () => {
-  it("clears the thread on a new-thread request for this workspace, focuses the composer, and sends the next prompt without resume", async () => {
+  it("clears the thread on a new-thread request for this workspace, focuses the composer, and sends the next prompt naming no thread and the one after into the thread it opened", async () => {
     const { api, started, emit } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
@@ -638,8 +640,8 @@ describe("chat tab new thread", () => {
     expect(started[0]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "start over" });
     expect(screen.getByText("start over")).toBeDefined();
 
-    // The fresh session's events land in the cleared thread; the store remembers its id and the next send resumes it.
-    const fresh = { workspaceId: WS, sessionId: "sess_0002", turnId: "turn_0002" };
+    // The fresh session's events land in the cleared thread, and the next send names the thread its start opened.
+    const fresh = { workspaceId: WS, sessionId: "sess_0002", turnId: "turn_0002", threadId: "thr_b" };
     emit({ type: "session.start", ...fresh, at: T0 + 100_000, prompt: "start over" });
     emit({ type: "session.delta", ...fresh, at: T0 + 100_500, kind: "text", text: "Fresh start." });
     emit({ type: "session.done", ...fresh, at: T0 + 101_000, result: { status: "completed", durationMs: 1000, costUsd: 0.001 } });
@@ -648,7 +650,7 @@ describe("chat tab new thread", () => {
     await typeInto(editor, "and then");
     await press(editor, "Enter");
     await waitFor(() => expect(started.length).toBe(2));
-    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then", resume: "sess_0002" });
+    expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "and then", thread: "thr_b" });
   });
 });
 

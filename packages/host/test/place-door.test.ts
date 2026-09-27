@@ -10,7 +10,7 @@ import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { freshEphemeral } from "@wsp/keys";
-import { AGENTS_ON, API_UNAUTHORIZED, DEFAULT_PLACE_PORT, DEFAULT_PORT, LOOPBACK, PLACE_LINK_NONCE_BYTES, PLACE_PORT_OFFSET, SCOPED_TOKEN_ROAD_REFUSAL, WILDCARD, WS_PATH, doorPortHeldLine, type BootPayload } from "@wsp/protocol";
+import { AGENTS_ON, DEFAULT_PLACE_PORT, DEFAULT_PORT, LOOPBACK, PLACE_LINK_NONCE_BYTES, PLACE_PORT_OFFSET, SCOPED_TOKEN_ROAD_REFUSAL, WILDCARD, WS_PATH, doorPortHeldLine, type BootPayload } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, newPlaceKeyPair, type PlaceBackHolder, type Runtime } from "@wsp/runtime";
 import { WsClient } from "../../runtime/test/ws-client.js";
 import { placeWiring } from "../src/places.js";
@@ -19,7 +19,7 @@ import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import { createOn, projectOn } from "./verbs-fixture.js";
 
-const DEV_BOOT = `<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>`;
+const DEV_BOOT = `<script>window.__WSP__ = window.__WSP__ || { token: "" };</script>`;
 const PAGE = `<!doctype html>\n<html><body><div id="root"></div>\n${DEV_BOOT}\n</body></html>\n`;
 
 let dirs: string[] = [];
@@ -95,7 +95,6 @@ async function up(opts: { door?: "closed" | "open"; listen?: string; runtime?: R
         runtime,
         webDir: fakeWebDir(),
         port,
-        wsPort: 0,
         ...(opts.door !== undefined ? { door: opts.door } : {}),
         ...(opts.listen !== undefined ? { listen: opts.listen } : {}),
         ...(opts.back !== undefined ? { back: opts.back } : {}),
@@ -129,16 +128,9 @@ describe("the door a host opens for computers you own", () => {
     expect(own.paired).toBe(true);
   });
 
-  it("asks a request on the door for a paired device's token and reaches the one runtime over its own port", async () => {
+  it("reaches the one runtime over the door's own port", async () => {
     const h = await up({ door: "open" });
     const port = h.port;
-    const refused = await fetch(`http://127.0.0.1:${port + PLACE_PORT_OFFSET}/api/workspaces`);
-    expect(refused.status).toBe(401);
-    expect((await refused.json()).error).toBe(API_UNAUTHORIZED);
-    // The same route on the person's own port asks for a token too, and takes the host's own off the file beside
-    // the state: reaching a loopback port is not being the person.
-    expect((await fetch(`http://127.0.0.1:${port}/api/workspaces`)).status).toBe(401);
-    expect((await fetch(`http://127.0.0.1:${port}/api/workspaces`, { headers: { authorization: `Bearer ${h.authToken}` } })).status).toBe(200);
     const ws = new WebSocket(`ws://127.0.0.1:${port + PLACE_PORT_OFFSET}${WS_PATH}`);
     await new Promise<void>((done, fail) => {
       ws.once("open", () => done());
@@ -247,21 +239,6 @@ describe("a request that arrives on the door", () => {
     const own = await WsClient.connectTo(`ws://127.0.0.1:${port}${WS_PATH}`, { token });
     expect(((await own.request("workspaces.list"))["workspaces"] as { name: string }[]).map(w => w.name)).toEqual(["lead"]);
     own.close();
-  });
-
-  it("refuses a thread's token on the fork route from 127.0.0.1, and the owner's own port still forks with it", async () => {
-    const runtime = testRuntime();
-    const { port } = await up({ door: "open", runtime });
-    const token = await threadToken(runtime);
-    const post = (at: number, name: string): Promise<Response> =>
-      fetch(`http://127.0.0.1:${at}/api/workspaces`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ name }) });
-    const carried = await post(port + PLACE_PORT_OFFSET, "carried");
-    expect(carried.status).toBe(401);
-    expect((await carried.json()) as { error: string }).toEqual({ error: API_UNAUTHORIZED });
-    expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["lead"]);
-    const made = await post(port, "builder");
-    expect(made.status).toBe(200);
-    expect(((await made.json()) as { workspace: { rootThreadId?: string } }).workspace.rootThreadId).toBe("t_1");
   });
 
   it("ends every socket the door let in when it closes, and opens again after", async () => {

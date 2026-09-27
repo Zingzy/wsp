@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, alreadyRecorded, copyPathFor, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { HERE_PLACE_ID, copyPathFor, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, noWorkspaceRefusal, deviceHeldRefusal, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, NO_COPIER_HERE, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";

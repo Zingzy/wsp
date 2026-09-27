@@ -294,7 +294,7 @@ where
     if let Some(token) = conn.token.clone() {
         ctx.add_tokened(key, token, conn.out.clone());
     }
-    let hello = DaemonEvent::DaemonHello { root: ctx.root.clone(), version: Some(numbers::DAEMON_VERSION) };
+    let hello = DaemonEvent::DaemonHello { root: ctx.root.clone(), version: numbers::DAEMON_VERSION };
     let mut ended = Ended::Peer;
     if emit(&mut ws, &mut seal, crate::frame_text(&hello)).await {
         let idle = tokio::time::sleep(quiet.unwrap_or(FOREVER));

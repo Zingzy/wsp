@@ -12,7 +12,7 @@ use wsp_frames::numbers;
 
 use crate::verbs::Verb;
 
-pub(crate) const USAGE: &str = "usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>] [--roots-path <file>] [--kind cloud|local|ssh|place] [--work-folder <dir>] [--inbox <dir>] [--inbox-quiet-ms <n>] [--inbox-poll-ms <n>] [--manifest <file>] [--run-dir <dir>] [--log-dir <dir>] [--open-socket <path>] [--port-file <file>] [--proc-root <dir>] [--passwd <file>] [--ports-interval-ms <n>] [--sys-interval-ms <n>] [--proc-interval-ms <n>] [--mode-interval-ms <n>] [--auth-deadline-ms <n>] [--place-file <file>] [--home <dir>] [--wsp-argv <word>]... [--agents id=bin,...] [--link-connect-ms <n>] [--link-quiet-ms <n>] [--link-refused-retry-ms <n>] [--link-backoff-ms <n>] [--runtime-root <dir>]";
+pub(crate) const USAGE: &str = "usage: wsp-daemon [--host <addr>] [--port <n>] [--token-path <file>] [--root <dir>] [--roots-path <file>] [--kind cloud|local|place] [--work-folder <dir>] [--inbox <dir>] [--inbox-quiet-ms <n>] [--inbox-poll-ms <n>] [--manifest <file>] [--run-dir <dir>] [--log-dir <dir>] [--open-socket <path>] [--port-file <file>] [--proc-root <dir>] [--passwd <file>] [--ports-interval-ms <n>] [--sys-interval-ms <n>] [--proc-interval-ms <n>] [--mode-interval-ms <n>] [--auth-deadline-ms <n>] [--place-file <file>] [--home <dir>] [--wsp-argv <word>]... [--agents id=bin,...] [--link-connect-ms <n>] [--link-quiet-ms <n>] [--link-refused-retry-ms <n>] [--link-backoff-ms <n>] [--runtime-root <dir>]";
 
 #[derive(Debug, Parser)]
 #[command(name = "wsp-daemon", disable_version_flag = true, override_usage = USAGE)]
@@ -33,7 +33,7 @@ pub(crate) struct Flags {
     #[arg(long, value_name = "file")]
     pub(crate) roots_path: Option<PathBuf>,
     // Any word: a kind the daemon lacks is refused at the watch, in the words the pane prints, not here.
-    #[arg(long, default_value = "cloud", value_name = "cloud|local|ssh|place")]
+    #[arg(long, default_value = "cloud", value_name = "cloud|local|place")]
     pub(crate) kind: String,
     #[arg(long, value_name = "dir")]
     pub(crate) work_folder: Option<PathBuf>,
@@ -243,7 +243,7 @@ mod tests {
             "--link-backoff-ms",
             "9",
             "--runtime-root",
-            "/var/lib/wsp-test",
+            "/wsp-test",
         ])
         .unwrap();
         let o = f.into_options();
@@ -254,7 +254,7 @@ mod tests {
         assert_eq!((o.inbox_quiet_ms, o.inbox_poll_ms, o.auth_deadline_ms), (Some(10), Some(20), Some(5)));
         assert_eq!((o.link_connect_ms, o.link_quiet_ms, o.link_refused_retry_ms, o.link_backoff_ms), (Some(6), Some(7), Some(8), Some(9)));
         assert_eq!(o.open_socket_path, Some(PathBuf::from("/o.sock")));
-        assert_eq!(o.runtime_root, Some(PathBuf::from("/var/lib/wsp-test")));
+        assert_eq!(o.runtime_root, Some(PathBuf::from("/wsp-test")));
         // No flag names the helper the workspace runtime runs, so a daemon on a machine runs this binary as it
         // always has: what names one is a test that opened a daemon inside its own process.
         assert_eq!(o.runtime_helper, None);

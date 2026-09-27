@@ -659,9 +659,8 @@ export interface StartSessionOptions {
    * from another client's with the same text. */
   requestId?: string;
   harness?: string;
-  resume?: string;
-  /** The thread the message goes to, by its runtime id, when the view has no session to resume: the runtime resumes
-   * the thread's latest session or, after a launch that failed, runs the message as the thread's first turn. */
+  /** The thread the message goes to, by its runtime id: the runtime resumes the thread's latest session or, after a
+   * launch that failed, runs the message as the thread's first turn. Absent opens a thread. */
   thread?: string;
   /** The folder the thread starts in; it wins over project and the runtime's default folder rule. */
   cwd?: string;

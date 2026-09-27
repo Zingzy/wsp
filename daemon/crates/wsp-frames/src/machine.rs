@@ -690,23 +690,17 @@ mod tests {
         assert_eq!(written, r#"{"kind":"sandbox"}"#);
         assert_eq!(serde_json::from_str::<MachineSpec>(&written).unwrap(), bare);
         let shared = MachineSpec {
-            shares: Some(vec![Share {
-                source: "/var/lib/wsp/logins/codex/auth.json".to_owned(),
-                target: "/root/.codex/auth.json".to_owned(),
-            }]),
+            shares: Some(vec![Share { source: "/wsp/logins/codex/auth.json".to_owned(), target: "/root/.codex/auth.json".to_owned() }]),
             ..bare
         };
         let written = serde_json::to_string(&shared).unwrap();
-        assert_eq!(
-            written,
-            r#"{"kind":"sandbox","shares":[{"source":"/var/lib/wsp/logins/codex/auth.json","target":"/root/.codex/auth.json"}]}"#
-        );
+        assert_eq!(written, r#"{"kind":"sandbox","shares":[{"source":"/wsp/logins/codex/auth.json","target":"/root/.codex/auth.json"}]}"#);
         assert_eq!(serde_json::from_str::<MachineSpec>(&written).unwrap(), shared);
         // Both paths are read by the wire's own rule: a bind mount is the one thing a slip cannot be taken back.
         for bad in [
             r#"{"kind":"sandbox","shares":[{"source":"logins/codex/auth.json","target":"/root/.codex/auth.json"}]}"#,
-            r#"{"kind":"sandbox","shares":[{"source":"/var/lib/wsp/logins/../../root/.ssh/id","target":"/root/.codex/auth.json"}]}"#,
-            r#"{"kind":"sandbox","shares":[{"source":"/var/lib/wsp/logins/codex/auth.json","target":"/root/../etc/passwd"}]}"#,
+            r#"{"kind":"sandbox","shares":[{"source":"/wsp/logins/../../root/.ssh/id","target":"/root/.codex/auth.json"}]}"#,
+            r#"{"kind":"sandbox","shares":[{"source":"/wsp/logins/codex/auth.json","target":"/root/../etc/passwd"}]}"#,
         ] {
             assert!(serde_json::from_str::<MachineSpec>(bad).is_err(), "{bad}");
         }
@@ -758,7 +752,7 @@ mod tests {
         // cannot be taken back.
         for bad in [
             r#"{"kind":"sandbox","binds":[{"source":"projects/pr_1/memory","target":"/root/memory"}]}"#,
-            r#"{"kind":"sandbox","binds":[{"source":"/var/lib/wsp/../../root/.ssh","target":"/root/memory"}]}"#,
+            r#"{"kind":"sandbox","binds":[{"source":"/wsp/../../root/.ssh","target":"/root/memory"}]}"#,
             r#"{"kind":"sandbox","binds":[{"source":"/wsp/projects/pr_1/memory","target":"/root/../etc"}]}"#,
         ] {
             assert!(serde_json::from_str::<MachineSpec>(bad).is_err(), "{bad}");
@@ -769,8 +763,8 @@ mod tests {
     fn a_backend_says_where_the_logins_it_shares_live_and_only_as_a_path() {
         let facts = r#"{"offer":"runtime","capabilities":{"liveCloneForks":false,"replacesMachine":true,"previewUrls":false,"signedUrls":false,"callbackRelay":false,"diskSnapshots":true,"images":false,"snapshotsAnyLife":false,"snapshotListing":true,"templates":true,"sizes":[],"kept":false,"copies":true,"ownNetwork":true},"pricing":{"defaultSize":{"cpu":2,"memMb":4096},"snapshotStorage":{"freeGb":0,"usdPerGbMonth":0,"billedFrom":""}}}"#;
         assert_eq!(serde_json::from_str::<BackendFacts>(facts).unwrap().logins, None);
-        let shared = facts.replace(r#"{"offer":"runtime""#, r#"{"logins":"/var/lib/wsp/logins","offer":"runtime""#);
-        assert_eq!(serde_json::from_str::<BackendFacts>(&shared).unwrap().logins.as_deref(), Some("/var/lib/wsp/logins"));
+        let shared = facts.replace(r#"{"offer":"runtime""#, r#"{"logins":"/wsp/logins","offer":"runtime""#);
+        assert_eq!(serde_json::from_str::<BackendFacts>(&shared).unwrap().logins.as_deref(), Some("/wsp/logins"));
         let relative = facts.replace(r#"{"offer":"runtime""#, r#"{"logins":"logins","offer":"runtime""#);
         assert!(serde_json::from_str::<BackendFacts>(&relative).is_err());
     }

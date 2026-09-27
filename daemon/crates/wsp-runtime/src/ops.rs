@@ -9,7 +9,7 @@
 //! Idle means stopped, and a pause always stops: SIGTERM to the workspace's processes, its init last, then the
 //! kill road for whatever stayed, the network down, and every mount under the rootfs detached. The upper
 //! directories stay with the copy, and the wake mounts the computer again and boots from them with the same id,
-//! address and forwards. There is no other state: nothing here freezes a workspace, and no label asks for it.
+//! address and forwards. There is no other state.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -33,9 +33,9 @@ use wsp_frames::{
 };
 
 use crate::bundle::{self, Config, CopyMade, Init, Layout, Workspace};
+use crate::cgroup;
 use crate::copy;
 use crate::engine::{self, Fence, Ports};
-use crate::freeze;
 use crate::net::{self, Net};
 use crate::profile;
 use crate::runtime::{self, Runtime, Status};
@@ -69,18 +69,6 @@ const EXEC_DEFAULT: Duration = Duration::from_millis(20_000);
 /// files and git off its rootfs and inside its namespaces, and nothing is deployed in.
 pub fn boot_cmd() -> Vec<String> {
     vec!["sleep".to_owned(), "infinity".to_owned()]
-}
-
-/// What every exec carries ahead of its command: the home and the user every wsp guest exec sets, and the
-/// compose project of a workspace that asked for an engine. A tenant starts from the workspace's own boot
-/// environment, which the container crate takes off the spec and the builder's own entries override by name, so
-/// the PATH and the recipe's knobs are there already; this line is what holds for a workspace booted by an older
-/// daemon and taken over by this one, whose spec carries neither.
-pub fn exec_env(record: &Workspace) -> String {
-    match record.engine {
-        true => format!("{EXEC_ENV} COMPOSE_PROJECT_NAME={}", compose_project(&record.id)),
-        false => EXEC_ENV.to_owned(),
-    }
 }
 
 /// The compose project one workspace's containers, networks and volumes belong to: its own id, held to what
@@ -675,8 +663,8 @@ impl Ops {
         })();
         let _ = fs::remove_dir_all(&check);
         overlay.map_err(|e| format!("this computer refuses an overlay mount of {}: {e}", lower.display()))?;
-        let cgroup = Path::new(freeze::CGROUP_ROOT).join("wsp").join(format!("check-{}", std::process::id()));
-        fs::create_dir_all(&cgroup).map_err(|e| format!("this computer refuses a cgroup under {}/wsp: {e}", freeze::CGROUP_ROOT))?;
+        let cgroup = Path::new(cgroup::CGROUP_ROOT).join("wsp").join(format!("check-{}", std::process::id()));
+        fs::create_dir_all(&cgroup).map_err(|e| format!("this computer refuses a cgroup under {}/wsp: {e}", cgroup::CGROUP_ROOT))?;
         let _ = fs::remove_dir(&cgroup);
         net::check()
     }
@@ -957,9 +945,8 @@ impl Ops {
     /// everything the workspace wrote, over the box's directories as they are now.
     async fn boot(&self, mut record: Workspace) -> Result<Workspace, OpError> {
         let id = record.id.clone();
-        // Before the first directory of this boot is made: a record written before this rule, or one whose
-        // destination fell under a tool root the computer has installed since, is refused at its wake rather
-        // than mounted through the computer's own home.
+        // Before the first directory of this boot is made: a record whose destination fell under a tool root the
+        // computer has installed since is refused at its wake rather than mounted through the computer's own home.
         for at in record.copy.iter().map(|made| made.at.as_str()).chain(record.binds.iter().map(|bind| bind.target.as_str())) {
             no_computer_tree(at)?;
         }
@@ -1013,9 +1000,8 @@ impl Ops {
         }
         let mut args = vec![profile::INIT_PATH.to_owned(), "runtime".to_owned(), "init".to_owned(), "--".to_owned()];
         args.extend(boot_cmd());
-        // The compose project of a workspace with an engine, in the environment its daemon and every thread
-        // under it inherits; the exec road sets the same name, which is what holds for a workspace booted by an
-        // older daemon and taken over by this one.
+        // The compose project of a workspace with an engine, in the environment its daemon, every exec and every
+        // thread under it inherits.
         let compose_name = record.engine.then(|| compose_project(&id));
         let cgroup = self.layout.cgroup_name(&id);
         let config = Config {
@@ -1049,11 +1035,11 @@ impl Ops {
         // The same inode the container has bound, so the line lands inside.
         bundle::write_etc(&self.layout.etc(&id), &record.hostname, Some(network.gateway))?;
         let cgroup = self.layout.cgroup_dir(&id);
-        freeze::forbid_swap(&cgroup)?;
+        cgroup::forbid_swap(&cgroup)?;
         // The cap as a throttle as well as a kill: youki wrote memory.max off the spec, and this is the same
         // figure at memory.high, so the kernel reclaims what it can from the workspace before it ends anything.
         if let Some(mem_mb) = record.mem_mb {
-            freeze::throttle_at(&cgroup, mem_mb)?;
+            cgroup::throttle_at(&cgroup, mem_mb)?;
         }
         if record.engine {
             self.serve_engine(&record).await?;
@@ -1219,10 +1205,10 @@ impl Ops {
             state: self.state_of(record),
             cpu: record.cpu,
             mem_mb: record.mem_mb,
-            mem_bytes: live.then(|| freeze::memory_current(&cgroup).ok()).flatten(),
-            cpu_usage_usec: live.then(|| freeze::cpu_usage_usec(&cgroup).ok()).flatten(),
+            mem_bytes: live.then(|| cgroup::memory_current(&cgroup).ok()).flatten(),
+            cpu_usage_usec: live.then(|| cgroup::cpu_usage_usec(&cgroup).ok()).flatten(),
             uptime_ms: live.then(|| runtime::uptime_ms(&record.init).ok()).flatten(),
-            procs: live.then(|| freeze::pids_in(&cgroup).ok()).flatten(),
+            procs: live.then(|| cgroup::pids_in(&cgroup).ok()).flatten(),
             quiet_for_ms: live.then(|| self.net.quiet_for_ms(&record.id)).flatten(),
             address: self.net.record(&record.id).ok().flatten().map(|network| network.address.to_string()),
             cgroup: cgroup.display().to_string(),
@@ -1250,17 +1236,15 @@ impl Ops {
         cwd: &str,
         shell: Option<&str>,
     ) -> Result<runtime::PtyInsideRunning, OpError> {
-        let record = self.running(id)?;
+        self.running(id)?;
         // Over the workspace's own boot environment, which the broker starts from as every tenant does: the
-        // PATH the workspace booted with and the recipe's knobs are there and none of them is spelled here.
-        let mut env = BTreeMap::from([
+        // PATH the workspace booted with, the recipe's knobs and the compose project are there and none of them is
+        // spelled here.
+        let env = BTreeMap::from([
             ("HOME".to_owned(), "/root".to_owned()),
             ("USER".to_owned(), "root".to_owned()),
             ("TERM".to_owned(), TERM.to_owned()),
         ]);
-        if record.engine {
-            env.insert("COMPOSE_PROJECT_NAME".to_owned(), compose_project(&record.id));
-        }
         // A login shell, as a person's terminal on any other machine opens: the workspace's own profile and the
         // person's own rc file, which are the computer's home bound inside.
         let args = match shell {
@@ -1297,7 +1281,7 @@ impl Ops {
 
     /// One command inside, with neither the clock nor the machine op's shape: what both roads above share.
     async fn inside(&self, record: &Workspace, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<runtime::Exec, OpError> {
-        let args = vec!["bash".to_owned(), "-c".to_owned(), format!("{}\n{cmd}", exec_env(record))];
+        let args = vec!["bash".to_owned(), "-c".to_owned(), format!("{EXEC_ENV}\n{cmd}")];
         Ok(self.runtime.exec(&record.id, &args, stdin, timeout).await?)
     }
 
@@ -2232,15 +2216,6 @@ mod tests {
         }
     }
 
-    /// Every exec carries the home and the user; one in a workspace with an engine carries its compose project
-    /// too, beside what the tenant already reads off the workspace's own boot environment.
-    #[test]
-    fn an_exec_in_a_workspace_with_an_engine_carries_its_compose_project() {
-        assert_eq!(exec_env(&awake("wsp-a", None)), "export HOME=/root USER=root");
-        let engined = Workspace { engine: true, ..awake("wsp-spoo.landing", None) };
-        assert_eq!(exec_env(&engined), "export HOME=/root USER=root COMPOSE_PROJECT_NAME=wsp-spoo-landing");
-    }
-
     #[test]
     fn the_backend_facts_are_the_plans() {
         let dir = tempfile::tempdir().unwrap();
@@ -2926,36 +2901,19 @@ mod tests {
     /// first directory.
     #[test]
     fn a_root_under_a_directory_every_workspace_overlays_is_refused_by_the_open_and_nothing_is_made() {
-        let under = Path::new("/var/lib/wsp-under-a-lower");
+        let under = Path::new("/var/wsp-under-a-lower");
         let refused = match Ops::open(under, PathBuf::from("/bin/true"), 0) {
             Ok(_) => panic!("a root under /var opened"),
             Err(e) => e.message,
         };
         assert_eq!(refused, crate::doctor::root_under_a_lower(under).unwrap());
-        assert!(refused.contains("/var/lib/wsp-under-a-lower") && refused.contains("/var"), "{refused}");
+        assert!(refused.contains("/var/wsp-under-a-lower") && refused.contains("/var"), "{refused}");
         assert!(!under.exists(), "the open made a folder under a root it refused");
         // And the same root a directory deeper, since the reading is of the whole path.
         assert!(Ops::open(Path::new("/etc/wsp/one"), PathBuf::from("/bin/true"), 0).is_err());
         // A root clear of all five opens as ever.
         let dir = tempfile::tempdir().unwrap();
         assert!(Ops::open(dir.path(), PathBuf::from("/bin/true"), 0).is_ok());
-    }
-
-    /// An older daemon that died inside the write of a claim's points file left a torn one behind: the open
-    /// reads it as the leaving of a create that never finished and takes the claim away with it, where before
-    /// it refused, and went on refusing every open after that until somebody deleted the file on the box.
-    #[test]
-    fn the_open_takes_a_claim_whose_points_file_is_torn_as_a_dead_creates_leaving() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("wsp");
-        let layout = Layout::new(&root);
-        drop(Ops::open(&root, PathBuf::from("/bin/true"), 0).unwrap());
-        fs::create_dir_all(layout.workspace("wsp-torn")).unwrap();
-        fs::write(layout.points("wsp-torn"), "[\"/root/.codex/auth.json\"").unwrap();
-
-        let again = Ops::open(&root, PathBuf::from("/bin/true"), 0).unwrap();
-        assert_eq!(again.unfinished_at_open().claims, vec!["wsp-torn".to_owned()]);
-        assert!(!layout.workspace("wsp-torn").exists());
     }
 
     #[test]

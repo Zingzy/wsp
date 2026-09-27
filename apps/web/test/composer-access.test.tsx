@@ -19,10 +19,8 @@ const WS = "ws_a";
 
 /** The runtime's own table, which is what the host answers before any machine has been asked. */
 const TABLE = harnessCatalog("claude")!;
-/** The same table as the runtime hands it out for a workspace on this computer, and for one on a computer the
- * person owns, where a thread asks before it acts. */
+/** The same table as the runtime hands it out for a workspace on this computer. */
 const THIS_MAC = workspaceAccess(TABLE, "local");
-const OWN_BOX = workspaceAccess(TABLE, "ssh");
 /** And for a machine wsp forked, where the pick that asks nothing names no computer of theirs. */
 const FORK = workspaceAccess(TABLE, "cloud");
 
@@ -53,10 +51,6 @@ describe("the access pick reads the workspace's own catalog and no other", () =>
     expect(access(store([THIS_MAC]))).toBe("bypassPermissions");
   });
 
-  it("reads Default on a computer the person owns and works on", () => {
-    expect(access(store([OWN_BOX]))).toBe("default");
-  });
-
   it("reads what a fork's own catalog marks", () => {
     expect(access(store([FORK]))).toBe("bypassPermissions");
   });
@@ -82,7 +76,7 @@ const view: ChatThreadView = {
   permissionMode: null,
 };
 
-const handle = { view, hydrated: true, busy: false, sending: false, fresh: true, resume: null, thread: "t1", threadKey: "t1", named: null } as unknown as ChatThreadHandle;
+const handle = { view, hydrated: true, busy: false, sending: false, fresh: true, thread: "t1", threadKey: "t1", named: null } as unknown as ChatThreadHandle;
 
 const WORKSPACE: WorkspaceView = { id: WS, name: "api", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
 

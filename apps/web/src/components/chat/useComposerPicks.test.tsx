@@ -62,7 +62,7 @@ const view = (model: string | null, running = false, recorded: Recorded = UNRECO
 });
 
 const handle = (model: string | null, threadKey = "t1", running = false, recorded: Recorded = UNRECORDED): ChatThreadHandle =>
-  ({ view: view(model, running, recorded), hydrated: true, busy: false, sending: false, fresh: false, resume: "sess", thread: threadKey, threadKey, named: null }) as unknown as ChatThreadHandle;
+  ({ view: view(model, running, recorded), hydrated: true, busy: false, sending: false, fresh: false, thread: threadKey, threadKey, named: null }) as unknown as ChatThreadHandle;
 
 /** The store as the composer meets it once this workspace's own machine has answered. Its catalog is what says which
  * access modes the workspace takes: a workspace still waiting for one is lent the host-wide lists with none, so the
