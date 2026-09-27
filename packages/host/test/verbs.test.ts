@@ -1978,11 +1978,19 @@ describe("wsp verbs over the host", () => {
     expect(rows[0]).toMatch(/^PROJECT\s+WORKSPACE\s+THREAD\s+AGENT\s+STATE\s+BY\s+COMPUTER\s+TITLE$/);
     const [a] = await rt.sessions.list(alpha!.id);
     const [b] = await rt.sessions.list(beta!.id);
-    // Each row reads project, workspace, thread, agent, state, who opened it, the computer and the title.
+    // Each row reads project, workspace, thread, agent, state, who opened it, the computer and the title. Both turns
+    // ended and no window has shown either, so both read Done, the word the app's tile shows.
     expect(rows.slice(1).map(r => r.split(/ {2,}/))).toEqual([
-      [alpha!.project.name, "alpha", a!.threadId!, "claude", "Idle", "cli", alpha!.project.computer, "first task"],
-      [beta!.project.name, "beta", b!.threadId!, "codex", "Idle", "person", beta!.project.computer, "from the app"],
+      [alpha!.project.name, "alpha", a!.threadId!, "claude", "Done", "cli", alpha!.project.computer, "first task"],
+      [beta!.project.name, "beta", b!.threadId!, "codex", "Done", "person", beta!.project.computer, "from the app"],
     ]);
+    // A window showing one moves its stamp on the host, and so does reading it here; both read Idle at once.
+    await rt.sessions.read(b!.threadId!);
+    const read = await run("threads");
+    expect(read.io.lines[0]!.split("\n").slice(1).map(r => r.split(/ {2,}/)[4])).toEqual(["Done", "Idle"]);
+    expect((await run("thread", "read", a!.threadId!)).code).toBe(0);
+    const both = await run("threads");
+    expect(both.io.lines[0]!.split("\n").slice(1).map(r => r.split(/ {2,}/)[4])).toEqual(["Idle", "Idle"]);
 
     const scoped = await run("threads", "beta", "--json");
     expect(scoped.code).toBe(0);
@@ -2013,7 +2021,7 @@ describe("wsp verbs over the host", () => {
     held.release(0, "written");
     expect(await started.ended).toBe(0);
     const after = await run("threads");
-    expect(after.io.lines[0]!.split("\n")[1]).toContain("Idle");
+    expect(after.io.lines[0]!.split("\n")[1]).toContain("Done");
   });
 
   it("run --cwd is the folder the turn starts in, the same field the app's composer sends; without it the workspace's project folder, else none and the harness starts in its own home", async () => {

@@ -97,6 +97,7 @@ export function ThreadTile({
   time,
   depth,
   active,
+  settled = false,
   renaming,
   saving,
   onSelect,
@@ -114,6 +115,8 @@ export function ThreadTile({
   /** How many tiles of the tree stand over this one. */
   depth: number;
   active: boolean;
+  /** The tile sits in the Settled fold: it rests, its age muted and its title stepped back, whatever its state. */
+  settled?: boolean;
   /** The name is being typed on this tile: row two holds the input instead of the title. */
   renaming: boolean;
   /** That name is on its way to the machine: the field stays exactly as it is and takes no second Enter. */
@@ -125,7 +128,7 @@ export function ThreadTile({
   /** Opens the box on this tile, as the menu's Rename does; absent where the rename is refused. */
   onRenameOpen?: (() => void) | undefined;
 }) {
-  const status = threadStatusOf(thread);
+  const status = settled ? RESTING : threadStatusOf(thread);
   // Only a resting thread steps back; a failed one or one waiting on the person keeps the foreground ink.
   const idle = status === RESTING;
   return (
@@ -143,7 +146,7 @@ export function ThreadTile({
     >
       <TileRows
         place={place}
-        status={<ThreadStatus thread={thread} age={time} />}
+        status={<ThreadStatus thread={thread} age={time} settled={settled} />}
         title={
           renaming ? (
             <span className="flex h-[18px] min-w-0">
@@ -224,7 +227,7 @@ export function WorkspaceTile({
 
 /** A send in flight is working by the fact of having been sent, read through the same status as the runtime's own
  * rows, so the two tiles cannot say different things about the same thread. */
-const LAUNCHED: ThreadStatusInput = { status: "running", asking: null, startedAt: null };
+const LAUNCHED: ThreadStatusInput = { status: "running", asking: null, startedAt: null, unread: false };
 
 /** The send the runtime has written no row for yet, in the tile's own grammar. Not a button: the thread it stands
  * for has no id to select until the runtime answers, and the transcript the person is looking at is already it. */
@@ -243,7 +246,7 @@ export function ThreadLaunchTile({ launch, place, branch }: { launch: Launch; pl
   );
 }
 
-const CREATE_FAILED: ThreadStatusInput = { status: "failed", asking: null, startedAt: null };
+const CREATE_FAILED: ThreadStatusInput = { status: "failed", asking: null, startedAt: null, unread: false };
 
 /** A workspace still being made, in the tile's grammar: where it will run, its name, and the step the create is
  * waiting on in row three, with the whole of it on the hover text. A refused create says Failed in the slot. */

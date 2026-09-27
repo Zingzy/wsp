@@ -647,6 +647,33 @@
       "height": 1100
     },
     {
+      "name": "tiles-scrolled",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "row-id=thread:cart",
+        "scroll:22:sidebar-tree"
+      ],
+      "wait": "row-id=thread:cart",
+      "widths": [
+        1440
+      ],
+      "height": 600
+    },
+    {
+      "name": "tiles-paused-done",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "row-id=thread:dark"
+      ],
+      "wait": "workspace-paused",
+      "widths": [
+        1440
+      ],
+      "fresh": true
+    },
+    {
       "name": "new-thread-dialog",
       "at": "/",
       "fixture": "mac-and-boxes",

@@ -53,8 +53,10 @@ export function useWorkspaceVerbs(): WorkspaceVerbs {
 export function useThreadVerbs(): ThreadVerbs {
   const api = useStore(s => s.api);
   const forgetThread = useStore(s => s.forgetThread);
+  const settleThreads = useStore(s => s.settleThreads);
   const stop = api?.interruptSession;
   const canForget = api?.forgetThread !== undefined;
+  const canSettle = api?.settleThreads !== undefined;
   return useMemo<ThreadVerbs>(
     () => ({
       stop:
@@ -64,8 +66,9 @@ export function useThreadVerbs(): ThreadVerbs {
               await stop(sessionId);
             },
       forget: canForget ? thread => void forgetThread(thread) : undefined,
+      settle: canSettle ? settleThreads : undefined,
       copyText,
     }),
-    [canForget, forgetThread, stop],
+    [canForget, canSettle, forgetThread, settleThreads, stop],
   );
 }

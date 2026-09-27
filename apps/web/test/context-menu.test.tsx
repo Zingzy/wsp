@@ -269,7 +269,7 @@ describe("a tile's menu for the copy it runs on", () => {
     await mountSidebar(fakeApi([API], [statusOf(API)], [{ ...RUNNING }, child]), "fix the port list");
     rightClick(rowOf("fix the port list"));
     await screen.findByRole("menu");
-    expect(labels()).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.forget, ...[
+    expect(labels()).toEqual([THREAD_WORDS.stop, THREAD_WORDS.settle, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.forget, ...[
       WORKSPACE_WORDS.pause,
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
@@ -342,7 +342,7 @@ describe("a thread row's menu", () => {
     const row = rowOf("fix the port list");
     rightClick(row);
     await screen.findByRole("menu");
-    expect(labels().slice(0, 4)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
+    expect(labels().slice(0, 5)).toEqual([THREAD_WORDS.stop, THREAD_WORDS.settle, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
     // The agent's own store keeps a name, and the row is the box: the rename runs.
     expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBeNull();
     expect(refusalOf(THREAD_WORDS.rename)).toBeNull();
@@ -579,7 +579,7 @@ describe("the palette's Rename task", () => {
   });
 
   it("with no thread open there takes the copy's top thread, opening the Settled fold when that is where its tile is", async () => {
-    const quiet: SessionView = { ...RUNNING, status: "completed", startedAt: Date.now() - 3 * 24 * 60 * 60_000, endedAt: Date.now() - 2 * 24 * 60 * 60_000 };
+    const quiet: SessionView = { ...RUNNING, status: "completed", startedAt: Date.now() - 3 * 24 * 60 * 60_000, endedAt: Date.now() - 2 * 24 * 60 * 60_000, readAt: Date.now() - 2 * 24 * 60 * 60_000, settledAt: Date.now() - 24 * 60 * 60_000 };
     await mountSidebar(fakeApi([API], [statusOf(API)], [quiet]), "Settled");
     await waitFor(() => expect(rowOf2("settled").getAttribute("aria-expanded")).toBe("false"));
     act(() => requestRenameWorkspace("ws_a"));

@@ -2,7 +2,7 @@
 // Workspaces and statuses into sidebar projects with status indicators.
 import { describe, expect, it } from "vitest";
 import type { MachineState, ReachState, SessionView, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
-import { deriveSidebarProjects, pausedLine, threadIndicator, turnWait, workspaceIndicator, type SidebarInput } from "../src/adapt/index.js";
+import { deriveSidebarProjects, threadIndicator, turnWait, workspaceIndicator, type SidebarInput } from "../src/adapt/index.js";
 import { LIVE_RUN_1, LIVE_RUN_1_RESTART, LIVE_WORKSPACE_1, LIVE_WORKSPACE_2, LIVE_WS } from "./fixtures/live-run-1.js";
 
 const status = (phase: WorkspacePhase, machineState: MachineState, reach: ReachState, id = "ws_a"): WorkspaceStatus => ({
@@ -63,14 +63,6 @@ describe("turnWait", () => {
     expect(turnWait("unreachable", runs)).toEqual({ label: "waiting for profile to answer", wake: false, elapsed: false });
     expect(turnWait("gone", runs)).toEqual({ label: "profile is gone", wake: false, elapsed: false });
   });
-
-  it("the paused line reads the idle window the runtime napped it after, and the state alone where no status carried one", () => {
-    expect(pausedLine("idle 30 min")).toBe("paused after 30 min idle");
-    expect(pausedLine("idle 20 min")).toBe("paused after 20 min idle");
-    expect(pausedLine(undefined)).toBe("paused");
-    // A reason of another shape is not a window: nothing is invented from it.
-    expect(pausedLine("machine replaced")).toBe("paused");
-  });
 });
 
 describe("deriveSidebarProjects", () => {
@@ -86,7 +78,7 @@ describe("deriveSidebarProjects", () => {
       statuses: statusesFrom(LIVE_RUN_1),
       sessions: {
         [LIVE_WS]: [
-          { id: "s1", workspaceId: LIVE_WS, harness: "claude", status: "completed", claudeSessionId: "59094224", prompt: "hello", startedAt: Date.parse("2026-09-02T17:19:35.668Z"), endedAt: Date.parse("2026-09-02T17:19:37.768Z") },
+          { id: "s1", workspaceId: LIVE_WS, harness: "claude", status: "completed", claudeSessionId: "59094224", prompt: "hello", startedAt: Date.parse("2026-09-02T17:19:35.668Z"), endedAt: Date.parse("2026-09-02T17:19:37.768Z"), readAt: Date.parse("2026-09-02T17:19:40.000Z") },
           { id: "s0", workspaceId: LIVE_WS, harness: "claude", status: "running", claudeSessionId: "59094224" },
         ],
       },
@@ -97,8 +89,8 @@ describe("deriveSidebarProjects", () => {
     ]);
     expect(projects[0]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable", state: "running" });
     expect(projects[0]?.threads).toEqual([
-      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, asking: null, costUsd: null },
-      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, asking: null, costUsd: null },
+      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: "2026-09-02T17:19:40.000Z", settledAt: null },
+      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null },
     ]);
   });
 
@@ -124,7 +116,7 @@ describe("deriveSidebarProjects", () => {
       sessions: {
         [LIVE_WS]: [
           { id: "s1", workspaceId: LIVE_WS, harness: "claude", status: "completed", startedBy: "cli", threadId: "thr_a", prompt: "make me a simple server", startedAt: 1_000, endedAt: 2_000 },
-          { id: "s2", workspaceId: LIVE_WS, harness: "codex", status: "completed", startedBy: "person", threadId: "thr_b", prompt: "unrelated", startedAt: 3_000, endedAt: 4_000 },
+          { id: "s2", workspaceId: LIVE_WS, harness: "codex", status: "completed", startedBy: "person", threadId: "thr_b", prompt: "unrelated", startedAt: 3_000, endedAt: 4_000, readAt: 4_000 },
           { id: "s3", workspaceId: LIVE_WS, harness: "claude", status: "running", startedBy: "person", threadId: "thr_a", prompt: "do you have access", startedAt: 5_000 },
           { id: "s4", workspaceId: LIVE_WS, harness: "claude", status: "failed", prompt: "before threads", startedAt: 6_000, endedAt: 7_000 },
         ],

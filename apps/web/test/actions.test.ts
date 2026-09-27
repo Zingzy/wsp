@@ -11,7 +11,7 @@ import { TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS, terminalRefusedLine } fr
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, actionIfAny, resolveActions, toMenuItems } from "../src/actions/registry.js";
 import { terminalActions, type TerminalVerbs } from "../src/actions/terminalActions.js";
-import { threadActions, threadTarget, type ThreadTarget, type ThreadVerbs } from "../src/actions/threadActions.js";
+import { settledFoldActions, threadActions, threadTarget, type ThreadTarget, type ThreadVerbs } from "../src/actions/threadActions.js";
 import { workspaceActions, workspaceTarget, type WorkspaceTarget, type WorkspaceVerbs } from "../src/actions/workspaceActions.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../src/keybindingDefaults.js";
 import { MAX_TERMINALS_PER_GROUP } from "../src/terminal/groups.js";
@@ -307,7 +307,7 @@ describe("thread actions", () => {
     ran = true,
   ): ThreadTarget =>
     threadTarget(
-      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, asking: null, costUsd: null },
+      { id: "thr_1", sessionId: "s1", threadId, workspaceId: "ws_a", harness, title: "fix the port list", status, ran, startedAt: null, endedAt: null, indicator: null, startedBy: "person", project: null, parentThreadId: null, asking: null, costUsd: null, unread: false, readAt: null, settledAt: null },
       { catalog: machine.catalog === undefined ? row(harness) : machine.catalog, state: machine.state ?? "running", ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}) },
     );
   const threadVerbs = (over: Partial<ThreadVerbs> = {}): ThreadVerbs => ({ stop: vi.fn(async () => {}), rename: vi.fn(), forget: vi.fn(), copyText: vi.fn(async () => {}), ...over });
@@ -335,6 +335,27 @@ describe("thread actions", () => {
     expect(actionById(resolveActions(threadActions, never, threadVerbs({ forget: undefined })), "forget").refusal).toBe("This client cannot forget a thread");
     // A row the runtime stamped no thread id on names nothing to forget.
     expect(actionById(resolveActions(threadActions, thread("completed", null, "claude", {}, false), threadVerbs()), "forget").refusal).toBe("This thread has no id yet");
+  });
+
+  it("a root thread offers Settle on its shortcut, which takes its whole tree and is held while one of it works; a thread under a root offers none", async () => {
+    const settle = vi.fn(async () => {});
+    const root = (working: boolean): ThreadTarget => ({ ...thread("completed"), settle: { threadIds: ["thr_1", "thr_2"], working } });
+    const actions = resolveActions(threadActions, root(false), threadVerbs({ settle }));
+    expect(actionById(actions, "settle")).toMatchObject({ title: THREAD_WORDS.settle, refusal: null, shortcutCommand: "thread.settle" });
+    await actionById(actions, "settle").run();
+    expect(settle).toHaveBeenCalledWith(["thr_1", "thr_2"]);
+    expect(actionById(resolveActions(threadActions, root(true), threadVerbs({ settle })), "settle").refusal).toBe("A thread in it is still working");
+    expect(actionById(resolveActions(threadActions, root(false), threadVerbs()), "settle").refusal).toBe("This client cannot settle a thread");
+    expect(actionIfAny(resolveActions(threadActions, thread("completed"), threadVerbs({ settle })), "settle")).toBeUndefined();
+  });
+
+  it("the Settled row's Settle all read takes every read tree it is handed, and says so when there is none", async () => {
+    const settle = vi.fn(async () => {});
+    const [all] = resolveActions(settledFoldActions, { threadIds: ["thr_1", "thr_2", "thr_3"] }, threadVerbs({ settle }));
+    expect(all).toMatchObject({ title: "Settle all read", refusal: null });
+    await all!.run();
+    expect(settle).toHaveBeenCalledWith(["thr_1", "thr_2", "thr_3"]);
+    expect(resolveActions(settledFoldActions, { threadIds: [] }, threadVerbs({ settle }))[0]!.refusal).toBe("No read thread to settle");
   });
 
   it("a settled thread refuses stop; a client without the verb says so; a thread without an id has no link", () => {
