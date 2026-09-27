@@ -1,0 +1,314 @@
+{
+  "cloudOff": {
+    "name": "terminal_config",
+    "description": "The person's Ghostty config on this computer as the app's terminal pane applies it: every config file Ghostty would load and the theme it names, read now, with only the keys the pane honours. files is empty when they have no Ghostty config, and each other key is absent when no file sets it, so the pane keeps its default there. backgroundBlur is read and not applied: the desktop window's own material is the blur, and a browser tab has none. Read this to say how their terminal looks or to check what a config change did; nothing is written.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "enum": [
+            "light",
+            "dark"
+          ],
+          "description": "which side of a light:...,dark:... theme to resolve; dark when absent"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fontFamily": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fontSize": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "theme": {
+          "type": "string"
+        },
+        "background": {
+          "type": "object",
+          "properties": {
+            "r": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "g": {
+              "$ref": "#/properties/background/properties/r"
+            },
+            "b": {
+              "$ref": "#/properties/background/properties/r"
+            }
+          },
+          "required": [
+            "r",
+            "g",
+            "b"
+          ],
+          "additionalProperties": false
+        },
+        "foreground": {
+          "$ref": "#/properties/background"
+        },
+        "palette": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/properties/background"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minItems": 16,
+          "maxItems": 16
+        },
+        "selectionBackground": {
+          "$ref": "#/properties/background"
+        },
+        "cursorColor": {
+          "$ref": "#/properties/background"
+        },
+        "cursorStyle": {
+          "type": "string",
+          "enum": [
+            "block",
+            "bar",
+            "underline",
+            "block_hollow"
+          ]
+        },
+        "cursorStyleBlink": {
+          "type": "boolean"
+        },
+        "windowPaddingX": {
+          "type": "object",
+          "properties": {
+            "left": {
+              "type": "number",
+              "minimum": 0
+            },
+            "right": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        "windowPaddingY": {
+          "type": "object",
+          "properties": {
+            "top": {
+              "type": "number",
+              "minimum": 0
+            },
+            "bottom": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "top",
+            "bottom"
+          ],
+          "additionalProperties": false
+        },
+        "backgroundOpacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "backgroundBlur": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "files",
+        "fontFamily",
+        "palette"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "terminal_config",
+    "description": "The person's Ghostty config on this computer as the app's terminal pane applies it: every config file Ghostty would load and the theme it names, read now, with only the keys the pane honours. files is empty when they have no Ghostty config, and each other key is absent when no file sets it, so the pane keeps its default there. backgroundBlur is read and not applied: the desktop window's own material is the blur, and a browser tab has none. Read this to say how their terminal looks or to check what a config change did; nothing is written.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scheme": {
+          "type": "string",
+          "enum": [
+            "light",
+            "dark"
+          ],
+          "description": "which side of a light:...,dark:... theme to resolve; dark when absent"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fontFamily": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fontSize": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "theme": {
+          "type": "string"
+        },
+        "background": {
+          "type": "object",
+          "properties": {
+            "r": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "g": {
+              "$ref": "#/properties/background/properties/r"
+            },
+            "b": {
+              "$ref": "#/properties/background/properties/r"
+            }
+          },
+          "required": [
+            "r",
+            "g",
+            "b"
+          ],
+          "additionalProperties": false
+        },
+        "foreground": {
+          "$ref": "#/properties/background"
+        },
+        "palette": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/properties/background"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minItems": 16,
+          "maxItems": 16
+        },
+        "selectionBackground": {
+          "$ref": "#/properties/background"
+        },
+        "cursorColor": {
+          "$ref": "#/properties/background"
+        },
+        "cursorStyle": {
+          "type": "string",
+          "enum": [
+            "block",
+            "bar",
+            "underline",
+            "block_hollow"
+          ]
+        },
+        "cursorStyleBlink": {
+          "type": "boolean"
+        },
+        "windowPaddingX": {
+          "type": "object",
+          "properties": {
+            "left": {
+              "type": "number",
+              "minimum": 0
+            },
+            "right": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "left",
+            "right"
+          ],
+          "additionalProperties": false
+        },
+        "windowPaddingY": {
+          "type": "object",
+          "properties": {
+            "top": {
+              "type": "number",
+              "minimum": 0
+            },
+            "bottom": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "top",
+            "bottom"
+          ],
+          "additionalProperties": false
+        },
+        "backgroundOpacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "backgroundBlur": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "files",
+        "fontFamily",
+        "palette"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

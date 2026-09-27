@@ -1,0 +1,508 @@
+{
+  "cloudOff": {
+    "name": "threads",
+    "description": "Every thread as the sidebar lists it: its project, its workspace, the computer that workspace runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one workspace. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "threads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "threadId": {
+                "type": "string"
+              },
+              "workspaceId": {
+                "type": "string"
+              },
+              "harness": {
+                "type": "string"
+              },
+              "startedBy": {
+                "type": "string",
+                "enum": [
+                  "person",
+                  "cli",
+                  "agent"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running",
+                  "completed",
+                  "interrupted",
+                  "failed"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "claudeSessionId": {
+                "type": "string"
+              },
+              "startedAt": {
+                "type": "number"
+              },
+              "endedAt": {
+                "type": "number"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "turns": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "ran": {
+                "type": "boolean"
+              },
+              "parentThreadId": {
+                "type": "string"
+              },
+              "rootThreadId": {
+                "type": "string"
+              },
+              "asking": {
+                "type": "string"
+              },
+              "waitingOn": {
+                "type": "object",
+                "properties": {
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "workspaceId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "type": "object",
+                    "properties": {
+                      "askId": {
+                        "type": "string"
+                      },
+                      "toolName": {
+                        "type": "string"
+                      },
+                      "toolUseId": {
+                        "type": "string"
+                      },
+                      "parentToolUseId": {
+                        "type": "string"
+                      },
+                      "input": {
+                        "type": "string"
+                      },
+                      "detail": {
+                        "type": "string"
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "effect": {
+                              "type": "string",
+                              "enum": [
+                                "allow",
+                                "deny",
+                                "mode",
+                                "answer"
+                              ]
+                            },
+                            "mode": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label",
+                            "effect"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "askId",
+                      "toolName",
+                      "input",
+                      "options"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "threadId",
+                  "workspaceId",
+                  "sessionId",
+                  "title",
+                  "prompt"
+                ],
+                "additionalProperties": false
+              },
+              "costUsd": {
+                "type": "number"
+              },
+              "pid": {
+                "type": "integer"
+              },
+              "readAt": {
+                "type": "number"
+              },
+              "settledAt": {
+                "type": "number"
+              },
+              "pinnedAt": {
+                "type": "number"
+              },
+              "snoozedUntil": {
+                "type": "number"
+              },
+              "wokeAt": {
+                "type": "number"
+              },
+              "section": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "enum": [
+                      "needs-you",
+                      "working",
+                      "done",
+                      "idle"
+                    ]
+                  },
+                  "whileState": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "whileState"
+                ],
+                "additionalProperties": false
+              },
+              "projectName": {
+                "type": "string"
+              },
+              "workspaceName": {
+                "type": "string"
+              },
+              "computerName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "workspaceId",
+              "harness",
+              "startedBy",
+              "status",
+              "title",
+              "sessionId",
+              "turns",
+              "ran",
+              "projectName",
+              "workspaceName",
+              "computerName"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "threads"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "threads",
+    "description": "Every thread as the sidebar lists it: its project, its workspace, the computer that workspace runs on, the agent inside, its state, who opened it (person, cli or agent) and its title. Optionally within one workspace. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "threads": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "threadId": {
+                "type": "string"
+              },
+              "workspaceId": {
+                "type": "string"
+              },
+              "harness": {
+                "type": "string"
+              },
+              "startedBy": {
+                "type": "string",
+                "enum": [
+                  "person",
+                  "cli",
+                  "agent"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "running",
+                  "completed",
+                  "interrupted",
+                  "failed"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "claudeSessionId": {
+                "type": "string"
+              },
+              "startedAt": {
+                "type": "number"
+              },
+              "endedAt": {
+                "type": "number"
+              },
+              "cwd": {
+                "type": "string"
+              },
+              "turns": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "ran": {
+                "type": "boolean"
+              },
+              "parentThreadId": {
+                "type": "string"
+              },
+              "rootThreadId": {
+                "type": "string"
+              },
+              "asking": {
+                "type": "string"
+              },
+              "waitingOn": {
+                "type": "object",
+                "properties": {
+                  "threadId": {
+                    "type": "string"
+                  },
+                  "workspaceId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "prompt": {
+                    "type": "object",
+                    "properties": {
+                      "askId": {
+                        "type": "string"
+                      },
+                      "toolName": {
+                        "type": "string"
+                      },
+                      "toolUseId": {
+                        "type": "string"
+                      },
+                      "parentToolUseId": {
+                        "type": "string"
+                      },
+                      "input": {
+                        "type": "string"
+                      },
+                      "detail": {
+                        "type": "string"
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "label": {
+                              "type": "string"
+                            },
+                            "effect": {
+                              "type": "string",
+                              "enum": [
+                                "allow",
+                                "deny",
+                                "mode",
+                                "answer"
+                              ]
+                            },
+                            "mode": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "label",
+                            "effect"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "askId",
+                      "toolName",
+                      "input",
+                      "options"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "threadId",
+                  "workspaceId",
+                  "sessionId",
+                  "title",
+                  "prompt"
+                ],
+                "additionalProperties": false
+              },
+              "costUsd": {
+                "type": "number"
+              },
+              "pid": {
+                "type": "integer"
+              },
+              "readAt": {
+                "type": "number"
+              },
+              "settledAt": {
+                "type": "number"
+              },
+              "pinnedAt": {
+                "type": "number"
+              },
+              "snoozedUntil": {
+                "type": "number"
+              },
+              "wokeAt": {
+                "type": "number"
+              },
+              "section": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "enum": [
+                      "needs-you",
+                      "working",
+                      "done",
+                      "idle"
+                    ]
+                  },
+                  "whileState": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "whileState"
+                ],
+                "additionalProperties": false
+              },
+              "projectName": {
+                "type": "string"
+              },
+              "workspaceName": {
+                "type": "string"
+              },
+              "computerName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "workspaceId",
+              "harness",
+              "startedBy",
+              "status",
+              "title",
+              "sessionId",
+              "turns",
+              "ran",
+              "projectName",
+              "workspaceName",
+              "computerName"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "threads"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

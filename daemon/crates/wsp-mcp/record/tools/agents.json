@@ -1,0 +1,400 @@
+{
+  "cloudOff": {
+    "name": "agents",
+    "description": "The coding agents the catalog knows, as they stand on one computer or workspace: whether each is on that login's PATH and where, the version its command answers, the newest its vendor publishes as this host last read it (asked of npm, GitHub or the vendor from this host alone, kept a day, never with Newest agent versions off in Settings > Privacy or WSP_UPDATE_CHECK=0) and the version wsp's install pins, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown), how a person signs it in, and whether one of its MCP config files names the wsp server. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "placeId": {
+                  "type": "string"
+                },
+                "project": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "placeId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "workspaceId"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "home": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        },
+        "readAt": {
+          "type": "string"
+        },
+        "stale": {
+          "type": "string",
+          "const": "napping"
+        },
+        "refused": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "reach": {
+          "type": "string",
+          "enum": [
+            "here",
+            "relay",
+            "none"
+          ]
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "installed": {
+                "type": "boolean"
+              },
+              "version": {
+                "type": "string"
+              },
+              "latest": {
+                "type": "string"
+              },
+              "pinned": {
+                "type": "string"
+              },
+              "road": {
+                "type": "string",
+                "enum": [
+                  "wsp",
+                  "own",
+                  "shim",
+                  "none"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "via": {
+                "type": "string"
+              },
+              "signIn": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "signed-in",
+                      "vault-key",
+                      "none"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "const": "unknown"
+                  }
+                ]
+              },
+              "signInRoad": {
+                "type": "string",
+                "enum": [
+                  "device",
+                  "code",
+                  "key",
+                  "token",
+                  "terminal",
+                  "none"
+                ]
+              },
+              "wspTools": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "installed",
+              "road",
+              "signIn",
+              "signInRoad",
+              "wspTools"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "target",
+        "home",
+        "user",
+        "readAt",
+        "refused",
+        "agents"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "agents",
+    "description": "The coding agents the catalog knows, as they stand on one computer or workspace: whether each is on that login's PATH and where, the version its command answers, the newest its vendor publishes as this host last read it (asked of npm, GitHub or the vendor from this host alone, kept a day, never with Newest agent versions off in Settings > Privacy or WSP_UPDATE_CHECK=0) and the version wsp's install pins, its sign-in there (signed in, your key from this host's vault, not signed in, or unknown), how a person signs it in, and whether one of its MCP config files names the wsp server. Read as the login the computer was added with, off each agent's config and whether its files are there: no MCP server is started and no login file is opened. A napping workspace answers what stood there when it last ran, marked stale, and is not woken.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "placeId": {
+                  "type": "string"
+                },
+                "project": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "placeId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "workspaceId"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "home": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string"
+        },
+        "readAt": {
+          "type": "string"
+        },
+        "stale": {
+          "type": "string",
+          "const": "napping"
+        },
+        "refused": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "reach": {
+          "type": "string",
+          "enum": [
+            "here",
+            "relay",
+            "none"
+          ]
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "installed": {
+                "type": "boolean"
+              },
+              "version": {
+                "type": "string"
+              },
+              "latest": {
+                "type": "string"
+              },
+              "pinned": {
+                "type": "string"
+              },
+              "road": {
+                "type": "string",
+                "enum": [
+                  "wsp",
+                  "own",
+                  "shim",
+                  "none"
+                ]
+              },
+              "path": {
+                "type": "string"
+              },
+              "via": {
+                "type": "string"
+              },
+              "signIn": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "signed-in",
+                      "vault-key",
+                      "none"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "const": "unknown"
+                  }
+                ]
+              },
+              "signInRoad": {
+                "type": "string",
+                "enum": [
+                  "device",
+                  "code",
+                  "key",
+                  "token",
+                  "terminal",
+                  "none"
+                ]
+              },
+              "wspTools": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "installed",
+              "road",
+              "signIn",
+              "signInRoad",
+              "wspTools"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "target",
+        "home",
+        "user",
+        "readAt",
+        "refused",
+        "agents"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

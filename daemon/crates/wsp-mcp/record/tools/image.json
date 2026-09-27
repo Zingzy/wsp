@@ -1,0 +1,1100 @@
+{
+  "cloudOff": {
+    "name": "image",
+    "description": "The image this host owns and the copy each place has built of it. The record is the recipe the seal was planned from, the sign-ins it holds and a hash over both; a copy built at that hash is current and any other is stale, whatever version the place's own manifest gave it. A record with no vault was read back off its own copy rather than written at a seal, so it judges none of them and every copy of it asks for the sign-ins again: cutting the next version holds them. The project images taken off workspaces are listed under it, each with its snapshot id, the workspace it was taken off, its size where the provider lists one and its date.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "image": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "hash": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64
+                },
+                "recipeHash": {
+                  "type": "string"
+                },
+                "recipe": {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "number",
+                      "const": 1
+                    },
+                    "at": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "tick": {
+                      "type": "string",
+                      "enum": [
+                        "used",
+                        "installed",
+                        "default"
+                      ]
+                    },
+                    "histories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agent": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "read",
+                              "empty",
+                              "unreadable",
+                              "no-reader"
+                            ]
+                          },
+                          "sessions": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "calls": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "agent",
+                          "state",
+                          "sessions",
+                          "calls"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "agent",
+                              "tool"
+                            ]
+                          },
+                          "on": {
+                            "type": "boolean"
+                          },
+                          "source": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "project"
+                                  },
+                                  "why": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "why"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "installed"
+                                  },
+                                  "paths": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "bin": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "paths",
+                                  "bin"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "used"
+                                  },
+                                  "sessions": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "calls": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "sessions",
+                                  "calls"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "popular"
+                                  },
+                                  "sessions": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "images": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "sessions",
+                                  "images"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "signIn": {
+                            "type": "string",
+                            "enum": [
+                              "copy",
+                              "machine",
+                              "later",
+                              "key",
+                              "skip",
+                              "token"
+                            ]
+                          },
+                          "pin": {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "sha256": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "latest": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "tag"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "kind",
+                          "on",
+                          "source"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "custom": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "custom"
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "install": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1
+                          },
+                          "check": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "manager": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "why": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "id",
+                          "name",
+                          "install",
+                          "check",
+                          "why"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "engine": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "at",
+                    "histories",
+                    "rows"
+                  ],
+                  "additionalProperties": false
+                },
+                "pins": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "tag": {
+                        "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/tag"
+                      },
+                      "sha256": {
+                        "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/sha256"
+                      },
+                      "latest": {
+                        "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/latest"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "road": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "tag",
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "logins": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "signed-in",
+                          "not-signed-in",
+                          "not-verified",
+                          "skipped",
+                          "copied",
+                          "deferred"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "state"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "sealedAt": {
+                  "type": "string"
+                },
+                "sealedFrom": {
+                  "type": "string"
+                },
+                "vault": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string",
+                      "minLength": 64,
+                      "maxLength": 64
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "paths": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "held": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "takenAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "paths",
+                    "takenAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "usedBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "place": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version",
+                "hash",
+                "recipeHash",
+                "logins",
+                "sealedAt",
+                "sealedFrom"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "copies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "place": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "hash": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64
+              },
+              "snapshotId": {
+                "type": "string"
+              },
+              "templateId": {
+                "type": "string"
+              },
+              "builtAt": {
+                "type": "string"
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "place",
+              "version",
+              "snapshotId",
+              "builtAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "snapshotId": {
+                "type": "string"
+              },
+              "projects": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "dest": {
+                      "type": "string"
+                    },
+                    "importedAt": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "dest",
+                    "importedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "golden": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "workspaceId": {
+                "type": "string"
+              },
+              "workspaceName": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "place": {
+                "type": "string"
+              },
+              "sizeBytes": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "snapshotId",
+              "projects",
+              "golden",
+              "workspaceId",
+              "workspaceName",
+              "createdAt"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "image",
+        "copies",
+        "projects"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "image",
+    "description": "The image this host owns and the copy each place has built of it. The record is the recipe the seal was planned from, the sign-ins it holds and a hash over both; a copy built at that hash is current and any other is stale, whatever version the place's own manifest gave it. A record with no vault was read back off its own copy rather than written at a seal, so it judges none of them and every copy of it asks for the sign-ins again: cutting the next version holds them. The project images taken off workspaces are listed under it, each with its snapshot id, the workspace it was taken off, its size where the provider lists one and its date.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "image": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "hash": {
+                  "type": "string",
+                  "minLength": 64,
+                  "maxLength": 64
+                },
+                "recipeHash": {
+                  "type": "string"
+                },
+                "recipe": {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "number",
+                      "const": 1
+                    },
+                    "at": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "tick": {
+                      "type": "string",
+                      "enum": [
+                        "used",
+                        "installed",
+                        "default"
+                      ]
+                    },
+                    "histories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "agent": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "read",
+                              "empty",
+                              "unreadable",
+                              "no-reader"
+                            ]
+                          },
+                          "sessions": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "calls": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "agent",
+                          "state",
+                          "sessions",
+                          "calls"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "agent",
+                              "tool"
+                            ]
+                          },
+                          "on": {
+                            "type": "boolean"
+                          },
+                          "source": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "project"
+                                  },
+                                  "why": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "why"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "installed"
+                                  },
+                                  "paths": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "bin": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "paths",
+                                  "bin"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "used"
+                                  },
+                                  "sessions": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "calls": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "sessions",
+                                  "calls"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "popular"
+                                  },
+                                  "sessions": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "images": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "sessions",
+                                  "images"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "signIn": {
+                            "type": "string",
+                            "enum": [
+                              "copy",
+                              "machine",
+                              "later",
+                              "key",
+                              "skip",
+                              "token"
+                            ]
+                          },
+                          "pin": {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "sha256": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "latest": {
+                                "type": "boolean",
+                                "const": true
+                              }
+                            },
+                            "required": [
+                              "tag"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "kind",
+                          "on",
+                          "source"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "custom": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "custom"
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "install": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "minItems": 1
+                          },
+                          "check": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "manager": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "why": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "id",
+                          "name",
+                          "install",
+                          "check",
+                          "why"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "engine": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "at",
+                    "histories",
+                    "rows"
+                  ],
+                  "additionalProperties": false
+                },
+                "pins": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "tag": {
+                        "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/tag"
+                      },
+                      "sha256": {
+                        "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/sha256"
+                      },
+                      "latest": {
+                        "$ref": "#/properties/image/anyOf/0/properties/recipe/properties/rows/items/properties/pin/properties/latest"
+                      },
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "road": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "tag",
+                      "id"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "logins": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "signed-in",
+                          "not-signed-in",
+                          "not-verified",
+                          "skipped",
+                          "copied",
+                          "deferred"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "state"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "sealedAt": {
+                  "type": "string"
+                },
+                "sealedFrom": {
+                  "type": "string"
+                },
+                "vault": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string",
+                      "minLength": 64,
+                      "maxLength": 64
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "paths": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "held": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "takenAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sha256",
+                    "bytes",
+                    "paths",
+                    "takenAt"
+                  ],
+                  "additionalProperties": false
+                },
+                "usedBytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "place": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version",
+                "hash",
+                "recipeHash",
+                "logins",
+                "sealedAt",
+                "sealedFrom"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "copies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "place": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              },
+              "hash": {
+                "type": "string",
+                "minLength": 64,
+                "maxLength": 64
+              },
+              "snapshotId": {
+                "type": "string"
+              },
+              "templateId": {
+                "type": "string"
+              },
+              "builtAt": {
+                "type": "string"
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "place",
+              "version",
+              "snapshotId",
+              "builtAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "snapshotId": {
+                "type": "string"
+              },
+              "projects": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "dest": {
+                      "type": "string"
+                    },
+                    "importedAt": {
+                      "type": "string"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "dest",
+                    "importedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "golden": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              },
+              "workspaceId": {
+                "type": "string"
+              },
+              "workspaceName": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "place": {
+                "type": "string"
+              },
+              "sizeBytes": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "snapshotId",
+              "projects",
+              "golden",
+              "workspaceId",
+              "workspaceName",
+              "createdAt"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "image",
+        "copies",
+        "projects"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

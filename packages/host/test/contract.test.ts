@@ -3,7 +3,7 @@
 // over the fake runtime: with --json stdout is JSON only and ends with the
 // object the verb's MCP tool answers with; every refusal is one line on stderr
 // and the exit code is its class's, the same class the tool error carries.
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { CLOUD_ENV, DAEMON_TOKEN_PATH, EXIT_CODES, FORWARD_ENV, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
+import { CLOUD_ENV, DAEMON_TOKEN_PATH, EXIT_CODES, FORWARD_ENV, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { CLOUD_ON } from "../src/cloud.js";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import type { RestartRoad } from "../src/restart.js";
@@ -49,6 +49,7 @@ const skillsSh: SkillsFetch = async url => {
 };
 import { nodeHost, type Host } from "@wsp/collect";
 import { writeStub } from "../../protocol/test/stub-script.js";
+import { ownEnv, served } from "./stdio-session.js";
 
 /** This computer's own Host over a fixture home, with the fixture's agents on its PATH. */
 function fixtureHost(at: AgentHome): Host {
@@ -65,38 +66,6 @@ const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
 /** The wsp command as the app puts it on PATH: the daemon binary's forwarder in front of the wsp it runs. */
 const forwarder = (wsp: readonly string[]): string[] => [daemonBinaryHere(), "forward", ...wsp.flatMap(word => ["--wsp-argv", word])];
-
-/** This process's environment less every variable that aims a line at a host, so a spawned wsp reaches the host this
- * case serves and no other. */
-const ownEnv = (): NodeJS.ProcessEnv =>
-  Object.fromEntries(Object.entries(process.env).filter(([name]) => ![HOST_URL_ENV, HOST_TOKEN_ENV, HOST_KEY_ENV, TURN_TOKEN_ENV, FORWARD_ENV, "WSP_HOST", "WSP_STARTED_BY"].includes(name)));
-
-/** One stdio session with a tool server: each line written in turn, and the lines it printed once it has answered
- * every request among them; then its stdin closes and its code is read. */
-async function served(argv: readonly string[], env: NodeJS.ProcessEnv, lines: readonly Record<string, unknown>[]): Promise<{ out: string[]; code: number | null }> {
-  const child = spawn(argv[0]!, argv.slice(1), { env, stdio: ["pipe", "pipe", "inherit"] });
-  const out: string[] = [];
-  let held = "";
-  child.stdout.on("data", (chunk: Buffer) => {
-    held += chunk.toString("utf8");
-    for (let at = held.indexOf("\n"); at !== -1; at = held.indexOf("\n")) {
-      out.push(held.slice(0, at));
-      held = held.slice(at + 1);
-    }
-  });
-  const exited = new Promise<number | null>(done => child.once("exit", code => done(code)));
-  try {
-    for (const line of lines) {
-      const answered = out.length + ("id" in line ? 1 : 0);
-      child.stdin.write(`${JSON.stringify(line)}\n`);
-      await vi.waitFor(() => expect(out.length).toBe(answered), { timeout: 15_000, interval: 20 });
-    }
-    child.stdin.end();
-    return { out, code: await exited };
-  } finally {
-    if (child.exitCode === null) child.kill("SIGKILL");
-  }
-}
 
 /** A serving host as the doctor's computer road meets one: the rows it holds, the lines its road says and the code
  * it answers with. Nothing is dialled and no host is started; what the fake was asked is what the road asked. */

@@ -1,0 +1,14 @@
+{
+  "codes": {
+    "ok": 0,
+    "provider": 1,
+    "auth": 2,
+    "usage": 3
+  },
+  "kinds": {
+    "usage": "usage",
+    "invalid": "usage",
+    "auth": "auth",
+    "not-found": "usage"
+  }
+}

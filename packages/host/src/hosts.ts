@@ -62,7 +62,7 @@ const ALIAS_FIRST = "A-Za-z0-9";
 const ALIAS_MAX = 64;
 const ALIAS = new RegExp(`^[${ALIAS_FIRST}][${ALIAS_CHARS}]{0,${ALIAS_MAX - 1}}$`);
 
-const aliasOk = (alias: string): boolean => ALIAS.test(alias) && !alias.includes("..");
+export const aliasOk = (alias: string): boolean => ALIAS.test(alias) && !alias.includes("..");
 
 /** The alias itself, or the refusal for a word that could never be one: every road that names a file reads it here. */
 function checkedAlias(alias: string): string {
@@ -154,7 +154,11 @@ export interface HostPick {
 
 /** What the person reads when a line names a host this computer holds no record for. */
 export function noSuchHostLine(alias: string, home: string): string {
-  const known = listHosts(home).map(h => h.alias);
+  return noSuchHostAmong(alias, listHosts(home).map(h => h.alias));
+}
+
+/** The same sentence off the aliases already read, for a reader that listed the hosts folder itself. */
+export function noSuchHostAmong(alias: string, known: readonly string[]): string {
   const has = known.length === 0 ? "this computer holds none" : `this computer holds ${known.join(", ")}`;
   return `no host named ${alias} is connected; ${has}, and wsp login puts the hosts on your account here.`;
 }
@@ -192,6 +196,9 @@ export function accountAim(statePath: string, home: string): AccountAim {
   if (held.length === 1 && first !== undefined) return { kind: "one", alias: first.alias, record: first.record };
   return held.length === 0 ? { kind: "none" } : { kind: "several", aliases: held.map(h => h.alias) };
 }
+
+/** What to do about several: name one. */
+export const NAME_ONE_HOST = `Name one on the line with --host <name>.\n\n${READ_THE_HOSTS}`;
 
 /** What the person reads when this computer can reach several hosts on the account: which one a line takes is
  * theirs to say, and naming them once is the whole of it. */
@@ -303,7 +310,7 @@ export function aimedHost(statePath: string, pick: HostPick = {}): HostAim {
   // none at all, or no sign-in, and a host starts here exactly as it did before.
   const account = accountAim(statePath, home);
   if (account.kind === "one") return keyed({ kind: "alias", alias: account.alias, record: account.record }, account.alias);
-  if (account.kind === "several") throw usageRefusal(severalAccountHostsLine(account.aliases), `Name one on the line with --host <name>.\n\n${READ_THE_HOSTS}`);
+  if (account.kind === "several") throw usageRefusal(severalAccountHostsLine(account.aliases), NAME_ONE_HOST);
   return { kind: "here" };
 }
 

@@ -1,0 +1,128 @@
+{
+  "cloudOff": {
+    "name": "servers_disable",
+    "description": "Turns one MCP server off in one agent's own config on one computer or workspace, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "the server's name, as servers lists it"
+        },
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent whose config names it, as servers lists it"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "user",
+            "home",
+            "project"
+          ],
+          "description": "the scope servers lists it under: user, home or project; user without it"
+        },
+        "project": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "the project's server of that name: true from a workspace, or the project's name, as projects lists it, with on"
+        }
+      },
+      "required": [
+        "name",
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "servers_disable",
+    "description": "Turns one MCP server off in one agent's own config on one computer or workspace, by the switch that agent reads (Codex's enabled line, OpenCode's enabled field, Gemini CLI's mcp.excluded); Claude Code keeps no such switch per server and is refused. Written as the login the computer was added with, into that agent's own file, which keeps its mode; a file that is a link out of the home, or out of the project for a project's file, is not written through, and a file the agent wrote meanwhile is left as it was. A napping workspace is not woken. The report there reads again at once.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "the server's name, as servers lists it"
+        },
+        "agent": {
+          "type": "string",
+          "description": "the catalog id of the agent whose config names it, as servers lists it"
+        },
+        "workspace": {
+          "type": "string",
+          "description": "the workspace to read, by its name, or its id when two share a name; absent reads a computer"
+        },
+        "on": {
+          "type": "string",
+          "description": "the computer to read, by the name computers lists; absent with no workspace is the computer the app runs on"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "user",
+            "home",
+            "project"
+          ],
+          "description": "the scope servers lists it under: user, home or project; user without it"
+        },
+        "project": {
+          "type": [
+            "boolean",
+            "string"
+          ],
+          "description": "the project's server of that name: true from a workspace, or the project's name, as projects lists it, with on"
+        }
+      },
+      "required": [
+        "name",
+        "agent"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}
