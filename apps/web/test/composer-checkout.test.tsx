@@ -10,7 +10,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, createContext, useContext, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { REPO_STATE_WORDS, type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { FOLDER_GHOST_WITH_WALK } from "../src/files/FolderPathField.js";
 
 vi.mock("../src/components/ui/menu.js", () => {
@@ -258,7 +258,7 @@ describe("composer checkout row", () => {
     expect(screen.getByText(BRANCH_NOTE).getAttribute("role")).toBe("tooltip");
   });
 
-  it("says in the branch slot that the machine could not read the folder's git state, before the first message, and nothing shifts", async () => {
+  it("leaves the branch slot empty when the machine could not read the folder's git state, before the first message, and nothing shifts", async () => {
     const wire = fakeWire({ "fs.list": LISTING, "git.status": () => Object.assign(new Error("outside the browsable roots"), { code: "outside-root" }) });
     provideDaemonWire(WS, wire);
     const { api } = fixtureApi();
@@ -267,15 +267,13 @@ describe("composer checkout row", () => {
     expect(screen.getByRole("button", { name: "Working folder: /root" })).toBeTruthy();
     const slot = branchSlot()!;
     expect(slot.querySelector("svg")).toBeNull();
-    expect(slot.textContent).toBe(REPO_STATE_WORDS.refused.word);
+    expect(slot.textContent).toBe("");
     expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
-    expect(slot.className.split(" ")).toEqual(expect.arrayContaining(["font-mono", "text-muted-foreground"]));
     expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
-    expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
     expect(folder()).toBe("/root");
   });
 
-  it("says the same word beside the locked label once a turn exists: a dropped wire is a read that failed too", async () => {
+  it("leaves the slot empty beside the locked label once a turn exists: a dropped wire is a read that failed too", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": () => new Error("socket closed") }));
     const { api } = fixtureApi(CHAT_STREAM.slice());
     await setup(api);
@@ -283,9 +281,8 @@ describe("composer checkout row", () => {
     expect(row()?.dataset["pickable"]).toBeUndefined();
     await waitFor(() => expect(branch()).toBe("refused"));
     const slot = branchSlot()!;
-    expect(slot.textContent).toBe(REPO_STATE_WORDS.refused.word);
+    expect(slot.textContent).toBe("");
     expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
-    expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
   });
 
   it("asks again every time the link changes its word, so a read made before it was up is not the row's last word", async () => {
@@ -305,6 +302,46 @@ describe("composer checkout row", () => {
     await waitFor(() => expect(branch()).toBe("feature/panes"));
     expect(branchSlot()?.textContent).toBe("feature/panes");
     provideTerminals(WS, null);
+  });
+
+  it("asks again as a running turn moves while the branch is not known, and shows nothing but the branch", async () => {
+    // A thread opened on a copy that is still being made asks before the copy's folder is there; the turn then runs,
+    // and a row that held that first failure for the whole turn printed its placeholder word over a copy on main.
+    let made = false;
+    const wire = fakeWire({ "fs.list": LISTING, "git.status": () => (made ? { ...STATUS, branch: { ...STATUS.branch, head: "main" } } : Object.assign(new Error("/root is not there"), { code: "not-found" })) });
+    provideDaemonWire(WS, wire);
+    const { api, emit } = fixtureApi(CHAT_STREAM.slice(0, 3));
+    await setup(api);
+    await screen.findByText(/then starting it\./);
+    await waitFor(() => expect(wire.calls.some(([op]) => op === "git.status")).toBe(true));
+    await settle();
+    expect(branchSlot()!.textContent).toBe("");
+    made = true;
+    emit(CHAT_STREAM[3]! as unknown as EventUnion);
+    await waitFor(() => expect(branch()).toBe("main"));
+    expect(branchSlot()!.textContent).toBe("main");
+  });
+
+  it("keeps the read in flight while a running turn moves, and asks again only once it has settled", async () => {
+    // A cloud copy answers in a few hundred ms and a turn can add entries faster than that; dropping the read on
+    // every entry meant no answer landed until the turn ended, and one git status went out per entry.
+    const inner = fakeWire({ "fs.list": LISTING });
+    const answers: Array<(reply: Record<string, unknown>) => void> = [];
+    const wire: TerminalWire = { request: (op, params) => (op === "git.status" ? new Promise(resolve => answers.push(resolve)) : inner.request(op, params)) };
+    provideDaemonWire(WS, wire);
+    const { api, emit } = fixtureApi(CHAT_STREAM.slice(0, 3));
+    await setup(api);
+    await screen.findByText(/then starting it\./);
+    await waitFor(() => expect(answers.length).toBeGreaterThan(0));
+    const asked = answers.length;
+    emit(CHAT_STREAM[3]! as unknown as EventUnion);
+    emit(CHAT_STREAM[4]! as unknown as EventUnion);
+    await settle();
+    expect(answers.length).toBe(asked);
+    act(() => answers[asked - 1]!({ ...STATUS, branch: { ...STATUS.branch, head: "main" } }));
+    await waitFor(() => expect(branch()).toBe("main"));
+    await settle();
+    expect(answers.length).toBeLessThanOrEqual(asked + 1);
   });
 
   it("draws the path the one way in both forms, inside a box that gives its width up, so a long one never reaches the branch slot", async () => {
@@ -359,7 +396,6 @@ describe("composer checkout row", () => {
     expect(slot.textContent).toBe("");
     expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
     expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
-    expect(screen.queryByText(REPO_STATE_WORDS.refused.note)).toBeNull();
     expect(folder()).toBe("/root");
   });
 
@@ -375,7 +411,6 @@ describe("composer checkout row", () => {
     expect(slot.className.split(" ")).toEqual(expect.arrayContaining(SLOT_HEIGHT));
     expect(screen.queryByText("no repository")).toBeNull();
     expect(screen.queryByText(BRANCH_NOTE)).toBeNull();
-    expect(screen.queryByText(REPO_STATE_WORDS.refused.note)).toBeNull();
   });
 
   it("offers home and the imported project as roots, and browses and picks inside the project", async () => {
@@ -634,7 +669,8 @@ describe("composer checkout row", () => {
     await openPicker("/root");
     // The slot stands at its two lines before anything is refused, so a refusal arriving moves nothing under it.
     expect(refusalSlot()!.textContent).toBe("");
-    expect(refusalSlot()!.className.split(" ")).toEqual(expect.arrayContaining(["min-h-9", "font-mono", "text-xs", "text-destructive-foreground"]));
+    expect(refusalSlot()!.className.split(" ")).toEqual(expect.arrayContaining(["min-h-9", "text-[13px]", "text-destructive-foreground"]));
+    expect(refusalSlot()!.className.split(" ")).not.toContain("font-mono");
     expect(pathField()!.getAttribute("aria-invalid")).toBeNull();
     expect(document.querySelector("[data-refused]")).toBeNull();
 

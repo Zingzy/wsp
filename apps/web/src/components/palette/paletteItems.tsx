@@ -29,7 +29,8 @@ import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } f
 export interface PaletteHandlers {
   readonly selectWorkspace: (workspaceId: string) => void;
   readonly selectThread: (workspaceId: string, threadId: string | null) => void;
-  readonly newWorkspace: () => void;
+  /** Opens the New thread dialog on the named project, the one the selected copy is of, else the dialog's own pick. */
+  readonly newWorkspace: (project?: string) => void;
   readonly toggleSidebar: () => void;
   readonly toggleRightPanel: (workspaceId: string) => void;
   /** One step down the sidebar's workspaces, and back up; both wrap. */
@@ -91,12 +92,12 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     {
       kind: "action",
       value: "action:new-workspace",
-      searchTerms: ["new task", "create task"],
+      searchTerms: ["new thread", "new chat", "new task", "create task"],
       icon: <PlusIcon className={ITEM_ICON_CLASS} />,
       title: NEW_WORKSPACE,
       description: input.canCreate ? "One piece of work on one project" : "Not connected to the runtime",
       disabled: !input.canCreate,
-      run: sync(handlers.newWorkspace),
+      run: sync(() => handlers.newWorkspace(selected?.workspace.project?.id)),
     },
     {
       kind: "action",
@@ -109,7 +110,8 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     },
   ];
   if (selected !== null) {
-    items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status, input.places), input.verbs).map(action => actionItem(action, selected.displayName)));
+    // The one New thread row is the dialog's, opened on this copy's project; the copy's own act stays off the palette.
+    items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status, input.places), input.verbs).filter(action => action.id !== "new-thread").map(action => actionItem(action, selected.displayName)));
   }
 
   const oneWorkspace = input.projects.length < 2;

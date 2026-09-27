@@ -2,14 +2,13 @@
 "use client";
 
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
-import { XIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { Button } from "./button";
 import {
   DIALOG_BACKDROP_CLASS,
   DIALOG_MOBILE_SHEET_CLASS,
   DIALOG_POPUP_CLASS,
 } from "./dialog-styles";
+import { Kbd } from "./kbd";
 import { ScrollArea } from "./scroll-area";
 
 const DialogCreateHandle = DialogPrimitive.createHandle;
@@ -53,11 +52,9 @@ function DialogViewport({ className, ...props }: DialogPrimitive.Viewport.Props)
 function DialogPopup({
   className,
   children,
-  showCloseButton = true,
   bottomStickOnMobile = true,
   ...props
 }: DialogPrimitive.Popup.Props & {
-  showCloseButton?: boolean;
   bottomStickOnMobile?: boolean;
 }) {
   return (
@@ -69,7 +66,7 @@ function DialogPopup({
         <DialogPrimitive.Popup
           className={cn(
             DIALOG_POPUP_CLASS,
-            "row-start-2 max-h-full max-w-lg text-popover-foreground",
+            "row-start-2 max-h-full max-w-110 text-popover-foreground",
             bottomStickOnMobile && DIALOG_MOBILE_SHEET_CLASS,
             className,
           )}
@@ -77,44 +74,6 @@ function DialogPopup({
           {...props}
         >
           {children}
-          {showCloseButton && (
-            <DialogPrimitive.Close
-              aria-label="Close"
-              className="absolute end-2 top-2"
-              render={<Button size="icon" variant="ghost" />}
-            >
-              <XIcon />
-            </DialogPrimitive.Close>
-          )}
-        </DialogPrimitive.Popup>
-      </DialogViewport>
-    </DialogPortal>
-  );
-}
-
-/** The popup as a sheet over the whole window: the shell blurred behind it, the close 20 px from the top right, and
- * nothing scrolling but what the content scrolls itself. The glass makes the popup the containing block of anything
- * fixed in it, so what is pinned to a corner (the close, `aside`) sits beside the content, not in it. */
-function DialogSheet({ className, children, aside, ...props }: DialogPrimitive.Popup.Props & { aside?: React.ReactNode }) {
-  return (
-    <DialogPortal>
-      <DialogBackdrop />
-      <DialogViewport className="grid-rows-[1fr] p-0">
-        <DialogPrimitive.Popup
-          className={cn(
-            "dialog-glass relative h-full w-full overflow-hidden rounded-none border-0 text-foreground outline-none transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0",
-            className,
-          )}
-          data-slot="dialog-sheet"
-          {...props}
-        >
-          <div data-slot="dialog-sheet-body" className="h-full w-full overflow-hidden">
-            {children}
-          </div>
-          {aside}
-          <DialogPrimitive.Close aria-label="Close" className="fixed top-5 right-5" render={<Button size="icon" variant="ghost" />}>
-            <XIcon />
-          </DialogPrimitive.Close>
         </DialogPrimitive.Popup>
       </DialogViewport>
     </DialogPortal>
@@ -124,41 +83,44 @@ function DialogSheet({ className, children, aside, ...props }: DialogPrimitive.P
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
-      className={cn(
-        "flex flex-col gap-2 p-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-panel])]:pb-3 max-sm:pb-4",
-        className,
-      )}
+      className={cn("flex flex-col gap-1 px-5 pt-4 pb-1", className)}
       data-slot="dialog-header"
       {...props}
     />
   );
 }
 
-function DialogFooter({
-  className,
-  variant = "default",
-  ...props
-}: React.ComponentProps<"div"> & {
-  variant?: "default" | "bare";
-}) {
+/** One 44 px line of a dialog: its label at the left, its control at the right, pulled out by the line's own
+ * padding so the label starts on the title's edge. */
+function DialogLine({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
-      className={cn(
-        "flex flex-col-reverse gap-2 px-6 sm:flex-row sm:justify-end sm:rounded-b-[calc(var(--radius-2xl)-1px)]",
-        variant === "default" && "border-t bg-muted/72 py-4",
-        variant === "bare" && "py-4",
-        className,
-      )}
-      data-slot="dialog-footer"
+      className={cn("-mx-2 flex h-11 min-w-0 items-center justify-between gap-3 px-2", className)}
+      data-slot="dialog-line"
       {...props}
     />
+  );
+}
+
+/** The foot of a dialog: the key that closes it at the left, then Cancel and the primary at the right. A dialog has
+ * no close glyph of its own; Esc and Cancel close it. */
+function DialogFooter({ className, children, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      className={cn("flex flex-col-reverse gap-2 px-5 pt-3 pb-4 sm:flex-row sm:items-center sm:justify-end", className)}
+      data-slot="dialog-footer"
+      {...props}
+    >
+      <Kbd className="me-auto hidden sm:inline-flex">Esc</Kbd>
+      {children}
+    </div>
   );
 }
 
 function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
-      className={cn("font-heading font-semibold text-xl leading-none", className)}
+      className={cn("font-medium text-[15px] leading-5", className)}
       data-slot="dialog-title"
       {...props}
     />
@@ -168,7 +130,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
 function DialogDescription({ className, ...props }: DialogPrimitive.Description.Props) {
   return (
     <DialogPrimitive.Description
-      className={cn("text-muted-foreground text-sm", className)}
+      className={cn("text-[13px] leading-5 text-muted-foreground", className)}
       data-slot="dialog-description"
       {...props}
     />
@@ -183,10 +145,7 @@ function DialogPanel({
   return (
     <ScrollArea scrollFade={scrollFade}>
       <div
-        className={cn(
-          "p-6 in-[[data-slot=dialog-popup]:has([data-slot=dialog-header])]:pt-1 in-[[data-slot=dialog-popup]:has([data-slot=dialog-footer]:not(.border-t))]:pb-1",
-          className,
-        )}
+        className={cn("px-5 py-3", className)}
         data-slot="dialog-panel"
         {...props}
       />
@@ -204,9 +163,9 @@ export {
   DialogBackdrop as DialogOverlay,
   DialogPopup,
   DialogPopup as DialogContent,
-  DialogSheet,
   DialogHeader,
   DialogFooter,
+  DialogLine,
   DialogTitle,
   DialogDescription,
   DialogPanel,

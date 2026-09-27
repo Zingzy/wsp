@@ -61,16 +61,14 @@ export function RemoveComputerDialog({ place, holding, imageBytes, open, onOpenC
           <AlertDialogDescription data-k="remove-sentence">{removeSentence(place, holding, hereName(places), imageBytes)}</AlertDialogDescription>
         </AlertDialogHeader>
         {placeIsOffline(place) ? (
-          <div className="flex flex-col gap-3 px-6 pt-1 pb-6">
+          <div className="flex flex-col gap-3 px-5 pt-2">
             <CopyRow k="leave-line" value={PLACES_WORDS.remove.leaveLine} />
             <p className="text-[13px] text-muted-foreground">{PLACES_WORDS.remove.leaveTakes}</p>
           </div>
         ) : null}
-        {refusal === null ? null : (
-          <div className="px-6">
-            <RefusalSlot k="remove-refusal" {...refusal} />
-          </div>
-        )}
+        <div className="px-5 pt-2">
+          <RefusalSlot k="remove-refusal" {...(refusal ?? {})} />
+        </div>
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>{WHERE_WORDS.cancel}</AlertDialogClose>
           <Button data-k="remove-confirm" variant="destructive" disabled={busy} onClick={() => void remove()}>

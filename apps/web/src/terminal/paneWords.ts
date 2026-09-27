@@ -4,7 +4,7 @@
 // while the link is down. Both come from the same pane state, so the sidebar
 // and a pane can never say two things about one link. Beside them, the one
 // read of a folder's branch over the link, keyed on the link's word.
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { isLocalWorkspace, type DaemonLinkStatus, type RepoStateWord } from "@wsp/protocol";
 import { linkDownLine, terminalPaneHints, terminalPaneState, type TerminalPaneState } from "../adapt/index.js";
 import { repoAbsence } from "../adapt/git.js";
@@ -60,30 +60,55 @@ export function useLinkWord(workspaceId: string | null): DaemonLinkStatus {
   return useLinkSocket(workspaceId).socket;
 }
 
-/** What git said about a folder: a branch, or one of the states a slot has a word (or none) for. */
+/** What git said about a folder: a branch, or a state a slot draws as nothing. */
 export type Branch = { readonly kind: RepoStateWord } | { readonly kind: "repo"; readonly head: string };
 
+const UNKNOWN: Branch = { kind: "unknown" };
+
+/** A turn running in the folder: while it runs the answer in hand stands, since a checkout inside it shows once it
+ * ends, and `moved` is what asks again while there is no answer yet. */
+export interface BranchTurn {
+  readonly running: boolean;
+  readonly moved: number;
+}
+
 /** The branch git names for a folder over a workspace's wire, asked while `ask` holds and again every time the link
- * changes its word, the rule useLinkWord carries. The last answer for the same folder stands between asks. The
- * composer's folder row and a workspace's tiles both read this. */
-export function useBranch(wire: TerminalWire | null, folder: string | null, ask: boolean, link: DaemonLinkStatus): Branch {
-  const [state, setState] = useState<{ folder: string | null; branch: Branch }>({ folder, branch: { kind: "unknown" } });
+ * changes its word, the rule useLinkWord carries. The last answer for the same folder stands between asks. With a
+ * turn, a folder with no answer yet, or one whose read failed, is asked again as the turn moves, since the first ask
+ * can go out before a new copy's folder is there. A read in flight is kept until it settles; only a new wire, folder
+ * or link word drops it, so a turn moving faster than a round trip still gets its answer and never stacks one read
+ * per entry. The composer's folder row and a workspace's tiles both read this. */
+export function useBranch(wire: TerminalWire | null, folder: string | null, ask: boolean, link: DaemonLinkStatus, turn?: BranchTurn): Branch {
+  const [state, setState] = useState<{ folder: string | null; branch: Branch }>({ folder, branch: UNKNOWN });
+  const [again, setAgain] = useState(0);
+  const epoch = useRef(0);
+  const flying = useRef(false);
+  const movedNow = useRef(turn?.moved ?? 0);
+  movedNow.current = turn?.moved ?? 0;
   useEffect(() => {
-    if (!wire || folder === null || !ask) return;
-    let gone = false;
-    gitStatus(wire, folder).then(
-      status => {
-        if (!gone) setState({ folder, branch: { kind: "repo", head: status.branch.head } });
-      },
-      (e: unknown) => {
-        if (!gone) setState({ folder, branch: { kind: repoAbsence(e) } });
-      },
-    );
-    return () => {
-      gone = true;
+    epoch.current += 1;
+    flying.current = false;
+  }, [wire, folder, link]);
+  const known = state.folder === folder && (state.branch.kind === "repo" || state.branch.kind === "none");
+  const key = !ask ? "off" : turn === undefined || !turn.running ? "idle" : known ? "held" : `${turn.moved}:${again}`;
+  useEffect(() => {
+    if (!wire || folder === null || key === "off" || key === "held" || flying.current) return;
+    const at = epoch.current;
+    const askedAt = movedNow.current;
+    flying.current = true;
+    const land = (branch: Branch): void => {
+      if (epoch.current !== at) return;
+      flying.current = false;
+      setState({ folder, branch });
+      // The turn moved while this read was out: one more ask, now that nothing is in flight.
+      if (movedNow.current !== askedAt) setAgain(n => n + 1);
     };
-  }, [wire, folder, ask, link]);
-  return state.folder === folder ? state.branch : { kind: "unknown" };
+    gitStatus(wire, folder).then(
+      status => land({ kind: "repo", head: status.branch.head }),
+      (e: unknown) => land({ kind: repoAbsence(e) }),
+    );
+  }, [wire, folder, link, key]);
+  return state.folder === folder ? state.branch : UNKNOWN;
 }
 
 /** The one line the main screen shows while this workspace's link is down, else null. */

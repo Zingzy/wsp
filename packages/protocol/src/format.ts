@@ -3271,15 +3271,14 @@ export function behindGoldenLine(on: number, head: number): string {
 export const LINEAGE_MARKS = { now: "now", head: "newest", fork: "this one", failed: "failed", skipped: "skipped", volatile: "snapshot only" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
 
-/** What is said for each folder git named no branch for, by door: the word the composer's branch slot and the diff
- * pane's git mark show and the sentence it explains on hover, nothing for a folder outside any repository or one not
- * yet asked (both ordinary) and a word for a read the machine refused or failed (an outside cause the person should
- * see); and the one line an empty diff pane says in place of a diff, only for a folder outside any repository, since
- * an empty pane with no reason reads as broken while a refused read shows the cause git gave. */
+/** What is said for each folder git named no branch for: nothing in a branch slot or the diff pane's git mark, which
+ * show the branch or nothing until it is known, whatever kept it unknown; and the one line an empty diff pane says in
+ * place of a diff, only for a folder outside any repository, since an empty pane with no reason reads as broken while
+ * a refused read shows the cause git gave. */
 export const REPO_STATE_WORDS = {
-  unknown: { word: "", note: "", pane: "" },
-  none: { word: "", note: "", pane: "This folder is not inside a git repository, so there is nothing to diff." },
-  refused: { word: "git unread", note: "The task could not read this folder's git state, so no branch is shown.", pane: "" },
+  unknown: { pane: "" },
+  none: { pane: "This folder is not inside a git repository, so there is nothing to diff." },
+  refused: { pane: "" },
 } as const;
 export type RepoStateWord = keyof typeof REPO_STATE_WORDS;
 

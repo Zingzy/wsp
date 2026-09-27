@@ -7,9 +7,9 @@
 // component per opening so the field resets; a refusal shows on the creation
 // view, not here, since the runtime is the one that knows.
 //
-// Under the pick one line in mono says where the work lands, in the protocol's
-// own words, so this dialog holds no second spelling of a computer's name or
-// of what a copy's ports are.
+// Under the lines the slot says where the work lands, in the protocol's own
+// words, so this dialog holds no second spelling of a computer's name or of
+// what a copy's ports are; a Create pressed with no answer says why there.
 import { useState } from "react";
 import { portsWord, type PlaceView, type ProjectView , type WorkspaceLanding } from "@wsp/protocol";
 import { PROJECT_PICK_WORDS, landingName } from "../settings/places.js";
@@ -18,6 +18,7 @@ import {
   Dialog,
   DialogFooter,
   DialogHeader,
+  DialogLine,
   DialogPanel,
   DialogPopup,
   DialogTitle,
@@ -27,8 +28,7 @@ import { Label } from "../components/ui/label.js";
 import { Spaced } from "../components/ui/spaced.js";
 import { Select, SelectButton, SelectItem, SelectPopup, SelectValue } from "../components/ui/select.js";
 import { SegmentedControl } from "../components/ui/segmented-control.js";
-import { cn } from "../lib/utils.js";
-import { FACT } from "../settings/format.js";
+import { RefusalSlot } from "../settings/sheetParts.js";
 import { NEW_WORKSPACE, SAY_THE_WORK, WORK_GHOST, WORK_QUESTION } from "./words.js";
 
 /** Beyond this many rows the segmented control is too wide for the dialog, and the same words go in a select. */
@@ -56,20 +56,24 @@ export function NewWorkspaceDialog({
 }) {
   const [work, setWork] = useState("");
   const [pickedProject, setPickedProject] = useState<string | null>(picked);
+  const [tried, setTried] = useState(false);
   const project = projects.find(p => p.id === pickedProject) ?? projects[0];
   const trimmed = work.trim();
   const held = project === undefined || trimmed.length === 0;
   const landing = project === undefined ? null : landings[project.id] ?? null;
   const submit = (): void => {
-    if (held || project === undefined) return;
+    if (held || project === undefined) {
+      setTried(true);
+      return;
+    }
     onCreate(trimmed, project.id);
   };
 
   return (
     <Dialog open onOpenChange={open => { if (!open) onCancel(); }}>
-      {/* Anchored at its top, 160 px down, rather than centred: the card is one field and a line, and a dialog that
-          stands where the hand left it is one a second opening does not move. */}
-      <DialogPopup className="sm:row-start-1 sm:mt-36 sm:max-h-[calc(100dvh-11rem)] sm:max-w-sm sm:self-start">
+      {/* Anchored at its top, 160 px down, rather than centred: a dialog that stands where the hand left it is one a
+          second opening does not move. */}
+      <DialogPopup className="sm:row-start-1 sm:mt-36 sm:max-h-[calc(100dvh-11rem)] sm:self-start">
         <form
           className="flex min-h-0 flex-col"
           onSubmit={e => {
@@ -80,50 +84,56 @@ export function NewWorkspaceDialog({
           <DialogHeader>
             <DialogTitle>{NEW_WORKSPACE}</DialogTitle>
           </DialogHeader>
-          <DialogPanel className="flex flex-col gap-3">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="new-workspace-work">{WORK_QUESTION}</Label>
-              <Input
-                id="new-workspace-work"
-                nativeInput
-                autoFocus
-                autoComplete="off"
-                placeholder={WORK_GHOST}
-                value={work}
-                onChange={e => setWork(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    submit();
-                  } else if (e.key === "Escape") {
-                    e.preventDefault();
-                    onCancel();
-                  }
-                }}
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label id="new-workspace-project">{PROJECT_PICK_WORDS.label}</Label>
+          <DialogPanel className="pt-1 pb-0">
+            <DialogLine>
+              <Label htmlFor="new-workspace-work" className="shrink-0">{WORK_QUESTION}</Label>
+              <div className="w-52 min-w-0">
+                <Input
+                  id="new-workspace-work"
+                  nativeInput
+                  autoFocus
+                  autoComplete="off"
+                  placeholder={WORK_GHOST}
+                  value={work}
+                  onChange={e => {
+                    setWork(e.target.value);
+                    setTried(false);
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      submit();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      onCancel();
+                    }
+                  }}
+                />
+              </div>
+            </DialogLine>
+            <DialogLine>
+              <Label id="new-workspace-project" className="shrink-0">{PROJECT_PICK_WORDS.label}</Label>
               {project === undefined ? (
-                <p className="text-[13px] text-muted-foreground" data-k="no-project-here">
+                <p className="min-w-0 truncate text-[13px] text-muted-foreground" data-k="no-project-here" title={PROJECT_PICK_WORDS.noneYet}>
                   {PROJECT_PICK_WORDS.noneYet}
                 </p>
               ) : (
-                <>
-                  <ProjectPick projects={projects} checked={project} onPick={setPickedProject} />
-                  {/* The slot is there from the first paint, so the line arriving moves nothing under it. */}
-                  <span className={cn(FACT, "min-h-4")} data-k="landing">
-                    {landing === null ? "" : <Spaced parts={landsLine(places, landing)} />}
-                  </span>
-                </>
+                <ProjectPick projects={projects} checked={project} onPick={setPickedProject} />
               )}
-            </div>
+            </DialogLine>
+            {/* The slot is there from the first paint, so the landing arriving, or the reason Create is held, moves
+                nothing under it. */}
+            <RefusalSlot
+              k="new-workspace-slot"
+              {...(tried && held && project !== undefined ? { waiting: SAY_THE_WORK } : {})}
+              note={<span data-k="landing">{landing === null ? "" : <Spaced parts={landsLine(places, landing)} />}</span>}
+            />
           </DialogPanel>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onCancel}>
               Cancel
             </Button>
-            <Button type="submit" data-k="create" held={held} {...(held ? { title: SAY_THE_WORK } : {})}>
+            <Button type="submit" data-k="create" held={held}>
               Create
             </Button>
           </DialogFooter>
@@ -147,7 +157,7 @@ export function landsLine(places: readonly PlaceView[], landing: WorkspaceLandin
 function ProjectPick({ projects, checked, onPick }: { projects: readonly ProjectView[]; checked: ProjectView; onPick: (id: string) => void }) {
   if (projects.length === 1) {
     return (
-      <p className="text-[13px] text-foreground" data-project={checked.id}>
+      <p className="min-w-0 truncate text-sm text-foreground" data-project={checked.id}>
         {checked.name}
       </p>
     );
@@ -155,7 +165,7 @@ function ProjectPick({ projects, checked, onPick }: { projects: readonly Project
   if (projects.length > SEGMENT_CAP) {
     return (
       <Select value={checked.id} onValueChange={value => { if (typeof value === "string") onPick(value); }}>
-        <SelectButton size="sm" aria-labelledby="new-workspace-project" className="w-full">
+        <SelectButton size="sm" aria-labelledby="new-workspace-project" className="w-52">
           <SelectValue>{() => checked.name}</SelectValue>
         </SelectButton>
         <SelectPopup>
@@ -171,7 +181,6 @@ function ProjectPick({ projects, checked, onPick }: { projects: readonly Project
   return (
     <SegmentedControl
       aria-labelledby="new-workspace-project"
-      className="self-start"
       value={checked.id}
       segments={projects.map(project => ({ value: project.id, label: project.name }))}
       onChange={onPick}

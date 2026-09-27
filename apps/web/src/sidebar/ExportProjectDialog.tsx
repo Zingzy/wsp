@@ -110,7 +110,7 @@ export function ExportProjectDialog({ workspace, onClose }: { workspace: Workspa
 
   return (
     <Dialog open onOpenChange={open => { if (!open && !busy) onClose(); }}>
-      <DialogPopup className="sm:max-w-xl" showCloseButton={!busy}>
+      <DialogPopup>
         <div className="flex min-h-0 flex-col">
           <DialogHeader>
             <DialogTitle>Export a project</DialogTitle>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The rows both project dialogs are built from: a section of the one container
-// with its small label and the hairline above it, a mono path input for a
+// with its small label, a mono path input for a
 // browser tab, the desktop's picker row, a fact row with its value flush
 // right, the caches row whose list opens under its count, a row the person
 // ticks, and the one slot above the footer that reads the step under way, the
@@ -13,15 +13,16 @@ import { Button } from "../components/ui/button.js";
 import { Checkbox } from "../components/ui/checkbox.js";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible.js";
 import { Input } from "../components/ui/input.js";
+import { MICRO_LABEL } from "../lib/microLabel.js";
 import { cn } from "../lib/utils.js";
 import { count, type StatusTone } from "./projectTrip.js";
 
-const SECTION_LABEL = "font-mono text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground";
+const SECTION_LABEL = cn(MICRO_LABEL, "text-muted-foreground");
 
-/** One section of the dialog's single container: its label, and a hairline above it unless it opens the container. */
+/** One section of the dialog's single container: its label over its rows, set apart from the next by space alone. */
 export function TripSection({ k, label, htmlFor, children }: { k: string; label: string; htmlFor?: string; children: ReactNode }) {
   return (
-    <section data-k={k} className="flex flex-col gap-1.5 border-t border-border/50 py-3 first:border-t-0 first:pt-0">
+    <section data-k={k} className="flex flex-col gap-1.5 py-3 first:pt-0">
       {htmlFor === undefined ? (
         <p className={SECTION_LABEL}>{label}</p>
       ) : (
@@ -174,8 +175,8 @@ function Bar({ fraction, label }: { fraction: number; label: string }) {
 }
 
 /** The one slot above the footer: what the trip has to say right now over a thin bar. Empty at rest, its height
- * always taken so nothing moves when the trip starts. The words are a step under way in muted mono, a quiet landed
- * line, the caution colour for a refusal that asks for a replace, the error colour for one that does not. Two lines
+ * always taken so nothing moves when the trip starts. The words are a step under way or a quiet landed
+ * line in the muted ink, the caution colour for a refusal that asks for a replace, the error colour for one that does not. Two lines
  * of the row's height and never cut: a sentence wraps into the second line, an unbroken path breaks where it must,
  * and a third line grows the box rather than being clipped. The bar, when there is one, is labelled by the words. */
 export function TripStatus({ tone, fraction, children }: { tone: StatusTone; fraction: number | null; children: string }) {
@@ -185,8 +186,8 @@ export function TripStatus({ tone, fraction, children }: { tone: StatusTone; fra
         role="status"
         data-k="progress-line"
         className={cn(
-          "min-h-7 break-words text-[11px] leading-[14px]",
-          tone === "step" ? "font-mono text-muted-foreground" : tone === "quiet" ? "text-muted-foreground" : tone === "caution" ? "text-warning-foreground" : "text-destructive-foreground",
+          "min-h-9 break-words text-[13px] leading-[18px]",
+          tone === "step" || tone === "quiet" ? "text-muted-foreground" : tone === "caution" ? "text-warning-foreground" : "text-destructive-foreground",
         )}
         title={children}
       >

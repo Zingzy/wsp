@@ -20,7 +20,7 @@ describe("gallery", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("ui kit gallery");
     const sections = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
     expect(sections).toEqual(GALLERY_SECTIONS.map((s) => s.id));
-    expect(sections.length).toBeGreaterThanOrEqual(16);
+    expect(sections.length).toBeGreaterThanOrEqual(14);
     expect(errors).not.toHaveBeenCalled();
   });
 

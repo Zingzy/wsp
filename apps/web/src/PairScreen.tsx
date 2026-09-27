@@ -29,8 +29,8 @@ export function PairScreen({ onRedeem }: { onRedeem: (code: string) => Promise<v
   return (
     <div className="flex h-dvh items-center justify-center bg-background p-6 text-foreground">
       <form className="flex w-80 flex-col gap-3" onSubmit={submit}>
-        <h1 className="text-base font-medium">{PAIR_HEADING}</h1>
-        <p className="text-sm text-muted-foreground">{PAIR_HINT}</p>
+        <h1 className="text-lg/7 font-medium tracking-[-0.01em]">{PAIR_HEADING}</h1>
+        <p className="text-[13px] leading-5 text-muted-foreground">{PAIR_HINT}</p>
         <Label htmlFor="pair-code">Pairing code</Label>
         <Input
           id="pair-code"
@@ -45,11 +45,10 @@ export function PairScreen({ onRedeem }: { onRedeem: (code: string) => Promise<v
         <Button type="submit" disabled={busy || code.trim().length === 0}>
           {busy ? "Pairing" : "Pair"}
         </Button>
-        {error !== undefined ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        {/* Two lines stand whether or not a refusal is in them, so one arriving moves nothing. */}
+        <div className="min-h-9 text-[13px] leading-[18px] text-destructive-foreground">
+          {error !== undefined ? <p role="alert">{error}</p> : null}
+        </div>
       </form>
     </div>
   );

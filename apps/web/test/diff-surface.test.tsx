@@ -44,9 +44,8 @@ const NOT_A_REPO = () => Object.assign(new Error("not inside a git repository"),
 const OUTSIDE_ROOT = () => Object.assign(new Error("outside the browsable roots"), { code: "outside-root" });
 /** The git mark's classes: the same box whether it names a branch or a read the machine refused, and away below
  * the width where the header has room for it. */
-const LABEL_CLASSES = ["h-6", "shrink-0", "items-center", "gap-1", "px-1", "font-mono", "text-[11px]", "text-muted-foreground", "hidden", "sm:inline-flex"];
 /** The one grammar for a sentence that fills an empty pane body: a muted mono line, centred, whatever it says. */
-const SENTENCE_CLASSES = ["flex", "flex-1", "items-center", "justify-center", "px-5", "text-center", "font-mono", "text-[11px]", "text-muted-foreground"];
+const SENTENCE_CLASSES = ["flex", "flex-1", "items-center", "justify-center", "px-5", "text-center", "text-[13px]", "text-muted-foreground"];
 
 beforeEach(() => {
   resetSurfaces();
@@ -146,7 +145,7 @@ describe("diff surface", () => {
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe(PROJECT_DEST));
   });
 
-  it("says once, in one muted mono sentence from the repo-state table, that the root is outside any repository", async () => {
+  it("says once, in one quiet sentence from the repo-state table, that the root is outside any repository", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": NOT_A_REPO, "git.status": NOT_A_REPO }));
     act(() => useRootStore.getState().follow(WS, "/root/scratch"));
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
@@ -198,10 +197,11 @@ describe("diff surface", () => {
     expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-cwd")).toBe("/root/scratch");
     expect(items(container)).toHaveLength(0);
     expect(screen.queryByRole("group", { name: "2 additions, 2 deletions" })).toBeNull();
-    await waitFor(() => expect(container.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("refused"));
+    await settle();
+    expect(container.querySelector("[data-diff-repo-state]")).toBeNull();
   });
 
-  it("gives every sentence that fills an empty pane the one muted mono line: no changes, and every file over the budget", async () => {
+  it("gives every sentence that fills an empty pane the one quiet line: no changes, and every file over the budget", async () => {
     const wire = fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": { base: null, files: [], truncated: false } });
     provideDaemonWire(WS, wire);
     act(() => useRootStore.getState().follow(WS, "/root/app"));
@@ -215,28 +215,26 @@ describe("diff surface", () => {
     expect(over.className.split(" ")).toEqual(SENTENCE_CLASSES);
   });
 
-  it("says git went unread when the machine refused the read, not that there is no repository", async () => {
+  it("draws no mark and no word when the machine refused the git read, and says nothing is missing a repository", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": OUTSIDE_ROOT }));
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
-    await waitFor(() => expect(container.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("refused"));
-    expect(container.querySelector("[data-diff-repo-state] [tabindex]")?.textContent).toBe(REPO_STATE_WORDS.refused.word);
-    expect(container.querySelector("[data-diff-repo]")).toBeNull();
     await waitFor(() => expect(items(container)).toHaveLength(2));
+    await settle();
+    expect(container.querySelector("[data-diff-repo-state]")).toBeNull();
+    expect(container.querySelector("[data-diff-repo]")).toBeNull();
+    expect(screen.queryByText("git unread")).toBeNull();
+    expect(screen.queryByText(REPO_STATE_WORDS.none.pane)).toBeNull();
   });
 
-  it("says the machine could not read the folder's git state, with its note, and nothing shifts", async () => {
+  it("keeps the header quiet on a refused read while the pane says the cause git gave, and nothing shifts", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": OUTSIDE_ROOT, "git.status": OUTSIDE_ROOT }));
     act(() => useRootStore.getState().follow(WS, "/root/scratch"));
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
-    await waitFor(() => expect(container.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("refused"));
-    const label = container.querySelector<HTMLElement>("[data-diff-repo-state]")!;
-    expect(label.querySelector("[tabindex]")?.textContent).toBe(REPO_STATE_WORDS.refused.word);
-    expect(label.textContent).not.toContain("/root/scratch");
-    expect(label.className.split(" ")).toEqual(LABEL_CLASSES);
-    expect(label.getAttribute("title")).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toBe("outside the browsable roots");
+    await settle();
+    expect(container.querySelector("[data-diff-repo-state]")).toBeNull();
     expect(container.querySelector("[data-diff-repo]")).toBeNull();
-    expect(screen.getByText(REPO_STATE_WORDS.refused.note).getAttribute("role")).toBe("tooltip");
-    expect(screen.getByRole("alert").textContent).toBe("outside the browsable roots");
+    expect(screen.queryByText("git unread")).toBeNull();
   });
 
   it("names the folder in the crumb row and draws no mark, no word and no note, while the read is still out", async () => {
@@ -250,8 +248,6 @@ describe("diff surface", () => {
     expect(shownFolder(container)).toBe("/root/scratch");
     expect(container.querySelector("[data-diff-repo-state]")).toBeNull();
     expect(container.querySelector("[data-diff-repo]")).toBeNull();
-    expect(screen.queryByText(REPO_STATE_WORDS.refused.word)).toBeNull();
-    expect(screen.queryByText(REPO_STATE_WORDS.refused.note)).toBeNull();
   });
 
   it("keeps the repository label through a refresh of the same folder", async () => {

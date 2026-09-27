@@ -116,14 +116,14 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
       <ScrollArea className="min-h-0 flex-1">
         <div role="table" aria-label="Processes" className={cn(stale !== null && "text-muted-foreground/60")} {...(stale !== null ? { "data-stale": stale } : {})}>
           {absent !== null ? (
-            <div className="flex flex-col items-start gap-2 px-2 py-2 text-muted-foreground" data-procs-unavailable>
+            <div className="flex flex-col items-start gap-2 px-2 py-2 font-sans text-[13px] text-muted-foreground" data-procs-unavailable>
               <p>{absent.said}</p>
               {absent.will !== undefined ? <p>{absent.will}</p> : null}
               <StartDaemonButton absent={absent} workspaceId={workspaceId} />
             </div>
           ) : (
             unavailable !== null && (
-              <p className="truncate px-2 text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={unavailable} data-procs-unavailable>
+              <p className="truncate px-2 font-sans text-[13px] text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={unavailable} data-procs-unavailable>
                 {unavailable}
               </p>
             )

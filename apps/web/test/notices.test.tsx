@@ -88,7 +88,8 @@ describe("the toast", () => {
     expect(notice.closest('[data-slot="sidebar-inset"]')).not.toBeNull();
     expect(notice.closest("[data-app-sidebar]")).toBeNull();
     expect(notice.textContent).toContain("spoo was not paused: the provider refused");
-    expect(notice.textContent).toContain("error");
+    expect(notice.querySelector("span")!.textContent).toBe("Error");
+    expect(notice.querySelector("span")!.className).toContain("text-destructive-foreground");
   });
 
   it("shows while Settings is open", async () => {
