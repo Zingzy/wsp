@@ -957,11 +957,10 @@ export interface RuntimeOptions {
   providerReadMs?: number;
   /** How long a gone verdict waits before it reads the machine's state once more (tests shrink it; 0 reads at once). */
   goneConfirmMs?: number;
-  /** How a turn on a machine reaches back into this host: what the host knows about where it answers, and the wsp
-   * command on this computer for the local kind. The address a turn is told is its kind's own answer, read off
-   * `reach` at each turn rather than once, since a host behind a relay is renamed whenever its connector runs.
-   * Without an address no turn is given a token at all, so a host no machine can reach spawns nothing. */
-  agents?: { reach?: HostReach; wspMcp?: McpServerSpec };
+  /** How a turn on this computer reaches back into this host: the loopback it dials, filled once the host's socket
+   * binds and read at each turn, and the wsp command it runs. A fork needs neither, since its wsp rides the link
+   * this host holds to its daemon. */
+  agents?: { here?: { url?: string }; wspMcp?: McpServerSpec };
   /** The seed each machine's own daemon token is derived from, so a test that pins one reads a machine's token off
    * its reach view rather than naming it. Absent, every machine's token is minted at random. */
   daemonToken?: string;
@@ -988,20 +987,6 @@ export interface RuntimeOptions {
   /** The environment labs is read from; this process's when unset, which the entry points mean and a test does not:
    * a test says the environment it means here rather than inheriting the shell that started it. */
   env?: Readonly<Record<string, string | undefined>>;
-}
-
-/** Where this host answers, as the host itself knows it: the address the person named with --advertise, which
- * every machine wsp forks is told; the address a machine somewhere else dials, which is none where nothing about
- * this computer leaves it; the loopback a turn on this computer dials, which is none on a host bound to one address
- * beyond loopback; and the port, present only where this host bound the wildcard, which is the one bind that
- * answers on every address this computer has, an address a machine knows of its own included. A host bound to one
- * address hands out no port, since it answers there and nowhere else. A machine's kind reads the first two and
- * never `here`, and this computer reads `here` alone, so a token for the loopback never leaves this computer. */
-export interface HostReach {
-  advertise?: string;
-  url?: string;
-  here?: string;
-  port?: number;
 }
 
 export interface WakeOptions {
@@ -2118,11 +2103,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * puts nothing on answers none, which leaves that kind's turns without the tools. Neither line names a host:
      * the tools read the pair the launch left in the agent's environment, as the wsp a turn's shell runs does. */
     wspMcp: (entry: LiveWorkspace) => McpServerSpec | undefined;
-    /** Where a turn on this workspace's machine dials this host, which the kind answers because whether there is
-     * an address at all is a fact about its machines: a fork somewhere else reaches this host where the person
-     * named or where it answers, a turn beside the host reaches it on its loopback. None leaves that turn without
-     * a token, since one with nowhere to go opens nothing. */
-    hostUrl: (entry: LiveWorkspace) => string | undefined;
+    /** How a turn on this workspace's machine reaches this host, which the kind answers because it is a fact about
+     * its machines: a fork's wsp is its daemon's and rides the link this host already holds, so it dials no address,
+     * and a turn beside the host dials its loopback. None leaves that turn without a token, since one with nowhere
+     * to go opens nothing. */
+    turnReach: (entry: LiveWorkspace) => { url?: string } | undefined;
     /** The road a turn on this kind's machine reaches this host by, written on the token minted into it and
      * stamped on every request that token makes: a machine's is relayed, and this computer's is here. */
     turnRoad: ScopedRoad;
@@ -2404,7 +2389,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // no host of its own, it opens a session on this machine's daemon and the daemon carries it up the socket
       // this host already holds.
       wspMcp: () => ({ command: "wsp", args: ["mcp"] }),
-      hostUrl: () => opts.agents?.reach?.advertise ?? opts.agents?.reach?.url,
+      turnReach: () => ({}),
       turnRoad: "relayed",
       // A workspace whose computer answers its daemon frames has no daemon of its own to dial and no route worth
       // minting: nothing listens inside it, and the road to its files and its git is the link this host holds.
@@ -2458,7 +2443,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // A turn here runs on the computer the host runs on, so it dials the host's loopback, and a host that
             // listens on none tells it nothing and hands it no token. The token is identity here, not confinement:
             // the turn runs as the person, who can read the host's own token file.
-            hostUrl: () => opts.agents?.reach?.here,
+            turnReach: () => {
+              const url = opts.agents?.here?.url;
+              return url === undefined || url === "" ? undefined : { url };
+            },
             turnRoad: "here",
             hasDaemon: () => local.daemonRoad !== undefined,
             daemonRoad: localRoad,
@@ -2515,8 +2503,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // wait for the round that answers both.
             wspMcp: () => undefined,
             // Nothing on this computer answers for a machine wsp only reaches yet; the round that gives this kind's
-            // turns the wsp command answers the address with it.
-            hostUrl: () => undefined,
+            // turns the wsp command answers the road with it.
+            turnReach: () => undefined,
             turnRoad: "relayed",
             // No road to a daemon on such a machine, here or in anything a host wires: the road that carried one
             // dialled a port on this computer that any other process here could have bound first, and handed it
@@ -2740,14 +2728,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   /** The top of the tree a thread is in: the root its own rows carry, and itself when nothing spawned it. */
   const rootOf = (threadId: string): string => rowsOn(threadId).find(v => v.rootThreadId !== undefined)?.rootThreadId ?? threadId;
-  /** Where a turn on this workspace's machine reaches this host, and the wsp command it runs there: the kind's own
-   * answer for its machines, and nothing where that kind reaches this host nowhere or this kind of machine carries
-   * no wsp. */
-  const agentsReach = (entry: LiveWorkspace): { url: string; wsp?: McpServerSpec } | undefined => {
-    const url = moduleOf(entry.record.kind).hostUrl(entry);
-    if (url === undefined || url === "") return undefined;
+  /** How a turn on this workspace's machine reaches this host, and the wsp command it runs there: the kind's own
+   * answer for its machines, and nothing where that kind reaches this host nowhere. */
+  const agentsReach = (entry: LiveWorkspace): { url?: string; wsp?: McpServerSpec } | undefined => {
+    const reach = moduleOf(entry.record.kind).turnReach(entry);
+    if (reach === undefined) return undefined;
     const wsp = moduleOf(entry.record.kind).wspMcp(entry);
-    return { url, ...(wsp !== undefined ? { wsp } : {}) };
+    return { ...reach, ...(wsp !== undefined ? { wsp } : {}) };
   };
   /** The one door every act a thread's own token asks for goes through: the switch on the workspace that thread
    * runs on, then the acts a thread may ask for at all, then how deep it already is, then how many machines its
@@ -7139,8 +7126,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const turnToken = randomBytes(16).toString("hex");
       // The token this turn's own agent drives this host with, and the address it dials: a device of this host's,
       // scoped to this thread and taken away when the turn's process exits, so a token read out of a machine after
-      // the turn opens nothing. Minted only where the person turned the switch on and only where this host knows an
-      // address the turn can reach it at, since a token with nowhere to go is one more secret for nothing.
+      // the turn opens nothing. Minted only where the person turned the switch on and only where the turn has a road
+      // to this host, since a token with nowhere to go is one more secret for nothing.
       const reach = agentsReach(entry);
       const scoped =
         agentsOf(entry.record)?.spawn === true && reach !== undefined
@@ -7161,10 +7148,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           o.harness,
           {
             [TURN_TOKEN_ENV]: turnToken,
-            // The key beside the address and the token: the turn's own wsp pins it before it sends the token, so
-            // a relay carrying the bytes reads nothing and a directory answer naming another host is refused.
-            ...(scoped !== undefined && reach !== undefined
-              ? { [HOST_URL_ENV]: reach.url, [HOST_TOKEN_ENV]: scoped.deviceToken, ...(placeDoor === undefined ? {} : { [HOST_KEY_ENV]: placeDoor.hostKey() }) }
+            ...(scoped !== undefined ? { [HOST_TOKEN_ENV]: scoped.deviceToken } : {}),
+            // The address and the key beside it only for a turn that dials one: its wsp pins the key before it sends
+            // the token, so a directory answer naming another host is refused.
+            ...(scoped !== undefined && reach?.url !== undefined
+              ? { [HOST_URL_ENV]: reach.url, ...(placeDoor === undefined ? {} : { [HOST_KEY_ENV]: placeDoor.hostKey() }) }
               : {}),
           },
           () => waiting.on,

@@ -6,7 +6,8 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RightPanelTabs } from "./RightPanelTabs";
 import type { RightPanelSurface } from "../rightPanelStore";
-import { PANE_KINDS, type RightPanelKind } from "../panes";
+import { PANE_KINDS, PANES, type RightPanelKind } from "../panes";
+import { CARD_SURFACE } from "../settings/rows";
 
 function draw(over: { surfaces?: RightPanelSurface[]; activeSurfaceId?: string | null; diffAvailable?: boolean; processesAvailable?: boolean; onAdd?: (kind: RightPanelKind) => void } = {}) {
   return render(
@@ -41,9 +42,19 @@ describe("the right panel's launcher", () => {
     expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDMPA");
   });
 
-  it("says what the Browser pane is for in the person's own words", () => {
+  it("says what each pane is for in the person's own words, never a task", () => {
     draw();
+    expect(screen.getByText("A browser, a terminal, the diff, the computer or what runs on it.")).toBeTruthy();
     expect(screen.getByText("Open your dev server or a URL.")).toBeTruthy();
+    expect(screen.getByText("Start a shell here.")).toBeTruthy();
+    expect(screen.getByText("Review the changes here.")).toBeTruthy();
+  });
+
+  it("never says task or workspace, in a pane's label, its line or the reason it is held", () => {
+    const banned = /\b(task|workspace)s?\b/i;
+    for (const kind of PANE_KINDS) for (const words of [PANES[kind].label, PANES[kind].description, PANES[kind].hint]) expect(words).not.toMatch(banned);
+    draw({ diffAvailable: false, processesAvailable: false });
+    expect(document.querySelector('[aria-label="Open a panel"]')!.textContent).not.toMatch(banned);
   });
 
   it("keeps a pane it cannot open drawn, held, with the one line that says why", () => {
@@ -51,22 +62,41 @@ describe("the right panel's launcher", () => {
     expect(cards()).toEqual(["preview", "terminal", "diff", "machine", "processes", "agents"]);
     const diff = document.querySelector<HTMLElement>('[data-surface-launch="diff"]')!;
     expect(diff.dataset["available"]).toBe("false");
-    expect(diff.textContent).toContain("Review changes once the task is running.");
+    expect(diff.textContent).toContain("Review the changes once it runs.");
   });
 
   it("holds Processes with the line that says why", () => {
     draw({ processesAvailable: false });
     const procs = document.querySelector<HTMLElement>('[data-surface-launch="processes"]')!;
     expect(procs.dataset["available"]).toBe("false");
-    expect(procs.textContent).toContain("Available while the task is running.");
+    expect(procs.textContent).toContain("Available while this runs.");
   });
 
-  it("draws each pane as a borderless row that fills with the accent on hover, its key in mono", () => {
-    draw();
+  it("draws each pane as its own card tile, 8px apart, that fills on hover, its key in mono", () => {
+    draw({ diffAvailable: false });
     const browser = document.querySelector<HTMLElement>('[data-surface-launch="preview"]')!;
-    expect(browser.className).not.toMatch(/\bborder\b|\bbg-card\b|inset-ring/);
-    expect(browser.className).toContain("hover:bg-accent");
+    for (const kind of PANE_KINDS) {
+      const tile = document.querySelector<HTMLElement>(`[data-surface-launch="${kind}"]`)!;
+      for (const surface of CARD_SURFACE.split(" ")) expect(tile.classList).toContain(surface);
+    }
+    expect(browser.parentElement!.className).toContain("gap-2");
+    expect(browser.className).toContain("hover:bg-card-hover");
     expect(browser.querySelector("kbd")!.className).toContain("font-mono");
+  });
+
+  it("moves the highlight with the arrows over the tiles it can open, skipping a held one", () => {
+    draw({ diffAvailable: false });
+    const launcher = document.querySelector<HTMLElement>("[data-surface-launcher-keys]")!;
+    const lit = () => cards().filter(kind => document.querySelector(`[data-surface-launch="${kind}"]`)!.classList.contains("bg-card-hover"));
+    expect(lit()).toEqual([]);
+    fireEvent.keyDown(launcher, { key: "ArrowDown" });
+    expect(lit()).toEqual(["preview"]);
+    fireEvent.keyDown(launcher, { key: "ArrowDown" });
+    fireEvent.keyDown(launcher, { key: "ArrowDown" });
+    expect(lit()).toEqual(["machine"]);
+    expect(document.querySelector('[data-surface-launch="machine"]')!.classList).not.toContain("bg-card");
+    fireEvent.keyDown(launcher, { key: "ArrowUp" });
+    expect(lit()).toEqual(["terminal"]);
   });
 
   it("dims a held row's label, glyph and key at 0.64 and leaves its reason at full ink", () => {
@@ -75,7 +105,7 @@ describe("the right panel's launcher", () => {
     expect(within(diff).getByText("Diff").className).toContain("opacity-64");
     expect(diff.querySelector("kbd")!.className).toContain("opacity-64");
     expect(diff.querySelector("svg")!.getAttribute("class")).toContain("opacity-64");
-    expect(within(diff).getByText("Review changes once the task is running.").className).not.toContain("opacity");
+    expect(within(diff).getByText("Review the changes once it runs.").className).not.toContain("opacity");
   });
 
   it("draws the open tab as a 6px chip and the add button as a 28px square", () => {
@@ -100,7 +130,7 @@ describe("the right panel's launcher", () => {
     draw({ onAdd });
     const agents = document.querySelector<HTMLElement>('[data-surface-launch="agents"]')!;
     expect(agents.textContent).toContain("Agents");
-    expect(agents.textContent).toContain("Agents, skills and servers on this task.");
+    expect(agents.textContent).toContain("Agents, skills and servers here.");
     expect(agents.querySelector("kbd")?.textContent).toBe("A");
     fireEvent.keyDown(window, { key: "a" });
     expect(onAdd.mock.calls).toEqual([["agents"]]);

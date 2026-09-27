@@ -128,6 +128,9 @@ describe("one module per service manager", () => {
     expect(text).toContain("WorkingDirectory=/Users/z/work\n");
     expect(text).toContain("Environment='PATH=/usr/bin:/bin'");
     expect(text).toContain("Restart=always");
+    // A stop takes the host's own process and nothing else: every turn leads a process group of its own so that the
+    // next host re-opens it, and systemd's default kills the unit's whole cgroup, turns included.
+    expect(text).toContain("KillMode=process\n");
     expect(text).toContain("StandardOutput=append:/Users/z/.wsp/host.log");
     expect(text).toContain("WantedBy=default.target");
     expect(text).not.toContain(KEY);
@@ -152,6 +155,8 @@ describe("one module per service manager", () => {
     expect(systemd.unit(there)).toEqual({ name: `wsp-place-${theirTag}.service`, path: `/etc/systemd/system/wsp-place-${theirTag}.service` });
     // multi-user.target, not default.target: the agent holds the link open whether or not anybody is logged in.
     expect(systemd.text(planFor(there))).toContain("WantedBy=multi-user.target");
+    // The agent's unit keeps the default: a leave takes the terminals and servers it started down with it.
+    expect(systemd.text(planFor(there))).not.toContain("KillMode");
     expect(systemd.load(there)).toEqual([
       ["systemctl", "daemon-reload"],
       ["systemctl", "enable", `wsp-place-${theirTag}.service`],
@@ -704,7 +709,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(await upServiceCommand(quietIO(), opts, fake.deps)).toBe(0);
     const lines: string[] = [];
     expect(await downCommand(quietIO(lines), opts, fake.deps)).toBe(0);
-    expect(lines).toEqual([`fake service fake.${serviceTag(statePath)} stopped; nothing serves ${statePath} now`]);
+    expect(lines).toEqual([`fake service fake.${serviceTag(statePath)} stopped; nothing serves ${statePath} now, and its running turns keep going until the next host adopts them`]);
     expect(existsSync(join(home, ".wsp", "host.lock"))).toBe(false);
     expect(existsSync(join(home, "fake-units", `${serviceTag(statePath)}.unit`))).toBe(false);
   });
@@ -875,7 +880,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
       ["fake", "holds", name],
       ["fake", "unload", name],
     ]);
-    expect(lines).toEqual([`fake service ${name} stopped; nothing serves ${statePath} now`]);
+    expect(lines).toEqual([`fake service ${name} stopped; nothing serves ${statePath} now, and its running turns keep going until the next host adopts them`]);
   });
 
   it("wsp down changes nothing and names the command that could not answer when the manager cannot say whether it holds it", async () => {

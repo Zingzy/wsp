@@ -47,12 +47,34 @@ describe("a workspace's lines on the notices stack", () => {
     expect(texts()).not.toContain(DAEMON_UPDATING);
   });
 
-  it("says a daemon that is not answering in the words the row used, about this computer by its name and never its host name", () => {
+  it("says a running machine that is not answering in plain words, about this computer by its name and never its host name", () => {
     const mac = view("ws_m", "zingzys-MacBook-Pro.local", { kind: "local", machineId: "local" });
     const places = [{ id: "here", kind: "computer", name: "zingzys-MacBook-Pro.local", label: "zingzy's MacBook Pro", default: true }];
     useStore.setState({ places, workspaces: [mac], statuses: { ws_m: statusOf(mac, { reach: { state: "no-daemon" } }) } } as never);
     render(<Harness />);
-    expect(useNotices.getState().notices.find(n => n.key === "line:ws_m:daemon-gone")).toMatchObject({ kind: "error", text: "no daemon answering", where: "zingzy's MacBook Pro" });
+    expect(useNotices.getState().notices.find(n => n.key === "line:ws_m:daemon-gone")).toMatchObject({ kind: "error", text: "Running but not answering", where: "zingzy's MacBook Pro" });
+  });
+
+  it("says nothing for a machine that is paused or pausing, whatever its daemon reads, since a pause is expected", () => {
+    const GiB = 1024 ** 3;
+    resetLive();
+    const pausing = view("ws_p", "api", { phase: "pausing" });
+    const napping = view("ws_n", "web", { phase: "napping" });
+    const pausedAtProvider = view("ws_s", "docs");
+    useStore.setState({
+      workspaces: [pausing, napping, pausedAtProvider],
+      statuses: {
+        ws_p: statusOf(pausing, { reach: { state: "no-daemon" }, daemonNote: DAEMON_UPDATING }),
+        ws_n: statusOf(napping, { reach: { state: "no-daemon" } }),
+        ws_s: statusOf(pausedAtProvider, { machineState: "paused", reach: { state: "no-daemon" } }),
+      },
+    } as never);
+    render(<Harness />);
+    act(() => {
+      getLive("ws_p").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
+      getLive("ws_p").feedStatus("connecting");
+    });
+    expect(useNotices.getState().notices).toEqual([]);
   });
 
   it("says a drop with memory near full in the row's own short form, and ends it when the link is back", () => {

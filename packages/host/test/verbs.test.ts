@@ -10,7 +10,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -19,14 +19,15 @@ import { hostKeyHere, placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { awake, BUILT_IN_LIST_CLAUSE, BUILT_IN_TABLE_CLAUSE, CLI_VERBS, hasTool, VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
-import { HOST_SIDE_VAULT, hostPlatform, THREAD_PREFIX_WORD } from "../src/verbs.js";
+import { HOST_RESTARTING_LINE, HOST_SIDE_VAULT, hostAgain, hostPlatform, hostRestartedLine, THREAD_PREFIX_WORD } from "../src/verbs.js";
+import { restartRoads, type RestartRoad } from "../src/restart.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import type { WatchSignals } from "../src/watch.js";
 import { writeHost } from "../src/hosts.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
-import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, sayingAgent, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
+import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, lastingAgent, launchedScript, launchedScripts, projectBundler, sayingAgent, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { CLOUD_ON } from "../src/cloud.js";
 
@@ -175,12 +176,12 @@ describe("wsp verbs over the host", () => {
   const RECORD = (bytes: number) => ({ name: "default", version: 1, hash: "a".repeat(64), recipeHash: "rh", logins: [{ name: "codex", state: "copied" as const }], sealedAt: "2026-09-12T00:00:00.000Z", sealedFrom: "h1", vault: { sha256: "b".repeat(64), bytes, paths: 2, takenAt: "2026-09-12T00:00:00.000Z" } });
 
   /** The host again on the same state file, over a runtime with these adapters; the verbs still see no key. */
-  async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends, wired: MachineBackend = backend): Promise<void> {
+  async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends, wired: MachineBackend = backend, restart?: RestartRoad): Promise<void> {
     await handle?.close();
     handle = undefined;
     rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), ...(places !== undefined ? { places } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
+    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt, ...(restart !== undefined ? { restart } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "");
     // A restart on a fresh store holds no project, and a workspace is one project's copy; one that kept the store
     // keeps the project it already had, since a second would make every wsp new ambiguous.
@@ -3232,21 +3233,93 @@ describe("wsp verbs over the host", () => {
     rmSync(folder, { recursive: true, force: true });
   });
 
-  it("a host that stops under a turn says so and that the turn goes on, in one line with exit 1 instead of hanging", async () => {
-    await restartHost({ claude: stuckAgent() });
+  it("a host that stops under an exec says so and that the turn goes on, in one line with exit 1 instead of hanging", async () => {
     await run("new", "alpha");
     execGuest(backend, "", undefined);
-    const turn = run("run", "alpha", "hang");
     const command = run("exec", "alpha", "--", "sleep", "600");
     await new Promise(r => setTimeout(r, 300));
     await handle!.close();
     handle = undefined;
-    const [t, c] = await Promise.all([turn, command]);
-    expect(t.code).toBe(1);
-    expect(t.io.errors).toEqual([`wsp run: ${HOST_STOPPING_LINE}`]);
-    expect(t.io.lines).toHaveLength(1);
+    const c = await command;
     expect(c.code).toBe(1);
     expect(c.io.errors).toEqual([`wsp exec: ${HOST_STOPPING_LINE}`]);
+  });
+
+  it("a run and a threads wait whose host restarts under them wait for it to come back, and the run prints the reply whole though its stream was cut", async () => {
+    const lasting = lastingAgent();
+    await restartHost({ claude: lasting.adapter });
+    await run("new", "alpha");
+    const turn = starting("run", "alpha", "build it");
+    turn.io.sameScreen = true;
+    await vi.waitFor(() => expect(lasting.started()).toBe(1), { timeout: 5_000, interval: 10 });
+    const [row] = await rt.sessions.list();
+    await vi.waitFor(() => expect(turn.io.lines).toHaveLength(1), { timeout: 5_000, interval: 10 });
+    const waited = run("threads", "wait", row!.threadId!);
+    await new Promise(r => setTimeout(r, 300));
+    await restartHost({ claude: lasting.adapter });
+    // The host that came back has re-opened the run before its lines are sent, so they reach the host now serving.
+    await rt.sessions.list();
+    expect(lasting.attached()).toBe(1);
+    lasting.finish("built it");
+    const [code, w] = await Promise.all([turn.ended, waited]);
+    expect(code).toBe(0);
+    // On a person's own screen the streamed copy is the reply, but this one was cut when the host stopped, so the
+    // reply is printed whole under the thread's line.
+    expect(turn.io.lines).toEqual([`thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "built it"]);
+    expect(turn.io.errors).toEqual([HOST_RESTARTING_LINE]);
+    expect(w.code).toBe(0);
+    expect(w.io.lines).toEqual([`thread ${row!.threadId!.slice(0, 8)} finished (completed): built it`]);
+    expect(w.io.errors).toEqual([HOST_RESTARTING_LINE]);
+  });
+
+  it("restart has the host restart on the road it came up on and answers once the host that replaced it serves, with the threads running on it; a host wsp up holds in a terminal refuses in that road's words", async () => {
+    const lasting = lastingAgent();
+    // The verb's road as the host takes it: the host closes, and the one that replaces it serves the same state file.
+    const road: RestartRoad = { shape: "verb", restart: () => restartHost({ claude: lasting.adapter }, store, undefined, backend, road) };
+    await restartHost({ claude: lasting.adapter }, store, undefined, backend, road);
+    await run("new", "alpha");
+    await run("run", "alpha", "--detach", "build it");
+    const [row] = await rt.sessions.list();
+    const before = handle;
+    const restarted = await run("restart");
+    expect(restarted.code).toBe(0);
+    expect(handle).not.toBe(before);
+    expect(restarted.io.lines).toEqual([hostRestartedLine([row!.threadId!])]);
+    expect(lasting.attached()).toBe(1);
+
+    const asJson = await run("restart", "--json");
+    expect(asJson.code).toBe(0);
+    expect(json(asJson.io)).toEqual([{ running: [row!.threadId] }]);
+    lasting.finish("built it");
+    await vi.waitFor(async () => expect((await rt.sessions.list())[0]!.status).toBe("completed"), { timeout: 5_000, interval: 10 });
+    expect((await run("restart")).io.lines).toEqual([hostRestartedLine([])]);
+
+    await restartHost({ claude: lasting.adapter }, store, undefined, backend, restartRoads({ exit: () => {}, respawn: async () => {}, log: () => {} }).up);
+    const refused = await run("restart");
+    expect(refused.code).toBe(EXIT_CODES.provider);
+    expect(refused.io.errors).toEqual([`wsp restart: ${UP_RESTART_LINE}`]);
+    const extra = await run("restart", "now");
+    expect(extra.code).toBe(EXIT_CODES.usage);
+    expect(extra.io.errors).toEqual(["wsp restart takes no arguments. usage: wsp restart"]);
+  });
+
+  it("a wait whose host does not come back gives up once its window runs out, with the dial's own refusal, and a dial that hangs is held to what is left", async () => {
+    const gone = new Error(noHostServingLine(statePath));
+    const within: number[] = [];
+    let started = Date.now();
+    await expect(hostAgain(async left => {
+      within.push(left);
+      throw gone;
+    }, 300)).rejects.toBe(gone);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(within.length).toBeGreaterThan(1);
+    expect(within.every(left => left > 0 && left <= 300)).toBe(true);
+    // A port that accepts and never answers: each dial waits out the deadline it was handed, and the wait still ends
+    // at its window rather than a whole dial window past it.
+    started = Date.now();
+    await expect(hostAgain(left => new Promise<HostClient>((_, fail) => setTimeout(() => fail(gone), left)), 300)).rejects.toBe(gone);
+    expect(Date.now() - started).toBeLessThan(600);
   });
 
   it("the workspace being deleted under a running exec fails the verb with the reason and exit 1", async () => {

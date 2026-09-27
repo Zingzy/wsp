@@ -13,7 +13,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { type ProjectView, HERE_PLACE_ID, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, addedProjectLine, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
+import { type ProjectView, HERE_PLACE_ID, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, addedProjectLine, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
@@ -31,7 +31,7 @@ import { HERE } from "./recipe-fixture.js";
 const HERE_PLACE = hostname().toLowerCase();
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScripts, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
+import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScripts, projectBundler, heldAgent, lastingAgent, scriptedAgent, doneOnlyAgent } from "./verbs-fixture.js";
 import { CLOUD_ON } from "../src/cloud.js";
 
 interface Called {
@@ -123,7 +123,7 @@ describe("the MCP server over the host", () => {
     const [toClient, toServer] = InMemoryTransport.createLinkedPair();
     // No starter: this server is held to what it answers with when nothing serves, not to one it would bring up.
     const dial = dialer(statePath);
-    server = mcpServer(statePath, { dial: Object.assign(async () => (socket = await dial()), { close: dial.close }), env, ...over });
+    server = mcpServer(statePath, { dial: Object.assign(async (again?: { withinMs: number }) => (socket = await dial(again)), { close: dial.close }), env, ...over });
     await server.connect(toServer);
     client = new Client({ name: "test-agent", version: "0.0.0" });
     await client.connect(toClient);
@@ -161,7 +161,7 @@ describe("the MCP server over the host", () => {
   it.runIf(CLOUD_ON)("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["agents", "agents_addtools", "bring_back", "computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "servers", "servers_add", "servers_disable", "servers_enable", "servers_remove", "servers_tools", "setup", "skills", "skills_add", "skills_disable", "skills_enable", "skills_remove", "skills_search", "skills_show", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["agents", "agents_addtools", "bring_back", "computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "image_remove", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "restart", "run", "send", "servers", "servers_add", "servers_disable", "servers_enable", "servers_remove", "servers_tools", "setup", "skills", "skills_add", "skills_disable", "skills_enable", "skills_remove", "skills_search", "skills_show", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
     for (const name of ["agents", "skills", "servers"]) expect(Object.keys((tools.find(t => t.name === name)!.inputSchema as { properties: Record<string, unknown> }).properties).sort(), name).toEqual(["on", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "servers_tools")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agent", "name", "on", "project", "refresh", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden", "on", "repos"]);
@@ -1046,7 +1046,7 @@ describe("the MCP server over the host", () => {
     expect(await running).toEqual(failedWith("machine deleted while the agent was working"));
   });
 
-  it("a dead host is a tool error, not a hang: no host serving, then the host stopping mid-turn, then a host that came back", async () => {
+  it("a dead host is a tool error, not a hang, and a host that restarts mid-turn is waited for: the run answers with the reply once the host is back", async () => {
     await call("new", { name: "alpha" });
     await handle!.close();
     handle = undefined;
@@ -1054,17 +1054,38 @@ describe("the MCP server over the host", () => {
     const gone = await call("workspaces");
     expect(gone).toEqual(failedWith(noHostServingLine(statePath)));
 
-    await restartHost({ claude: stuckAgent() });
-    const turn = call("run", { workspace: "alpha", task: "hang" });
+    const lasting = lastingAgent();
+    await restartHost({ claude: lasting.adapter });
+    const turn = call("run", { workspace: "alpha", task: "build it" });
+    await vi.waitFor(async () => expect((await rt.sessions.list()).map(s => s.claudeSessionId)).toEqual([expect.any(String)]), { timeout: 5_000, interval: 10 });
     await new Promise(r => setTimeout(r, 300));
-    await handle!.close();
-    handle = undefined;
-    expect(await turn).toEqual(failedWith(HOST_STOPPING_LINE));
+    await restartHost({ claude: lasting.adapter });
+    await rt.sessions.list();
+    expect(lasting.attached()).toBe(1);
+    lasting.finish("built it");
+    const answered = await turn;
+    expect(answered.isError).toBe(false);
+    expect(answered.structured).toMatchObject({ text: "built it", outcome: "started" });
 
-    await restartHost({ claude: claude.adapter });
     const back = await call("threads");
     expect(back.isError).toBe(false);
     expect((back.structured as { threads: ThreadView[] }).threads).toHaveLength(1);
+  });
+
+  it("a run whose host stops and does not come back is a tool error once the wait for the host runs out, in the dial's own words", async () => {
+    const lasting = lastingAgent();
+    await restartHost({ claude: lasting.adapter });
+    await connect({ hostWaitMs: 300 });
+    await call("new", { name: "alpha" });
+    const turn = call("run", { workspace: "alpha", task: "build it" });
+    await vi.waitFor(async () => expect((await rt.sessions.list()).map(s => s.claudeSessionId)).toEqual([expect.any(String)]), { timeout: 5_000, interval: 10 });
+    await new Promise(r => setTimeout(r, 300));
+    const started = Date.now();
+    await handle!.close();
+    handle = undefined;
+    expect(await turn).toEqual(failedWith(noHostServingLine(statePath)));
+    expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 
   it("wsp mcp speaks the protocol over stdio and returns when its stdin ends, closing the host socket", async () => {

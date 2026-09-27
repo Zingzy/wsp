@@ -12,7 +12,7 @@ import { VERBS, c1Escaped, dialHost, hasTool, toolFailure, toolName, type DialOp
 import { VERSION } from "./version.js";
 
 export interface Dialer {
-  (): Promise<HostClient>;
+  (again?: { withinMs: number }): Promise<HostClient>;
   close(): Promise<void>;
 }
 
@@ -21,8 +21,11 @@ export interface Dialer {
  * host on another computer that alias names. */
 export function dialer(statePath: string, pick: DialOpts = {}): Dialer {
   let client: Promise<HostClient> | undefined;
-  const dial = (): Promise<HostClient> =>
-    (client ??= dialHost(statePath, pick).then(
+  // The socket a stopping host let go has already been dropped here by the time a wait dials again, so `again` only
+  // takes the starter out of that dial and bounds it by what the wait has left.
+  const { start: _start, ...unstarting } = pick;
+  const dial = (again?: { withinMs: number }): Promise<HostClient> =>
+    (client ??= dialHost(statePath, again === undefined ? pick : { ...unstarting, deadlineMs: again.withinMs }).then(
       c => {
         void c.closed.then(() => {
           client = undefined;
@@ -50,9 +53,9 @@ const pickOf = (opts: { env: VerbDeps["env"]; host?: string; start?: VerbDeps["s
   ...(opts.start !== undefined ? { start: opts.start } : {}),
 });
 
-export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"]; skip?: (verb: Verb) => boolean; elsewhere?: boolean }): McpServer {
+export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: VerbDeps["alsoHere"]; cwd?: string; env: VerbDeps["env"]; host?: string; start?: VerbDeps["start"]; skip?: (verb: Verb) => boolean; elsewhere?: boolean; hostWaitMs?: number }): McpServer {
   const server = new McpServer({ name: "wsp", version: VERSION }, { instructions: INSTRUCTIONS });
-  const deps: VerbDeps = { statePath, env: opts.env, client: opts.dial ?? dialer(statePath, pickOf(opts)), ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}), ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}), ...(opts.elsewhere === true ? { elsewhere: true } : {}) };
+  const deps: VerbDeps = { statePath, env: opts.env, client: opts.dial ?? dialer(statePath, pickOf(opts)), ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}), ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}), ...(opts.elsewhere === true ? { elsewhere: true } : {}), ...(opts.hostWaitMs !== undefined ? { hostWaitMs: opts.hostWaitMs } : {}) };
   for (const verb of VERBS) {
     if (!hasTool(verb) || opts.skip?.(verb) === true) continue;
     server.registerTool(toolName(verb.name), { description: verb.tool.description, inputSchema: verb.tool.input, outputSchema: verb.tool.output }, args => verb.tool.call(args, deps).catch((e: unknown) => toolFailure(e, "usage" in verb ? verb.usage : undefined)));

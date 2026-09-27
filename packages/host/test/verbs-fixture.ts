@@ -320,6 +320,49 @@ export function stuckAgent(): HarnessAdapterFactory {
   });
 }
 
+/** A harness whose runs outlive the host that launched them, as a machine's and this computer's do: each turn is a
+ * run held here by its handle, a host started over the same store re-opens it by that handle, and the case ends the
+ * newest run with `finish`, whose lines reach whichever host opened it last. */
+export function lastingAgent() {
+  const runs = new Map<string, { sessionId: string; onEvent: (e: AdapterEvent) => void; settle: (r: TurnResult) => void }>();
+  let minted = 0;
+  let attached = 0;
+  const open = (run: string, sessionId: string, onEvent: (e: AdapterEvent) => void) => {
+    let settle!: (r: TurnResult) => void;
+    const finished = new Promise<TurnResult>(r => (settle = r));
+    runs.set(run, { sessionId, onEvent, settle });
+    return { localId: sessionId, run, finished, interrupt: async () => {} };
+  };
+  const adapter: HarnessAdapterFactory = () => ({
+    steers: false,
+    start: o => {
+      const run = `/tmp/wsp-run/${(++minted).toString(16).padStart(12, "0")}`;
+      const sessionId = randomUUID();
+      const session = open(run, sessionId, o.onEvent);
+      queueMicrotask(() => o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }));
+      return session;
+    },
+    attach: async o => {
+      if (!runs.has(o.run)) return "gone";
+      attached++;
+      return open(o.run, o.sessionId, o.onEvent);
+    },
+  });
+  return {
+    adapter,
+    started: () => runs.size,
+    attached: () => attached,
+    finish: (text: string) => {
+      const run = [...runs.values()].at(-1)!;
+      const result: TurnResult = { status: "completed", text };
+      run.onEvent({ type: "turn.delta", sessionId: run.sessionId, kind: "text", text });
+      run.onEvent({ type: "turn.done", sessionId: run.sessionId, result });
+      run.onEvent({ type: "session.end", sessionId: run.sessionId, exitCode: 0, sawResult: true });
+      run.settle(result);
+    },
+  };
+}
+
 /** One adapter event as a case writes it, the session id left to the fixture; distributive, so each arm of the union
  * keeps its own fields. */
 type WithoutSession<T> = T extends unknown ? Omit<T, "sessionId"> : never;
