@@ -4188,7 +4188,7 @@ const DAEMON_CONTENTS = [
   "4693a00a74c923f64a9062a65cac539d5ac7621da08fc623c63089a87b8231d7",
   "6064295b774d39defb1ba58ef099812ee1e4662bac2a1525c6d0061128450f2f",
   "12dc3a3741a25239969103531def3c28df0874e9233825d16f7063a84df345c6",
-  "c0470e9f2f892587971e39ad3cb4a65e887e682acff49ace2998e78b7ed79696",
+  "8515409a63d42ad2ba0143de98e5e9ffc64a440f2e171a52c614445c06965c2b",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4412,7 +4412,8 @@ const DAEMON_CONTENTS = [
  * empty list with a note where that command line is not there or nobody signed it in.
  * Version 85 writes into a copy: git.commit commits the files named with the message on stdin, git.discard puts one
  * file back as HEAD has it, and fs.write replaces a file's contents whole; git.diff gains the head scope with untracked
- * files as new, paths, whole files in one hunk, and each file's blob id. */
+ * files as new, paths, whole files in one hunk, and each file's blob id; a discard takes the folders it left empty, and
+ * the binary's version verb prints this number. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -6024,9 +6025,7 @@ export const THREAD_OPS: readonly string[] = [
  * dials, sweeps or lands a binary on a computer of the person's or clones onto one, every op that writes keys,
  * builds or seals an image, runs the sign-ins or costs money, and every op that reads or writes this computer's
  * disk outside wsp's own folders. The daemon channel's send and close ride a channel a refused open never gave
- * this socket. A role of the person's is where this list widens, per device. The Changes pane's own ops are here
- * although a commit runs the copy's hooks and a draft runs its agent: each writes inside wsp's own copy and nowhere
- * else, which the device's panes already type into, and none reaches a remote. */
+ * this socket. A role of the person's is where this list widens, per device. */
 export const DEVICE_OPS: readonly string[] = [
   "auth",
   "events.subscribe",
@@ -6060,9 +6059,6 @@ export const DEVICE_OPS: readonly string[] = [
   "workspaces.portProbe",
   "workspaces.rebuild",
   "workspaces.checkout",
-  "workspaces.discard",
-  "workspaces.commit",
-  "workspaces.commitDraft",
   "workspaces.viewed",
   "projects.list",
   "projects.resolve",

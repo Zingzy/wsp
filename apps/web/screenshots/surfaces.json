@@ -1114,7 +1114,7 @@
         "390:key:Escape",
         "390:sidebar=trigger"
       ],
-      "wait": "tile-counts",
+      "wait": "tile-count",
       "settleMs": 1200
     },
     {

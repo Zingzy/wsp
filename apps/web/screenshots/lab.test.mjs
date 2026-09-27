@@ -2,7 +2,7 @@
 // What a lab is made of, checked without a host, a build or a browser: the
 // fixtures a tester picks between, the provider and the environment each one
 // needs, the lines a lab prints, and the rules the driver reads a page with.
-import { CLOUD_ENV, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
+import { CLOUD_ENV, DAEMON_VERSION, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { TRANSCRIPT_LOADING } from "../src/transcript-words.js";
 import { spawnSync } from "node:child_process";
@@ -340,7 +340,17 @@ describe("what a lab must find built before it will serve anything", () => {
   });
 
   it("says nothing when the app, the command and the daemon are all there", async () => {
-    expect(await whatIsNotBuilt({ exists: () => true, daemon: async () => bin })).toBeUndefined();
+    expect(await whatIsNotBuilt({ exists: () => true, daemon: async () => bin, version: () => DAEMON_VERSION })).toBeUndefined();
+  });
+
+  it("refuses a daemon binary a build left behind, naming the version it speaks and the one the protocol names", async () => {
+    // A binary two versions old served a fixture host once, and every shot of the ops it lacked missed.
+    const said = await whatIsNotBuilt({ exists: () => true, daemon: async () => bin, version: () => DAEMON_VERSION - 1 });
+    expect(said).toContain(`speaks version ${DAEMON_VERSION - 1}`);
+    expect(said).toContain(`version ${DAEMON_VERSION}`);
+    expect(said).toContain(DAEMON_BUILD);
+    // One too old to answer the question at all is left behind as surely.
+    expect(await whatIsNotBuilt({ exists: () => true, daemon: async () => bin, version: () => undefined })).toContain(DAEMON_BUILD);
   });
 
   it("still names the app and the command first, since the daemon's path is read out of that command's build", async () => {

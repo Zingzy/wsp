@@ -403,6 +403,23 @@ describe("the Changes pane's writes", () => {
     await waitFor(() => expect(diffCalls(wire).length).toBeGreaterThan(before));
   });
 
+  it("says a file no commit has is deleted, since discarding it leaves nothing behind", async () => {
+    const added = { path: "new.txt", patch: "diff --git a/new.txt b/new.txt\nnew file mode 100644\nindex 0000000..ce01362\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+hello\n" };
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": { ...DIFF, files: [...DIFF.files, added] }, "git.status": STATUS }));
+    const { api } = paneApi();
+    useStore.setState({ api: api as never });
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(3));
+    fireEvent.click(within(rowOf(container, "new.txt")).getByRole("button", { name: "Discard changes to new.txt" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("No commit has new.txt, so discarding deletes it. This cannot be undone.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    // A file a commit has is put back as that commit has it, and the dialog says only that it cannot be undone.
+    fireEvent.click(within(rowOf(container, "src/a.ts")).getByRole("button", { name: "Discard changes to a.ts" }));
+    expect((await screen.findByRole("alertdialog")).textContent).not.toContain("deletes");
+  });
+
   it("opens the commit box filled from the draft with every file ticked, and commits the ticked ones", async () => {
     const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS });
     provideDaemonWire(WS, wire);
@@ -410,9 +427,15 @@ describe("the Changes pane's writes", () => {
     useStore.setState({ api: api as never });
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(items(container)).toHaveLength(2));
+    const header = container.querySelector<HTMLElement>("[data-diff-commit]")!.parentElement!.parentElement!;
+    const shape = () => [...header.querySelectorAll("button, [data-folder-crumbs], [data-diff-repo]")].map(n => n.getAttribute("aria-label") ?? n.textContent);
+    const closed = shape();
     fireEvent.click(screen.getByRole("button", { name: "Commit" }));
     const message = await screen.findByRole("textbox", { name: "Commit message" });
     await waitFor(() => expect((message as HTMLTextAreaElement).value).toBe("Round the cart total once\n\nIt rounded per line."));
+    // Nothing in the header moves while the box is open: Commit stays in its slot, held, and the path stays.
+    expect(shape()).toEqual(closed);
+    expect(container.querySelector("[data-diff-commit]")!.hasAttribute("disabled")).toBe(true);
     expect(asked.find(a => a.op === "commitDraft")?.args).toEqual([WS, ["src/a.ts", "README.md"]]);
     const ticks = [...container.querySelectorAll<HTMLElement>("[data-commit-tick]")];
     expect(ticks.map(t => t.getAttribute("aria-checked"))).toEqual(["true", "true"]);

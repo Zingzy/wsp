@@ -8,7 +8,8 @@ import { AlertDialog, AlertDialogClose, AlertDialogFooter, AlertDialogHeader, Al
 import { Button, NEUTRAL_RING } from "../components/ui/button.js";
 import { DISCARD_WORDS } from "./words.js";
 
-export function DiscardDialog({ name, onDiscard, onClose }: { name: string; onDiscard: () => Promise<void>; onClose: () => void }) {
+/** `deletes` is a file no commit has, which a discard removes rather than puts back. */
+export function DiscardDialog({ name, deletes, onDiscard, onClose }: { name: string; deletes: boolean; onDiscard: () => Promise<void>; onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const go = async (): Promise<void> => {
@@ -30,7 +31,7 @@ export function DiscardDialog({ name, onDiscard, onClose }: { name: string; onDi
           <AlertDialogTitle>{DISCARD_WORDS.title(name)}</AlertDialogTitle>
         </AlertDialogHeader>
         <div className="px-5 pt-1">
-          <RefusalSlot k="discard-refusal" {...(refusal !== null ? { said: refusal } : { note: DISCARD_WORDS.note })} />
+          <RefusalSlot k="discard-refusal" {...(refusal !== null ? { said: refusal } : { note: deletes ? DISCARD_WORDS.deletes(name) : DISCARD_WORDS.note })} />
         </div>
         <AlertDialogFooter>
           <AlertDialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>{DISCARD_WORDS.cancel}</AlertDialogClose>

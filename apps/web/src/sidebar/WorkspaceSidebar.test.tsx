@@ -206,6 +206,10 @@ describe("the sidebar's list of thread tiles", () => {
       act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, fact) } } as never));
       await waitFor(() => expect(three("ws_f").querySelector("[data-tile-branch]")?.textContent).toBe("fix/cart-rounding"));
       expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]);
+      // The branch and each count stand 12 px apart on the 4 px grid: one gap, with no margin of their own.
+      const branch = three("ws_f").querySelector<HTMLElement>("[data-tile-branch]")!;
+      expect(branch.parentElement!.className).toContain("gap-3");
+      expect([...branch.parentElement!.querySelectorAll("*")].map(n => n.getAttribute("class") ?? "").join(" ")).not.toMatch(/\bm[se]?-\[/);
       expect(three("ws_f").textContent).not.toContain("\u00b7");
       expect(three("ws_f").querySelector(".lucide-git-branch")).not.toBeNull();
     });

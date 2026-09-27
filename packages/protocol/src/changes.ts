@@ -109,6 +109,11 @@ export function discardedLine(workspace: string, path: string): string {
   return `${workspace}: ${path} discarded`;
 }
 
+/** What a commit of every change says when the checkout has none. */
+export function cleanCheckoutLine(workspace: string): string {
+  return `${workspace}: nothing to commit, the checkout has no changes`;
+}
+
 /** What `wsp commit` says once the commit stands: the short id and the subject. */
 export function committedLine(workspace: string, commit: { oid: string; subject: string; filesChanged: number }): string {
   return `${workspace}: committed ${commit.oid.slice(0, 7)} ${commit.subject} (${commit.filesChanged} file${commit.filesChanged === 1 ? "" : "s"})`;

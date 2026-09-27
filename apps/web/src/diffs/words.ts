@@ -21,6 +21,7 @@ export const DISCARD_WORDS = {
   control: (file: string): string => `Discard changes to ${file}`,
   title: (file: string): string => `Discard changes to ${file}?`,
   note: "This cannot be undone.",
+  deletes: (file: string): string => `No commit has ${file}, so discarding deletes it. This cannot be undone.`,
   confirm: "Discard",
   cancel: "Cancel",
 } as const;

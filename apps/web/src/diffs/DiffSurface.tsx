@@ -79,7 +79,7 @@ interface EditState {
   readonly saving: boolean;
 }
 /** The git mark beside the crumbs: one box whether it names a branch or a word from the repo-state table. */
-const REPO_MARK_CLASS = "inline-flex h-6 shrink-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground";
+const REPO_MARK_CLASS = "inline-flex h-6 min-w-0 items-center gap-1 px-1 font-mono text-[11px] text-muted-foreground";
 /** A sentence that fills an empty pane body, whatever it says: one muted mono line, centred. */
 const PANE_LINE_CLASS = "flex flex-1 items-center justify-center px-5 text-center text-[13px] text-muted-foreground";
 
@@ -266,6 +266,8 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     );
   };
 
+  // A new file in a scope measured against HEAD is one no commit has, so a discard deletes it.
+  const headLacks = (path: string): boolean => (scope === "head" || scope === "staged") && model?.files.find(f => f.filePath === path)?.fileDiff.type === "new";
   const discard = async (path: string): Promise<void> => {
     if (api?.discard === undefined) return;
     await api.discard(workspaceId, path);
@@ -379,7 +381,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
   const folderLabel = shown.kind === "repo" ? shown.root : cwd;
   const paneLine = load.kind === "error" ? REPO_STATE_WORDS[load.absence].pane : "";
   const repoRoot = shown.kind === "repo" ? shown.root : null;
-  const canCommit = scope === "head" && api?.commit !== undefined && model !== null && model.changedFiles.length > 0 && commit === null;
+  const canCommit = scope === "head" && api?.commit !== undefined && model !== null && model.changedFiles.length > 0;
   const editOf = (file: DiffFile | undefined) => {
     if (file === undefined || repoRoot === null) return undefined;
     if (editing?.fileKey === file.fileKey) return { kind: "open" as const, saving: editing.saving, onSave: () => void saveEdit(repoRoot), onCancel: () => setEditing(null) };
@@ -425,9 +427,9 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           </Menu>
           {/* The path and the branch leave the header at the narrow width: the file list under it names the file
               and the workspace's own row names the branch, and three facts on a 390 px header drew over one
-              another. The path leaves again when a comment puts Send to thread on the header, and while the commit box is open: it is the one fact
-              here with no bound, and squeezed to two letters it says nothing while the branch beside it still reads. */}
-          {comments.length === 0 && commit === null ? <FolderBreadcrumbs workspaceId={workspaceId} className="hidden flex-initial sm:flex" /> : null}
+              another. The path leaves again when a comment puts Send to thread on the header: it is the one fact here
+              with no bound, and squeezed to two letters it says nothing while the branch beside it still reads. */}
+          {comments.length === 0 ? <FolderBreadcrumbs workspaceId={workspaceId} className="hidden min-w-0 flex-initial shrink-[999] sm:flex" /> : null}
           {shown.kind === "repo" ? (
             <span className={cn(REPO_MARK_CLASS, "hidden sm:inline-flex")} title={`git: ${shown.root}`} data-diff-repo={shown.root} data-diff-repo-state={shown.kind}>
               <FolderGitIcon className="size-3.5 shrink-0 opacity-70" />
@@ -442,7 +444,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
                   type="button"
                   size="icon-micro"
                   variant="ghost"
-                  className="hidden sm:inline-flex"
+                  className="hidden shrink-0 sm:inline-flex"
                   aria-label={pinned ? "Follow the agent's folder" : "Stay in this folder"}
                   aria-pressed={pinned}
                   onClick={() => (pinned ? unpin(workspaceId) : pin(workspaceId, cwd))}
@@ -475,7 +477,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
             <DiffStatLabel additions={model.stat.additions} deletions={model.stat.deletions} className="mr-1 text-[11px]" layout="inline" />
           ) : null}
           {canCommit ? (
-            <Button type="button" size="xs" variant="outline" data-diff-commit onClick={openCommit}>
+            <Button type="button" size="xs" variant="outline" data-diff-commit held={commit !== null} onClick={openCommit}>
               {COMMIT_WORDS.button}
             </Button>
           ) : null}
@@ -529,7 +531,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
         </div>
       </div>
       {commit !== null ? <CommitBox state={commit} working={working} onMessage={message => setCommit(held => (held === null ? null : { ...held, message }))} onCommit={() => void makeCommit()} onCancel={() => setCommit(null)} /> : null}
-      {discarding !== null ? <DiscardDialog name={baseName(discarding)} onDiscard={() => discard(discarding)} onClose={() => setDiscarding(null)} /> : null}
+      {discarding !== null ? <DiscardDialog name={baseName(discarding)} deletes={headLacks(discarding)} onDiscard={() => discard(discarding)} onClose={() => setDiscarding(null)} /> : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         {reply?.truncated ? (
           <p className="shrink-0 border-b border-border/70 bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground" data-diff-truncated>

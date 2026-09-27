@@ -87,7 +87,23 @@ pub(crate) async fn discard<R: Runs>(runner: &R, cwd: &Path, path: &str) -> Resu
     } else {
         write(runner, top, &["restore", "--source=HEAD", "--staged", "--worktree", "--", &spec], None, &copy).await?;
     }
+    // A file no commit has may leave the folders made for it empty, which git never sees and the Files pane does.
+    if entry.xy == "??" || entry.xy.starts_with('A') || entry.orig_path.is_some() {
+        drop_emptied(runner, top, path).await;
+    }
     Ok(GitDiscardReply { path: path.to_owned() })
+}
+
+/// Removes each folder above a discarded file that it left empty, deepest first, through the same way git ran so a
+/// copy inside a workspace is the disk touched. rmdir refuses a folder that holds anything, which is where it stops.
+async fn drop_emptied<R: Runs>(runner: &R, top: &Path, path: &str) {
+    for folder in Path::new(path).ancestors().skip(1).filter(|p| !p.as_os_str().is_empty()) {
+        let Some(folder) = folder.to_str() else { return };
+        match runner.run(top, "rmdir", &["--", folder], None, None).await {
+            Ok(res) if res.code == Some(0) => {}
+            _ => return,
+        }
+    }
 }
 
 /// Commits the named files and no others. An untracked one is added first; a rename takes its old name with it, so
@@ -309,6 +325,25 @@ mod tests {
         assert_eq!(repo.read("old.txt").as_deref(), Some("old.txt\n"));
         assert_eq!((repo.read("new.txt"), repo.read("fresh.txt"), repo.read("staged.txt")), (None, None, None));
         assert!(!repo.at().join("dir/inner.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_discard_of_the_last_file_in_a_new_folder_takes_the_folder_and_leaves_one_that_still_holds_something() {
+        let repo = Repo::with(&["src/kept.txt"]);
+        repo.put("new/deep/only.txt", "only");
+        repo.put("two/a.txt", "a");
+        repo.put("two/b.txt", "b");
+        repo.put("src/fresh.txt", "fresh");
+        repo.put("staged/one.txt", "one");
+        git(&repo.at(), &["add", "staged/one.txt"]);
+        for path in ["new/deep/only.txt", "two/a.txt", "src/fresh.txt", "staged/one.txt"] {
+            discard(&Here::new(), &repo.at(), path).await.unwrap();
+        }
+        assert!(!repo.at().join("new").exists());
+        assert!(!repo.at().join("staged").exists());
+        assert_eq!(repo.read("two/b.txt").as_deref(), Some("b\n"));
+        assert_eq!(repo.read("src/kept.txt").as_deref(), Some("src/kept.txt\n"));
+        assert_eq!(repo.short(), "?? two/b.txt\n");
     }
 
     #[tokio::test]

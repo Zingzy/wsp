@@ -5,8 +5,8 @@
 // and the persona lab both take this road, so the environment a fixture is
 // served under is written once rather than once per harness.
 import { CATALOG_AGENTS, skillsDirOf } from "@wsp/catalog";
-import { CLOUD_ENV, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, shellQuote, WEB_DIR_ENV, wsUrlOf } from "@wsp/protocol";
-import { spawn } from "node:child_process";
+import { CLOUD_ENV, DAEMON_VERSION, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, shellQuote, WEB_DIR_ENV, wsUrlOf } from "@wsp/protocol";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
@@ -52,7 +52,7 @@ const notBuilt = (what, path, how) => `${what} is not built: ${path} is missing.
  * print, or nothing when all three are there. A whole round of nine served a host whose daemon binary was never
  * built, and no tester on a Mac alone could type a message: the turn does not need it, but the terminal, the files,
  * the process list and the composer's own reading of the machine all do. */
-export async function whatIsNotBuilt({ exists = existsSync, daemon = daemonBinaryHere } = {}) {
+export async function whatIsNotBuilt({ exists = existsSync, daemon = daemonBinaryHere, version = daemonVersionOf } = {}) {
   for (const [what, path, how] of [
     ["the web app", APP_PAGE, "pnpm --filter @wsp/web build"],
     ["the wsp command", HOST_BIN, "pnpm --filter @wsp/host build"],
@@ -62,7 +62,19 @@ export async function whatIsNotBuilt({ exists = existsSync, daemon = daemonBinar
   // Asked after the command, since the path is read out of that command's own build.
   const bin = await daemon();
   if (bin === undefined) return `wsp builds no daemon for ${process.platform} ${process.arch}, so a host here cannot serve its own workspace and every tester would meet a computer that answers nothing.`;
-  return exists(bin) ? undefined : notBuilt("this computer's daemon", bin, DAEMON_BUILD);
+  if (!exists(bin)) return notBuilt("this computer's daemon", bin, DAEMON_BUILD);
+  // A binary a build left behind is there all the same, and every op it lacks misses on every shot that needs it.
+  const speaks = version(bin);
+  if (speaks === DAEMON_VERSION) return undefined;
+  const said = speaks === undefined ? "is too old to say its version" : `speaks version ${speaks}`;
+  return `this computer's daemon at ${bin} ${said}, and this checkout's protocol names version ${DAEMON_VERSION}. Run ${DAEMON_BUILD} first, or use the coordinator's screenshots.sh or lab.sh, which build.`;
+}
+
+/** The protocol version a daemon binary speaks, off its own version verb; nothing from one too old to have it. */
+export function daemonVersionOf(bin) {
+  const ran = spawnSync(bin, ["version"], { encoding: "utf8", timeout: 10_000 });
+  const speaks = Number(ran.stdout?.trim());
+  return ran.status === 0 && Number.isInteger(speaks) ? speaks : undefined;
 }
 
 /** What every browser this harness opens is started with. Chromium's shared memory files land on the root disk, and

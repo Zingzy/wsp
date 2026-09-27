@@ -67,18 +67,16 @@ export function TileBranch({ branch, counts = [] }: { branch: string; counts?: r
   return (
     <>
       <GitBranchIcon aria-hidden className="size-3 shrink-0 text-[var(--top-row-meta)]" />
-      <span data-tile-branch className="min-w-0 truncate">
-        {branch}
-      </span>
-      {counts.length === 0 ? null : (
-        <span data-tile-counts className="ms-[7px] flex shrink-0 items-center gap-3">
-          {counts.map(count => (
-            <span key={count} data-tile-count>
-              {count}
-            </span>
-          ))}
+      <span className="flex min-w-0 items-center gap-3">
+        <span data-tile-branch className="min-w-0 truncate">
+          {branch}
         </span>
-      )}
+        {counts.map(count => (
+          <span key={count} data-tile-count className="shrink-0">
+            {count}
+          </span>
+        ))}
+      </span>
     </>
   );
 }

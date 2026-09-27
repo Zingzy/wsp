@@ -3,7 +3,7 @@
 // after a write and never on a timer; a discard and a commit sent down that same road; a commit message drafted by
 // the workspace's own agent with no thread; and the viewed marks kept on the workspace's record.
 import { afterEach, describe, expect, it } from "vitest";
-import { agentsOffRefusal, DRAFT_NOTES, type AdapterEvent, type Caller, type DaemonFrame, type DaemonResponse, type EventUnion, type TurnResult } from "@wsp/protocol";
+import { agentsOffRefusal, cleanCheckoutLine, DRAFT_NOTES, type AdapterEvent, type Caller, type DaemonFrame, type DaemonResponse, type EventUnion, type TurnResult } from "@wsp/protocol";
 import { CHECKOUT_TTL_MS, createRuntime, type HarnessAdapter, type HarnessAdapterFactory, type Runtime } from "../src/runtime.js";
 import type { DaemonChannel, DaemonChannelOptions } from "../src/daemon-channel.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -189,11 +189,20 @@ describe("a discard and a commit", () => {
     ]);
   });
 
+  it("says a clean checkout has nothing to commit, rather than that no file was named", async () => {
+    const daemon = fakeDaemon({ "git.diff": () => ({ id: 1, ok: true, base: null, files: [], truncated: false }) });
+    const { id, name } = await withWorkspace(daemon);
+    await expect(rt!.workspaces.commit({ workspaceId: id, message: "m" })).rejects.toThrow(cleanCheckoutLine(name));
+    expect(daemon.frames.map(f => f["op"])).toEqual(["git.diff"]);
+  });
+
   it("is refused to a thread whose workspace lets its agents do nothing, by the act's own word", async () => {
     const daemon = fakeDaemon();
     const { id, name } = await withWorkspace(daemon);
     const thread: Caller = { origin: "here", by: { kind: "thread", threadId: "thr_1", workspaceId: id, rootThreadId: "thr_1" } };
     await expect(rt!.workspaces.commit({ workspaceId: id, message: "m", paths: ["a.ts"] }, thread)).rejects.toThrow(agentsOffRefusal(name, "commit"));
+    // The draft is the commit's first half and runs the agent's command line, so it is held by the same word.
+    await expect(rt!.workspaces.commitDraft({ workspaceId: id, paths: ["a.ts"] }, thread)).rejects.toThrow(agentsOffRefusal(name, "commit"));
     expect(daemon.frames).toEqual([]);
   });
 });
