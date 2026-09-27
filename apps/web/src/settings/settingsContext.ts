@@ -12,6 +12,7 @@ import type { Failure } from "../protocol/failure.js";
 import { addNotice, noticeFailure } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
 import { shellVersions } from "../shell/shellVersion.js";
+import { inProjectOrder } from "../sidebar/threadTree.js";
 import type { AddRoad } from "./AddComputer.js";
 import { resolveAt, useSettingsStore, type SettingsAt, type SettingsReads, type SettingsState } from "./settingsStore.js";
 
@@ -73,7 +74,7 @@ export function useSettingsContext(): SettingsContext {
     places,
     placesRefused,
     projectsRefused,
-    projects,
+    projects: inProjectOrder(projects, project => project.id, preferences.projectOrder),
     workspaces,
     sessions,
     statuses,

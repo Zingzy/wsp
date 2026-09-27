@@ -174,6 +174,7 @@ async function shoot(context, shot, base, out, token) {
     else if (step.scroll !== undefined) await page.locator(step.scroll.within).first().evaluate(scrollAround, step.scroll.by);
     else if (step.type !== undefined) await page.keyboard.type(step.type);
     else if (step.focus !== undefined) await page.locator(step.focus).first().focus({ timeout: 15_000 });
+    else if (step.menu !== undefined) await page.locator(step.menu).first().click({ button: "right", timeout: 15_000 });
     else await page.locator(step.click).first().click({ timeout: 15_000 });
   }
   if (shot.wait !== undefined) await page.locator(shot.wait).first().waitFor({ state: "visible", timeout: 15_000 });

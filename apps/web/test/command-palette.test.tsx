@@ -437,6 +437,37 @@ describe("command palette", () => {
     expect(useStore.getState().selectedThreadId).toBe("t_old");
   });
 
+  it("a word only in a reply finds its thread under In messages with the words around it, asked of the host once the typing pauses, and opens that thread", async () => {
+    const redirect = { ...session("s_r", "ws_b", "fix the redirect"), threadId: "t_r" };
+    const other = { ...session("s_o", "ws_a", "tidy the readme"), threadId: "t_o" };
+    const api = fakeApi([view("ws_a", "api"), view("ws_b", "worker")], [redirect, other]);
+    const asked: string[] = [];
+    api.searchMessages = async query => {
+      asked.push(query);
+      return { hits: query === "canonical" ? [{ workspaceId: "ws_b", threadId: "t_r", snippet: "sends every old path to the canonical host" }] : [] };
+    };
+    useStore.getState().bind(api);
+    render(
+      <AppShell>
+        <div>center content</div>
+      </AppShell>,
+    );
+    await waitFor(() => expect(useStore.getState().workspaces.length).toBe(2));
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    const input = screen.getByPlaceholderText(/Search commands/);
+    fireEvent.change(input, { target: { value: "can" } });
+    fireEvent.change(input, { target: { value: "canonical" } });
+    await waitFor(() => expect(inPalette().getByText("In messages")).toBeTruthy());
+    // The first keystrokes were typed over before the pause, so only the last query went out.
+    expect(asked).toEqual(["canonical"]);
+    const hit = inPalette().getByText("sends every old path to the canonical host");
+    expect(hit.closest("[data-slot=command-item], [role=option]")!.textContent).toContain("fix the redirect");
+    fireEvent.click(hit);
+    await waitFor(() => expect(palette()).toBeNull());
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_b", "t_r"]);
+  });
+
   it("lists a thread an agent opened on another workspace once, naming the workspace it runs on and where that runs", async () => {
     const lead = { ...session("s_lead", "ws_a", "run the migration across the fleet"), threadId: "t_lead", startedAt: Date.now() - 60_000 };
     // Opened by the lead's agent, filed under the other workspace: the palette reads the same tree the sidebar draws.

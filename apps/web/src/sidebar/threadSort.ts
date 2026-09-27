@@ -1,6 +1,5 @@
 // Adapted from pingdotgg/t3code packages/client-runtime/src/state/threadSort.ts at 57a66608 (MIT).
-// The anchor math only. Pinned-thread reorder keys stay behind: drag to pin is
-// out of scope for the transplant.
+// The anchor math only.
 
 export function toSortableTimestamp(iso: string | undefined): number | null {
   if (!iso) return null;

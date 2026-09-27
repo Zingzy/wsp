@@ -195,8 +195,10 @@ import type {
   SessionOrigin,
   SessionTitleMaker,
   SessionTitleReader,
+  SessionSearchResult,
   SessionView,
   StartPicks,
+  ThreadMarks,
   TitleSource,
   SnapshotStorage,
   ImageAttachment,
@@ -221,7 +223,7 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
-import { vaultUnlistedRefusal, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
@@ -1487,6 +1489,14 @@ export interface Runtime {
     read(threadId: string, origin?: Caller): Promise<void>;
     /** Stamps each thread as settled by the person and as read, now, and tells every window as read does. */
     settle(threadIds: readonly string[], origin?: Caller): Promise<void>;
+    /** Pins, snoozes or places each thread, or takes one of those back, and tells every window as read does; a snooze
+     * stamps the thread read too, and every window is told again the moment it ends. */
+    mark(threadIds: readonly string[], marks: ThreadMarks, origin?: Caller): Promise<void>;
+    /** Takes each thread's settled stamp away and stamps it read now, and tells every window as read does. */
+    restore(threadIds: readonly string[], origin?: Caller): Promise<void>;
+    /** The threads the caller reaches whose messages or replies hold the query, case aside, one hit each with the
+     * words around it, off the transcripts this host holds. */
+    search(query: string, origin?: Caller): Promise<SessionSearchResult>;
     /** Drops a thread no turn ever ran on, the row a launch that never got going leaves: its rows and its
      * transcript rows go and nothing is asked of the machine. Takes the runtime's thread id, not a session id.
      * Refused (kind conflict) with threadForgetRefusal's sentence once a turn of it did work, which threadRan
@@ -1716,6 +1726,38 @@ const restartCutLine = (elapsedMs: number): string => `cut by a host restart aft
 const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 /** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
 const TRANSCRIPT_CAP = 5000;
+/** setTimeout's longest wait; a longer one fires at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/** Each thread's words in one transcript, by thread id, with the moment the thread last said anything: the person's
+ * messages and its own agent's replies, a reply's pieces joined back into the one message they are. A subagent's lines are the subagent's, and a row stamped no thread names none a hit could
+ * open. */
+function threadWords(events: readonly SessionEvent[], reaches: (threadId: string) => boolean): Map<string, { lines: string[]; last: number }> {
+  const words = new Map<string, { lines: string[]; open: string | undefined; last: number }>();
+  for (const e of events) {
+    if (e.threadId === undefined || !reaches(e.threadId)) continue;
+    const held = words.get(e.threadId) ?? { lines: [], open: undefined, last: 0 };
+    words.set(e.threadId, held);
+    held.last = Math.max(held.last, e.at ?? 0);
+    if ((e.type === "session.start" && e.prompt !== undefined) || e.type === "session.steer") {
+      held.lines.push(e.prompt!);
+      held.open = undefined;
+    } else if (e.type === "session.delta" && e.kind === "text" && e.parentToolUseId === undefined) {
+      const message = `${e.turnId ?? e.sessionId}:${e.messageId ?? ""}`;
+      if (held.open === message) held.lines[held.lines.length - 1] += e.text;
+      else held.lines.push(e.text);
+      held.open = message;
+    }
+  }
+  return new Map([...words].filter(([, held]) => held.lines.length > 0).map(([threadId, held]) => [threadId, { lines: held.lines, last: held.last }]));
+}
+
+/** The words around a hit, on one line: a little before it and more after, an ellipsis where the text goes on. */
+function snippetAround(text: string, at: number, length: number): string {
+  const from = Math.max(0, at - 40);
+  const to = Math.min(text.length, at + length + 80);
+  return `${from > 0 ? "…" : ""}${text.slice(from, to).replace(/\s+/g, " ").trim()}${to < text.length ? "…" : ""}`;
+}
 /** Index rows kept per workspace; the oldest finished rows fall off, a running one never does. */
 const SESSION_INDEX_CAP = 200;
 /** A turn boundary waits this long for more before the transcript is written; measured at one put per
@@ -1775,6 +1817,11 @@ interface ThreadRecord {
    * since every row of the thread shares them and a row falls off the cap while the thread lives on. */
   readAt?: number;
   settledAt?: number;
+  /** The person's marks on the thread, kept here for the same reason; snoozedUntil is kept after it passes, since
+   * the thread reads Done off it until a window shows it. */
+  pinnedAt?: number;
+  snoozedUntil?: number;
+  section?: ThreadPlacement;
 }
 
 interface SessionIndexRecord {
@@ -2857,6 +2904,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const threadRecords = new Map<string, ThreadRecord & { workspaceId: string }>();
   /** When this state file began keeping read stamps: what a thread no window has shown since reads as its stamp. */
   let readsSince = 0;
+  /** The wake of each snooze still standing, by fold key, so every window re-reads the thread the moment it ends. */
+  const snoozeTimers = new Map<string, () => void>();
+  /** Arms the wake of a thread's snooze, over any it had; a moment past already has nothing to wake. A timer longer
+   * than setTimeout holds is re-armed on the way, and a wake finding the snooze moved or gone says nothing. */
+  const wakeAt = (threadId: string, until: number): void => {
+    snoozeTimers.get(threadId)?.();
+    snoozeTimers.delete(threadId);
+    const wait = until - clock.now();
+    if (wait <= 0) return;
+    const cancel = clock.schedule(
+      () => {
+        snoozeTimers.delete(threadId);
+        const record = threadRecords.get(threadId);
+        if (record?.snoozedUntil !== until) return;
+        if (clock.now() < until) wakeAt(threadId, until);
+        else bus.emit({ type: "thread.marked", workspaceId: record.workspaceId, threadIds: [threadId] });
+      },
+      Math.min(wait, MAX_TIMER_MS),
+      { unref: true },
+    );
+    snoozeTimers.set(threadId, cancel);
+  };
   /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
@@ -4824,13 +4893,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (!live.has(index.workspaceId)) continue;
         for (const [threadId, held] of Object.entries(index.threads ?? {})) {
           if (typeof held?.harness !== "string") continue;
+          const placed = ThreadPlacement.safeParse(held.section);
           threadRecords.set(threadId, {
             workspaceId: index.workspaceId,
             harness: held.harness,
             ...(typeof held.permissionMode === "string" ? { permissionMode: held.permissionMode } : {}),
             ...(typeof held.readAt === "number" ? { readAt: held.readAt } : {}),
             ...(typeof held.settledAt === "number" ? { settledAt: held.settledAt } : {}),
+            ...(typeof held.pinnedAt === "number" ? { pinnedAt: held.pinnedAt } : {}),
+            ...(typeof held.snoozedUntil === "number" ? { snoozedUntil: held.snoozedUntil } : {}),
+            ...(placed.success ? { section: placed.data } : {}),
           });
+          if (typeof held.snoozedUntil === "number") wakeAt(threadId, held.snoozedUntil);
         }
         if (!Array.isArray(index.sessions)) {
           console.warn(`sessions document for ${index.workspaceId} has no rows array, read as empty`);
@@ -4939,7 +5013,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** Moves the read or settled stamp of each thread, by fold key, on the thread's record, which a thread from before
    * records existed takes here off its latest row; each workspace touched is written once and told once. Every
    * thread is checked before any moves, so a list naming one the caller cannot reach moves nothing. */
-  const mark = async (threadIds: readonly string[], stamps: Pick<ThreadRecord, "readAt" | "settledAt">, origin: Caller | undefined): Promise<void> => {
+  const mark = async (threadIds: readonly string[], stamps: Partial<Omit<ThreadRecord, "harness" | "permissionMode">>, origin: Caller | undefined): Promise<void> => {
     await ready();
     const found = await Promise.all(
       threadIds.map(async threadId => {
@@ -4954,7 +5028,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     );
     const touched = new Map<string, string[]>();
     for (const { threadId, workspaceId, base } of found) {
-      threadRecords.set(threadId, { ...base, ...stamps });
+      const next: ThreadRecord & { workspaceId: string } = { ...base, ...stamps };
+      for (const key of Object.keys(stamps) as (keyof typeof stamps)[]) if (stamps[key] === undefined) delete next[key];
+      threadRecords.set(threadId, next);
+      if (next.snoozedUntil !== undefined) wakeAt(threadId, next.snoozedUntil);
       touched.set(workspaceId, [...(touched.get(workspaceId) ?? []), threadId]);
     }
     for (const [workspaceId, ids] of touched) {
@@ -7270,6 +7347,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // the sidebar folds a thread by still counts from its end.
           readAt: marks?.readAt ?? (s.view.endedAt !== undefined && s.view.endedAt < readsSince ? s.view.endedAt : readsSince),
           ...(marks?.settledAt !== undefined ? { settledAt: marks.settledAt } : {}),
+          ...(marks?.pinnedAt !== undefined ? { pinnedAt: marks.pinnedAt } : {}),
+          ...(marks?.snoozedUntil === undefined ? {} : marks.snoozedUntil > clock.now() ? { snoozedUntil: marks.snoozedUntil } : { wokeAt: marks.snoozedUntil }),
+          ...(marks?.section !== undefined ? { section: marks.section } : {}),
         };
       });
     },
@@ -7407,6 +7487,40 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async settle(threadIds, origin) {
       const at = clock.now();
       await mark(threadIds, { readAt: at, settledAt: at }, origin);
+    },
+
+    async mark(threadIds, marks, origin) {
+      const at = clock.now();
+      await mark(
+        threadIds,
+        {
+          ...(marks.pinned !== undefined ? { pinnedAt: marks.pinned ? at : undefined } : {}),
+          ...(marks.snoozedUntil === undefined ? {} : marks.snoozedUntil === null ? { snoozedUntil: undefined } : { snoozedUntil: marks.snoozedUntil, readAt: at }),
+          ...(marks.section !== undefined ? { section: marks.section ?? undefined } : {}),
+        },
+        origin,
+      );
+    },
+
+    async restore(threadIds, origin) {
+      await mark(threadIds, { readAt: clock.now(), settledAt: undefined }, origin);
+    },
+
+    async search(query, origin) {
+      await ready();
+      const words = query.trim().toLowerCase();
+      if (words === "") return { hits: [] };
+      const found: { hit: SessionSearchResult["hits"][number]; last: number }[] = [];
+      for (const [workspaceId, events] of transcripts) {
+        // The workspaces a caller reads the transcript of, by the rule history reads them by.
+        if (!treeStandsOn(workspaceId, origin) && !(await entryOf(workspaceId, origin).then(() => true, () => false))) continue;
+        for (const [threadId, { lines, last }] of threadWords(events, id => drivesThread(id, origin))) {
+          // The snippet stays inside the one message that holds the words, so it never runs one message into the next.
+          const text = lines.find(line => line.toLowerCase().includes(words));
+          if (text !== undefined) found.push({ hit: { workspaceId, threadId, snippet: snippetAround(text, text.toLowerCase().indexOf(words), words.length) }, last });
+        }
+      }
+      return { hits: found.sort((a, b) => b.last - a.last).map(f => f.hit) };
     },
 
     async forget(threadId, origin) {
@@ -9356,6 +9470,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       beat = undefined;
       for (const cancel of graceTimers.values()) cancel();
       graceTimers.clear();
+      for (const cancel of snoozeTimers.values()) cancel();
+      snoozeTimers.clear();
       gone.close();
       await ticking;
       // A clean exit frees its builders at once; a crash leaves the heartbeat to age and the pid to die.

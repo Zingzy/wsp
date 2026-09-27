@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect } from "react";
-import { foldThreads, threadUnread, type SessionView } from "@wsp/protocol";
+import { foldThreads, threadUnseenAt, type SessionView } from "@wsp/protocol";
 import { useStore } from "../../protocol/store.js";
 
-/** Stamps the thread this view shows as read on the host each time its latest turn has ended after the last stamp,
- * while the window is visible: the stamp says a person could see the finish, so a hidden window stamps nothing until
- * it shows again. */
+/** Stamps the thread this view shows as read on the host each time its latest turn, finished or failed, or its snooze
+ * has ended after the last stamp, while the window is visible: the stamp says a person could see it, so a hidden
+ * window stamps nothing until it shows again. */
 export function useReadStamp(rows: ReadonlyArray<SessionView>): void {
   const readThread = useStore(s => s.readThread);
   const thread = rows.length === 0 ? undefined : foldThreads(rows)[0];
   const threadId = thread?.id;
-  const unreadEnd = thread !== undefined && threadUnread(thread) ? thread.endedAt : undefined;
+  const unreadEnd = thread === undefined ? undefined : threadUnseenAt(thread);
   useEffect(() => {
     if (threadId === undefined || unreadEnd === undefined) return;
     const stamp = (): void => {

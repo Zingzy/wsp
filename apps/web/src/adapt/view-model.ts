@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { ImageRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { ImageRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadPlacement, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -336,6 +336,14 @@ export interface SidebarThreadSnapshot {
    * holds none. */
   readonly readAt: string | null;
   readonly settledAt: string | null;
+  /** The thread asks, is stopped behind a thread that asks, or holds a finish or a failure nobody has seen, as the
+   * protocol's threadNeedsYou reads it: what the jump, the dock's count and the menu bar count. */
+  readonly needsYou: boolean;
+  /** The person's marks, as the host keeps them: when they pinned it, when its snooze ends while it has not, and the
+   * section they dragged it into; null where it holds none. */
+  readonly pinnedAt: string | null;
+  readonly snoozedUntil: string | null;
+  readonly section: ThreadPlacement | null;
 }
 
 /** A send whose thread the runtime has written no row for yet: what the sidebar draws in place of that row, so the

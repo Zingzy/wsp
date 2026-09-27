@@ -41,6 +41,10 @@ export const THREAD_WORDS = {
   forget: "Forget thread",
   settle: "Settle thread",
   settleRead: "Settle all read",
+  restore: "Restore thread",
+  pin: "Pin thread",
+  unpin: "Unpin thread",
+  snooze: "Snooze thread",
 } as const;
 
 export const TERMINAL_WORDS = {
@@ -148,6 +152,8 @@ export const THREAD_HAS_NO_ID = "This thread has no id yet";
 export const CLIENT_CANNOT_RENAME = "This client cannot rename a thread";
 export const CLIENT_CANNOT_FORGET_THREAD = "This client cannot forget a thread";
 export const CLIENT_CANNOT_SETTLE = "This client cannot settle a thread";
+export const CLIENT_CANNOT_RESTORE = "This client cannot restore a thread";
+export const CLIENT_CANNOT_MARK = "This client cannot pin or snooze a thread";
 export const THREAD_TREE_WORKING = "A thread in it is still working";
 export const NOTHING_READ_TO_SETTLE = "No read thread to settle";
 

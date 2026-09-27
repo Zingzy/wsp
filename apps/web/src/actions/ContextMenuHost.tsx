@@ -110,6 +110,7 @@ function MenuRow({ item, startsGroup, onFocus, onChoose }: { item: ContextMenuIt
       type="button"
       role="menuitem"
       tabIndex={-1}
+      data-menu-item={item.id}
       aria-disabled={item.enabled ? undefined : true}
       className={cn(ROW_CLASS, !item.enabled && "cursor-default opacity-50 hover:bg-transparent hover:text-popover-foreground focus:bg-accent/50", item.enabled && item.destructive && "text-destructive-foreground")}
       onFocus={onFocus}
