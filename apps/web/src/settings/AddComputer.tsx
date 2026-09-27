@@ -60,7 +60,7 @@ function Bar({ w, strong = false }: { w: number; strong?: boolean }) {
 function SshPicture() {
   return (
     <div className="flex h-full items-center justify-center gap-4 p-5">
-      <div className="flex w-[52%] flex-col gap-2 rounded-[6px] border border-border bg-background p-3">
+      <div className="flex w-[52%] flex-col gap-2 rounded-[6px] border border-border bg-(--app-chrome-background) p-3">
         <span className="flex items-center gap-1.5">
           <TerminalIcon aria-hidden className="size-3 text-foreground/50" />
           <Bar w={62} strong />
@@ -70,7 +70,7 @@ function SshPicture() {
       </div>
       <div className="flex w-[30%] flex-col gap-1.5">
         {[0, 1, 2].map(at => (
-          <span key={at} className="flex items-center gap-1.5 rounded-[4px] border border-border bg-background px-2 py-1.5">
+          <span key={at} className="flex items-center gap-1.5 rounded-[4px] border border-border bg-(--app-chrome-background) px-2 py-1.5">
             <span className={cn("size-1.5 rounded-full", at === 0 ? "bg-foreground/50" : "bg-foreground/20")} />
             <Bar w={70} />
           </span>
@@ -86,7 +86,7 @@ function CloudPicture() {
       <CloudIcon aria-hidden strokeWidth={1} className="size-24 text-foreground/25" />
       <div className="absolute inset-x-0 top-[48%] flex justify-center gap-1.5">
         {[0, 1, 2].map(at => (
-          <span key={at} className="h-4 w-6 rounded-[3px] border border-border bg-background" />
+          <span key={at} className="h-4 w-6 rounded-[3px] border border-border bg-(--app-chrome-background)" />
         ))}
       </div>
     </div>
@@ -98,7 +98,7 @@ function CodePicture() {
     <div className="flex h-full items-center justify-center gap-3 px-5">
       <LaptopIcon aria-hidden strokeWidth={1.25} className="size-12 text-foreground/40" />
       <div className="flex flex-1 flex-col items-center gap-1.5">
-        <span className="rounded-[4px] border border-border bg-background px-2 py-0.5 font-mono text-[10px] tracking-widest text-foreground/60">•••• ••••</span>
+        <span className="rounded-[4px] border border-border bg-(--app-chrome-background) px-2 py-0.5 font-mono text-[10px] tracking-widest text-foreground/60">•••• ••••</span>
         <span className="w-full border-foreground/20 border-t border-dashed" />
       </div>
       <LaptopIcon aria-hidden strokeWidth={1.25} className="size-12 text-foreground/40" />
