@@ -14,7 +14,7 @@ const thread = (over: Partial<SidebarThreadSnapshot> = {}): SidebarThreadSnapsho
 
 const PLACE: TilePlace = { projectId: "pr_1", project: "spoo-landing", computer: "zingzy's MacBook Pro" };
 
-function mount({ over = {}, branch = "fix/cart-rounding", active = false, settled = false, onSelect = () => {} }: { over?: Partial<SidebarThreadSnapshot>; branch?: string; active?: boolean; settled?: boolean; onSelect?: () => void } = {}) {
+function mount({ over = {}, branch = "fix/cart-rounding", active = false, settled = false, snoozedWorking, onSelect = () => {} }: { over?: Partial<SidebarThreadSnapshot>; branch?: string; active?: boolean; settled?: boolean; snoozedWorking?: number; onSelect?: () => void } = {}) {
   return render(
     <SidebarProvider defaultOpen>
       <ThreadTile
@@ -25,6 +25,7 @@ function mount({ over = {}, branch = "fix/cart-rounding", active = false, settle
         depth={1}
         active={active}
         settled={settled}
+        {...(snoozedWorking === undefined ? {} : { snoozedWorking })}
         renaming={false}
         saving={false}
         onSelect={onSelect}
@@ -53,6 +54,18 @@ describe("a thread tile", () => {
     cleanup();
     mount({ over: { status: "completed", endedAt: "2026-09-17T00:05:00.000Z", unread: true }, settled: true });
     expect(slot().textContent).toBe("3m");
+  });
+
+  it("a snoozed root whose threads work says how many in its slot, quietly: the snooze's glyph and the count, no tone, no crab, a muted title", () => {
+    mount({ over: { status: "completed", endedAt: "2026-09-17T00:05:00.000Z", snoozedUntil: "2026-09-17T06:00:00.000Z" }, snoozedWorking: 2 });
+    expect(slot().textContent).toBe("2 working");
+    expect(slot().dataset["threadStatus"]).toBe("snoozed");
+    expect(slot().dataset["tone"]).toBeUndefined();
+    expect(slot().querySelector("svg")).not.toBeNull();
+    expect([...slot().classList].filter(c => c.startsWith("text-status-"))).toEqual([]);
+    expect(tile().querySelector("canvas")).toBeNull();
+    expect(tile().querySelector("[data-thread-title]")!.className).toContain("text-sidebar-muted-foreground");
+    expect(tile().title).toContain("Snoozed, 2 working in it");
   });
 
   it("a finish nobody has seen says Done in the slot and keeps its title in the foreground ink; opened, it rests with its age and a muted title", () => {

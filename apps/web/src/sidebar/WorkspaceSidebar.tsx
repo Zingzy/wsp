@@ -340,8 +340,9 @@ export function WorkspaceSidebar() {
           counts={counts}
           time={restingAge(thread)}
           depth={depth}
-          active={selectedId === thread.workspaceId && (selectedThreadId === null ? thread.threadId === null : selectedThreadId === thread.id)}
+          active={(selectedId === thread.workspaceId && (selectedThreadId === null ? thread.threadId === null : selectedThreadId === thread.id)) || (selectedThreadId !== null && item.holds?.includes(selectedThreadId) === true)}
           settled={settled}
+          snoozedWorking={item.snoozedWorking}
           renaming={renaming?.rowId === rowId}
           saving={renaming?.rowId === rowId && renaming.saving}
           onSelect={() => select(thread.workspaceId, thread.threadId)}
