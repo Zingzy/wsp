@@ -33,6 +33,12 @@ function around(points: readonly WorkspaceCostEvent[], t: number): { before: Wor
   return { before: points[lo]!, after: points[lo + 1] };
 }
 
+/** The total `ms` of awake time past a tick adds to it, at the rate that tick carried: the rate a tick carries holds
+ * until the next one, so the meter's next tick and a read between ticks both take the total this way. */
+export function accruedPast(tick: Pick<WorkspaceCostEvent, "accruedUsd" | "rateUsdPerHour">, ms: number): number {
+  return tick.accruedUsd + (tick.rateUsdPerHour * ms) / 3_600_000;
+}
+
 /** The total accrued at t: linear between the ticks around it, flat past the newest, unknown before the first. */
 export function accruedAt(points: readonly WorkspaceCostEvent[], t: number): number | null {
   const near = around(points, t);
@@ -58,11 +64,21 @@ export function monthStart(at: number): number {
   return new Date(d.getFullYear(), d.getMonth(), 1).getTime();
 }
 
-/** What a series accrued between `from` and its newest tick: nothing for a series that ends before `from`, and the
- * whole of it for one that began after. A workspace deleted mid-month keeps its own share this way, since its
- * series stops where it was deleted. */
-export function spentSince(points: readonly WorkspaceCostEvent[], from: number): number {
+/** The first instant of the day `at` falls in, in the zone the computer is set to, as monthStart reads the month. */
+export function dayStart(at: number): number {
+  const d = new Date(at);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** What a series accrued between `from` and its newest tick, or up to `until` where one is given: past the newest
+ * tick the series goes on at that tick's rate, so a machine still running reads what it has cost since, and one
+ * whose newest tick is at rate 0 adds nothing. Nothing for a series that ends before `from`, and the whole of it for
+ * one that began after. A workspace deleted mid-month keeps its own share this way, since its series stops where it
+ * was deleted and its caller gives it no `until`. */
+export function spentSince(points: readonly WorkspaceCostEvent[], from: number, until?: number): number {
   const last = points[points.length - 1];
   if (last === undefined) return 0;
-  return Math.max(0, last.accruedUsd - (accruedAt(points, from) ?? 0));
+  const end = until ?? Date.parse(last.at);
+  const total = (t: number): number | null => (t > Date.parse(last.at) ? accruedPast(last, t - Date.parse(last.at)) : accruedAt(points, t));
+  return Math.max(0, (total(end) ?? 0) - (total(Math.min(from, end)) ?? 0));
 }
