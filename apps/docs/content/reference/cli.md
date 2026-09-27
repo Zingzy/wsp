@@ -479,8 +479,8 @@ usage: wsp new [<project>] "<what you are working on>" [--from <project image>]
 
 ```text
 usage: wsp run [<workspace>] [--agent <id>] [--model, --effort, --access <word>]
-       [--cwd <path>] [--notify <thread|me>] [--title <title>] [--image <path>]
-       [--detach] "<task>"
+       [--fast] [--cwd <path>] [--notify <thread|me>] [--title <title>]
+       [--file <path>] [--detach] "<task>"
   an agent works in the workspace and you read its reply: a thread with the
   agent, model, effort and access the app offers, in the workspace's project;
   with no workspace, run from inside one of your project folders, on that
@@ -498,12 +498,16 @@ usage: wsp run [<workspace>] [--agent <id>] [--model, --effort, --access <word>]
               on that workspace starts at: every action without asking on this
               computer and on a machine wsp forked, asking about each one on a
               computer you own
+  --fast      run the turn in the agent's fast mode, on a model that offers one;
+              refused naming the model otherwise
   --cwd       the folder on the machine to work in; the project's folder without
               it
   --notify    where each turn's end is sent, a thread's id or me; repeats
   --title     what to call the thread; the agent names it from the task without
               one
-  --image     an image file on this computer to send with the message; repeats
+  --file      a file on this computer to send with the message: an image goes as
+              an image, any other file lands in the thread's folder and the
+              message names its path; repeats
   --detach    print the thread's id and return, leaving the reply to the
               thread's finished line
   --json      print the raw protocol values, one JSON object per line, with
@@ -596,17 +600,21 @@ usage: wsp threads [<workspace>] [--tree] [--watch]
 ## wsp send
 
 ```text
-usage: wsp send <thread> [--model, --effort <value>] [--image <path>] [--detach]
-       "<message>"
-  a message to the thread, on a named model or effort, with images; the thread
-  keeps its own access and a running turn its own picks; --detach prints the id
-  and returns
+usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>]
+       [--detach] "<message>"
+  a message to the thread, on a named model or effort, fast or not, with files;
+  the thread keeps its own access and a running turn its own picks; --detach
+  prints the id and returns
 
   --model     the model the turn runs on, by the agent's own slug
               (claude-sonnet-5); the thread's own without it
   --effort    how hard the agent thinks, by its own word (low, medium, high,
               xhigh, max); its default without it
-  --image     an image file on this computer to send with the message; repeats
+  --fast      run the turn in the agent's fast mode, on a model that offers one;
+              refused naming the model otherwise
+  --file      a file on this computer to send with the message: an image goes as
+              an image, any other file lands in the thread's folder and the
+              message names its path; repeats
   --detach    print the thread's id and return, leaving the reply to the
               thread's finished line
   --json      print the raw protocol values, one JSON object per line, with

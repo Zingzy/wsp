@@ -10,6 +10,8 @@
 // before it ever reaches here.
 
 import { mkdirSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { cpus, release, totalmem, type, uptime } from "node:os";
 import { runChild } from "./child-exec.js";
 import { readOsName } from "./machine-facts.js";
@@ -105,6 +107,12 @@ export class LocalMachine implements Machine {
 
   async uploadUrl(): Promise<string> {
     throw new Error("this computer serves no signed upload URL; its files are written on it directly");
+  }
+
+  /** Bytes written on this computer where they are named, the folder made first and the file its owner's alone. */
+  async putBytes(path: string, bytes: Uint8Array): Promise<void> {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, bytes, { mode: 0o600 });
   }
 }
 
