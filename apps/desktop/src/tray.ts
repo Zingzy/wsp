@@ -16,10 +16,9 @@ import {
   type OutsideLine,
   type PermissionOption,
   type PlaceView,
-  type SessionPermissionEvent,
+  type SessionEvent,
   type SessionView,
   type ThreadView,
-  type TurnResult,
   type WorkspaceView,
 } from "@wsp/protocol";
 import { QUIT_WORD } from "./quit.js";
@@ -138,11 +137,9 @@ export function trayModel(input: TrayInput): TrayModel {
   };
 }
 
-type SessionDone = { type: "session.done"; workspaceId: string; sessionId: string; threadId?: string; result: Pick<TurnResult, "status"> };
-
 /** What the menu bar says over the system while no window is open to say it: a thread a person or a line opened
  * that finished, and a prompt. An agent's own thread reports to that agent. Nothing for anything else. */
-export function trayNotice(event: SessionDone | SessionPermissionEvent, rows: Pick<TrayInput, "sessions" | "workspaces" | "places">, sound: boolean): OutsideLine | undefined {
+export function trayNotice(event: Extract<SessionEvent, { type: "session.done" | "session.permission" }>, rows: Pick<TrayInput, "sessions" | "workspaces" | "places">, sound: boolean): OutsideLine | undefined {
   const thread = foldThreads(rows.sessions).find(t => t.id === (event.threadId ?? event.sessionId));
   if (event.type === "session.permission") return { title: NEEDS_YOU, body: askingLine(event), sound };
   if (event.result.status !== "completed" || thread === undefined || thread.startedBy === "agent") return undefined;

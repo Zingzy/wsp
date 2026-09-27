@@ -6,6 +6,7 @@ import type { EditorId } from "@wsp/protocol";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
 import { Switch } from "../components/ui/switch.js";
 import { AWAKE_WORDS, GENERAL_WORDS } from "./format.js";
+import { hereName } from "./places.js";
 import type { SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 
@@ -13,6 +14,7 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
   const editors = ctx.reads.editors ?? [];
   const picked = editors.find(editor => editor.id === ctx.preferences.editor) ?? editors[0];
   const nameOf = (id: EditorId): string => editors.find(editor => editor.id === id)?.name ?? id;
+  const keepAwake = AWAKE_WORDS.keepAwake(hereName(ctx.places));
   return [
     {
       id: "editor",
@@ -41,9 +43,9 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
         {
           kind: "row",
           id: "keep-awake",
-          title: AWAKE_WORDS.keepAwake,
+          title: keepAwake,
           description: AWAKE_WORDS.keepAwakeDescription,
-          control: <Switch data-k="keep-awake" aria-label={AWAKE_WORDS.keepAwake} checked={ctx.preferences.keepAwake} onCheckedChange={keepAwake => ctx.setPreferences({ keepAwake })} />,
+          control: <Switch data-k="keep-awake" aria-label={keepAwake} checked={ctx.preferences.keepAwake} onCheckedChange={keepAwake => ctx.setPreferences({ keepAwake })} />,
         },
       ],
     },

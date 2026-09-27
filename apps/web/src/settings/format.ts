@@ -238,7 +238,7 @@ export const NOTIFY_WORDS = {
 
 /** Settings > General's switch over the desktop app keeping this computer awake. */
 export const AWAKE_WORDS = {
-  keepAwake: "Keep this computer awake",
+  keepAwake: (here: string): string => `Keep ${here === "" ? "this computer" : here} awake`,
   keepAwakeDescription: "The wsp app stops this computer sleeping on its own while a thread works on it.",
 } as const;
 

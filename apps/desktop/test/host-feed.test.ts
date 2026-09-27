@@ -18,8 +18,11 @@ function fakeHost(sessions: SessionView[] = []) {
   let push: ((frame: Record<string, unknown>) => void) | undefined;
   let end: (() => void) | undefined;
   const replay: Record<string, unknown>[] = [];
+  const sockets: { push: (frame: Record<string, unknown>) => void; end: () => void }[] = [];
   const client = (): Client => {
     const closed = new Promise<void>(resolve => (end = resolve));
+    const socket = { push: (_frame: Record<string, unknown>) => {}, end: end! };
+    sockets.push(socket);
     return {
       request: async <T extends Record<string, unknown>>(op: string, params?: Record<string, unknown>): Promise<T> => {
         asked.push({ op, ...(params !== undefined ? { params } : {}) });
@@ -33,7 +36,7 @@ function fakeHost(sessions: SessionView[] = []) {
         for (const frame of replay) push?.(frame);
       },
       onFrame: fn => {
-        push = fn;
+        push = socket.push = fn;
         return () => (push = undefined);
       },
       closed,
@@ -42,7 +45,7 @@ function fakeHost(sessions: SessionView[] = []) {
       terminate: () => end?.(),
     } as Client;
   };
-  return { asked, sessions, replay, client, push: (f: Record<string, unknown>) => push?.(f), drop: () => end?.() };
+  return { asked, sessions, replay, sockets, client, push: (f: Record<string, unknown>) => push?.(f), drop: () => end?.() };
 }
 
 const ask = { type: "session.permission", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", askId: "a1", toolName: "Bash", input: "{}", options: [{ id: "o_yes", label: "Yes", effect: "allow" }] };
@@ -116,6 +119,46 @@ describe("the menu bar's feed from the host the window is on", () => {
     host.drop();
     await vi.waitFor(() => expect(states.slice(dropped).some(s => s.lost)).toBe(true));
     await vi.waitFor(() => expect(states.at(-1)?.lost).toBe(false));
+    feed.close();
+  });
+
+  it("a redial while a dial is still out dials once", async () => {
+    const host = fakeHost();
+    const states: FeedState[] = [];
+    let dials = 0;
+    let answer = (): void => {};
+    const feed = hostFeed({
+      dial: () => {
+        dials++;
+        return new Promise<Client>(resolve => (answer = () => resolve(host.client())));
+      },
+      changed: s => states.push(s),
+      settleMs: 0,
+      retryMs: 60_000,
+    });
+    feed.redial();
+    feed.redial();
+    expect(dials).toBe(1);
+    answer();
+    await vi.waitFor(() => expect(states.at(-1)?.lost).toBe(false));
+    expect(host.sockets).toHaveLength(1);
+    feed.close();
+  });
+
+  it("drops what a socket it has let go of still says", async () => {
+    const host = fakeHost();
+    const states: FeedState[] = [];
+    const heard: string[] = [];
+    const feed = hostFeed({ dial: async () => host.client(), changed: s => states.push(s), event: e => heard.push(e.type), settleMs: 0, retryMs: 10 });
+    await vi.waitFor(() => expect(states.at(-1)?.lost).toBe(false));
+    const old = host.sockets[0]!;
+    old.end();
+    await vi.waitFor(() => expect(host.sockets).toHaveLength(2));
+    await vi.waitFor(() => expect(states.at(-1)?.lost).toBe(false));
+    old.push(ask);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(states.at(-1)?.asks.has("s1")).toBe(false);
+    expect(heard).toEqual([]);
     feed.close();
   });
 

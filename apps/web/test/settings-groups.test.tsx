@@ -283,7 +283,7 @@ describe("General", () => {
     const { api, sets } = settingsApi({ editorList: async () => editors } as Partial<Api>);
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
-    expect(rowTitles()).toEqual([GENERAL_WORDS.editor, AWAKE_WORDS.keepAwake]);
+    expect(rowTitles()).toEqual([GENERAL_WORDS.editor, AWAKE_WORDS.keepAwake("")]);
     expect(descriptionOf("editor")).toBe(GENERAL_WORDS.editorDescription);
     const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=editor]")!;
     expect(select.textContent).toBe("Cursor");
@@ -327,7 +327,7 @@ describe("Keeping the computer awake", () => {
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
     expect(descriptionOf("keep-awake")).toBe(AWAKE_WORDS.keepAwakeDescription);
-    expect(`${AWAKE_WORDS.keepAwake} ${AWAKE_WORDS.keepAwakeDescription}`).not.toMatch(/host|daemon|service/i);
+    expect(`${AWAKE_WORDS.keepAwake("")} ${AWAKE_WORDS.keepAwakeDescription}`).not.toMatch(/host|daemon|service/i);
     const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=keep-awake]")!;
     expect(toggle().getAttribute("aria-checked")).toBe("true");
     fireEvent.click(toggle());
@@ -335,6 +335,14 @@ describe("Keeping the computer awake", () => {
     expect(sets).toEqual([{ keepAwake: false }]);
     expect(useStore.getState().preferences.keepAwake).toBe(false);
     expect(toggle().getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("names the computer it keeps awake, once the computers are read", async () => {
+    useStore.setState({ places: [here, box] });
+    mountSettings({ api: settingsApi({ editorList: async () => [] } as Partial<Api>).api, at: { kind: "group", group: "general" } });
+    await settle();
+    expect(rowTitles()).toContain("Keep zingzy's MacBook Pro awake");
+    expect(document.querySelector("[data-k=keep-awake]")!.getAttribute("aria-label")).toBe("Keep zingzy's MacBook Pro awake");
   });
 });
 

@@ -66,6 +66,7 @@ export function hostFeed(deps: FeedDeps): HostFeed {
   const retryMs = deps.retryMs ?? 3_000;
   let state: FeedState = { sessions: [], workspaces: [], places: [], asks: new Map(), keepAwake: DEFAULT_PREFERENCES.keepAwake, notifySound: DEFAULT_PREFERENCES.notifySound, lost: false };
   let client: HostClient | undefined;
+  let dialing = false;
   let closed = false;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let settle: ReturnType<typeof setTimeout> | undefined;
@@ -94,6 +95,7 @@ export function hostFeed(deps: FeedDeps): HostFeed {
   };
 
   const heard = (frame: Record<string, unknown>, live: boolean, on: HostClient): void => {
+    if (on !== client) return;
     const type = typeof frame["type"] === "string" ? frame["type"] : undefined;
     if (type === undefined) return;
     const sessionId = typeof frame["sessionId"] === "string" ? frame["sessionId"] : undefined;
@@ -123,6 +125,7 @@ export function hostFeed(deps: FeedDeps): HostFeed {
   async function connect(): Promise<void> {
     if (closed) return;
     let on: HostClient;
+    dialing = true;
     try {
       on = await deps.dial();
     } catch (e) {
@@ -130,6 +133,8 @@ export function hostFeed(deps: FeedDeps): HostFeed {
       if (!state.lost) set({ lost: true });
       later();
       return;
+    } finally {
+      dialing = false;
     }
     if (closed) return on.close();
     client = on;
@@ -165,7 +170,7 @@ export function hostFeed(deps: FeedDeps): HostFeed {
       await client?.request("sessions.interrupt", { sessionId });
     },
     redial: () => {
-      if (client !== undefined || closed) return;
+      if (client !== undefined || dialing || closed) return;
       if (retry !== undefined) clearTimeout(retry);
       retry = undefined;
       void connect();

@@ -373,6 +373,8 @@ async function askQuit(): Promise<void> {
   if (local === undefined || local.remote) return app.quit();
   const { home, statePath } = where();
   const working = await workingHere(statePath, home).catch(() => 0);
+  // Picked from the menu bar, the app may not be frontmost, and the question would open behind another app's window.
+  app.focus({ steal: true });
   const choice = quitChoice((await dialog.showMessageBox({ type: "question", ...quitPrompt(working) })).response);
   if (choice === "cancel") return;
   if (choice === "stop") {
@@ -465,9 +467,11 @@ function menuOf(rows: readonly TrayRow[]): Electron.MenuItemConstructorOptions[]
 function drawTray(): void {
   if (fed === undefined || fedFrom === undefined) return;
   drawn = trayModel({ ...fed, host: { label: fedFrom.label, remote: fedFrom.remote, lost: fed.lost } });
+  // Elsewhere the last window closing is the quit, so there is no menu bar app to show.
+  if (process.platform !== "darwin") return;
   tray ??= new Tray(trayImage(false));
   tray.setImage(trayImage(drawn.needsYou));
-  if (process.platform === "darwin") tray.setTitle(drawn.title);
+  tray.setTitle(drawn.title);
   tray.setToolTip(drawn.title === "" ? "wsp" : `wsp ${drawn.title}`);
   tray.setContextMenu(Menu.buildFromTemplate(menuOf(drawn.rows)));
   // The page puts the count on the dock while it is up; with no window, the menu bar's feed does.
