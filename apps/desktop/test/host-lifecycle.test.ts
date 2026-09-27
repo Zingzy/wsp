@@ -12,7 +12,7 @@ import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { copyingFake, fakeDaemonStart } from "../../../packages/host/test/verbs-fixture.js";
-import { ensureService, firstLaunch, homeOf, hostTokenMatches, openHost, runningHere, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type OpenHostOptions, type ServiceRoad } from "../src/host-lifecycle.js";
+import { ensureService, firstLaunch, homeOf, hostTokenMatches, openHost, openHostReady, runningHere, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type OpenHostOptions, type ServiceRoad } from "../src/host-lifecycle.js";
 
 const PAGE = `<!doctype html>
 <html><head><title>wsp</title></head>
@@ -295,6 +295,65 @@ describe("openHost", () => {
       release();
       existing = await serving;
     }
+  });
+
+  it("a launch that meets the host on its way down, lock and page still up, ends on the host the manager starts next", async () => {
+    // What launchctl kickstart -k looks like from the launch: the host that is stopping still holds its lock and
+    // serves its page for a moment, so the launch attaches to it, and the next read finds it gone.
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    serving(statePath, existing, { startedBy: "service" });
+    const going = existing;
+    let dials = 0;
+    const dial: typeof dialHost = async (path, o) => {
+      if (dials++ === 0) {
+        await going.close();
+        existing = undefined;
+        rmSync(join(home, "host.lock"), { force: true });
+      }
+      return dialHost(path, o);
+    };
+    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: launchd.road }, dial);
+    expect(ready.session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
+    // Read off the host it ended on, which holds nothing, as the fake manager's host does.
+    expect(ready.first).toBe(true);
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["bootstrap"]);
+  });
+
+  it("a launch that meets the host a moment later, its page gone and its process still holding the lock, waits for that process and ends on the next host", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    serving(statePath, existing, { startedBy: "service" });
+    await existing.close();
+    existing = undefined;
+    // The lock still names a live process, whose page no longer answers: the refusal a squatter gets, which here is
+    // a host on its way out that has not yet let go.
+    setTimeout(() => rmSync(join(home, "host.lock"), { force: true }), 300);
+    const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: launchd.road });
+    expect(ready.session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
+  });
+
+  it("a lock whose process never lets go is still refused, once the wait for it has run out", async () => {
+    const squatter = createServer((_req, res) => res.end("<html>hello</html>"));
+    const port = await listen(squatter);
+    try {
+      writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }));
+      await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 400 } })).rejects.toThrow(/but no wsp host answers there/);
+      expect(launchd.ran).toEqual([]);
+    } finally {
+      await closeServer(squatter);
+    }
+  });
+
+  it("a launch that reads nothing from the host it attached to, which is still serving, says why rather than dialling again", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    serving(statePath, existing);
+    let dials = 0;
+    const refusing: typeof dialHost = async () => {
+      dials++;
+      throw new Error("the host refused this computer");
+    };
+    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: launchd.road }, refusing)).rejects.toThrow("the host refused this computer");
+    expect(dials).toBe(1);
+    expect(launchd.ran).toEqual([]);
   });
 
   it("a serving host means no unit written", async () => {

@@ -176,7 +176,7 @@ describe("the login shell PATH", () => {
     const main = readFileSync(new URL("../../../apps/desktop/src/main.ts", import.meta.url), "utf8");
     const shim = main.indexOf("installCommand();");
     const read = main.indexOf("await adoptLoginPath(");
-    const service = main.indexOf("const on = await attach()");
+    const service = main.indexOf("await openHostReady(");
     expect(shim, "the desktop never writes the wsp command").toBeGreaterThanOrEqual(0);
     expect(read, "the desktop never reads the login shell PATH").toBeGreaterThanOrEqual(0);
     expect(shim, "the read waits on a shell before the command is written").toBeLessThan(read);

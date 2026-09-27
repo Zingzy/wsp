@@ -254,6 +254,41 @@ export async function firstLaunch(statePath: string, home: string, dial: typeof 
   }
 }
 
+/** Whether the process a lock named stops holding it within the wait: it exits, or another host takes the lock. */
+async function letGo(statePath: string, pid: number, waitMs: number): Promise<boolean> {
+  for (const until = Date.now() + waitMs; Date.now() < until; await new Promise(resolve => setTimeout(resolve, 200))) {
+    if (servingHost(statePath)?.pid !== pid) return true;
+  }
+  return servingHost(statePath)?.pid !== pid;
+}
+
+/** The host the window opens on and whether it holds nothing yet, read across a restart. A launch that meets the
+ * host on its way down (launchctl kickstart -k, a Restart host) finds its lock and its page still up for a moment,
+ * attaches, and then reads nothing from it, or a moment later finds the lock with no page behind it. Once the host
+ * that answered, or held the lock, is no longer the one serving, the launch attaches again, which waits for the host
+ * the manager starts next; a host still serving says its own refusal. */
+export async function openHostReady(opts: OpenHostOptions, dial: typeof dialHost = dialHost): Promise<{ session: HostSession; first: boolean }> {
+  for (let again = false; ; again = true) {
+    const held = servingHost(opts.statePath)?.pid;
+    let session: HostSession;
+    try {
+      session = await openHost(opts);
+    } catch (e) {
+      // Met a moment later still, the host's page is gone while its process holds the lock, which reads as a lock
+      // nothing answers behind. A host on its way out lets go within the wait; anything that does not is refused.
+      if (again || held === undefined || !(await letGo(opts.statePath, held, opts.service.waitMs))) throw e;
+      continue;
+    }
+    if (session.remote) return { session, first: false };
+    const answered = servingHost(opts.statePath)?.pid;
+    try {
+      return { session, first: await firstLaunch(opts.statePath, opts.home, dial) };
+    } catch (e) {
+      if (again || (answered !== undefined && servingHost(opts.statePath)?.pid === answered)) throw e;
+    }
+  }
+}
+
 /** The turns running on this computer's own workspaces, which stopping wsp would leave with nobody reading them. A
  * turn on a box runs on that box and goes on whether wsp here serves or not. */
 export function runningHere(sessions: readonly Pick<SessionView, "id" | "workspaceId" | "status">[], workspaces: readonly Pick<WorkspaceView, "id" | "kind">[]): string[] {
