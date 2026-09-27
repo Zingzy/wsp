@@ -6,7 +6,8 @@ import { DEFAULT_PORT, HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction,
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
-import { fontDirs, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
+import { deepLinks, linkInArgv } from "./deep-link.js";
+import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, type BundleShell } from "./get-bundle.js";
 import { appRestartRoad } from "./restart-road.js";
 import { locateHost, openHost, statePathIn, userDataIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
@@ -45,6 +46,9 @@ function launch(): Launch {
 
 // Before the app is ready, which is the last moment Chromium takes a new home for its files.
 app.setPath("userData", userDataIn(launch()));
+// One app per home: the lock is keyed on the folder just set, so a second launch on the same home hands its
+// arguments, a wsp:// link among them on Linux and Windows, to this one and quits.
+if (!app.requestSingleInstanceLock()) app.exit(0);
 
 /** The host the window is on; every bridge call is gated on its origin and on what a page on it may ask for. */
 let session: HostSession | undefined;
@@ -79,6 +83,7 @@ let fontIndex: Promise<FontFile[]> | undefined;
 const fonts = (): Promise<FontFile[]> => (fontIndex ??= indexFonts(fontDirs(process.platform, homedir(), process.env)));
 // The font files are this computer's, so only the app's own host's page may read them.
 answer("fonts:local", (_event, family) => localFontFaces(typeof family === "string" ? family : "", fonts));
+answer("fonts:families", () => fontFamilies(fonts));
 
 const previews = pagePreviews();
 // A picture of the page can hold anything the page shows, so only the app's own host's page may take one or read one.
@@ -113,6 +118,35 @@ listen("theme:set", (_event, theme) => {
   const parsed = ThemePreference.safeParse(theme);
   if (parsed.success) nativeTheme.themeSource = parsed.data;
 });
+
+/** Whether the window's page is up and which host serves it; nothing until the app window's first page has loaded. */
+let pageUp = false;
+const links = deepLinks({
+  page: () => (pageUp && session !== undefined ? { remote: session.remote } : undefined),
+  send: target => win?.webContents.send("shell:open", target),
+  moveHome: async hash => {
+    await switcher?.to(null, hash);
+    refreshMenu();
+  },
+  raise: () => {
+    if (win !== undefined) raiseWindow(win);
+  },
+});
+// Registered before the app is ready: macOS hands a link that launched the app over before ready fires.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  links.open(url);
+});
+app.on("second-instance", (_event, argv) => {
+  const url = linkInArgv(argv);
+  if (url !== undefined) links.open(url);
+  else if (win !== undefined) raiseWindow(win);
+});
+const launchedWith = linkInArgv(process.argv);
+if (launchedWith !== undefined) links.open(launchedWith);
+// The bundle names the scheme for macOS; Linux and Windows learn it here. A build run from dist by the smoke, or
+// unpackaged, would name itself the computer's handler for every wsp:// link, so only an installed app asks.
+if (app.isPackaged && process.env["WSP_DESKTOP_SMOKE"] !== "1") app.setAsDefaultProtocolClient("wsp");
 
 /** How this shell shows a system notification; the module decides whether to, this says with what. */
 const NOTIFIER: Notifier = { supported: () => Notification.isSupported(), make: o => new Notification(o) };
@@ -281,7 +315,9 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
     page.webContents.send("shell:chord", shellChordOf(input));
   });
   page.on("closed", () => terminalFocus.delete(contentsId));
-  await loadHostPage(page, session.url, { log: io.error });
+  await loadHostPage(page, `${session.url}${links.take()}`, { log: io.error });
+  pageUp = true;
+  links.ready();
   return true;
 }
 

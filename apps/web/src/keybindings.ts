@@ -198,7 +198,7 @@ function resolveContext(
   };
 }
 
-function evaluateWhenNode(node: KeybindingWhenNode, context: ShortcutMatchContext): boolean {
+export function evaluateWhenNode(node: KeybindingWhenNode, context: Record<string, boolean>): boolean {
   switch (node.type) {
     case "identifier":
       if (node.name === "true") return true;
@@ -221,7 +221,7 @@ function matchesWhenClause(
   return evaluateWhenNode(whenAst, context);
 }
 
-function shortcutConflictKey(shortcut: KeybindingShortcut, platform = navigator.platform): string {
+export function shortcutConflictKey(shortcut: KeybindingShortcut, platform = navigator.platform): string {
   const { metaKey, ctrlKey } = effectiveModifiers(shortcut, platform);
   return [
     shortcut.key,

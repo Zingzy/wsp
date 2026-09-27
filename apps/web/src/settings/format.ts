@@ -28,6 +28,16 @@ export const SETTINGS_WORDS = {
   themesOf: (side: string) => `${side} themes`,
 } as const;
 
+/** Settings > Appearance, the two font rows. */
+export const FONT_WORDS = {
+  head: "Fonts",
+  app: "App font",
+  appDescription: "The sidebar, replies and every page.",
+  code: "Code font",
+  codeDescription: "Code in replies, the diff and files.",
+  default: "Default",
+} as const;
+
 /** Each side as its segment names it. */
 export const THEME_WORDS: Record<ThemePreference, string> = {
   system: "System",

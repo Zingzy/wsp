@@ -2,12 +2,14 @@
 // Add a project: a project is a git repo on one computer, so the dialog opens on
 // the repos the chosen computer holds, most recently used first, and the field
 // searches all of them by name and path. A path typed from / or ~ walks the disk
-// instead, and a repository address is cloned where a computer clones: a box or a
-// provider, never the host's computer, whose projects are folders of the person's own. The
-// list keeps one height across every state, so nothing around it moves.
+// instead. A repository address is cloned by the computer picked: a box or a
+// provider clones where it keeps its checkouts, and the host's own computer into
+// an empty folder the person names, which is then a folder project like any
+// other. owner/repo reads as a search here until no repo matches it. The list
+// keeps one height across every state, so nothing around it moves.
 import { CloudIcon, FolderGitIcon, FolderIcon, FolderOpenIcon, GitBranchIcon, LaptopIcon, PlusIcon, ServerIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { HERE_PLACE_ID, sourceKind, type HostFolder, type HostFolderListing, type PlaceView, type ProjectHue, type ProjectIcon } from "@wsp/protocol";
+import { HERE_PLACE_ID, projectNameOf, projectSourceOf, sourceKind, type HostFolder, type HostFolderListing, type PlaceView, type ProjectHue, type ProjectIcon } from "@wsp/protocol";
 import { HueSelect, IconSelect } from "../projects/LookPicker.js";
 import { AddButton } from "../components/ui/add-button.js";
 import { Dialog, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
@@ -17,15 +19,28 @@ import { desktopBridge } from "../lib/desktopShell.js";
 import { MICRO_LABEL } from "../lib/microLabel.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
-import { hereName, isProviderPlace, placeName, placeTakesWorkspaces } from "../settings/places.js";
+import { isProviderPlace, placeName, placeTakesWorkspaces } from "../settings/places.js";
 import { ADD_PROJECT_WORDS } from "./words.js";
 
-/** Whether the field holds a repository address rather than a search or a path. */
-function namesRepository(word: string): boolean {
+/** How the field names a repository: by its address, which nothing else looks like, as owner/repo, which a search
+ * of paths can look like too, or not at all. */
+function repositoryWord(word: string): "address" | "short" | null {
   try {
-    return sourceKind(word.trim()) === "git";
+    const kind = sourceKind(word.trim());
+    if (kind === "git" || ((kind === "github" || kind === "gitlab") && word.includes(".com/"))) return "address";
+    return kind === "github" ? "short" : null;
   } catch {
-    return false;
+    return null;
+  }
+}
+
+/** What a repository word would be called as a project, for the example under the folder field. */
+function repoName(word: string): string {
+  try {
+    const kind = sourceKind(word);
+    return kind === "folder" || kind === "computer" ? "repo" : projectNameOf(projectSourceOf(word, kind));
+  } catch {
+    return "repo";
   }
 }
 
@@ -70,9 +85,13 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
   const [lit, setLit] = useState(0);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [cloneTo, setCloneTo] = useState("");
 
   const home = repos?.dir ?? "";
-  const repoWord = namesRepository(field);
+  const repoShape = repositoryWord(field);
+  const query = field.trim().toLowerCase();
+  const searched = useMemo(() => (repos?.folders ?? []).filter(f => query === "" || f.path.toLowerCase().includes(query)), [repos, query]);
+  const repoWord = repoShape === "address" || (repoShape === "short" && (!here || searched.length === 0));
   const typingPath = !repoWord && (field.startsWith("/") || field.startsWith("~"));
   const path = typingPath ? pathParts(field, home) : null;
 
@@ -110,22 +129,20 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
   const rows: readonly HostFolder[] = useMemo(() => {
     if (!here || repoWord) return [];
     if (path !== null) return level?.dir === path.dir ? level.folders.filter(f => baseName(f.path).toLowerCase().startsWith(path.stem)) : [];
-    const q = field.trim().toLowerCase();
-    const all = repos?.folders ?? [];
-    return q === "" ? all : all.filter(f => f.path.toLowerCase().includes(q));
-  }, [here, repoWord, path?.dir, path?.stem, level, repos, field]);
+    return searched;
+  }, [here, repoWord, path?.dir, path?.stem, level, searched]);
   useEffect(() => setLit(0), [field, on]);
   const litRow = rows[lit];
   // A repo already recorded on this computer is shown, so the list matches the disk, but is not added twice.
   const added = useMemo(() => new Set(recorded.filter(p => p.computer === undefined || p.computer === HERE_PLACE_ID).map(p => p.path)), [recorded]);
   const addable = (row: HostFolder | undefined): boolean => row?.repo === true && !added.has(row.path);
 
-  const add = async (source: string): Promise<void> => {
+  const add = async (source: string, into?: string): Promise<void> => {
     if (adding) return;
     setAdding(true);
     setRefusal(null);
     try {
-      const project = await addProject(source, here ? undefined : computer?.id);
+      const project = await addProject(source, here ? undefined : computer?.id, into);
       if (project !== null && (icon !== "folder" || hue !== "neutral")) void setPreferences({ projectLook: { [project.id]: { icon, hue } } });
       onClose();
     } catch (e) {
@@ -140,7 +157,18 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
     if (picked !== undefined) await add(picked);
   };
   const clones = !here && repoWord;
-  const target = clones ? field.trim() : addable(litRow) ? litRow!.path : null;
+  // The folder a repo is cloned into here is one the host can read as it stands: from the root or the home.
+  const clonesHere = here && repoWord;
+  const cloneFolder = cloneTo.trim();
+  const cloneReady = clonesHere && (cloneFolder.startsWith("/") || cloneFolder.startsWith("~"));
+  const pickCloneFolder = async (): Promise<void> => {
+    const picked = await bridge?.pickFolder?.();
+    if (picked !== undefined) setCloneTo(picked);
+  };
+  const target = clones || cloneReady ? field.trim() : addable(litRow) ? litRow!.path : null;
+  const addTarget = (): void => {
+    if (target !== null) void add(target, cloneReady ? cloneFolder : undefined);
+  };
 
   const keys = (e: KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === "ArrowDown") {
@@ -155,7 +183,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
       else setField(tilde(litRow.path, home));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (target !== null) return void add(target);
+      if (target !== null) return addTarget();
       if (typingPath && litRow !== undefined) into(litRow);
     }
   };
@@ -171,7 +199,42 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
       );
     }
     if (!here) return say(computer !== undefined && isProviderPlace(computer) ? ADD_PROJECT_WORDS.providerSays(placeName(computer)) : ADD_PROJECT_WORDS.boxSays(computer === undefined ? "" : placeName(computer)));
-    if (repoWord) return say(ADD_PROJECT_WORDS.noCloneHere(hereName(places)));
+    if (clonesHere) {
+      return (
+        <div data-k="clone-into" className={cn(PANE_ROW, "h-auto flex-col items-stretch gap-2 bg-accent py-3 text-foreground")}>
+          <span className="flex min-w-0 items-center gap-3">
+            <GitBranchIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{ADD_PROJECT_WORDS.cloneInto(field.trim())}</span>
+          </span>
+          <span className="flex min-w-0 items-center gap-2 ps-7">
+            <input
+              data-k="clone-into-folder"
+              autoComplete="off"
+              spellCheck={false}
+              value={cloneTo}
+              disabled={adding}
+              placeholder={ADD_PROJECT_WORDS.cloneIntoPlaceholder(repoName(field.trim()))}
+              onChange={e => {
+                setCloneTo(e.target.value);
+                setRefusal(null);
+              }}
+              onKeyDown={e => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                addTarget();
+              }}
+              className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-background px-2.5 font-mono text-xs outline-none placeholder:font-sans placeholder:text-muted-foreground/70 focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            {bridge?.pickFolder !== undefined ? (
+              <button type="button" data-k="clone-into-choose" onClick={() => void pickCloneFolder()} className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-background hover:text-foreground">
+                <FolderOpenIcon aria-hidden className="size-3.5" />
+                {ADD_PROJECT_WORDS.choose}
+              </button>
+            ) : null}
+          </span>
+        </div>
+      );
+    }
     if (repos === null && path === null) return null;
     if (rows.length === 0) return say(path !== null ? ADD_PROJECT_WORDS.noFolders : field.trim() === "" ? ADD_PROJECT_WORDS.noRepos : ADD_PROJECT_WORDS.noMatch);
     return rows.map((row, at) => (
@@ -225,7 +288,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
               {ADD_PROJECT_WORDS.choose}
             </button>
           ) : null}
-          <AddButton primary data-k="add" busy={adding} held={target === null || adding} onClick={() => (target === null ? undefined : void add(target))}>
+          <AddButton primary data-k="add" busy={adding} held={target === null || adding} onClick={addTarget}>
             {ADD_PROJECT_WORDS.add}
           </AddButton>
           <Kbd>esc</Kbd>

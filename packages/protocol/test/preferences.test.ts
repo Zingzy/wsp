@@ -10,7 +10,7 @@ describe("the preferences record", () => {
     expect(preferencesFrom({})).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom({ theme: "sepia" })).toEqual(DEFAULT_PREFERENCES);
     expect(preferencesFrom("nonsense")).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], labs: false });
+    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false });
   });
 
   it("a stored record keeps what it has and takes the defaults for the rest", () => {
@@ -19,11 +19,11 @@ describe("the preferences record", () => {
 
   it("a patch lands field by field, a null width clears the width, and the zoom lands per workspace, a null entry dropping that workspace's", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { theme: "dark", sidebarWidth: 300, terminalZoom: { ws_a: 2 } });
-    expect(one).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], labs: false });
+    expect(one).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", sidebarWidth: 300, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false });
     const two = applyPreferencesPatch(one, { terminalZoom: { ws_b: -1 } });
     expect(two.terminalZoom).toEqual({ ws_a: 2, ws_b: -1 });
     const three = applyPreferencesPatch(two, { sidebarWidth: null, terminalZoom: { ws_a: null } });
-    expect(three).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], labs: false });
+    expect(three).toEqual({ theme: "dark", lightTheme: "paper", darkTheme: "graphite", sidebarMode: "list", terminalSize: "app", terminalZoom: { ws_b: -1 }, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false });
     expect(applyPreferencesPatch(one, {})).toEqual(one);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
   });
@@ -96,6 +96,36 @@ describe("the preferences record", () => {
     expect(preferencesFrom({ serverIcons: false }).serverIcons).toBe(false);
     expect(applyPreferencesPatch(off, { serverIcons: true }).serverIcons).toBe(true);
     expect(PreferencesPatch.safeParse({ serverIcons: "no" }).success).toBe(false);
+  });
+
+  it("a chord override lands per command, a null entry putting that command back on its default chords", () => {
+    const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { keybindings: { "sidebar.toggle": "mod+shift+b" } });
+    expect(one.keybindings).toEqual({ "sidebar.toggle": "mod+shift+b" });
+    const two = applyPreferencesPatch(one, { keybindings: { "terminal.toggle": "mod+shift+t" } });
+    expect(two.keybindings).toEqual({ "sidebar.toggle": "mod+shift+b", "terminal.toggle": "mod+shift+t" });
+    expect(applyPreferencesPatch(two, { theme: "dark" }).keybindings).toEqual(two.keybindings);
+    expect(applyPreferencesPatch(two, { keybindings: { "sidebar.toggle": null } }).keybindings).toEqual({ "terminal.toggle": "mod+shift+t" });
+    // A record from a host that kept no overrides reads as none.
+    expect(preferencesFrom({ theme: "light" }).keybindings).toEqual({});
+    expect(preferencesFrom({ keybindings: { "chat.new": "mod+alt+n" } }).keybindings).toEqual({ "chat.new": "mod+alt+n" });
+    expect(PreferencesPatch.safeParse({ keybindings: { "sidebar.toggle": null } }).success).toBe(true);
+    expect(PreferencesPatch.safeParse({ keybindings: { "sidebar.toggle": 3 } }).success).toBe(false);
+    expect(PreferencesPatch.safeParse({ keybindings: { "sidebar.toggle": "" } }).success).toBe(false);
+  });
+
+  it("the app and code fonts are a family each, empty for the system stack, and a stored record without them reads as empty", () => {
+    const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { appFont: "Inter", codeFont: "JetBrains Mono" });
+    expect([one.appFont, one.codeFont]).toEqual(["Inter", "JetBrains Mono"]);
+    expect(applyPreferencesPatch(one, { theme: "dark" })).toEqual({ ...one, theme: "dark" });
+    expect(applyPreferencesPatch(one, { appFont: "" })).toEqual({ ...one, appFont: "" });
+    expect(preferencesFrom({ theme: "light" })).toEqual({ ...DEFAULT_PREFERENCES, theme: "light" });
+    expect(preferencesFrom({ codeFont: "Hack" }).codeFont).toBe("Hack");
+    expect(PreferencesPatch.safeParse({ appFont: 3 }).success).toBe(false);
+    expect(PreferencesPatch.safeParse({ codeFont: "x".repeat(129) }).success).toBe(false);
+    expect(PreferencesPatch.safeParse({ uiFont: "Inter" }).success).toBe(false);
+    // On the wire too: a record from an older host parses with the fonts and overrides empty.
+    const { keybindings: _k, appFont: _a, codeFont: _c, ...older } = DEFAULT_PREFERENCES;
+    expect(Preferences.parse(older)).toEqual(DEFAULT_PREFERENCES);
   });
 
   it("labs comes from the host's environment alone, and no patch carries it", () => {

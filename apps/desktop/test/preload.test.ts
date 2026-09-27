@@ -42,6 +42,8 @@ describe("the preload's bridge", () => {
     expect(invoke).toHaveBeenLastCalledWith("preview:read", "ws_b");
     await wsp.localFonts("Berkeley Mono");
     expect(invoke).toHaveBeenLastCalledWith("fonts:local", "Berkeley Mono");
+    await wsp.fontFamilies();
+    expect(invoke).toHaveBeenLastCalledWith("fonts:families");
     await wsp.pickFolder();
     expect(invoke).toHaveBeenLastCalledWith("folder:pick");
   });
@@ -96,6 +98,18 @@ describe("the preload's bridge", () => {
     expect(opened).toBe(1);
     stop();
     expect(off).toHaveBeenLastCalledWith("needs-you:open", listen);
+  });
+
+  it("hands the page what a wsp:// link names on its own channel, unsubscribing with the same listener", async () => {
+    const wsp = await bridge();
+    const opened: unknown[] = [];
+    const stop = wsp.onOpen(target => opened.push(target));
+    expect(on).toHaveBeenLastCalledWith("shell:open", expect.any(Function));
+    const listen = on.mock.calls.at(-1)![1] as (event: unknown, target: unknown) => void;
+    listen(null, { kind: "thread", id: "th_9f3a" });
+    expect(opened).toEqual([{ kind: "thread", id: "th_9f3a" }]);
+    stop();
+    expect(off).toHaveBeenLastCalledWith("shell:open", listen);
   });
 });
 

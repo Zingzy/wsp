@@ -885,6 +885,30 @@ describe("typing contexts", () => {
     await waitFor(() => expect(sidebarOpen()).toBe("false"));
   });
 
+  it("reads the person's own chords off the preferences record, the moved chord firing and the old one doing nothing", async () => {
+    const mod = navigator.platform.startsWith("Mac") ? { metaKey: true } : { ctrlKey: true };
+    act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, keybindings: { "sidebar.toggle": "mod+shift+b" } } }));
+    try {
+      render(
+        <SidebarProvider defaultOpen>
+          <KeybindingDispatcher />
+          <SidebarOpenProbe />
+        </SidebarProvider>,
+      );
+      fireEvent.keyDown(window, { key: "b", code: "KeyB", ...mod });
+      await settle();
+      expect(sidebarOpen()).toBe("true");
+      fireEvent.keyDown(window, { key: "B", code: "KeyB", shiftKey: true, ...mod });
+      await waitFor(() => expect(sidebarOpen()).toBe("false"));
+      // A patch that lands while the window is up moves the chord without a reload.
+      act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, keybindings: {} } }));
+      fireEvent.keyDown(window, { key: "b", code: "KeyB", ...mod });
+      await waitFor(() => expect(sidebarOpen()).toBe("true"));
+    } finally {
+      act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, keybindings: {} } }));
+    }
+  });
+
   it("fires a bare key outside a typing context", async () => {
     mountDispatcher();
     fireEvent.keyDown(window, { key: "b", code: "KeyB" });

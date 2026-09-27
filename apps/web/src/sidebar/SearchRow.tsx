@@ -13,14 +13,11 @@ import { openCommandPalette } from "../commandPaletteBus.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 import { cn } from "../lib/utils.js";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
-import { shortcutLabelForCommand } from "../keybindings.js";
+import { useShortcutLabel } from "../shell/useKeybindings.js";
 import { ONE_LINE_ROW_CLASS } from "./rowGrammar.js";
 
-const PALETTE_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "commandPalette.toggle");
-const SEARCH_TITLE = PALETTE_SHORTCUT ? `Search (${PALETTE_SHORTCUT})` : "Search";
-
 export function SearchRow({ action }: { action?: ReactNode }) {
+  const paletteShortcut = useShortcutLabel("commandPalette.toggle");
   return (
     <>
       <Tooltip>
@@ -32,7 +29,7 @@ export function SearchRow({ action }: { action?: ReactNode }) {
             </SidebarMenuButton>
           }
         />
-        <TooltipPopup side="bottom">{SEARCH_TITLE}</TooltipPopup>
+        <TooltipPopup side="bottom">{paletteShortcut === null ? "Search" : `Search (${paletteShortcut})`}</TooltipPopup>
       </Tooltip>
       {action}
     </>

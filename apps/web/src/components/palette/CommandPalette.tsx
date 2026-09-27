@@ -9,12 +9,12 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { isLocalWorkspace, type SessionSearchHit } from "@wsp/protocol";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { isCommandPaletteOpen, onOpenCommandPalette } from "../../commandPaletteBus.js";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
 import { noticeFailure } from "../../notices/store.js";
 import { useSelectedWorkspaceId, useSidebarProjects, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
+import { useKeybindings } from "../../shell/useKeybindings.js";
 import { requestAddProject, requestNewWorkspace } from "../../shell/shellRequests.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
 import { useSidebar } from "../ui/sidebar.js";
@@ -35,7 +35,9 @@ const NO_HITS: ReadonlyArray<SessionSearchHit> = [];
 /** How long the typing rests before the words go to the host. */
 const MESSAGE_SEARCH_WAIT_MS = 200;
 
-export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: { keybindings?: ResolvedKeybindingsConfig }) {
+export function CommandPalette({ keybindings: given }: { keybindings?: ResolvedKeybindingsConfig }) {
+  const live = useKeybindings();
+  const keybindings = given ?? live;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);

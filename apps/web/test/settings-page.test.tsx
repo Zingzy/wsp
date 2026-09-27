@@ -6,15 +6,18 @@
 // Restore defaults standing only off the defaults, the doors that open
 // Settings on a page, the memory of where it was closed, and the chords that
 // do nothing behind the page.
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { ABOUT_WORDS, SETTINGS_WORDS, groupBlurbs } from "../src/settings/format.js";
+import { ABOUT_WORDS, FONT_WORDS, NOTIFY_WORDS, SETTINGS_WORDS, groupBlurbs } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
-import { SYSTEM_DARK_QUERY, useThemeEffect } from "../src/settings/theme.js";
+import { SYSTEM_DARK_QUERY, useFontEffect, useThemeEffect } from "../src/settings/theme.js";
+import { forgetFontFamilies } from "../src/settings/FontPicker.js";
+import { DEFAULT_TERMINAL_TEXT_FACES, TERMINAL_SYMBOLS_FACE, terminalFontChain } from "../src/terminal/ghostty/fontChain.js";
+import { pickOption } from "./select.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
 import { THEMES } from "../src/themes/index.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
@@ -36,6 +39,11 @@ const cells = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[
 const cellIds = (): string[] => cells().map(c => c.dataset["themeOption"] ?? "");
 const cellOf = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-theme-option="${id}"]`)!;
 const sideIds = (side: "light" | "dark"): string[] => THEMES.filter(t => t.side === side).map(t => t.id);
+
+function FontRule() {
+  useFontEffect();
+  return null;
+}
 
 function ThemeRule() {
   useThemeEffect();
@@ -190,16 +198,16 @@ describe("the row grammar", () => {
   });
   const check = (where: string): void => {
     const { rows, lines, cards } = walk();
-    // Appearance is the theme picker alone, drawn in place of a card's rows.
+    // Appearance's theme picker is drawn in place of a card's rows.
     if (where === "appearance") expect(document.querySelector("[data-settings-page] [data-k=theme-picker]"), where).not.toBeNull();
-    else expect(rows.length + lines.length, where).toBeGreaterThan(0);
+    expect(rows.length + lines.length, where).toBeGreaterThan(0);
     for (const row of rows) {
       expect(row.querySelector("[data-settings-title]")?.textContent, `${where}: a row's title`).not.toBe("");
       expect(row.querySelector("[data-settings-description]")?.textContent, `${where}: a row's description`).not.toBe("");
       const slot = row.querySelector("[data-settings-slot]");
       if (slot !== null) {
         const words = slot.querySelectorAll("[data-settings-word]");
-        const controls = slot.querySelectorAll("[data-slot=button], [data-slot=segmented-control], [data-slot=number-field], [data-slot=select-trigger], [data-slot=switch]");
+        const controls = slot.querySelectorAll("[data-slot=button], [data-slot=segmented-control], [data-slot=number-field], [data-slot=select-trigger], [data-slot=switch], [data-slot=input]");
         expect(words.length, `${where}: one word at most`).toBeLessThanOrEqual(1);
         expect(controls.length, `${where}: one control at most`).toBeLessThanOrEqual(1);
         expect(words.length + controls.length + (row.tagName === "BUTTON" ? 1 : 0), `${where}: a slot holds something`).toBeGreaterThan(0);
@@ -339,14 +347,15 @@ describe("Appearance", () => {
     expect(sets).toEqual([{ darkTheme: "pitch" }]);
   });
 
-  it("is the page's head over the theme picker and the one Notifications switch, with no line under the pictures", async () => {
+  it("is the page's head over the theme picker, the two font rows and the one Notifications switch, with no line under the pictures", async () => {
     const { api } = settingsApi();
     mountSettings({ api });
     await settle();
     const head = document.querySelector<HTMLElement>("[data-settings-page] [data-k=settings-page-head]")!;
     expect(head.querySelector("h1")!.textContent).toBe(SETTINGS_WORDS.appearance);
     expect(head.querySelector("p")!.textContent).toBe(groupBlurbs("").appearance);
-    expect([...document.querySelectorAll<HTMLElement>("[data-settings-page] [data-settings-row], [data-settings-page] [data-settings-line]")].map(row => row.querySelector("[data-k]")?.getAttribute("data-k"))).toEqual(["notify-sound"]);
+    expect(rowTitles()).toEqual([FONT_WORDS.app, FONT_WORDS.code, NOTIFY_WORDS.sound]);
+    expect(document.querySelectorAll("[data-settings-page] [data-settings-line]")).toHaveLength(0);
     expect(document.querySelector("[data-k=sidebar-width]")).toBeNull();
     expect(document.querySelector("[data-k=terminal-size-row]")).toBeNull();
     expect(within(group(SETTINGS_WORDS.theme)).queryByText(/whatever this Mac/)).toBeNull();
@@ -366,7 +375,7 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.theme).toBe("system");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", notifySound: true });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", notifySound: true });
   });
 
   it("a theme picked for either side is off the defaults, and Restore defaults puts both sides back", async () => {
@@ -379,7 +388,72 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.darkTheme).toBe("graphite");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", notifySound: true });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", notifySound: true });
+  });
+});
+
+describe("Appearance's fonts", () => {
+  const root = (token: string): string => document.documentElement.style.getPropertyValue(token);
+  afterEach(() => {
+    forgetFontFamilies();
+    document.documentElement.style.removeProperty("--font-sans");
+    document.documentElement.style.removeProperty("--font-mono");
+  });
+
+  it("in a tab takes a family typed into each row, sets the root's token to it in front of the system stack, and leaves the terminal's chain alone", async () => {
+    const { api, sets } = settingsApi();
+    mountSettings({ api, children: <FontRule /> });
+    await settle();
+    expect(rowTitles()).toContain(FONT_WORDS.app);
+    expect(descriptionOf("code-font")).toBe(FONT_WORDS.codeDescription);
+    const app = document.querySelector<HTMLInputElement>("input[data-k=app-font]")!;
+    expect(app.placeholder).toBe(FONT_WORDS.default);
+    expect(root("--font-sans")).toBe("");
+    fireEvent.focus(app);
+    fireEvent.change(app, { target: { value: "Iowan Old Style" } });
+    fireEvent.keyDown(app, { key: "Enter" });
+    fireEvent.blur(app);
+    await settle();
+    expect(sets).toEqual([{ appFont: "Iowan Old Style" }]);
+    expect(root("--font-sans")).toBe('"Iowan Old Style", var(--font-sans-system)');
+    expect(root("--font-mono")).toBe("");
+    act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, codeFont: "Hack" } }));
+    expect(root("--font-mono")).toBe("Hack, var(--font-mono-system)");
+    expect(terminalFontChain(undefined)).toBe(`${DEFAULT_TERMINAL_TEXT_FACES}, "${TERMINAL_SYMBOLS_FACE}", monospace`);
+    // Empty is the system stack: the token goes back to the stylesheet's.
+    act(() => useStore.setState({ preferences: { ...useStore.getState().preferences, appFont: "" } }));
+    expect(root("--font-sans")).toBe("");
+  });
+
+  it("in the desktop lists the computer's installed families with Default first, and a pick writes the record", async () => {
+    const fontFamilies = vi.fn(async () => ["Hack", "Inter"]);
+    window.wsp = { fontFamilies };
+    const { api, sets } = settingsApi();
+    mountSettings({ api, children: <FontRule /> });
+    await settle();
+    const trigger = document.querySelector("[data-k=code-font]")!;
+    expect(trigger.tagName).not.toBe("INPUT");
+    expect(await pickOption(trigger, "Hack")).toEqual([FONT_WORDS.default, "Hack", "Inter"]);
+    await settle();
+    expect(sets).toEqual([{ codeFont: "Hack" }]);
+    expect(root("--font-mono")).toBe("Hack, var(--font-mono-system)");
+    // One read of the list per window, whichever row asked.
+    expect(fontFamilies).toHaveBeenCalledTimes(1);
+    // Restore defaults puts both fonts back with the theme.
+    await waitFor(() => expect(restore()).not.toBeNull());
+    fireEvent.click(restore()!);
+    await settle();
+    expect(useStore.getState().preferences).toMatchObject({ appFont: "", codeFont: "" });
+    expect(root("--font-mono")).toBe("");
+    // The select leaves a portal React must unmount itself before the file's teardown empties the body.
+    cleanup();
+  });
+
+  it("a page the shell will not list fonts for takes the typed field instead", async () => {
+    window.wsp = { fontFamilies: async () => Promise.reject(new Error("fonts:families: not for this page")) };
+    mountSettings({ api: settingsApi().api });
+    await settle();
+    expect(document.querySelector("input[data-k=app-font]")).not.toBeNull();
   });
 });
 

@@ -41,6 +41,7 @@ import { addNotice } from "../notices/store.js";
 import { catalogIn, useLaunches, useProjectsRead, useProjectsRefused, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { hostAsleep } from "../boot.js";
 import { onAddProjectRequest, onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, requestAddProject, type ProjectTripRequest } from "../shell/shellRequests.js";
+import { useShortcutLabel } from "../shell/useKeybindings.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { AddProjectDialog } from "./AddProjectDialog.js";
@@ -57,7 +58,7 @@ import { SettingsRow } from "./SettingsRow.js";
 import { HostFoot } from "../hosts/HostFoot.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
-import { NEW_THREAD_TITLE, computerName, copyName, placeNames } from "./workspaceRows.js";
+import { newThreadTitle, computerName, copyName, placeNames } from "./workspaceRows.js";
 import { BranchReader, readsBranch, workspaceBranch } from "./WorkspaceBranch.js";
 import { restingAge } from "../components/status/restingAge.js";
 import { PROJECT_WORDS, SECTION_WORDS } from "./words.js";
@@ -440,6 +441,7 @@ export function WorkspaceSidebar() {
   };
 
   const offline = useMemo(() => computerOffline(Object.values(statuses)), [statuses]);
+  const newThreadShortcut = useShortcutLabel("chat.new");
   /** The one add control at rest: a new thread in the selected workspace, held while none is selected. Held by
    * aria-disabled rather than the disabled attribute, so the pointer still reaches it and the tooltip can say what
    * it is in the one state a person might ask why it is held. */
@@ -459,7 +461,7 @@ export function WorkspaceSidebar() {
       >
         <SquarePenIcon />
       </TooltipTrigger>
-      <TooltipPopup side="bottom">{NEW_THREAD_TITLE}</TooltipPopup>
+      <TooltipPopup side="bottom">{newThreadTitle(newThreadShortcut)}</TooltipPopup>
     </Tooltip>
   );
   const header = (

@@ -539,7 +539,7 @@ export interface Api {
   /** Records a project: a folder on the computer running the host, or a repository address on the computer named.
    * The host answers the record it kept, so the sidebar draws the project before anything is cloned. Optional so a
    * fixture that records none need not fake it; without it the first run and the sheet are held. */
-  projectsAdd?(source: string, on?: string): Promise<ProjectView>;
+  projectsAdd?(source: string, on?: string, into?: string): Promise<ProjectView>;
   /** Forgets a project and answers the runtime's own sentence for what left. The host refuses one a workspace
    * still stands on, naming them. Optional so a fixture that removes none need not fake it; without it the row's
    * Remove project is held. */
@@ -776,7 +776,7 @@ export function makeApi(c: ProtocolClient): Api {
       return { places: PlaceView.array().parse(read.places), adds: PlaceAddJob.array().parse(read.adds ?? []) };
     },
     projectsList: async () => ProjectView.array().parse((await c.request<{ projects?: unknown }>("projects.list")).projects),
-    projectsAdd: async (source, on) => ProjectView.parse((await c.request<{ project?: unknown }>("projects.add", { source, ...(on === undefined ? {} : { on }) })).project),
+    projectsAdd: async (source, on, into) => ProjectView.parse((await c.request<{ project?: unknown }>("projects.add", { source, ...(on === undefined ? {} : { on }), ...(into === undefined ? {} : { into }) })).project),
     projectsRemove: async projectId => {
       const reply = await c.request<{ said?: unknown }>("projects.remove", { projectId });
       return { said: typeof reply.said === "string" ? reply.said : undefined };

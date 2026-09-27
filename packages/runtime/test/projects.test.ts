@@ -2,13 +2,14 @@
 // Projects as records of their own: what wsp add records and what it refuses,
 // the two roads a workspace of one takes, and what a thread on it starts in.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { copyPathFor, gitOnThisMacRefusal, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, copyTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type Caller, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, copyPathFor, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, copyTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type Caller, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
 import { createRuntime, NO_SEED_WIRING, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
+import { writeStub } from "../../protocol/test/stub-script.js";
 import { createOn, fakeLocal, projectOn, stubBackend, tempRepo, type StubBackend, type StubMachine } from "./stub-backend.js";
 
 const REPO = "https://github.com/spoo-me/frontend.git";
@@ -101,7 +102,7 @@ describe("recording a project", () => {
 
   it("a repo's url with no computer names the ones that clone, since this computer takes a folder of yours", async () => {
     const { rt } = withLocal();
-    await expect(rt.projects.add({ source: REPO })).rejects.toThrow("name the computer that clones it with --on default");
+    await expect(rt.projects.add({ source: REPO })).rejects.toThrow(noComputerForSourceLine(REPO, ["default"]));
     expect(await rt.projects.list()).toEqual([]);
   });
 
@@ -113,9 +114,84 @@ describe("recording a project", () => {
     await expect(rt.projects.add({ source: REPO, on: "default" })).rejects.toMatchObject({ message: sameSourceRefusal("spoo-landing", "default"), kind: "conflict" });
   });
 
-  it("a repo's url on this computer is refused: it works the folder you already have", async () => {
-    const { rt } = withLocal();
-    await expect(rt.projects.add({ source: REPO, on: HERE_PLACE_ID })).rejects.toThrow(gitOnThisMacRefusal);
+  describe("a repo cloned on this computer", () => {
+    /** A repo with one commit to clone from, and a git and a gh ahead of the real ones on PATH that write down how
+     * they were run, then clone that repo wherever they were asked to: no network, and the argv and the prompt
+     * setting are read off what the runtime really spawned. */
+    function cloneRig(): { origin: string; into: (...parts: string[]) => string; calls: () => { argv: string[]; prompt: string }[] } {
+      const origin = tempRepo();
+      writeFileSync(join(origin, "README.md"), "spoo\n");
+      execFileSync("git", ["-C", origin, "add", "."]);
+      execFileSync("git", ["-C", origin, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "one"]);
+      const bin = here();
+      const log = join(bin, "calls.log");
+      const realGit = execFileSync("sh", ["-c", "command -v git"]).toString().trim();
+      const record = (name: string) => `printf '%s\\t%s\\n' "\${GIT_TERMINAL_PROMPT:-unset}" "$(printf '%s\\037' ${name} "$@")" >> ${JSON.stringify(log)}`;
+      // Every url the rig is handed is the one repo above, however it was spelled; an url naming "missing" fails
+      // the way a clone of a repo that is not there does, and one naming "private" the way a signed-out one does.
+      const script = (name: string, clone: string) => `#!/bin/sh\n${record(name)}\n${clone}\n`;
+      const pick = `case "$URL" in *missing*) echo "fatal: repository '$URL' does not exist" >&2; exit 128;; *private*) echo "remote: Repository not found." >&2; echo "fatal: repository '$URL' not found" >&2; exit 128;; esac`;
+      writeStub(join(bin, "git"), script("git", `if [ "$1" = clone ]; then URL="$3"; ${pick}; exec ${JSON.stringify(realGit)} clone -q ${JSON.stringify(origin)} "$4"; fi\nexec ${JSON.stringify(realGit)} "$@"`));
+      writeStub(join(bin, "gh"), script("gh", `URL="$3"; ${pick}; exec ${JSON.stringify(realGit)} clone -q ${JSON.stringify(origin)} "$4"`));
+      vi.stubEnv("PATH", `${bin}:${process.env["PATH"] ?? ""}`);
+      const calls = () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").map(line => {
+        const [prompt, argv] = line.split("\t");
+        return { prompt: prompt!, argv: argv!.split("\x1f").slice(0, -1) };
+      }) : []);
+      return { origin, into: (...parts) => join(realpathSync(here()), ...parts), calls };
+    }
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("clones an https url into the folder named, by argv with no prompt, and records a folder project there", async () => {
+      const rig = cloneRig();
+      const { rt } = withLocal();
+      const dest = rig.into("clones", "spoo.me");
+      const project = await rt.projects.add({ source: "https://github.com/spoo-me/spoo.me", into: dest });
+      expect(project).toMatchObject({ computer: HERE_PLACE_ID, name: "spoo.me", path: dest, source: { kind: "folder", path: dest } });
+      expect(readFileSync(join(dest, "README.md"), "utf8")).toBe("spoo\n");
+      expect(rig.calls().filter(c => c.argv[1] === "clone")).toEqual([{ prompt: "0", argv: ["git", "clone", "--", "https://github.com/spoo-me/spoo.me", dest] }]);
+      expect((await rt.projects.list()).map(p => p.source)).toEqual([{ kind: "folder", path: dest }]);
+    });
+
+    it("clones owner/repo through gh into an empty folder that already exists", async () => {
+      const rig = cloneRig();
+      const { rt } = withLocal();
+      const dest = rig.into("empty");
+      mkdirSync(dest);
+      const project = await rt.projects.add({ source: "spoo-me/spoo.me", into: dest, name: "spoo" });
+      expect(project).toMatchObject({ name: "spoo", source: { kind: "folder", path: dest } });
+      expect(rig.calls().filter(c => c.argv[0] === "gh")).toEqual([{ prompt: "0", argv: ["gh", "repo", "clone", "spoo-me/spoo.me", dest] }]);
+    });
+
+    it("refuses a folder that holds something, a url with no folder, and a url no clone should run, cloning nothing", async () => {
+      const rig = cloneRig();
+      const { rt } = withLocal();
+      const full = rig.into("full");
+      mkdirSync(full);
+      writeFileSync(join(full, "notes.txt"), "mine");
+      await expect(rt.projects.add({ source: REPO, into: full })).rejects.toThrow(cloneIntoTakenLine(full));
+      await expect(rt.projects.add({ source: REPO, into: join(full, "notes.txt") })).rejects.toThrow(cloneIntoTakenLine(join(full, "notes.txt")));
+      await expect(rt.projects.add({ source: REPO, on: HERE_PLACE_ID })).rejects.toThrow(cloneIntoNeeded(REPO));
+      await expect(rt.projects.add({ source: REPO })).rejects.toThrow(noComputerForSourceLine(REPO, ["default"]));
+      await expect(rt.projects.add({ source: "file:///etc", into: rig.into("etc") })).rejects.toThrow(cloneUrlRefusal("file:///etc")!);
+      await expect(rt.projects.add({ source: "ssh://-oProxyCommand=touch/x", into: rig.into("x") })).rejects.toThrow("is not a repo address wsp clones");
+      await expect(rt.projects.add({ source: "ssh://-oProxyCommand=true@github.com/a/b", into: rig.into("u") })).rejects.toThrow("is not a repo address wsp clones");
+      await expect(rt.projects.add({ source: rig.origin, into: rig.into("y") })).rejects.toThrow(INTO_TAKES_A_REPO_LINE);
+      await expect(rt.projects.add({ source: REPO, on: "default", into: rig.into("z") })).rejects.toThrow("--into is a folder on ");
+      expect(rig.calls().filter(c => c.argv[1] === "clone" || c.argv[0] === "gh")).toEqual([]);
+      expect(readdirSync(full)).toEqual(["notes.txt"]);
+      expect(await rt.projects.list()).toEqual([]);
+    });
+
+    it("says git's own last line when the clone fails, with how to sign in where the failure is a sign-in, and records nothing", async () => {
+      cloneRig();
+      const { rt } = withLocal();
+      const dest = join(here(), "gone");
+      await expect(rt.projects.add({ source: "https://github.com/me/missing.git", into: dest })).rejects.toThrow("fatal: repository 'https://github.com/me/missing.git' does not exist");
+      await expect(rt.projects.add({ source: "https://github.com/me/private.git", into: dest })).rejects.toThrow("fatal: repository 'https://github.com/me/private.git' not found; sign in with gh auth login, or use the repo's ssh url");
+      expect(existsSync(dest)).toBe(false);
+      expect(await rt.projects.list()).toEqual([]);
+    });
   });
 
   it("a folder seeding a computer that clones is refused until the person has said what travels", async () => {
@@ -186,7 +262,7 @@ describe("a workspace of a project", () => {
     expect(ws.project).toEqual({ id: project.id, name: "spoo-landing", path: "/root/spoo-landing", computer: "default" });
     // The clone is a script now: the folder above the checkout is made first, and a source cloned through a host's
     // own command line checks that command is there. The line itself is still git's.
-    expect(backend.machines[0]!.execLog.join("\n")).toContain(`git clone --branch main ${REPO} /root/spoo-landing`);
+    expect(backend.machines[0]!.execLog.join("\n")).toContain(`git clone --branch main -- ${REPO} /root/spoo-landing`);
     expect(stages).toContain("project-cloned");
     expect(stages.indexOf("project-cloned")).toBeLessThan(stages.indexOf("ready"));
   });
@@ -195,7 +271,7 @@ describe("a workspace of a project", () => {
     const { rt, backend } = withLocal();
     const project = await rt.projects.add({ source: REPO, on: "default", name: "spoo-landing" });
     await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" });
-    expect(backend.machines[0]!.execLog.join("\n")).toContain(`git clone ${REPO} /root/spoo-landing`);
+    expect(backend.machines[0]!.execLog.join("\n")).toContain(`git clone -- ${REPO} /root/spoo-landing`);
   });
 
   it("a clone that fails ends the create with git's own last line and the machine goes with it", async () => {

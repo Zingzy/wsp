@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
 import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, TOOL_PREFIX, catalogIdOfRow, serverValuesOf, guestEnv, installEnv, installHomes, sharedOn } from "@wsp/catalog";
@@ -222,9 +222,9 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
-import { projectSource } from "./project-sources.js";
+import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -1390,10 +1390,10 @@ export interface Runtime {
     seenBy(event: unknown, origin?: Caller): boolean;
   };
   readonly projects: {
-    /** Records a project: the word a person typed, which is a folder on this computer or a repo a computer clones,
-     * and the computer it lives on. Refused when the word is neither, when the computer's kind takes no source of
+    /** Records a project: the word a person typed, which is a folder on this computer, a repo cloned into an empty
+     * folder here, or a repo a computer clones, and the computer it lives on. Refused when the word is neither, when the computer's kind takes no source of
      * that shape, and when that source is already a project on that computer. */
-    add(opts: { source: string; on?: string; name?: string; base?: string; seed?: SeedChoice }, origin?: Caller): Promise<ProjectView & { notice?: string }>;
+    add(opts: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice }, origin?: Caller): Promise<ProjectView & { notice?: string }>;
     /** What a seed of a folder on this computer would carry, with the ticks a remembered choice for that folder
      * leaves on it. Nothing of the folder is read whole and nothing leaves this computer. */
     seedPlan(source: string): Promise<SeedPlan>;
@@ -2273,6 +2273,29 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const machine = await moduleOf("local").backend({ kind: "local" } as WorkspaceRecord).get(LOCAL_MACHINE_ID);
     const read = await machine.exec(shellLine(["git", "-C", path, "rev-parse", "--show-toplevel"]), { timeoutMs: INLINE_EXEC_MS });
     return read.exitCode === 0 && read.stdout.trim() === path;
+  };
+  /** A repo cloned on this computer into the folder the person named, which must hold nothing yet: the source's own
+   * clone line, argv quoted so neither the url nor the folder is read by the shell, `--` before the url so git
+   * reads no option out of it, and no prompt, since nobody is at a terminal to answer one. Git's own last line is
+   * the refusal. Answers the folder as it resolved, which is the project's path from here on. */
+  const cloneHere = async (word: string, source: ProjectSource, into: string): Promise<string> => {
+    const refused = cloneUrlRefusal(word);
+    if (refused !== undefined) throw Object.assign(new Error(refused), { kind: "invalid" });
+    const dest = folderNamed(into);
+    let held: string[] = [];
+    try {
+      held = readdirSync(dest);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code === "ENOTDIR") held = [dest];
+      else if (code !== "ENOENT") throw e;
+    }
+    if (held.length > 0) throw Object.assign(new Error(cloneIntoTakenLine(homeShortened(dest, homedir()))), { kind: "invalid" });
+    const machine = await moduleOf("local").backend({ kind: "local" } as WorkspaceRecord).get(LOCAL_MACHINE_ID);
+    const line = `${shellLine(["env", "GIT_TERMINAL_PROMPT=0"])} ${projectSource(source.kind).cloneCommand({ remote: projectRemote(source), dest })}`;
+    const cloned = await machine.exec(line, { timeoutMs: CLONE_MS });
+    if (cloned.exitCode !== 0) throw Object.assign(new Error(cloneFailedLine(cloned.stderr || cloned.stdout)), { kind: "invalid" });
+    return folderNamed(dest);
   };
   /** The import road on this computer: the folder is here already, so its path is recorded at once and nothing is
    * packed or sent. The plan is still read, since it is the one measure of the folder and the one check that it is
@@ -8836,26 +8859,36 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return { ...plan, remembered: true, files: plan.files.map(f => ({ ...f, ticked: f.kind !== "never" && remembered.files.includes(f.path) })) };
     },
 
-    async add(o: { source: string; on?: string; name?: string; base?: string; seed?: SeedChoice }, origin?: Caller): Promise<ProjectView & { notice?: string }> {
+    async add(o: { source: string; on?: string; name?: string; base?: string; into?: string; seed?: SeedChoice }, origin?: Caller): Promise<ProjectView & { notice?: string }> {
       await ready();
       // A project is this computer's to record: the folder and the computer named are read here, and a machine
       // that asked would be naming paths on a computer it cannot see.
       refuseRecording(o.source, origin);
       const rows = await computerRows();
-      const clones = rows.filter(r => kindWords(kindForComputer(r.id)).projectSources.includes("git")).map(r => r.name);
+      const clones = rows.filter(r => r.id !== HERE_PLACE_ID && kindWords(kindForComputer(r.id)).projectSources.includes("git")).map(r => r.name);
       const kind = sourceKind(o.source);
       if (kind === "computer") throw new Error(ADD_IS_A_COMPUTER_LINE);
+      if (kind === "folder" && o.into !== undefined) throw new Error(INTO_TAKES_A_REPO_LINE);
       const source: ProjectSource = projectSourceOf(o.source, kind, kind === "folder" ? folderNamed(o.source) : undefined);
-      // No --on: a folder is worked here, and a repo needs the computer that clones it, since this computer never
-      // does. The kind table says which computers those are.
-      const computer = o.on === undefined ? (kind === "folder" ? HERE_PLACE_ID : undefined) : (rows.find(r => r.id === o.on || r.name === o.on)?.id ?? undefined);
+      // No --on: a folder is worked here and so is a repo given a folder to clone into; a repo with neither is the
+      // person's to place, here or on a computer that clones, which the kind table says are which.
+      const computer = o.on === undefined ? (kind === "folder" || o.into !== undefined ? HERE_PLACE_ID : undefined) : (rows.find(r => r.id === o.on || r.name === o.on)?.id ?? undefined);
       if (computer === undefined) {
         if (o.on === undefined) throw new Error(noComputerForSourceLine(o.source, clones));
         throw new Error(noSuchPlaceRefusal(o.on, rows.map(r => r.name)));
       }
+      if (o.into !== undefined && computer !== HERE_PLACE_ID) throw new Error(intoIsHereLine(nameOfComputer(HERE_PLACE_ID, rows)));
       const computerKind = kindForComputer(computer);
       const takes = kindWords(computerKind).projectSources;
-      if (!takes.includes(source.kind)) throw new Error(source.kind === "folder" ? folderOnCopyRefusal(nameOfComputer(computer, rows)) : gitOnThisMacRefusal);
+      if (!takes.includes(source.kind)) throw new Error(source.kind === "folder" ? folderOnCopyRefusal(nameOfComputer(computer, rows)) : noComputerForSourceLine(o.source, clones));
+      // A repo here is cloned into the folder the person named, and that folder is then the project: every road
+      // after the clone is the one a folder of theirs already takes.
+      if (source.kind !== "folder" && copiesFolder(computerKind)) {
+        if (o.into === undefined) throw new Error(cloneIntoNeeded(o.source));
+        const into = await cloneHere(o.source, source, o.into);
+        const { into: _into, on: _on, ...rest } = o;
+        return projectsDoor.add({ ...rest, source: into }, origin);
+      }
       const held = [...projectsHeld.values()].find(p => p.computer === computer && sameSource(p.source, source));
       if (held !== undefined) throw Object.assign(new Error(sameSourceRefusal(held.name, nameOfComputer(computer, rows))), { kind: "conflict" });
       // A folder here is a project only if it is the top of a git repo: a workspace of it starts on a branch, and
