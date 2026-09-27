@@ -211,7 +211,7 @@ impl Layout {
     }
     /// Where the plain cgroup manager puts it.
     pub fn cgroup_dir(&self, id: &str) -> PathBuf {
-        Path::new(crate::freeze::CGROUP_ROOT).join(self.cgroup_name(id).trim_start_matches('/'))
+        Path::new(crate::cgroup::CGROUP_ROOT).join(self.cgroup_name(id).trim_start_matches('/'))
     }
 }
 
@@ -246,30 +246,22 @@ pub struct Workspace {
     pub created_at: String,
     pub init: Init,
     /// The workspace asked for the box's container engine, so every boot serves the fenced socket into it.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub engine: bool,
     /// The project this workspace was made with, where it was made with one: the copy of a checkout this
-    /// computer holds, bound inside at the project's own path by every boot. A record written before any
-    /// workspace took a project reads as one without.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// computer holds, bound inside at the project's own path by every boot.
     pub copy: Option<CopyMade>,
     /// The logins this computer holds and this workspace was made with, mounted into it by every boot: a wake
     /// takes whatever the file says now, which is what makes one sign-in on the computer the workspaces' own.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shares: Vec<Share>,
     /// The folders of this computer's own this workspace was made with, mounted into it by every boot: a
-    /// project's memory folder is one, so every workspace of that project works the same memory. A record
-    /// written before any workspace took one reads as a workspace with none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// project's memory folder is one, so every workspace of that project works the same memory.
     pub binds: Vec<Bind>,
     /// The mount points this workspace's boot made under a tree the rootfs takes from the computer, as the
     /// computer's own paths rather than the paths under the rootfs, which name nothing once the unmount has run.
     /// A shared login is bound at the agent's own path inside, and under /root that path is the computer's own
     /// home, so the empty file the bind lands on is made on the computer's disk: kept here so the stop and the
-    /// remove take off what this workspace put there and nothing the person had. A record written before this
-    /// reads as a workspace that made none. Until this record is written the claim's own points file carries
-    /// them, and what the take-off reads is the two together.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// remove take off what this workspace put there and nothing the person had. Until this record is written
+    /// the claim's own points file carries them, and what the take-off reads is the two together.
     pub made_points: Vec<String>,
 }
 
@@ -1377,17 +1369,11 @@ pub fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
 
 /// The mount points a boot wrote under its claim, or none where the record has taken them over and the file is
 /// gone. This daemon wrote it and no other program reads it, so a name in it the record already carries costs
-/// the take-off nothing: what that removes is an empty file no running record has bound.
-///
-/// A file that does not parse reads as none as well. This daemon writes the file whole or not at all, so a torn
-/// one is an older daemon's death inside its write and what it named is lost with it: an empty file at an
-/// agent's login path, which is the box as it was before any of this was written down. Refusing instead would
-/// refuse that workspace's every stop and remove, and its neighbours' every boot, for as long as the file
-/// stands, with no road out but a delete by hand on the box. The record's own reader is strict still: a
-/// workspace whose record does not read is one nothing here can reason about, and the open says so by name.
+/// the take-off nothing: what that removes is an empty file no running record has bound. The file is written
+/// whole or not at all, so one that does not parse is refused by its path, as a record is.
 pub fn read_points(path: &Path) -> Result<Vec<String>, Error> {
     match fs::read(path) {
-        Ok(text) => Ok(serde_json::from_slice(&text).unwrap_or_default()),
+        Ok(text) => serde_json::from_slice(&text).map_err(|e| Error { path: path.to_owned(), source: io::Error::other(e) }),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(e) => Err(Error { path: path.to_owned(), source: e }),
     }
@@ -1410,16 +1396,12 @@ mod tests {
         Inside { rootfs: root.join("rootfs"), uppers: Layout::new(root).upper_roots(id), id: id.to_owned() }
     }
 
-    /// The one reader of a claim's points takes a file that does not parse as no points, so a file an older
-    /// daemon tore costs that workspace its claim's names and nothing else. The record's reader refuses such a
-    /// file by name still: a workspace whose record does not read is one nothing here can reason about.
     #[test]
-    fn a_points_file_that_does_not_parse_reads_as_absent_and_a_record_that_does_not_still_refuses() {
+    fn a_points_file_or_a_record_that_does_not_parse_is_refused_by_its_path() {
         let dir = tempfile::tempdir().unwrap();
         let points = dir.path().join("points.json");
         fs::write(&points, "[\"/root/.codex/auth.json\"").unwrap();
-        assert!(read_points(&points).unwrap().is_empty(), "a torn claim file refused the read where it had nothing to say");
-        // A whole one answers what it names, and one that is not there answers none, as they both did before.
+        assert!(read_points(&points).unwrap_err().to_string().contains("points.json"));
         write_json(&points, &vec!["/root/.codex/auth.json".to_owned()]).unwrap();
         assert_eq!(read_points(&points).unwrap(), ["/root/.codex/auth.json"]);
         fs::remove_file(&points).unwrap();
@@ -1734,19 +1716,16 @@ mod tests {
         };
         write_json(&path, &record).unwrap();
         assert_eq!(read_record(&path).unwrap(), Some(record.clone()));
-        // A record written before the engine, the copy, the shares and the binds fields existed reads as a
-        // workspace with none of them.
+        // Every field is written, the empty ones too, and a record missing one is refused by its path: nothing
+        // here reads a record another daemon wrote in another shape.
         let written = fs::read_to_string(&path).unwrap();
-        assert!(
-            !written.contains("engine") && !written.contains("copy") && !written.contains("shares") && !written.contains("binds"),
-            "{written}"
-        );
-        assert!(read_record(&path).unwrap().unwrap().shares.is_empty());
-        assert!(read_record(&path).unwrap().unwrap().binds.is_empty());
-        // And a record an older daemon wrote carries no mount point of its own, so a workspace booted then and
-        // removed now takes off nothing it cannot say it made.
-        assert!(!written.contains("madePoints") && read_record(&path).unwrap().unwrap().made_points.is_empty());
-        assert_eq!(read_record(&path).unwrap().unwrap().copy, None);
+        for field in ["\"engine\"", "\"copy\"", "\"shares\"", "\"binds\"", "\"madePoints\""] {
+            assert!(written.contains(field), "{field} missing from {written}");
+        }
+        let mut short: serde_json::Value = serde_json::from_str(&written).unwrap();
+        short.as_object_mut().unwrap().remove("madePoints");
+        fs::write(&path, short.to_string()).unwrap();
+        assert!(read_record(&path).unwrap_err().to_string().contains("workspace.json"));
         write_json(&path, &Workspace { engine: true, ..record.clone() }).unwrap();
         assert!(read_record(&path).unwrap().unwrap().engine);
         let made = CopyMade {
@@ -1759,7 +1738,7 @@ mod tests {
         assert_eq!(read_record(&path).unwrap().unwrap().copy, Some(made));
         assert!(fs::read_to_string(&path).unwrap().contains("\"made\": \"reflink\""));
         // The logins the workspace was made with are the record's too: every boot binds whatever the file says now.
-        let shares = vec![Share { source: "/var/lib/wsp/logins/codex/auth.json".to_owned(), target: "/root/.codex/auth.json".to_owned() }];
+        let shares = vec![Share { source: "/wsp/logins/codex/auth.json".to_owned(), target: "/root/.codex/auth.json".to_owned() }];
         write_json(&path, &Workspace { shares: shares.clone(), ..record.clone() }).unwrap();
         assert_eq!(read_record(&path).unwrap().unwrap().shares, shares);
         // And the folders it was made with, which every boot mounts again: the project's checkout on the computer.

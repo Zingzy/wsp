@@ -8,11 +8,6 @@
 
 use std::path::Path;
 
-/// Where cgroup v2 is mounted when the box runs it; the read-only twin of the self check reads the same root the
-/// freezer writes. Read only on Linux, where a workspace runs.
-#[cfg(target_os = "linux")]
-const CGROUP_ROOT: &str = "/sys/fs/cgroup";
-
 /// The container engine a project's own `docker compose` would run on, when the box has one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Engine {
@@ -111,7 +106,7 @@ pub fn read_facts() -> Facts {
     let engine = engine_on_path(&std::env::var("PATH").unwrap_or_default());
     #[cfg(target_os = "linux")]
     {
-        let controllers = std::fs::read_to_string(Path::new(CGROUP_ROOT).join("cgroup.controllers"));
+        let controllers = std::fs::read_to_string(Path::new(crate::cgroup::CGROUP_ROOT).join("cgroup.controllers"));
         let cgroup2 = controllers.is_ok();
         Facts {
             linux: true,
@@ -280,7 +275,7 @@ mod tests {
     #[test]
     fn a_root_under_a_directory_every_workspace_overlays_is_named_with_that_directory() {
         for (root, lower) in
-            [("/var/lib/wsp", "/var"), ("/usr/local/wsp", "/usr"), ("/etc/wsp", "/etc"), ("/opt/wsp", "/opt"), ("/srv/wsp", "/srv")]
+            [("/var/wsp", "/var"), ("/usr/local/wsp", "/usr"), ("/etc/wsp", "/etc"), ("/opt/wsp", "/opt"), ("/srv/wsp", "/srv")]
         {
             let said = root_under_a_lower(Path::new(root)).unwrap_or_else(|| panic!("{root} read as clear of {lower}"));
             assert!(said.contains(root) && said.contains(lower), "{said}");

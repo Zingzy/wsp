@@ -12,11 +12,8 @@ import {
   WorkspaceView,
   copyPathFor,
   CopyRoad,
-  CopyVerbRoad,
   COPY_WORD,
   folderSlug,
-  IN_PLACE_ROAD,
-  inPlaceRecordLine,
   madeOfWord,
   portsWord,
 } from "../src/index.js";
@@ -87,16 +84,11 @@ describe("what a row says a workspace is made of", () => {
     expect(COPY_WORD).toBe("a copy");
   });
 
-  it("has no road for a folder worked in place: a record does not parse the word, the verb's report still does, and the boot sentence names the record", () => {
+  it("has two roads, and a record or a report naming any other is refused", () => {
     expect(CopyRoad.options).toEqual(["clonefile", "worktree"]);
-    expect(CopyRoad.safeParse(IN_PLACE_ROAD).success).toBe(false);
-    expect(ProjectCopy.safeParse({ road: IN_PLACE_ROAD, path: "/Users/dev/repo", source: "/Users/dev/repo", base: "", branch: "", carried: "nothing" }).success).toBe(false);
-    // The daemon's copy verb keeps the word on its wire, so the contract with a daemon already out there stands.
-    expect(CopyVerbRoad.parse(IN_PLACE_ROAD)).toBe("in-place");
-    expect(CopyReport.safeParse({ ...report, road: IN_PLACE_ROAD }).success).toBe(true);
-    expect(inPlaceRecordLine("ws_1a2b3c4d", "/Users/dev/repo")).toBe(
-      'workspace ws_1a2b3c4d was recorded as /Users/dev/repo worked in place, and every workspace here is a copy now: it is not served, wsp new "<what you are working on>" makes a copy of the project, and the record goes when the state file is moved aside',
-    );
+    expect(CopyRoad.safeParse("in-place").success).toBe(false);
+    expect(ProjectCopy.safeParse({ road: "in-place", path: "/Users/dev/repo", source: "/Users/dev/repo", base: "", branch: "", carried: "nothing" }).success).toBe(false);
+    expect(CopyReport.safeParse({ ...report, road: "in-place" }).success).toBe(false);
   });
 });
 

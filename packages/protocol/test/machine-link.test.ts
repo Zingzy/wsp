@@ -88,7 +88,7 @@ describe("the machine ops on a place link", () => {
   });
 
   it("takes a create that shares the computer's own logins into the workspace, and refuses a path that is not one", () => {
-    const share = { source: "/var/lib/wsp/logins/codex/auth.json", target: "/root/.codex/auth.json" };
+    const share = { source: "/wsp/logins/codex/auth.json", target: "/root/.codex/auth.json" };
     const create = (spec: unknown): boolean => MachineLinkRequest.safeParse({ id: 1, op: "machine.create", spec }).success;
     expect(create({ kind: "sandbox", shares: [share] })).toBe(true);
     // A workspace that shares none is the same frame without the field, and the empty list is no shares either.
@@ -98,7 +98,7 @@ describe("the machine ops on a place link", () => {
     // Both sides are absolute and plain, and neither walks up out of itself: where the file on the computer has
     // to live is the daemon's own wall behind this one, and a bind mount is what cannot be taken back.
     expect(create({ kind: "sandbox", shares: [{ ...share, source: "logins/codex/auth.json" }] })).toBe(false);
-    expect(create({ kind: "sandbox", shares: [{ ...share, source: "/var/lib/wsp/logins/../../root/.ssh/id" }] })).toBe(false);
+    expect(create({ kind: "sandbox", shares: [{ ...share, source: "/wsp/logins/../../root/.ssh/id" }] })).toBe(false);
     expect(create({ kind: "sandbox", shares: [{ ...share, target: "/root/../etc/passwd" }] })).toBe(false);
     expect(create({ kind: "sandbox", shares: [{ ...share, target: "" }] })).toBe(false);
     expect(create({ kind: "sandbox", shares: [{ source: share.source }] })).toBe(false);
@@ -127,7 +127,7 @@ describe("the machine ops on a place link", () => {
     };
     // A provider shares none, so the field is absent there and present on a computer the person owns.
     expect(BackendFacts.parse(facts).logins).toBeUndefined();
-    expect(BackendFacts.parse({ ...facts, logins: "/var/lib/wsp/logins" }).logins).toBe("/var/lib/wsp/logins");
+    expect(BackendFacts.parse({ ...facts, logins: "/wsp/logins" }).logins).toBe("/wsp/logins");
     expect(BackendFacts.safeParse({ ...facts, logins: "logins" }).success).toBe(false);
     expect(BackendFacts.safeParse({ ...facts, logins: "" }).success).toBe(false);
   });

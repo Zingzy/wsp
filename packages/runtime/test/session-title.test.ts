@@ -37,6 +37,8 @@ function titledAdapter(
     keepsNames?: boolean;
     rekeys?: boolean;
     announces?: boolean;
+    /** The harness session a thread's first turn announces, off its prompt; SESSION when absent. */
+    sessionOf?: (prompt: string) => string;
     reader?: HarnessAdapter["sessionTitle"];
     /** What the harness answers when asked to name a thread; absent means a harness that cannot be asked at all. */
     maker?: HarnessAdapter["titleFor"];
@@ -69,7 +71,7 @@ function titledAdapter(
     ...(options.keepsNames === true ? { renameSession: writer } : {}),
     start: o => {
       options.starts?.push(o);
-      const sessionId = o.resume ?? SESSION;
+      const sessionId = o.resume ?? options.sessionOf?.(o.prompt) ?? SESSION;
       const result: TurnResult = { status: "completed", text: options.reply ?? "ok" };
       const emit = (e: AdapterEvent): void => o.onEvent(e);
       let interrupted!: () => void;
@@ -204,10 +206,10 @@ describe("the harness's own title on a thread", () => {
     const codex = createCodexAdapter({ exec: () => { throw new Error("no turns here"); }, home: "/root/.codex", login: "codex login" });
     const { backend } = titledBackend(() => null);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ reader: codex.sessionTitle }) } });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ reader: codex.sessionTitle, sessionOf: () => "-not-a-slug" }) } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     try {
-      await (await rt.sessions.start(ws.id, { prompt: "make a server", resume: "-not-a-slug" })).finished;
+      await (await rt.sessions.start(ws.id, { prompt: "make a server" })).finished;
       const rows = await rt.sessions.list(ws.id);
       expect(rows).toHaveLength(1);
       expect(rows[0]).not.toHaveProperty("harnessTitle");
@@ -225,7 +227,7 @@ describe("the harness's own title on a thread", () => {
     // read it starts: the count and the ids are the refresh's own.
     const { backend, reads } = titledBackend(() => null);
     const { clock, advance } = fakeClock();
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() }, clock });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ sessionOf: prompt => prompt.slice("turn ".length) }) }, clock });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const ids = [...Array(SESSION_TITLE_REFRESH_MAX + 1).keys()].map(i => `s-${String(i).padStart(2, "0")}`);
     for (const id of ids) {
@@ -233,7 +235,7 @@ describe("the harness's own title on a thread", () => {
       // A row's startedAt is the wall clock, which the pick sorts on, so the turns are spaced in it and not only
       // in the runtime's own clock.
       await new Promise(r => setTimeout(r, 2));
-      await (await rt.sessions.start(ws.id, { prompt: `turn ${id}`, resume: id })).finished;
+      await (await rt.sessions.start(ws.id, { prompt: `turn ${id}` })).finished;
     }
     await until(async () => reads.length >= ids.length);
     // One listing inside the window, which waits on every read still in flight from a turn's end.
@@ -250,9 +252,10 @@ describe("the harness's own title on a thread", () => {
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ rekeys: true }) }, clock });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    await (await rt.sessions.start(ws.id, { prompt: "make a server", resume: SESSION })).finished;
+    const first = await rt.sessions.start(ws.id, { prompt: "make a server" });
+    await first.finished;
     advance(1_000);
-    await (await rt.sessions.start(ws.id, { prompt: "and tests", resume: SESSION })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "and tests", thread: first.view().threadId! })).finished;
     // Two rows, one harness session: the adapter minted its own local id per turn, as the codex one does.
     expect((await rt.sessions.list(ws.id)).filter(v => v.claudeSessionId === SESSION)).toHaveLength(2);
 
@@ -534,14 +537,15 @@ describe("the title the harness makes for a thread", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsTitles: false, maker: claude.titleFor }) } });
     try {
       const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-      await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
+      const first = await rt.sessions.start(ws.id, { prompt: OPENING });
+      await first.finished;
       await until(async () => answers.length === 1);
       expect(await titleOf(rt, ws.id)).toBe(OPENING);
       expect((await rt.sessions.list(ws.id))[0]).not.toHaveProperty("titleSource");
       expect(warn.mock.calls.filter(([line]) => String(line).includes("keeps its opening words"))).toHaveLength(1);
 
       // A second turn on the same thread does not ask again: nothing retries in a loop.
-      await (await rt.sessions.start(ws.id, { prompt: "and now the tests", resume: SESSION })).finished;
+      await (await rt.sessions.start(ws.id, { prompt: "and now the tests", thread: first.view().threadId! })).finished;
       await new Promise(r => setTimeout(r, 5));
       expect(answers).toHaveLength(1);
     } finally {
@@ -553,9 +557,10 @@ describe("the title the harness makes for a thread", () => {
     const { backend } = titledBackend(() => null);
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ rekeys: true, maker: async () => "Seed thread titles here" }) } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
+    const first = await rt.sessions.start(ws.id, { prompt: OPENING });
+    await first.finished;
     await until(async () => (await rt.sessions.list(ws.id))[0]?.titleSource === "auto");
-    await (await rt.sessions.start(ws.id, { prompt: "and now the tests", resume: SESSION })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "and now the tests", thread: first.view().threadId! })).finished;
     expect(await titleOf(rt, ws.id)).toBe("Seed thread titles here");
   });
 
@@ -603,9 +608,10 @@ describe("naming a thread from wsp", () => {
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, rekeys: true }) }, clock });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    await (await rt.sessions.start(ws.id, { prompt: "make a server", resume: SESSION })).finished;
+    const first = await rt.sessions.start(ws.id, { prompt: "make a server" });
+    await first.finished;
     advance(1_000);
-    const second = await rt.sessions.start(ws.id, { prompt: "and tests", resume: SESSION });
+    const second = await rt.sessions.start(ws.id, { prompt: "and tests", thread: first.view().threadId! });
     await second.finished;
 
     expect(await rt.sessions.rename(second.id, "the name he typed in wsp")).toEqual({ outcome: "renamed" });
@@ -709,7 +715,7 @@ describe("naming a thread from wsp", () => {
     const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, rekeys: true }) } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    const session = await rt.sessions.start(ws.id, { prompt: "make a server", resume: SESSION });
+    const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
     await session.finished;
     expect(session.id).not.toBe(SESSION);
     await rt.sessions.rename(session.id, "the name");

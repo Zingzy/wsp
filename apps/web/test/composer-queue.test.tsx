@@ -48,7 +48,7 @@ const catalog = (steers: boolean): HarnessCatalog => ({ harness: "claude", label
 
 function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionView[] = [], harnesses?: HarnessCatalog[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
-  const started: Array<{ workspaceId: string; prompt: string; resume?: string; thread?: string }> = [];
+  const started: Array<{ workspaceId: string; prompt: string; thread?: string }> = [];
   const interrupted: string[] = [];
   const steered: Array<{ sessionId: string; prompt: string; requestId: string }> = [];
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
@@ -119,9 +119,10 @@ async function enter(text: string) {
 describe("composer queue", () => {
   it("enter during a turn queues the message, clears the composer and shows no banner; the turn's end sends it", async () => {
     const { api, started, emit } = fixtureApi();
+    const turn = { ...scope, threadId: "thr_0001" };
     await setup(api);
-    emit({ type: "session.start", ...scope, prompt: "go" });
-    emit({ type: "session.delta", ...scope, kind: "text", text: "on it" });
+    emit({ type: "session.start", ...turn, prompt: "go" });
+    emit({ type: "session.delta", ...turn, kind: "text", text: "on it" });
     expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
     expect(isEditable(composerEditor())).toBe(true);
     await enter("what model are you?");
@@ -133,10 +134,10 @@ describe("composer queue", () => {
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByText(/Turn in flight/)).toBeNull();
 
-    emit(done("completed"));
-    emit(end());
+    emit({ type: "session.done", ...turn, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
+    emit({ type: "session.end", ...turn, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ workspaceId: WS, prompt: "what model are you?", resume: "sess_0001" });
+    expect(started[0]).toMatchObject({ workspaceId: WS, prompt: "what model are you?", thread: "thr_0001" });
     expect(queued()).toEqual([]);
     expect(screen.getByText("what model are you?")).toBeDefined();
   });
@@ -356,7 +357,6 @@ describe("composer queue", () => {
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third"]));
     expect(started[0]?.thread).toBeUndefined();
     expect(started[1]).toMatchObject({ thread: "thr_x" });
-    expect(started[1]?.resume).toBeUndefined();
     expect(queued()).toEqual(["second"]);
     const Y = { workspaceId: WS, sessionId: "sess_y", turnId: "turn_y1", threadId: "thr_x" };
     emit({ type: "session.start", ...Y, prompt: "third" });
@@ -365,7 +365,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...Y, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...Y, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third", "second"]));
-    expect(started[2]?.resume).toBe("sess_y");
+    expect(started[2]?.thread).toBe("thr_x");
     expect(queued()).toEqual([]);
   });
 
@@ -376,7 +376,7 @@ describe("composer queue", () => {
     await screen.findByText(/Server is live at :3000\./);
     await enter("go on");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]?.resume).toBe("sess_a");
+    expect(started[0]?.thread).toBe("thr_a");
     await enter("second");
     await enter("third");
     expect(queued()).toEqual(["second", "third"]);
@@ -394,7 +394,7 @@ describe("composer queue", () => {
     expect(queued()).toEqual(["second", "third, edited"]);
     fireEvent.click(within(rowFor("second"), "Send now")!);
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["go on", "second"]));
-    expect(started[1]?.resume).toBe("sess_a");
+    expect(started[1]?.thread).toBe("thr_a");
     expect(queued()).toEqual(["third, edited"]);
     const A3 = { ...A2, turnId: "turn_a3" };
     emit({ type: "session.start", ...A3, prompt: "second" });
@@ -464,7 +464,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...N, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...N, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second"]));
-    expect(started[1]?.resume).toBe("sess_n");
+    expect(started[1]?.thread).toBe("thr_n");
     expect(queued()).toEqual([]);
   });
 
@@ -477,7 +477,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toBeDefined());
     await enter("first");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]?.resume).toBeUndefined();
+    expect(started[0]?.thread).toBeUndefined();
     await enter("second");
     expect(queued()).toEqual(["second"]);
     const X = { workspaceId: WS, sessionId: "sess_x", turnId: "turn_x1", threadId: "thr_x" };
@@ -492,7 +492,6 @@ describe("composer queue", () => {
     expect(queued()).toEqual(["second, edited"]);
     await enter("third");
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third"]));
-    expect(started[1]?.resume).toBeUndefined();
     expect(started[1]?.thread).toBe("thr_x");
     expect(queued()).toEqual(["second, edited"]);
     const Y = { workspaceId: WS, sessionId: "sess_y", turnId: "turn_y1", threadId: "thr_x" };
@@ -501,7 +500,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...Y, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...Y, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third", "second, edited"]));
-    expect(started[2]?.resume).toBe("sess_y");
+    expect(started[2]?.thread).toBe("thr_x");
     expect(queued()).toEqual([]);
   });
 
@@ -558,10 +557,11 @@ describe("composer queue", () => {
   });
 
   it("a reload while the runtime keeps the turn restores the row held; Enter during the turn goes first at its end and the restored row follows", async () => {
-    useComposerDraftStore.getState().enqueue(WS, "what model are you?");
-    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").state.queues[WS]).toHaveLength(1);
+    useComposerDraftStore.getState().enqueue("thr_a", "what model are you?");
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}").state.queues["thr_a"]).toHaveLength(1);
     await reloadStore();
-    const { api, started, emit } = fixtureApi({ [WS]: CHAT_STREAM.slice(0, 3) as SessionEvent[] });
+    const A = CHAT_STREAM.map(e => ({ ...e, threadId: "thr_a" }));
+    const { api, started, emit } = fixtureApi({ [WS]: A.slice(0, 3) });
     await setup(api);
     await screen.findByText(/Creating the server file/);
     expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
@@ -569,14 +569,15 @@ describe("composer queue", () => {
     expect(started).toHaveLength(0);
     await enter("and now?");
     expect(queued()).toEqual(["and now?", "what model are you?"]);
-    for (const e of CHAT_STREAM.slice(7)) emit(e);
+    for (const e of A.slice(7)) emit(e);
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["and now?"]));
     expect(queued()).toEqual(["what model are you?"]);
-    emit({ type: "session.start", ...scope, turnId: "turn_0002", prompt: "and now?" });
-    emit(done("completed", "turn_0002"));
-    emit(end("turn_0002"));
+    const A2 = { ...scope, turnId: "turn_0002", threadId: "thr_a" };
+    emit({ type: "session.start", ...A2, prompt: "and now?" });
+    emit({ type: "session.done", ...A2, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
+    emit({ type: "session.end", ...A2, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["and now?", "what model are you?"]));
-    expect(started[1]?.resume).toBe("sess_0001");
+    expect(started[1]?.thread).toBe("thr_a");
     expect(queued()).toEqual([]);
   });
 
@@ -619,7 +620,7 @@ describe("composer queue", () => {
     ];
     view.rerender(<WorkspaceThread workspaceId={WS} threadId="thr_a" />);
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["hello b", "one for a"]));
-    expect(started[1]?.resume).toBe("sess_a");
+    expect(started[1]?.thread).toBe("thr_a");
     expect(queued()).toEqual([]);
   });
 
@@ -638,7 +639,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...N, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...N, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second"]));
-    expect(started[1]?.resume).toBe("sess_n");
+    expect(started[1]?.thread).toBe("thr_new");
   });
 
   it("rows typed before a fresh thread's start are held when another thread is pinned: nothing goes into it, and the next new thread shows them waiting", async () => {
@@ -665,7 +666,7 @@ describe("composer queue", () => {
     expect(started).toHaveLength(1);
     fireEvent.click(within(rowFor("second"), "Send now")!);
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second"]));
-    expect(started[1]?.resume).toBeUndefined();
+    expect(started[1]?.thread).toBeUndefined();
     expect(queued()).toEqual(["third"]);
     const N = { workspaceId: WS, sessionId: "sess_n", turnId: "turn_n1", threadId: "thr_n" };
     emit({ type: "session.start", ...N, prompt: "second" });
@@ -673,7 +674,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...N, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...N, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second", "third"]));
-    expect(started[2]?.resume).toBe("sess_n");
+    expect(started[2]?.thread).toBe("thr_n");
   });
 
   it("a reload after the turn ended restores the rows and sends nothing; the next message the person sends goes first and they follow in order", async () => {
@@ -730,7 +731,6 @@ describe("composer queue", () => {
     await enter("retry");
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["retry"]));
     expect(started[0]).toMatchObject({ thread: "thr_x" });
-    expect(started[0]?.resume).toBeUndefined();
     const Z = { workspaceId: WS, sessionId: "sess_z", turnId: "turn_z1", threadId: "thr_x" };
     emit({ type: "session.start", ...Z, prompt: "retry" });
     expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
@@ -740,7 +740,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...Z, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...Z, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["retry", "retry later"]));
-    expect(started[1]?.resume).toBe("sess_z");
+    expect(started[1]?.thread).toBe("thr_x");
     expect(queued()).toEqual([]);
   });
 
@@ -765,7 +765,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...A2, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...A2, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one", "two"]));
-    expect(started[1]?.resume).toBe("sess_a");
+    expect(started[1]?.thread).toBe("thr_a");
     expect(queued()).toEqual([]);
   });
 
@@ -792,7 +792,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...N, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...N, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one", "two"]));
-    expect(started[1]?.resume).toBe("sess_n");
+    expect(started[1]?.thread).toBe("thr_n");
     expect(queued()).toEqual([]);
   });
 
@@ -823,7 +823,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...N, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...N, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second"]));
-    expect(started[1]?.resume).toBe("sess_n");
+    expect(started[1]?.thread).toBe("thr_n");
     expect(queued()).toEqual([]);
   });
 
@@ -857,7 +857,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...A2, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...A2, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one", "two"]));
-    expect(started[1]?.resume).toBe("sess_a");
+    expect(started[1]?.thread).toBe("thr_a");
   });
 
   it("a replay gap on a fresh view whose reply ends in a known older thread running does not close the composer for a turn the person never left", async () => {
@@ -888,7 +888,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...N, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...N, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second"]));
-    expect(started[1]?.resume).toBe("sess_n");
+    expect(started[1]?.thread).toBe("thr_n");
   });
 
   it("rows typed before a fresh thread's start follow that thread when its start lands while another thread is pinned, and go when it is opened", async () => {
@@ -927,7 +927,7 @@ describe("composer queue", () => {
     ];
     view.rerender(<WorkspaceThread workspaceId={WS} />);
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second"]));
-    expect(started[1]?.resume).toBe("sess_n");
+    expect(started[1]?.thread).toBe("thr_n");
     expect(queued()).toEqual(["third"]);
   });
 
@@ -953,7 +953,7 @@ describe("composer queue", () => {
     emit({ type: "session.done", ...N, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...N, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second"]));
-    expect(started[1]?.resume).toBe("sess_n");
+    expect(started[1]?.thread).toBe("thr_n");
   });
 
   it("rows typed before a fresh thread's start follow that thread when a replay gap on the pinned thread carries the start", async () => {

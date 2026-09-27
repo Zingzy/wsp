@@ -455,8 +455,8 @@ describe("the status ticks", () => {
     const dark: StatusRecord = {
       id: "ws_a",
       name: "box",
-      machineId: "ssh://dev@box:22",
-      kind: "ssh",
+      machineId: "m_box",
+      kind: "cloud",
       phase: "running",
       golden: "",
       project: { id: "pr_1a2b3c4d", name: "box", path: "/home/dev/box", computer: "pl_box" },

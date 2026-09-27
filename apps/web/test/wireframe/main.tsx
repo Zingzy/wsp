@@ -619,7 +619,7 @@ if (screen === "sidebar-hosts") {
 }
 if (screen === "settings-keybindings" || screen === "settings-about" || screen === "settings-about-behind" || screen === "settings-about-restart") {
   window.wsp = { version: "0.2.0" };
-  (window as unknown as { __WSP__?: { wsPort: number; paired: boolean; version: string } }).__WSP__ = { wsPort: 0, paired: true, version: "0.2.0" };
+  (window as unknown as { __WSP__?: { paired: boolean; version: string } }).__WSP__ = { paired: true, version: "0.2.0" };
 }
 if (screen === "settings-about-behind") {
   const held = window as unknown as { finishBundle?: () => void };

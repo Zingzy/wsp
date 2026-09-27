@@ -124,7 +124,7 @@ const PLACES: PlaceView[] = [
 ];
 /** What the dialog makes a workspace of: one project on the computer these tests fork at. */
 const PROJECTS: ProjectView[] = [
-  { id: "pr_1", name: "spoo-landing", computer: "box", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/var/lib/wsp/projects/pr_1/memory", createdAt: "t" },
+  { id: "pr_1", name: "spoo-landing", computer: "box", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/wsp/projects/pr_1/memory", createdAt: "t" },
 ];
 /** What a row calls the provider these tests fork at, through the one rule every surface names a computer by. */
 const BOX_NAME = placeName(PLACES[1]!);
@@ -496,7 +496,7 @@ describe("Solari out of reach from this computer", () => {
 
 describe("a window on another computer while the wsp it shows is asleep", () => {
   const served = (here: boolean) => {
-    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: here, version: "0.0.0", ...(here ? { wsPort: 7788, tokenHash: "a".repeat(64) } : {}) };
+    (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: here, version: "0.0.0", ...(here ? { tokenHash: "a".repeat(64) } : {}) };
   };
 
   afterEach(() => {

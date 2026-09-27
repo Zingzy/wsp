@@ -52,8 +52,8 @@ describe("makeApi wrappers", () => {
     const { api, lastSent } = await connect();
     const session = { id: "s1", workspaceId: "ws_1", harness: "claude", status: "running" };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, session });
-    const got = await api.startSession({ workspaceId: "ws_1", prompt: "fix it", resume: "claude-sid" });
-    expect(lastSent()).toMatchObject({ op: "sessions.start", workspaceId: "ws_1", prompt: "fix it", resume: "claude-sid" });
+    const got = await api.startSession({ workspaceId: "ws_1", prompt: "fix it", thread: "thr_1" });
+    expect(lastSent()).toMatchObject({ op: "sessions.start", workspaceId: "ws_1", prompt: "fix it", thread: "thr_1" });
     expect(got).toEqual(session);
   });
 
@@ -247,14 +247,14 @@ describe("makeApi wrappers", () => {
     const { api, sock } = await connect();
     // The host writes the open reply and the daemon's hello back to back; two frames in one read reach the client
     // before the microtask that resolves the open, so the hello must wait for the listener rather than be dropped.
-    const hello = { type: "daemon.event", channel: "ch_1", event: { type: "daemon.hello", root: "/root" } };
+    const hello = { type: "daemon.event", channel: "ch_1", event: { type: "daemon.hello", root: "/root", version: 2 } };
     sock.onmessage!({ data: JSON.stringify(hello) });
     const held: unknown[] = [];
     api.daemon.onFrame("ch_1", e => held.push(e));
     expect(held).toEqual([hello]);
 
     // A channel dies with the socket that opened it, so nothing held for one outlives a redial.
-    sock.onmessage!({ data: JSON.stringify({ type: "daemon.event", channel: "ch_2", event: { type: "daemon.hello", root: "/root" } }) });
+    sock.onmessage!({ data: JSON.stringify({ type: "daemon.event", channel: "ch_2", event: { type: "daemon.hello", root: "/root", version: 2 } }) });
     sock.drop(1006);
     await until(() => ScriptedSocket.instances.length > 1);
     const late: unknown[] = [];

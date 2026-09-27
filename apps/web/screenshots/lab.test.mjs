@@ -190,7 +190,7 @@ describe("the fixtures a lab serves", () => {
   });
 
   it("puts no two workspaces on one machine, since that is a sidebar wsp refuses to make", () => {
-    // The runtime refuses a second workspace on a machine that already carries one (`alreadyRecorded`), and this
+    // The runtime puts no second workspace on a machine that already carries one, and this
     // computer is one machine, so four local rows is a state nobody can reach. A tester read three rows and could
     // not say which computer two of them were on.
     for (const name of FIXTURE_NAMES) {
@@ -742,11 +742,11 @@ describe("what a lab tells the tester who starts it", () => {
   });
 
   it("names the address a machine dials this host at, since without one no thread's tools act as that thread", () => {
-    const argv = hostArgv({ statePath: "/lab/.wsp/state.json", port: 4123, wsPort: 4124, advertise: "http://127.0.0.1:4123" });
+    const argv = hostArgv({ statePath: "/lab/.wsp/state.json", port: 4123, advertise: "http://127.0.0.1:4123" });
     // The machines a lab's forks stand on are this computer, so the address is its own loopback. Without one the
     // runtime hands a turn no token: no opener on a thread a thread opened, no cap, no tree.
     expect(argv.slice(-2)).toEqual(["--advertise", "http://127.0.0.1:4123"]);
-    expect(hostArgv({ statePath: "/lab/.wsp/state.json", port: 4123, wsPort: 4124 })).not.toContain("--advertise");
+    expect(hostArgv({ statePath: "/lab/.wsp/state.json", port: 4123 })).not.toContain("--advertise");
   });
 
   it("starts a host on this computer's own path, not the path the shell that started the lab was given", async () => {

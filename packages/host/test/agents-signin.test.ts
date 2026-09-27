@@ -23,7 +23,7 @@ const rootBox = (): AgentsOn => ({
   kind: "box",
   machine: { exec: async () => ({ exitCode: 0, stdout: "Linux\n0\nroot\nada\n1\n/root\n/usr/bin\n", stderr: "" }) } as unknown as Pick<Machine, "exec">,
   login: { HOME: "/home/ada", PATH: "/usr/local/bin:/usr/bin" },
-  logins: "/var/lib/wsp/logins",
+  logins: "/wsp/logins",
 });
 const fork = (): AgentsOn => ({ kind: "machine", machine: { exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }) } as never, projects: [{ id: "pr_landing", name: "landing", path: "/root/landing" }] });
 /** A workspace whose callback port this host forwards from this computer. */
@@ -54,8 +54,8 @@ describe("the line a sign-in runs where it stands", () => {
     const plan = await planSignIn(rootBox(), { agent: "codex" });
     expect(plan.line).toEqual({
       command: "codex login --device-auth",
-      env: { CODEX_HOME: "/var/lib/wsp/logins/codex" },
-      prepare: "mkdir -p '/var/lib/wsp/logins/codex'",
+      env: { CODEX_HOME: "/wsp/logins/codex" },
+      prepare: "mkdir -p '/wsp/logins/codex'",
       status: "codex login status",
     });
     // Off a box the same login is the tool's own, in the home.
@@ -144,15 +144,15 @@ describe("a watched sign-in", () => {
       setTimeout(() => (signedIn = true), 40);
     }, plan);
     await t.done;
-    expect(t.link.ops[0]).toEqual({ op: "exec", extra: { cmd: "mkdir -p '/var/lib/wsp/logins/codex'" } });
+    expect(t.link.ops[0]).toEqual({ op: "exec", extra: { cmd: "mkdir -p '/wsp/logins/codex'" } });
     const [flow] = t.link.ptys;
-    expect(flow!.created["env"]).toEqual({ CODEX_HOME: "/var/lib/wsp/logins/codex" });
+    expect(flow!.created["env"]).toEqual({ CODEX_HOME: "/wsp/logins/codex" });
     expect(flow!.ran).toBe("codex login --device-auth");
     expect(t.steps[0]).toEqual({ state: "running" });
     expect(t.steps).toContainEqual({ state: "waiting", url: "https://auth.openai.com/codex/device", code: "ABCD-12345", paste: false });
     expect(t.steps.at(-1)).toEqual({ state: "signed-in" });
     // Every status ran with the same store as the flow.
-    expect(t.link.ptys.slice(1).every(p => (p.created["env"] as Record<string, string>)["CODEX_HOME"] === "/var/lib/wsp/logins/codex")).toBe(true);
+    expect(t.link.ptys.slice(1).every(p => (p.created["env"] as Record<string, string>)["CODEX_HOME"] === "/wsp/logins/codex")).toBe(true);
     expect(flow!.killed).toBe(true);
   });
 

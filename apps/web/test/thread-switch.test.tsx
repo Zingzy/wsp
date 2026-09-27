@@ -219,14 +219,14 @@ describe("switching threads while a turn runs", () => {
     expect(threadRow("do you have access").getAttribute("data-active")).toBe("true");
   });
 
-  it("a send from an older thread's view resumes that thread's session, and from the latest view the latest one", async () => {
+  it("a send from an older thread's view names that thread, and from the latest view the latest one", async () => {
     const { started, center, threadRow, editor } = await mount();
     fireEvent.click(threadRow("make me a simple server"));
     await center().findByText("Added GET /health.");
     await typeInto(editor(), "add a readiness route too");
     await press(editor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ workspaceId: WS, prompt: "add a readiness route too", resume: "sess_a" });
+    expect(started[0]).toMatchObject({ workspaceId: WS, prompt: "add a readiness route too", thread: "thr_a" });
     await center().findByText("add a readiness route too");
     fireEvent.click(threadRow("do you have access"));
     await center().findByText("Checking the keychain.");
@@ -271,7 +271,7 @@ describe("switching threads while a turn runs", () => {
     await center().findByText(/Adding GET \/ready\. Wiring it in\./);
   });
 
-  it("with two threads running, a send from the latest view resumes the thread it shows, not the one started last", async () => {
+  it("with two threads running, a send from the latest view names the thread it shows, not the one started last", async () => {
     const A2 = { ...A, turnId: "turn_a2" };
     const transcript: SessionEvent[] = [
       ...SETTLED_A,
@@ -292,7 +292,7 @@ describe("switching threads while a turn runs", () => {
     await typeInto(editor(), "check the login keychain too");
     await press(editor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ prompt: "check the login keychain too", resume: "sess_b" });
+    expect(started[0]).toMatchObject({ prompt: "check the login keychain too", thread: "thr_b" });
     const B2 = { ...B, turnId: "turn_b2" };
     emit({ type: "session.start", ...B2, at: T0 + 120_000, prompt: "check the login keychain too" });
     emit({ type: "session.delta", ...B2, at: T0 + 120_300, kind: "text", text: "Login keychain is unlocked." });
@@ -327,7 +327,7 @@ describe("switching threads while a turn runs", () => {
     await press(editor(), "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]).toMatchObject({ workspaceId: WS, prompt: "third thread" });
-    expect(started[0]).not.toHaveProperty("resume");
+    expect(started[0]).not.toHaveProperty("thread");
     const C = { workspaceId: WS, sessionId: "sess_c", turnId: "turn_c", threadId: "thr_c" };
     emit({ type: "session.start", ...C, at: T0 + 120_000, prompt: "third thread" });
     emit({ type: "session.delta", ...C, at: T0 + 120_300, kind: "text", text: "Third answer." });

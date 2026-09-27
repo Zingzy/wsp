@@ -4,7 +4,7 @@
 // that runs its commands. Both callers that put a file on a machine read the
 // machine for which, so nothing above them says which kind it holds.
 import { describe, expect, it } from "vitest";
-import { SSH_BYTES_OK, SshBackend, landBytes, putBytesScript, sshArgs, type ExecResult, type Machine, type SshReach, type SshTransport } from "../src/index.js";
+import { SSH_BYTES_OK, SshMachine, landBytes, putBytesScript, sshArgs, type ExecResult, type Machine, type SshReach, type SshTransport } from "../src/index.js";
 
 const REACH: SshReach = { user: "maya", host: "box", port: 2222 };
 
@@ -22,7 +22,7 @@ function fakeTransport(): { transport: SshTransport; carried: { script: string; 
 describe("bytes onto a machine reached over ssh", () => {
   it("ride the connection's stdin under a script that names the path", async () => {
     const { transport, carried } = fakeTransport();
-    const machine = await new SshBackend({ transport }).get("ssh://maya@box:2222");
+    const machine = new SshMachine(REACH, transport);
     const bytes = new Uint8Array([1, 2, 3, 4, 5]);
     await machine.putBytes!("/home/maya/.wsp/daemon.tgz", bytes);
     expect(carried).toHaveLength(1);
@@ -42,7 +42,7 @@ describe("bytes onto a machine reached over ssh", () => {
 
   it("says what did not land rather than leaving a half file behind", async () => {
     const transport: SshTransport = async () => ({ exitCode: 1, stdout: "WSP_BYTES_SHORT\n", stderr: "" });
-    const machine = await new SshBackend({ transport }).get("ssh://maya@box:2222");
+    const machine = new SshMachine(REACH, transport);
     await expect(machine.putBytes!("/home/maya/x", new Uint8Array(9))).rejects.toThrow("9 bytes did not land at /home/maya/x over ssh (exit 1)");
   });
 
@@ -76,7 +76,7 @@ function urlMachine(puts: { url: string; bytes: Uint8Array }[]): Machine {
 describe("landBytes", () => {
   it("takes the machine's own road when it has one", async () => {
     const { transport, carried } = fakeTransport();
-    const machine = await new SshBackend({ transport }).get("ssh://maya@box:2222");
+    const machine = new SshMachine(REACH, transport);
     await landBytes(machine, "/home/maya/f", new Uint8Array([7, 7]));
     expect(carried).toHaveLength(1);
     expect(carried[0]!.stdin).toEqual(new Uint8Array([7, 7]));

@@ -24,7 +24,7 @@
       },
       "shares": [
         {
-          "source": "/var/lib/wsp/logins/codex/auth.json",
+          "source": "/wsp/logins/codex/auth.json",
           "target": "/root/.codex/auth.json"
         }
       ],
