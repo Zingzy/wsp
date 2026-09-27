@@ -79,7 +79,7 @@ import { collapseExpandedComposerCursor, composerSubmissionIntentForEnter, detec
 import { hostItemText, serializeComposerMention, splitPromptIntoComposerSegments } from "../../composer-editor-mentions";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { asideQuestion, catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
-import { AsideSheet } from "./AsideSheet";
+import { AsideStrip } from "./AsideStrip";
 import { canPickFolder, ComposerCheckoutRow, HomeCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import type { ComposerCommandGroup } from "./composerCommandGroups";
@@ -577,6 +577,12 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     [api, latestRow],
   );
 
+  /** The strip goes, and an answer still on its way lands nowhere. */
+  const closeAside = useCallback(() => {
+    asked.current += 1;
+    setAside(null);
+  }, []);
+
   const send = useCallback(() => {
     // The same reading the slot and the send button are already wearing: an Enter that lands here leaves the draft
     // where it was typed and that line standing.
@@ -910,7 +916,8 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   );
 
   return (
-    <div className="w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
+    <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
+      {aside !== null ? <AsideStrip {...aside} onClose={closeAside} /> : null}
       {/* The refusal takes room only while it holds a sentence, which wraps to two lines at most: at the smallest
           window with the right panel open a cut would drop the half that says what happens next. */}
       <div className={cn("mx-auto flex w-full max-w-3xl items-center px-3", line !== null && "min-h-9 pb-1")} aria-live="polite" data-composer-refusal>
@@ -1043,15 +1050,6 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
           />
         )}
       </ComposerSurface.Shell>
-      {aside !== null ? (
-        <AsideSheet
-          {...aside}
-          onClose={() => {
-            asked.current += 1;
-            setAside(null);
-          }}
-        />
-      ) : null}
     </div>
   );
 }

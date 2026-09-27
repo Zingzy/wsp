@@ -767,7 +767,7 @@ describe("a side question from the composer", () => {
     expect(groupLabels()).toEqual(["Commands", "wsp"]);
   });
 
-  it("a /btw send asks the host, starts no turn, and the sheet goes from asking to the answer and away on Esc", async () => {
+  it("a /btw send asks the host, starts no turn, and the strip above the box goes from asking to the answer and away on Esc", async () => {
     const { api, started, asked, answer } = asking(true);
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
@@ -784,12 +784,21 @@ describe("a side question from the composer", () => {
     await waitFor(() => expect(asked).toEqual([{ sessionId: "sess_local_1", question: "what did I last ask?" }]));
     expect(started).toHaveLength(0);
     expect(draft()).toBe("");
-    const sheet = await screen.findByRole("dialog");
-    expect(sheet.querySelector('[data-k="aside-asking"]')).not.toBeNull();
+    // No dialog: the strip grows above the box inside the composer, out of the flow the thread's inset reads, so
+    // nothing else moves.
+    const strip = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-chat-composer] [data-k="aside-strip"]');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(strip.className).toContain("absolute");
+    expect(strip.className).toContain("bottom-full");
+    expect(strip.querySelector('[data-k="aside-asking"]')).not.toBeNull();
     answer("You asked for a hello world server on :3000.");
-    await waitFor(() => expect(sheet.querySelector('[data-k="aside-answer"]')?.textContent).toContain("You asked for a hello world server on :3000."));
-    await act(async () => { fireEvent.keyDown(sheet, { key: "Escape" }); });
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(strip.querySelector('[data-k="aside-answer"]')?.textContent).toContain("You asked for a hello world server on :3000."));
+    await act(async () => { fireEvent.keyDown(window, { key: "Escape" }); });
+    await waitFor(() => expect(document.querySelector('[data-k="aside-strip"]')).toBeNull());
     // Nothing of it reached the thread: no row in the transcript, no turn.
     expect(screen.queryByText(/hello world server/)).toBeNull();
     expect(started).toHaveLength(0);
