@@ -249,7 +249,7 @@ export function serversActs(o: ServersActsOptions = {}): ServersActs {
         return format.argRef(name);
       });
       const placed = formatted(shown, () => format.place(read.text, ask.name, byName));
-      const named = await format.refer(placed.text, ask.name, [], new Set(Object.keys(o.vault?.held() ?? {}))).catch((e: unknown) =>
+      const named = await format.refer(placed.text, ask.name, [], new Set([...Object.keys(o.vault?.held() ?? {}), ...Object.keys(given)])).catch((e: unknown) =>
         formatted(shown, () => {
           throw e;
         }),

@@ -5304,6 +5304,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const nameGiven = (name: string): string => name.trim();
   /** Names whose fork is between its check and its first machine: held here so two forks asked for together cannot both land. */
   const forking = new Set<string>();
+  /** Creates that failed before any machine was recorded, by the id their stages carried: every client keeps a row
+   * for one until it is deleted, so resolve and delete reach it here. */
+  const failedCreates = new Map<string, WorkspaceView>();
   /** Why a fork of this name is refused, or nothing when the name is free: one entry holds it, whatever it is doing
    * (a delete in flight says so), or a fork of it is under way. A name never names two workspaces, and a fork and a
    * delete of one name never interleave. */
@@ -5453,6 +5456,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw Object.assign(new Error(refusal), { kind: "conflict" });
       }
       forking.add(o.name);
+      // A create asked again under the name supersedes the one that failed under it, and every client's row of it.
+      for (const [failedId, failed] of failedCreates) {
+        if (failed.name !== o.name) continue;
+        failedCreates.delete(failedId);
+        bus.emit({ type: "workspace.deleted", workspaceId: failedId });
+      }
       const id = `ws_${randomBytes(4).toString("hex")}`;
       const began = clock.now();
       // Who asked rides every stage from the first, which is emitted before the fork has a record: the stream's
@@ -5493,8 +5502,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
         // The id dies with a failed create, so nothing could ever retry under its key.
         await store.delete(CREATES, `workspace/${id}`);
-        report("failed", e instanceof Error ? e.message : String(e));
+        const said = e instanceof Error ? e.message : String(e);
+        report("failed", said);
         if (kept !== undefined) bus.emit({ type: "workspace.created", workspace: view(kept.record) });
+        else failedCreates.set(id, { id, name: o.name, machineId: "", phase: "gone", kind, golden: o.golden ?? "", createdAt: new Date(began).toISOString(), project: refOf(project), gone: said });
         throw e;
       } finally {
         forking.delete(o.name);
@@ -5538,6 +5549,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = exact ?? started[0];
       if (entry === undefined) {
         if (scope !== undefined) throw notFoundRefusal(noWorkspaceRefusal(ref));
+        const failed = [...failedCreates.values()].find(v => v.id === ref || v.name === ref);
+        if (failed !== undefined) return failed;
         // A computer somebody joined is a place, and a place is no workspace: the word is answered with the road to
         // one there rather than with absence, since the person typed the name of something this host does hold.
         const place = (await placeDoor?.find(ref)) ?? [];
@@ -5799,6 +5812,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async delete(id, origin) {
       spawnGuard("delete", origin);
+      if (scopeOf(origin) === undefined && !live.has(id) && failedCreates.delete(id)) {
+        bus.emit({ type: "workspace.deleted", workspaceId: id });
+        return;
+      }
       const entry = await entryOf(id, origin);
       if (entry.deleting) return entry.deleting;
       entry.deleting = (async () => {
@@ -9095,7 +9112,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * silence as a machine that died. */
   const awayLine = (record: WorkspaceRecord): string | undefined => {
     const at = workspacePlace(record);
-    if (at === undefined || placeDoor === undefined || placeDoor.link(at) !== undefined) return undefined;
+    if (at === undefined || placeDoor === undefined || !placeAway(at)) return undefined;
     return absentComputer(placeDoor.nameOf(at), null).sentence;
   };
 

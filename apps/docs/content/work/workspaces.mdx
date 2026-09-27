@@ -9,7 +9,7 @@ A workspace is a machine forked from your golden image, with your setup already 
 ```bash
 wsp new dev
 wsp new dev-2 --from app            # from a project golden, project in place
-wsp new gate --size 2x8             # a size the provider offers
+wsp new gate --size 2x4             # a size the provider offers
 wsp fork dev --name dev-3           # a sibling from dev's golden version
 wsp fork dev --send "Run the gate." # and open its first thread
 ```
@@ -18,7 +18,7 @@ wsp fork dev --send "Run the gate." # and open its first thread
 
 `wsp fork` makes a sibling from another workspace's golden version. It is a new machine, not a copy of the source's live disk: work on the source's disk is not on the fork. Fork from a project golden when the fork needs the project. With `--send` the fork opens its first thread, and `run`'s flags follow. When that first turn fails, the workspace still exists and the error names it; continue with `wsp run` on it rather than forking again.
 
-`--size` is `<cpu>x<memGb>`. The provider offers `2x4` and `2x8`; a size it does not offer is refused in one line that lists the ones it does with the rate of each. Absent, a workspace takes the golden's size.
+`--size` is `<cpu>x<memGb>`. The provider offers `2x4` alone, since a fork asked for `2x8` came up with 4 GB; a size it does not offer is refused in one line that lists the ones it does with the rate of each. Absent, a workspace takes the golden's size.
 
 The account runs two machines at once. A third `new` or `fork` is refused; the builder stays up ten minutes after a seal and counts as one.
 

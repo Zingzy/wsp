@@ -9,7 +9,7 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import { afterEach, describe, expect, it } from "vitest";
 import { HOSTNAME_KEPT, type WorkspaceView } from "@wsp/protocol";
 import { localZoneLabel } from "../src/lib/timestampFormat.js";
-import { useStore, type Creation, type CreationLine } from "../src/protocol/store.js";
+import { explainCreateRefusal, useStore, type Creation, type CreationLine } from "../src/protocol/store.js";
 import { WorkspaceCreation } from "../src/shell/WorkspaceCreation.js";
 
 afterEach(cleanup);
@@ -33,7 +33,7 @@ function failed(count: number): Creation {
     askedAt: Date.now(),
     workspaceId: "ws_beta",
     lines: lines(count),
-    failed: { title: "The provider refused: no more workspaces can run there now", detail: CAP_LINE },
+    failed: { title: "Couldn't start beta: the provider has no room to start another now", detail: CAP_LINE },
   };
 }
 
@@ -44,6 +44,17 @@ const mount = async (creation: Creation) => {
 };
 
 describe("workspace creation layout", () => {
+  it("names what it is making, in flight and refused, and never says task or workspace", async () => {
+    const asking: Creation = { key: "creating:beta", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null };
+    let view = await mount(asking);
+    expect(view.textContent).toContain("Starting");
+    expect(view.textContent).not.toMatch(/\b(tasks?|workspaces?)\b/i);
+    cleanup();
+    view = await mount({ ...asking, lines: [], failed: explainCreateRefusal(new Error("Snapshot not found"), "beta") });
+    expect(view.textContent).toContain("Couldn't start beta");
+    expect(view.textContent).not.toMatch(/\b(tasks?|workspaces?)\b/i);
+  });
+
   it("centres the eyebrow, the name, the refusal sentence and the buttons on one column", async () => {
     const view = await mount(failed(2));
     const column = view.firstElementChild!;
@@ -56,7 +67,7 @@ describe("workspace creation layout", () => {
 
   it("keeps the refusal's lead red, says the failing line's words once, Retry tactile and Dismiss as text", async () => {
     const view = await mount(failed(2));
-    const lead = within(view).getByText("The provider refused: no more workspaces can run there now");
+    const lead = within(view).getByText("Couldn't start beta: the provider has no room to start another now");
     expect(lead.className).toContain("text-destructive-foreground");
     expect(lead.nextElementSibling).toBeNull();
     expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);

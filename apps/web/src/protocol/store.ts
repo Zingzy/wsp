@@ -71,16 +71,19 @@ export interface CreateRefusal {
   readonly detail: string;
 }
 
-export function explainCreateRefusal(error: unknown): CreateRefusal {
+/** A refused create's lead names what was being made rather than a word for the kind of thing it is. */
+const couldNotStart = (name: string): string => `Couldn't start ${name}`;
+
+export function explainCreateRefusal(error: unknown, name: string): CreateRefusal {
   const message = error instanceof Error ? error.message : String(error);
   // The runtime names the machines holding the slots and the move that frees one; a second wording here would say less.
   if (error instanceof RequestError && error.kind === "concurrency") {
-    return { title: "The provider refused: no more tasks can run there now", detail: message };
+    return { title: `${couldNotStart(name)}: the provider has no room to start another now`, detail: message };
   }
   if (error instanceof DisconnectedError) {
     return { title: "Not connected to the runtime", detail: message };
   }
-  return { title: "Could not create the task", detail: message };
+  return { title: couldNotStart(name), detail: message };
 }
 
 interface State {
@@ -351,7 +354,7 @@ export const useStore = create<State>((set, get) => {
       const message = e instanceof Error ? e.message : String(e);
       patchCreation(key, c => ({
         ...c,
-        failed: explainCreateRefusal(e),
+        failed: explainCreateRefusal(e, name),
         lines: c.lines.at(-1)?.stage === "failed" ? c.lines : [...c.lines, { stage: "failed", message, at: new Date().toISOString(), elapsedMs: c.lines.at(-1)?.elapsedMs ?? 0 }],
       }));
       return null;
@@ -640,6 +643,10 @@ export const useStore = create<State>((set, get) => {
       await runCreation(key, creation.project, creation.name, { ...(creation.golden !== undefined ? { golden: creation.golden } : {}), ...(creation.size !== undefined ? { size: creation.size } : {}) });
     },
     dismissCreation(key) {
+      // The runtime holds a create that failed with the id its stages carried, so every client's row goes with it.
+      const workspaceId = get().creations.find(c => c.key === key)?.workspaceId ?? null;
+      const deleting = get().api?.deleteWorkspace;
+      if (workspaceId !== null && deleting !== undefined) void deleting(workspaceId).catch((e: unknown) => noticeFailure(e));
       set(s => {
         const project = s.creations.find(c => c.key === key)?.project;
         // The next row is one of the same project's, never the sidebar's first, which may be another project's.
@@ -865,8 +872,11 @@ export const useStore = create<State>((set, get) => {
             const { [e.workspaceId]: _p, ...spending } = s.spending;
             const { [e.workspaceId]: _r, ...sessions } = s.sessions;
             const { [e.workspaceId]: _b, ...broughtBack } = s.broughtBack;
+            const creation = s.creations.find(c => c.workspaceId === e.workspaceId);
             return {
               workspaces: s.workspaces.filter(x => x.id !== e.workspaceId),
+              creations: s.creations.filter(c => c !== creation),
+              ...(creation !== undefined && s.selectedId === creation.key ? { selectedId: null } : {}),
               statuses,
               costs,
               spending,
@@ -945,7 +955,7 @@ export const useStore = create<State>((set, get) => {
             // too. Two clients creating the same name at once can swap logs until the reply lands, and workspace.created
             // settles which row is whose; the runtime's id is not known here any earlier than its first stage.
             const own = s.creations.find(c => c.workspaceId === e.workspaceId) ?? s.creations.find(c => c.workspaceId === null && c.name === e.name && c.failed === null);
-            const failed = e.stage === "failed" ? { title: "Could not create the task", detail: e.message } : null;
+            const failed = e.stage === "failed" ? { title: couldNotStart(e.name), detail: e.message } : null;
             if (own === undefined) {
               return { creations: [...s.creations, { key: `creating:${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
             }
