@@ -42,7 +42,6 @@ export interface Launch {
 
 export interface OpenHostOptions {
   port: number;
-  wsPort: number;
   statePath: string;
   webDir: string;
   io: CliIO;
@@ -223,17 +222,16 @@ function loggedTo(io: CliIO, logPath: string): CliIO {
 
 /** Attaches to the host already serving this state file, which its lock names
  * and this window has proof of, else opens on the host a line with no name on
- * it takes, else starts one the way the wsp bin does. Defaults held by
- * anything else give way to free ports. */
+ * it takes, else starts one the way the wsp bin does. A default port held
+ * by anything else gives way to a free one. */
 export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
   const held = await lockedHost(opts.statePath);
   if (held !== undefined) return held;
   const away = await accountSession(opts);
   if (away !== undefined) return away;
-  const defaultsFree = (opts.port === 0 || (await canListen(opts.port))) && (opts.wsPort === 0 || (await canListen(opts.wsPort)));
-  const ports = defaultsFree ? { port: opts.port, wsPort: opts.wsPort } : { port: 0, wsPort: 0 };
+  const port = opts.port === 0 || (await canListen(opts.port)) ? opts.port : 0;
   const handle = await serve(loggedTo(opts.io, hostLogPath(opts.statePath)), {
-    ...ports,
+    port,
     statePath: opts.statePath,
     webDir: opts.webDir,
     ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),

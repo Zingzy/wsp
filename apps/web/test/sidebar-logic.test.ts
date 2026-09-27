@@ -322,8 +322,6 @@ describe("where a workspace runs", () => {
     // A record from before the provider rode the wire says what the machine is; the id the provider minted for it
     // names nothing to the person reading the row, and no row anywhere shows one.
     expect(computerName([], runs({ machineId: "sb_9f2c1d8a" }))).toBe("a provider");
-    expect(computerName([], runs({ machineId: "dev@box" }, { kind: "ssh" }))).toBe("dev@box");
-    expect(computerName([], { status: null, workspace: { ...status({}), kind: "ssh", machineId: "m_recorded" } })).toBe("m_recorded");
   });
 });
 

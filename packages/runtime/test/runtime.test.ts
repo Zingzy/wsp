@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { execFailedLine, machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape, type ThreadScope } from "@wsp/protocol";
+import { execFailedLine, machineUnreachableLine, projectNeedsReaddLine, STATE_SHAPE, type StateShape } from "@wsp/protocol";
 import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type ExecStream, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, DISK_SYNC_CMD, ExecFailedError, GuestUnusableError, KILL_ASKS, MachineUnreachableError, TOOLS_PATH, type ExecResult, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
@@ -629,8 +629,9 @@ describe("runtime session history", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const before = Date.now();
-    await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
-    await (await rt.sessions.start(ws.id, { prompt: "second", resume: sessionId })).finished;
+    const first = await rt.sessions.start(ws.id, { prompt: "first" });
+    await first.finished;
+    await (await rt.sessions.start(ws.id, { prompt: "second", thread: first.view().threadId! })).finished;
     const after = Date.now();
 
     const history = await rt.sessions.history(ws.id);
@@ -676,13 +677,11 @@ describe("runtime session history", () => {
     await rt.close();
   });
 
-  /** Emits one full turn per start, under the resume id when given, else a fresh id; `rekey` makes a resumed
-   * start announce a different id in system/init, as the CLI is allowed to. */
-  const threaded = (rekey?: (resume: string) => string): HarnessAdapterFactory => () => ({
+  /** Emits one full turn per start, under the resume id when given, else a fresh id. */
+  const threaded = (): HarnessAdapterFactory => () => ({
     steers: false,
     start: o => {
-      const localId = o.resume ?? randomUUID();
-      const sessionId = o.resume !== undefined && rekey !== undefined ? rekey(o.resume) : localId;
+      const sessionId = o.resume ?? randomUUID();
       const result: TurnResult = { status: "completed", text: o.prompt };
       const finished = Promise.resolve().then(() => {
         o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
@@ -691,7 +690,7 @@ describe("runtime session history", () => {
         o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
         return result;
       });
-      return { localId, finished, interrupt: async () => {} };
+      return { localId: sessionId, finished, interrupt: async () => {} };
     },
   });
   /** Counts runs of one threadId in wire order. Enough here, where turns never overlap; a consumer folding a
@@ -700,14 +699,14 @@ describe("runtime session history", () => {
     events.reduce((n, e, i) => (i === 0 || e.threadId !== events[i - 1]!.threadId ? n + 1 : n), 0);
   const UUID = /^[0-9a-f-]{36}$/;
 
-  it("stamps a threadId that resume keeps and a start without resume replaces, so two threads replay as two", async () => {
+  it("stamps a threadId that a send into the thread keeps and a start without a thread replaces, so two threads replay as two", async () => {
     const live: EventUnion[] = [];
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded() } });
     rt.events.on("*", e => live.push(e));
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
-    const resume = (await rt.workspaces.get(ws.id)).claudeSessionId!;
-    await (await rt.sessions.start(ws.id, { prompt: "second", resume })).finished;
+    const first = await rt.sessions.start(ws.id, { prompt: "first" });
+    await first.finished;
+    await (await rt.sessions.start(ws.id, { prompt: "second", thread: first.view().threadId! })).finished;
     await (await rt.sessions.start(ws.id, { prompt: "third" })).finished;
 
     const history = await rt.sessions.history(ws.id);
@@ -724,31 +723,12 @@ describe("runtime session history", () => {
     await rt.close();
   });
 
-  it("a resumed start joins the thread of the session it resumes, across a CLI re-key; an unknown resume id starts a new one", async () => {
-    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded(id => `${id.slice(0, 8)}-rekeyed`) } });
-    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
-    const first = (await rt.workspaces.get(ws.id)).claudeSessionId!;
-    await (await rt.sessions.start(ws.id, { prompt: "second", resume: first })).finished;
-    const rekeyed = (await rt.workspaces.get(ws.id)).claudeSessionId!;
-    expect(rekeyed).not.toBe(first);
-    await (await rt.sessions.start(ws.id, { prompt: "third", resume: rekeyed })).finished;
-    await (await rt.sessions.start(ws.id, { prompt: "fourth", resume: "never-started" })).finished;
-
-    const history = await rt.sessions.history(ws.id);
-    expect(history).toHaveLength(16);
-    expect(new Set(history.slice(0, 12).map(e => e.threadId)).size).toBe(1);
-    expect(history[12]!.threadId).toMatch(UUID);
-    expect(threads(history)).toBe(2);
-    await rt.close();
-  });
-
   it("a row says who opened its thread: a resumed turn keeps the answer of the turn it resumes, a fresh start gives its own", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded() } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    await (await rt.sessions.start(ws.id, { prompt: "first", startedBy: "cli" })).finished;
-    const resume = (await rt.workspaces.get(ws.id)).claudeSessionId!;
-    await (await rt.sessions.start(ws.id, { prompt: "second", resume })).finished;
+    const first = await rt.sessions.start(ws.id, { prompt: "first", startedBy: "cli" });
+    await first.finished;
+    await (await rt.sessions.start(ws.id, { prompt: "second", thread: first.view().threadId! })).finished;
     await (await rt.sessions.start(ws.id, { prompt: "third" })).finished;
     expect((await rt.sessions.list(ws.id)).map(s => [s.prompt, s.startedBy])).toEqual([["first", "cli"], ["third", "person"]]);
     await rt.close();
@@ -760,126 +740,20 @@ describe("runtime session history", () => {
     const rt = createRuntime({ backend, store, adapters: { claude: threaded() } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const titles = async (r: typeof rt) => foldThreads(await r.sessions.list(ws.id)).map(t => [t.title, t.status]);
-    await (await rt.sessions.start(ws.id, { prompt: "You are a builder for the wsp repo", startedBy: "cli" })).finished;
-    const resume = (await rt.workspaces.get(ws.id)).claudeSessionId!;
+    const first = await rt.sessions.start(ws.id, { prompt: "You are a builder for the wsp repo", startedBy: "cli" });
+    await first.finished;
+    const thread = first.view().threadId!;
     expect(await titles(rt)).toEqual([["You are a builder for the wsp repo", "completed"]]);
-    await (await rt.sessions.start(ws.id, { prompt: "GitHub is signed in on this machine now", resume })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "GitHub is signed in on this machine now", thread })).finished;
     expect(await titles(rt)).toEqual([["You are a builder for the wsp repo", "completed"]]);
     const history = await rt.sessions.history(ws.id);
     expect(history.filter(e => e.type === "session.start").map(e => e.prompt)).toEqual(["You are a builder for the wsp repo", "GitHub is signed in on this machine now"]);
     await rt.close();
 
     const again = createRuntime({ backend, store, adapters: { claude: threaded() } });
-    await (await again.sessions.start(ws.id, { prompt: "Push the branch", resume })).finished;
+    await (await again.sessions.start(ws.id, { prompt: "Push the branch", thread })).finished;
     expect(await titles(again)).toEqual([["You are a builder for the wsp repo", "completed"]]);
     await again.close();
-  });
-
-  it("a transcript written before threads existed replays as one thread, and a resume into it stamps it in place", async () => {
-    const backend = stubBackend();
-    const store = memoryStore();
-    const setup = createRuntime({ backend, store, adapters: {} });
-    const a = await createOn(setup, { golden: "snap_g", name: "a" });
-    const b = await createOn(setup, { golden: "snap_g", name: "b" });
-    await setup.close();
-    const legacy = (workspaceId: string, sessionId: string) => [
-      { type: "session.start", workspaceId, sessionId, prompt: "old" },
-      { type: "session.delta", workspaceId, sessionId, kind: "text", text: "old answer" },
-      { type: "session.done", workspaceId, sessionId, result: { status: "completed", text: "old answer" } },
-      { type: "session.end", workspaceId, sessionId, exitCode: 0, sawResult: true },
-    ];
-    await store.put("transcripts", a.id, { workspaceId: a.id, events: legacy(a.id, "old-a") });
-    await store.put("transcripts", b.id, { workspaceId: b.id, events: legacy(b.id, "old-b") });
-
-    const rt = createRuntime({ backend, store, adapters: { claude: threaded() } });
-    for (const id of [a.id, b.id]) {
-      const old = await rt.sessions.history(id);
-      expect(old).toHaveLength(4);
-      for (const e of old) {
-        expect(SessionEvent.parse(e)).toEqual(e);
-        expect(e.threadId).toBeUndefined();
-      }
-      expect(threads(old)).toBe(1);
-    }
-
-    // continuing the old conversation: the old events take the new thread's id, in memory and in the store
-    await (await rt.sessions.start(a.id, { prompt: "more", resume: "old-a" })).finished;
-    const continued = await rt.sessions.history(a.id);
-    expect(continued).toHaveLength(8);
-    expect(new Set(continued.map(e => e.threadId)).size).toBe(1);
-    expect(continued[0]!.threadId).toMatch(UUID);
-    expect(threads(continued)).toBe(1);
-    // a new thread: the old events stay as they were and fold as the thread before it
-    await (await rt.sessions.start(b.id, { prompt: "fresh" })).finished;
-    const split = await rt.sessions.history(b.id);
-    expect(split.slice(0, 4).map(e => e.threadId)).toEqual([undefined, undefined, undefined, undefined]);
-    expect(new Set(split.slice(4).map(e => e.threadId)).size).toBe(1);
-    expect(threads(split)).toBe(2);
-    await rt.close();
-    const storedA = (await store.get("transcripts", a.id)) as { events: { threadId?: string }[] };
-    expect(storedA.events.map(e => e.threadId)).toEqual(continued.map(e => e.threadId));
-  });
-
-  it("a resume whose session.start fell off the cap opens a new thread; the surviving head keeps its own id", async () => {
-    const backend = stubBackend();
-    const store = memoryStore();
-    const setup = createRuntime({ backend, store, adapters: {} });
-    const ws = await createOn(setup, { golden: "snap_g", name: "a" });
-    await setup.close();
-    const scope = { workspaceId: ws.id, sessionId: "X", turnId: "turn_x", threadId: "T" };
-    await store.put("transcripts", ws.id, {
-      workspaceId: ws.id,
-      events: [
-        { type: "session.delta", ...scope, kind: "text", text: "tail of an old answer" },
-        { type: "session.done", ...scope, result: { status: "completed" } },
-        { type: "session.end", ...scope, exitCode: 0, sawResult: true },
-      ],
-    });
-
-    const rt = createRuntime({ backend, store, adapters: { claude: threaded() } });
-    await (await rt.sessions.start(ws.id, { prompt: "more", resume: "X" })).finished;
-    const history = await rt.sessions.history(ws.id);
-    expect(history.slice(0, 3).map(e => e.threadId)).toEqual(["T", "T", "T"]);
-    expect(new Set(history.slice(3).map(e => e.threadId)).size).toBe(1);
-    expect(history[3]!.threadId).toMatch(UUID);
-    expect(threads(history)).toBe(2);
-    await rt.close();
-  });
-
-  it("sessions.history hands out copies, so an earlier result does not change when a legacy transcript is stamped", async () => {
-    const backend = stubBackend();
-    const store = memoryStore();
-    const setup = createRuntime({ backend, store, adapters: {} });
-    const ws = await createOn(setup, { golden: "snap_g", name: "a" });
-    await setup.close();
-    await store.put("transcripts", ws.id, {
-      workspaceId: ws.id,
-      events: [{ type: "session.start", workspaceId: ws.id, sessionId: "old", prompt: "old" }],
-    });
-    const rt = createRuntime({ backend, store, adapters: { claude: threaded() } });
-    const earlier = await rt.sessions.history(ws.id);
-    await (await rt.sessions.start(ws.id, { prompt: "more", resume: "old" })).finished;
-    expect(earlier).toEqual([{ type: "session.start", workspaceId: ws.id, sessionId: "old", prompt: "old" }]);
-    expect((await rt.sessions.history(ws.id))[0]!.threadId).toMatch(UUID);
-    await rt.close();
-  });
-
-  it("a resume into a transcript written before threads stamps nothing when the caller may not reach the workspace", async () => {
-    const backend = stubBackend();
-    const store = memoryStore();
-    const setup = createRuntime({ backend, store, adapters: {} });
-    const a = await createOn(setup, { golden: "snap_g", name: "a" });
-    const b = await createOn(setup, { golden: "snap_g", name: "b" });
-    await setup.close();
-    await store.put("transcripts", b.id, { workspaceId: b.id, events: [{ type: "session.start", workspaceId: b.id, sessionId: "old-b", prompt: "old" }] });
-    const rt = createRuntime({ backend, store, adapters: { claude: threaded() } });
-    // A thread on another workspace names the old session: refused, and the transcript is as it was, in memory
-    // and in the store, since the rule is read before anything is written.
-    const by: ThreadScope = { kind: "thread", threadId: "t_a", workspaceId: a.id, rootThreadId: "t_a" };
-    await expect(rt.sessions.start(b.id, { prompt: "more", resume: "old-b" }, { origin: "relayed", by })).rejects.toThrow();
-    expect((await rt.sessions.history(b.id))[0]!.threadId).toBeUndefined();
-    await rt.close();
-    expect(((await store.get("transcripts", b.id)) as { events: { threadId?: string }[] }).events[0]!.threadId).toBeUndefined();
   });
 
   it("sessions.history over the socket carries the threadId", async () => {
@@ -930,10 +804,9 @@ describe("runtime session history", () => {
     expect(handle.view().status).toBe("running");
     expect((await rt.sessions.list(ws.id))[0]!.status).toBe("running");
     expect((await rt.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done"]);
-    const sid = (await rt.sessions.list(ws.id))[0]!.claudeSessionId!;
     // A send while the process lives is never refused and never a second agent in the same folder: it waits for
     // that process to exit and runs as the thread's next turn.
-    const again = rt.sessions.start(ws.id, { prompt: "again", resume: sid });
+    const again = rt.sessions.start(ws.id, { prompt: "again", thread: handle.view().threadId! });
     await settle();
     expect(m.starts).toEqual(["go"]);
 
@@ -1217,7 +1090,7 @@ describe("runtime session history", () => {
       m.done("ok");
       m.end();
       await handle.finished;
-      const resumed = await rt.sessions.start(ws.id, { prompt: "more", resume: "33333333-3333-4333-8333-333333333333" });
+      const resumed = await rt.sessions.start(ws.id, { prompt: "more", thread: handle.view().threadId! });
       expect(m.lastStart()!.model).toBeUndefined();
       m.done("ok");
       m.end();
@@ -1512,14 +1385,14 @@ describe("runtime session index", () => {
     const t = turns();
     const rt1 = createRuntime({ backend, store, adapters: { claude: t.adapter, hung } });
     const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
-    await rt1.sessions.start(ws.id, { prompt: "first", harness: "hung" });
+    const thread = (await rt1.sessions.start(ws.id, { prompt: "first", harness: "hung" })).view().threadId!;
     await rt1.close();
 
     // The thread ran on hung and goes on running on hung: the agent a thread's rows carry is the one its next
     // turn runs on, and this host answers for it again after the restart.
     const rt2 = createRuntime({ backend, store, adapters: { claude: t.adapter, hung: t.adapter } });
-    await (await rt2.sessions.start(ws.id, { prompt: "second", resume: HUNG_ID })).finished;
-    await (await rt2.sessions.start(ws.id, { prompt: "third", resume: HUNG_ID })).finished;
+    await (await rt2.sessions.start(ws.id, { prompt: "second", thread })).finished;
+    await (await rt2.sessions.start(ws.id, { prompt: "third", thread })).finished;
     const starts = (await rt2.sessions.history(ws.id)).filter(e => e.type === "session.start");
     expect(starts.map(e => [e.prompt, e.afterCut])).toEqual([["first", undefined], ["second", true], ["third", undefined]]);
     expect(new Set(starts.map(e => e.threadId)).size).toBe(1);
@@ -1548,11 +1421,13 @@ describe("runtime session index", () => {
   it("a resume after a turn the transport cut stamps afterCut; a turn that failed with an exit code, or finished, leaves the next start plain", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: onPrompt("dies", dying, cutting) } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    await (await rt.sessions.start(ws.id, { prompt: "cut" })).finished;
-    await (await rt.sessions.start(ws.id, { prompt: "second", resume: CUT_ID })).finished;
-    await (await rt.sessions.start(ws.id, { prompt: "third", resume: CUT_ID })).finished;
-    await (await rt.sessions.start(ws.id, { prompt: "dies", resume: CUT_ID })).finished;
-    await (await rt.sessions.start(ws.id, { prompt: "fifth", resume: CUT_ID })).finished;
+    const cut = await rt.sessions.start(ws.id, { prompt: "cut" });
+    await cut.finished;
+    const thread = cut.view().threadId!;
+    await (await rt.sessions.start(ws.id, { prompt: "second", thread })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "third", thread })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "dies", thread })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "fifth", thread })).finished;
     const starts = (await rt.sessions.history(ws.id)).filter(e => e.type === "session.start");
     expect(starts.map(e => [e.prompt, e.afterCut])).toEqual([["cut", undefined], ["second", true], ["third", undefined], ["fifth", undefined]]);
     // a fresh thread has no previous turn
@@ -1604,7 +1479,7 @@ describe("runtime session index", () => {
     await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
     const [first] = await rt.sessions.list(ws.id);
     const resume = first!.claudeSessionId!;
-    await (await rt.sessions.start(ws.id, { prompt: "again", resume })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "again", thread: first!.threadId! })).finished;
     const rows = await rt.sessions.list(ws.id);
     expect(rows.map(r => [r.prompt, r.status, r.threadId, r.claudeSessionId])).toEqual([["first", "failed", first!.threadId, resume]]);
     await rt.close();
@@ -1961,7 +1836,7 @@ describe("runtime session index", () => {
 
     const t = turns();
     const rt2 = createRuntime({ backend, store, adapters: { claude: t.adapter } });
-    await (await rt2.sessions.start(ws.id, { prompt: "more", resume: first!.claudeSessionId, cwd: first!.cwd })).finished;
+    await (await rt2.sessions.start(ws.id, { prompt: "more", thread: first!.threadId!, cwd: first!.cwd })).finished;
     expect(t.starts[0]).toMatchObject({ resume: first!.claudeSessionId, cwd: "/root/app" });
     // the resumed turn keeps the session id, so it takes over that row and its opening prompt, in memory and in the store
     const rows = await rt2.sessions.list(ws.id);
@@ -2002,11 +1877,11 @@ describe("runtime session index", () => {
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "first", cwd: "/root/app" })).finished;
     const [first] = await rt.sessions.list(ws.id);
-    await (await rt.sessions.start(ws.id, { prompt: "from another folder", resume: first!.claudeSessionId, cwd: "/root/other" })).finished;
-    await (await rt.sessions.start(ws.id, { prompt: "from the command line", resume: first!.claudeSessionId })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "from another folder", thread: first!.threadId!, cwd: "/root/other" })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "from the command line", thread: first!.threadId! })).finished;
     expect(t.starts.map(s => s.cwd)).toEqual(["/root/app", "/root/app", "/root/app"]);
     expect((await rt.sessions.list(ws.id)).map(s => s.cwd)).toEqual(["/root/app"]);
-    // a start without resume still runs where it was asked to
+    // a start without a thread still runs where it was asked to
     await (await rt.sessions.start(ws.id, { prompt: "new thread", cwd: "/root/other" })).finished;
     expect(t.starts[3]!.cwd).toBe("/root/other");
     await rt.close();
@@ -2015,7 +1890,7 @@ describe("runtime session index", () => {
     await store.delete("sessions", ws.id);
     const t2 = turns();
     const rt2 = createRuntime({ backend, store, adapters: { claude: t2.adapter } });
-    await (await rt2.sessions.start(ws.id, { prompt: "after a restart", resume: first!.claudeSessionId, cwd: "/root/other" })).finished;
+    await (await rt2.sessions.start(ws.id, { prompt: "after a restart", thread: first!.threadId!, cwd: "/root/other" })).finished;
     expect(t2.starts[0]!.cwd).toBe("/root/app");
     await rt2.close();
   });
@@ -5111,18 +4986,6 @@ describe("runtime workspace size", () => {
     expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
   });
 
-  it("a stored workspace with no recorded size is sized from the provider's view on hydrate", async () => {
-    const backend = clampingBackend();
-    const store = memoryStore();
-    const rt1 = createRuntime({ backend, store, adapters: {} });
-    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
-    const raw = (await store.get("workspaces", ws.id)) as Record<string, unknown>;
-    delete raw["size"];
-    await store.put("workspaces", ws.id, raw);
-
-    const rt2 = createRuntime({ backend, store, adapters: {} });
-    expect((await rt2.status.list())[0]!.size).toEqual({ cpu: 2, memMb: 2048 });
-  });
 });
 
 describe("runtime workspace screen", () => {
@@ -7321,7 +7184,7 @@ describe("a start on a thread whose turn is running", () => {
     const first = await rt.sessions.start(ws.id, { prompt: "loop for a minute", requestId: "req_1" });
     expect(first.outcome).toBe("started");
     const sid = first.view().claudeSessionId!;
-    const joined = await rt.sessions.start(ws.id, { prompt: "end with STEERED", resume: sid, requestId: "req_2", startedBy: "cli" });
+    const joined = await rt.sessions.start(ws.id, { prompt: "end with STEERED", thread: first.view().threadId!, requestId: "req_2", startedBy: "cli" });
     expect(joined.outcome).toBe("steered");
     expect(joined.id).toBe(first.id);
     expect(joined.turnId).toBe(first.turnId);
@@ -7348,7 +7211,7 @@ describe("a start on a thread whose turn is running", () => {
     const first = await rt.sessions.start(ws.id, { prompt: "one" });
     const sid = first.view().claudeSessionId!;
     let second: Awaited<ReturnType<typeof rt.sessions.start>> | undefined;
-    const pending = rt.sessions.start(ws.id, { prompt: "two", resume: sid, requestId: "req_2" }).then(s => (second = s));
+    const pending = rt.sessions.start(ws.id, { prompt: "two", thread: first.view().threadId!, requestId: "req_2" }).then(s => (second = s));
     await settle();
     expect(h.starts.map(s => s.prompt)).toEqual(["one"]);
     expect(second).toBeUndefined();
@@ -7376,10 +7239,10 @@ describe("a start on a thread whose turn is running", () => {
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const sid = (await rt.sessions.start(ws.id, { prompt: "one" })).view().claudeSessionId!;
+    const thread = (await rt.sessions.start(ws.id, { prompt: "one" })).view().threadId!;
     const outcomes: string[] = [];
-    const two = rt.sessions.start(ws.id, { prompt: "two", resume: sid }).then(s => outcomes.push(`two:${s.outcome}`));
-    const three = rt.sessions.start(ws.id, { prompt: "three", resume: sid }).then(s => outcomes.push(`three:${s.outcome}`));
+    const two = rt.sessions.start(ws.id, { prompt: "two", thread }).then(s => outcomes.push(`two:${s.outcome}`));
+    const three = rt.sessions.start(ws.id, { prompt: "three", thread }).then(s => outcomes.push(`three:${s.outcome}`));
     await settle();
     expect(h.starts.map(s => s.prompt)).toEqual(["one"]);
     expect(events.filter(e => e.type === "session.queued").map(e => (e as { prompt: string }).prompt)).toEqual(["two", "three"]);
@@ -7670,10 +7533,10 @@ describe("a thread whose start named who to tell", () => {
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     const parentThread = parent.view().threadId!;
     const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread] });
-    const kidSid = kid.view().claudeSessionId!;
+    const kidThread = kid.view().threadId!;
     h.end(1, "first");
     await vi.waitFor(() => expect(h.steered).toHaveLength(1));
-    const again = await rt.sessions.start(ws.id, { prompt: "and the docs", resume: kidSid });
+    const again = await rt.sessions.start(ws.id, { prompt: "and the docs", thread: kidThread });
     expect(again.view().threadId).toBe(kid.view().threadId);
     h.end(2, "second");
     await vi.waitFor(() => expect(h.steered).toHaveLength(2));
@@ -7683,9 +7546,9 @@ describe("a thread whose start named who to tell", () => {
 
     const h2 = held(true);
     const rt2 = createRuntime({ backend, store, adapters: { claude: h2.adapter } });
-    const parentAgain = await rt2.sessions.start(ws.id, { prompt: "still here", resume: parent.view().claudeSessionId! });
+    const parentAgain = await rt2.sessions.start(ws.id, { prompt: "still here", thread: parentThread });
     expect(parentAgain.view().threadId).toBe(parentThread);
-    const third = await rt2.sessions.start(ws.id, { prompt: "and the tests", resume: kidSid });
+    const third = await rt2.sessions.start(ws.id, { prompt: "and the tests", thread: kidThread });
     expect(third.view().threadId).toBe(kid.view().threadId);
     h2.end(1, "third");
     await vi.waitFor(() => expect(h2.steered).toEqual([`thread ${kid.view().threadId!.slice(0, 8)} finished (completed): third`]));
@@ -7693,15 +7556,14 @@ describe("a thread whose start named who to tell", () => {
     await rt2.close();
   });
 
-  it("a thread cannot notify itself: a resumed start that names its own thread is refused, and nothing starts", async () => {
+  it("a thread cannot notify itself: a send into it that names its own thread is refused, and nothing starts", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const own = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
-    const sid = own.view().claudeSessionId!;
     h.end(0, "ready");
     await own.finished;
-    await expect(rt.sessions.start(ws.id, { prompt: "again", resume: sid, notify: [own.view().threadId!]})).rejects.toThrow("a thread cannot notify itself");
+    await expect(rt.sessions.start(ws.id, { prompt: "again", thread: own.view().threadId!, notify: [own.view().threadId!]})).rejects.toThrow("a thread cannot notify itself");
     expect(h.starts).toHaveLength(1);
     expect((await rt.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done", "session.end"]);
     await rt.close();
@@ -7721,8 +7583,8 @@ describe("a thread whose start named who to tell", () => {
     await vi.waitFor(() => expect(h.steered).toHaveLength(2));
     h.end(0, "idle");
     await a.finished;
-    await expect(rt.sessions.start(ws.id, { prompt: "a again", resume: a.view().claudeSessionId!, notify: [b.view().threadId!]})).rejects.toThrow(`thread ${b.view().threadId!.slice(0, 8)} already notifies this thread; a cycle would run forever`);
-    await expect(rt.sessions.start(ws.id, { prompt: "a again", resume: a.view().claudeSessionId!, notify: [c.view().threadId!]})).rejects.toThrow(`thread ${c.view().threadId!.slice(0, 8)} already notifies this thread; a cycle would run forever`);
+    await expect(rt.sessions.start(ws.id, { prompt: "a again", thread: a.view().threadId!, notify: [b.view().threadId!]})).rejects.toThrow(`thread ${b.view().threadId!.slice(0, 8)} already notifies this thread; a cycle would run forever`);
+    await expect(rt.sessions.start(ws.id, { prompt: "a again", thread: a.view().threadId!, notify: [c.view().threadId!]})).rejects.toThrow(`thread ${c.view().threadId!.slice(0, 8)} already notifies this thread; a cycle would run forever`);
     expect(h.starts).toHaveLength(3);
     // A chain that does not come back is fine: a fresh thread may name c, and c's own chain ends at a.
     const d = await rt.sessions.start(ws.id, { prompt: "d", notify: [c.view().threadId!] });
@@ -8367,29 +8229,6 @@ describe("what a move onto a newer image does with the files the image itself wr
     expect(log.findIndex(c => c.includes(READ))).toBeGreaterThan(-1);
     expect(log.findIndex(c => c.includes(READ))).toBeLessThan(log.findIndex(c => c.includes("tar czf")));
     expect(backend.machines[0]!.killed).toBe(true);
-  });
-});
-
-describe("the shape a state file was written in, on the records the runtime reads", () => {
-  it("names the build that wrote the file beside the record nothing reads, so the one field is put right instead of the file thrown away", async () => {
-    const wrote: StateShape = { shape: STATE_SHAPE, wsp: "0.2.0", daemon: DAEMON_VERSION, bin: "/Applications/wsp.app/Contents/Resources/bin.js", at: "2026-09-18T15:15:00.000Z" };
-    const held = memoryStore();
-    await held.put("workspaces", "ws_old", { id: "ws_old", name: "old", kind: "cloud", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z", spec: {}, size: { cpu: 2, memMb: 4096 }, firstLife: true, projects: [{ name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00.000Z" }] });
-    // The document a state file carries, as the store that has a file behind it answers it.
-    const store = { ...held, shape: async (): Promise<StateShape> => wrote };
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, statePath: "/tmp/wsp-shape/state.json" });
-    await expect(rt.workspaces.list()).rejects.toThrow(
-      `workspace ws_old was recorded before a workspace held a project, and nothing reads that shape: /tmp/wsp-shape/state.json was last written by /Applications/wsp.app/Contents/Resources/bin.js (wsp 0.2.0, daemon ${DAEMON_VERSION}), so run that wsp on it, or move the file aside and start again, and wsp add records your projects on the new one`,
-    );
-  });
-
-  it("says the file alone where the file carries no such document, as one written before it did", async () => {
-    const store = memoryStore();
-    await store.put("workspaces", "ws_old", { id: "ws_old", name: "old", kind: "cloud", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z", spec: {}, size: { cpu: 2, memMb: 4096 }, firstLife: true });
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, statePath: "/tmp/wsp-shape/state.json" });
-    await expect(rt.workspaces.list()).rejects.toThrow(
-      "workspace ws_old was recorded before a workspace held a project, and nothing reads that shape: move /tmp/wsp-shape/state.json aside and start again, and wsp add records your projects on the new one",
-    );
   });
 });
 

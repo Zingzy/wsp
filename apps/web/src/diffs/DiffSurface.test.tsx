@@ -40,7 +40,7 @@ vi.mock("../components/ui/tooltip", () => ({
   TooltipPopup: ({ children }: { children: ReactNode }) => <div role="tooltip">{children}</div>,
 }));
 
-import { DAEMON_VERSION, type WorkspaceView } from "@wsp/protocol";
+import type { WorkspaceView } from "@wsp/protocol";
 import { useComposerDraftStore } from "../components/chat/composerDraftStore";
 import { useRootStore } from "../files/root";
 import { provideDaemonHello, provideDaemonWire } from "../files/wire";
@@ -76,7 +76,7 @@ beforeEach(() => {
   useComposerDraftStore.setState({ drafts: {}, queues: {}, held: {} });
   useRootStore.setState({ byWorkspaceId: {} });
   useStore.setState({ workspaces: [workspace], statuses: {}, places: [] });
-  provideDaemonHello(WS, { root: "/root", version: DAEMON_VERSION });
+  provideDaemonHello(WS, { root: "/root" });
   provideDaemonWire(WS, wire);
 });
 

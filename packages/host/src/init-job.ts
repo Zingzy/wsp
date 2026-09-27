@@ -547,7 +547,7 @@ export class InitJobs implements InitDoor {
       platform: this.deps.platform,
       ...(this.deps.build.bundleFile !== undefined ? { bundleFile: this.deps.build.bundleFile } : {}),
       runtime: r => buildingOn(this.deps.rt, this.deps.build.recipe(r), offs),
-      ports: { port: 0, wsPort: 0, named: true },
+      ports: { port: 0, named: true },
       upCommand: "wsp up",
       forkCommand: `wsp new ${shellQuote(first ?? FIRST_WORKSPACE)}`,
       relay: this.deps.build.relay,
