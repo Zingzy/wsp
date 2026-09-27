@@ -262,6 +262,11 @@ describe("what a workspace's kind changes about its words", () => {
     expect(onDeleteOf("local")).toBe(WORKSPACE_KIND_WORDS.local.onDelete);
   });
 
+  it("the delete sentence for a create that failed before any computer was made names none going", () => {
+    expect(deleteNotice(0, "cloud", undefined, "")).toBe("Its create failed before any computer was made, so there is none to delete; its record and 0 threads leave this computer.");
+    expect(onDeleteOf("cloud", undefined, "").done("")).toBe("its create had made no computer");
+  });
+
   it("the phrase for this computer has one home: the refusals read it too", () => {
     expect(THIS_COMPUTER).toBe("this computer");
     expect(relayedRefusal("mac")).toContain(THIS_COMPUTER);

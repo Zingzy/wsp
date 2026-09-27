@@ -36,7 +36,7 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
   return (
     <div data-testid="workspace-creation" aria-busy={!failed} className="flex h-full min-h-0 flex-col items-center overflow-y-auto bg-background px-6 py-12 text-foreground sm:py-16">
       <div className="flex w-full max-w-xl flex-col items-center text-center">
-        <p className="text-[13px] leading-5 text-muted-foreground">{failed ? "Creation failed" : "Creating thread"}</p>
+        <p className="text-[13px] leading-5 text-muted-foreground">{failed ? "Couldn't start" : "Starting"}</p>
         <h1 className="mt-1 w-full truncate text-lg/7 font-medium tracking-[-0.01em]">{creation.name}</h1>
         <Squiggle failed={failed} className="mt-6" />
         <div data-testid="creation-log" className="mt-6 h-32 w-full text-left">
