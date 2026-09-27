@@ -8,8 +8,9 @@ import { intro, log } from "@clack/prompts";
 import { imageBuiltOnLine, stateFileLine } from "@wsp/protocol";
 import type { InitIO } from "./init.js";
 import { colourDepth, grey, muted } from "./init-layout.js";
+import { CLOUD_ON } from "./cloud.js";
 
-export const TAGLINE = "your setup, on cloud machines, for coding agents";
+export const TAGLINE = `your setup, on ${CLOUD_ON ? "cloud machines" : "your computers"}, for coding agents`;
 
 /** "wsp" in block letters, written out so no font library is needed. */
 export const WORDMARK: readonly string[] = [
