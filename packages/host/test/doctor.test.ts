@@ -644,6 +644,7 @@ describe("the doctor's line for the vault", () => {
     expect(lines).toEqual([
       "ANTHROPIC_API_KEY held (Claude Code reads it after CLAUDE_CODE_OAUTH_TOKEN)",
       "CLAUDE_CODE_OAUTH_TOKEN not held (Claude Code reads it first)",
+      "CURSOR_API_KEY not held (Cursor reads it)",
       "GEMINI_API_KEY not held (Gemini CLI reads it)",
       "OPENAI_API_KEY not held (Codex reads it)",
     ]);

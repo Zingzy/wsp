@@ -13,7 +13,7 @@ import { machineExecStream } from "../src/machine-exec.js";
 describe("the agents wsp can open a thread on", () => {
   it("is one list, the adapter registry is keyed by it, and every id is a catalog agent", () => {
     expect(Object.keys(HARNESS_ADAPTERS).sort()).toEqual([...THREAD_AGENTS].sort());
-    expect([...THREAD_AGENTS]).toEqual(["claude", "codex"]);
+    expect([...THREAD_AGENTS]).toEqual(["claude", "codex", "opencode", "cursor"]);
     for (const id of THREAD_AGENTS) expect(CATALOG_AGENTS.map(a => a.id)).toContain(id);
   });
 
@@ -44,6 +44,22 @@ describe("the agents wsp can open a thread on", () => {
     // Both take the servers on their launch: Claude Code as --mcp-config, Codex as config overrides.
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "claude"))).toBe(true);
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "codex"))).toBe(true);
+  });
+
+  it("OpenCode's row offers Auto alone and says why, Cursor's the two modes its CLI has, and neither takes a message mid-turn", () => {
+    const machine = {} as Machine;
+    const ctx = { machine, workspaceId: "ws_1", execStream: machineExecStream(machine), home: () => "/root/.state", env: {}, signInRefusal: signInRefusalLine({ kind: "cloud" }), loginStands: () => false };
+    const opencode = HARNESS_CATALOGS.find(c => c.harness === "opencode")!;
+    expect(opencode.permissionModes.map(m => m.value)).toEqual(["auto"]);
+    expect(opencode.permissionModes[0]!.description).toMatch(/^Runs every action without asking.*nobody to ask$/);
+    expect([opencode.keptMode, opencode.bypassMode]).toEqual(["auto", "auto"]);
+    const cursor = HARNESS_CATALOGS.find(c => c.harness === "cursor")!;
+    expect(cursor).toMatchObject({ label: "Cursor", models: [], keptMode: "default", bypassMode: "force" });
+    expect(cursor.permissionModes.map(m => m.value)).toEqual(["default", "force"]);
+    for (const id of ["opencode", "cursor"] as const) expect(HARNESS_ADAPTERS[id]({ ...ctx, vault: {} }).steers, id).toBe(false);
+    // The key the vault holds for Cursor rides the turn's environment under the variable its row names, and only where no login stands.
+    expect(HARNESS_ADAPTERS.cursor({ ...ctx, vault: { CURSOR_API_KEY: "key_x" } }).env).toEqual({ CURSOR_API_KEY: "key_x" });
+    expect(HARNESS_ADAPTERS.cursor({ ...ctx, vault: { CURSOR_API_KEY: "key_x" }, loginStands: () => true }).env).toEqual({});
   });
 
   it("every adapter exports the login env the runtime hands it, so a turn carries the golden's PATH onto the machine", () => {

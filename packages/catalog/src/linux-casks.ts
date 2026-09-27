@@ -93,4 +93,39 @@ export const KUBECTL: LinuxCask = {
   uninstall: "rm -f /usr/local/bin/kubectl",
 };
 
-export const LINUX_CASKS: readonly LinuxCask[] = [GCLOUD, KUBECTL];
+const CURSOR_HOME = "/opt/cursor-agent";
+const CURSOR_BINS = ["agent", "cursor-agent"];
+
+/** Cursor publishes a tarball per version and arch and no sum, and its own installer checks none, so the sums are the
+ * tarballs' own as read on 2026-09-27 at the address that installer (https://cursor.com/install) names. */
+const CURSOR_PIN = {
+  version: "2026.09.26-dd393fe",
+  sha256: {
+    x86_64: "8085fd120f5c71f4eae7fea26a043718e5644e3071e4fab3220a0e58c51f9593",
+    aarch64: "ab1178d0d8c10b254e7e427d1d673533a389338424e75034be9ab9da02845bde",
+  },
+} as const;
+
+/** The tarball is the CLI with its own node beside it; its launcher follows a link back to that folder. */
+export const CURSOR: LinuxCask = {
+  ...CURSOR_PIN,
+  bin: "cursor-agent",
+  from: "Cursor's Linux release",
+  detail: "from Cursor's Linux release, at the version and sum the catalog pins",
+  install: [
+    ...PRELUDE,
+    ARCH("x64", "arm64", CURSOR_PIN.sha256),
+    verLine(CURSOR_PIN.version),
+    'pkg="agent-cli-package.tar.gz"',
+    'curl -o "$tmp/$pkg" "https://downloads.cursor.com/lab/$ver/linux/$a/$pkg"',
+    'echo "$sha  $tmp/$pkg" | sha256sum -c - >/dev/null',
+    `rm -rf ${CURSOR_HOME}`,
+    `mkdir -p ${CURSOR_HOME}`,
+    `tar --strip-components=1 -xzf "$tmp/$pkg" -C ${CURSOR_HOME}`,
+    ...CURSOR_BINS.map(b => `ln -sf ${CURSOR_HOME}/cursor-agent /usr/local/bin/${b}`),
+    'echo "WSP_ROAD release cursor-agent-$ver-linux-$a $sha $ver"',
+  ].join("\n"),
+  uninstall: `rm -rf ${CURSOR_HOME} ${CURSOR_BINS.map(b => `/usr/local/bin/${b}`).join(" ")}`,
+};
+
+export const LINUX_CASKS: readonly LinuxCask[] = [GCLOUD, KUBECTL, CURSOR];

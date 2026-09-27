@@ -9,6 +9,7 @@
 // (`codex app-server generate-json-schema`).
 import { randomUUID } from "node:crypto";
 import {
+  INTERRUPT_GRACE_MS,
   PERMISSION_ALLOW,
   PERMISSION_DENY,
   RUN_EXIT_MS,
@@ -38,7 +39,7 @@ import type {
   TurnResult,
 } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
-import { INTERRUPT_GRACE_MS, accessParams, buildCommand, buildEnv, imagePath } from "./command.js";
+import { accessParams, buildCommand, buildEnv, imagePath } from "./command.js";
 import {
   INITIALIZED_LINE,
   REQUEST,

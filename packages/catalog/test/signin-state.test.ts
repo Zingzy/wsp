@@ -83,7 +83,7 @@ describe("the token sign-in and the vault", () => {
   });
 
   it("the vault holds the agents' token and key variables and nothing else", () => {
-    expect([...VAULT_VARIABLES].sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "GEMINI_API_KEY", "OPENAI_API_KEY"]);
+    expect([...VAULT_VARIABLES].sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "CURSOR_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"]);
     const declared = new Set(CATALOG_AGENTS.flatMap(a => [...(mintsToken(a.signIn) ? [a.signIn.tokenEnv] : []), ...("keyEnv" in a.signIn && a.signIn.keyEnv !== undefined ? [a.signIn.keyEnv] : [])]));
     for (const name of VAULT_VARIABLES) expect(declared.has(name), `${name} is in the vault but no agent row declares it`).toBe(true);
   });

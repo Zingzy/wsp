@@ -225,6 +225,26 @@ exports[`catalog > is the seeded catalog 1`] = `
     "status": undefined,
   },
   {
+    "argument": "cursor-agent",
+    "configPaths": 0,
+    "id": "cursor",
+    "kind": "agent",
+    "projectState": [],
+    "road": "vendor",
+    "signIn": "key",
+    "size": {
+      "bytes": 583125383,
+      "method": "unpacked",
+      "on": "2026-09-27",
+    },
+    "source": {
+      "images": 0,
+      "road": "unmeasured",
+      "sessions": 0,
+    },
+    "status": "cursor-agent status",
+  },
+  {
     "argument": "curl",
     "configPaths": 0,
     "defaultOn": true,

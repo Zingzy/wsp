@@ -439,6 +439,17 @@ export const SIGN_IN_ROWS = {
     note: "OpenCode dropped its Anthropic sign-in in 1.3.0; it takes an API key there",
     stateOnMachine: [".local/share/opencode/auth.json"],
   },
+  // 2026.09.26-dd393fe: status exits 0 signed in or not, so its own words for signed in decide; the Linux
+  // login lands in $XDG_CONFIG_HOME/cursor/auth.json, and a key rides CURSOR_API_KEY on every turn instead.
+  cursor: {
+    kind: "key",
+    sources: [],
+    finish: "none",
+    login: "cursor-agent login",
+    keyEnv: "CURSOR_API_KEY",
+    status: { command: "cursor-agent status", signedIn: ok(/Logged in as|Login successful/) },
+    stateOnMachine: [".config/cursor/auth.json"],
+  },
   cloudflared: { kind: "oauth", sources: ["file"], finish: "none", login: "cloudflared tunnel login", status: { command: CLOUDFLARED_STATUS, signedIn: ok() }, stateOnMachine: [".cloudflared"] },
   op: { kind: "none", sources: [], note: "needs the 1Password desktop app; set OP_SERVICE_ACCOUNT_TOKEN on the machine instead" },
   // kubectl v1.36.1 puts a kuberc warning on stderr with no newline, so on the merged pty it would glue onto the context.

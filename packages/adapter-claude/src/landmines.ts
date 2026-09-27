@@ -192,11 +192,3 @@ export function userMessageLine(text: string, sessionId: string, images: readonl
     session_id: sessionId,
   });
 }
-
-/**
- * Interrupt policy from t3code interruptTurn: a graceful interrupt can be
- * acknowledged while background tasks keep the CLI alive, so interrupt is a
- * hard boundary: teardown (SIGTERM), then SIGKILL after this
- * grace window.
- */
-export const INTERRUPT_GRACE_MS = 5_000;

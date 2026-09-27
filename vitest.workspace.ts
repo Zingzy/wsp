@@ -21,6 +21,8 @@ const alias = {
   "@wsp/engine": pkg("engine"),
   "@wsp/adapter-claude": pkg("adapter-claude"),
   "@wsp/adapter-codex": pkg("adapter-codex"),
+  "@wsp/adapter-cursor": pkg("adapter-cursor"),
+  "@wsp/adapter-opencode": pkg("adapter-opencode"),
   "@wsp/keys": pkg("keys"),
   "@wsp/own-file": pkg("own-file"),
   "@wsp/protocol": pkg("protocol"),

@@ -4738,7 +4738,7 @@ export const HELP_WIDTH = 80;
  * agent is named cannot await it. A word outside the catalog is refused by the runtime naming the list it does
  * hold, which is where the truth is said. */
 export const FLAG_WORDS: Readonly<Record<string, string>> = {
-  agent: "which agent runs the thread, by its catalog id (claude, codex); the workspace's own default without it",
+  agent: `which agent runs the thread, by its catalog id (${THREAD_AGENTS.join(", ")}); the workspace's own default without it`,
   agents: "the agents whose sessions for that folder travel with it, by catalog id, comma separated; every one that has them without it",
   "add-check": "<id>=<command> proving that added tool is on the machine; repeats",
   add: "<id>=<command> carrying a tool neither the catalog nor this computer has, installed by that command on the machine; repeats",

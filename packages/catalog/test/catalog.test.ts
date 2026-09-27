@@ -4,7 +4,8 @@
 // the six whose project state has a measured resolver, every default names
 // its evidence, and the seeded rows are what the snapshot says they are.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -289,7 +290,7 @@ describe("catalog", () => {
     const dir = fileURLToPath(new URL("../src/agents/", import.meta.url));
     const modules = readdirSync(dir).filter(f => f.endsWith(".ts") && f !== "index.ts" && f !== "entry.ts").map(f => f.replace(/\.ts$/, "")).sort();
     expect([...CATALOG_AGENTS.map(a => a.id)].sort()).toEqual(modules);
-    expect(CATALOG_AGENTS.map(a => a.id)).toEqual(["claude", "codex", "gemini", "opencode", "pi", "hermes", "crush", "qwen", "goose", "amp"]);
+    expect(CATALOG_AGENTS.map(a => a.id)).toEqual(["claude", "codex", "gemini", "opencode", "pi", "hermes", "crush", "qwen", "goose", "amp", "cursor"]);
     expect(CATALOG.slice(0, CATALOG_AGENTS.length)).toEqual(CATALOG_AGENTS);
     expect(CATALOG.slice(CATALOG_AGENTS.length).every(e => e.kind === "tool")).toBe(true);
   });
@@ -330,6 +331,48 @@ describe("catalog", () => {
     for (const a of added) for (const r of a.skillRoots.user) expect(r.dir, a.id).toMatch(/^~\//);
   });
 
+  it("runs Cursor's agent from its vendor's Linux download at a pinned version, checked against a sum per arch, and signs it in by a key", () => {
+    const cursor = catalogEntry("cursor") as AgentEntry;
+    expect(cursor.bin).toBe("cursor-agent");
+    expect(cursor.installRoad).toEqual({ road: "vendor", cask: catalog.CURSOR, version: catalog.CURSOR.version });
+    expect(installLine(cursor)).toBe(catalog.CURSOR.install);
+    expect(installLine(cursor)).toContain('curl -o "$tmp/$pkg" "https://downloads.cursor.com/lab/$ver/linux/$a/$pkg"');
+    expect(installShown(cursor)).toEqual({ words: "Cursor's Linux release" });
+    expect(cursor.size).toEqual({ bytes: 583125383, on: "2026-09-27", method: "unpacked" });
+    expect(cursor.signIn).toBe(SIGN_IN_ROWS.cursor);
+    expect(SIGN_IN_ROWS.cursor).toMatchObject({ kind: "key", login: "cursor-agent login", keyEnv: "CURSOR_API_KEY", stateOnMachine: [".config/cursor/auth.json"] });
+    expect(runsThreads("cursor")).toBe(true);
+    expect(cursor.mark?.license).toBe("MIT");
+    expect(cursor.mark?.source).toMatch(/^https:\/\/github\.com\/lobehub\/lobe-icons\/blob\/[0-9a-f]{40}\/src\/Cursor\//);
+  });
+
+  it("Cursor's install unpacks the checked download under /opt and links both its names: it runs here against a local tarball", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-cursor-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, "src", "dist-package"), { recursive: true });
+    writeFileSync(join(dir, "src", "dist-package", "cursor-agent"), "the launcher\n");
+    execFileSync("tar", ["-czf", join(dir, "served.tar.gz"), "-C", join(dir, "src"), "dist-package"]);
+    const sum = createHash("sha256").update(readFileSync(join(dir, "served.tar.gz"))).digest("hex");
+    const home = join(dir, "opt", "cursor-agent");
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    // The arch is forced and the paths moved so the case reads the same on any machine that runs the suite.
+    const script = catalog.CURSOR.install
+      .replace('arch="$(uname -m)"', "arch=x86_64")
+      .replace(catalog.CURSOR.sha256.x86_64, sum)
+      .replace('"https://downloads.cursor.com/lab/$ver/linux/$a/$pkg"', `"file://${join(dir, "served.tar.gz")}"`)
+      .replaceAll("/opt/cursor-agent", home)
+      .replaceAll("/usr/local/bin", bin);
+    const run = spawnSync("bash", ["-c", `${CURL_NET}\n${script}`], { encoding: "utf8" });
+    expect(run.stderr).toBe("");
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain(`WSP_ROAD release cursor-agent-2026.09.26-dd393fe-linux-x64 ${sum} 2026.09.26-dd393fe`);
+    for (const name of ["agent", "cursor-agent"]) {
+      expect(readlinkSync(join(bin, name)), name).toBe(join(home, "cursor-agent"));
+      expect(readFileSync(join(bin, name), "utf8"), name).toBe("the launcher\n");
+    }
+  });
+
   it("says which agents wsp opens threads on", () => {
     expect(CATALOG_AGENTS.filter(a => runsThreads(a.id)).map(a => a.id)).toEqual([...THREAD_AGENTS]);
     expect(runsThreads("nope")).toBe(false);
@@ -348,6 +391,8 @@ describe("catalog", () => {
       ["qwen", "npm"],
       ["goose", "github"],
       ["amp", "npm"],
+      // Nothing publishes its version alone: its installer script carries it inline.
+      ["cursor", undefined],
     ]);
     for (const a of CATALOG_AGENTS) {
       const [road, latest] = [a.installRoad, a.latest];
@@ -369,6 +414,7 @@ describe("catalog", () => {
       ["qwen", "Qwen team, Alibaba", "Apache-2.0"],
       ["goose", "Block", "Apache-2.0"],
       ["amp", "Sourcegraph", "proprietary"],
+      ["cursor", "Anysphere", "proprietary"],
     ]);
     for (const a of CATALOG_AGENTS) {
       const sentences = a.about.description.split(/(?<=\.) /);
@@ -378,8 +424,8 @@ describe("catalog", () => {
       if (a.about.repo !== undefined) expect(a.about.repo, a.id).toMatch(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/);
       if (a.about.homepage !== undefined) expect(a.about.homepage, a.id).toMatch(/^https:\/\//);
     }
-    // Amp's source is not public.
-    expect(CATALOG_AGENTS.filter(a => a.about.repo === undefined).map(a => a.id)).toEqual(["amp"]);
+    // Neither Amp's source nor Cursor's is public.
+    expect(CATALOG_AGENTS.filter(a => a.about.repo === undefined).map(a => a.id)).toEqual(["amp", "cursor"]);
     expect(installShown(catalogEntry("codex")!)).toEqual({ line: "npm install -g @openai/codex@0.155.1" });
     // A vendor's script is many lines no person pastes, and a release is a download checked against its sum.
     expect(installShown(catalogEntry("claude")!)).toEqual({ words: "by its own installer" });
@@ -789,13 +835,13 @@ describe("catalog", () => {
   it("says which roads no guest has run yet", () => {
     const unmeasured = CATALOG.filter(e => e.source.road === "unmeasured").map(e => e.id);
     expect(unmeasured).toEqual([
-      "crush", "qwen", "goose", "amp",
+      "crush", "qwen", "goose", "amp", "cursor",
       "curl", "pnpm", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "agent-browser",
       "docker", "rust", "maven", "bun", "yarn", "ruff", "black", "mypy", "pyright", "pytest", "prettier", "eslint", "typescript",
       "wrangler", "cloudflared", "kubectl", "aws", "vercel", "netlify", "fly", "supabase", "railway", "doppler", "op", "ffmpeg", "yq", "git-lfs", "tmux",
       "ruby", "php", "postgresql-client", "redis-tools", "golangci-lint", "mise", "git-delta", "shellcheck", "swift", "elixir", "bazel", "llvm", "playwright",
     ]);
-    expect(CATALOG_AGENTS.filter(e => e.source.road !== "measured").map(e => e.id)).toEqual(["crush", "qwen", "goose", "amp"]);
+    expect(CATALOG_AGENTS.filter(e => e.source.road !== "measured").map(e => e.id)).toEqual(["crush", "qwen", "goose", "amp", "cursor"]);
   });
 
   it("gives every row a size in bytes with the day and the way it was measured, or the reason nobody could measure it", () => {

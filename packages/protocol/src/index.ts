@@ -70,6 +70,8 @@ export const ASIDE_WALL_MS = 3 * 60_000;
 /** How long a turn's process gets to go on the graceful signal before its group is killed, on either road: what the
  * guest's reap waits between its TERM and its KILL, and what a host gives the turns on this computer as it stops. */
 export const RUN_STOP_MS = 2_000;
+/** How long an interrupted turn's harness gets on the graceful signal before it and its tree are killed. */
+export const INTERRUPT_GRACE_MS = 5_000;
 /** How long a road to a machine keeps being dialled while nothing answers before it is called down. The one rule
  * every link this project holds reads, which is why it lives here: the host's dial of a machine's daemon and its
  * re-dial after a drop, the post that launches or re-opens a turn's run, and the browser's link to a workspace.

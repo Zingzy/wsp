@@ -2,7 +2,7 @@ import { Callout } from 'scalar-mdx-components'
 
 # Agents inside a workspace
 
-Claude Code and Codex run headless on the machine, one process per turn, launched detached so a nap mid-turn stalls the reading and not the agent. This page is how each is run, what the machine tells them, and where they differ.
+Claude Code, Codex, OpenCode and Cursor run headless on the machine, one process per turn, launched detached so a nap mid-turn stalls the reading and not the agent. This page is how each is run, what the machine tells them, and where they differ.
 
 ## How a turn is launched
 
@@ -11,6 +11,10 @@ The runtime writes a small script to the machine and starts it in its own sessio
 **Claude Code** runs `claude -p` with stream-json in and out, `--verbose`, the access flag, `--model`, `--effort`, `--name <title>` when a title was given, and either `--session-id <uuid>` for a new session or `--resume <uuid>` for a send. The task is never an argument; it rides stdin as one JSON line, and stdin closes when the reply lands, which ends the process after its current turn. The session id is minted before launch so the thread is addressable before the CLI prints anything. Its config lives at `/root/.claude-cfg` through `CLAUDE_CONFIG_DIR`. On this computer the variable is set only if your own shell sets it, because Claude Code keys its Keychain login by whether it is set: a thread here runs as your own Claude, with the login your terminal has.
 
 **Codex** runs `codex exec` with `--json`, `--skip-git-repo-check`, `resume <thread id>` for a send, the sandbox and approval flags, `-m <model>` and `-c model_reasoning_effort=<effort>`. The task travels in a quoted heredoc on stdin, because a long task as an argument would hit the kernel's per-argument cap. Its home is `/root/.codex`.
+
+**OpenCode** runs `opencode run --format json` with `--dir <folder>`, `-s <session>` for a send, `-m <provider/model>`, `--variant <effort>` and one `-f` per image, the task on stdin in the same heredoc. It has one access mode, Auto, sent as `--auto`: `opencode run` has no way to hand a permission prompt to anyone and turns down every one its own settings raise, so Auto, which allows whatever those settings do not deny, is the mode a turn can work in. Nothing reaches a running turn; a send waits for the next one. Its login is its own file under `~/.local/share/opencode`.
+
+**Cursor** runs `cursor-agent -p --output-format stream-json --stream-partial-output --trust` with `--workspace <folder>`, `--model <name>`, `--resume <chat>` for a send, and `--force` on the Force mode only; Default proposes changes and applies none. `--trust` trusts the folder for that one process. The task rides stdin. The API key you save with `wsp agents key cursor` travels as `CURSOR_API_KEY` in the turn's environment, never on its command line. It takes no image, and nothing reaches a running turn.
 
 ## What the machine tells every agent
 

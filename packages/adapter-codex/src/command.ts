@@ -94,6 +94,3 @@ export function imagePath(path: string): string {
   if (!path.startsWith("/") || path.includes("\n")) throw new Error(`an image path must be one absolute path on the machine, got "${path}"`);
   return path;
 }
-
-/** Interrupt is a hard boundary, as it is for every harness: teardown (SIGTERM), then SIGKILL after this grace window. */
-export const INTERRUPT_GRACE_MS = 5_000;
