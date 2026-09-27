@@ -17,7 +17,7 @@ import { DiskSyncError, diskUnsettled, syncDisk } from "./disk-sync.js";
 import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, pinRead, plural, reasonOf, sweepCaches, usedBytes, withRecordedPins, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
-import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
+import { BROWSER_SHIM_PATH, applyMachineContext, boundedCommand, type ContextResult } from "./machine-context.js";
 import type { Machine, MachineBackend, MachineKind, MachineState, TemplateRow } from "./machine.js";
 import { isAccountRefusal, isMissing, NotFirstLifeError } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
@@ -586,8 +586,9 @@ const SHELL_CHECK_S = 60;
 
 /** One start of the login shell the way the app's pty runs it, a login shell (profile.d puts the tools on PATH before
  * the rc files) and interactive (the rc files are read): what it prints to stderr is what the person sees before the
- * first prompt. The guest exec has no HOME, so the prelude sets it. */
-const shellCheck = (shell: LoginShell): string => `${PRELUDE}\nTERM=xterm-256color ${shell} -lic true </dev/null || true`;
+ * first prompt. The guest exec has no HOME, so the prelude sets it. Bounded as its own group, so a job an rc file
+ * leaves holding the output open ends with the check; the guard's timeout code where the bound stopped it. */
+const shellCheck = (shell: LoginShell): string => `${PRELUDE}\n${boundedCommand(SHELL_CHECK_S, `TERM=xterm-256color ${shell} -lic true </dev/null`)} || exit 124`;
 
 /** Runs the import stages and the harness on a builder, skipping what the
  * ledger says is already there for the same recipe. Files and upload fail the

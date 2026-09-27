@@ -144,7 +144,9 @@ function treeOf(pid: number): number[] {
   return tree;
 }
 
-function spawnRun(cmd: string, args: readonly string[], env: NodeJS.ProcessEnv, opts: RunOptions): Promise<string | undefined> {
+/** One child as the leader of its own process group under `env` and nothing else, answered with its stdout on exit 0
+ * and nothing otherwise; the group dies with the run, past the budget or once the child exits. */
+export function spawnRun(cmd: string, args: readonly string[], env: NodeJS.ProcessEnv, opts: RunOptions): Promise<string | undefined> {
   return new Promise(resolve => {
     if (opts.signal?.aborted === true) {
       resolve(undefined);
@@ -168,6 +170,8 @@ function spawnRun(cmd: string, args: readonly string[], env: NodeJS.ProcessEnv, 
     const budget = setTimeout(() => {
       failed = true;
       killGroup("SIGTERM");
+      // An interactive shell ignores SIGTERM and would never exit, so the run ends on its own after the grace.
+      grace ??= setTimeout(() => settle(null, "SIGTERM"), CLOSE_GRACE_MS);
     }, opts.timeoutMs ?? 120_000);
     const abort = (): void => {
       failed = true;
@@ -212,6 +216,7 @@ function spawnRun(cmd: string, args: readonly string[], env: NodeJS.ProcessEnv, 
       settle(null, null);
     });
     child.on("exit", (code, signal) => {
+      clearTimeout(grace);
       grace = setTimeout(() => settle(code, signal), CLOSE_GRACE_MS);
     });
     child.on("close", settle);

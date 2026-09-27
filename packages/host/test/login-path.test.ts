@@ -20,6 +20,16 @@ const PAGE = `<!doctype html>
 </body></html>
 `;
 
+const pidsIn = (file: string): number[] => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(l => l !== "").map(Number) : []);
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 
 describe("the login shell PATH", () => {
@@ -88,13 +98,28 @@ describe("the login shell PATH", () => {
     expect(lines).toEqual([]);
   });
 
-  it("a shell that fails leaves the PATH alone and says so in one line, with only the first line of the failure", async () => {
+  it("a shell that fails or runs past its limit leaves the PATH alone and says so in one line", async () => {
     const env: NodeJS.ProcessEnv = { ...launchd(), SHELL: "/bin/zsh" };
     const lines: string[] = [];
-    await takeLoginPath({ env, log: l => lines.push(l), read: () => Promise.reject(new Error("Command failed: /bin/zsh -ilc\nrc file said something on the way out")) });
+    await takeLoginPath({ env, log: l => lines.push(l), read: () => Promise.resolve(undefined) });
     expect(env["PATH"]).toBe(LAUNCHD_PATH.join(":"));
-    expect(lines).toEqual([loginPathLine("/bin/zsh failed: Command failed: /bin/zsh -ilc")]);
+    expect(lines).toEqual([loginPathLine("/bin/zsh failed or ran past 15 s")]);
   });
+
+  it("a shell whose rc file leaves a job holding its output open is read once it answers, and the job ends with it", async () => {
+    const pids = join(dir, "pids");
+    const env: NodeJS.ProcessEnv = { ...launchd(), SHELL: fakeShell(`sleep 300 & echo $! >> ${JSON.stringify(pids)}\nprintf %s "/Users/dev/.local/bin:/usr/bin:/bin"`) };
+    const started = Date.now();
+    try {
+      await takeLoginPath({ env, log: () => {} });
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(env["PATH"]).toBe("/Users/dev/.local/bin:/usr/bin:/bin");
+      expect(pidsIn(pids).length).toBe(1);
+      await vi.waitFor(() => expect(pidsIn(pids).filter(alive)).toEqual([]));
+    } finally {
+      for (const pid of pidsIn(pids)) if (alive(pid)) process.kill(pid, "SIGKILL");
+    }
+  }, 30_000);
 
   it("a shell that prints nothing leaves the PATH alone and says so in one line", async () => {
     const env: NodeJS.ProcessEnv = { ...launchd(), SHELL: "/bin/zsh" };
@@ -206,6 +231,29 @@ describe("the login shell's environment", () => {
       expect(await loginEnv()).toMatchObject({ WSP_FROM_RC: "yes" });
       expect(Date.now() - started).toBeLessThan(5_000);
     } finally {
+      if (was === undefined) delete process.env["SHELL"];
+      else process.env["SHELL"] = was;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("is read once the shell answers when an rc file leaves a job holding its output open, and the job ends with it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-login-env-"));
+    const shell = join(dir, "sh");
+    const pids = join(dir, "pids");
+    writeStub(shell, `#!/bin/sh\nsleep 300 & echo $! >> ${JSON.stringify(pids)}\nprintf 'WSP_FROM_RC=yes\\0'\n`);
+    const was = process.env["SHELL"];
+    process.env["SHELL"] = shell;
+    vi.resetModules();
+    try {
+      const { loginEnv } = await import("../src/login-path.js");
+      const started = Date.now();
+      expect(await loginEnv()).toMatchObject({ WSP_FROM_RC: "yes" });
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(pidsIn(pids).length).toBe(1);
+      await vi.waitFor(() => expect(pidsIn(pids).filter(alive)).toEqual([]));
+    } finally {
+      for (const pid of pidsIn(pids)) if (alive(pid)) process.kill(pid, "SIGKILL");
       if (was === undefined) delete process.env["SHELL"];
       else process.env["SHELL"] = was;
       rmSync(dir, { recursive: true, force: true });

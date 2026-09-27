@@ -86,6 +86,16 @@ describe("nodeExec.run", () => {
     expect(await gone(pid)).toBe(true);
   }, 15_000);
 
+  it("ends a child that ignores the budget's SIGTERM, as an interactive zsh does, and every job it started", async () => {
+    const d = scratch();
+    const out = nodeExec.run("/bin/sh", ["-c", `trap "" TERM; echo $$ > ${join(d, "pid")}; sleep 100 & echo $! > ${join(d, "job")}; while :; do sleep 1; done`], { timeoutMs: 300 });
+    const shell = await pidIn(join(d, "pid"));
+    const job = await pidIn(join(d, "job"));
+    expect(await out).toBeUndefined();
+    expect(await gone(shell)).toBe(true);
+    expect(await gone(job)).toBe(true);
+  }, 15_000);
+
   it("does not wait on a grandchild that kept stdout after the child exited, and ends it with the run", async () => {
     const d = scratch();
     const out = await nodeExec.run("/bin/sh", ["-c", `sleep 30 & echo $! > ${join(d, "pid")}; echo listed`]);

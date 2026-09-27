@@ -15,6 +15,7 @@ import { READS_PER_EXEC } from "../src/exec-detached.js";
 import { ALREADY_ON_MACHINE } from "../src/golden-base.js";
 import { goldenName } from "../src/snapshot-names.js";
 import { tarOf } from "../src/vault.js";
+import { boundedCommand } from "../src/machine-context.js";
 import { tarRead } from "./tar-read.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, SnapshotProgress, TemplateRow } from "../src/machine.js";
 
@@ -1270,6 +1271,8 @@ describe("golden import stages", () => {
     const check = noisy.cmds[at("zsh -lic true")]!;
     // A login shell like the app's terminal: profile.d puts the tools on PATH before the rc files are read.
     expect(check).toContain('TERM=xterm-256color zsh -lic true </dev/null');
+    // A job the rc file leaves holding the output open ends with the check rather than holding the exec to its deadline.
+    expect(check).toContain(`${boundedCommand(60, "TERM=xterm-256color zsh -lic true </dev/null")} || exit 124`);
     expect(check).toMatch(/\nsetsid bash -c '/);
     // A tool or an agent the rc calls is on the machine by then: the check runs after the last install of each stage.
     for (const before of ["tar xzf", "claude-install", "codex-install", "brew install gh", "bun@1.4.0", "autoremove"]) expect(at("zsh -lic true"), before).toBeGreaterThan(at(before));
