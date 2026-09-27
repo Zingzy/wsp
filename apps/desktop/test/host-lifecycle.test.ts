@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
@@ -88,6 +88,23 @@ const ipv6Loopback = await new Promise<boolean>(resolve => {
 });
 
 /** A lock and a token file as a host serving this state file leaves them beside it. */
+/** A host after the one serving: a live process of its own takes the lock `afterMs` from now and binds its page
+ * 600 ms after that, as a host does that reads its computers between the two. */
+async function handedOn(statePath: string, afterMs: number): Promise<{ port: number; done(): Promise<void> }> {
+  const probe = createTcpServer();
+  const port = await listen(probe);
+  await closeServer(probe);
+  const other = spawn("sleep", ["30"], { stdio: "ignore" });
+  let host: Promise<HostHandle> | undefined;
+  let timer = setTimeout(() => {
+    writeFileSync(join(statePath, "..", "host.lock"), JSON.stringify({ pid: other.pid, port, startedAt: new Date().toISOString(), startedBy: "service" }));
+    timer = setTimeout(() => {
+      host = startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port }).then(h => (serving(statePath, h, { pid: other.pid, startedBy: "service" }), h));
+    }, 600);
+  }, afterMs);
+  return { port, done: async () => (clearTimeout(timer), other.kill(), await (await host)?.close()) };
+}
+
 function serving(statePath: string, h: HostHandle, over: Record<string, unknown> = {}): void {
   writeFileSync(join(statePath, "..", "host.lock"), JSON.stringify({ pid: process.pid, port: h.port, startedAt: new Date().toISOString(), ...over }));
   writeFileSync(join(statePath, "..", "host-token"), `${h.authToken}\n`);
@@ -382,8 +399,8 @@ describe("openHost", () => {
   });
 
   it("the service's new host is waited for past the start's own wait while it holds the lock and binds late, as a host reading unreachable boxes does", async () => {
-    // What the ticket's launch met: nothing served, the unit loaded, and the host the manager started took its lock
-    // at once but answered on its port only after the start's twenty seconds.
+    // Nothing served, the unit loaded, and the host the manager started took its lock at once but answered on its
+    // port only after the start's own wait had run out.
     const probe = createTcpServer();
     const port = await listen(probe);
     await closeServer(probe);
@@ -411,12 +428,74 @@ describe("openHost", () => {
     expect(ready.session.url).toBe(`http://127.0.0.1:${port}`);
   });
 
-  it("a host that holds the lock and never answers is given up on, once the longer wait for a starting host has run out", async () => {
+  it("a host that holds the lock and never answers is given up on, once the longer wait for a starting host has run out, and says how long it waited", async () => {
     const probe = createTcpServer();
     const port = await listen(probe);
     await closeServer(probe);
     writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString(), startedBy: "service" }));
-    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 200 } })).rejects.toThrow(/no wsp host answers there/);
+    const t0 = Date.now();
+    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 200 } })).rejects.toThrow(/^after 1\.\ds of waiting, a host .* but no wsp host answers there/);
+    expect(Date.now() - t0).toBeLessThan(2_000);
+  });
+
+  it("the service's host that takes the lock and never answers is waited on once, and the line names the whole wait", async () => {
+    const probe = createTcpServer();
+    const port = await listen(probe);
+    await closeServer(probe);
+    let loaded = false;
+    const road = {
+      ...launchd.road,
+      waitMs: 200,
+      run: async (argv: readonly string[]) => {
+        if (argv[1] === "print") return loaded ? { code: 0, output: "" } : { code: 113, output: "Could not find service" };
+        if (argv[1] === "bootstrap") {
+          loaded = true;
+          writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString(), startedBy: "service" }));
+        }
+        return { code: 0, output: "" };
+      },
+    };
+    const t0 = Date.now();
+    await expect(openHostReady({ statePath, home, shim, io: quietIO(), service: road })).rejects.toThrow(/did not start within 1\.\ds/);
+    expect(Date.now() - t0).toBeLessThan(2_000);
+  });
+
+  it("a launch that meets the lock passing straight to a new host, which binds a while after taking it, ends on that host", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    serving(statePath, existing, { startedBy: "service" });
+    await existing.close();
+    existing = undefined;
+    const next = await handedOn(statePath, 300);
+    try {
+      const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } });
+      expect(ready.session.url).toBe(`http://127.0.0.1:${next.port}`);
+      expect(launchd.ran).toEqual([]);
+    } finally {
+      await next.done();
+    }
+  });
+
+  it("a launch whose read meets the lock passing straight to a new host, which binds a while after taking it, ends on that host", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0 });
+    serving(statePath, existing, { startedBy: "service" });
+    const going = existing;
+    let next: Awaited<ReturnType<typeof handedOn>> | undefined;
+    let dials = 0;
+    const dial: typeof dialHost = async (path, o) => {
+      if (dials++ === 0) {
+        await going.close();
+        existing = undefined;
+        next = await handedOn(path, 0);
+      }
+      return dialHost(path, o);
+    };
+    try {
+      const ready = await openHostReady({ statePath, home, shim, io: quietIO(), service: { ...launchd.road, waitMs: 2_000 } }, dial);
+      expect(ready.session.url).toBe(`http://127.0.0.1:${next!.port}`);
+      expect(launchd.ran).toEqual([]);
+    } finally {
+      await next?.done();
+    }
   });
 
   it("a launch whose read meets the host closing its page before it lets go of its lock ends on the next host", async () => {

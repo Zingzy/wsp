@@ -224,9 +224,12 @@ export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "h
   }
   const started = Date.now();
   if ((await untilAttachable(opts.statePath, opts.service.waitMs)) === undefined) {
-    throw new Error([`wsp did not start within ${fmtDuration(Date.now() - started)}; its log is ${plan.logPath}`, ...logTail(plan.logPath)].join("\n"));
+    throw new StartTimeout([`wsp did not start within ${fmtDuration(Date.now() - started)}; its log is ${plan.logPath}`, ...logTail(plan.logPath)].join("\n"));
   }
 }
+
+/** The service's host did not answer within the start's wait, which already covered a host still binding. */
+class StartTimeout extends Error {}
 
 /** Attaches to the host already serving this state file, which its lock names and this window has proof of, else
  * opens on the host a line with no name on it takes, else makes this computer's own service serve it and attaches
@@ -272,33 +275,37 @@ async function untilAttachable(statePath: string, waitMs: number): Promise<HostL
   }
 }
 
-/** Whether a lock whose page answers nothing settles within the longer wait: the process holding it lets go (a host
- * on its way out, and the one the manager starts next takes over), or it answers as this window's own (a host that
- * took the lock and was still binding). A lock whose page answers anything at all is not waited on: that host is
- * up, and its refusal stands as it is. */
-async function settles(statePath: string, lock: HostLock, waitMs: number): Promise<boolean> {
-  if (await httpProbe(lock)) return false;
-  for (const until = Date.now() + waitMs * STARTING_WAITS; ; await pause()) {
-    const now = servingHost(statePath);
-    if (now?.pid !== lock.pid || (await answersAsOwn(statePath)(now))) return true;
+/** Waits, until `until`, for the lock to be gone or to answer as this window's own host: a host on its way out lets
+ * go, and the one after it, which may already hold the lock, binds. A lock whose page answers as anything else is a
+ * host that is up, and its refusal stands. */
+async function settles(statePath: string, until: number): Promise<boolean> {
+  for (;; await pause()) {
     if (Date.now() >= until) return false;
+    const now = servingHost(statePath);
+    if (now === undefined || (await answersAsOwn(statePath)(now))) return true;
+    if (await httpProbe(now)) return false;
   }
 }
 
 /** The host the window opens on and whether it holds nothing yet, read across a restart. A launch that meets the
  * host on its way down (launchctl kickstart -k, a Restart host) finds its lock and its page still up for a moment,
- * attaches, and then reads nothing from it, or a moment later finds the lock with no page behind it; a host the
- * manager has just started holds its lock a while before its page answers. Once the lock settles, the launch
- * attaches again, which waits for the host the manager starts next; a host whose page answers keeps its refusal. */
+ * attaches, and then reads nothing from it, or finds the lock with no page behind it; the host after it holds the
+ * lock a while before its page answers. The launch waits for the lock to settle and attaches again, all within one
+ * wait for a starting host; a host whose page answers keeps its refusal. */
 export async function openHostReady(opts: OpenHostOptions, dial: typeof dialHost = dialHost): Promise<{ session: HostSession; first: boolean }> {
-  for (let again = false; ; again = true) {
+  const from = Date.now();
+  const until = from + opts.service.waitMs * STARTING_WAITS;
+  const gaveUp = (e: unknown): unknown => (Date.now() < until ? e : new Error(`after ${fmtDuration(Date.now() - from)} of waiting, ${e instanceof Error ? e.message : String(e)}`));
+  for (;;) {
     let session: HostSession;
     try {
       session = await openHost(opts);
     } catch (e) {
-      // A lock nothing answers behind: a host on its way out that has not let go, or one that has not bound yet.
+      // A lock whose page answers is a host that is up and refused this window; one with nothing behind it is a host
+      // closing or still binding. The start's own wait has already covered a host still binding.
       const lock = servingHost(opts.statePath);
-      if (again || lock === undefined || !(await settles(opts.statePath, lock, opts.service.waitMs))) throw e;
+      if (e instanceof StartTimeout || lock === undefined || (await httpProbe(lock))) throw e;
+      if (!(await settles(opts.statePath, until))) throw gaveUp(e);
       continue;
     }
     if (session.remote) return { session, first: false };
@@ -306,11 +313,11 @@ export async function openHostReady(opts: OpenHostOptions, dial: typeof dialHost
     try {
       return { session, first: await firstLaunch(opts.statePath, opts.home, dial) };
     } catch (e) {
-      if (again) throw e;
-      // The host that answered is gone, or is closing: its page shuts before its lock goes, so a read in that gap
-      // fails while the lock still names it.
+      // The host that answered and still serves refused the read. Any other failure is a host closing (its page
+      // shuts before its lock goes) or the one after it still binding.
       const now = servingHost(opts.statePath);
-      if (now !== undefined && now.pid === answered?.pid && !(await settles(opts.statePath, now, opts.service.waitMs))) throw e;
+      if (now !== undefined && now.pid === answered?.pid && (await httpProbe(now))) throw e;
+      if (!(await settles(opts.statePath, until))) throw gaveUp(e);
     }
   }
 }
