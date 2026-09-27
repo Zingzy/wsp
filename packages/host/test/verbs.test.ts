@@ -2755,6 +2755,11 @@ describe("wsp verbs over the host", () => {
     const asJson = await run("threads", "wait", a!.threadId!, "--timeout", "0.05", "--json");
     expect(json(asJson.io)).toEqual([{ timedOut: true }]);
     expect(asJson.io.errors).toEqual([`thread ${a!.threadId!.slice(0, 8)} still running after 50ms`]);
+    const now = Date.now;
+    let skew = 0;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now() + (skew += 5));
+    const late = await run("threads", "wait", a!.threadId!, "--timeout", "0.05").finally(() => clock.mockRestore());
+    expect(late.io.errors).toEqual([`thread ${a!.threadId!.slice(0, 8)} still running after 50ms`]);
 
     const waiting = run("threads", "wait", a!.threadId!, b!.threadId!);
     await new Promise(r => setTimeout(r, 30));
