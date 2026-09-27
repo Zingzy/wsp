@@ -183,6 +183,37 @@
               "settledAt": {
                 "type": "number"
               },
+              "pinnedAt": {
+                "type": "number"
+              },
+              "snoozedUntil": {
+                "type": "number"
+              },
+              "wokeAt": {
+                "type": "number"
+              },
+              "section": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "enum": [
+                      "needs-you",
+                      "working",
+                      "done",
+                      "idle"
+                    ]
+                  },
+                  "whileState": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "whileState"
+                ],
+                "additionalProperties": false
+              },
               "projectName": {
                 "type": "string"
               },
@@ -404,6 +435,37 @@
               },
               "settledAt": {
                 "type": "number"
+              },
+              "pinnedAt": {
+                "type": "number"
+              },
+              "snoozedUntil": {
+                "type": "number"
+              },
+              "wokeAt": {
+                "type": "number"
+              },
+              "section": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "enum": [
+                      "needs-you",
+                      "working",
+                      "done",
+                      "idle"
+                    ]
+                  },
+                  "whileState": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "whileState"
+                ],
+                "additionalProperties": false
               },
               "projectName": {
                 "type": "string"
