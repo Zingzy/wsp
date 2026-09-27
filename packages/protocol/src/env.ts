@@ -7,6 +7,10 @@
 /** The one road that turns labs on: this variable in the host's environment, read once when the runtime starts. */
 export const LABS_ENV = "WSP_LABS";
 
+/** The one road that turns the cloud on: this variable set to 1 in the environment of every wsp process, read once
+ * when the process registers its providers. Off, no cloud provider is registered and nothing built from one exists. */
+export const CLOUD_ENV = "WSP_CLOUD";
+
 /** The variable a turn's launch environment carries so wsp run inside that turn can say which thread it is: one
  * turn's token, minted by the host at the launch and forgotten when the turn's process exits. The host is the only
  * thing that maps it to a thread, so a caller cannot name a thread it did not come from. */

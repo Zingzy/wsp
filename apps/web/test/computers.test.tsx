@@ -27,7 +27,7 @@ const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 
 /** What the host says about its own setup: which keys it holds, which is the rule a cloud row stands under, and
  * the agents on this computer, which are this computer's own rows. */
-const setupOf = (over: Partial<InitSetup> = {}): InitSetup => ({ keys: { solari: false }, home: "/Users/dev", agents: [], pricing: null, job: null, ...over }) as InitSetup;
+const setupOf = (over: Partial<InitSetup> = {}): InitSetup => ({ keys: { box: false, solari: false }, home: "/Users/dev", agents: [], pricing: null, job: null, ...over }) as InitSetup;
 
 /** A Linux box the ssh installer hands back: it runs Docker, so it can hold copies of the image. */
 const box: PlaceView = {
@@ -248,6 +248,12 @@ describe("the Computers list", () => {
     expect(document.querySelector("[data-k='connect-provider']")).toBeNull();
     openPage("p_2");
     expect(pageAt()).toBe("computer:p_2");
+  });
+
+  it("draws Add a computer alone where the host registered no cloud", async () => {
+    useStore.setState({ places: [here, box] });
+    await mountComputers(computersApi({}, setupOf({ keys: {} })).api);
+    expect([...document.querySelectorAll("[data-settings-card='computers'] [data-add-button]")].map(b => b.textContent)).toEqual([ADD_COMPUTER_WORDS.title]);
   });
 
   it("asks the host once for the month and follows the meter, and says no money at all on a window that may not read it", async () => {
@@ -692,11 +698,17 @@ describe("Add a computer on the page", () => {
   const job = (over: Partial<PlaceAddJob>): PlaceAddJob => ({ addId: "a_host", address: "root@spoo", startedAt: "2026-09-12T11:59:00.000Z", state: "running", steps: [], ...over });
 
   it("offers the three roads as pictures with none picked, and draws no flow until one is", async () => {
-    await open(null);
+    await open(null, {}, setupOf());
     const roads = [...document.querySelectorAll("[data-add-road]")];
     expect(roads.map(r => r.getAttribute("data-add-road"))).toEqual(["ssh", "cloud", "code"]);
     expect(roads.every(r => r.getAttribute("aria-checked") === "false")).toBe(true);
     expect(document.querySelector("[data-k^='road-']")).toBeNull();
+  });
+
+  it("offers no cloud where the host registered none, and names none", async () => {
+    await open(null, {}, setupOf({ keys: {} }));
+    expect([...document.querySelectorAll("[data-add-road]")].map(r => r.getAttribute("data-add-road"))).toEqual(["ssh", "code"]);
+    for (const words of Object.values(PROVIDER_KEY_WORDS)) expect(document.body.textContent).not.toContain(words.name);
   });
 
   it("asks for user, host and port over ssh, focuses the host, and lists what happens before Add", async () => {
@@ -862,7 +874,7 @@ describe("Add a computer on the page", () => {
 
   it("keeps the run when the person switches roads or leaves the page and comes back, since the host keeps installing", async () => {
     const { at, api } = pending();
-    await open("ssh", api);
+    await open("ssh", api, setupOf());
     fireEvent.change(host(), { target: { value: "root@65.21.4.12" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     stage(at.addId!, "connect", "done", "Ubuntu 24.04");

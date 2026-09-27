@@ -30,9 +30,10 @@ import {
 } from "@wsp/runtime";
 import { writeOwn } from "@wsp/own-file";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, serverValuesOf } from "@wsp/catalog";
-import { authRefusal, FORWARD_ENV, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
+import { authRefusal, cloudOffRefusal, FORWARD_ENV, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, verbCopier } from "@wsp/engine";
-import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
+import { CLOUD_ON } from "./cloud.js";
+import { noMachinesLine, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
 import { DAEMON_DEPLOYED_LINE, cappedLine, claudeEnvs, deployDaemon, doctor, doctorOverHost, hostDoctor, missingBundleFile } from "./doctor.js";
 import { daemonFixLine, releaseUpdateLine } from "./daemon-fix.js";
@@ -103,7 +104,7 @@ import { hostActs } from "./agents-signin.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
 import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, hereDoor, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, cloudLineOf, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, hereDoor, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { installedVersion, stateWriterHere, VERSION } from "./version.js";
 import { latestWords, releaseReading, releaseWatch } from "./release.js";
 
@@ -129,8 +130,8 @@ usage: wsp <verb> ...
   wsp add <user@host|folder|url>  a computer over ssh (user@host or ssh alias);
                                   or a project: a folder here or a repo cloned
                                   with --on <computer>
-  wsp computers                   your computers: this one, each box you added,
-                                  each cloud account
+${CLOUD_ON ? `  wsp computers                   your computers: this one, each box you added,
+                                  each cloud account` : "  wsp computers                   your computers: this one, each box you added"}
   wsp remove <computer>           take a computer out; the box is left as
                                   wsp found it
   wsp projects                    your projects, each on its computer
@@ -318,7 +319,7 @@ export interface LoadedKeys {
 export async function loadKeys(
   io: CliIO,
   sources: KeySources,
-  ask: { anthropic: boolean; noSolari?: NoProviderKey; checkSaved?: boolean } = { anthropic: true },
+  ask: { anthropic: boolean; noProviderKey?: NoProviderKey; checkSaved?: boolean } = { anthropic: true },
 ): Promise<LoadedKeys> {
   const ownEnv = envFileFor(sources.statePath);
   const layers = keyLayers(sources);
@@ -354,19 +355,19 @@ export async function loadKeys(
   // provider's, and a local thread uses it as a fork would.
   // A refused key is never quietly dropped for the local road: nobody asked for this computer, the provider did.
   if (refusedSaved !== undefined && io.isTTY !== true) throw authRefusal(refusedSaved);
-  if (keyEnv === undefined || ask.noSolari === "local" || (ask.noSolari === "offer" && io.isTTY !== true)) return loaded(undefined);
+  if (keyEnv === undefined || ask.noProviderKey === "local" || (ask.noProviderKey === "offer" && io.isTTY !== true)) return loaded(undefined);
 
   // Not wrapped: the CLI's IOs already refuse a secret as the contract's auth class, so a caller with no terminal
   // to type one on exits on that code rather than on a generic failure.
   const where = row?.keyConsole !== undefined ? `\n${row.keyConsole}` : "";
-  const skip = ask.noSolari === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : "";
+  const skip = ask.noProviderKey === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : "";
   // The variable is said once, on the line that says where a key goes so this screen is not drawn again.
   let why = refusedSaved ?? `No ${keyEnv} in ${KEY_LAYER_WORDS}.`;
   let key: string;
   for (let attempt = 1; ; attempt++) {
     const typed = (await io.askSecret(`${row?.keyName ?? keyEnv}\n${why}${where}${skip}`, keyEnv)).trim();
     if (!typed) {
-      if (ask.noSolari === "offer") return loaded(undefined);
+      if (ask.noProviderKey === "offer") return loaded(undefined);
       throw authRefusal(`${keyEnv} is needed to start.`);
     }
     // Checked before it is written, so a key the provider refuses never reaches the file the whole setup reads.
@@ -617,6 +618,8 @@ interface ServeFlag {
   name: Extract<keyof SharedFlags, string>;
   option: Options[string];
   words(asked: ServeAsked): string[];
+  /** Only means something on a cloud: with none registered it prints in no help, and typing it is refused by the flag. */
+  cloud?: true;
 }
 
 export const SERVE_FLAGS: readonly ServeFlag[] = [
@@ -624,7 +627,7 @@ export const SERVE_FLAGS: readonly ServeFlag[] = [
   { name: "port", option: { type: "string" }, words: a => ["--port", String(a.port)] },
   { name: "listen", option: { type: "string" }, words: a => ["--listen", a.address] },
   { name: "advertise", option: { type: "string" }, words: a => (a.advertise === undefined ? [] : ["--advertise", a.advertise]) },
-  { name: "provider", option: { type: "string" }, words: a => (a.provider === undefined ? [] : ["--provider", a.provider]) },
+  { name: "provider", option: { type: "string" }, cloud: true, words: a => (a.provider === undefined ? [] : ["--provider", a.provider]) },
   { name: "no-relay", option: { type: "boolean" }, words: a => (a.relay === false ? ["--no-relay"] : []) },
 ];
 
@@ -734,6 +737,7 @@ export function makeRuntime(
   // starts with no key swaps its module in when one is saved, and its copies belong to the module that made them.
   const pick: ProviderPick = { id: wiredProviderId(env), env };
   const rt = createRuntime({
+    noMachinesLine: noMachinesLine(),
     places: providerPlaces(
       () => pick.id,
       slot.backend,
@@ -1137,7 +1141,7 @@ async function init(
   const beside = held === undefined ? undefined : await besideHost(held, opts, flags.upCommand, flags.on);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
   const { keys, env: providerEnv } =
-    beside !== undefined ? { keys: keysFound(keySources(opts.providerEnv, opts.statePath)), env: opts.providerEnv } : await loadKeys(say, keySources(opts.providerEnv, opts.statePath), { anthropic: false, noSolari: "offer", checkSaved: true });
+    beside !== undefined ? { keys: keysFound(keySources(opts.providerEnv, opts.statePath)), env: opts.providerEnv } : await loadKeys(say, keySources(opts.providerEnv, opts.statePath), { anthropic: false, noProviderKey: "offer", checkSaved: true });
   // One wiring for every runtime this run builds and for the host it serves at the end: the links and the recipe
   // planner are the same on both roads below.
   const links = placeWiring(opts.statePath, opts.advertise);
@@ -1273,7 +1277,7 @@ export interface ServeOptions {
  * window that can ask nothing. */
 export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
-  const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noSolari: "local" });
+  const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noProviderKey: "local" });
   // One wiring for the runtime and for the host over it, so the links this host holds and the recipe its doctor
   // reads come from the same place.
   const links = placeWiring(opts.statePath, opts.advertise);
@@ -1307,7 +1311,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
-  const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noSolari: "local" });
+  const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noProviderKey: "local" });
   // Read first, for the reason readOnce carries.
   const store = await readOnce(opts.statePath);
   const links = placeWiring(opts.statePath, opts.advertise);
@@ -1895,12 +1899,12 @@ export const DOCTOR_HANDLES_ENV = "WSP_DOCTOR_HANDLES";
 /** What the doctor's roads that touch no provider load: no key, and no question about one. The local road and the
  * computer road fork nothing and bill nothing, so a person with a computer of their own and no cloud account is
  * never asked for a cloud key; the agents' key rides along from the files either way. */
-const NO_CLOUD_KEY = { anthropic: false, noSolari: "local" } as const;
+const NO_CLOUD_KEY = { anthropic: false, noProviderKey: "local" } as const;
 
 /** Which keys one doctor road needs: a cloud row's road forks a machine at that provider and bills while it runs,
  * so its key is asked for the way every cloud road asks for one; every other road forks nothing and is handed no
  * key at all. Read after the row, since the row is what says which road this is. */
-export const doctorKeyAsk = (computer?: Pick<PlaceView, "kind">): { anthropic: boolean; noSolari?: "local" } =>
+export const doctorKeyAsk = (computer?: Pick<PlaceView, "kind">): { anthropic: boolean; noProviderKey?: "local" } =>
   computer?.kind === "provider" ? { anthropic: true } : NO_CLOUD_KEY;
 
 /** The row a word names, or the refusal naming the rows this host holds and the line that lists them. The one
@@ -1924,7 +1928,7 @@ function oneWord(words: string, usage: string, args: readonly string[]): string 
 const COMMANDS: Readonly<Record<string, Command>> = {
   up: {
     page: "agent",
-    usage: "wsp up [--port <n>] [--listen <addr>] [--advertise <url>] [--provider <name>] [--no-relay] [--service]",
+    usage: `wsp up [--port <n>] [--listen <addr>] [--advertise <url>]${CLOUD_ON ? " [--provider <name>]" : ""} [--no-relay] [--service]`,
     about: `serve the host in this terminal, for a host you want to watch or one that serves beyond this computer; --service hands the same line to this computer's own service manager, which starts it now and again at every login. ${HOST_STARTS_ITSELF}`,
     json: false,
     host: "refused",
@@ -2068,9 +2072,9 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   add: {
     page: "front",
     usage:
-      "wsp add [<user@host>|<ssh alias>|<folder>|<url>|<owner/repo>|<provider>|<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]",
+      `wsp add [<user@host>|<ssh alias>|<folder>|<url>|<owner/repo>|${CLOUD_ON ? "<provider>|" : ""}<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>] [--host-key <key>]`,
     about:
-      "a computer of yours over ssh by user@host or by an alias from your ssh config, or a project: a folder on this computer, which every workspace of it is a copy of, or a repo a computer clones with --on <computer>; <provider> takes a provider's key, nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every workspace on it",
+      "a computer of yours over ssh by user@host or by an alias from your ssh config, or a project: a folder on this computer, which every workspace of it is a copy of, or a repo a computer clones with --on <computer>; " + (CLOUD_ON ? "<provider> takes a provider's key, " : "") + "nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every workspace on it",
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
@@ -2521,7 +2525,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "advertise", on: ["up"], says: "the address a computer being joined dials this host at; without it, the relay's name or what this computer answers on" },
   { name: "no-relay", on: ["up"], says: "serve without the tunnel, on a computer that is linked to a relay" },
   { name: "service", on: ["up"], says: "install the host as a launchd agent on a Mac or a systemd user unit on Linux, which serves now and again at every login. The keys are not written into it: it reads the same .env a terminal run reads, so they have to be in a file" },
-  { name: "provider", on: ["up", "init"], says: "which machine provider this computer forks on; without it, a key saved under a provider's own variable wires that provider" },
+  ...(CLOUD_ON ? [{ name: "provider" as const, on: ["up", "init"], says: "which machine provider this computer forks on; without it, a key saved under a provider's own variable wires that provider" }] : []),
   { name: "code", on: ["join"], says: "the code the other computer printed: wsp add on the host" },
   { name: "code-file", on: ["join"], says: "read the code off this file and delete the file before dialing, so a code never sits on a disk" },
   { name: "watch", on: ["status"], says: "draw the same rows again every second where they stand, until Ctrl-C; it needs a terminal to redraw on, and reads nothing but this computer's own agent" },
@@ -2614,6 +2618,8 @@ export async function cli(
   // The flags every line shares are taken off the whole line here, before the words that select the line are read,
   // so one of them binds wherever it was typed and what is left reaches its own parse in the order it was given.
   const { common, rest } = takeCommon(argv);
+  const cloudLine = cloudLineOf(rest);
+  if (cloudLine !== undefined) return failed(io, jsonAsked(argv), cloudOffRefusal(cloudLine));
   const verb = findVerb(rest);
   if (verb !== undefined) {
     const words = verb.name.split(" ");
@@ -2693,6 +2699,8 @@ export async function cli(
   if (values.host !== undefined && command.host === "refused") {
     return failed(io, json, usageRefusal(`Unknown option '--host' for wsp ${words}: it runs on this computer.`, `That flag belongs to ${HOST_COMMANDS.map(w => `wsp ${w}`).join(", ")}, and to every verb.`));
   }
+  const cloudFlag = CLOUD_ON ? undefined : SERVE_FLAGS.find(f => f.cloud === true && values[f.name] !== undefined);
+  if (cloudFlag !== undefined) return failed(io, json, cloudOffRefusal(`wsp ${words} --${cloudFlag.name}`));
   // A flag another command of the shared parse reads: the union is one parse, so the line that does not read it is
   // told which lines do rather than taking it and doing nothing with it.
   const foreign = SHARED_FLAGS.find(f => values[f.name] !== undefined && !readers(f.name).includes(words));

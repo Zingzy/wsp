@@ -31,7 +31,7 @@ import { builtWhen, copyOn, IMAGE_WORDS } from "./image.js";
 import { useImageCard } from "./ImageCard.js";
 import { openImageRecipe } from "./openAt.js";
 import { NOTHING_HELD, absenceOf, hereName, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, projectOn, threadWord, type PlaceHolding } from "./places.js";
-import { keyHeld } from "./providers.js";
+import { cloudsOffered, keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 import { RefusalSlot } from "./sheetParts.js";
 import { Card, cardDrops, Cards, Row, type SettingsCardData, type SettingsItem, type SettingsRowData } from "./rows.js";
@@ -133,9 +133,11 @@ export function computersCards(ctx: SettingsContext): SettingsCardData[] {
       <AddButton data-k="add-computer-button" onClick={() => ctx.askAdd(null)}>
         {ADD_COMPUTER_WORDS.title}
       </AddButton>
-      <AddButton data-k="add-cloud-button" onClick={() => ctx.askAdd("cloud")}>
-        {ADD_COMPUTER_WORDS.addCloud}
-      </AddButton>
+      {cloudsOffered(ctx.reads.setup).length === 0 ? null : (
+        <AddButton data-k="add-cloud-button" onClick={() => ctx.askAdd("cloud")}>
+          {ADD_COMPUTER_WORDS.addCloud}
+        </AddButton>
+      )}
     </div>
   );
   return [

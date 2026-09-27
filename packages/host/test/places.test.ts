@@ -111,6 +111,7 @@ import { addedBy, addedProviders } from "../src/providers.js";
 import { sha256sumBin } from "../../engine/test/sha256sum-bin.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 runsFromItsOwnFolder();
 
@@ -314,7 +315,7 @@ describe("what wsp add prints with no argument", () => {
     expect(addLines(joinToken("X", `SHA256:${"b".repeat(43)}`), 1, 0, ["http://10.0.0.2:4400"], undefined).join("\n")).not.toContain("relay");
   });
 
-  it("takes every provider the table says how to add, and nothing it names no way of adding", () => {
+  it.runIf(CLOUD_ON)("takes every provider the table says how to add, and nothing it names no way of adding", () => {
     // Read off the table, never off an id: the row that holds no machine is no place to add at all.
     expect(addableProviders()).toEqual(["box", "solari"]);
     // How a row is added is read off the row's own facts: a row that declares the variable it reads a key from is
@@ -374,7 +375,7 @@ const opts = (home: string, env: Record<string, string | undefined> = {}): Param
 });
 
 describe("a provider as a place", () => {
-  it("puts the key to a provider that is opened by one, and writes nothing when it is refused", async () => {
+  it.runIf(CLOUD_ON)("puts the key to a provider that is opened by one, and writes nothing when it is refused", async () => {
     const home = tmp("add-provider-key");
     const put: MachineBackend[] = [];
     const refusing = { ...systemPlaceDeps, checkKey: async (b: MachineBackend): Promise<KeyCheck> => (put.push(b), { state: "refused", said: "box said 401 invalid token" }) };
@@ -395,7 +396,7 @@ describe("a provider as a place", () => {
     expect(good.lines.join("\n") + good.errors.join("\n")).not.toContain("sk-ant-x");
   });
 
-  it("writes the pick beside the state file it was run against, which is what the host serving it reads", async () => {
+  it.runIf(CLOUD_ON)("writes the pick beside the state file it was run against, which is what the host serving it reads", async () => {
     const home = tmp("add-provider-beside");
     const folder = join(home, "elsewhere");
     mkdirSync(folder, { recursive: true });
