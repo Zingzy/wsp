@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One state file, one host: the lock names the process serving it and the
 // port it bound, so a second host refuses and other local tools find it.
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { authority, isWildcard, LOOPBACK, relayUrlOf, WS_PATH, type HostShape } from "@wsp/protocol";
 import { ownFolder } from "@wsp/own-file";
@@ -193,28 +193,86 @@ export async function heldOrStarted(statePath: string, start: HostStarter | unde
  * gives way; a lock this process cannot parse is treated the same. Read twice
  * on the road a start takes: once before it picks ports or builds anything, so
  * a host already serving costs the second start nothing, and again in takeLock
- * as the last read before its write, which is what settles two starts that both
- * passed the first one. */
+ * where a lock already stands in the place its link wanted. */
 export function refuseIfServed(lockPath: string, statePath: string): void {
   const held = readLock(lockPath);
   if (held !== undefined && pidAlive(held.pid)) throw heldBy(held, statePath);
 }
 
 /** Seeded with the requested port so a refusal during startup can name it;
- * rewritten with the bound port once the host is up. */
+ * rewritten with the bound port once the host is up. A lock only ever appears
+ * whole: it is written to a file of this process's own and linked into place,
+ * which fails where any lock stands, so of two starts only one gets past here
+ * and the other never reaches the token. */
 export function takeLock(lockPath: string, statePath: string, ports: { port: number; address?: string; startedBy?: HostStarted }): HostLock {
   refuseIfServed(lockPath, statePath);
   const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
   // The state file, its blobs and the host token sit here, so the folder is the owner's before the lock is taken.
   ownFolder(dirname(statePath));
   ownFolder(dirname(lockPath));
-  rmSync(lockPath, { force: true });
+  const mine = `${lockPath}.${process.pid}`;
+  writeFileSync(mine, JSON.stringify(lock));
   try {
-    writeFileSync(lockPath, JSON.stringify(lock), { flag: "wx" });
-  } catch (e) {
-    if (errnoCode(e) !== "EEXIST") throw e;
+    if (linkInto(mine, lockPath)) return lock;
+    refuseIfServed(lockPath, statePath);
+    setAsideStale(lockPath, statePath);
+    if (linkInto(mine, lockPath)) return lock;
     const winner = readLock(lockPath);
     throw winner !== undefined ? heldBy(winner, statePath) : new Error(`another wsp host just took ${lockPath}`);
+  } finally {
+    rmSync(mine, { force: true });
   }
-  return lock;
+}
+
+/** The lock rewritten by the host holding it, swapped in whole, so a start reading it never meets half a file and
+ * takes it for a stale one. */
+export function rewriteLock(lockPath: string, lock: HostLock): void {
+  const next = `${lockPath}.${process.pid}`;
+  writeFileSync(next, JSON.stringify(lock));
+  renameSync(next, lockPath);
+}
+
+/** What link() says on a file system with no hard links: exFAT, and some network mounts. */
+const NO_LINKS = new Set(["EPERM", "ENOTSUP", "EXDEV"]);
+
+/** Links a whole lock into place; false where a lock already stands. A file system with no hard links gets the
+ * exclusive create instead, so a state file kept on one still starts, with the moment between the file appearing
+ * and its words landing that the create has. */
+function linkInto(from: string, to: string): boolean {
+  try {
+    linkSync(from, to);
+    return true;
+  } catch (e) {
+    if (errnoCode(e) === "EEXIST") return false;
+    if (!NO_LINKS.has(errnoCode(e) ?? "")) throw e;
+  }
+  try {
+    writeFileSync(to, readFileSync(from), { flag: "wx" });
+    return true;
+  } catch (e) {
+    if (errnoCode(e) === "EEXIST") return false;
+    throw e;
+  }
+}
+
+/** Moves a stale lock out of the way in one rename, which only one of two starts can win. The rename moves whatever
+ * stands there by then, so a live host's lock that took the place since the last read is put back, and this start
+ * refuses. */
+function setAsideStale(lockPath: string, statePath: string): void {
+  const aside = `${lockPath}.${process.pid}.stale`;
+  try {
+    renameSync(lockPath, aside);
+  } catch (e) {
+    if (errnoCode(e) === "ENOENT") return;
+    throw e;
+  }
+  const moved = readLock(aside);
+  try {
+    if (moved !== undefined && pidAlive(moved.pid)) {
+      linkInto(aside, lockPath);
+      throw heldBy(moved, statePath);
+    }
+  } finally {
+    rmSync(aside, { force: true });
+  }
 }

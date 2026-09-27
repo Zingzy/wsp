@@ -10,7 +10,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { COORDINATOR_HANDOFF, DEVICE_OPS, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
+import { COORDINATOR_HANDOFF, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RUNTIME_OPS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
 import { agentPage, cli, COMMAND_LINES, commandPage, COMMANDS_FOR_HELP, HELP, HOST_FLAG, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, SHARED_FLAGS, type CliIO, type CommandLine } from "../src/cli.js";
 
@@ -332,8 +332,11 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "sessions.mark": "a pin, a snooze and a section are where one person's sidebar draws a thread; wsp threads lists every thread in one order and hides none",
       "sessions.restore": "a restore takes a thread back out of the sidebar's fold, which wsp threads never folds it into",
       "sessions.search": "the sidebar's search inside messages; an agent reads a thread whole with thread read and has no list of threads to narrow",
+      "sessions.steer": "the composer's send-now on a queued row; wsp send already joins a running turn wherever its harness steers",
+      "sessions.access": "the access picker moving a running turn, the person's guard on an agent; wsp run takes --access when the thread opens",
+      "sessions.aside": "a side question is read once and kept nowhere; a message a thread should keep is `wsp send`",
     };
-    expect(DEVICE_OPS.filter(op => op.startsWith("sessions.") && !verbs.includes(`"${op}"`))).toEqual(Object.keys(WINDOW_ONLY));
+    expect(RUNTIME_OPS.filter(op => op.startsWith("sessions.") && !verbs.includes(`"${op}"`)).sort()).toEqual(Object.keys(WINDOW_ONLY).sort());
     for (const [op, why] of Object.entries(WINDOW_ONLY)) expect(why, `${op} says why it has no verb`).toMatch(/\S/);
   });
 

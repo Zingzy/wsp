@@ -36,6 +36,8 @@ interface ComposerPrimaryActionsProps {
   isInterruptPending?: boolean;
   /** The machine is paused and the send wakes it first: the button says so, and nothing else about it changes. */
   wakesFirst?: boolean;
+  /** What the send button says in words instead of its arrow, where one send goes to several models. */
+  sendLabel?: string | undefined;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
@@ -84,6 +86,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   showSendWhileRunning = false,
   isInterruptPending = false,
   wakesFirst = false,
+  sendLabel,
   onPreviousPendingQuestion,
   onInterrupt,
   onImplementPlanInNewThread,
@@ -235,7 +238,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     <button
       type="submit"
       className={cn(
-        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-transparent shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-[0_1px_--theme(--color-white/16%)] hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8",
+        "relative isolate flex h-9 items-center justify-center overflow-hidden rounded-full border border-transparent shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-[0_1px_--theme(--color-white/16%)] hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8",
+        sendLabel === undefined ? "w-9 sm:w-8" : "px-3.5 text-[13px] font-medium",
         // Held for a reason it can name, the window's one loud thing stops being loud: it takes the held tier in the
         // same slot and the accent back the moment the block lifts. An empty box is not held, it is simply empty,
         // and stays the fainter accent it has always been.
@@ -264,12 +268,14 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                   ? COMPOSER_STATE_WORDS.sending
                   : wakesFirst
                     ? WAKE_AND_SEND_LABEL
-                    : SEND_LABEL
+                    : (sendLabel ?? SEND_LABEL)
       }
       title={sendDisabledReason ?? (wakesFirst ? WAKE_AND_SEND_LABEL : undefined)}
     >
       {isConnecting || isSendBusy ? (
         <Spinner className="size-3.5" aria-hidden="true" />
+      ) : sendLabel !== undefined ? (
+        sendLabel
       ) : (
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
           <path

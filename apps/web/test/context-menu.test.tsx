@@ -207,6 +207,9 @@ describe("a tile's menu for the copy it runs on", () => {
     expect(item(WORKSPACE_WORDS.pause).getAttribute("aria-disabled")).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.delete)).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.pause)).toBeNull();
+    // One destructive tier: neutral where it stands, the danger ink only under the pointer or the keys.
+    expect(item(WORKSPACE_WORDS.delete).className.split(" ")).not.toContain("text-destructive-foreground");
+    expect(item(WORKSPACE_WORDS.delete).className.split(" ")).toEqual(expect.arrayContaining(["hover:text-destructive-foreground", "focus:text-destructive-foreground"]));
     expect(item(WORKSPACE_WORDS.openTerminal).querySelector("kbd")?.textContent).toBe("⌘J");
     const chord = item(WORKSPACE_WORDS.openTerminal).querySelector<HTMLElement>("[data-slot=menu-shortcut]")!;
     expect(chord.className).toContain("font-mono");

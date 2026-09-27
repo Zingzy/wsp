@@ -107,6 +107,7 @@ export function ThreadTile({
   onRenameOpen,
   onDragStart,
   onDragEnd,
+  label,
 }: {
   thread: SidebarThreadSnapshot;
   place: TilePlace;
@@ -132,6 +133,9 @@ export function ThreadTile({
   /** The tile picked up to drop in another section; absent on a tile that is not dragged, one under a root. */
   onDragStart?: ((event: DragEvent<HTMLElement>) => void) | undefined;
   onDragEnd?: (() => void) | undefined;
+  /** What row two says in place of the title, where the title is already said over the tile: the model, in a group
+   * of threads one send opened. */
+  label?: string | undefined;
 }) {
   const status = settled ? RESTING : threadStatusOf(thread);
   // Only a resting thread steps back; a failed one or one waiting on the person keeps the foreground ink.
@@ -159,7 +163,7 @@ export function ThreadTile({
               <RowNameInput name={thread.title} label={THREAD_WORDS.rename} saving={saving} onRename={onRename} onCancel={onRenameCancel} />
             </span>
           ) : (
-            <Title text={thread.title} idle={idle} active={active} onDoubleClick={onRenameOpen} />
+            <Title text={label ?? thread.title} idle={idle} active={active} onDoubleClick={onRenameOpen} />
           )
         }
         harness={thread.harness}

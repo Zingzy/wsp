@@ -63,7 +63,7 @@ import { buildBesideHost } from "./init-beside.js";
 import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
 import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, refuseIfServed, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
+import { addressLines, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, refuseIfServed, rewriteLock, SERVICE_WAIT_MS, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
 import { startOnce } from "./start-once.js";
 import {
@@ -1436,7 +1436,7 @@ async function hostFor(
       }),
       ...(restart !== undefined ? { restart } : {}),
     });
-    writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, address }));
+    rewriteLock(lockPath, { ...lock, port: handle.port, address });
     const home = resolve(wspHome());
     // A skill copy an install wrote once falls behind the binary at the next release, and the agent reading it
     // calls verbs that are gone. The copies that are there are brought up to this wsp's, and none is written where

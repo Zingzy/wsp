@@ -97,6 +97,8 @@ import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
+import { ProjectHome } from "../src/shell/ProjectHome.js";
+import { useMultiPickStore } from "../src/components/chat/composerMultiPick.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useComposerFavouritesStore } from "../src/components/chat/composerFavouritesStore.js";
 import { useComposerOptionsStore } from "../src/components/chat/composerOptionsStore.js";
@@ -118,6 +120,7 @@ beforeEach(() => {
   useComposerDraftStore.setState({ drafts: {} });
   useComposerOptionsStore.setState({ byWorkspaceId: {} });
   useComposerFavouritesStore.setState({ keys: [] });
+  useMultiPickStore.setState({ byKey: {} });
 });
 
 const WS = CHAT_WS;
@@ -751,6 +754,60 @@ describe("composer pickers", () => {
     }
     const shell = readFileSync(SHELL_FIXTURE, "utf8");
     for (const mode of modes.filter(o => shell.includes(`value: "${o.value}"`))) expect(shell, mode.value).toContain(mode.description!);
+  });
+
+  it("on a project's home a shift-click adds a model beside the one shown: chips with each agent's mark over the box, the send reads Send to N, and a plain click goes back to one model", async () => {
+    const { api } = fixtureApi({ table: [CLAUDE, CODEX] });
+    useStore.setState({ projects: [{ id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder", path: "/root" }, path: "/root", remote: "https://github.com/dev/the-project.git", defaultBranch: "main", memoryKey: "-root", memoryDir: "/root/.claude-cfg/projects/-root/memory", createdAt: "t" }] });
+    useStore.getState().bind(api);
+    useStore.getState().setConn("live");
+    render(<ProjectHome projectId="pr_1" />);
+    await waitFor(() => expect(pickerValue("model")).toBe("claude-opus-5"));
+    const chips = () => [...document.querySelectorAll<HTMLElement>("[data-composer-model-chip]")].map(chip => chip.textContent);
+    const send = () => document.querySelector<HTMLButtonElement>('[data-chat-composer-actions] button[type="submit"]')!;
+    expect(chips()).toEqual([]);
+    expect(send().textContent).not.toContain("Send to");
+
+    const menu = await openModelMenu();
+    fireEvent.click(option("claude-sonnet-5")!, { shiftKey: true });
+    await waitFor(() => expect(chips()).toEqual(["Opus 5", "Sonnet 5"]));
+    // The menu stays up for the next add, and the model the button shows is still the first pick.
+    expect(modelMenu()).not.toBeNull();
+    expect(pickerValue("model")).toBe("claude-opus-5");
+    expect(option("claude-sonnet-5")?.getAttribute("aria-selected")).toBe("true");
+    expect(send().textContent).toBe("Send to 2");
+    fireEvent.click(menu.querySelector('[data-composer-harness="codex"]')!);
+    await waitFor(() => expect(option("gpt-6-astra")).not.toBeNull());
+    // While the list stands the rail browses: the composer's own pick stays the list's first.
+    expect(pickerValue("model")).toBe("claude-opus-5");
+    expect(picker("model")?.dataset["harness"]).toBe("claude");
+    fireEvent.click(option("gpt-6-astra")!, { shiftKey: true });
+    await waitFor(() => expect(chips()).toEqual(["Opus 5", "Sonnet 5", "GPT-6 Astra"]));
+    expect(document.querySelector('[data-composer-model-chip="codex:gpt-6-astra"] svg[data-harness-mark="codex"]')).not.toBeNull();
+    expect(send().textContent).toBe("Send to 3");
+    expect(send().getAttribute("aria-label")).toBe("Send to 3");
+    // A chip's own remove takes that model off.
+    fireEvent.click(screen.getByRole("button", { name: "Remove Sonnet 5" }));
+    await waitFor(() => expect(chips()).toEqual(["Opus 5", "GPT-6 Astra"]));
+
+    // A plain click is a pick of one model, which ends the list.
+    fireEvent.click(option("gpt-6-astra")!);
+    await waitFor(() => expect(chips()).toEqual([]));
+    expect(pickerValue("model")).toBe("gpt-6-astra");
+    expect(modelMenu()).toBeNull();
+    expect(send().textContent).not.toContain("Send to");
+  });
+
+  it("a shift-click on a workspace's composer is a plain pick, since only a home's send opens a copy per model", async () => {
+    const { api } = fixtureApi({ table: [CLAUDE] });
+    await setup(api);
+    await waitFor(() => expect(pickerValue("model")).toBe("claude-opus-5"));
+    await openModelMenu();
+    fireEvent.click(option("claude-sonnet-5")!, { shiftKey: true });
+    await waitFor(() => expect(pickerValue("model")).toBe("claude-sonnet-5"));
+    expect(modelMenu()).toBeNull();
+    expect(document.querySelector("[data-composer-model-chip]")).toBeNull();
+    expect(useMultiPickStore.getState().byKey).toEqual({});
   });
 
   it("shows nothing at all when the runtime serves no catalog for the harness", async () => {

@@ -102,6 +102,21 @@ describe("the sidebar's tiles", () => {
     ]);
   });
 
+  it("draws the roots one send to several models opened as one group, in the order they were opened, which folds only once every one of them would", () => {
+    const rows = (read: boolean) => [
+      row("ws_a", "pr_1", [done("a1", "ws_a", 4, null, { attempt: "att", title: "the task", readAt: read ? ago(3) : null, unread: !read })]),
+      row("ws_b", "pr_1", [done("b1", "ws_b", 3.9, null, { attempt: "att", title: "the task" })]),
+      row("ws_c", "pr_1", [thread("alone", "ws_c", null, { startedAt: ago(0.5) })]),
+      // An attempt down to one root, the others deleted, is that root alone again.
+      row("ws_d", "pr_1", [thread("kept", "ws_d", null, { attempt: "att2", startedAt: ago(0.2) })]),
+    ];
+    const live = sidebarTiles(rows(false), { picked: null, nowMs: NOW }).live;
+    expect(shape(live)).toEqual(["kept", "alone", ["attempt:att", ["a1", "b1"]]]);
+    expect(live[2]!.thread).toMatchObject({ groupTitle: "the task", thread: null });
+    const folded = sidebarTiles(rows(true), { picked: null, nowMs: NOW });
+    expect(shape(folded.settled)).toEqual([["attempt:att", ["a1", "b1"]]]);
+  });
+
   it("draws a workspace with no thread as a tile of its own, so no copy the host holds loses its place in the list", () => {
     const rows = [row("ws_a", "pr_1", []), row("ws_b", "pr_1", [thread("t", "ws_b")])];
     const live = sidebarTiles(rows, { picked: null, nowMs: NOW }).live;

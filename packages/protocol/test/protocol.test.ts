@@ -890,7 +890,7 @@ describe("runtime wire types", () => {
     for (const op of wire.DEVICE_OPS) expect(wire.RUNTIME_OPS, op).toContain(op);
     expect(new Set(wire.DEVICE_OPS).size).toBe(wire.DEVICE_OPS.length);
     const held = [
-      "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.rename", "sessions.answer", "sessions.access", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
+      "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.rename", "sessions.answer", "sessions.access", "sessions.aside", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
       "places.add", "places.update", "places.remove", "places.dial", "places.cap", "places.loginLanded", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
       "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
       "image.export", "host.folders", "agents.read", "servers.tools", "servers.icon", "agents.signIn", "servers.signIn", "agents.signInCode", "agents.signInStop", "agents.signInLine", "agents.key", "agents.addTools", "skills.search", "skills.get", "skills.preview", "skills.add", "skills.remove", "skills.toggle", "servers.add", "servers.remove", "servers.toggle", "project.seed.plan", "project.plan", "project.import", "project.export",
@@ -1472,6 +1472,20 @@ describe("thread provenance", () => {
       { id: "s4", workspaceId: "ws_1", harness: "claude", startedBy: "person", status: "failed", title: "before threads", sessionId: "s4", startedAt: 6_000, endedAt: 7_000, turns: 1, ran: false },
     ]);
     for (const t of threads) expect(ThreadView.parse(t)).toEqual(t);
+  });
+
+  it("a start carries the attempt it was sent under, and a thread reads the attempt off its opening row alone", () => {
+    const start = { id: 1, op: "sessions.start", workspaceId: "ws_1", prompt: "go", attempt: "att_1" };
+    expect(RuntimeRequest.parse(start)).toMatchObject({ attempt: "att_1" });
+    const [grouped, alone] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", attempt: "att_1" },
+      { ...row, id: "s2", threadId: "thr_a", attempt: "att_2" },
+      { ...row, id: "s3", threadId: "thr_b" },
+    ]);
+    expect(grouped!.attempt).toBe("att_1");
+    expect("attempt" in alone!).toBe(false);
+    expect(ThreadView.parse(grouped)).toEqual(grouped);
+    expect(SessionView.parse({ ...row, id: "s1", attempt: "att_1" })).toMatchObject({ attempt: "att_1" });
   });
 
   it("foldThreads adds up what a thread's turns cost, and says nothing where no turn of it reported a figure", () => {
