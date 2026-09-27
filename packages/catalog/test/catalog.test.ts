@@ -277,7 +277,7 @@ describe("catalog", () => {
       expect(smokeOf(a)).toBe(`${a.bin} --version`);
     }
     expect(CATALOG_AGENTS.filter(a => a.guestStateHome !== undefined).map(a => [a.id, a.guestStateHome])).toEqual([["claude", "/root/.claude-cfg"]]);
-    expect(installLine(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.153.0");
+    expect(installLine(catalogEntry("codex")!)).toBe("npm install -g @openai/codex@0.155.1");
     expect(installLine(catalogEntry("pi")!)).toBe("npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.4");
     expect(installLine(catalogEntry("claude")!)).toBe(catalog.CLAUDE_INSTALL);
     expect(installLine(catalogEntry("hermes")!)).toMatch(/git clone -q --depth 1 --branch v[\d.]+ https:\/\/github\.com\/NousResearch\/hermes-agent\.git/);
@@ -380,7 +380,7 @@ describe("catalog", () => {
     }
     // Amp's source is not public.
     expect(CATALOG_AGENTS.filter(a => a.about.repo === undefined).map(a => a.id)).toEqual(["amp"]);
-    expect(installShown(catalogEntry("codex")!)).toEqual({ line: "npm install -g @openai/codex@0.153.0" });
+    expect(installShown(catalogEntry("codex")!)).toEqual({ line: "npm install -g @openai/codex@0.155.1" });
     // A vendor's script is many lines no person pastes, and a release is a download checked against its sum.
     expect(installShown(catalogEntry("claude")!)).toEqual({ words: "by its own installer" });
     expect(installShown(catalogEntry("hermes")!)).toEqual({ words: "by its own installer" });

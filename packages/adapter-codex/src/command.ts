@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The shell line that runs one Codex turn on a workspace, as `codex exec
-// --help` on codex-cli 0.153.0 spells the flags. The prompt travels on stdin
-// through a quoted heredoc, since a long task as an argument would hit the
-// kernel's per-argument cap, and `-` tells codex to read it there; the heredoc
-// also closes stdin, which codex otherwise waits on when it is not a terminal.
-// Images ride `-i`, one flag per image on both exec and resume: exec's flag
-// takes many values and resume's one, and one flag each parses on both, with
-// the `-` after it still read as the prompt (measured on 0.153.0, 2026-09-08).
+// The shell line that runs one Codex turn on a workspace: `codex app-server`
+// on its own stdio, as codex-cli 0.155.1 spells it. Everything about the turn
+// (the prompt, the model, the sandbox) travels as JSON-RPC on stdin (rpc.ts),
+// so the line carries only the folder and the MCP servers' config overrides.
+// No listener is ever named: stdio is the server's default transport, and a
+// socket would let anything on the machine drive the agent.
 import { inFolder, LAUNCH_ENV, MCP_SERVER_NAME, shellQuote, type McpServerSpec } from "@wsp/protocol";
 
-const PROMPT_END = "WSP_PROMPT_END";
 const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
-/** The sandbox modes `codex exec -s` takes; the one that turns the sandbox off is the flag that also skips approvals. */
-const SANDBOXED = ["read-only", "workspace-write"];
+/** The sandbox modes thread/start takes; the one that turns the sandbox off is the one that asks nobody. */
+const SANDBOXED = ["read-only", "workspace-write"] as const;
 const NO_SANDBOX = "danger-full-access";
 
 export interface CodexEnvOptions {
@@ -31,22 +28,13 @@ export function buildEnv(options: CodexEnvOptions): Record<string, string> {
   for (const [key, value] of Object.entries(options.base ?? {})) if (value !== undefined) clean[key] = value;
   // The key travels under both names. CODEX_API_KEY is the one this CLI's own login reads and prefers over the
   // store under CODEX_HOME (read_codex_api_key_from_env, codex-rs/login/src/auth/manager.rs at rust-v0.153.0);
-  // OPENAI_API_KEY is read by a provider a person configured with env_key and by nothing in exec's own login.
+  // OPENAI_API_KEY is read by a provider a person configured with env_key and by nothing in the CLI's own login.
   const key: Record<string, string> = options.apiKey === undefined ? {} : { CODEX_API_KEY: options.apiKey, OPENAI_API_KEY: options.apiKey };
   return { ...clean, CODEX_HOME: home, ...key };
 }
 
 export interface BuildCommandOptions {
-  prompt: string;
-  /** The thread id an earlier turn's thread.started announced; the turn continues that thread. */
-  resume?: string;
   cwd?: string;
-  model?: string;
-  effort?: string;
-  /** One of the catalog's sandbox modes; absent runs without a sandbox, as every turn in a throwaway machine does. */
-  permissionMode?: string;
-  /** Absolute paths of images already on the machine; the CLI reads each off disk, so it takes no bytes of its own. */
-  images?: readonly string[];
   /** MCP servers this turn gets besides the ones its config names, by the name each takes there. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
 }
@@ -81,39 +69,28 @@ function serverFlags(servers: Readonly<Record<string, McpServerSpec>>): string[]
   });
 }
 
-/** exec takes the mode as -s and resume has no such flag, so both set the config key the flag writes. */
-function accessFlags(mode: string | undefined): string[] {
-  if (mode === undefined || mode === NO_SANDBOX) return ["--dangerously-bypass-approvals-and-sandbox"];
-  if (!SANDBOXED.includes(mode)) throw new Error(`permissionMode must be one of ${[...SANDBOXED, NO_SANDBOX].join(", ")}, got "${mode}"`);
-  return [config("sandbox_mode", mode), config("approval_policy", "never")];
+export interface AccessParams {
+  sandbox: "read-only" | "workspace-write" | "danger-full-access";
+  approvalPolicy: "on-request" | "never";
 }
 
-/**
- * The turn as one bash line: `codex exec` (or `codex exec resume <id>`) with JSONL events on stdout, outside a git
- * checkout allowed since a thread may start in the home folder, and the prompt as the heredoc on stdin. Guest exec
- * carries no HOME, so the default folder is `~`, which bash reads from passwd.
- */
+/** A sandboxed mode asks the person before the agent goes past its sandbox; full access, and a turn that names no
+ * mode, as every turn in a throwaway machine does, runs unsandboxed and asks nobody. */
+export function accessParams(mode: string | undefined): AccessParams {
+  if (mode === undefined || mode === NO_SANDBOX) return { sandbox: NO_SANDBOX, approvalPolicy: "never" };
+  const sandboxed = SANDBOXED.find(m => m === mode);
+  if (sandboxed === undefined) throw new Error(`permissionMode must be one of ${[...SANDBOXED, NO_SANDBOX].join(", ")}, got "${mode}"`);
+  return { sandbox: sandboxed, approvalPolicy: "on-request" };
+}
+
+/** The server as one bash line in the folder the turn runs in. Guest exec carries no HOME, so the default folder is
+ * `~`, which bash reads from passwd. */
 export function buildCommand(options: BuildCommandOptions): string {
-  const { prompt, resume, cwd, model, effort, permissionMode, images, mcpServers } = options;
-  if (prompt.split("\n").includes(PROMPT_END)) throw new Error(`the prompt has a line that reads ${PROMPT_END}, which ends the prompt`);
-  const codex = [
-    "codex exec",
-    ...(resume === undefined ? [] : [`resume ${slug("resume", resume)}`]),
-    "--json",
-    "--skip-git-repo-check",
-    ...accessFlags(permissionMode),
-    ...(model === undefined ? [] : [`-m ${slug("model", model)}`]),
-    ...(effort === undefined ? [] : [config("model_reasoning_effort", slug("effort", effort))]),
-    ...(images ?? []).map(path => `-i ${shellQuote(imagePath(path))}`),
-    ...serverFlags(mcpServers ?? {}),
-    "-",
-  ].join(" ");
-  return inFolder(cwd, `${codex} <<'${PROMPT_END}'\n${prompt}\n${PROMPT_END}`);
+  return inFolder(options.cwd, ["codex app-server", ...serverFlags(options.mcpServers ?? {})].join(" "));
 }
 
-/** An image path is a plain absolute path on the machine, never a word the flag would read as another flag: `-i`
- * takes many values on exec and one on resume, so a value starting with a dash would be read as the next flag. */
-function imagePath(path: string): string {
+/** An image path is a plain absolute path on the machine, where the runtime landed it before the turn. */
+export function imagePath(path: string): string {
   if (!path.startsWith("/") || path.includes("\n")) throw new Error(`an image path must be one absolute path on the machine, got "${path}"`);
   return path;
 }

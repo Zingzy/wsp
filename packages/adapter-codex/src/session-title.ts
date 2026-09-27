@@ -7,9 +7,11 @@
 // it has one, and a rename from here writes that same column. Measured on
 // codex-cli 0.153.0 against state_5.sqlite.
 
-import { generatedTitle, shellQuote } from "@wsp/protocol";
+import { generatedTitle, inFolder, shellQuote } from "@wsp/protocol";
 import type { SessionRenameWrite } from "@wsp/protocol";
-import { buildCommand, buildEnv, slug } from "./command.js";
+import { buildEnv, slug } from "./command.js";
+
+const PROMPT_END = "WSP_PROMPT_END";
 
 /**
  * One shell line for the guest: the thread's row as JSON, out of the highest-versioned state db (the file name
@@ -52,15 +54,19 @@ export function parseSessionTitle(stdout: string): string | null {
 }
 
 /**
- * One shell line for the guest that asks the CLI itself to name a thread: a plain turn on the question, in the same
- * shape every codex turn on a workspace runs in, so the prompt travels on stdin and the flags stay in one place. It
- * runs read-only rather than with the sandbox off, since the answer is one line of words and nothing it could write
+ * One shell line for the guest that asks the CLI itself to name a thread: one `codex exec` turn on the question,
+ * since a one-shot answer needs none of the app server's channel. It runs read-only rather than with the sandbox off, since the answer is one line of words and nothing it could write
  * belongs to the thread it names, and under the same CODEX_HOME as a session, which a guest exec would not carry.
  */
 export function titleForCommand(options: { home: string; prompt: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
   const env = buildEnv({ base: options.baseEnv, home: options.home });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
-  return `export ${exports}; ${buildCommand({ prompt: options.prompt, permissionMode: "read-only", ...(options.model === undefined ? {} : { model: options.model }) })}`;
+  if (options.prompt.split("\n").includes(PROMPT_END)) throw new Error(`the prompt has a line that reads ${PROMPT_END}, which ends the prompt`);
+  const model = options.model === undefined ? "" : ` -m ${slug("model", options.model)}`;
+  // The question rides a quoted heredoc on stdin, read by the `-` that ends the flags; the heredoc also closes stdin,
+  // which codex exec otherwise waits on when it is not a terminal.
+  const exec = `codex exec --json --skip-git-repo-check -c sandbox_mode='"read-only"' -c approval_policy='"never"'${model} -`;
+  return `export ${exports}; ${inFolder(undefined, `${exec} <<'${PROMPT_END}'\n${options.prompt}\n${PROMPT_END}`)}`;
 }
 
 /** The title out of the turn's events: the last agent message, sanitized; null when the turn failed, said nothing or

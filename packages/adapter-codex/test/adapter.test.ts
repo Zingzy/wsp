@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// app-server-turn.jsonl is written by hand from `codex app-server generate-json-schema` on codex-cli 0.155.1, in the
+// shapes that binary printed for its handshake under an empty CODEX_HOME; no-login-app-server.jsonl is that binary's
+// own output for a turn with no sign-in, stderr lines and all.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine } from "@wsp/protocol";
+import { codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { createCodexAdapter, type CodexSession } from "../src/adapter.js";
 
-const THREAD_ID = "0199a213-81c0-7800-8aa1-bbab2a035a53";
-const FAILED_THREAD_ID = "01a07959-8db6-7590-bf71-c9561e1ddaa0";
+const THREAD_ID = "01a0e2c1-5d10-7b42-9a6e-3f1c2d4b5a60";
+const TURN_ID = "01a0e2c1-5e02-7c11-8d3f-9b2a1c0d4e71";
+const NO_LOGIN_THREAD = "01a0e2b2-493b-7c53-ae59-446697cb28db";
 
 function fixtureLines(name: string): string[] {
   return readFileSync(new URL(`./fixtures/${name}.jsonl`, import.meta.url), "utf8")
@@ -14,52 +18,117 @@ function fixtureLines(name: string): string[] {
     .filter(line => line.trim().length > 0);
 }
 
-/** What the guest calls the run every scripted stream stands for. */
 const RUN_HANDLE = "/tmp/wsp-run/cd34";
 
-interface ScriptedExec {
-  factory: ExecStreamFactory;
-  calls: { command: string; env: Record<string, string>; input: readonly string[] | undefined }[];
+type Json = Record<string, unknown>;
+const parse = (line: string): Json => JSON.parse(line) as Json;
+
+/** One app-server process under test: the lines it prints, the lines wsp wrote to it (the launch's seed first), and
+ * how it ended. It exits on stdin EOF as the real one does, unless it hangs. */
+interface Wire {
+  stream: ExecStream;
+  written: Json[];
   order: string[];
+  closed: boolean;
+  push(...lines: string[]): void;
+  exit(code: number | null): void;
 }
 
-/** Replays scripted log lines; in hang mode the stream only ends on kill(). */
-function scriptedExec(lines: string[], opts: { exitCode?: number; hang?: boolean } = {}): ScriptedExec {
-  const calls: ScriptedExec["calls"] = [];
-  const order: string[] = [];
+function wire(opts: { exitCode?: number; hang?: boolean; onWrite?: (message: Json, w: Wire) => void } = {}): Wire {
+  const queue: string[] = [];
+  let wake: (() => void) | undefined;
+  let done = false;
+  let resolveExit: (code: number | null) => void = () => {};
+  const exited = new Promise<number | null>(resolve => {
+    resolveExit = resolve;
+  });
+  const w: Wire = {
+    written: [],
+    order: [],
+    closed: false,
+    push: (...lines) => {
+      queue.push(...lines);
+      wake?.();
+    },
+    exit: code => {
+      if (done) return;
+      done = true;
+      wake?.();
+      resolveExit(code);
+    },
+    stream: undefined as unknown as ExecStream,
+  };
+  w.stream = {
+    run: RUN_HANDLE,
+    lines: (async function* () {
+      for (;;) {
+        while (queue.length > 0) yield queue.shift()!;
+        if (done) return;
+        await new Promise<void>(resolve => {
+          wake = resolve;
+        });
+        wake = undefined;
+      }
+    })(),
+    teardown: () => {
+      w.order.push("teardown");
+      if (!opts.hang) w.exit(opts.exitCode ?? 0);
+    },
+    kill: () => {
+      w.order.push("kill");
+      w.exit(null);
+    },
+    write: async line => {
+      if (done) return "gone";
+      const message = parse(line);
+      w.written.push(message);
+      opts.onWrite?.(message, w);
+      return "written";
+    },
+    closeInput: () => {
+      w.closed = true;
+      if (!opts.hang) setTimeout(() => w.exit(opts.exitCode ?? 0), 0);
+    },
+    exited,
+  };
+  return w;
+}
+
+/** Plays a recorded server: everything up to its answer to the thread request once that request arrives, the rest
+ * once a turn starts. */
+function server(lines: string[], opts: { exitCode?: number; hang?: boolean } = {}): (seed: readonly string[]) => Wire {
+  const split = lines.findIndex(l => l.includes('"id":"wsp-thread"')) + 1;
+  const head = lines.slice(0, split);
+  const tail = lines.slice(split);
+  return seed => {
+    const w = wire({
+      ...opts,
+      onWrite: (message, self) => {
+        if (message.method === "thread/start" || message.method === "thread/resume") self.push(...head);
+        if (message.method === "turn/start") self.push(...tail);
+      },
+    });
+    for (const line of seed) void w.stream.write(line);
+    return w;
+  };
+}
+
+interface Launch {
+  factory: ExecStreamFactory;
+  calls: { command: string; env: Record<string, string>; input: readonly string[] | undefined }[];
+  wires: Wire[];
+}
+
+function launcher(make: (seed: readonly string[]) => Wire): Launch {
+  const calls: Launch["calls"] = [];
+  const wires: Wire[] = [];
   const factory: ExecStreamFactory = (command, { env, input }) => {
     calls.push({ command, env, input });
-    let resolveExit: (code: number | null) => void = () => {};
-    const exited = new Promise<number | null>(resolve => {
-      resolveExit = resolve;
-    });
-    const stream: ExecStream = {
-      run: RUN_HANDLE,
-      lines: (async function* () {
-        yield* lines;
-        if (opts.hang) await exited;
-        else resolveExit(opts.exitCode ?? 0);
-      })(),
-      teardown: () => {
-        order.push("teardown");
-        if (!opts.hang) resolveExit(opts.exitCode ?? 0);
-      },
-      kill: () => {
-        order.push("kill");
-        resolveExit(null);
-      },
-      write: async () => {
-        order.push("write");
-        return "written" as const;
-      },
-      closeInput: () => {
-        order.push("closeInput");
-      },
-      exited,
-    };
-    return stream;
+    const w = make(input ?? []);
+    wires.push(w);
+    return w.stream;
   };
-  return { factory, calls, order };
+  return { factory, calls, wires };
 }
 
 function collect(): { events: AdapterEvent[]; onEvent: (e: AdapterEvent) => void } {
@@ -67,201 +136,359 @@ function collect(): { events: AdapterEvent[]; onEvent: (e: AdapterEvent) => void
   return { events, onEvent: e => events.push(e) };
 }
 
+const deltasOf = (events: AdapterEvent[]) => events.filter((e): e is Extract<AdapterEvent, { type: "turn.delta" }> => e.type === "turn.delta");
+
 const LOGIN = "codex login --device-auth";
 const NOT_SIGNED_IN = codexNotSignedInLine(LOGIN);
-const adapterOver = (exec: ScriptedExec, graceMs?: number, stallMs?: number) =>
-  createCodexAdapter({ exec: exec.factory, home: "/root/.codex", login: LOGIN, ...(graceMs !== undefined ? { interruptGraceMs: graceMs } : {}), ...(stallMs !== undefined ? { reconnectStallMs: stallMs } : {}) });
-const started = `{"type":"thread.started","thread_id":"${THREAD_ID}"}`;
-const reconnecting = '{"type":"error","message":"Reconnecting... waiting for network (Connection failed: error sending request)"}';
+const adapterOver = (launch: Launch, extra: { graceMs?: number; stallMs?: number; resultExitMs?: number } = {}) =>
+  createCodexAdapter({
+    exec: launch.factory,
+    home: "/root/.codex",
+    login: LOGIN,
+    ...(extra.graceMs !== undefined ? { interruptGraceMs: extra.graceMs } : {}),
+    ...(extra.stallMs !== undefined ? { reconnectStallMs: extra.stallMs } : {}),
+    ...(extra.resultExitMs !== undefined ? { resultExitMs: extra.resultExitMs } : {}),
+  });
 
-describe("CodexAdapter over a codex exec --json turn", () => {
-  it("launches codex exec with the picks, under CODEX_HOME, with no stdin channel since the prompt rides the heredoc", async () => {
-    const exec = scriptedExec(fixtureLines("exec-turn"));
-    const adapter = adapterOver(exec);
+/** The lines a live server prints up to a running turn, for the cases that drive the rest by hand. */
+const opened = (threadId = THREAD_ID): string[] => [
+  '{"id":"wsp-initialize","result":{"userAgent":"wsp/0.155.1","codexHome":"/root/.codex","platformFamily":"unix","platformOs":"linux"}}',
+  `{"id":"wsp-thread","result":{"thread":{"id":"${threadId}","model":"gpt-5.6-sol","cwd":"/root/app","turns":[]},"model":"gpt-5.6-sol","cwd":"/root/app","approvalPolicy":"on-request","sandbox":{"type":"workspaceWrite"}}}`,
+];
+const turnStarted = `{"method":"turn/started","params":{"threadId":"${THREAD_ID}","turn":{"id":"${TURN_ID}","items":[],"status":"inProgress"}}}`;
+const completed = (status: string, extra = "") => `{"method":"turn/completed","params":{"threadId":"${THREAD_ID}","turn":{"id":"${TURN_ID}","items":[],"status":"${status}"${extra}}}}`;
+const failedWith = (message: string) => completed("failed", `,"error":${JSON.stringify({ message })}`);
+const errorNote = (message: string, willRetry: boolean, details: string | null = null) =>
+  `{"method":"error","params":{"error":${JSON.stringify({ message, additionalDetails: details })},"willRetry":${String(willRetry)},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
+const agentMessage = (id: string, text: string) => `{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"${id}","text":${JSON.stringify(text)}},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
+const reconnecting = errorNote("Reconnecting... 2/5", true, "error sending request");
+
+/** A server that opens the thread and starts the turn, then prints what the case hands it. */
+const scripted = (rest: string[], opts: { exitCode?: number; hang?: boolean } = {}) => server([...opened(), turnStarted, ...rest], opts);
+
+const until = async (check: () => boolean): Promise<void> => {
+  for (let i = 0; i < 200 && !check(); i++) await new Promise(r => setTimeout(r, 1));
+  expect(check()).toBe(true);
+};
+
+describe("CodexAdapter over codex app-server", () => {
+  it("launches the app server in the folder under CODEX_HOME, seeding initialize and the thread with the picks; the turn follows the thread", async () => {
+    const launch = launcher(server(fixtureLines("app-server-turn")));
+    const adapter = adapterOver(launch);
     const session = adapter.start({ prompt: "list the repo", model: "gpt-5.5", effort: "low", permissionMode: "workspace-write", cwd: "/root/app", onEvent: () => {} });
     await session.finished;
-    const call = exec.calls[0]!;
-    expect(call.command.startsWith("cd '/root/app' && codex exec --json --skip-git-repo-check")).toBe(true);
-    expect(call.command).toContain("-m gpt-5.5");
-    expect(call.command).toContain(`-c model_reasoning_effort='"low"'`);
-    expect(call.command).toContain(`-c sandbox_mode='"workspace-write"'`);
-    expect(call.command).toContain("list the repo");
-    expect(call.input).toBeUndefined();
+    const call = launch.calls[0]!;
+    expect(call.command).toBe("cd '/root/app' && codex app-server");
+    expect(call.command).not.toContain("list the repo");
     expect(call.env).toEqual({ CODEX_HOME: "/root/.codex" });
     expect(adapter.env).toEqual({ CODEX_HOME: "/root/.codex" });
     expect(session.command).toBe(call.command);
+    expect(call.input?.map(l => parse(l).method)).toEqual(["initialize", "initialized", "thread/start"]);
+    expect(parse(call.input![2]!).params).toEqual({ cwd: "/root/app", model: "gpt-5.5", sandbox: "workspace-write", approvalPolicy: "on-request" });
+    const turn = launch.wires[0]!.written.find(m => m.method === "turn/start")!;
+    expect(turn.params).toEqual({ threadId: THREAD_ID, input: [{ type: "text", text: "list the repo" }], effort: "low" });
+    // The reply is the turn's end, so stdin closes there and the server exits on its own.
+    expect(launch.wires[0]!.closed).toBe(true);
   });
 
-  it("a launched session carries the run its stream reported, and an attach re-opens that run with no channel", async () => {
-    const exec = scriptedExec(fixtureLines("exec-turn"));
-    const attached: { run: string; input: boolean }[] = [];
-    exec.factory.attach = async (run, options) => {
-      attached.push({ run, input: options.input });
-      return exec.factory("", { env: {} });
-    };
-    const adapter = adapterOver(exec);
-    expect(adapter.start({ prompt: "go", onEvent: () => {} }).run).toBe(RUN_HANDLE);
+  it("normalizes the server's notifications into session.start, one delta per item, turn.done and session.end", async () => {
+    const launch = launcher(server(fixtureLines("app-server-turn")));
     const { events, onEvent } = collect();
-    const session = (await adapter.attach!({ run: RUN_HANDLE, sessionId: THREAD_ID, startedAt: 1, model: "gpt-5.5", cwd: "/root/app", onEvent })) as CodexSession;
-    const result = await session.finished;
-    expect(attached).toEqual([{ run: RUN_HANDLE, input: false }]);
-    expect(session.command).toBeUndefined();
-    expect(result.status).toBe("completed");
-    // the CLI names its model and its folder once, so a reader that came later takes both off the row
-    expect(events[0]).toMatchObject({ type: "session.start", sessionId: THREAD_ID, model: "gpt-5.5", cwd: "/root/app" });
-    expect(events.slice(-2)).toMatchObject([{ type: "turn.done" }, { type: "session.end", exitCode: 0, sawResult: true }]);
-  });
-
-  it("normalizes the stream into session.start, one delta per item, turn.done and session.end", async () => {
-    const exec = scriptedExec(fixtureLines("exec-turn"));
-    const { events, onEvent } = collect();
-    const session = adapterOver(exec).start({ prompt: "list the repo", cwd: "/root/app", onEvent });
+    const session = adapterOver(launch).start({ prompt: "list the repo", cwd: "/root/app", onEvent });
     const result = await session.finished;
 
     expect(events.map(e => e.type)).toEqual(["session.start", ...Array<string>(11).fill("turn.delta"), "turn.done", "session.end"]);
-    expect(events[0]).toEqual({ type: "session.start", sessionId: THREAD_ID, cwd: "/root/app" });
-
-    const deltas = events.filter((e): e is Extract<AdapterEvent, { type: "turn.delta" }> => e.type === "turn.delta");
+    expect(events[0]).toEqual({ type: "session.start", sessionId: THREAD_ID, model: "gpt-5.6-sol", cwd: "/root/app" });
+    const deltas = deltasOf(events);
     expect(deltas.map(d => [d.kind, d.toolName, d.toolUseId])).toEqual([
-      ["thinking", undefined, undefined],
-      ["tool_use", "command_execution", "item_1"],
-      ["tool_result", undefined, "item_1"],
-      ["tool_use", "file_change", "item_2"],
-      ["tool_result", undefined, "item_2"],
-      ["tool_use", "wsp.threads", "item_3"],
-      ["tool_result", undefined, "item_3"],
-      ["tool_use", "web_search", "item_4"],
-      ["tool_result", undefined, "item_4"],
       ["note", undefined, undefined],
+      ["thinking", undefined, undefined],
+      ["tool_use", "command_execution", "call_1"],
+      ["tool_result", undefined, "call_1"],
+      ["tool_use", "file_change", "call_2"],
+      ["tool_result", undefined, "call_2"],
+      ["tool_use", "wsp.threads", "call_3"],
+      ["tool_result", undefined, "call_3"],
+      ["tool_use", "web_search", "ws_1"],
+      ["tool_result", undefined, "ws_1"],
       ["text", undefined, undefined],
     ]);
-    // Every tool_use has its tool_result, so no entry of the timeline is left running once the turn ended.
     const opened = deltas.filter(d => d.kind === "tool_use").map(d => d.toolUseId);
     const closed = deltas.filter(d => d.kind === "tool_result").map(d => d.toolUseId);
     for (const id of opened) expect(closed, id).toContain(id);
-    expect(deltas[0]!.text).toBe("Listing the repository first.");
-    expect(deltas[1]!.text).toBe(JSON.stringify({ command: "bash -lc ls" }));
-    expect(deltas[2]).toMatchObject({ text: "docs\nsdk\nexamples\n", isError: false });
-    expect(deltas[3]!.text).toBe(JSON.stringify({ changes: [{ path: "README.md", kind: "update" }, { path: "docs/new.md", kind: "add" }] }));
-    expect(deltas[4]).toMatchObject({ text: "update README.md\nadd docs/new.md", isError: false });
-    expect(deltas[5]!.text).toBe(JSON.stringify({ workspace: "first" }));
-    expect(deltas[6]).toMatchObject({ text: JSON.stringify([{ type: "text", text: '{"threads":[]}' }]), isError: false });
-    expect(deltas[7]!.text).toBe(JSON.stringify({ query: "codex exec json" }));
-    expect(deltas[8]).toMatchObject({ text: "codex exec json", isError: false });
-    expect(deltas[9]).toEqual({ type: "turn.delta", sessionId: THREAD_ID, kind: "note", text: "one MCP server did not answer" });
-    expect(deltas[10]!.text).toBe("Repo contains docs, sdk, and examples directories.");
+    expect(deltas[0]!.text).toBe("one MCP server did not answer");
+    expect(deltas[1]!.text).toBe("Listing the repository first.");
+    expect(deltas[2]!.text).toBe(JSON.stringify({ command: "/bin/bash -lc ls" }));
+    expect(deltas[3]).toMatchObject({ text: "docs\nsdk\nexamples\n", isError: false });
+    expect(deltas[4]!.text).toBe(JSON.stringify({ changes: [{ path: "README.md", kind: "update" }, { path: "docs/new.md", kind: "add" }] }));
+    expect(deltas[5]).toMatchObject({ text: "update README.md\nadd docs/new.md", isError: false });
+    expect(deltas[6]!.text).toBe(JSON.stringify({ workspace: "first" }));
+    expect(deltas[7]).toMatchObject({ text: JSON.stringify([{ type: "text", text: '{"threads":[]}' }]), isError: false });
+    expect(deltas[8]!.text).toBe(JSON.stringify({ query: "codex app-server" }));
+    expect(deltas[9]).toMatchObject({ text: "codex app-server", isError: false });
     for (const d of deltas) expect(d.sessionId).toBe(THREAD_ID);
 
     expect(result.status).toBe("completed");
     expect(result.text).toBe("Repo contains docs, sdk, and examples directories.");
-    expect(result.usage).toEqual({ input_tokens: 24763, cached_input_tokens: 24448, output_tokens: 122, reasoning_output_tokens: 0 });
+    // The usage keeps the snake_case names codex exec printed, so a reader of either road reads one shape.
+    expect(result.usage).toEqual({ input_tokens: 24763, cached_input_tokens: 24448, cache_write_input_tokens: 0, output_tokens: 122, reasoning_output_tokens: 0 });
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
-    expect(result.costUsd).toBeUndefined();
     expect(events.at(-1)).toEqual({ type: "session.end", sessionId: THREAD_ID, exitCode: 0, sawResult: true });
     expect(session.threadId).toBe(THREAD_ID);
     expect(session.localId).not.toBe(THREAD_ID);
   });
 
-  it("reads the CLI's own warning about itself as a note, not as a call that failed, and the turn still completes", async () => {
-    const warning = "loading hooks from both /root/.codex/hooks.json and /root/.codex/config.toml; prefer a single representation for this layer";
-    const exec = scriptedExec([started, `{"type":"item.completed","item":{"id":"item_0","type":"error","message":${JSON.stringify(warning)}}}`, '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"ready"}}', '{"type":"turn.completed","usage":{"output_tokens":1}}']);
+  it("a reply is one text line when its item completes, carrying the server's id for it; the streamed deltas draw nothing twice", async () => {
+    const launch = launcher(server(fixtureLines("app-server-turn")));
     const { events, onEvent } = collect();
-    const result = await adapterOver(exec).start({ prompt: "say ready", onEvent }).finished;
-
-    const deltas = events.filter((e): e is Extract<AdapterEvent, { type: "turn.delta" }> => e.type === "turn.delta");
-    expect(deltas.map(d => [d.kind, d.text])).toEqual([["note", warning], ["text", "ready"]]);
-    expect(deltas.some(d => d.isError === true)).toBe(false);
-    expect(result.status).toBe("completed");
+    await adapterOver(launch).start({ prompt: "list the repo", onEvent }).finished;
+    const texts = deltasOf(events).filter(d => d.kind === "text");
+    expect(texts.map(d => [d.text, d.messageId])).toEqual([["Repo contains docs, sdk, and examples directories.", "msg_1"]]);
   });
 
-  it("carries the CLI's own id for the message each reply came out of, so two replies of one turn read as two", async () => {
-    const exec = scriptedExec(fixtureLines("exec-turn"));
+  it("resumes a thread by the id the row holds: the registry key is that id and the seed asks thread/resume", async () => {
+    const launch = launcher(server(fixtureLines("app-server-turn")));
+    const adapter = adapterOver(launch);
     const { events, onEvent } = collect();
-    await adapterOver(exec).start({ prompt: "list the repo", onEvent }).finished;
-
-    const deltas = events.filter((e): e is Extract<AdapterEvent, { type: "turn.delta" }> => e.type === "turn.delta");
-    expect(deltas.filter(d => d.kind === "text").map(d => d.messageId)).toEqual(["item_7"]);
+    const session = adapter.start({ prompt: "next", resume: THREAD_ID, permissionMode: "read-only", cwd: "/root/app", onEvent });
+    await session.finished;
+    expect(session.localId).toBe(THREAD_ID);
+    expect(adapter.sessions.get(THREAD_ID)).toBe(session);
+    expect(parse(launch.calls[0]!.input![2]!)).toEqual({ id: "wsp-thread", method: "thread/resume", params: { threadId: THREAD_ID, cwd: "/root/app", sandbox: "read-only", approvalPolicy: "on-request" } });
+    expect(new Set(events.map(e => e.sessionId))).toEqual(new Set([THREAD_ID]));
   });
 
-  it("a turn.failed is a failed result carrying the CLI's own reason, and the stream's error lines are not deltas", async () => {
-    const exec = scriptedExec([`{"type":"thread.started","thread_id":"${THREAD_ID}"}`, '{"type":"turn.started"}', '{"type":"error","message":"Reconnecting... 2/5 (stream disconnected)"}', '{"type":"turn.failed","error":{"message":"stream disconnected before completion"}}'], { exitCode: 1 });
-    const { events, onEvent } = collect();
-    const result = await adapterOver(exec).start({ prompt: "x", onEvent }).finished;
-    expect(events.map(e => e.type)).toEqual(["session.start", "turn.done", "session.end"]);
-    expect(result).toMatchObject({ status: "failed", error: "stream disconnected before completion" });
-    expect(events.at(-1)).toEqual({ type: "session.end", sessionId: THREAD_ID, exitCode: 1, sawResult: true });
+  it("images ride the turn as local paths, and one with no path on the machine is refused before anything launches", async () => {
+    const launch = launcher(server(fixtureLines("app-server-turn")));
+    await adapterOver(launch).start({ prompt: "what is this?", images: [{ mediaType: "image/png", bytes: "", path: "/root/.wsp/threads/thr_1/images/1.png" }], onEvent: () => {} }).finished;
+    expect(launch.wires[0]!.written.find(m => m.method === "turn/start")!.params).toMatchObject({ input: [{ type: "text", text: "what is this?" }, { type: "localImage", path: "/root/.wsp/threads/thr_1/images/1.png" }] });
+
+    const none = launcher(server(fixtureLines("app-server-turn")));
+    expect(() => adapterOver(none).start({ prompt: "x", images: [{ mediaType: "image/png", bytes: "aGk=" }], onEvent: () => {} })).toThrow("no path on it");
+    expect(() => adapterOver(none).start({ prompt: "x", images: [{ mediaType: "image/png", bytes: "", path: "shot.png" }], onEvent: () => {} })).toThrow("must be one absolute path");
+    expect(none.calls).toEqual([]);
   });
 
-  it("a 401 the CLI retried and then failed the turn on is the sign-in line, in the protocol's words", async () => {
-    const exec = scriptedExec(fixtureLines("failed-turn"), { exitCode: 1 });
+  it("refuses a context window, which codex has no setting for", () => {
+    expect(() => adapterOver(launcher(server([]))).start({ prompt: "x", contextWindow: "1m", onEvent: () => {} })).toThrow("codex takes no context window");
+  });
+});
+
+describe("a message sent while a Codex turn runs", () => {
+  it("steers the running turn by its id and reads accepted off the server's answer", async () => {
+    const live = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/start") self.push(turnStarted);
+          if (message.method === "turn/steer") self.push(`{"id":${JSON.stringify(message.id)},"result":{"turnId":"${TURN_ID}"}}`);
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const adapter = adapterOver(live);
+    expect(adapter.steers).toBe(true);
+    const session = adapter.start({ prompt: "count to 40", onEvent: () => {} });
+    await until(() => live.wires[0]!.written.some(m => m.method === "turn/start"));
+    await new Promise(r => setTimeout(r, 5));
+    expect(await session.steer!("stop at 12")).toBe("accepted");
+    const steer = live.wires[0]!.written.find(m => m.method === "turn/steer")!;
+    expect(steer.params).toEqual({ threadId: THREAD_ID, expectedTurnId: TURN_ID, input: [{ type: "text", text: "stop at 12" }] });
+    live.wires[0]!.push(agentMessage("msg_1", "stopped at 12"), completed("completed"));
+    expect(await session.finished).toMatchObject({ status: "completed", text: "stopped at 12" });
+  });
+
+  it("reads not-running when the server turns the steer down, and before the turn has started", async () => {
+    const live = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/steer") self.push(`{"error":{"code":-32600,"message":"no active turn"},"id":${JSON.stringify(message.id)}}`);
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const session = adapterOver(live).start({ prompt: "x", onEvent: () => {} });
+    expect(await session.steer!("too early")).toBe("not-running");
+    expect(live.wires[0]!.written.some(m => m.method === "turn/steer")).toBe(false);
+    live.wires[0]!.push(turnStarted);
+    await new Promise(r => setTimeout(r, 5));
+    expect(await session.steer!("refused")).toBe("not-running");
+    live.wires[0]!.push(completed("completed"));
+    await session.finished;
+    expect(await session.steer!("after the end")).toBe("not-running");
+  });
+});
+
+describe("an approval Codex asks for", () => {
+  const approving = (request: string) =>
+    launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/start")
+            self.push(turnStarted, `{"method":"item/started","params":{"item":{"type":"fileChange","id":"call_9","changes":[{"path":"hi.txt","kind":{"type":"add"},"diff":"+hi\\n"}],"status":"inProgress"},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`, request);
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+  const fileAsk = `{"id":0,"method":"item/fileChange/requestApproval","params":{"threadId":"${THREAD_ID}","turnId":"${TURN_ID}","itemId":"call_9","reason":"write outside the sandbox","startedAtMs":1}}`;
+  const commandAsk = `{"id":"ask-7","method":"item/commandExecution/requestApproval","params":{"threadId":"${THREAD_ID}","turnId":"${TURN_ID}","itemId":"call_4","command":"rm -rf build","cwd":"/root/app","startedAtMs":1,"proposedExecpolicyAmendment":["rm"]}}`;
+
+  it("raises a file change as a prompt with allow and deny, the change's paths as its input, and answers allow with accept alone", async () => {
+    const live = approving(fileAsk);
     const { events, onEvent } = collect();
-    const result = await adapterOver(exec).start({ prompt: "x", onEvent }).finished;
+    const session = adapterOver(live).start({ prompt: "write hi into hi.txt", permissionMode: "read-only", onEvent });
+    await until(() => events.some(e => e.type === "permission.ask"));
+    const ask = events.find((e): e is Extract<AdapterEvent, { type: "permission.ask" }> => e.type === "permission.ask")!.ask;
+    expect(ask).toEqual({
+      askId: "0",
+      toolName: "file_change",
+      toolUseId: "call_9",
+      input: JSON.stringify({ changes: [{ path: "hi.txt", kind: "add" }] }),
+      detail: "write outside the sandbox",
+      options: [
+        { id: PERMISSION_ALLOW, label: "Allow", effect: "allow" },
+        { id: PERMISSION_DENY, label: "Deny", effect: "deny" },
+      ],
+    });
+    expect(await session.answer!("0", { optionId: PERMISSION_ALLOW, outcome: "allowed", denyMessage: "" })).toBe("answered");
+    expect(live.wires[0]!.written.at(-1)).toEqual({ id: 0, result: { decision: "accept" } });
+    expect(events.at(-1)).toEqual({ type: "permission.close", sessionId: THREAD_ID, askId: "0", outcome: "allowed", optionId: PERMISSION_ALLOW });
+    expect(await session.answer!("0", { optionId: PERMISSION_ALLOW, outcome: "allowed", denyMessage: "" })).toBe("gone");
+    live.wires[0]!.push(completed("completed"));
+    await session.finished;
+  });
+
+  it("answers a command's deny with decline under the server's own id, never widening the prompt for the session or writing policy", async () => {
+    const live = approving(commandAsk);
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "clean", permissionMode: "workspace-write", onEvent });
+    await until(() => events.some(e => e.type === "permission.ask"));
+    const ask = events.find((e): e is Extract<AdapterEvent, { type: "permission.ask" }> => e.type === "permission.ask")!.ask;
+    expect(ask).toMatchObject({ askId: "ask-7", toolName: "command_execution", toolUseId: "call_4", input: JSON.stringify({ command: "rm -rf build", cwd: "/root/app" }) });
+    expect(await session.answer!("ask-7", { optionId: PERMISSION_DENY, outcome: "denied", denyMessage: "not now" })).toBe("answered");
+    expect(live.wires[0]!.written.at(-1)).toEqual({ id: "ask-7", result: { decision: "decline" } });
+    live.wires[0]!.push(completed("completed"));
+    await session.finished;
+    const decisions = live.wires[0]!.written.flatMap(m => (m.result !== undefined ? [JSON.stringify(m.result)] : []));
+    for (const d of decisions) expect(d).not.toMatch(/acceptForSession|Execpolicy|NetworkPolicy/);
+  });
+
+  it("closes a prompt the server resolved itself, and every prompt still open when the process goes", async () => {
+    const live = approving(fileAsk);
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "x", onEvent });
+    await until(() => events.some(e => e.type === "permission.ask"));
+    live.wires[0]!.push(`{"method":"serverRequest/resolved","params":{"threadId":"${THREAD_ID}","requestId":0}}`);
+    await until(() => events.some(e => e.type === "permission.close"));
+    expect(events.find(e => e.type === "permission.close")).toMatchObject({ askId: "0", outcome: "cancelled" });
+
+    const second = approving(commandAsk);
+    const { events: later, onEvent: onLater } = collect();
+    const cut = adapterOver(second).start({ prompt: "x", onEvent: onLater });
+    await until(() => later.some(e => e.type === "permission.ask"));
+    second.wires[0]!.exit(1);
+    await cut.finished;
+    expect(later.find(e => e.type === "permission.close")).toMatchObject({ askId: "ask-7", outcome: "cancelled" });
+    live.wires[0]!.push(completed("completed"));
+    await session.finished;
+  });
+
+  it("refuses a server request it does not serve with an error, so the turn is not left waiting on it", async () => {
+    const live = approving(`{"id":5,"method":"item/tool/requestUserInput","params":{"threadId":"${THREAD_ID}","turnId":"${TURN_ID}","itemId":"call_5","questions":[]}}`);
+    const { events, onEvent } = collect();
+    const session = adapterOver(live).start({ prompt: "x", onEvent });
+    await until(() => live.wires[0]!.written.some(m => m.id === 5));
+    expect(live.wires[0]!.written.find(m => m.id === 5)).toEqual({ id: 5, error: { code: -32601, message: "wsp does not answer item/tool/requestUserInput" } });
+    expect(events.some(e => e.type === "permission.ask")).toBe(false);
+    live.wires[0]!.push(completed("completed"));
+    await session.finished;
+  });
+});
+
+describe("a Codex turn that does not complete", () => {
+  it("a turn with no sign-in, as codex-cli 0.155.1 printed it, is the sign-in line with its cause, and the server exits on EOF", async () => {
+    const launch = launcher(server(fixtureLines("no-login-app-server")));
+    const { events, onEvent } = collect();
+    const result = await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
     expect(NOT_SIGNED_IN).toBe("Codex is not signed in where this workspace runs; run codex login --device-auth there");
-    // The cause rides the result, as it does on the other CLI: a turn refused for want of a sign-in did no work.
     expect(result).toMatchObject({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
-    expect(events.at(-1)).toEqual({ type: "session.end", sessionId: FAILED_THREAD_ID, exitCode: 1, sawResult: true });
+    expect(events.map(e => e.type)).toEqual(["session.start", "turn.delta", "turn.done", "session.end"]);
+    expect(events.at(-1)).toEqual({ type: "session.end", sessionId: NO_LOGIN_THREAD, exitCode: 0, sawResult: true });
+    expect(launch.wires[0]!.closed).toBe(true);
   });
 
-  it("a 401 on a turn that was handed the vault's key is said as a refused key, with the provider's own reason", async () => {
-    const withKey = (exec: ScriptedExec) => createCodexAdapter({ exec: exec.factory, home: "/root/.codex", login: LOGIN, apiKey: "sk-ant-x-not-a-key", keyEnv: "OPENAI_API_KEY" });
-    const said = '{"type":"error","message":"Reconnecting... 1/5 (unexpected status 401 Unauthorized: token expired)"}';
-    const refused = await withKey(scriptedExec([started, said, '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: token expired"}}'], { exitCode: 1 })).start({ prompt: "x", onEvent: () => {} }).finished;
-    expect(refused).toMatchObject({ status: "failed", error: codexKeyRefusedLine("OPENAI_API_KEY", "token expired", LOGIN), refusal: "sign-in" });
-
-    // A status the CLI said nothing after still names the key: what is wrong with it is the provider's to say.
-    const bare = await withKey(scriptedExec([started, '{"type":"turn.failed","error":{"message":"401 Unauthorized"}}'], { exitCode: 1 })).start({ prompt: "x", onEvent: () => {} }).finished;
-    expect(bare).toMatchObject({ status: "failed", error: codexKeyRefusedLine("OPENAI_API_KEY", "", LOGIN), refusal: "sign-in" });
-
-    // No key was handed, so nothing was refused: the turn ran with no credential at all and the line says so.
-    const none = await adapterOver(scriptedExec([started, '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: token expired"}}'], { exitCode: 1 })).start({ prompt: "x", onEvent: () => {} }).finished;
-    expect(none).toMatchObject({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
-  });
-
-  it("a fatal error event followed by an exit with no turn.failed keeps that event's message, not the stderr tail", async () => {
-    const exec = scriptedExec([started, '{"type":"turn.started"}', "2026-09-07T01:10:02Z WARN codex_core: slow disk", '{"type":"error","message":"stream closed by the provider"}'], { exitCode: 1 });
-    const result = await adapterOver(exec).start({ prompt: "x", onEvent: () => {} }).finished;
-    expect(result).toEqual({ status: "failed", error: "codex exited with code 1 before its turn ended: stream closed by the provider" });
-  });
-
-  it("a 401 the CLI retried and then died on with exit 101 and no turn event, as codex-cli 0.153.0 does, is the sentence alone", async () => {
-    const exec = scriptedExec(fixtureLines("no-login-0153"), { exitCode: 101 });
-    const { events, onEvent } = collect();
-    const result = await adapterOver(exec).start({ prompt: "x", onEvent }).finished;
-    expect(result).toEqual({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
-    // The CLI announced its session on thread.started, before it could know it had no sign-in, so the announce is
-    // no sign that the turn worked: the cause is what says it did none.
-    expect(events.map(e => e.type)).toEqual(["session.start", "turn.done", "session.end"]);
-    expect(events.at(-1)).toMatchObject({ type: "session.end", exitCode: 101, sawResult: false });
-  });
-
-  it("an exit 101 with no 401 in sight is a death like any other: the exit code and the CLI's last lines, no guess at a login", async () => {
-    const exec = scriptedExec([started, "thread 'main' panicked at core/src/rollout.rs"], { exitCode: 101 });
-    const result = await adapterOver(exec).start({ prompt: "x", onEvent: () => {} }).finished;
-    expect(result).toEqual({ status: "failed", error: "codex exited with code 101 before its turn ended: thread 'main' panicked at core/src/rollout.rs" });
-  });
-
-  it("the last failure seen wins: a 401 in an early reconnect line, then a turn that recovers and fails for another reason, names that reason", async () => {
-    const exec = scriptedExec([started, '{"type":"error","message":"Reconnecting... 1/5 (unexpected status 401 Unauthorized: token expired)"}', '{"type":"turn.started"}', '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"partway"}}', '{"type":"turn.failed","error":{"message":"Missing environment variable: `LATER_KEY`."}}'], { exitCode: 1 });
-    const result = await adapterOver(exec).start({ prompt: "x", onEvent: () => {} }).finished;
-    expect(result).toMatchObject({ status: "failed", error: codexMissingEnvLine("LATER_KEY") });
-    // A missing variable is not a refusal wsp classes: the later failure's words win and they claim no cause.
+  it("a failed turn carries the server's own reason where wsp claims no cause for it", async () => {
+    const result = await adapterOver(launcher(scripted([errorNote("stream disconnected before completion", false), failedWith("stream disconnected before completion")]))).start({ prompt: "x", onEvent: () => {} }).finished;
+    expect(result).toMatchObject({ status: "failed", error: "stream disconnected before completion" });
     expect(result.refusal).toBeUndefined();
   });
 
-  it("a process that dies after thread.started fails under the announced thread id with its last stderr lines", async () => {
-    const exec = scriptedExec([`{"type":"thread.started","thread_id":"${THREAD_ID}"}`, "2026-09-07T00:51:50Z ERROR codex_core: sandbox unavailable"], { exitCode: 2 });
+  it("a 401 on a turn that was handed the vault's key is said as a refused key, with the provider's own reason and no url", async () => {
+    const withKey = (launch: Launch) => createCodexAdapter({ exec: launch.factory, home: "/root/.codex", login: LOGIN, apiKey: "sk-x-not-a-key", keyEnv: "OPENAI_API_KEY" });
+    const refused = await withKey(launcher(scripted([failedWith("unexpected status 401 Unauthorized: token expired, url: https://api.openai.com/v1/responses, cf-ray: x")]))).start({ prompt: "x", onEvent: () => {} }).finished;
+    expect(refused).toMatchObject({ status: "failed", error: codexKeyRefusedLine("OPENAI_API_KEY", "token expired", LOGIN), refusal: "sign-in" });
+    const none = await adapterOver(launcher(scripted([failedWith("unexpected status 401 Unauthorized: token expired")]))).start({ prompt: "x", onEvent: () => {} }).finished;
+    expect(none).toMatchObject({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
+  });
+
+  it("a provider whose env_key variable is unset fails the turn naming that variable, in the protocol's words", async () => {
+    const result = await adapterOver(launcher(scripted([failedWith("Missing environment variable: `FAKE_API_KEY`.")]))).start({ prompt: "x", onEvent: () => {} }).finished;
+    expect(result).toMatchObject({ status: "failed", error: codexMissingEnvLine("FAKE_API_KEY") });
+  });
+
+  it("the last failure seen wins: a 401 in an early retry, then a turn that fails for another reason, names that reason", async () => {
+    const result = await adapterOver(launcher(scripted([errorNote("Reconnecting... 1/5", true, "unexpected status 401 Unauthorized: token expired"), agentMessage("msg_1", "partway"), failedWith("Missing environment variable: `LATER_KEY`.")]))).start({ prompt: "x", onEvent: () => {} }).finished;
+    expect(result).toMatchObject({ status: "failed", error: codexMissingEnvLine("LATER_KEY") });
+    expect(result.refusal).toBeUndefined();
+  });
+
+  it("a server that turns the thread down fails the turn in its words and sends no turn", async () => {
+    const launch = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/resume") self.push('{"id":"wsp-initialize","result":{}}', '{"error":{"code":-32600,"message":"no rollout found for thread id 01a0"},"id":"wsp-thread"}');
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
     const { events, onEvent } = collect();
-    const result = await adapterOver(exec).start({ prompt: "x", onEvent }).finished;
-    expect(result).toEqual({ status: "failed", error: "codex exited with code 2 before its turn ended: 2026-09-07T00:51:50Z ERROR codex_core: sandbox unavailable" });
+    const result = await adapterOver(launch).start({ prompt: "x", resume: THREAD_ID, onEvent }).finished;
+    expect(result).toEqual({ status: "failed", error: "codex could not open the thread: no rollout found for thread id 01a0" });
+    expect(launch.wires[0]!.written.some(m => m.method === "turn/start")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
+  });
+
+  it("a process that dies mid-turn fails under the thread's id with its last stderr lines", async () => {
+    const launch = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/start") {
+            self.push(turnStarted, "2026-09-27T00:51:50Z ERROR codex_core: sandbox unavailable");
+            setTimeout(() => self.exit(2), 1);
+          }
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const { events, onEvent } = collect();
+    const result = await adapterOver(launch).start({ prompt: "x", onEvent }).finished;
+    expect(result).toEqual({ status: "failed", error: "codex exited with code 2 before its turn ended: 2026-09-27T00:51:50Z ERROR codex_core: sandbox unavailable" });
     expect(events.map(e => [e.type, e.sessionId])).toEqual([["session.start", THREAD_ID], ["turn.done", THREAD_ID], ["session.end", THREAD_ID]]);
   });
 
   it("a transport that ends the turn itself makes its message the turn's error", async () => {
-    const exec = scriptedExec([]);
-    const failing: ExecStreamFactory = (command, options) => ({
-      ...exec.factory(command, options),
+    const failing: ExecStreamFactory = command => ({
+      ...wire().stream,
       lines: (async function* () {
-        yield `{"type":"thread.started","thread_id":"${THREAD_ID}"}`;
+        yield command.length > 0 ? opened()[0]! : "";
         throw new Error("turn cut: idle 10m");
       })(),
       exited: Promise.resolve(null),
@@ -270,105 +497,122 @@ describe("CodexAdapter over a codex exec --json turn", () => {
     expect(result).toEqual({ status: "failed", error: "turn cut: idle 10m" });
   });
 
-  it("resumes with the thread id as the registry key and the command's resume word; the thread.started a resume re-emits keeps that id", async () => {
-    const exec = scriptedExec(fixtureLines("exec-turn"));
-    const adapter = adapterOver(exec);
+  it("a provider that never answers: the server retries forever, so the adapter ends the turn in words and kills the process", async () => {
+    const launch = launcher(scripted([reconnecting, reconnecting], { hang: true }));
     const { events, onEvent } = collect();
-    const session = adapter.start({ prompt: "next", resume: THREAD_ID, cwd: "/root/app", onEvent });
-    await session.finished;
-    expect(session.localId).toBe(THREAD_ID);
-    expect(session.threadId).toBe(THREAD_ID);
-    expect(adapter.sessions.get(THREAD_ID)).toBe(session);
-    expect(exec.calls[0]!.command).toContain(`codex exec resume ${THREAD_ID} --json`);
-    expect(events[0]).toEqual({ type: "session.start", sessionId: THREAD_ID, cwd: "/root/app" });
-    expect(new Set(events.map(e => e.sessionId))).toEqual(new Set([THREAD_ID]));
-  });
-
-  it("reads a codex-cli 0.153.0 turn: the metadata warning item before turn.started, the message, and usage with its new field", async () => {
-    const exec = scriptedExec(fixtureLines("exec-turn-0153"));
-    const { events, onEvent } = collect();
-    const result = await adapterOver(exec).start({ prompt: "say hi", onEvent }).finished;
-    expect(events.map(e => e.type)).toEqual(["session.start", "turn.delta", "turn.delta", "turn.done", "session.end"]);
-    expect(events[1]).toMatchObject({ kind: "note", text: expect.stringContaining("Model metadata for `fake-model` not found") });
-    expect(events[2]).toMatchObject({ kind: "text", text: "fake reply to: say hi" });
-    expect(result).toMatchObject({ status: "completed", text: "fake reply to: say hi", usage: { input_tokens: 10, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 3, reasoning_output_tokens: 0 } });
-  });
-
-  it("a provider whose env_key variable is unset fails the turn naming that variable, in the protocol's words", async () => {
-    const exec = scriptedExec([started, '{"type":"turn.started"}', '{"type":"error","message":"Missing environment variable: `FAKE_API_KEY`."}', '{"type":"turn.failed","error":{"message":"Missing environment variable: `FAKE_API_KEY`."}}'], { exitCode: 1 });
-    const result = await adapterOver(exec).start({ prompt: "x", onEvent: () => {} }).finished;
-    expect(codexMissingEnvLine("FAKE_API_KEY")).toBe("Codex's model provider reads its key from the environment variable FAKE_API_KEY, which is not set on this machine");
-    expect(result).toMatchObject({ status: "failed", error: codexMissingEnvLine("FAKE_API_KEY") });
-  });
-
-  it("a provider that never answers: the CLI reconnects forever, so the adapter ends the turn in words and kills the process", async () => {
-    const exec = scriptedExec([started, '{"type":"turn.started"}', reconnecting, reconnecting], { hang: true });
-    const { events, onEvent } = collect();
-    const result = await adapterOver(exec, 10, 20).start({ prompt: "x", onEvent }).finished;
-    expect(exec.order).toEqual(["teardown", "kill"]);
+    const result = await adapterOver(launch, { graceMs: 10, stallMs: 20 }).start({ prompt: "x", onEvent }).finished;
+    expect(launch.wires[0]!.order).toEqual(["teardown", "kill"]);
     expect(result.status).toBe("failed");
     expect(result.error).toMatch(/^stopped after \d+m \d\ds of Codex reconnecting to its model provider with no answer$/);
     expect(codexReconnectLine(90_000)).toBe("stopped after 1m 30s of Codex reconnecting to its model provider with no answer");
     expect(events.at(-1)).toMatchObject({ type: "session.end", exitCode: null, sawResult: false });
   });
 
-  it("a reconnect run that recovers into a turn is not cut, and the clock starts over on the next run", async () => {
-    const exec = scriptedExec([started, reconnecting, '{"type":"turn.started"}', reconnecting, '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"back"}}', '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}']);
-    const result = await adapterOver(exec, 10, 20).start({ prompt: "x", onEvent: () => {} }).finished;
+  it("a retry run that recovers into the turn is not cut", async () => {
+    const launch = launcher(scripted([reconnecting, agentMessage("msg_1", "back"), completed("completed")]));
+    const result = await adapterOver(launch, { graceMs: 10, stallMs: 20 }).start({ prompt: "x", onEvent: () => {} }).finished;
     expect(result).toMatchObject({ status: "completed", text: "back" });
-    expect(exec.order).toEqual([]);
-  });
-
-  it("does not steer: sessions carry no steer and the adapter says so, so the runtime queues a second message", () => {
-    const adapter = adapterOver(scriptedExec([]));
-    expect(adapter.steers).toBe(false);
-    expect("steer" in adapter.start({ prompt: "x", onEvent: () => {} })).toBe(false);
-  });
-
-  it("refuses a context window, which codex has no flag for", () => {
-    expect(() => adapterOver(scriptedExec([])).start({ prompt: "x", contextWindow: "1m", onEvent: () => {} })).toThrow("codex takes no context window");
+    expect(launch.wires[0]!.order).toEqual([]);
   });
 });
 
-describe("interrupt policy (teardown, then SIGKILL)", () => {
-  it("escalates to kill when teardown does not end the process, and reports the turn interrupted", async () => {
-    const exec = scriptedExec([`{"type":"thread.started","thread_id":"${THREAD_ID}"}`], { hang: true });
+describe("interrupt", () => {
+  it("asks the server to interrupt the running turn, which then completes as interrupted and exits on EOF", async () => {
+    const live = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/start") self.push(...opened());
+          if (message.method === "turn/start") self.push(turnStarted);
+          if (message.method === "turn/interrupt") self.push('{"id":"wsp-interrupt","result":{}}', completed("interrupted"));
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
     const { events, onEvent } = collect();
-    const session = adapterOver(exec, 15).start({ prompt: "loop forever", onEvent });
+    const session = adapterOver(live, { graceMs: 5_000 }).start({ prompt: "loop forever", onEvent });
+    await until(() => live.wires[0]!.written.some(m => m.method === "turn/start"));
+    await new Promise(r => setTimeout(r, 5));
     await session.interrupt();
-    const result = await session.finished;
-    expect(exec.order).toEqual(["teardown", "kill"]);
-    expect(result).toEqual({ status: "interrupted" });
-    expect(events.at(-1)).toEqual({ type: "session.end", sessionId: THREAD_ID, exitCode: null, sawResult: false });
+    expect(await session.finished).toEqual({ status: "interrupted" });
+    expect(live.wires[0]!.written.find(m => m.method === "turn/interrupt")!.params).toEqual({ threadId: THREAD_ID, turnId: TURN_ID });
+    expect(live.wires[0]!.order).toEqual([]);
+    expect(events.at(-1)).toMatchObject({ type: "session.end", exitCode: 0, sawResult: true });
   });
 
-  it("does not kill when teardown ends the process within the grace window", async () => {
-    const exec = scriptedExec(fixtureLines("exec-turn"));
-    const session = adapterOver(exec, 5_000).start({ prompt: "x", onEvent: () => {} });
-    await session.finished;
+  it("ends the process with its tree when the server does not stop inside the grace window", async () => {
+    const launch = launcher(scripted([], { hang: true }));
+    const session = adapterOver(launch, { graceMs: 15 }).start({ prompt: "loop forever", onEvent: () => {} });
+    await until(() => launch.wires[0]!.written.some(m => m.method === "turn/start"));
+    await new Promise(r => setTimeout(r, 5));
     await session.interrupt();
-    expect(exec.order).toEqual(["teardown"]);
+    expect(await session.finished).toEqual({ status: "interrupted" });
+    expect(launch.wires[0]!.order).toEqual(["teardown", "kill"]);
+  });
+
+  it("an interrupt before the server started the turn ends the process at once, with nothing to ask it", async () => {
+    const launch = launcher(seed => {
+      const w = wire({ hang: true });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    const session = adapterOver(launch, { graceMs: 15 }).start({ prompt: "x", onEvent: () => {} });
+    await session.interrupt();
+    expect(await session.finished).toEqual({ status: "interrupted" });
+    expect(launch.wires[0]!.written.some(m => m.method === "turn/interrupt")).toBe(false);
+    expect(launch.wires[0]!.order).toEqual(["teardown", "kill"]);
+  });
+
+  it("an interrupt after the process is gone sends nothing and ends nothing", async () => {
+    const launch = launcher(server(fixtureLines("app-server-turn")));
+    const session = adapterOver(launch, { graceMs: 5_000 }).start({ prompt: "x", onEvent: () => {} });
+    await session.finished;
+    const before = launch.wires[0]!.written.length;
+    await session.interrupt();
+    expect(launch.wires[0]!.written.length).toBe(before);
+    expect(launch.wires[0]!.order).toEqual([]);
+  });
+});
+
+describe("a turn a later host attaches to", () => {
+  it("re-opens the run with its channel, replays the log, and writes nothing in answer to what the replay shows", async () => {
+    const launch = launcher(server(fixtureLines("app-server-turn")));
+    const attached: { run: string; input: boolean }[] = [];
+    const replay = wire();
+    replay.push(...fixtureLines("app-server-turn"));
+    replay.exit(0);
+    launch.factory.attach = async (run, options) => {
+      attached.push({ run, input: options.input });
+      return replay.stream;
+    };
+    const adapter = adapterOver(launch);
+    expect(adapter.start({ prompt: "go", onEvent: () => {} }).run).toBe(RUN_HANDLE);
+    const { events, onEvent } = collect();
+    const session = (await adapter.attach!({ run: RUN_HANDLE, sessionId: THREAD_ID, startedAt: 1, model: "gpt-5.5", cwd: "/root/app", onEvent })) as CodexSession;
+    const result = await session.finished;
+    expect(attached).toEqual([{ run: RUN_HANDLE, input: true }]);
+    expect(session.command).toBeUndefined();
+    expect(result.status).toBe("completed");
+    expect(replay.written).toEqual([]);
+    expect(events[0]).toMatchObject({ type: "session.start", sessionId: THREAD_ID, model: "gpt-5.5", cwd: "/root/app" });
+    expect(events.slice(-2)).toMatchObject([{ type: "turn.done" }, { type: "session.end", exitCode: 0, sawResult: true }]);
   });
 });
 
 describe("the process a finished turn leaves", () => {
-  it("a CLI that does not go after its own turn.completed is ended with its tree, and the turn still reads as its reply", async () => {
-    const exec = scriptedExec([started, '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"done"}}', '{"type":"turn.completed","usage":{"output_tokens":1}}'], { hang: true });
+  it("a server that does not go after its turn completed is ended with its tree, and the turn still reads as its reply", async () => {
+    const launch = launcher(scripted([agentMessage("msg_1", "done"), completed("completed")], { hang: true }));
     const { events, onEvent } = collect();
-    const adapter = createCodexAdapter({ exec: exec.factory, home: "/root/.codex", login: LOGIN, interruptGraceMs: 15, resultExitMs: 15 });
-
-    const result = await adapter.start({ prompt: "x", onEvent }).finished;
-
-    expect(exec.order).toEqual(["teardown", "kill"]);
+    const result = await adapterOver(launch, { graceMs: 15, resultExitMs: 15 }).start({ prompt: "x", onEvent }).finished;
+    expect(launch.wires[0]!.order).toEqual(["teardown", "kill"]);
     expect(result).toMatchObject({ status: "completed", text: "done" });
     expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
   });
 
-  it("a CLI that ends its own process is left alone", async () => {
-    const exec = scriptedExec(fixtureLines("exec-turn"));
-    const adapter = createCodexAdapter({ exec: exec.factory, home: "/root/.codex", login: LOGIN, interruptGraceMs: 15, resultExitMs: 15 });
-    expect((await adapter.start({ prompt: "x", onEvent: () => {} }).finished).status).toBe("completed");
+  it("a server that exits on EOF is left alone", async () => {
+    const launch = launcher(server(fixtureLines("app-server-turn")));
+    expect((await adapterOver(launch, { graceMs: 15, resultExitMs: 15 }).start({ prompt: "x", onEvent: () => {} }).finished).status).toBe("completed");
     await new Promise(r => setTimeout(r, 60));
-    expect(exec.order).toEqual([]);
+    expect(launch.wires[0]!.order).toEqual([]);
   });
 });

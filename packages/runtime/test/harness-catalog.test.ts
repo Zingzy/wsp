@@ -232,7 +232,7 @@ describe("the access a thread starts at, per kind of workspace", () => {
     }
   });
 
-  it("claude asks the person in its default mode; codex exec cannot ask, so its narrowest working sandbox stands", () => {
+  it("claude asks the person in its default mode; codex keeps its narrowest working sandbox and asks past it", () => {
     expect(harnessCatalog("claude")!.keptMode).toBe("default");
     expect(harnessCatalog("codex")!.keptMode).toBe("workspace-write");
   });

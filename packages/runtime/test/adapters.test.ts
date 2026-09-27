@@ -34,6 +34,11 @@ describe("the agents wsp can open a thread on", () => {
     // The mode a row calls its bypass is the one its adapter knows as a launch flag: one slug, pinned to the module
     // that owns it, so the table and the launch cannot drift apart.
     expect(HARNESS_CATALOGS.find(c => c.harness === "claude")?.bypassMode).toBe(SKIP_PROMPTS_MODE);
+    // Both take a message mid-turn: Claude Code on its stream-json channel, Codex as the app server's turn/steer.
+    for (const id of ["claude", "codex"] as const) {
+      const adapter = HARNESS_ADAPTERS[id]({ machine, workspaceId: "ws_1", execStream: machineExecStream(machine), home: () => "/root/.state", env: {}, signInRefusal: signInRefusalLine({ kind: "cloud" }), vault: {}, loginStands: () => false });
+      expect(adapter.steers, id).toBe(true);
+    }
     // Both take the servers on their launch: Claude Code as --mcp-config, Codex as config overrides.
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "claude"))).toBe(true);
     expect(takesMcpServers(HARNESS_CATALOGS.find(c => c.harness === "codex"))).toBe(true);

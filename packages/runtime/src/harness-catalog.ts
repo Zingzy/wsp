@@ -136,8 +136,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
       { ...option("gpt-5.2", "GPT-5.2"), efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" },
     ],
     efforts: levels(["low", "medium", "high", "xhigh", "max", "ultra"], "low"),
-    // `codex exec` runs non-interactively and its JSON stream carries no approval request, so this CLI cannot ask
-    // anyone anything: the narrowest sandbox a turn can still work in is the whole answer for a kept machine.
+    // A sandboxed mode asks the person in the chat before the agent goes past its sandbox, over the app server's
+    // approval requests; the narrowest sandbox a turn can still work in is the answer for a kept machine.
     keptMode: "workspace-write",
     bypassMode: "danger-full-access",
     permissionModes: [

@@ -28,7 +28,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "status": "claude auth status",
   },
   {
-    "argument": "@openai/codex@0.153.0",
+    "argument": "@openai/codex@0.155.1",
     "configPaths": 4,
     "id": "codex",
     "kind": "agent",
