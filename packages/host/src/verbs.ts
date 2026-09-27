@@ -271,7 +271,7 @@ import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
 import type { RelayTerminal } from "./signin-relay.js";
 import { gitRootOf } from "./repo-root.js";
-import { dialAddress, hostTokenFor, hostTokenPath, servingHost } from "./host-lock.js";
+import { dialAddress, heldOrStarted, hostTokenFor, hostTokenPath, servingHost } from "./host-lock.js";
 import type { HostStarter } from "./host-start.js";
 import { addressNotPairedLine, aimAddress, aimHolds, aimName, aimedHost, deviceRefusedLine, dialWindowMs, hostSideOnlyFix, hostSideOnlyLine, noAnswerRefusal, noAnswerWithin, READ_THE_HOSTS, stateIgnoredLine, wsUrlOf, wspHome, writeHost, type HostAim, type HostPick } from "./hosts.js";
 import { readDeviceKeyPair } from "./account.js";
@@ -396,9 +396,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
   const aim = opts.aim ?? aimedHost(statePath, opts);
   // Nothing serves this state file here and the line needs one: start it rather than telling the person to. Every
   // other aim is a host somewhere else, which this computer cannot start and must not try to.
-  if (aim.kind === "here" && opts.start !== undefined && servingHost(statePath) === undefined) {
-    await opts.start(statePath, opts.say ?? (line => void process.stderr.write(`${line}\n`)));
-  }
+  if (aim.kind === "here") await heldOrStarted(statePath, opts.start, opts.say ?? (line => void process.stderr.write(`${line}\n`)));
   // An address with no token beside it opens nothing: this computer holds a token only under a name.
   if (aim.kind === "url" && aim.token === undefined && opts.admit === undefined) throw usageRefusal(addressNotPairedLine(aim.url), READ_THE_HOSTS);
   const { url, token } = hostAddress(statePath, { aim });

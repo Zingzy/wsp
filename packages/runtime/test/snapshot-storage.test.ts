@@ -3,12 +3,11 @@ import type { GoldenImport } from "@wsp/engine";
 import { describe, expect, it } from "vitest";
 import { copyKey, createRuntime } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
-import { memoryStore } from "../src/store.js";
-import { stubBackend, createOn, projectOn } from "./stub-backend.js";
+import { ownedStore, stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { wsRequest } from "./ws-client.js";
 
 const GB = 1e9;
-/** templateHost() takes the part after the last colon, so every name this host writes carries the mark "h1". */
+/** The host's part of the mark is "h1" (templateHost() takes the part after the last colon) and the state's owner is "s1". */
 const HOST = "box:h1";
 /** Version n sealed from the one before it, as an update chain records them. */
 const version = (n: number) => ({
@@ -24,7 +23,7 @@ const version = (n: number) => ({
 
 /** Four sealed versions on the account, sized as the listing would report them, with a recipe stored per version. */
 async function fourVersions() {
-  const store = memoryStore();
+  const store = ownedStore();
   const backend = stubBackend();
   await store.put("goldens", copyKey("default", "default"), { head: 4, versions: [1, 2, 3, 4].map(version) });
   for (const n of [1, 2, 3, 4]) {
@@ -49,7 +48,7 @@ describe("runtime snapshot storage", () => {
   it("is undefined on a backend that cannot list snapshots, and null over the wire", async () => {
     const backend = stubBackend();
     const { listSnapshots: _l, ...bare } = backend;
-    const rt = createRuntime({ backend: { ...bare, capabilities: { ...backend.capabilities, snapshotListing: false } }, store: memoryStore(), adapters: {}, hostId: HOST });
+    const rt = createRuntime({ backend: { ...bare, capabilities: { ...backend.capabilities, snapshotListing: false } }, store: ownedStore(), adapters: {}, hostId: HOST });
     expect(await rt.golden.storage()).toBeUndefined();
     expect(await rt.golden.retention()).toBeUndefined();
     const srv = await serveRuntime(rt, { port: 0, authToken: "t" });
@@ -142,9 +141,9 @@ describe("runtime golden retention", () => {
     const result = await updating.golden.upgrade({ delta: { import: { ...imp, recipeHash: "h2" }, retired: [], retiredOnImage: [] } });
     expect(result.road).toBe("fork");
     // A version sealed now carries this host's mark in the snapshot's name, which is the only place ownership rides.
-    expect(result.version).toMatchObject({ version: 5, snapshotId: "snap_wsp-h1-default-v5", parentSnapshotId: "snap_golden-v2" });
+    expect(result.version).toMatchObject({ version: 5, snapshotId: "snap_wsp-h1s1-default-v5", parentSnapshotId: "snap_golden-v2" });
     // The stub sizes the new snapshot like a golden.
-    expect(backend.snapshots.map(r => r.id)).toEqual(["snap_golden-v1", "snap_golden-v2", "snap_golden-v3", "snap_golden-v4", "snap_wsp-h1-default-v5"]);
+    expect(backend.snapshots.map(r => r.id)).toEqual(["snap_golden-v1", "snap_golden-v2", "snap_golden-v3", "snap_golden-v4", "snap_wsp-h1s1-default-v5"]);
     const plan = (await updating.golden.retention())!;
     expect(plan.keep.map(v => v.version)).toEqual([5, 2]);
     expect(plan.drop.map(v => v.version)).toEqual([1, 3, 4]);
@@ -158,7 +157,7 @@ describe("runtime golden retention", () => {
     const pruned = await updating.golden.prune();
     expect(pruned.dropped.map(v => v.version)).toEqual([1, 3]);
     expect(pruned.failed).toEqual([]);
-    expect(backend.snapshots.map(r => r.id)).toEqual(["snap_golden-v2", "snap_golden-v4", "snap_wsp-h1-default-v5"]);
+    expect(backend.snapshots.map(r => r.id)).toEqual(["snap_golden-v2", "snap_golden-v4", "snap_wsp-h1s1-default-v5"]);
     expect((await updating.golden.get())!.versions.map(v => v.version)).toEqual([2, 4, 5]);
     expect(await store.get("golden-recipes", copyKey("default", "default@v3"))).toBeUndefined();
     expect(await store.get("golden-recipes", copyKey("default", "default@v4"))).toBeDefined();
@@ -166,7 +165,7 @@ describe("runtime golden retention", () => {
   });
 
   it("with no golden there is nothing to plan", async () => {
-    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, hostId: HOST });
+    const rt = createRuntime({ backend: stubBackend(), store: ownedStore(), adapters: {}, hostId: HOST });
     expect(await rt.golden.retention()).toBeUndefined();
     expect(await rt.golden.prune()).toEqual({ dropped: [], failed: [] });
   });
