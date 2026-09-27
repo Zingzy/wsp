@@ -16,7 +16,7 @@ import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS, parseManifest, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { BUILDER_DISK_GB, LocalBackend, SNAPSHOT_STORAGE, type BackendPricing, type ExecResult } from "@wsp/engine";
 import { HERE_PLACE_ID, ALREADY_APPLIED, BUILD_NEEDS_FILE_FIX, DAEMON_TOKEN_PATH, buildNeedsFileLine, folderName, MACHINE_GONE_LINE, Recipe, SEAL_FAILED_LINE, SIGN_IN_DEFERRED_WORD, SIGN_IN_LATER, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
-import { copyKey, DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localExecStream, memoryStore, type GoldenRecipe, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
+import { copyKey, DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localExecStream, type GoldenRecipe, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalogEntry, parseJsonc } from "@wsp/catalog";
 import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
@@ -39,6 +39,7 @@ import { runRecipe } from "../src/recipe-command.js";
 import { saveSmallRecipe } from "../src/recipe-file.js";
 import { fakeHost } from "./recipe-fixture.js";
 import type { ScanRow } from "../src/scan.js";
+import { ownedStore } from "../../runtime/test/stub-backend.js";
 import { guestAnswer, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
 import { loginOf } from "./signin-questions.js";
 import { copyingFake, createOn, projectOn } from "./verbs-fixture.js";
@@ -188,7 +189,7 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
   mkdirSync(join(home, ".ssh"), { mode: 0o700 });
   writeFileSync(join(home, ".ssh", "config"), "Host work\n", { mode: 0o600 });
   const reads: string[] = [];
-  const store = memoryStore();
+  const store = ownedStore();
   const { tty: _tty, env: _env, columns: _columns, signedIn: _signedIn, hold: _hold, missing: _missing, json: _json, ...rest } = over;
   const opts: InitOptions = {
     yes: false,
@@ -483,7 +484,7 @@ describe("wsp init, interactive", () => {
     const scanned = { id: "brew/zingzy/tap/diskbloom", name: "zingzy/tap/diskbloom", manager: "brew" as const, group: "Homebrew formulae", install: "brew install zingzy/tap/diskbloom", check: "brew list --versions zingzy/tap/diskbloom", size: 4 * 1024 * 1024, version: "0.1.0" };
     const collect = async () => ({ entries: [...FIXTURE.entries, tap] });
     const brew = async () => table;
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     shared.execImpl = (_m, cmd) => {
       const tag = /repos\/Zingzy\/diskbloom\/releases\/(?:tags\/(\S+?)'|latest)/.exec(cmd);
@@ -648,7 +649,7 @@ describe("wsp init, interactive", () => {
       // The smoke command fails on the fork alone; the builder's own stages answer as a bare guest does.
       backend.execImpl = (m, cmd) => (m.spec.fromSnapshot !== undefined ? { exitCode: 3, stdout: "", stderr: "claude: not found" } : guestAnswer(cmd));
       f.backends.push(backend);
-      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
+      const rt = createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
       f.runtimes.push(rt);
       return rt;
     };
@@ -674,7 +675,7 @@ describe("wsp init, interactive", () => {
       const backend = stubBackend();
       backend.beforeSnapshot = refuse;
       f.backends.push(backend);
-      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, snapshotRetryMs: 1 , hostId: "box:h1" });
+      const rt = createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe, snapshotRetryMs: 1 , hostId: "box:h1" });
       f.runtimes.push(rt);
       return rt;
     };
@@ -1603,7 +1604,7 @@ describe("wsp init, the sign-in stage", () => {
     backend.execImpl = (_m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     const create = backend.create.bind(backend);
     backend.create = async spec => Object.assign(await create(spec), { previewUrl: async () => ({ url: "http://guest.test", token: "pt", expiresAt: Date.now() + 3_600_000 }) });
-    const store = memoryStore();
+    const store = ownedStore();
     await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "base", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } }] });
     // Nothing answers on guest.test, so the create's daemon ping is kept short.
     backend.lifecycle.budgets.daemonAnswersMs = 100;
@@ -1724,7 +1725,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.relays).toBe(1);
     expect(f.hosts).toBe(0);
     // No process stays to end a kept builder's window, so the builder goes with the seal; the smoke fork too; nothing else booted.
-    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true]]);
+    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1s1-default-v1", true]]);
     expect(out).not.toContain("The builder stays up ten minutes");
     expect(await f.store.list("builders")).toEqual([]);
     expect(f.opened).toEqual([]);
@@ -1782,7 +1783,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toContain("Sealing image v1. Taken as yes (--non-interactive).");
     expect(out).toContain("a workspace is one project's, and this run named no folder here");
     const rt = f.runtimes.at(-1)!;
-    expect(goldenHead(await rt.golden.get())?.snapshotId).toBe("snap_wsp-h1-default-v1");
+    expect(goldenHead(await rt.golden.get())?.snapshotId).toBe("snap_wsp-h1s1-default-v1");
     // An agent pays for no machine it did not ask for: nothing is forked. A workspace is one project's copy and
     // this run named no folder here, so the tick makes none either.
     expect(await rt.workspaces.list()).toEqual([]);
@@ -1807,12 +1808,12 @@ describe("wsp init, flags and no terminal", () => {
       { event: "sign-in", tool: "gemini", label: "Gemini CLI login", browserUrl: GEMINI_URL, finish: "code", nextCommand: `open '${GEMINI_URL}'`, waitSeconds: 120 },
       { event: "sign-in-result", tool: "gemini", label: "Gemini CLI login", state: "signed-in", note: "gemini --skip-trust exited 0" },
       // Nothing was made, so the last object names the command that opens the app and no workspace.
-      { event: "done", golden: "default", version: 1, snapshotId: "snap_wsp-h1-default-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up --state /tmp/wsp-test/state.json", forkCommand: "wsp new first --state /tmp/wsp-test/state.json" },
+      { event: "done", golden: "default", version: 1, snapshotId: "snap_wsp-h1s1-default-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up --state /tmp/wsp-test/state.json", forkCommand: "wsp new first --state /tmp/wsp-test/state.json" },
     ]);
     // Claude Code's token is the vault's and nobody is at this terminal to paste it; the two machine sign-ins ran.
     expect(result.logins?.map(l => l.state)).toEqual(["not-signed-in", "signed-in", "signed-in"]);
     // No process stays to end a kept builder's window, so the builder goes with the seal; the smoke fork too; nothing else boots.
-    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true]]);
+    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1s1-default-v1", true]]);
     expect(await f.store.list("builders")).toEqual([]);
   });
 
@@ -1821,7 +1822,7 @@ describe("wsp init, flags and no terminal", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const workspace = (await f.runtimes.at(-1)!.workspaces.list())[0]!;
     expect(workspace.name).toBe("proj");
-    expect(f.records.at(-1)).toEqual({ event: "done", golden: "default", version: 1, snapshotId: "snap_wsp-h1-default-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up", workspace: { id: workspace.id, name: "proj" } });
+    expect(f.records.at(-1)).toEqual({ event: "done", golden: "default", version: 1, snapshotId: "snap_wsp-h1s1-default-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up", workspace: { id: workspace.id, name: "proj" } });
     expect(f.text()).toContain("Done. Image v1 is sealed; wsp up opens the app.");
     expect(f.hosts).toBe(0);
   });
@@ -1889,9 +1890,9 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).toContain("listen EADDRINUSE: address already in use 127.0.0.1:4410");
     expect(out).toContain("Image v1 is sealed and recorded. The app did not start; fix that and run wsp up, with --port when a port is taken.");
     expect(out).not.toContain(FIRST_QUESTION);
-    expect(goldenHead(await f.runtimes.at(-1)!.golden.get())?.snapshotId).toBe("snap_wsp-h1-default-v1");
+    expect(goldenHead(await f.runtimes.at(-1)!.golden.get())?.snapshotId).toBe("snap_wsp-h1s1-default-v1");
     // The builder is kept ten minutes for one more change and recorded as saved; the smoke fork is gone; no workspace was forked.
-    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1-default-v1", true]]);
+    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1s1-default-v1", true]]);
     // The runtime is closed on the way out, so the kept builder carries no dead pid's hold.
     expect(await f.store.get("builders", "m1")).toMatchObject({ sealed: { version: 1 } });
     expect(await f.store.get("builders", "m1")).not.toHaveProperty("heldBy");
@@ -1978,7 +1979,7 @@ describe("wsp init, flags and no terminal", () => {
         throw Object.assign(new Error("Insufficient credit"), { kind: "quota", status: 402 });
       };
       f.backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
+      return createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
@@ -2011,7 +2012,7 @@ describe("wsp init, flags and no terminal", () => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => (cmd.includes("claude-code-releases/") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
       f.backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, hostId: "box:h1" });
+      return createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe, hostId: "box:h1" });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
@@ -2126,14 +2127,14 @@ describe("wsp init, flags and no terminal", () => {
         return create(spec);
       };
       f.backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
+      return createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
     expect(refusals).toBe(2);
     expect(f.text()).toContain("at its machine cap");
     // The builder, then the seal's smoke fork and the first workspace.
-    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v1", false]]);
+    expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1s1-default-v1", true], ["snap_wsp-h1s1-default-v1", false]]);
   });
 
   it("a failed upload reports the stage and the detail and exits 1 with no host", async () => {
@@ -2142,7 +2143,7 @@ describe("wsp init, flags and no terminal", () => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => (cmd.includes("tar xzf") ? { exitCode: 2, stdout: "", stderr: "gzip: stdin: not in gzip format" } : guestAnswer(cmd));
       f.backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
+      return createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
@@ -2158,7 +2159,7 @@ describe("wsp init, flags and no terminal", () => {
       backend.execImpl = (_m, cmd) => (cmd.includes("brew install yq") ? { exitCode: 1, stdout: "", stderr: "curl: no route" } : guestAnswer(cmd));
       f.backends.push(backend);
       f.recipes.push(recipe);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
+      return createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
@@ -2183,7 +2184,7 @@ describe("wsp init, flags and no terminal", () => {
       // The person's files untar under /root; the context archive is the one untarred at the root. Only the builder refuses it.
       backend.execImpl = (m, cmd) => (m.spec.fromSnapshot === undefined && cmd.includes("tar xzf - -C '/' ") ? { exitCode: 2, stdout: "", stderr: "tar: etc/wsp: Cannot mkdir: Read-only file system\n" } : guestAnswer(cmd));
       f.backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
+      return createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
@@ -2198,7 +2199,7 @@ describe("wsp init, flags and no terminal", () => {
 
   /** A build whose context write the builder refused once, so the results file carries contextFailure; the next init over the same store attaches and the retried write lands. */
   async function builtWithRefusedContextWrite() {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     let refusals = 0;
     // The builder refuses the root untar once: the build's context write fails, the attach's lands.
@@ -2258,7 +2259,7 @@ describe("wsp init, flags and no terminal", () => {
         return { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" };
       };
       f.backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
+      return createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
@@ -2281,7 +2282,7 @@ describe("wsp init, flags and no terminal", () => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => (cmd.includes("claude-code-releases/") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
       f.backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
+      return createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
@@ -2321,7 +2322,7 @@ describe("wsp init, flags and no terminal", () => {
       // The recipe's setup line is "true"; the harness stage runs it under its guard like every installer.
       backend.execImpl = (_m, cmd) => (cmd.includes("\ntrue' &") ? { exitCode: 0, stdout: "export GH_TOKEN=gho_fake\ntoken gho_fake seen\n", stderr: "" } : guestAnswer(cmd));
       f.backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
+      return createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
     };
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     expect(f.reads).toEqual(["gh:github.com"]);
@@ -2332,7 +2333,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("a builder from an earlier run built from a different recipe is listed with its age, cost and reason; under --yes it is stopped by its recorded id and a fresh one boots", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const earlier = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", cpu: 2, memMb: 4096 } , hostId: "box:h1" });
     await earlier.golden.prepare();
@@ -2361,7 +2362,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("a changed byte in a planned file is named in the refusal; the earlier builder is stopped on the yes and a fresh one boots", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     first.opts.runtime = recipe => {
@@ -2385,7 +2386,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("a planned file rewritten with the same bytes and a moved mtime still attaches: the hash reads bytes, not stat times", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     first.opts.runtime = recipe => {
@@ -2413,7 +2414,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("a recipe saved before the volatile list existed still attaches once ~/.claude.json moved: the catalog supplies the list, the file is re-imported and never reads as gone", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     const home = first.opts.home;
@@ -2449,7 +2450,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("a re-login on this computer attaches: the Keychain value is out of the hash, the login file re-renders with the new token on attach, and the record carries the new value's digest", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     withGhCopy(first);
@@ -2484,7 +2485,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("when the second of two stops fails, the message names the builder still running", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     for (const n of [1, 2]) {
       const earlier = createRuntime({ backend: shared, store, adapters: {}, goldenRecipe: { setup: "true", smoke: "true", cpu: 2, memMb: 4096, labels: { n: String(n) } } , hostId: "box:h1" });
@@ -2509,7 +2510,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("a changed tick is named in the refusal: the saved recipe with Codex ticked reads as Codex ticked", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     first.opts.runtime = recipe => {
@@ -2531,7 +2532,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("No at the stop question leaves the earlier builder running, boots nothing, and keeps the recipe", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     withGhCopy(first);
@@ -2562,7 +2563,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("a builder from an earlier run that was paused is listed as unsealable and stopped on the yes; a fresh one boots", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     first.opts.runtime = recipe => {
@@ -2587,7 +2588,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("the same builder at a place whose copy is the disk as it stands is attached to, not listed as unsealable: the sentence follows the provider", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     shared.capabilities.snapshotsAnyLife = true;
     const first = fake({ yes: true });
@@ -2614,7 +2615,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("an earlier builder wearing another setup's owner label is refused with those words, and nothing boots beside it", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     first.opts.runtime = recipe => {
@@ -2642,7 +2643,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("when the only blocker is a builder another wsp process is using, the guard says to wait for or stop that process, never to kill the machine", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     first.opts.runtime = recipe => {
@@ -2669,7 +2670,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("a placeholder left mid-setup by a dead process is listed as unfinished, never attached to even on the same recipe, and stopped on the yes before a fresh one boots", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const gate = new Promise<void>(() => {});
     const dying = fake({ yes: true });
@@ -2699,7 +2700,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("when another builder blocks, the one this run can reuse is named; the yes stops the blocker and attaches to it", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     first.opts.runtime = recipe => {
@@ -2728,7 +2729,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("a Keychain refusal rehashes the recipe the builder carries, so the next wsp init with the same answers attaches after a crash", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     withGhCopy(first);
@@ -2768,7 +2769,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("a first-life builder from an earlier run with the same recipe is attached to: no boot question, every stage already applied, one machine", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     withGhCopy(first);
@@ -2808,7 +2809,7 @@ describe("wsp init, flags and no terminal", () => {
   });
 
   it("the seal report names the version sealed: a second golden on the same store is v2", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const runtimeOver = (f: Fake) => (recipe: GoldenRecipe) => {
       f.backends.push(shared);
@@ -2832,7 +2833,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(second.text()).toMatch(/Image v2 sealed in \d+s on the builder kept since the save/);
     expect(second.text()).not.toContain("Image v1 sealed");
     // The kept builder and the first run's workspace; the update road forks none.
-    expect(shared.machines.filter(m => !m.killed).map(m => m.spec.fromSnapshot)).toEqual([undefined, "snap_wsp-h1-default-v1"]);
+    expect(shared.machines.filter(m => !m.killed).map(m => m.spec.fromSnapshot)).toEqual([undefined, "snap_wsp-h1s1-default-v1"]);
   });
 });
 
@@ -2841,7 +2842,7 @@ describe("wsp init, a signal during prepare", () => {
 
   /** The tools stage hangs on its first install until the machine is deleted, as the provider fails a call on a machine that is gone;
    * the signal lands while that call is in flight. `onKill` sees the machine's kill before it runs. */
-  function toolsStageHeld(f: Fake, store: ReturnType<typeof memoryStore>, onKill?: (m: StubMachine, kill: () => Promise<void>) => Promise<void>, signal: "SIGINT" | "SIGTERM" = "SIGINT"): void {
+  function toolsStageHeld(f: Fake, store: Store, onKill?: (m: StubMachine, kill: () => Promise<void>) => Promise<void>, signal: "SIGINT" | "SIGTERM" = "SIGINT"): void {
     f.opts.runtime = recipe => {
       const backend = stubBackend();
       backend.execImpl = (m, cmd) => {
@@ -2866,7 +2867,7 @@ describe("wsp init, a signal during prepare", () => {
     ["no terminal", { yes: false, tty: false }, "SIGTERM", 143],
   ] as const)("a signal during the tools stage (%s) kills the builder by its recorded id, drops the record, says so on one line and exits", async (_label, over, signal, code) => {
     const f = fake(over);
-    const store = memoryStore();
+    const store = ownedStore();
     toolsStageHeld(f, store, undefined, signal);
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(code);
@@ -2901,7 +2902,7 @@ describe("wsp init, a signal during prepare", () => {
         });
       };
       f.backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
+      return createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(130);
@@ -2913,7 +2914,7 @@ describe("wsp init, a signal during prepare", () => {
 
   it("a second signal while the kill is still running exits at once with the builder id and the sweep line; the record stays for the sweep", async () => {
     const f = fake({ yes: true });
-    const store = memoryStore();
+    const store = ownedStore();
     let release!: () => void;
     const held = new Promise<void>(r => {
       release = r;
@@ -2941,7 +2942,7 @@ describe("wsp init, a signal during prepare", () => {
 
   it("a signal while the create is still in flight waits for the machine, then kills it: nothing leaks", async () => {
     const f = fake({ yes: true });
-    const store = memoryStore();
+    const store = ownedStore();
     f.opts.runtime = recipe => {
       const backend = stubBackend();
       const create = backend.create.bind(backend);
@@ -2968,7 +2969,7 @@ describe("wsp init, a signal during prepare", () => {
         throw Object.assign(new Error("Sandbox limit reached"), { kind: "concurrency", status: 429 });
       };
       f.backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
+      return createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: recipe , hostId: "box:h1" });
     };
     const run = runInit(f.opts, f.io);
     await f.until("at its machine cap");
@@ -2982,7 +2983,7 @@ describe("wsp init, a signal during prepare", () => {
 
   it("a builder that outlives its kill is named with the sweep line, and its record stays for the sweep", async () => {
     const f = fake({ yes: true });
-    const store = memoryStore();
+    const store = ownedStore();
     toolsStageHeld(f, store, async () => {
       throw new Error("provider said no");
     });
@@ -2996,7 +2997,7 @@ describe("wsp init, a signal during prepare", () => {
 
   it("a second signal while the stop's line, close and exit run still answers, with the line the stop settled on", async () => {
     const f = fake({ yes: true });
-    const store = memoryStore();
+    const store = ownedStore();
     toolsStageHeld(f, store);
     const exit = f.io.exit;
     f.io.exit = code => {
@@ -3012,7 +3013,7 @@ describe("wsp init, a signal during prepare", () => {
 
   it("a last exec that outruns the kill never writes a finished record: the placeholder stays building until the stop drops it", async () => {
     const f = fake({ yes: true });
-    const store = memoryStore();
+    const store = ownedStore();
     const puts: { id: string; building?: true }[] = [];
     const put = store.put.bind(store);
     store.put = async (collection, id, value) => {
@@ -3062,7 +3063,7 @@ describe("wsp init, a signal during prepare", () => {
   });
 
   it("a signal while attaching to an earlier builder that can still be sealed leaves it running: the hold is released, the record stays reusable, and the line says what bills", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const first = fake({ yes: true });
     withGhCopy(first);
@@ -3325,7 +3326,7 @@ describe("disk estimate before the boot", () => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => (cmd.includes("cli/cli/releases/download/") ? { exitCode: 0, stdout: `WSP_ROAD release gh_2.101.0_linux_amd64.tar.gz ${sha} v2.101.0\n`, stderr: "" } : guestAnswer(cmd));
       f.backends.push(backend);
-      const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" }, hostId: "box:h1" });
+      const rt = createRuntime({ backend, store: ownedStore(), adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" }, hostId: "box:h1" });
       f.runtimes.push(rt);
       return rt;
     };
@@ -3377,7 +3378,7 @@ describe("wsp init with a golden already built from a recipe", () => {
   /** A first init under --yes that prepared and sealed golden v1; the builder stays for its window. Its first
    * workspace is refused by the host fake so the machines here are the builder and the forks the seals boot. */
   async function sealed(over: Partial<InitOptions> = {}, answer?: (cmd: string) => ExecResult) {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     if (answer !== undefined) shared.execImpl = (_m, cmd) => answer(cmd);
     const first = fake({ yes: true, ...over });
@@ -3594,7 +3595,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toMatch(/Image v2 sealed in \d+s on the builder kept since the save; new workspaces fork it\./);
     expect(out).toContain("The builder stays up (about $0.11/h, one of the account's machine slots) until wsp init updates on it again, a wsp sweep stops it ten minutes after the save, or the provider's six-hour idle kill fires.");
     // The builder, v1's smoke fork, v2's smoke fork: nothing else booted.
-    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v2", true]]);
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1s1-default-v1", true], ["snap_wsp-h1s1-default-v2", true]]);
     // The update rewrote the import result; the first build's measured stages stay in it for the next rebuild offer.
     const after = JSON.parse(readFileSync(join(dirname(first.opts.statePath), "golden-import.json"), "utf8")) as { recipeHash: string; build: unknown };
     expect(after.recipeHash).not.toBe(before.recipeHash);
@@ -3641,7 +3642,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const create = shared.create.bind(shared);
     let refused = false;
     shared.create = async spec => {
-      if (spec.fromSnapshot === "snap_wsp-h1-default-v2" && !refused) {
+      if (spec.fromSnapshot === "snap_wsp-h1s1-default-v2" && !refused) {
         refused = true;
         throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency" });
       }
@@ -3657,7 +3658,7 @@ describe("wsp init with a golden already built from a recipe", () => {
   });
 
   it("the seal report names the kept builder only when it was kept: a cap fallback prints no such line", async () => {
-    const store = memoryStore();
+    const store = ownedStore();
     const shared = stubBackend();
     const create = shared.create.bind(shared);
     // The account has one slot: a fork beside a running machine is refused, so the seal gives the builder up first.
@@ -3677,7 +3678,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(f.text()).not.toContain("The builder stays up ten minutes");
     expect(shared.machines[0]!.killed).toBe(true);
     // The builder gave up its slot to the smoke fork; nothing else boots, and the fork is the person's to ask for.
-    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true]]);
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1s1-default-v1", true]]);
     expect(f.text()).toContain("wsp new first forks a workspace from it, and wsp up opens the app.");
   });
 
@@ -3709,7 +3710,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).not.toMatch(BOOT);
     expect(out).toContain("Image v2 sealed.");
     // The attached builder goes with its seal, since nobody at a terminal stays to end a kept one's window; v2's smoke fork too.
-    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true], [undefined, true], ["snap_wsp-h1-default-v2", true]]);
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1s1-default-v1", true], [undefined, true], ["snap_wsp-h1s1-default-v2", true]]);
   });
 
   it("a failed update on the kept builder says that builder is gone and what a retry costs", async () => {
@@ -3739,8 +3740,8 @@ describe("wsp init with a golden already built from a recipe", () => {
     const h = next({ tty: false });
     expect((await runInit(h.opts, h.io)).code).toBe(0);
     expect(h.text()).toContain("Image v2 is sealed");
-    expect(goldenHead(await h.runtimes.at(-1)!.golden.get())).toMatchObject({ version: 2, snapshotId: "snap_wsp-h1-default-v2" });
-    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v2", true]]);
+    expect(goldenHead(await h.runtimes.at(-1)!.golden.get())).toMatchObject({ version: 2, snapshotId: "snap_wsp-h1s1-default-v2" });
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1s1-default-v1", true], ["snap_wsp-h1s1-default-v2", true]]);
 
     const unread = await sealed();
     writeFileSync(join(unread.first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
@@ -3782,7 +3783,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).not.toContain("Updating your image");
     expect(out).toContain("Image v2 sealed.");
     // A fresh machine, not a fork of v1: the rebuild boots from the base image and runs every stage again.
-    expect(shared.machines.map(m => m.spec.fromSnapshot)).toEqual([undefined, "snap_wsp-h1-default-v1", undefined, "snap_wsp-h1-default-v2"]);
+    expect(shared.machines.map(m => m.spec.fromSnapshot)).toEqual([undefined, "snap_wsp-h1s1-default-v1", undefined, "snap_wsp-h1s1-default-v2"]);
   });
 
   it("a rebuild's seal offers the oldest version for deletion the way an update's does, before the app opens", async () => {
@@ -3802,7 +3803,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toContain("Deleted image v1.");
     expect(out.indexOf("Image v3 sealed.")).toBeLessThan(out.indexOf("Delete image v1"));
     expect(out.indexOf("Deleted image v1.")).toBeLessThan(out.indexOf("Done. Image v3 is sealed;"));
-    expect(shared.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1-default-v2", "snap_wsp-h1-default-v3"]);
+    expect(shared.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1s1-default-v2", "snap_wsp-h1s1-default-v3"]);
   });
 
   it("once a third version seals, wsp init offers the oldest for deletion in one line and --yes takes it, keeping the head and its parent", async () => {
@@ -3812,7 +3813,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect((await runInit(second.opts, second.io)).code).toBe(0);
     // Two versions: nothing to offer yet.
     expect(second.text()).not.toContain("Delete golden");
-    expect(shared.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1-default-v1", "snap_wsp-h1-default-v2"]);
+    expect(shared.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1s1-default-v1", "snap_wsp-h1s1-default-v2"]);
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\nexport C=3\n");
     const third = next({ tty: false });
     expect((await runInit(third.opts, third.io)).code).toBe(0);
@@ -3821,7 +3822,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).toContain("Delete image v1, 8.0 GB, saving about $0.40/month from 2026-10-01? v3 and v2 stay. Taken as yes (--yes).");
     expect(out).toContain("Deleted image v1.");
     expect(out).toContain("storage: 2 snapshots, 16.0 GB; about $0.30/month above the free 10 GB from 2026-10-01");
-    expect(shared.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1-default-v2", "snap_wsp-h1-default-v3"]);
+    expect(shared.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1s1-default-v2", "snap_wsp-h1s1-default-v3"]);
     expect(await store.get("goldens", copyKey("default", "default"))).toMatchObject({ head: 3, versions: [{ version: 2 }, { version: 3 }] });
     expect(await store.get("golden-recipes", copyKey("default", "default@v1"))).toBeUndefined();
     expect(await store.get("golden-recipes", copyKey("default", "default@v3"))).toBeDefined();
@@ -3837,7 +3838,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     // One road: the delta landed on the builder kept from v1, and nothing was built from scratch beside it.
     expect(out).not.toContain("Rebuilding from scratch");
     expect(out).not.toMatch(BOOT);
-    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v2", true]]);
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1s1-default-v1", true], ["snap_wsp-h1s1-default-v2", true]]);
     const manifest = (await store.get("goldens", copyKey("default", "default"))) as GoldenManifest;
     expect(manifest.head).toBe(2);
     expect(manifest.versions.map(v => v.version)).toEqual([1, 2]);
@@ -3899,7 +3900,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const { store, shared, first, next } = await sealed();
     // The person's one workspace, forked from v1 before the rebuild.
     const alphaRt = createRuntime({ backend: shared, store, adapters: {}, hostId: "box:h1" });
-    const alpha = await createOn(alphaRt, { golden: "snap_wsp-h1-default-v1", name: "alpha" });
+    const alpha = await createOn(alphaRt, { golden: "snap_wsp-h1s1-default-v1", name: "alpha" });
     // A measured build on this computer whose tools stage alone took 17m39s; the stages sum to 22 minutes.
     noteOutcomes(importResultPath(first.opts.statePath), { build: { at: "2026-09-05T19:44:00.000Z", stages: { creating: 62_000, "deploying-daemon": 35_000, "applying-setup": 4_000, "uploading-files": 6_000, "installing-harness": 48_000, "installing-tools": 1_059_000, "installing-mcp": 3_000, snapshotting: 41_000, "smoke-forking": 82_000 } } });
     const f = next({ recipe: async () => ticking("codex") });
@@ -3929,13 +3930,13 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out).not.toContain("Workspace first");
     expect(out).not.toContain("Forking your first workspace");
     expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/#c\/7K3MQP2X$/m);
-    expect((await f.runtimes.at(-1)!.workspaces.list()).map(w => [w.id, w.golden])).toEqual([[alpha.id, "snap_wsp-h1-default-v1"]]);
-    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v1", false], [undefined, false], ["snap_wsp-h1-default-v2", true]]);
+    expect((await f.runtimes.at(-1)!.workspaces.list()).map(w => [w.id, w.golden])).toEqual([[alpha.id, "snap_wsp-h1s1-default-v1"]]);
+    expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1s1-default-v1", true], ["snap_wsp-h1s1-default-v1", false], [undefined, false], ["snap_wsp-h1s1-default-v2", true]]);
   });
 
   it("--first-workspace on a rebuild forks it whatever the list holds, and the workspaces already there stay on the version they came from", async () => {
     const { store, shared, first, next } = await sealed();
-    const alpha = await createOn(createRuntime({ backend: shared, store, adapters: {}, hostId: "box:h1" }), { golden: "snap_wsp-h1-default-v1", name: "alpha" });
+    const alpha = await createOn(createRuntime({ backend: shared, store, adapters: {}, hostId: "box:h1" }), { golden: "snap_wsp-h1s1-default-v1", name: "alpha" });
     const f = next({ recipe: async () => ticking("codex") });
     f.opts.firstWorkspace = "proj";
     expect((await runInit(f.opts, f.io)).code).toBe(0);
@@ -3949,7 +3950,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(workspaces.map(w => w.name).sort()).toEqual(["alpha", "proj"]);
     // The one that was already there is untouched: the fork above it is a new machine on the new version.
     expect(workspaces.find(w => w.name === "alpha")!.golden).toBe(alpha.golden);
-    expect(workspaces.find(w => w.name === "proj")!.golden).toBe("snap_wsp-h1-default-v2");
+    expect(workspaces.find(w => w.name === "proj")!.golden).toBe("snap_wsp-h1s1-default-v2");
     expect(first.text()).not.toContain("Workspace proj");
   });
 

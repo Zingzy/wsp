@@ -10,6 +10,7 @@ import type { ExecResult, Lifecycle, Machine, MachineBackend, MachineLife, Machi
 import { DAEMON_TOKEN_PATH, HERE_PLACE_ID, scopeOf, type Caller, type ProjectView } from "@wsp/protocol";
 import type { CreatedWorkspace, CreateWorkspaceOptions, LocalWiring, Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
+import { memoryStore, type Store } from "../src/store.js";
 import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
 
 /** The branch the stub guest's checkout is on, and the remote's copy of it: what a workspace forked from such a
@@ -95,6 +96,8 @@ export interface StubBackend extends MachineBackend {
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
   /** Runs before each snapshot is taken, with which attempt on that machine this is; one that throws is the provider refusing. */
   beforeSnapshot?: (m: StubMachine, nth: number) => void;
+  /** The snapshot's name is its id, as Box keys a named snapshot, and a second snapshot under a name replaces the first. */
+  namedSnapshots?: boolean;
   /** Every snapshot taken and not deleted, as the provider would list it. */
   snapshots: SnapshotRow[];
   /** What the next snapshot is listed at; a golden measured 7.8 to 8.5 GB live. */
@@ -235,7 +238,9 @@ export function stubBackend(mark?: string): StubBackend {
           const nth = (snapshotsNamed.get(name) ?? 0) + 1;
           snapshotsNamed.set(name, nth);
           const at = mark === undefined ? "" : `${mark}-`;
-          const id = nth === 1 ? `snap_${at}${name}` : `snap_${at}${name}-${nth}`;
+          const id = backend.namedSnapshots === true ? name : nth === 1 ? `snap_${at}${name}` : `snap_${at}${name}-${nth}`;
+          const held = snapshots.findIndex(r => r.id === id);
+          if (held >= 0) snapshots.splice(held, 1);
           snapshots.push({ id, name, sizeBytes: backend.snapshotBytes, createdAt: new Date().toISOString() });
           return id;
         },
@@ -363,6 +368,14 @@ export async function createOn(rt: ProjectMaker & WorkspaceMaker, o: CreateOn, o
   const own = scope === undefined ? undefined : (await rt.workspaces.get(scope.workspaceId, origin)).project.id;
   const id = project ?? own ?? (await projectOn(rt, on)).id;
   return rt.workspaces.create({ ...rest, project: id }, origin);
+}
+
+/** A state file that already holds its owner id, so every image a runtime on it names carries a mark a test can write
+ * down: the host's id, then this one. The memory store writes before its first await, so the put has landed on return. */
+export function ownedStore(owner = "s1"): Store {
+  const store = memoryStore();
+  void store.put("owner", "id", { id: owner });
+  return store;
 }
 
 export type CreateOn = Omit<CreateWorkspaceOptions, "project"> & { project?: string; on?: string };

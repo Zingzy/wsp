@@ -5,6 +5,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { authority, isWildcard, LOOPBACK, relayUrlOf, type HostShape } from "@wsp/protocol";
 import { ownFolder } from "@wsp/own-file";
+import type { HostStarter } from "./host-start.js";
 
 export interface HostLock {
   pid: number;
@@ -175,6 +176,13 @@ export function dialAddress(lock: { address?: string }): string {
 export function servingHost(statePath: string): HostLock | undefined {
   const held = readLock(lockPathFor(statePath));
   return held !== undefined && pidAlive(held.pid) ? held : undefined;
+}
+
+/** The host serving this state file here, started first when none does and the line was handed a starter; nothing
+ * where none serves and nothing may start one. Only for a line aimed at this computer: a host elsewhere is not
+ * this computer's to start. */
+export async function heldOrStarted(statePath: string, start: HostStarter | undefined, say: (line: string) => void): Promise<HostLock | undefined> {
+  return servingHost(statePath) ?? (await start?.(statePath, say));
 }
 
 /** One state file, one host. A lock whose pid is gone is a crash leftover and
