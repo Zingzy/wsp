@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
-import { authority, fmtDuration, LABS_ENV, shellQuote, UPDATE_CHECK_ENV } from "@wsp/protocol";
+import { authority, CLOUD_ENV, fmtDuration, LABS_ENV, shellQuote, UPDATE_CHECK_ENV } from "@wsp/protocol";
 import { addressLines, dialAddress, POLL_MS, servingHost, stateLine, type HostLock } from "./host-lock.js";
 import { providerEnvNames } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
@@ -132,7 +132,7 @@ export function serviceEnv(env: Record<string, string | undefined>): Record<stri
   // that picks its provider out of an environment naming none forks nothing, labs, since a service installed
   // from a shell holding it would come up without the rows that shell was using, and the release check's switch,
   // which that shell turned off. One list, copied by one rule.
-  const carried = [LABS_ENV, UPDATE_CHECK_ENV, ...providerEnvNames()];
+  const carried = [CLOUD_ENV, LABS_ENV, UPDATE_CHECK_ENV, ...providerEnvNames()];
   return {
     PATH: env["PATH"] ?? FALLBACK_PATH,
     ...(home !== undefined ? { WSP_HOME: home } : {}),

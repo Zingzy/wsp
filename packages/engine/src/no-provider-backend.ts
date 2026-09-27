@@ -20,8 +20,8 @@ const NO_SNAPSHOT_STORAGE: SnapshotStoragePricing = { freeGb: 0, usdPerGbMonth: 
  * is missing, and the record waits for it rather than being called gone. */
 export class NoProviderError extends Error {
   readonly kind = "noProvider" as const;
-  constructor() {
-    super(NO_PROVIDER_LINE);
+  constructor(line: string = NO_PROVIDER_LINE) {
+    super(line);
     this.name = "NoProviderError";
   }
 }
@@ -30,13 +30,12 @@ export function isNoProvider(e: unknown): boolean {
   return (e as { kind?: unknown } | undefined)?.kind === "noProvider";
 }
 
-const refuse = (): never => {
-  throw new NoProviderError();
-};
-
 /** The provider module of a host with no provider key: it holds no machine, lists none, and refuses every road with
  * the one sentence that says how to get one. */
 export class NoProviderBackend implements MachineBackend {
+  /** `line` is the sentence every road refuses with: the host's, which says what can be added here. */
+  constructor(private readonly line: string = NO_PROVIDER_LINE) {}
+
   readonly capabilities: Capabilities = {
     liveCloneForks: false,
     replacesMachine: false, // nothing here forks, so there is no machine to hand a workspace in place of another
@@ -62,11 +61,11 @@ export class NoProviderBackend implements MachineBackend {
   };
 
   async create(): Promise<Machine> {
-    return refuse();
+    throw new NoProviderError(this.line);
   }
 
   async get(): Promise<Machine> {
-    return refuse();
+    throw new NoProviderError(this.line);
   }
 
   async list(): Promise<{ id: string; state: MachineState; labels: Record<string, string> }[]> {
@@ -74,6 +73,6 @@ export class NoProviderBackend implements MachineBackend {
   }
 
   async deleteSnapshot(): Promise<void> {
-    return refuse();
+    throw new NoProviderError(this.line);
   }
 }

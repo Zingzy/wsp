@@ -121,7 +121,7 @@ import {
   offeredSize,
   sizeOffer,
   plural,
-  PROVIDER_UNREACHED_LINE,
+  MACHINE_UNREACHED_LINE,
   providerAnswerLine,
   providerRoadRetryLine,
   SEAL_FAILED_BUILDER_GONE_LINE,
@@ -1133,7 +1133,7 @@ describe("taskFinishedLine", () => {
 
 describe("a provider out of reach from this computer", () => {
   it("names what could not be reached, not the computer", () => {
-    expect(PROVIDER_UNREACHED_LINE).toBe("Solari cannot be reached from this computer");
+    expect(MACHINE_UNREACHED_LINE).toBe("A machine cannot be reached from this computer");
   });
 
   it("logs one retry per line, naming the call, the road's own code and the try about to go", () => {
