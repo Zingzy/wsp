@@ -65,8 +65,9 @@ describe("where a row says a workspace runs", () => {
     expect(computerName([mac, solari], { workspace: workspace({ kind: "cloud", provider: "solari" }), status: null })).toBe("Solari");
   });
 
-  it("with no places list, reads the live record's provider, and leaves the computer the host runs on unnamed rather than saying a stand-in", () => {
-    expect(computerName([], { workspace: workspace({ kind: "cloud", provider: "solari" }), status: null })).toBe("solari");
+  it("with no places list, as while a host that just restarted reads its rows, names a provider by the name its words row gives it and never by the id its record holds, and leaves the computer the host runs on unnamed rather than saying a stand-in", () => {
+    expect(computerName([], { workspace: workspace({ kind: "cloud", provider: "solari" }), status: null })).toBe("Solari");
+    expect(computerName([], { workspace: workspace({ kind: "cloud", provider: "box" }), status: null })).toBe("Boat");
     expect(computerName([], { workspace: workspace({ kind: "local" }), status: null })).toBe("");
     expect(computerName([], { workspace: workspace({ kind: "local" }), status: onMac })).toBe("");
     expect(madeOfLine({ project: row({ copy: copy() }), landing: SHARES, computer: null, here: "" })).toEqual(["a copy"]);

@@ -189,7 +189,7 @@ describe("adding an MCP server", () => {
     const acts = serversActs({ here: () => here(at), vault: memVault(vaulted) });
     const words: [string, string][] = [
       ["SOLARI_API_KEY", "SOLARI_API_KEY belongs to the Solari key, so set it there or give the variable another name."],
-      ["BOX_API_KEY", "BOX_API_KEY belongs to the Box by ASCII key, so set it there or give the variable another name."],
+      ["BOAT_API_KEY", "BOAT_API_KEY belongs to the Boat key, so set it there or give the variable another name."],
       ["GEMINI_API_KEY", "GEMINI_API_KEY belongs to the Gemini CLI key, so set it there or give the variable another name."],
     ];
     for (const [name, said] of words) {
