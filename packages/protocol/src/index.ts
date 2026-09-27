@@ -4051,6 +4051,7 @@ const DAEMON_CONTENTS = [
   "be3d9077764035f8bf2b96ab6b50c018017046ec74a30827404f64752ef19bdf",
   "837e923920b718c42e372f7d84dd08d4d51add8e7b86de1ab4afb4a156afb8ae",
   "69559f24eb63363f130e96d07548df1e6cffed939d08d5df760e5ac9948f240e",
+  "4693a00a74c923f64a9062a65cac539d5ac7621da08fc623c63089a87b8231d7",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4266,7 +4267,8 @@ const DAEMON_CONTENTS = [
  * Version 80 answers git.status on a stopped workspace with the branch alone, read off its copy's git directory with no program run, and says the edits were not read; running or stopped, a branch with no upstream counts ahead and behind against the default branch; a stopped copy's history too long or slow to walk answers countsUnknown.
  * Version 81 reads no record another daemon wrote: a workspace record carries every field and a points file that does
  * not parse is refused by its path; the hello always names the version; the copy verb has no in-place road and the
- * daemon no ssh kind; exec and pty take the compose project off the workspace's own boot environment. */
+ * daemon no ssh kind; exec and pty take the compose project off the workspace's own boot environment.
+ * Version 82 changes nothing a guest runs: the binary gains the mcp verb behind a feature the guest build leaves off. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4277,7 +4279,8 @@ export const DAEMON_VERSION = DAEMON_CONTENTS.length;
  * cannot reach nobody: a start script gained a PATH line under an unchanged version once and every machine already
  * running kept the old one. Left out: every file under a crate's tests/ folder, which is built for a test run
  * and no deploy installs, so test-only work cuts no version for a binary nobody's machine would read as new; an
- * inline #[cfg(test)] module stays hashed, since the file carrying it ships. Left out too: the rest of this file,
+ * inline #[cfg(test)] module stays hashed, since the file carrying it ships. Left out too: crates/wsp-mcp, the tool
+ * server a feature links into the host's own build and the guest build never does; the rest of this file,
  * which the binary reads only through the fixtures; hashing the protocol whole would turn every edit to it into a
  * redeploy of every machine. */
 export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
