@@ -105,25 +105,24 @@ export const noComputerForSourceLine = (word: string, computers: readonly string
 /** Why a repo on this computer records nothing without a folder: the clone goes where the person says. */
 export const cloneIntoNeeded = (word: string): string => `${word} is a repo; name the empty folder to clone it into with --into <folder>`;
 
-/** Why a repo on a computer that holds no projects records nothing. */
-export const takesNoProjectLine = (computer: string): string => `${computer} holds no projects yet; add the project on ${THIS_COMPUTER}, or on a computer that clones`;
-
 /** Why a folder that holds something is no place to clone into: the clone would land among files that are not its. */
 export const cloneIntoTakenLine = (folder: string): string => `${folder} is not an empty folder; clone into an empty one or one that does not exist yet`;
 
-/** Why --into beside a computer that is not this one is refused: the folder is this computer's, and that computer
- * clones where it keeps its own checkouts. */
-export const INTO_IS_HERE_LINE = `--into is a folder on ${THIS_COMPUTER}; drop --on to clone here, or drop --into to clone on that computer`;
+/** Why --into beside a computer that is not this one is refused: the folder is on the computer named, and the other
+ * computer clones where it keeps its own checkouts. */
+export const intoIsHereLine = (here: string): string => `--into is a folder on ${here}; drop --on to clone there, or drop --into to clone on the computer you named`;
 
 /** Why --into beside a folder is refused: the folder is the project where it already is. */
 export const INTO_TAKES_A_REPO_LINE = "--into is where a repo is cloned; a folder is a project where it already is";
 
 const CLONE_HOST = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
-const SCP_FORM = /^[A-Za-z0-9_.][\w.-]*@[A-Za-z0-9][A-Za-z0-9.-]*:[^\s-][^\s]*$/;
+/** A login ssh is handed: nothing it could read as an option, and nothing a shell or a url would have to escape. */
+const CLONE_USER = /^[A-Za-z0-9_.][A-Za-z0-9_.-]*$/;
+const SCP_FORM = /^[A-Za-z0-9_.][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]*:[^\s-][^\s]*$/;
 const OWNER_REPO = /^[\w.][\w.-]*\/[\w.][\w.-]*$/;
 
 /** Why a repo word is not one this computer clones, or nothing where it is: an https url, an ssh url, git's scp form
- * or owner/repo, with no credentials in it, no host or path that git or ssh could read as an option, and no
+ * or owner/repo, with no credentials in it, no login, host or path that git or ssh could read as an option, and no
  * transport of git's that runs a command or reads this computer's own files. */
 export function cloneUrlRefusal(word: string): string | undefined {
   const refused = `${word} is not a repo address wsp clones; give its https or ssh url, or owner/repo`;
@@ -145,6 +144,7 @@ export function cloneUrlRefusal(word: string): string | undefined {
   }
   if (url.protocol !== "https:" && url.protocol !== "ssh:") return refused;
   if (url.password !== "" || (url.protocol === "https:" && url.username !== "")) return refused;
+  if (url.username !== "" && !CLONE_USER.test(url.username)) return refused;
   if (!CLONE_HOST.test(url.hostname) || url.pathname.length <= 1) return refused;
   return undefined;
 }

@@ -337,6 +337,12 @@ describe("a person's own chords over the defaults", () => {
     expect(shortcutLabelForCommand(compiled, "chat.new", { platform: MAC, context: { desktopShell: true } })).toBe("⌥⌘N");
   });
 
+  it("reads one when off a command's defaults, which holds because every command's default chords share one", () => {
+    const whens = new Map<string, Set<string | undefined>>();
+    for (const rule of DEFAULT_KEYBINDINGS) whens.set(rule.command, (whens.get(rule.command) ?? new Set()).add(rule.when));
+    expect([...whens].filter(([, set]) => set.size > 1).map(([command]) => command)).toEqual([]);
+  });
+
   it("drops an override for a command it does not know or a chord that does not parse, and no override is the defaults", () => {
     expect(rulesWith(DEFAULT_KEYBINDINGS, {})).toEqual(DEFAULT_KEYBINDINGS);
     expect(rulesWith(DEFAULT_KEYBINDINGS, { "rocket.launch": "mod+r", "sidebar.toggle": "mod+a+b" })).toEqual(DEFAULT_KEYBINDINGS);

@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, INTO_IS_HERE_LINE, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, copyPathFor, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, copyTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type Caller, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, copyPathFor, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, copyTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type Caller, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
 import { createRuntime, NO_SEED_WIRING, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
@@ -175,8 +175,9 @@ describe("recording a project", () => {
       await expect(rt.projects.add({ source: REPO })).rejects.toThrow(noComputerForSourceLine(REPO, ["default"]));
       await expect(rt.projects.add({ source: "file:///etc", into: rig.into("etc") })).rejects.toThrow(cloneUrlRefusal("file:///etc")!);
       await expect(rt.projects.add({ source: "ssh://-oProxyCommand=touch/x", into: rig.into("x") })).rejects.toThrow("is not a repo address wsp clones");
+      await expect(rt.projects.add({ source: "ssh://-oProxyCommand=true@github.com/a/b", into: rig.into("u") })).rejects.toThrow("is not a repo address wsp clones");
       await expect(rt.projects.add({ source: rig.origin, into: rig.into("y") })).rejects.toThrow(INTO_TAKES_A_REPO_LINE);
-      await expect(rt.projects.add({ source: REPO, on: "default", into: rig.into("z") })).rejects.toThrow(INTO_IS_HERE_LINE);
+      await expect(rt.projects.add({ source: REPO, on: "default", into: rig.into("z") })).rejects.toThrow("--into is a folder on ");
       expect(rig.calls().filter(c => c.argv[1] === "clone" || c.argv[0] === "gh")).toEqual([]);
       expect(readdirSync(full)).toEqual(["notes.txt"]);
       expect(await rt.projects.list()).toEqual([]);

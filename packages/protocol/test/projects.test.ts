@@ -281,10 +281,10 @@ describe("where a workspace of a project lands", () => {
 
 describe("a repo cloned on this computer", () => {
   it("takes an https url, an ssh url, git's scp form and owner/repo, and nothing a transport or an option could hide in", () => {
-    for (const word of ["https://github.com/spoo-me/spoo.me", "https://gitlab.example.com:8443/team/app.git", "ssh://git@github.com/spoo-me/spoo.me.git", "ssh://git@host.example:2222/srv/app.git", "git@github.com:spoo-me/spoo.me.git", "spoo-me/spoo.me", "gitlab.com/team/app"]) {
+    for (const word of ["https://github.com/spoo-me/spoo.me", "https://gitlab.example.com:8443/team/app.git", "ssh://git@github.com/spoo-me/spoo.me.git", "ssh://github.com/spoo-me/spoo.me.git", "ssh://deploy-bot.v2@host.example/srv/app.git", "ssh://git@host.example:2222/srv/app.git", "git@github.com:spoo-me/spoo.me.git", "spoo-me/spoo.me", "gitlab.com/team/app"]) {
       expect(cloneUrlRefusal(word), word).toBeUndefined();
     }
-    for (const word of ["file:///etc", "ext::sh -c touch% /tmp/x", "http://github.com/a/b", "git://github.com/a/b", "https://user:token@github.com/a/b", "https://-oProxyCommand=x/a/b", "ssh://-oProxyCommand=evil/x", "git@-oProxyCommand=x:a/b", "git@host:-x/y", "https://github.com/a/b --upload-pack=x", "-uhttps://github.com/a/b", "-a/b", "https://", "ssh://git@github.com"]) {
+    for (const word of ["file:///etc", "ext::sh -c touch% /tmp/x", "http://github.com/a/b", "git://github.com/a/b", "https://user:token@github.com/a/b", "https://-oProxyCommand=x/a/b", "ssh://-oProxyCommand=evil/x", "git@-oProxyCommand=x:a/b", "git@host:-x/y", "https://github.com/a/b --upload-pack=x", "-uhttps://github.com/a/b", "-a/b", "https://", "ssh://git@github.com", "ssh://-oProxyCommand=true@github.com/a/b", "ssh://git$(id)@github.com/a/b", "ssh://gi%60t@github.com/a/b", "ssh://a:b@github.com/x", "ssh://git@-host/a/b", "-git@github.com:a/b", "git$x@github.com:a/b"]) {
       expect(cloneUrlRefusal(word), word).toBe(`${word} is not a repo address wsp clones; give its https or ssh url, or owner/repo`);
     }
   });
