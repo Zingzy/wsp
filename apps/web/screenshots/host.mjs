@@ -5,7 +5,7 @@
 // and the persona lab both take this road, so the environment a fixture is
 // served under is written once rather than once per harness.
 import { CATALOG_AGENTS, skillsDirOf } from "@wsp/catalog";
-import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, shellQuote, WEB_DIR_ENV, wsUrlOf } from "@wsp/protocol";
+import { CLOUD_ENV, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, shellQuote, WEB_DIR_ENV, wsUrlOf } from "@wsp/protocol";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -130,6 +130,8 @@ export function hostEnv({ home, state, personHome = homedir(), appDir, cloud, bi
     [PERSON_HOME_ENV]: personHome,
     ...(appDir === undefined ? {} : { [WEB_DIR_ENV]: appDir }),
     ...(personHome === home ? agentStores(home) : {}),
+    // A fixture that names a cloud is served with the cloud on; every other one as a fresh host is, with it off.
+    ...(cloud === undefined ? {} : { [CLOUD_ENV]: "1" }),
     ...(cloud === undefined || providerFor(state) !== "fake" ? {} : { [FAKE_AS_ENV]: cloud }),
     ...(standIn === undefined || providerFor(state) !== "fake" ? {} : { [FAKE_ROOT_ENV]: standIn }),
     // The records alone where no folder was named: the fixture's forks come up in the state it gave them and

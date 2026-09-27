@@ -2634,7 +2634,7 @@ describe("wsp init, flags and no terminal", () => {
     const out = f.text();
     expect(out).toMatch(/default \(m1\), \d+ s old, about \$\d+\.\d\d so far; not this setup's builder/);
     expect(out).not.toContain("cannot be sealed");
-    expect(out).toContain("Nothing was booted. It belongs to another wsp setup: stop it from there, or from the Solari console if it is yours and forgotten; then run wsp init again.");
+    expect(out).toContain("Nothing was booted. It belongs to another wsp setup: stop it from there, or from its provider's console if it is yours and forgotten; then run wsp init again.");
     expect(out).not.toContain("Stop it");
     expect(f.reads).toEqual([]);
     expect(shared.machines).toHaveLength(1);

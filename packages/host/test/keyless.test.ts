@@ -18,6 +18,7 @@ import { noProviderStorageLine } from "../src/storage.js";
 import type { HostHandle } from "../src/server.js";
 import { PAGE, captured, copyingFake, fakeDaemonStart } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { CLOUD_ON } from "../src/cloud.js";
 
 runsFromItsOwnFolder();
 
@@ -97,7 +98,18 @@ describe("a computer with no machine provider key", () => {
     expect(listed.lines[0]).toMatch(/\d+\u00a0cores,\u00a0\d+\u00a0GB/);
   });
 
-  it("answers the sentence naming what is missing on every road that would fork a machine, once and with nothing before it", async () => {
+  it.runIf(!CLOUD_ON)("with the cloud off, a road that would start a machine says what is missing and names no line the flag refuses", async () => {
+    const served = captured();
+    handle = await up(served, { port: 0, statePath, webDir, runtime: makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(home, process.env, fakeDaemonStart, statePath, copyingFake())) });
+    expect(await cli(["add", "https://github.com/dev/proj.git", "--on", "none", "--state", statePath], captured())).toBe(0);
+    const asked = captured();
+    expect(await cli(["new", "proj", "alpha", "--state", statePath], asked)).toBe(1);
+    expect(asked.errors).toHaveLength(1);
+    expect(asked.errors[0]).not.toContain("<provider>");
+    expect(asked.errors[0]).toContain("wsp add user@host");
+  });
+
+  it.runIf(CLOUD_ON)("answers the sentence naming what is missing on every road that would fork a machine, once and with nothing before it", async () => {
     await serving();
     // Two roads to a copy, whose own refusals would each name a second road that cannot be taken here.
     // A project on the computer this host forks at, which forks nothing here: every road to a copy of it names the

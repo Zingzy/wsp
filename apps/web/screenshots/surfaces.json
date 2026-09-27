@@ -305,6 +305,7 @@
     },
     {
       "name": "add-cloud",
+      "fixture": "ascii-only",
       "at": "/",
       "widths": [
         1440,

@@ -19,7 +19,7 @@ const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", defa
 const box: PlaceView = { id: "p_spoo", kind: "computer", name: "spoo", default: false, present: true, takesForks: true, engine: "docker", os: "Ubuntu 24.04", shape: { cpu: 4, memMb: 8192 }, diskFreeBytes: 63 * 1024 ** 3, joinedAt: "2026-09-12T11:00:00.000Z", lastSeenAt: "2026-09-12T11:59:00.000Z" };
 const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.11, takesForks: true };
 const project: ProjectView = { id: "pr_spoo", name: "spoo", computer: "here", source: { kind: "folder", path: "/Users/dev/spoo" }, path: "/Users/dev/spoo", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-Users-dev-spoo", memoryDir: "/Users/dev/.claude-cfg/projects/-Users-dev-spoo/memory", createdAt: "2026-09-12T09:14:00.000Z" };
-const setup = { keys: { solari: true }, home: "/Users/dev", agents: [], pricing: null, job: null } as unknown as InitSetup;
+const setup = { keys: { box: false, solari: true }, home: "/Users/dev", agents: [], pricing: null, job: null } as unknown as InitSetup;
 
 const api = () =>
   settingsApi({

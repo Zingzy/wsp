@@ -528,12 +528,12 @@ describe("host sweeps orphaned machines", () => {
       `reap: stopping ${owned.id}: your earlier builder from this setup; a builder cannot be sealed after a restart`,
       `reap: stopping ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
       `reap: stopping ${strayWs.id} (wsp=1 createdAt=${strayAt}): workspace with no owner, 12 min old`,
-      `reap: left alone ${foreign.id}: builder from another wsp setup (owner h_other), 53 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: left alone ${foreign.id}: builder from another wsp setup (owner h_other), 53 s old, $0.11/h (about $0.00 so far); kill it from its provider's console if it is yours and forgotten`,
       `reap: left alone ${young.id}: builder with no owner, 2 min old, $0.11/h (about $0.00 so far); reaped once it is 6.0 h old`,
       `reap: left alone ${ageless.id}: builder with no owner, age unknown, $0.11/h; never reaped by this host`,
-      `reap: left alone ${foreignWs.id}: workspace from another wsp setup (owner h_other), 20 min old, $0.11/h (about $0.04 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: left alone ${foreignWs.id}: workspace from another wsp setup (owner h_other), 20 min old, $0.11/h (about $0.04 so far); kill it from its provider's console if it is yours and forgotten`,
       `reap: left alone ${garbage.id}: builder with no owner, age unknown, $0.11/h; never reaped by this host`,
-      `reap: left alone ${foreignSmoke.id}: smoke fork from another wsp setup (owner h_other), 20 min old, $0.11/h (about $0.04 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: left alone ${foreignSmoke.id}: smoke fork from another wsp setup (owner h_other), 20 min old, $0.11/h (about $0.04 so far); kill it from its provider's console if it is yours and forgotten`,
     ]);
     expect(await store.list("builders")).toEqual([]);
   });
@@ -594,7 +594,7 @@ describe("host sweeps orphaned machines", () => {
     expect(lines).toEqual([
       `reap: stopping ${stray.id} (wsp=1 createdAt=${strayAt}): workspace with no owner, 12 min old`,
       `reap: stopping ${orphan.id} (wsp=1 wsp-builder=1 createdAt=${orphanAt}): builder with no owner, 6.0 h old`,
-      `reap: left alone ${foreign.id}: builder from another wsp setup (owner h_other), 53 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: left alone ${foreign.id}: builder from another wsp setup (owner h_other), 53 s old, $0.11/h (about $0.00 so far); kill it from its provider's console if it is yours and forgotten`,
       `reap: ${lost.id}: could not stop: Bad Gateway`,
     ]);
   });
@@ -615,10 +615,10 @@ describe("host sweeps orphaned machines", () => {
 
     expect(backend.machines.some(m => m.killed)).toBe(false);
     expect(lines).toEqual([
-      `reap: left alone ${ahead.id}: builder from another wsp setup (owner h_other), 0 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
-      `reap: left alone ${almostMinute.id}: builder from another wsp setup (owner h_other), 59 s old, $0.11/h (about $0.00 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: left alone ${ahead.id}: builder from another wsp setup (owner h_other), 0 s old, $0.11/h (about $0.00 so far); kill it from its provider's console if it is yours and forgotten`,
+      `reap: left alone ${almostMinute.id}: builder from another wsp setup (owner h_other), 59 s old, $0.11/h (about $0.00 so far); kill it from its provider's console if it is yours and forgotten`,
       `reap: left alone ${ownWs.id}: workspace from this setup that no record claims, 45 s old, $0.11/h (about $0.00 so far); recorded once it is 1 min old unless a record claims it first`,
-      `reap: left alone ${hours.id}: builder from another wsp setup (owner h_other), 6.0 h old, $0.11/h (about $0.66 so far); kill it from the Solari console if it is yours and forgotten`,
+      `reap: left alone ${hours.id}: builder from another wsp setup (owner h_other), 6.0 h old, $0.11/h (about $0.66 so far); kill it from its provider's console if it is yours and forgotten`,
       `reap: left alone ${freshOwn.id}: builder from this setup that no record claims, 30 s old, $0.11/h (about $0.00 so far); reaped once it is 1 min old unless a record claims it first`,
     ]);
   });
