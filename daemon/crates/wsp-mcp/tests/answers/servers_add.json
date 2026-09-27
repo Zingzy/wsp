@@ -1,0 +1,175 @@
+{
+  "tool": "servers_add",
+  "cases": [
+    {
+      "case": "command",
+      "arguments": {
+        "name": "linear",
+        "agent": "claude",
+        "command": "npx -y '@scope/pkg ${X}' \"a \\\"b\\\"\" c\\ d\te",
+        "env": [
+          "WSP_RECORD_KEY"
+        ]
+      },
+      "env": {
+        "WSP_RECORD_KEY": "sk-ant-x"
+      },
+      "replies": {
+        "servers.add": "{\"id\":1,\"ok\":true,\"file\":\"~/.claude.json\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"linear is in ~/.claude.json.\"}],\"structuredContent\":{\"file\":\"~/.claude.json\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "servers.add",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "claude",
+          "name": "linear",
+          "command": "npx",
+          "args": [
+            "-y",
+            "@scope/pkg ${X}",
+            "a \"b\"",
+            "c d",
+            "e"
+          ],
+          "env": {
+            "WSP_RECORD_KEY": "sk-ant-x"
+          }
+        }
+      ]
+    },
+    {
+      "case": "address",
+      "arguments": {
+        "name": "remote",
+        "agent": "codex",
+        "url": "https://mcp.example/sse",
+        "header": [
+          "Authorization=WSP_RECORD_KEY"
+        ],
+        "workspace": "landing",
+        "project": true
+      },
+      "env": {
+        "WSP_RECORD_KEY": "sk-ant-x"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
+        "servers.add": "{\"id\":1,\"ok\":true,\"file\":\"/root/api/.codex/config.toml\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"remote is in /root/api/.codex/config.toml.\"}],\"structuredContent\":{\"file\":\"/root/api/.codex/config.toml\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "landing"
+        },
+        {
+          "op": "servers.add",
+          "target": {
+            "workspaceId": "ws_1"
+          },
+          "agent": "codex",
+          "name": "remote",
+          "url": "https://mcp.example/sse",
+          "headers": {
+            "Authorization": "sk-ant-x"
+          },
+          "project": true
+        }
+      ]
+    },
+    {
+      "case": "unset variable",
+      "arguments": {
+        "name": "x",
+        "agent": "claude",
+        "command": "x",
+        "env": [
+          "WSP_RECORD_UNSET"
+        ]
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"WSP_RECORD_UNSET is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"WSP_RECORD_UNSET is not set in this environment, so there is no value to write. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "not a header",
+      "arguments": {
+        "name": "x",
+        "agent": "claude",
+        "url": "https://x.example",
+        "header": [
+          "Authorization"
+        ]
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Authorization is not <header>=<variable>. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"Authorization is not <header>=<variable>. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "header with no variable",
+      "arguments": {
+        "name": "x",
+        "agent": "claude",
+        "url": "https://x.example",
+        "header": [
+          "Authorization="
+        ]
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Authorization= is not <header>=<variable>. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"Authorization= is not <header>=<variable>. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "unclosed quote",
+      "arguments": {
+        "name": "x",
+        "agent": "claude",
+        "command": "npx 'x"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"The command has a quote it never closes, so nothing was written. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"The command has a quote it never closes, so nothing was written. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "project unnamed",
+      "arguments": {
+        "name": "x",
+        "agent": "claude",
+        "command": "x",
+        "on": "attic",
+        "project": true
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--project with --on names the project: --project <name>, as wsp projects shows it. servers_add takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"--project with --on names the project: --project <name>, as wsp projects shows it. servers_add takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "name": "x",
+        "agent": "claude",
+        "command": ""
+      },
+      "replies": {
+        "servers.add": "{\"id\":1,\"ok\":false,\"error\":\"claude already has a server named x in ~/.claude.json\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"claude already has a server named x in ~/.claude.json\"}],\"structuredContent\":{\"error\":\"claude already has a server named x in ~/.claude.json\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "servers.add",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "claude",
+          "name": "x",
+          "command": "",
+          "args": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "id": 1,
+    "op": "fs.search",
+    "query": "rea",
+    "mode": "files"
+  },
+  {
+    "id": 1,
+    "op": "fs.search",
+    "path": "/root/repo",
+    "mode": "files"
+  },
+  {
+    "id": 1,
+    "op": "fs.search",
+    "path": "/root/repo",
+    "query": "rea",
+    "mode": "regex"
+  },
+  {
+    "id": 1,
+    "op": "fs.search",
+    "path": "/root/repo",
+    "query": "rea",
+    "mode": "files",
+    "machineId": 1
+  }
+]

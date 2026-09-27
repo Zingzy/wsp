@@ -4,12 +4,13 @@
 // and this computer's link all read this table; what a pane draws is the one
 // line each kind has in RightPanel's view table. This module imports no
 // component, since the store reads it and every pane imports the store.
-import { Activity, Bot, Cpu, FileDiff, Globe2, TerminalSquare, type LucideIcon } from "lucide-react";
+import { Activity, Bot, Cpu, File, FileDiff, Folder, Globe2, TerminalSquare, type LucideIcon } from "lucide-react";
 import type { AbsentComputer, WorkspaceView } from "@wsp/protocol";
 import type { PreviewTabSnapshot } from "./components/RightPanelTabs";
+import { baseName } from "./files/entries";
 import type { RightPanelSurface } from "./rightPanelStore";
 
-export type RightPanelKind = "preview" | "terminal" | "diff" | "machine" | "processes" | "agents";
+export type RightPanelKind = "preview" | "terminal" | "diff" | "files" | "machine" | "processes" | "agents";
 
 /** What decides whether a pane can open: the panel's workspace, or this computer's own panel. */
 export interface PaneContext {
@@ -34,6 +35,8 @@ export interface Pane<K extends RightPanelKind = RightPanelKind> {
   available(at: PaneContext): boolean;
   reason?(at: PaneContext): string | undefined;
   title?(surface: Extract<RightPanelSurface, { kind: K }>, names: TabNames): string;
+  /** The glyph a tab draws where it is not the pane's own: a file tab in the files pane. */
+  tabIcon?(surface: Extract<RightPanelSurface, { kind: K }>): LucideIcon;
   /** Open on this computer's own panel, the pane reads this computer's daemon link. */
   readsHere?: true;
 }
@@ -80,6 +83,17 @@ export const PANES: { readonly [K in RightPanelKind]: Pane<K> } = {
     hint: "Review the changes once it runs.",
     available: running,
     reason: at => (at.here ? NO_PROJECT_HERE : undefined),
+  },
+  files: {
+    label: "Files",
+    description: "Browse and read the files here.",
+    icon: Folder,
+    shortcut: "F",
+    hint: "Available while this runs.",
+    available: running,
+    reason: at => (at.here ? "Pick a thread to read its files." : undefined),
+    title: surface => (surface.path === null ? "Files" : baseName(surface.path)),
+    tabIcon: surface => (surface.path === null ? Folder : File),
   },
   machine: {
     label: "Computer",

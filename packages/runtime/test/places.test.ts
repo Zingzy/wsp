@@ -2659,6 +2659,7 @@ function forks(
       case "ping":
       case "fs.list":
       case "fs.read":
+      case "fs.search":
       case "git.diff":
       case "git.prState":
       case "guest.watch":
@@ -3192,7 +3193,7 @@ describe("a fork on a computer you joined", () => {
   });
 
   const PTY = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list"];
-  const FILES_AND_GIT = ["fs.list", "fs.read", "git.status", "git.diff", "git.push", "git.pr", "git.prState"];
+  const FILES_AND_GIT = ["fs.list", "fs.read", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prState"];
   const HOST_GUESTS = ["guest.watch", "guest.reply", "guest.close"];
   const REFUSED = [
     "ports.watch",

@@ -1,0 +1,25 @@
+{
+  "tool": "skills_enable",
+  "cases": [
+    {
+      "case": "on",
+      "arguments": {
+        "name": "review"
+      },
+      "replies": {
+        "skills.toggle": "{\"id\":1,\"ok\":true,\"paths\":[]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"review is on.\"}],\"structuredContent\":{\"paths\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "skills.toggle",
+          "target": {
+            "placeId": "here"
+          },
+          "name": "review",
+          "on": true
+        }
+      ]
+    }
+  ]
+}

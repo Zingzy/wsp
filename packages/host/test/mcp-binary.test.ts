@@ -8,7 +8,7 @@
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -20,7 +20,13 @@ import { copyKey, createRuntime, memoryStore } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, serve } from "../src/cli.js";
 import { dialer, mcpServer } from "../src/mcp.js";
+import { nodeHost, type Host } from "@wsp/collect";
+import { agentsReader } from "../src/agents-reader.js";
+import { hostActs } from "../src/agents-signin.js";
 import { placeWiring } from "../src/places.js";
+import { serversActs } from "../src/servers-acts.js";
+import { skillsActs } from "../src/skills-acts.js";
+import type { SkillsFetch } from "../src/skills-sh.js";
 import type { HostHandle } from "../src/server.js";
 import { c1Escaped } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -76,8 +82,90 @@ async function answeredHere(statePath: string, lines: readonly Record<string, un
 }
 
 /** Every tool the binary serves, called against the host as the command line runs its verb: the verb's words, and
- * the arguments the tool is called with. A tool the binary takes on adds its row here. */
-const CALLED: readonly { tool: string; argv: string[]; arguments: Record<string, unknown> }[] = [{ tool: "computers", argv: ["computers"], arguments: {} }];
+ * the arguments the tool is called with. A tool the binary takes on adds its row here. Files under the home and
+ * lines run first set up what the call acts on. The text is the object as jsonLine(obj, 2) writes it, or with
+ * `prose` the line the verb prints without --json. A call that changes something acts on a twin of what the verb
+ * changed, named where `twin` names the verb's one, and its answer is the verb's with that name for the other; its
+ * text is held to the recorded answers alone. */
+const CALLED: readonly { tool: string; argv: string[]; arguments: Record<string, unknown>; files?: Record<string, string>; setup?: string[][]; text?: "prose"; twin?: [string, string] }[] = [
+  { tool: "computers", argv: ["computers"], arguments: {} },
+  { tool: "skills_search", argv: ["skills", "search", "memo"], arguments: { query: "memo" }, text: "prose" },
+  { tool: "skills_show", argv: ["skills", "show", "acme/skills/memo"], arguments: { skill: "acme/skills/memo" }, text: "prose" },
+  { tool: "skills_add", argv: ["skills", "add", "acme/skills/memo"], arguments: { skill: "acme/skills/note" }, twin: ["memo", "note"] },
+  { tool: "skills_show", argv: ["skills", "show", "review"], arguments: { skill: "review" }, files: { ".agents/skills/review/SKILL.md": "---\nname: review\ndescription: reads a diff\n---\n# Review\n" }, text: "prose" },
+  {
+    tool: "skills_disable",
+    argv: ["skills", "disable", "one"],
+    arguments: { name: "two" },
+    files: { ".agents/skills/one/SKILL.md": "---\nname: one\ndescription: one\n---\n", ".agents/skills/two/SKILL.md": "---\nname: two\ndescription: two\n---\n" },
+    twin: ["one", "two"],
+  },
+  {
+    tool: "skills_enable",
+    argv: ["skills", "enable", "one"],
+    arguments: { name: "two" },
+    files: { ".agents/skills/one/SKILL.md.off": "---\nname: one\ndescription: one\n---\n", ".agents/skills/two/SKILL.md.off": "---\nname: two\ndescription: two\n---\n" },
+    twin: ["one", "two"],
+  },
+  {
+    tool: "skills_remove",
+    argv: ["skills", "remove", "one"],
+    arguments: { name: "two" },
+    files: { ".agents/skills/one/SKILL.md": "---\nname: one\ndescription: one\n---\n", ".agents/skills/two/SKILL.md": "---\nname: two\ndescription: two\n---\n" },
+    twin: ["one", "two"],
+  },
+  {
+    tool: "servers_tools",
+    argv: ["servers", "tools", "one", "--agent", "claude"],
+    arguments: { name: "one", agent: "claude" },
+    setup: [["servers", "add", "one", "--agent", "claude", "--command", "false"]],
+    text: "prose",
+  },
+  { tool: "servers_add", argv: ["servers", "add", "one", "--agent", "claude", "--command", "npx -y one"], arguments: { name: "two", agent: "claude", command: "npx -y two" }, twin: ["one", "two"] },
+  {
+    tool: "servers_remove",
+    argv: ["servers", "remove", "one", "--agent", "claude"],
+    arguments: { name: "two", agent: "claude" },
+    setup: [
+      ["servers", "add", "one", "--agent", "claude", "--command", "npx -y one"],
+      ["servers", "add", "two", "--agent", "claude", "--command", "npx -y two"],
+    ],
+    twin: ["one", "two"],
+  },
+  {
+    tool: "servers_disable",
+    argv: ["servers", "disable", "one", "--agent", "codex"],
+    arguments: { name: "two", agent: "codex" },
+    setup: [
+      ["servers", "add", "one", "--agent", "codex", "--command", "npx -y one"],
+      ["servers", "add", "two", "--agent", "codex", "--command", "npx -y two"],
+    ],
+    twin: ["one", "two"],
+  },
+  {
+    tool: "servers_enable",
+    argv: ["servers", "enable", "one", "--agent", "codex"],
+    arguments: { name: "two", agent: "codex" },
+    setup: [
+      ["servers", "add", "one", "--agent", "codex", "--command", "npx -y one"],
+      ["servers", "add", "two", "--agent", "codex", "--command", "npx -y two"],
+      ["servers", "disable", "one", "--agent", "codex"],
+      ["servers", "disable", "two", "--agent", "codex"],
+    ],
+    twin: ["one", "two"],
+  },
+  { tool: "agents_addtools", argv: ["agents", "addtools", "claude"], arguments: { agent: "claude" }, text: "prose" },
+];
+
+/** skills.sh as far as these calls ask it: a search, and two skills to read or download. */
+const SKILLS_SH: SkillsFetch = async url => {
+  const at = new URL(url);
+  const skill = (name: string) => ({ path: "SKILL.md", contents: `---\nname: ${name}\ndescription: Keep ${name}s\n---\n# ${name}\n` });
+  if (at.pathname === "/api/search") return new Response(JSON.stringify({ skills: [{ id: "acme/skills/memo", source: "acme/skills", skillId: "memo", name: "memo", installs: 12 }] }));
+  if (at.pathname === "/api/download/acme/skills/memo") return new Response(JSON.stringify({ files: [skill("memo")] }));
+  if (at.pathname === "/api/download/acme/skills/note") return new Response(JSON.stringify({ files: [skill("note")] }));
+  return new Response("{}", { status: 404 });
+};
 
 const suite = MCP_BIN !== undefined ? describe : describe.skip;
 
@@ -138,12 +226,29 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
     beforeEach(async () => {
       const webDir = join(dir, "web");
       mkdirSync(join(webDir, "assets"), { recursive: true });
+      mkdirSync(join(dir, "user"), { recursive: true });
       writeFileSync(join(webDir, "index.html"), PAGE);
       vi.stubEnv("HOME", env["HOME"]!);
       vi.stubEnv("WSP_HOME", env["WSP_HOME"]!);
       const store = memoryStore();
       await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
-      const runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()), placeLinks: placeWiring(statePath) });
+      // What stands on this computer is read off, and written into, this case's own home, with nothing but the
+      // system's own folders on PATH; skills.sh answers from SKILLS_SH.
+      const home = (): Host => {
+        const live = nodeHost();
+        return { ...live, home: join(dir, "user"), exec: { ...live.exec, run: (cmd, args, o) => live.exec.run(cmd, args, { ...o, env: { PATH: "/usr/bin:/bin", HOME: join(dir, "user"), ...o?.env } }) } };
+      };
+      const runtime = createRuntime({
+        backend: stubBackend(),
+        store,
+        adapters: {},
+        local: localWiring(join(dir, "user"), undefined, fakeDaemonStart, undefined, copyingFake()),
+        placeLinks: placeWiring(statePath),
+        agentsReader: agentsReader({ vault: () => ({}), here: home }),
+        agentsActs: hostActs({ vaultFile: join(dir, ".env"), home: () => join(dir, "user"), wspServer: () => ({ command: "wsp", args: ["mcp"] }) }),
+        skillsActs: skillsActs({ fetch: SKILLS_SH, here: home }),
+        serversActs: serversActs({ here: home }),
+      });
       handle = await serve(captured(), { port: 0, statePath, webDir, runtime });
     });
     afterEach(async () => {
@@ -152,7 +257,15 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       vi.unstubAllEnvs();
     });
 
-    it.each(CALLED)("answers $tool with the object its verb prints under --json, its text that object as jsonLine(obj, 2) byte for byte", async ({ tool, argv, arguments: args }) => {
+    it.each(CALLED)("answers $tool with the object its verb prints under --json, its text that object as jsonLine(obj, 2) byte for byte", async ({ tool, argv, arguments: args, files, setup, text, twin }) => {
+      for (const [rel, body] of Object.entries(files ?? {})) {
+        mkdirSync(dirname(join(env["HOME"]!, rel)), { recursive: true });
+        writeFileSync(join(env["HOME"]!, rel), body);
+      }
+      for (const line of setup ?? []) {
+        const set = captured();
+        expect(await cli([...line, "--state", statePath], set, undefined, env, false), set.errors.join("\n")).toBe(0);
+      }
       const io = captured();
       expect(await cli([...argv, "--json", "--state", statePath], io, undefined, env, false), io.errors.join("\n")).toBe(0);
       const printed = JSON.parse(io.lines.at(-1)!) as Record<string, unknown>;
@@ -160,7 +273,17 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       expect(code).toBe(0);
       const { result } = JSON.parse(out[0]!) as { result: { content: { type: string; text: string }[]; structuredContent: unknown; isError?: boolean } };
       expect(result.isError).toBeUndefined();
+      if (twin !== undefined) {
+        expect(result.structuredContent).toEqual(JSON.parse(JSON.stringify(printed).replaceAll(twin[0], twin[1])));
+        return;
+      }
       expect(result.structuredContent).toEqual(printed);
+      if (text === "prose") {
+        const said = captured();
+        expect(await cli([...argv, "--state", statePath], said, undefined, env, false), said.errors.join("\n")).toBe(0);
+        expect(result.content).toEqual([{ type: "text", text: said.lines.join("\n") }]);
+        return;
+      }
       expect(result.content).toEqual([{ type: "text", text: jsonLine(printed, 2) }]);
     });
   });

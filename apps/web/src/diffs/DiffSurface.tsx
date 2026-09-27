@@ -207,7 +207,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
     setRevealNote(revealFile(relativeTo(cwd, revealRequest)) ? null : noDiffLine(baseName(revealRequest), SCOPE_LABELS[scope]));
   }, [cwd, model, revealFile, revealRequest, scope, takeReveal, workspaceId]);
 
-  if (!wire || root === null) return <NotRunning workspaceId={workspaceId} />;
+  if (!wire || root === null) return <NotRunning workspaceId={workspaceId} line="A diff is read over the thread's daemon; wake it to read one." />;
 
   const isPending = load.kind === "pending";
   const scopeLabel = SCOPE_LABELS[scope];

@@ -19,7 +19,7 @@ import type { SettingsCardData, SettingsLineData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 
 /** The cards, each the commands it lists in the order they are read. */
-const SHELL: readonly KeybindingCommand[] = ["commandPalette.toggle", "settings.toggle", "sidebar.toggle", "terminal.toggle", "rightPanel.toggle", "preview.toggle"];
+const SHELL: readonly KeybindingCommand[] = ["commandPalette.toggle", "files.quickOpen", "files.search", "settings.toggle", "sidebar.toggle", "terminal.toggle", "rightPanel.toggle", "preview.toggle"];
 const WORK: readonly KeybindingCommand[] = ["chat.new", "workspace.next", "workspace.previous", "thread.next", "thread.previous", "thread.settle", "thread.nextNeedsYou", workspaceSelectCommand(WORKSPACE_SELECT_SLOTS[0])];
 const TERMINAL: readonly KeybindingCommand[] = ["terminal.split", "terminal.new", "terminal.zoomIn", "terminal.zoomOut", "terminal.zoomReset"];
 

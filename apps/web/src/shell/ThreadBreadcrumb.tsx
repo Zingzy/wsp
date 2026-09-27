@@ -16,6 +16,8 @@ import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { threadState, threadWordOf, waitingLine } from "@wsp/protocol";
 import { useCreation, useFirstRun, useOpenThread, useSelectedId, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useStore, useWorkspace } from "../protocol/store.js";
 import { ThreadLink } from "../components/ThreadLink.js";
+import { OPEN_FOLDER_IN_EDITOR, OpenInEditor } from "../files/OpenInEditor.js";
+import { projectFolderOf } from "../files/root.js";
 import { cn } from "../lib/utils.js";
 import { SettingsCrumbs } from "../settings/SettingsCrumbs.js";
 import { openedBy } from "../sidebar/threadTree.js";
@@ -76,6 +78,7 @@ export function ThreadBreadcrumb() {
               ) : null}
             </>
           ) : null}
+          {workspace !== null ? <OpenInEditor workspaceId={workspace.id} path={projectFolderOf(workspace)} label={OPEN_FOLDER_IN_EDITOR} /> : null}
         </>
       )}
     </span>

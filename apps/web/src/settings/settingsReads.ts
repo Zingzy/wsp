@@ -50,6 +50,13 @@ export function useSettingsReads(): void {
       },
       () => {},
     );
+    // A refusal (a page on a ticket socket) leaves the row without a picker rather than saying none is installed.
+    void api?.editorList?.().then(
+      editors => {
+        if (live) setReads({ editors });
+      },
+      () => {},
+    );
     void api?.account?.().then(
       account => {
         if (live) setReads({ account });

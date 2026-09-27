@@ -18,7 +18,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use wsp_daemon::{Daemon, Options};
-use wsp_frames::numbers::{FS_READ_CAP_BYTES, GIT_DIFF_CAP_BYTES};
+use wsp_frames::numbers::{FS_READ_CAP_BYTES, FS_SEARCH_CAP_FILES, FS_SEARCH_CAP_HITS, GIT_DIFF_CAP_BYTES};
 
 const TOKEN: &str = "fs-token";
 
@@ -369,6 +369,85 @@ async fn fs_read_types_directories_missing_files_and_bad_encodings() {
     refused(&c.request("fs.read", json!({ "path": "repo/src" })).await, "not-a-file");
     refused(&c.request("fs.read", json!({ "path": "repo/none.txt" })).await, "not-found");
     refused(&c.request("fs.read", json!({ "path": "repo/docs.md", "encoding": "hex" })).await, "bad-request");
+}
+
+fn hits(m: &Value) -> Vec<String> {
+    assert_eq!(m["ok"], true, "{m}");
+    m["hits"].as_array().unwrap().iter().map(|h| h["path"].as_str().unwrap().to_owned()).collect()
+}
+
+#[tokio::test]
+async fn fs_search_files_walks_the_folder_leaving_out_what_gitignore_names_hidden_names_and_links() {
+    let (_t, _d, mut c) = bench().await;
+    let all = c.request("fs.search", json!({ "path": "repo", "query": "", "mode": "files" })).await;
+    assert_eq!(hits(&all), ["docs.md", "feature.txt", "src/index.ts", "staged.txt", "untracked.txt"]);
+    assert_eq!(all["truncated"], false);
+    assert_eq!(all["hits"][0], json!({ "path": "docs.md" }), "a path hit carries no line and no text");
+    // The query's letters in order anywhere in the path, case folded.
+    let some = c.request("fs.search", json!({ "path": "repo", "query": "SIDX", "mode": "files" })).await;
+    assert_eq!(hits(&some), ["src/index.ts"]);
+}
+
+#[tokio::test]
+async fn fs_search_text_answers_each_matching_line_with_its_number_and_never_reads_through_a_link_out_of_the_root() {
+    let (t, _d, mut c) = bench().await;
+    fs::write(t.repo().join("notes.txt"), "first\nThe Thing here\nnothing\nthing again\n").unwrap();
+    let res = c.request("fs.search", json!({ "path": t.repo().display().to_string(), "query": "THING", "mode": "text" })).await;
+    assert_eq!(
+        res["hits"],
+        json!([
+            { "path": "notes.txt", "line": 2, "text": "The Thing here" },
+            { "path": "notes.txt", "line": 3, "text": "nothing" },
+            { "path": "notes.txt", "line": 4, "text": "thing again" },
+        ]),
+        "{res}"
+    );
+    // secret.txt is outside the root, reached only through the escape link, and a link is never followed.
+    let secret = c.request("fs.search", json!({ "path": "repo", "query": "secret", "mode": "text" })).await;
+    assert_eq!(hits(&secret), Vec::<String>::new());
+    // Nor is an ignored file read, though it holds the word.
+    let ignored = c.request("fs.search", json!({ "path": "repo", "query": "module.exports", "mode": "text" })).await;
+    assert_eq!(hits(&ignored), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn fs_search_refuses_a_folder_outside_the_root_by_dot_dot_by_absolute_path_and_through_a_link() {
+    let (t, _d, mut c) = bench().await;
+    for path in ["..".to_owned(), t.outside().display().to_string(), "repo/escape".to_owned()] {
+        refused(&c.request("fs.search", json!({ "path": path, "query": "secret", "mode": "text" })).await, "outside-root");
+    }
+    refused(&c.request("fs.search", json!({ "path": "repo/docs.md", "query": "x", "mode": "files" })).await, "not-a-directory");
+}
+
+#[tokio::test]
+async fn fs_search_text_skips_a_file_with_a_nul_byte_and_one_over_the_read_cap() {
+    let (t, _d, mut c) = bench().await;
+    let dir = t.root().join("mixed");
+    fs::create_dir(&dir).unwrap();
+    fs::write(dir.join("binary.dat"), b"needle\0needle\n").unwrap();
+    let mut big = b"needle\n".to_vec();
+    big.resize(FS_READ_CAP_BYTES as usize + 1, b'x');
+    fs::write(dir.join("big.txt"), big).unwrap();
+    fs::write(dir.join("small.txt"), "a needle\n").unwrap();
+    let res = c.request("fs.search", json!({ "path": "mixed", "query": "needle", "mode": "text" })).await;
+    assert_eq!(hits(&res), ["small.txt"]);
+}
+
+#[tokio::test]
+async fn fs_search_stops_at_its_caps_and_says_so() {
+    let (t, _d, mut c) = bench().await;
+    let many = t.root().join("many");
+    fs::create_dir(&many).unwrap();
+    for i in 0..=FS_SEARCH_CAP_FILES {
+        fs::write(many.join(format!("f{i:05}.txt")), "").unwrap();
+    }
+    let files = c.request("fs.search", json!({ "path": "many", "query": "f", "mode": "files" })).await;
+    assert_eq!((hits(&files).len(), files["truncated"].as_bool()), (FS_SEARCH_CAP_FILES, Some(true)));
+    let lines = t.root().join("lines");
+    fs::create_dir(&lines).unwrap();
+    fs::write(lines.join("hits.txt"), "hit\n".repeat(FS_SEARCH_CAP_HITS + 1)).unwrap();
+    let text = c.request("fs.search", json!({ "path": "lines", "query": "hit", "mode": "text" })).await;
+    assert_eq!((hits(&text).len(), text["truncated"].as_bool()), (FS_SEARCH_CAP_HITS, Some(true)));
 }
 
 #[tokio::test]

@@ -61,15 +61,73 @@ pub struct Words {
     pub starting_host: String,
     pub no_host_answered: String,
     pub host_exited: String,
+    /// The id a target names the computer the host runs on by.
+    pub here_place_id: String,
+    /// Each catalog entry's name by its id: what a line calls an agent.
+    pub agent_names: HashMap<String, String>,
+    pub other_version: String,
+    pub no_such_place: String,
+    pub places_fix: String,
+    pub aimed_usage: String,
+    pub aimed_both: String,
+    pub project_unnamed: String,
+    pub project_off_computer: String,
+    pub tools_project_bare: String,
+    pub skills_sh_placeless: String,
+    pub unset_variable: String,
+    pub not_header: String,
+    pub unclosed_quote: String,
+    pub project_scope: String,
+    pub no_skill_hits: String,
+    pub skill_hit_columns: Vec<String>,
+    pub preview_bytes: u64,
+    pub preview_cut: String,
+    pub is_in: String,
+    pub is_in_also: String,
+    pub agent_copy: String,
+    pub gone_from: String,
+    pub turned_on: String,
+    pub turned_off: String,
+    pub turned_on_in: String,
+    pub turned_off_in: String,
+    pub tools_added: String,
+    pub server_tools_head: String,
+    pub server_tools_held: String,
+    pub server_tools_refused: String,
+    pub server_tools_none: String,
+    pub server_tool_columns: Vec<String>,
+    /// Command lines, each with the words the TypeScript split gives it, or none where a quote is never closed.
+    #[cfg(test)]
+    pub command_words: HashMap<String, Option<Vec<String>>>,
 }
 
 pub fn words() -> Words {
     read("words.json", WORDS)
 }
 
-/// A recorded sentence with each `{name}` in it filled.
+/// A recorded sentence with each `{name}` in it filled, in one pass, so a value that reads like a placeholder is
+/// said as it is.
 pub fn fill(template: &str, fills: &[(&str, &str)]) -> String {
-    fills.iter().fold(template.to_owned(), |said, (name, value)| said.replace(&format!("{{{name}}}"), value))
+    let mut said = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        said.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let named =
+            after.find('}').and_then(|close| fills.iter().find(|(name, _)| *name == &after[..close]).map(|(_, value)| (close, value)));
+        match named {
+            Some((close, value)) => {
+                said.push_str(value);
+                rest = &after[close + 1..];
+            }
+            None => {
+                said.push('{');
+                rest = after;
+            }
+        }
+    }
+    said.push_str(rest);
+    said
 }
 
 #[derive(Deserialize)]
@@ -161,5 +219,11 @@ mod tests {
         let words = words();
         let noted = fill(&words.no_host_serving, &[("state", "/s/state.json")]);
         assert!(noted.contains("/s/state.json") && !noted.contains('{'), "{noted}");
+    }
+
+    #[test]
+    fn a_value_that_reads_like_a_placeholder_is_said_as_it_is() {
+        assert_eq!(fill("{name} is in {path}.", &[("name", "{path}"), ("path", "~/x")]), "{path} is in ~/x.");
+        assert_eq!(fill("{a} {unfilled} {", &[("a", "1")]), "1 {unfilled} {");
     }
 }
