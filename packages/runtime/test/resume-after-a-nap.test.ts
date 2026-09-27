@@ -13,18 +13,21 @@ import { memoryStore } from "../src/store.js";
 import { createOn, stubBackend, type StubBackend } from "./stub-backend.js";
 
 const CLAUDE_SESSION = "e16ed170-8257-4668-879e-fe836341633c";
-const CODEX_THREAD = "0199a213-81c0-7800-8aa1-bbab2a035a53";
+const CODEX_THREAD = "01a0e365-72f3-77e3-ba3a-3d18e12e9b95";
 
 const fixture = (at: string): string[] =>
   readFileSync(new URL(at, import.meta.url), "utf8")
     .split("\n")
     .filter(line => line.trim() !== "");
 
-/** An exec that records the line it was given and replays that harness's own output at it. */
-function scripted(lines: () => string[]): { factory: ExecStreamFactory; commands: string[] } {
+/** An exec that records the line it was given, and the lines it was seeded with, and replays that harness's own output
+ * at it. */
+function scripted(lines: () => string[]): { factory: ExecStreamFactory; commands: string[]; seeds: (readonly string[] | undefined)[] } {
   const commands: string[] = [];
-  const factory: ExecStreamFactory = (command, _o) => {
+  const seeds: (readonly string[] | undefined)[] = [];
+  const factory: ExecStreamFactory = (command, o) => {
     commands.push(command);
+    seeds.push(o.input);
     let settle: (code: number | null) => void = () => {};
     const exited = new Promise<number | null>(resolve => (settle = resolve));
     const stream: ExecStream = {
@@ -40,7 +43,7 @@ function scripted(lines: () => string[]): { factory: ExecStreamFactory; commands
     };
     return stream;
   };
-  return { factory, commands };
+  return { factory, commands, seeds };
 }
 
 /** The real adapter for that harness, launching through the scripted exec instead of the machine. */
@@ -53,7 +56,10 @@ afterEach(async () => {
 });
 
 /** A workspace with a thread that ran once and whose machine is then stopped. */
-async function stoppedAfterOneTurn(harness: "claude" | "codex", lines: string[]): Promise<{ backend: StubBackend; commands: string[]; workspaceId: string; threadId: string }> {
+async function stoppedAfterOneTurn(
+  harness: "claude" | "codex",
+  lines: string[],
+): Promise<{ backend: StubBackend; commands: string[]; seeds: (readonly string[] | undefined)[]; workspaceId: string; threadId: string }> {
   const exec = scripted(() => lines);
   const backend = stubBackend();
   rt = createRuntime({ backend, store: memoryStore(), adapters: { [harness]: through(harness, exec.factory) } });
@@ -63,7 +69,7 @@ async function stoppedAfterOneTurn(harness: "claude" | "codex", lines: string[])
   const threadId = opened.view().threadId!;
   await rt.workspaces.nap(ws.id);
   expect(backend.machines[0]!.paused).toBe(true);
-  return { backend, commands: exec.commands, workspaceId: ws.id, threadId };
+  return { backend, commands: exec.commands, seeds: exec.seeds, workspaceId: ws.id, threadId };
 }
 
 describe("a send after a stop", () => {
@@ -99,17 +105,17 @@ describe("a send after a stop", () => {
     expect(exec.commands[1]).not.toContain("--dangerously-skip-permissions");
   });
 
-  it("launches codex with exec resume on the thread it started, carrying its own bypass flag", async () => {
-    const { backend, commands, workspaceId, threadId } = await stoppedAfterOneTurn("codex", fixture("../../adapter-codex/test/fixtures/exec-turn.jsonl"));
+  it("resumes codex on the thread it started, at the access that asks nobody", async () => {
+    const { backend, commands, seeds, workspaceId, threadId } = await stoppedAfterOneTurn("codex", fixture("../../adapter-codex/test/fixtures/app-server-turn.jsonl"));
     expect(commands).toHaveLength(1);
-    expect(commands[0]).toContain("codex exec --json");
-    expect(commands[0]).not.toContain("resume");
+    expect(commands[0]).toMatch(/ && codex app-server$/);
+    const threadLine = (at: number) => JSON.parse(seeds[at]!.at(-1)!) as { method: string; params: Record<string, unknown> };
+    expect(threadLine(0).method).toBe("thread/start");
     await rt!.workspaces.wake(workspaceId);
     const again = await rt!.sessions.start(workspaceId, { prompt: "what did you leave running", thread: threadId });
     await again.finished;
     expect(backend.machines[0]!.paused).toBe(false);
     expect(commands).toHaveLength(2);
-    expect(commands[1]).toContain(`codex exec resume ${CODEX_THREAD}`);
-    expect(commands[1]).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(threadLine(1)).toMatchObject({ method: "thread/resume", params: { threadId: CODEX_THREAD, sandbox: "danger-full-access", approvalPolicy: "never" } });
   });
 });

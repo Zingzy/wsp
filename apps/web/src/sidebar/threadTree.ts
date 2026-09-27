@@ -139,6 +139,9 @@ export interface TileItem {
   readonly startedAt: string | null;
   readonly runs: SidebarProjectSnapshot;
   readonly thread: SidebarThreadSnapshot | null;
+  /** Set on the head of the threads one send to several models opened, and nowhere else: the title they share, drawn
+   * once over them. Such a head holds no thread of its own; its children are those threads. */
+  readonly groupTitle?: string;
 }
 
 export type TileNode = ThreadNode<TileItem>;
@@ -168,7 +171,7 @@ export function sidebarTiles(
     if (runs.threads.length === 0) return [{ id: workspaceRowId(runs.id), parentThreadId: forkedBy, startedAt: runs.workspace.createdAt, runs, thread: null }];
     return runs.threads.map(thread => ({ id: thread.id, parentThreadId: thread.parentThreadId ?? forkedBy, startedAt: thread.startedAt, runs, thread }));
   });
-  const roots = threadForest(sortThreadsForSidebar(items)).filter(node => picked === null || node.thread.runs.workspace.project.id === picked);
+  const roots = attemptGroups(threadForest(sortThreadsForSidebar(items)).filter(node => picked === null || node.thread.runs.workspace.project.id === picked));
   const filed = new Map<SidebarSection, TileNode[]>(SIDEBAR_SECTIONS.map(id => [id, []]));
   const settled: TileNode[] = [];
   for (const node of roots) {
@@ -181,6 +184,28 @@ export function sidebarTiles(
   const sections = SIDEBAR_SECTIONS.map(id => ({ id, roots: filed.get(id)! })).filter(section => section.roots.length > 0);
   const bySettle = new Map(settled.map(node => [node.thread.thread!, node]));
   return { live: sections.flatMap(section => section.roots), settled: sortSettledThreadsForSidebar([...bySettle.keys()]).map(thread => bySettle.get(thread)!), sections };
+}
+
+/** The roots one send to several models opened, as one node where the first of them stands in the list: a head named
+ * by the thread the send opened first, and under it each of them in the order they were opened. An attempt down to
+ * one root, the others deleted, is that root alone again. */
+function attemptGroups(roots: ReadonlyArray<TileNode>): TileNode[] {
+  const members = new Map<string, TileNode[]>();
+  for (const node of roots) {
+    const attempt = node.thread.thread?.attempt;
+    if (attempt != null) members.set(attempt, [...(members.get(attempt) ?? []), node]);
+  }
+  const drawn = new Set<string>();
+  return roots.flatMap((node): TileNode[] => {
+    const attempt = node.thread.thread?.attempt;
+    const group = attempt == null ? undefined : members.get(attempt)!;
+    if (attempt == null || group === undefined || group.length < 2) return [node];
+    if (drawn.has(attempt)) return [];
+    drawn.add(attempt);
+    const opened = [...group].sort((a, b) => (a.thread.startedAt ?? "").localeCompare(b.thread.startedAt ?? ""));
+    const first = opened[0]!.thread;
+    return [{ thread: { id: `attempt:${attempt}`, parentThreadId: null, startedAt: first.startedAt, runs: first.runs, thread: null, groupTitle: first.thread!.title }, children: opened }];
+  });
 }
 
 const SECTION_RANK: readonly ThreadSection[] = ThreadSection.options;
@@ -241,9 +266,11 @@ export function nextNeedsYou(live: ReadonlyArray<TileNode>, fromId: string | nul
   return [...drawn.slice(at + 1), ...drawn.slice(0, at + 1)].find(item => item.thread?.needsYou === true);
 }
 
-/** Every tile of the tree is a thread, and each passes the test; a workspace tile with no thread passes none. */
-function everyTile({ thread: { thread }, children }: TileNode, test: (thread: SidebarThreadSnapshot) => boolean): boolean {
-  return thread !== null && test(thread) && children.every(child => everyTile(child, test));
+/** Every tile of the tree is a thread, and each passes the test; a workspace tile with no thread passes none. A group's
+ * head is no tile, so a group passes when its threads all do. */
+function everyTile({ thread: { thread, groupTitle }, children }: TileNode, test: (thread: SidebarThreadSnapshot) => boolean): boolean {
+  const own = thread !== null ? test(thread) : groupTitle !== undefined;
+  return own && children.every(child => everyTile(child, test));
 }
 
 /** The fold keys of every thread a tree holds, the root first: what a settle of the root sends. */

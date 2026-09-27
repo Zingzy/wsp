@@ -239,6 +239,7 @@ describe("readHistories", () => {
       ["qwen", "no-reader", 0, 0],
       ["goose", "no-reader", 0, 0],
       ["amp", "no-reader", 0, 0],
+      ["cursor", "no-reader", 0, 0],
     ]);
   });
 });

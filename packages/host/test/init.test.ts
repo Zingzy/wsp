@@ -1022,8 +1022,8 @@ describe("wsp init, the summary-first screens", () => {
     expect(one).toMatch(/◆  Agents  1\/5\n┃ {2}Which agents go on the image\n┃ {2}You can change this later\.\n┃ {2}search/);
     expect(one).toContain("On: 3 agents, 1.1 GB");
     expect(one).toMatch(/● Hermes Agent\s+installed\s+installed here, never used\s+484 MB\n┃\s+● Claude Code\s+installed\s+installed here, never used\s+208 MB\n┃\s+● Codex\s+catalog\s+not installed here\s+455 MB\n/);
-    // Down onto Gemini CLI: the detail says wsp cannot drive it yet and what installs; space ticks it for the machine.
-    await f.press(KEY.down, KEY.down, KEY.down, KEY.down);
+    // Down past OpenCode and Cursor onto Gemini CLI: the detail says wsp cannot drive it yet and what installs; space ticks it for the machine.
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.down);
     await f.until("about 189 MB installed on the machine (measured 2026-09-05)");
     expect(f.text()).toContain("installs, but wsp cannot run its threads yet");
     expect(f.text()).toContain("not on this Mac; try it on the machine, nothing here changes");
@@ -1089,7 +1089,7 @@ describe("wsp init, the summary-first screens", () => {
     const summary = f.text().slice(f.text().lastIndexOf("Summary"), f.text().lastIndexOf("Recipe saved"));
     // The four agents and both MCP servers, the one with a token by the copy it was given on the screen.
     // Gemini's row is the catalog's, added after what the collector found, so it installs last.
-    expect(summary).toMatch(/Agents\s+6 of 12/);
+    expect(summary).toMatch(/Agents\s+6 of 13/);
     expect(summary).toMatch(/Sign-ins\s+2 copy, 1 during the build, 2 when you need it, 1 token\s+25 KB\n/);
     expect(summary).toMatch(/Hermes Agent login\s+copy\n/);
     expect(summary).toMatch(/Hermes Agent API keys\s+copy\n/);
@@ -1170,7 +1170,7 @@ describe("wsp init, the summary-first screens", () => {
     await new Promise(r => setTimeout(r, 100));
     expect(f.text()).not.toContain("Tools  2/5");
     // Down onto Gemini CLI and space: the tick stands when the screen is left and come back to.
-    await f.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.space, KEY.enter);
+    await f.press(KEY.down, KEY.down, KEY.down, KEY.down, KEY.down, KEY.space, KEY.enter);
     await f.until("Tools  2/5");
     await f.press(KEY.esc);
     await f.until(/Agents  1\/5[\s\S]*Agents  1\/5/);

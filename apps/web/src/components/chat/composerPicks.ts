@@ -41,7 +41,7 @@ export function resolveModel(catalog: HarnessCatalog, input: { picked: string | 
 /** The model a start or a row names, with the window it runs at: the CLI announces the model with its own 1M suffix,
  * and a row that names a window of its own says it outright. The two are read together wherever either is read,
  * since on claude's wire the window rides inside the model string. */
-function modelPicks(model: string, contextWindow?: string): ComposerOptions {
+export function modelPicks(model: string, contextWindow?: string): ComposerOptions {
   const window = contextWindow ?? (ONE_M.test(model) ? "1m" : undefined);
   return { model: model.replace(ONE_M, ""), ...(window !== undefined ? { contextWindow: window } : {}) };
 }

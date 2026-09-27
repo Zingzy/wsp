@@ -58,6 +58,7 @@ describe("the agents screen", () => {
       ["Codex", "catalog    not installed here", "455 MB"],
       ["OpenCode", "catalog    not installed here", "673 MB"],
       ["Hermes Agent", "catalog    not installed here", "484 MB"],
+      ["Cursor", "catalog    not installed here", "556 MB"],
       ["Gemini CLI", "catalog    not installed here", "189 MB"],
       ["Pi", "catalog    not installed here", "165 MB"],
       ["Crush", "catalog    not installed here", "83 MB"],
@@ -68,7 +69,8 @@ describe("the agents screen", () => {
     // No groups on this screen, and nothing locked: the agents are one list.
     expect(items.every(i => i.group === undefined && i.lock === undefined)).toBe(true);
     expect(items.find(i => i.label === "Codex")!.detail[0]).not.toBe("installs, but wsp cannot run its threads yet");
-    expect(items.find(i => i.label === "OpenCode")!.detail[0]).toBe("installs, but wsp cannot run its threads yet");
+    expect(items.find(i => i.label === "OpenCode")!.detail[0]).not.toBe("installs, but wsp cannot run its threads yet");
+    expect(items.find(i => i.label === "Hermes Agent")!.detail[0]).toBe("installs, but wsp cannot run its threads yet");
     expect(items.find(i => i.label === "Claude Code")!.detail).toEqual(["on this Mac; its config (39 KB) comes along", "about 208 MB installed on the machine (measured 2026-09-05)"]);
   });
 
@@ -80,9 +82,9 @@ describe("the agents screen", () => {
       histories: [{ agent: "claude", state: "read", sessions: 3, calls: 40 }, { agent: "codex", state: "read", sessions: 5, calls: 90 }],
       rows: [...RECIPE.rows.filter(r => r.kind !== "agent"), { id: "claude", kind: "agent", on: true, source: here }, { id: "codex", kind: "agent", on: false, source: here }, { id: "opencode", kind: "agent", on: false, source: here }],
     };
-    expect(agentRows(recipe).map(r => [r.name, r.on])).toEqual([["Claude Code", true], ["Codex", false], ["OpenCode", false], ["Hermes Agent", false], ["Gemini CLI", false], ["Pi", false], ["Crush", false], ["Qwen Code", false], ["Goose", false], ["Amp", false]]);
+    expect(agentRows(recipe).map(r => [r.name, r.on])).toEqual([["Claude Code", true], ["Codex", false], ["OpenCode", false], ["Hermes Agent", false], ["Cursor", false], ["Gemini CLI", false], ["Pi", false], ["Crush", false], ["Qwen Code", false], ["Goose", false], ["Amp", false]]);
     // The tools table keeps heavy rows first inside a group: this order is the agents screen's alone.
-    expect(recipeTable(recipe, CATALOG_AGENTS).map(r => r.name)).toEqual(["Codex", "Claude Code", "OpenCode", "Hermes Agent", "Gemini CLI", "Pi", "Crush", "Qwen Code", "Goose", "Amp"]);
+    expect(recipeTable(recipe, CATALOG_AGENTS).map(r => r.name)).toEqual(["Codex", "Claude Code", "OpenCode", "Hermes Agent", "Cursor", "Gemini CLI", "Pi", "Crush", "Qwen Code", "Goose", "Amp"]);
   });
 });
 
@@ -137,7 +139,7 @@ describe("the tools screen", () => {
     expect(tools.rows.find(r => r.id === "go")).toEqual({ id: "go", kind: "tool", on: true, source: { kind: "popular", sessions: 9, images: 4 }, size: 250752891 });
     expect(tools.rows.filter(r => r.kind === "agent")).toEqual(RECIPE.rows.filter(r => r.kind === "agent"));
     const agents = withAgents(RECIPE, new Set(["codex", "pi"]));
-    expect(agents.rows.filter(r => r.kind === "agent").map(r => [r.id, r.on])).toEqual([["claude", false], ["codex", true], ["gemini", false], ["opencode", false], ["pi", true], ["hermes", false], ["crush", false], ["qwen", false], ["goose", false], ["amp", false]]);
+    expect(agents.rows.filter(r => r.kind === "agent").map(r => [r.id, r.on])).toEqual([["claude", false], ["codex", true], ["gemini", false], ["opencode", false], ["pi", true], ["hermes", false], ["crush", false], ["qwen", false], ["goose", false], ["amp", false], ["cursor", false]]);
     const both = withPicked(RECIPE, new Set(["codex", "gh"]));
     expect(both.rows.filter(r => r.on).map(r => r.id)).toEqual(["codex", "curl", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh"]);
   });
@@ -347,10 +349,15 @@ describe("the agents screen drawn", () => {
     expect(t.indexOf("● Codex")).toBeLessThan(t.indexOf("● Claude Code"));
     expect(t.indexOf("● Claude Code")).toBeLessThan(t.indexOf("○ OpenCode"));
     expect(t).not.toContain("installs, but wsp cannot run its threads yet");
-    // Down twice lands on OpenCode, and only the frame drawn after that keypress carries its note.
+    // Down twice lands on OpenCode, which wsp drives, so its frame carries no note; one more lands on Hermes Agent,
+    // and only the frame drawn after that keypress carries its note.
     o.input.write(KEY.down);
     await settle();
-    const before = o.raw().length;
+    let before = o.raw().length;
+    o.input.write(KEY.down);
+    await settle();
+    expect(stripVTControlCharacters(o.raw().slice(before))).not.toContain("installs, but wsp cannot run its threads yet");
+    before = o.raw().length;
     o.input.write(KEY.down);
     await settle();
     expect(stripVTControlCharacters(o.raw().slice(before))).toContain("installs, but wsp cannot run its threads yet");

@@ -28,7 +28,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "status": "claude auth status",
   },
   {
-    "argument": "@openai/codex@0.153.0",
+    "argument": "@openai/codex@0.155.1",
     "configPaths": 4,
     "id": "codex",
     "kind": "agent",
@@ -223,6 +223,26 @@ exports[`catalog > is the seeded catalog 1`] = `
       "sessions": 0,
     },
     "status": undefined,
+  },
+  {
+    "argument": "cursor-agent",
+    "configPaths": 0,
+    "id": "cursor",
+    "kind": "agent",
+    "projectState": [],
+    "road": "vendor",
+    "signIn": "key",
+    "size": {
+      "bytes": 583125383,
+      "method": "unpacked",
+      "on": "2026-09-27",
+    },
+    "source": {
+      "images": 0,
+      "road": "unmeasured",
+      "sessions": 0,
+    },
+    "status": "cursor-agent status",
   },
   {
     "argument": "curl",

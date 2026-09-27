@@ -6,11 +6,13 @@
 // it the labels and descriptions the binary has no words for. Each row carries
 // the pin it was read against, its own command, version and day, since a row
 // that borrowed another agent's pin would tell the person the wrong thing
-// about the list in front of them. Gemini CLI, OpenCode, Pi and Hermes have no
-// adapter yet; their catalogs name the flags their CLIs document, so they
-// carry no pin of our own reading and the pickers are right the day one lands.
+// about the list in front of them. Gemini CLI, Pi and Hermes have no adapter
+// yet; their catalogs name the flags their CLIs document, so they carry no pin
+// of our own reading and the pickers are right the day one lands.
 // A list is empty where the CLI has no such flag or takes open values.
 import { CLAUDE_SCREEN_COMMANDS } from "@wsp/adapter-claude";
+import { DEFAULT_MODE, FORCE_MODE } from "@wsp/adapter-cursor";
+import { AUTO_MODE } from "@wsp/adapter-opencode";
 import { CLAUDE_CODE } from "@wsp/catalog";
 import { everyModel } from "@wsp/protocol";
 import type { HarnessCatalog, HarnessCatalogProbe, HarnessModel, HarnessOption } from "@wsp/protocol";
@@ -136,8 +138,8 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
       { ...option("gpt-5.2", "GPT-5.2"), efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" },
     ],
     efforts: levels(["low", "medium", "high", "xhigh", "max", "ultra"], "low"),
-    // `codex exec` runs non-interactively and its JSON stream carries no approval request, so this CLI cannot ask
-    // anyone anything: the narrowest sandbox a turn can still work in is the whole answer for a kept machine.
+    // A sandboxed mode asks the person in the chat before the agent goes past its sandbox, over the app server's
+    // approval requests; the narrowest sandbox a turn can still work in is the answer for a kept machine.
     keptMode: "workspace-write",
     bypassMode: "danger-full-access",
     permissionModes: [
@@ -162,11 +164,14 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
   fromTable({
     harness: "opencode",
     label: "OpenCode",
+    // Models and their variants come off `opencode models --verbose` on the machine; the table has none of its own.
+    pin: { read: "run --help", version: "1.18.18", date: "2026-09-27" },
     models: [],
     efforts: [],
-    keptMode: "default",
-    bypassMode: "auto",
-    permissionModes: [option("default", "Default", "Asks as its own settings say"), option("auto", "Auto", "Runs every action its own settings do not deny")],
+    keptMode: AUTO_MODE,
+    bypassMode: AUTO_MODE,
+    // Its one mode: a thread starts there on every kind of workspace, since the mode that would ask has nobody to ask.
+    permissionModes: [option(AUTO_MODE, "Auto", "Runs every action without asking, save what its own settings deny: a headless run has nobody to ask")],
   }),
   fromTable({
     harness: "pi",
@@ -183,6 +188,20 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     keptMode: "default",
     bypassMode: "yolo",
     permissionModes: [option("default", "Default", "Asks before a command that could do damage"), option("yolo", "Yolo", "Runs a command that could do damage without asking")],
+  }),
+  fromTable({
+    harness: "cursor",
+    label: "Cursor",
+    // No model list without a sign-in, so any model name passes to --model and the CLI answers for it.
+    pin: { read: "-h", version: "2026.09.26-dd393fe", date: "2026-09-27" },
+    models: [],
+    efforts: [],
+    keptMode: DEFAULT_MODE,
+    bypassMode: FORCE_MODE,
+    permissionModes: [
+      option(DEFAULT_MODE, "Default", "Proposes changes and runs no command; applies nothing"),
+      option(FORCE_MODE, "Force", "Edits files and runs every command without asking, save what its own settings deny"),
+    ],
   }),
 ];
 

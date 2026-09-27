@@ -246,6 +246,8 @@ describe("the tree a thread's own threads make", () => {
     startedBy: parentThreadId === null ? "person" : "agent",
     project: null,
     parentThreadId,
+    attempt: null,
+    model: null,
     asking: null,
     costUsd: null,
     unread: false,

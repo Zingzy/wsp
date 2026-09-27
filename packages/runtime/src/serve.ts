@@ -1374,6 +1374,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
                 ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
                 ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
+                ...(msg.attempt !== undefined ? { attempt: msg.attempt } : {}),
                 ...(msg.notify !== undefined ? { notify: msg.notify } : {}),
                 ...(msg.turnToken !== undefined ? { turnToken: msg.turnToken } : {}),
                 ...(msg.title !== undefined ? { title: msg.title } : {}),
@@ -1425,6 +1426,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "sessions.search":
               send({ id: msg.id, ok: true, ...(await rt.sessions.search(msg.query, origin)) });
+              return;
+            case "sessions.aside":
+              send({ id: msg.id, ok: true, ...(await rt.sessions.aside(msg.sessionId, msg.question, origin)) });
               return;
             case "sessions.steer":
               send({ id: msg.id, ok: true, ...(await rt.sessions.steer(msg.sessionId, { prompt: msg.prompt, ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}) }, origin)) });

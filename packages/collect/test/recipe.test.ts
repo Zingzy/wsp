@@ -55,6 +55,7 @@ describe("computeRecipe", () => {
       { agent: "qwen", state: "no-reader", sessions: 0, calls: 0 },
       { agent: "goose", state: "no-reader", sessions: 0, calls: 0 },
       { agent: "amp", state: "no-reader", sessions: 0, calls: 0 },
+      { agent: "cursor", state: "no-reader", sessions: 0, calls: 0 },
     ]);
   });
 

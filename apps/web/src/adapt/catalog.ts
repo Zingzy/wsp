@@ -17,16 +17,26 @@ export function catalogFor(harness: string): HarnessCatalog | null {
   return client === undefined ? null : { harness, slashCommands: client.slashCommands };
 }
 
+/** wsp's own command, answered by the host on a copy of the thread's session and never sent to the agent as a turn. */
+export const ASIDE_COMMAND: ProviderSlashCommand = { name: "btw", description: "Ask a side question the thread never keeps", input: { hint: "question" }, source: "wsp" };
+
+/** The question a draft asks beside the thread, or null when the draft is not /btw with words after it. */
+export function asideQuestion(prompt: string): string | null {
+  return /^\/btw\s+(\S[\s\S]*)$/.exec(prompt.trim())?.[1] ?? null;
+}
+
 /** The slash commands a session announced, else the harness's seed when the CLI said nothing about them, less the
- * ones its runtime catalog says work only in the CLI's own terminal. */
-export function catalogFromHarness(input: { readonly id: string; readonly harness: SessionHarness | null; readonly screen?: ReadonlyArray<ScreenCommand> }): HarnessCatalog {
+ * ones its runtime catalog says work only in the CLI's own terminal, and wsp's own side question where the agent
+ * takes one, in place of any command of that name the agent announced. */
+export function catalogFromHarness(input: { readonly id: string; readonly harness: SessionHarness | null; readonly screen?: ReadonlyArray<ScreenCommand>; readonly asides?: boolean }): HarnessCatalog {
   const announced = harnessClient(input.id)?.announced;
   const offered: ReadonlyArray<ProviderSlashCommand> =
     input.harness?.slashCommands !== undefined && input.harness.slashCommands.length > 0
       ? input.harness.slashCommands.map(name => (announced === undefined ? { name } : announced(name)))
       : harnessClient(input.id)?.slashCommands ?? [];
   const screen = input.screen ?? [];
-  const slashCommands = screen.length === 0 ? offered : offered.filter(c => !screen.some(s => s.name === c.name));
+  const kept = screen.length === 0 ? offered : offered.filter(c => !screen.some(s => s.name === c.name));
+  const slashCommands = input.asides === true ? [...kept.filter(c => c.name !== ASIDE_COMMAND.name), ASIDE_COMMAND] : kept;
   return { harness: input.id, slashCommands };
 }
 
@@ -46,6 +56,7 @@ export function composerPlaceholder(catalog: HarnessCatalog): string {
 /** What the composer says when a draft that is a slash and nothing more is held. The first is true of every harness;
  * the second names the word that reached nothing. */
 const LONE_SLASH = "a slash on its own is not a command";
+const ASIDE_NEEDS_WORDS = `/${ASIDE_COMMAND.name} takes a question after it`;
 const noCommandCalled = (name: string) => `no command here is called /${name}`;
 
 /** Why a draft is held rather than sent, or null when its words are a message the agent can take. A slash opens a
@@ -59,6 +70,7 @@ export function slashHoldLine(input: { readonly prompt: string; readonly catalog
   if (draft === "/") return LONE_SLASH;
   const name = /^\/(\S+)$/.exec(draft)?.[1];
   if (name === undefined || !offersSlashCommands(input.catalog)) return null;
+  if (name === ASIDE_COMMAND.name && input.catalog.slashCommands.includes(ASIDE_COMMAND)) return ASIDE_NEEDS_WORDS;
   if (screenCommandTyped({ screenCommands: input.screen }, draft) !== null) return null;
   return input.catalog.slashCommands.some(command => command.name === name) ? null : noCommandCalled(name);
 }
