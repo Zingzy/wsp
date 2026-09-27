@@ -4,9 +4,11 @@
 // stored, and a wake puts nothing back. The kinds that keep an image nap
 // exactly as they did.
 import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { BOX_BUDGETS } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { fakeClock } from "./fake-clock.js";
 import { droppingPort } from "./held-port.js";
 import { createOn, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
 
@@ -118,6 +120,62 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
       expect(m1.killed).toBe(false);
       expect(untars).toEqual([]);
       expect(await store.getBlob("vaults", ws.id)).toBeUndefined();
+    } finally {
+      await rt.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a Boat wake whose daemon answers two and a half minutes after the box is up succeeds on the first send, on the same machine", async () => {
+    // What the dev host's log saw on 2026-09-27: five wakes whose daemon had not answered 120 s after the box read
+    // ready, each of which answered at the next probe after the wake gave up.
+    const { backend, store } = imageless();
+    const { clock, advance } = fakeClock();
+    const rt = createRuntime({ backend, store, adapters: {}, clock });
+    try {
+      backend.lifecycle.budgets = { ...BOX_BUDGETS };
+      const ws = await createOn(rt, { name: "x" });
+      const m1 = backend.machines[0]!;
+      await rt.workspaces.nap(ws.id);
+      let answersAt: number | undefined;
+      m1.daemonAnswers = async () => clock.now() >= (answersAt ??= clock.now() + 150_000);
+      let done = false;
+      const waking = rt.workspaces.wake(ws.id).finally(() => (done = true));
+      for (let spent = 0; !done && spent < 10 * 60_000; spent += 500) {
+        await new Promise(resolve => setImmediate(resolve));
+        advance(500);
+      }
+      await expect(waking).resolves.toMatchObject({ machineId: "m1", phase: "running" });
+      expect(backend.machines).toHaveLength(1);
+    } finally {
+      await rt.close();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("a Boat wake whose daemon never answers fails once its five minutes are out, saying so, and keeps the machine", async () => {
+    const { backend, store } = imageless();
+    const { clock, advance } = fakeClock();
+    const rt = createRuntime({ backend, store, adapters: {}, clock });
+    try {
+      backend.lifecycle.budgets = { ...BOX_BUDGETS };
+      const ws = await createOn(rt, { name: "x" });
+      const m1 = backend.machines[0]!;
+      await rt.workspaces.nap(ws.id);
+      m1.daemonAnswers = async () => false;
+      let done = false;
+      const started = clock.now();
+      const waking = rt.workspaces.wake(ws.id).finally(() => (done = true));
+      waking.catch(() => {});
+      for (let spent = 0; !done && spent < 10 * 60_000; spent += 500) {
+        await new Promise(resolve => setImmediate(resolve));
+        advance(500);
+      }
+      await expect(waking).rejects.toThrow(/the wake of m1 did not finish: attempt 1: nothing listens on the daemon's port inside m1.*the workspace keeps this machine and its disk/);
+      expect(clock.now() - started).toBeGreaterThanOrEqual(5 * 60_000);
+      expect(clock.now() - started).toBeLessThan(6 * 60_000);
+      expect((await rt.workspaces.get(ws.id)).machineId).toBe("m1");
+      expect(m1.killed).toBe(false);
     } finally {
       await rt.close();
       vi.unstubAllGlobals();
