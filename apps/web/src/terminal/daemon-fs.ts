@@ -6,9 +6,11 @@ import {
   DaemonErrorCode,
   FsListReply,
   FsReadReply,
+  FsSearchReply,
   GitDiffReply,
   GitStatusReply,
   type FsReadEncoding,
+  type FsSearchMode,
   type GitDiffScope,
 } from "@wsp/protocol";
 import type { TerminalWire } from "./link.js";
@@ -54,6 +56,11 @@ export function fsRead(wire: TerminalWire, path: string, encoding?: FsReadEncodi
   const params: Record<string, unknown> = { path };
   if (encoding !== undefined) params["encoding"] = encoding;
   return call(wire, "fs.read", params, FsReadReply);
+}
+
+/** Every file under `path` whose path holds the query's letters in order, or every line of text there holding it. */
+export function fsSearch(wire: TerminalWire, path: string, query: string, mode: FsSearchMode): Promise<FsSearchReply> {
+  return call(wire, "fs.search", { path, query, mode }, FsSearchReply);
 }
 
 export function gitStatus(wire: TerminalWire, cwd: string): Promise<GitStatusReply> {

@@ -15,6 +15,7 @@ const SURFACES: RightPanelSurface[] = [
   { id: "browser:new", kind: "preview", resourceId: null },
   { id: "terminal:p1", kind: "terminal", resourceId: "p1", terminalIds: ["p1"], activeTerminalId: "p1" },
   { id: "diff", kind: "diff" },
+  { id: "files", kind: "files", path: null },
   { id: "machine", kind: "machine" },
   { id: "processes", kind: "processes" },
   { id: "agents", kind: "agents" },
@@ -49,7 +50,7 @@ describe("the pane registry", () => {
   it("names every open kind on the tab strip by its label, or by what its tab holds", () => {
     tabs(SURFACES);
     const strip = [...document.querySelectorAll("[data-right-panel-tab-list] [data-active-tab]")].map(t => t.textContent);
-    expect(strip).toEqual(["Browser", "Terminal", "Diff", "Computer", "Processes", "Agents"]);
+    expect(strip).toEqual(["Browser", "Terminal", "Diff", "Files", "Computer", "Processes", "Agents"]);
   });
 
   it("keeps every kind it holds across a reload of the store", () => {
@@ -82,12 +83,12 @@ describe("the pane registry", () => {
       here: ["preview", "terminal", "machine", "processes"],
       running: PANE_KINDS,
       napping: ["machine", "agents"],
-      away: ["preview", "diff", "machine", "agents"],
-      startable: ["preview", "diff", "machine", "processes", "agents"],
+      away: ["preview", "diff", "files", "machine", "agents"],
+      startable: ["preview", "diff", "files", "machine", "processes", "agents"],
       none: [],
     });
     const reasons = (at: PaneContext) => Object.fromEntries(PANE_KINDS.flatMap(k => (PANES[k].reason?.(at) === undefined ? [] : [[k, PANES[k].reason!(at)]])));
-    expect(reasons(contexts["here"]!)).toEqual({ diff: "Pick a project to review its changes." });
+    expect(reasons(contexts["here"]!)).toEqual({ diff: "Pick a project to review its changes.", files: "Pick a thread to read its files." });
     expect(reasons(contexts["running"]!)).toEqual({});
     expect(reasons(contexts["away"]!)).toEqual({ terminal: away.sentence, processes: away.sentence });
   });
