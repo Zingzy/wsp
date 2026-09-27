@@ -1,13 +1,14 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/ComposerCommandMenu.tsx at 57a66608 (MIT).
-// Differs from upstream: the path, built-in slash command and skill item arms
-// are removed with their icons, badges, loading copy and the resolvedTheme
-// prop (no file search, pickers or skills catalog on the wire); the one arm
-// left names its harness by string; and the one flat list became the groups
-// composerCommandGroups reads off the announcement, each under the heading the
-// palette gives its own, since a hundred and thirty names in one run are a
-// list nobody reads. Nothing matching draws no menu at all rather than an
-// empty state: the composer's own slot already holds the one line saying that
-// name reached nothing, and two readings of it are one too many.
+// Differs from upstream: the built-in slash command arm is removed with its
+// pickers; a skill row carries no source badge, since the Skills heading says
+// it; a pull request or issue row is wsp's own, off the # menu; the arms name
+// their harness by string; and the one flat list became groups, each under the
+// heading the palette gives its own, since a hundred and thirty names in one
+// run are a list nobody reads. Nothing matching draws no menu at all rather
+// than an empty state: the composer's own slot already holds the one line
+// saying why, and two readings of it are one too many.
+import type { HostItem } from "@wsp/protocol";
+import { CircleDotIcon, FileIcon, GitPullRequestIcon } from "lucide-react";
 import { memo, useLayoutEffect, useRef } from "react";
 
 import { type ComposerTriggerKind } from "../../composer-logic";
@@ -17,14 +18,24 @@ import type { ComposerCommandGroup } from "./composerCommandGroups";
 import type { ProviderSlashCommand } from "./adapt";
 import { ComposerBanner } from "./ComposerBanner";
 
-export type ComposerCommandItem = {
-  id: string;
-  type: "provider-slash-command";
-  harness: string;
-  command: ProviderSlashCommand;
-  label: string;
-  description: string;
-};
+/** A row the slash menu ranks and groups by its command: one the harness announced, or one of the person's skills,
+ * which carries the Skills heading as its source and whether the harness announced it, which is how it is sent. */
+export type ComposerSlashItem =
+  | { id: string; type: "provider-slash-command"; harness: string; command: ProviderSlashCommand; label: string; description: string }
+  | { id: string; type: "skill"; harness: string; command: ProviderSlashCommand; announced: boolean; label: string; description: string };
+
+export type ComposerCommandItem =
+  | ComposerSlashItem
+  | { id: string; type: "path"; path: string; label: string; description: string }
+  | { id: string; type: "reference"; item: HostItem; label: string; description: string };
+
+const ROW_MARKS = { path: FileIcon, "pull-request": GitPullRequestIcon, issue: CircleDotIcon } as const;
+
+function rowMark(item: ComposerCommandItem) {
+  if (item.type === "path") return ROW_MARKS.path;
+  if (item.type === "reference") return ROW_MARKS[item.item.kind];
+  return null;
+}
 
 export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   groups: ReadonlyArray<ComposerCommandGroup>;
@@ -107,6 +118,10 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       }}
     >
       <span className="flex min-w-0 flex-1 items-center gap-2">
+        {(() => {
+          const Mark = rowMark(props.item);
+          return Mark === null ? null : <Mark aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />;
+        })()}
         {/* The name yields the row's far half to a description only where there is one to read; a command a plugin
             named itself in is long, and in a narrow window it was cut short of a half the row left empty. */}
         <span

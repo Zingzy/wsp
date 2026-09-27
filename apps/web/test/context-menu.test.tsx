@@ -260,7 +260,7 @@ describe("a tile's menu for the copy it runs on", () => {
     rightClick(rowOf("old"));
     await screen.findByRole("menu");
     await waitFor(() => expect(item(WORKSPACE_WORDS.wake).getAttribute("aria-disabled")).toBe("true"));
-    expect(refusalOf(WORKSPACE_WORDS.wake)).toBe("Workspace machine is gone; rebuild it to wake");
+    expect(refusalOf(WORKSPACE_WORDS.wake)).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to wake, which brings back its home folder from the last saved nap");
     expect(item(WORKSPACE_WORDS.rebuild).getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(item(WORKSPACE_WORDS.forget));
     const dialog = await screen.findByRole("alertdialog");
@@ -483,7 +483,7 @@ describe("a thread row's menu", () => {
     rightClick(rowOf("fix the port list"));
     await screen.findByRole("menu");
     expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBe("true");
-    expect(refusalOf(THREAD_WORDS.rename)).toBe("Workspace machine is gone; rebuild it to rename (machine m_ws_c is gone at the provider: Not found)");
+    expect(refusalOf(THREAD_WORDS.rename)).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to rename, which brings back its home folder from the last saved nap (machine m_ws_c is gone at the provider: Not found)");
     fireEvent.click(item(THREAD_WORDS.rename));
     expect(screen.queryByRole("textbox")).toBeNull();
   });
@@ -505,7 +505,7 @@ describe("a thread row's menu", () => {
     rightClick(rowOf("rebuild the index"));
     await screen.findByRole("menu");
     expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBe("true");
-    expect(refusalOf(THREAD_WORDS.rename)).toBe("Workspace machine is gone; rebuild it to rename (machine m_ws_c is gone at the provider: Not found)");
+    expect(refusalOf(THREAD_WORDS.rename)).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to rename, which brings back its home folder from the last saved nap (machine m_ws_c is gone at the provider: Not found)");
     fireEvent.click(item(THREAD_WORDS.rename));
     expect(screen.queryByRole("textbox")).toBeNull();
   });

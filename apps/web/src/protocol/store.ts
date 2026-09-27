@@ -370,7 +370,7 @@ export const useStore = create<State>((set, get) => {
     }
   };
 
-  // wake-via-resurrect and upgrade replace the machine, so those events carry a new machineId; gone carries the
+  // a rebuild and an image move replace the machine, so those events carry a new machineId; gone carries the
   // words, and any other phase drops the ones the view was holding, since a record that left gone has none to show
   const setPhase = (id: string, phase: WorkspacePhase, machineId?: string, gone?: string): void => {
     const words = phase !== "gone" ? { gone: undefined } : gone !== undefined ? { gone } : {};

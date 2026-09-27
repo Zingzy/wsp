@@ -3155,6 +3155,13 @@ export function wakeGaveUpLine(asks: number, overMs: number): string {
   return `the provider answered none of ${plural(asks, "resume request")} over ${fmtDuration(overMs)}; the work on this machine's disk stays with the provider, and a rebuild starts a new machine from the image`;
 }
 
+/** What a wake ends with when the machine came back and failed every check its backend allows: the faults in order,
+ * then that the workspace still stands on that machine, since its disk is the only copy of the agents' sessions and
+ * of the work nobody pushed, and no wake trades it for a fresh fork of the image. */
+export function wakeFailedLine(machineId: string, faults: string): string {
+  return `the wake of ${machineId} did not finish: ${faults}; the workspace keeps this machine and its disk`;
+}
+
 /** What the needs-you road says outside the app when a machine came up while the person was looking elsewhere. */
 export const workspaceAwakeLine = (name: string): string => `${name} is awake`;
 

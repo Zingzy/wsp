@@ -610,19 +610,19 @@ describe("wsp verbs over the host", () => {
     expect(words).toMatch(new RegExp(`^machine ${alpha!.machineId} is gone at the provider: the record load found it gone at \\S+Z \\(404 gone\\)$`));
     const forked = await run("fork", "alpha");
     expect(forked.code).toBe(1);
-    expect(forked.io.errors).toEqual([`wsp fork: Workspace machine is gone; rebuild it to fork (${words})`]);
+    expect(forked.io.errors).toEqual([`wsp fork: alpha's machine is gone with its disk, so work that was not pushed is lost; rebuild it to fork, which brings back its home folder from the last saved nap (${words})`]);
     const opened = await run("run", "alpha", "do it");
     expect(opened.code).toBe(1);
-    expect(opened.io.errors).toEqual([`wsp run: Workspace machine is gone; rebuild it to send (${words})`]);
+    expect(opened.io.errors).toEqual([`wsp run: alpha's machine is gone with its disk, so work that was not pushed is lost; rebuild it to send, which brings back its home folder from the last saved nap (${words})`]);
     const ran = await run("exec", "alpha", "--", "echo", "hi");
     expect(ran.code).toBe(1);
-    expect(ran.io.errors).toEqual([`wsp exec: Workspace machine is gone; rebuild it to exec (${words})`]);
+    expect(ran.io.errors).toEqual([`wsp exec: alpha's machine is gone with its disk, so work that was not pushed is lost; rebuild it to exec, which brings back its home folder from the last saved nap (${words})`]);
     // The workspace is on the listing throughout: what the machine is, is the machine's trouble to say, and no verb
     // answers for a machine by calling the workspace missing.
     expect(names(await run("workspaces"))).toEqual(["alpha"]);
     const woken = await run("wake", "alpha");
     expect(woken.code).toBe(1);
-    expect(woken.io.errors).toEqual([`wsp wake: Workspace machine is gone; rebuild it to wake (${words})`]);
+    expect(woken.io.errors).toEqual([`wsp wake: alpha's machine is gone with its disk, so work that was not pushed is lost; rebuild it to wake, which brings back its home folder from the last saved nap (${words})`]);
     expect((await rt.workspaces.list()).map(w => [w.name, w.phase])).toEqual([["alpha", "gone"]]);
   });
 

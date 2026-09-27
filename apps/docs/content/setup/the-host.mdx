@@ -73,7 +73,7 @@ Everything is beside the state file, `~/.wsp/` by default:
 
 - **Keeps the helper current.** Each machine's helper reports a version when the host connects. One that is behind gets the current bundle deployed, after any running turn ends, since replacing it ends the terminals under it. The row reads `updating the helper` while it happens.
 - **Naps idle workspaces.** Twenty minutes with no person, thread or command, then a nap. The provider's own idle timer is set behind it as a backstop, because every read of a machine's state resets that timer, so if the provider owned the policy any process that looked at a machine would keep it awake and billing.
-- **Recovers machines.** A machine the provider says is running but whose helper stopped answering for three minutes gets one probe; if that fails it is marked zombie and offered a rebuild. A paused machine that vanished while paused is rebuilt from the golden with the files it saved at nap time.
+- **Recovers machines.** A machine the provider says is running but whose helper stopped answering for three minutes gets one probe; if that fails it is marked zombie and offered a rebuild. A wake never swaps in a new machine. A paused machine the provider says is gone reads as gone: work that was not pushed is lost with its disk, and `wsp rebuild` starts a new machine from the image with the home folder from the last saved nap.
 - **Refuses a mismatched client.** The command line and the MCP server refuse a host of another version in one line. `wsp down` then `wsp up` fixes it.
 
 <Callout type="info">

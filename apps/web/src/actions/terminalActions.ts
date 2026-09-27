@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The terminal's actions, one registry: what the drawer's toolbar and the
 // surface's context menu offer for the active terminal.
-import { ClipboardPasteIcon, CopyIcon, EraserIcon, PlusIcon, SquareSplitHorizontalIcon, SquareSplitVerticalIcon, Trash2Icon } from "lucide-react";
+import { ClipboardPasteIcon, CopyIcon, EraserIcon, MessageSquarePlusIcon, PlusIcon, SquareSplitHorizontalIcon, SquareSplitVerticalIcon, Trash2Icon } from "lucide-react";
 import { NO_CLIPBOARD_READ, NO_TERMINAL, NOTHING_SELECTED, SPLIT_LIMIT, TERMINAL_WORDS } from "./format.js";
 import type { ActionEntry } from "./registry.js";
 
@@ -17,6 +17,8 @@ export interface TerminalVerbs {
   /** Absent where the page cannot read the clipboard. */
   readonly paste?: (() => Promise<void>) | undefined;
   readonly clear?: (() => void) | undefined;
+  /** Puts the selected lines into the composer's draft as one excerpt; absent where no composer stands beside it. */
+  readonly addToChat?: (() => void) | undefined;
   readonly split: () => void;
   readonly splitVertical: () => void;
   readonly newTerminal: () => void;
@@ -31,6 +33,15 @@ export const terminalActions: ReadonlyArray<ActionEntry<TerminalTarget, Terminal
     title: () => TERMINAL_WORDS.copy,
     refusal: (target, verbs) => (verbs.copy === undefined ? NO_TERMINAL : target.hasSelection ? null : NOTHING_SELECTED),
     run: (_target, verbs) => verbs.copy?.(),
+  },
+  {
+    id: "add-to-chat",
+    group: "clipboard",
+    icon: () => MessageSquarePlusIcon,
+    applies: target => target.hasSelection,
+    title: () => TERMINAL_WORDS.addToChat,
+    refusal: (_target, verbs) => (verbs.addToChat === undefined ? NO_TERMINAL : null),
+    run: (_target, verbs) => verbs.addToChat?.(),
   },
   {
     id: "paste",

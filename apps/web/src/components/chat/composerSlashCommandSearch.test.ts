@@ -2,13 +2,13 @@
 // Differs from upstream: the skill and built-in cases are dropped with those arms; items name their harness by string.
 import { describe, expect, it } from "vitest";
 
-import type { ComposerCommandItem } from "./ComposerCommandMenu";
+import type { ComposerSlashItem } from "./ComposerCommandMenu";
 import {
   searchSlashCommandItems,
   slashCommandItemsForPromptPosition,
 } from "./composerSlashCommandSearch";
 
-const item = (name: string, description: string): ComposerCommandItem => ({
+const item = (name: string, description: string): ComposerSlashItem => ({
   id: `provider-slash-command:claude:${name}`,
   type: "provider-slash-command",
   harness: "claude",

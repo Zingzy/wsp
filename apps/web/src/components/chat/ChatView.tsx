@@ -33,6 +33,9 @@ import { useChatThread, type ChatThreadHandle } from "./useChatThread";
 import { DEFAULT_HARNESS } from "./ComposerOptionPickers";
 import { TRANSCRIPT_LOADING } from "../../transcript-words";
 import { useAppDark } from "../../settings/theme";
+import { insertIntoComposer } from "./composerInsert";
+import { quoteText } from "../../composer-editor-mentions";
+import type { QuotedSelection } from "./AssistantSelectionToolbar";
 
 const noopImageExpand = () => {};
 
@@ -66,6 +69,7 @@ export function ChatView({
   const { view } = thread;
   const empty = view.entries.length === 0 && !view.running;
   const cwd = view.cwd ?? undefined;
+  const onQuote = useCallback((quote: QuotedSelection) => insertIntoComposer(workspaceId, quoteText(quote)), [workspaceId]);
   // A file named in the transcript opens as its own tab in the Files pane at the line it names, read against the
   // folder the thread worked in, which is what the agent wrote the path from.
   const onOpenFile = useCallback(
@@ -206,6 +210,7 @@ export function ChatView({
             workspaceRoot={cwd}
             resolvedTheme={appDark ? "dark" : "light"}
             timestampFormat={timestampFormat}
+            onQuote={onQuote}
           />
         )}
       </div>

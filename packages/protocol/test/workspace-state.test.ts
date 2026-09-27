@@ -64,7 +64,7 @@ describe("workspaceState", () => {
     expect(sendRefusal("paused")).toBe("Workspace is paused; wake it to send");
     expect(sendRefusal("waking")).toBe("Workspace is waking; sends open when it is running");
     expect(sendRefusal("unreachable")).toBe("Workspace is unreachable; sends open when the machine answers");
-    expect(sendRefusal("gone")).toBe("Workspace machine is gone; rebuild it to send");
+    expect(sendRefusal("gone")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to send, which brings back its home folder from the last saved nap");
   });
 
   it("sendRefusal is one table over everything that refuses a send: the socket, the lookup, the transcript, the agents, the thread, then the states", () => {
@@ -86,7 +86,7 @@ describe("workspaceState", () => {
     expect(actionRefusal("pausing", "export")).toBe("Workspace is pausing; wake it to export");
     expect(actionRefusal("waking", "import")).toBe("Workspace is waking; imports open when it is running");
     expect(actionRefusal("unreachable", "export")).toBe("Workspace is unreachable; exports open when the machine answers");
-    expect(actionRefusal("gone", "import", "404")).toBe("Workspace machine is gone; rebuild it to import (404)");
+    expect(actionRefusal("gone", "import", "404")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to import, which brings back its home folder from the last saved nap (404)");
     for (const state of ["running", "pausing", "paused", "waking", "unreachable", "gone"] as const) expect(actionRefusal(state, "send", "x")).toBe(sendRefusal(state, "x"));
   });
 
@@ -115,10 +115,13 @@ describe("workspaceState", () => {
   });
 
   it("goneRefusal is one sentence per verb, quoting the provider when the caller holds its words; a send's is sendRefusal's", () => {
-    expect(goneRefusal("wake")).toBe("Workspace machine is gone; rebuild it to wake");
-    expect(goneRefusal("fork", "machine m1 is gone at the provider: Not found")).toBe("Workspace machine is gone; rebuild it to fork (machine m1 is gone at the provider: Not found)");
-    expect(goneRefusal("wake", "")).toBe("Workspace machine is gone; rebuild it to wake");
-    expect(sendRefusal("gone", "machine m1 is gone at the provider: Not found")).toBe(goneRefusal("send", "machine m1 is gone at the provider: Not found"));
+    expect(goneRefusal(undefined, "wake")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to wake, which brings back its home folder from the last saved nap");
+    expect(goneRefusal(undefined, "fork", "machine m1 is gone at the provider: Not found")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to fork, which brings back its home folder from the last saved nap (machine m1 is gone at the provider: Not found)");
+    expect(goneRefusal(undefined, "wake", "")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to wake, which brings back its home folder from the last saved nap");
+    expect(sendRefusal("gone", "machine m1 is gone at the provider: Not found")).toBe(goneRefusal(undefined, "send", "machine m1 is gone at the provider: Not found"));
+    // The runtime holds the record, so its refusals lead with the workspace's name.
+    expect(sendRefusal("gone", undefined, "api")).toBe("api's machine is gone with its disk, so work that was not pushed is lost; rebuild it to send, which brings back its home folder from the last saved nap");
+    expect(actionRefusal("gone", "import", "404", "api")).toBe(goneRefusal("api", "import", "404"));
   });
 });
 

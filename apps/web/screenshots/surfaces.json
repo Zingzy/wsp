@@ -104,6 +104,73 @@
       "wait": "k=aside-answer"
     },
     {
+      "name": "composer-slash-skills",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "key:/",
+        "scroll:4000:composer-command-group=source:Skills"
+      ],
+      "wait": "composer-item-id=skill:claude:release-notes",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-mention-menu",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:@red"
+      ],
+      "wait": "composer-item-id=path:apps/api/src/redirect.ts",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-hash-menu",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:#"
+      ],
+      "wait": "composer-item-id=reference:pull-request:41",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-chips",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:what does ",
+        "type:@red",
+        "composer-item-id=path:apps/api/src/redirect.ts",
+        "type:change in ",
+        "type:#41",
+        "composer-item-id=reference:pull-request:41",
+        "type:and does it close the issue"
+      ],
+      "wait": "composer-citation-chip=pull-request",
+      "settleMs": 700
+    },
+    {
       "name": "machine",
       "at": "/",
       "steps": [

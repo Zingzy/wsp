@@ -5,7 +5,7 @@ use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize, Serializer};
 use ts_rs::TS;
 
-use crate::{DaemonErrorCode, FsEntryType, MachineErrorKind, PullRequestState, RequestId};
+use crate::{DaemonErrorCode, FsEntryType, HostItemKind, MachineErrorKind, PullRequestState, RequestId};
 
 /// The literal `true` the ok envelope carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -230,6 +230,15 @@ pub struct FsListReply {
     pub total: u64,
 }
 
+/// The checkout's files under the folder asked about, relative to it, in git's order; truncated where there were more
+/// than the cap.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FsFilesReply {
+    pub files: Vec<String>,
+    pub truncated: bool,
+}
+
 /// One fs.search hit: a path relative to the folder searched, and in text mode the line it is on (from 1) and that
 /// line's text, cut to a few hundred characters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -378,6 +387,35 @@ pub struct PullRequest {
     pub state: PullRequestState,
     /// The git host it lives on, as the remote's url names it: github.com and the like.
     pub host: String,
+}
+
+/// One open pull request or issue as its host's command line listed it, with its body as it stands now.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct HostItem {
+    pub kind: HostItemKind,
+    pub number: u64,
+    pub title: String,
+    /// Cut at GIT_PR_LIST_BODY_CAP characters, ending in an ellipsis where it was.
+    pub body: String,
+    pub url: String,
+}
+
+/// The repository's open pull requests, then its open issues. Where nothing can be listed, since no signed-in
+/// command line for the host is on the computer, the list is empty and `noCliFor` names the host, for the client to
+/// say on which computer; a list the command line refused otherwise is left out with its first line as the note.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrListReply {
+    pub items: Vec<HostItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub no_cli_for: Option<String>,
 }
 
 /// What a push carried: the branch, the branch it is measured against, the remote it went to, how many commits it

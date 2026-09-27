@@ -98,7 +98,7 @@ describe("workspace actions", () => {
     expect(waking.title).toBe(WORKSPACE_WORDS.stopWake);
     expect(waking.refusal).toBeNull();
     expect(waking.rowLabel).toBe("Stop api");
-    expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "phase").refusal).toBe(goneRefusal("wake"));
+    expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "phase").refusal).toBe(goneRefusal(undefined, "wake"));
     // A machine wsp neither forked nor pays for is neither paused nor woken by wsp, so the slot is not there.
     expect(actionIfAny(resolveActions(workspaceActions, workspace("running", { kind: "local" }), verbs), "phase")).toBeUndefined();
   });
@@ -140,8 +140,8 @@ describe("workspace actions", () => {
     // The delete is the road for a machine that is still there; a gone one has only its record left to lose.
     expect(actionIfAny(gone, "delete")).toBeUndefined();
     expect(actionById(gone, "new-thread").refusal).toBe("New threads wait for the rebuild");
-    expect(actionById(gone, "open-terminal").refusal).toBe(goneRefusal("open a terminal"));
-    expect(actionById(gone, "open-browser").refusal).toBe(goneRefusal("preview"));
+    expect(actionById(gone, "open-terminal").refusal).toBe(goneRefusal(undefined, "open a terminal"));
+    expect(actionById(gone, "open-browser").refusal).toBe(goneRefusal(undefined, "preview"));
     const zombie = resolveActions(workspaceActions, workspace("unreachable", { reach: "zombie" }), verbs);
     expect(actionById(zombie, "rebuild").refusal).toBeNull();
     // A zombie is a machine that is still there, so the road out of it is the delete and not the forget.
@@ -411,8 +411,8 @@ describe("thread actions", () => {
     expect(renameOf("paused")).toBeNull();
     expect(renameOf("waking")).toBeNull();
     expect(renameOf("unreachable")).toBeNull();
-    expect(renameOf("gone")).toBe("Workspace machine is gone; rebuild it to rename");
-    expect(renameOf("gone", "machine m1 is gone at the provider")).toBe("Workspace machine is gone; rebuild it to rename (machine m1 is gone at the provider)");
+    expect(renameOf("gone")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to rename, which brings back its home folder from the last saved nap");
+    expect(renameOf("gone", "machine m1 is gone at the provider")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to rename, which brings back its home folder from the last saved nap (machine m1 is gone at the provider)");
   });
 
   it("copy link writes the page's address for the thread", async () => {

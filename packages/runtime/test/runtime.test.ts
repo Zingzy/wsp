@@ -185,10 +185,8 @@ describe("runtime", () => {
   });
 
   it.each([
-    ["a wake that resurrects", async (rt: ReturnType<typeof createRuntime>, backend: StubBackend, id: string) => {
-      await rt.workspaces.nap(id);
-      backend.machines[0]!.killed = true;
-      await rt.workspaces.wake(id);
+    ["a rebuild", async (rt: ReturnType<typeof createRuntime>, _backend: StubBackend, id: string) => {
+      await rt.workspaces.rebuild(id);
     }],
     ["an upgrade", async (rt: ReturnType<typeof createRuntime>, _backend: StubBackend, id: string) => {
       await rt.workspaces.upgrade(id);
@@ -225,9 +223,7 @@ describe("runtime", () => {
     try {
       const ws = await createOn(rt, { golden: "snap_g", name: "big", cpu: 2, memMb: 8192 });
       expect(await store.get("workspaces", ws.id)).not.toHaveProperty("shape");
-      await rt.workspaces.nap(ws.id);
-      backend.machines[0]!.killed = true;
-      await rt.workspaces.wake(ws.id);
+      await rt.workspaces.rebuild(ws.id);
       expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
     } finally {
       warn.mockRestore();
@@ -310,20 +306,24 @@ describe("runtime", () => {
     expect(backend.machines[1]!.spec.envs).toEqual({ HOME: "/home/dev", USER: "root", PATH: TOOLS_PATH, IS_SANDBOX: "1", DISABLE_AUTOUPDATER: "1", FOO: "1" });
   });
 
-  it("wake after the paused machine vanished resurrects a fresh golden fork", async () => {
+  it("wake after the paused machine vanished settles it gone and forks nothing; the rebuild that follows forks the golden with the workspace's envs", async () => {
     const backend = stubBackend();
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goneConfirmMs: 0 });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    onTestFinished(() => warn.mockRestore());
     const ws = await createOn(rt, { golden: "snap_g", name: "x", envs: { FOO: "1" } });
     await rt.workspaces.nap(ws.id);
     backend.machines[0]!.killed = true; // paused machine vanished overnight
-    const woken = await rt.workspaces.wake(ws.id);
-    expect(woken.machineId).toBe("m2");
+    await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^x's machine is gone with its disk/);
+    expect(backend.machines).toHaveLength(1);
+    expect(events.some(e => e.type === "workspace.woken")).toBe(false);
+    expect(await rt.workspaces.get(ws.id)).toMatchObject({ phase: "gone", machineId: "m1" });
+    const rebuilt = await rt.workspaces.rebuild(ws.id);
+    expect(rebuilt.machineId).toBe("m2");
     expect(backend.machines[1]!.spec.fromSnapshot).toBe("snap_g");
     expect(backend.machines[1]!.spec.envs).toEqual({ ...GUEST_LOGIN_ENV, FOO: "1" });
-    const wokeEvent = events.find(e => e.type === "workspace.woken");
-    expect(wokeEvent).toMatchObject({ machineId: "m2", resurrected: true });
   });
 
   it("persists workspaces in the store and rehydrates them (phase survives)", async () => {
@@ -3181,7 +3181,7 @@ describe("runtime daemon reach", () => {
     await expect(rt.workspaces.updateDaemon("ws_nobody")).rejects.toThrow("no such workspace");
   });
 
-  it("writes a token again after a resurrect replaces the machine, the new machine's own", async () => {
+  it("writes a token again after a rebuild replaces the machine, the new machine's own", async () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
@@ -3190,9 +3190,7 @@ describe("runtime daemon reach", () => {
     backend.machines[0]!.previewUrl = mint;
     const gone = (await rt.workspaces.daemonReach(ws.id)).daemonToken!;
 
-    await rt.workspaces.nap(ws.id);
-    backend.machines[0]!.killed = true;
-    await rt.workspaces.wake(ws.id);
+    await rt.workspaces.rebuild(ws.id);
     backend.machines[1]!.previewUrl = mint;
     const fresh = (await rt.workspaces.daemonReach(ws.id)).daemonToken!;
     expect(fresh).not.toBe(gone);
@@ -4034,7 +4032,7 @@ describe("runtime golden builders", () => {
     expect(backend.machines.some(m => m.killed)).toBe(false);
   });
 
-  it("the sweep leaves a workspace this process is still forking alone, on create and on a resurrect", async () => {
+  it("the sweep leaves a workspace this process is still forking alone, on create and on a rebuild", async () => {
     const backend = stubBackend();
     let release!: () => void;
     let gate = new Promise<void>(r => (release = r));
@@ -4056,16 +4054,14 @@ describe("runtime golden builders", () => {
       const ws = await creating;
       expect(ws.machineId).toBe("m1");
 
-      await rt.workspaces.nap(ws.id);
-      backend.machines[0]!.killed = true; // vanished while paused, so the wake forks anew
       gate = new Promise<void>(r => (release = r));
-      const waking = rt.workspaces.wake(ws.id);
+      const rebuilding = rt.workspaces.rebuild(ws.id);
       await vi.waitFor(() => expect(backend.machines).toHaveLength(2));
       vi.setSystemTime(Date.now() + 5 * 60_000);
       expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
       expect(backend.machines[1]!.killed).toBe(false);
       release();
-      expect((await waking).machineId).toBe("m2");
+      expect((await rebuilding).machineId).toBe("m2");
       expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
     } finally {
       vi.useRealTimers();
@@ -4571,7 +4567,7 @@ describe("runtime verified wake", () => {
     return { backend, tars, untars, setTgzBytes: (n: number) => { tgzBytes = n; } };
   }
 
-  it("resume returns but the daemon never answers: waking, one retry, then a golden fork with the vault and the zombie killed", async () => {
+  it("resume returns but the daemon never answers: waking, one retry, then the wake fails on the same machine, nothing forked, imported or killed", async () => {
     const { backend, tars, untars } = guestBackend();
     const { port, close: closePort } = await droppingPort();
     onTestFinished(closePort);
@@ -4589,26 +4585,25 @@ describe("runtime verified wake", () => {
       expect(tars).toEqual(["m1"]);
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
 
-      const woken = await rt.workspaces.wake(ws.id);
+      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/^the wake of m1 did not finish: attempt 1: daemon on m1 did not answer/);
       const phases = events.filter(e => e.type === "workspace.status").map(e => (e as { status: { phase: string } }).status.phase);
       expect(phases.slice(0, 3)).toEqual(["pausing", "napping", "waking"]);
       expect(m1.resumes).toBe(2);
-      expect(m1.killed).toBe(true);
-      expect(woken.machineId).toBe("m2");
-      expect(woken.phase).toBe("running");
-      expect(backend.machines[1]!.spec.fromSnapshot).toBe("snap_g");
-      expect(untars).toEqual(["m2"]);
-      expect(events.find(e => e.type === "workspace.woken")).toMatchObject({ machineId: "m2", resurrected: true });
+      expect(m1.killed).toBe(false);
+      expect(backend.machines).toHaveLength(1);
+      expect(untars).toEqual([]);
+      expect((await rt.workspaces.get(ws.id)).machineId).toBe("m1");
+      expect(events.some(e => e.type === "workspace.woken")).toBe(false);
       const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { phase: string; reason?: string; machineId: string } };
-      expect(last.status.phase).toBe("running");
-      expect(last.status.machineId).toBe("m2");
-      expect(last.status.reason).toMatch(/attempt 1: daemon on m1 did not answer within 300 ms.*created as \{"cpu":2,"memMb":4096.*attempt 2:/);
+      expect(last.status.phase).toBe("napping");
+      expect(last.status.machineId).toBe("m1");
+      expect(last.status.reason).toMatch(/attempt 1: daemon on m1 did not answer within 300 ms.*created as \{"cpu":2,"memMb":4096.*attempt 2:.*; the workspace keeps this machine and its disk$/);
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it("a backend declaring one wake attempt: resume, the check fails, no re-pause, and the fork replaces the machine", async () => {
+  it("a backend declaring one wake attempt: resume, the check fails, no re-pause, and the wake fails on the same machine", async () => {
     const { backend, untars } = guestBackend();
     const { port, close: closePort } = await droppingPort();
     onTestFinished(closePort);
@@ -4626,16 +4621,16 @@ describe("runtime verified wake", () => {
       m1.pause = async () => { pauses++; await pause(); };
       await rt.workspaces.nap(ws.id);
       expect(pauses).toBe(1);
-      const woken = await rt.workspaces.wake(ws.id);
+      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/daemon on m1 did not answer within 300 ms/);
       // One resume and no re-pause after the nap's own: a provider that bills every start is not asked for a second.
       expect(m1.resumes).toBe(1);
       expect(pauses).toBe(1);
-      expect(m1.killed).toBe(true);
-      expect(woken.machineId).toBe("m2");
-      expect(untars).toEqual(["m2"]);
+      expect(m1.killed).toBe(false);
+      expect(backend.machines).toHaveLength(1);
+      expect(untars).toEqual([]);
       const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { reason?: string } };
       // The fault names the backend's own daemon budget, on a wake as on a fork.
-      expect(last.status.reason).toMatch(/^attempt 1: daemon on m1 did not answer within 300 ms/);
+      expect(last.status.reason).toMatch(/^the wake of m1 did not finish: attempt 1: daemon on m1 did not answer within 300 ms/);
       expect(last.status.reason).not.toContain("attempt 2");
     } finally {
       vi.unstubAllGlobals();
@@ -4682,8 +4677,8 @@ describe("runtime verified wake", () => {
       const m1 = backend.machines[0]!;
       m1.daemonAnswers = async () => false;
       await rt.workspaces.nap(ws.id);
-      const woken = await rt.workspaces.wake(ws.id);
-      expect(woken.machineId).toBe("m2");
+      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/nothing listens/);
+      expect((await rt.workspaces.get(ws.id)).machineId).toBe("m1");
       const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { reason?: string } };
       expect(last.status.reason).toContain("nothing listens on the daemon's port inside m1");
     } finally {
@@ -4704,7 +4699,7 @@ describe("runtime verified wake", () => {
         throw new Error("container m1 is not running");
       };
       await rt.workspaces.nap(ws.id);
-      await rt.workspaces.wake(ws.id);
+      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/could not be asked/);
       const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { reason?: string } };
       expect(last.status.reason).toContain("could not be asked (container m1 is not running)");
       expect(last.status.reason).not.toContain("did not answer within");
@@ -4728,10 +4723,10 @@ describe("runtime verified wake", () => {
       m1.shape = { cpu: 2, memMb: 2048, createdAt: "2026-09-02T19:03:35.000Z" };
 
       const started = Date.now();
-      const woken = await rt.workspaces.wake(ws.id);
+      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/memMb 2048 != 4096/);
       expect(Date.now() - started).toBeLessThan(2_000);
       expect(minted).toBe(0);
-      expect(woken.machineId).toBe("m2");
+      expect((await rt.workspaces.get(ws.id)).machineId).toBe("m1");
       const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { reason?: string } };
       expect(last.status.reason).toContain("memMb 2048 != 4096");
       expect(last.status.reason).toContain('provider view {"cpu":2,"memMb":2048,"createdAt":"2026-09-02T19:03:35.000Z"}');
@@ -4796,7 +4791,7 @@ describe("runtime verified wake", () => {
         expect(m1.killed).toBe(false);
         expect(backend.machines).toHaveLength(1);
         expect(untars).toEqual([]);
-        expect(events.find(e => e.type === "workspace.woken")).toMatchObject({ machineId: "m1", resurrected: false });
+        expect(events.find(e => e.type === "workspace.woken")).toMatchObject({ machineId: "m1" });
         const last = events.filter(e => e.type === "workspace.status").at(-1) as { status: { reach: { state: string }; reason?: string } };
         expect(last.status.reach.state).toBe("reachable");
         expect(last.status.reason).toBeUndefined();
@@ -4959,7 +4954,7 @@ describe("runtime workspace size", () => {
     expect((await rt2.status.list())[0]).toMatchObject({ id: ws.id, size: built });
   });
 
-  it("a resurrected fork asks for the recorded size and records what came back; an upgrade records its new size", async () => {
+  it("a rebuilt fork asks for the recorded size and records what came back; an upgrade records its new size", async () => {
     const backend = clampingBackend();
     backend.execImpl = (_m, cmd) => (cmd.includes("ls -A /root") ? { exitCode: 0, stdout: "notes.md\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: { method?: string }) =>
@@ -4970,9 +4965,7 @@ describe("runtime workspace size", () => {
       const events: EventUnion[] = [];
       rt.events.on("workspace.status", e => events.push(e));
       const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-      await rt.workspaces.nap(ws.id);
-      backend.machines[0]!.killed = true;
-      await rt.workspaces.wake(ws.id);
+      await rt.workspaces.rebuild(ws.id);
       expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 2048 });
       const pushed = events.at(-1) as { status: { size: { cpu: number; memMb: number } } };
       expect(pushed.status.size).toEqual({ cpu: 2, memMb: 2048 });
@@ -5036,7 +5029,7 @@ describe("runtime workspace screen", () => {
     expect((await headless.status.list())[0]).not.toHaveProperty("screen");
   });
 
-  it("the stream survives a restart and a wake on the same machine; a resurrect refreshes it from the new machine", async () => {
+  it("the stream survives a restart and a wake on the same machine; a rebuild refreshes it from the new machine", async () => {
     const backend = desktopBackend();
     const store = memoryStore();
     const rt1 = createRuntime({ backend, store, adapters: {} });
@@ -5051,11 +5044,9 @@ describe("runtime workspace screen", () => {
 
     const pushed: EventUnion[] = [];
     rt2.events.on("workspace.status", e => pushed.push(e));
-    await rt2.workspaces.nap(ws.id);
-    backend.machines[0]!.killed = true;
-    const resurrected = await rt2.workspaces.wake(ws.id);
-    expect(resurrected.machineId).toBe("m2");
-    expect(resurrected.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
+    const rebuilt = await rt2.workspaces.rebuild(ws.id);
+    expect(rebuilt.machineId).toBe("m2");
+    expect(rebuilt.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
     const last = pushed.at(-1) as { status: { screen?: { streamUrl: string } } };
     expect(last.status.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
     expect((await store.get("workspaces", ws.id) as { screen?: unknown }).screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
@@ -5073,7 +5064,7 @@ describe("runtime fork kind", () => {
     smoke: { cmd: "true", exitCode: 0 },
   });
 
-  it("forks a desktop golden as kind desktop on create, resurrect and upgrade, carrying the stream on the view", async () => {
+  it("forks a desktop golden as kind desktop on create, rebuild and upgrade, carrying the stream on the view", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version("desktop")] });
@@ -5083,11 +5074,9 @@ describe("runtime fork kind", () => {
     expect(backend.machines[0]!.spec.kind).toBe("desktop");
     expect(ws.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
 
-    await rt.workspaces.nap(ws.id);
-    backend.machines[0]!.killed = true;
-    const woken = await rt.workspaces.wake(ws.id);
+    const rebuilt = await rt.workspaces.rebuild(ws.id);
     expect(backend.machines[1]!.spec.kind).toBe("desktop");
-    expect(woken.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
+    expect(rebuilt.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
 
     const upgraded = await rt.workspaces.upgrade(ws.id);
     expect(backend.machines[2]!.spec.kind).toBe("desktop");
@@ -6772,8 +6761,6 @@ describe("create idempotency keys", () => {
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
     const ws = await createOn(rt, { golden: "snap_g", name: "x" });
-    await rt.workspaces.nap(ws.id);
-    backend.machines[0]!.killed = true;
     let lose = true;
     const specs = intercept(backend, (spec, real) => {
       if (lose) {
@@ -6782,10 +6769,10 @@ describe("create idempotency keys", () => {
       }
       return real(spec);
     });
-    await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("fetch failed");
+    await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow("fetch failed");
     expect(await store.list("creates")).toHaveLength(1);
-    const woken = await rt.workspaces.wake(ws.id);
-    expect(woken.machineId).toBe("m2");
+    const rebuilt = await rt.workspaces.rebuild(ws.id);
+    expect(rebuilt.machineId).toBe("m2");
     expect(specs).toHaveLength(2);
     expect(specs[1]!.idempotencyKey).toBe(specs[0]!.idempotencyKey);
     expect(specs[1]!.labels?.["createdAt"]).toBe(specs[0]!.labels?.["createdAt"]);
@@ -6861,15 +6848,13 @@ describe("create idempotency keys", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const ws = await createOn(rt, { golden: "snap_g", name: "x" });
-      await rt.workspaces.nap(ws.id);
-      backend.machines[0]!.killed = true;
       const specs = intercept(backend, async (spec, real) => {
         const m = await real(spec);
         if (specs.length === 1) m.killed = true;
         return Object.assign(Object.create(m) as typeof m, { replayed: specs.length <= 2 });
       });
-      const woken = await rt.workspaces.wake(ws.id);
-      expect(woken.machineId).toBe("m3");
+      const rebuilt = await rt.workspaces.rebuild(ws.id);
+      expect(rebuilt.machineId).toBe("m3");
       expect(specs.map(s => s.idempotencyKey)).toHaveLength(2);
       expect(specs[1]!.idempotencyKey).not.toBe(specs[0]!.idempotencyKey);
       const notes = warn.mock.calls.map(c => String(c[0]));
@@ -6885,22 +6870,20 @@ describe("create idempotency keys", () => {
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
     const ws = await createOn(rt, { golden: "snap_g", name: "x" });
-    await rt.workspaces.nap(ws.id);
-    backend.machines[0]!.killed = true;
     let losses = 2;
     const specs = intercept(backend, (spec, real) => {
       if (losses-- > 0) throw lostAnswer();
       return real(spec);
     });
-    await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("fetch failed");
+    await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow("fetch failed");
     const purpose = `workspace/${ws.id}`;
     const left = (await store.get("creates", purpose)) as { key: string; pid: number };
     expect(left.pid).toBe(process.pid);
     const deadPid = 99_999_999;
     await store.put("creates", purpose, { ...left, pid: deadPid });
-    await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("fetch failed");
+    await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow("fetch failed");
     expect(await store.get("creates", purpose)).toMatchObject({ key: left.key, pid: process.pid });
-    await rt.workspaces.wake(ws.id);
+    await rt.workspaces.rebuild(ws.id);
     expect(specs.map(s => s.idempotencyKey)).toEqual([left.key, left.key, left.key]);
     expect(await store.list("creates")).toEqual([]);
   });
@@ -7914,8 +7897,8 @@ describe("gone machines", () => {
     const { backend, store, rt, a } = await hydratedGone();
     const words = (await rt.workspaces.get(a.id)).gone!;
     expect(words).toMatch(/^machine m1 is gone at the provider: the record load found it gone at /);
-    await expect(rt.workspaces.wake(a.id)).rejects.toThrow(`Workspace machine is gone; rebuild it to wake (${words})`);
-    await expect(rt.sessions.start(a.id, { prompt: "hi" })).rejects.toThrow(`Workspace machine is gone; rebuild it to send (${words})`);
+    await expect(rt.workspaces.wake(a.id)).rejects.toThrow(`a's machine is gone with its disk, so work that was not pushed is lost; rebuild it to wake, which brings back its home folder from the last saved nap (${words})`);
+    await expect(rt.sessions.start(a.id, { prompt: "hi" })).rejects.toThrow(`a's machine is gone with its disk, so work that was not pushed is lost; rebuild it to send, which brings back its home folder from the last saved nap (${words})`);
     expect(await rt.workspaces.nap(a.id)).toMatchObject({ phase: "gone" });
     expect(backend.machines).toHaveLength(2);
 

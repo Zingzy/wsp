@@ -48,6 +48,10 @@ machineId?: string, } | { "op": "ports.watch" } | { "op": "manifest.get" } | { "
  * that workspace sees it, and the operation is answered inside it. Without one the path is resolved under
  * this daemon's own roots.
  */
+machineId?: string, } | { "op": "fs.files", cwd: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
 machineId?: string, } | { "op": "fs.read", path: string, encoding?: FsReadEncoding, 
 /**
  * The workspace this frame is for, as on fs.list above.
@@ -78,6 +82,10 @@ machineId?: string, } | { "op": "git.pr", cwd: string, base?: string, title?: st
  * The workspace this frame is for, as on fs.list above.
  */
 machineId?: string, } | { "op": "git.prState", cwd: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.prList", cwd: string, 
 /**
  * The workspace this frame is for, as on fs.list above.
  */

@@ -1,0 +1,62 @@
+{
+  "tool": "agents_addtools",
+  "cases": [
+    {
+      "case": "added",
+      "arguments": {
+        "agent": "claude"
+      },
+      "replies": {
+        "agents.addTools": "{\"id\":1,\"ok\":true,\"file\":\"~/.claude.json\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Claude Code now has the wsp tools: ~/.claude.json\"}],\"structuredContent\":{\"file\":\"~/.claude.json\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "agents.addTools",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "claude"
+        }
+      ]
+    },
+    {
+      "case": "an agent the catalog does not know",
+      "arguments": {
+        "agent": "zed-x"
+      },
+      "replies": {
+        "agents.addTools": "{\"id\":1,\"ok\":true,\"file\":\"~/.zed/settings.json\",\"more\":true}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"zed-x now has the wsp tools: ~/.zed/settings.json\"}],\"structuredContent\":{\"file\":\"~/.zed/settings.json\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "agents.addTools",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "zed-x"
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "agent": "codex"
+      },
+      "replies": {
+        "agents.addTools": "{\"id\":1,\"ok\":false,\"error\":\"Codex is not installed here\",\"kind\":\"not-found\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Codex is not installed here\"}],\"structuredContent\":{\"error\":\"Codex is not installed here\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "agents.addTools",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "codex"
+        }
+      ]
+    }
+  ]
+}

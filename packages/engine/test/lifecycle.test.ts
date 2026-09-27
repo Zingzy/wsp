@@ -42,18 +42,19 @@ describe("Workspace lifecycle", () => {
     await ws.wake();
     await expect(ws.checkpoint("v2")).rejects.toThrow("snapshot v2 refused: resumed");
   });
-  it("wake resurrects from golden when the paused machine vanished", async () => {
+  it("a wake of a machine that vanished while paused throws the provider's 404 and forks nothing", async () => {
     const dead = stubMachine({ resume: async () => { throw Object.assign(new Error("gone"), { kind: "missing" }); } });
-    let resurrected = false;
+    let forked = false;
     const ws = new Workspace(dead, {
       goldenSnapshot: "snap_g",
       wakeAttempts: 2,
-      resurrect: async () => { resurrected = true; return stubMachine({ id: "m2" }); },
+      resurrect: async () => { forked = true; return stubMachine({ id: "m2" }); },
     });
     await ws.nap();
-    await ws.wake();
-    expect(resurrected).toBe(true);
-    expect(ws.machineId).toBe("m2");
+    await expect(ws.wake()).rejects.toMatchObject({ kind: "missing" });
+    expect(forked).toBe(false);
+    expect(ws.machineId).toBe("m1");
+    expect(ws.currentPhase).toBe("napping");
   });
 });
 
@@ -94,7 +95,7 @@ describe("Workspace verified wake", () => {
     expect(seen).toEqual(["waking"]);
     expect(ws.currentPhase).toBe("running");
     expect(ws.machineId).toBe("m1");
-    expect(result).toEqual({ resurrected: false });
+    expect(result).toEqual({});
     expect(calls.resume).toBe(1);
   });
 
@@ -111,33 +112,28 @@ describe("Workspace verified wake", () => {
     const result = await ws.wake();
     expect(calls).toEqual({ pause: 2, resume: 2, kill: 0 });
     expect(ws.machineId).toBe("m1");
-    expect(result.resurrected).toBe(false);
     expect(result.reason).toContain("daemon did not answer");
   });
 
-  it("two failed checks resurrect from golden, restore the stashed vault, then kill the zombie", async () => {
+  it("two failed checks fail the wake with both faults, and the machine stays: nothing forked, nothing restored, nothing killed", async () => {
     const { machine, calls } = counting();
     const order: string[] = [];
-    const replacement = stubMachine({ id: "m2" });
     const ws = new Workspace(machine, {
       goldenSnapshot: "snap_g",
       wakeAttempts: 2,
-      resurrect: async () => { order.push("resurrect"); return replacement; },
+      resurrect: async () => { order.push("resurrect"); return stubMachine({ id: "m2" }); },
       restoreVault: async m => { order.push(`restore:${m.id}`); },
       wakeCheck: async m => `memMb 2048 != 4096 on ${m.id}`,
     });
     await ws.nap();
-    const result = await ws.wake();
-    expect(calls).toEqual({ pause: 2, resume: 2, kill: 1 });
-    expect(order).toEqual(["resurrect", "restore:m2"]);
-    expect(ws.machineId).toBe("m2");
-    expect(ws.isFirstLife).toBe(true);
-    expect(ws.currentPhase).toBe("running");
-    expect(result.resurrected).toBe(true);
-    expect(result.reason).toMatch(/attempt 1: memMb 2048 != 4096 on m1; attempt 2: memMb 2048/);
+    await expect(ws.wake()).rejects.toThrow(/^the wake of m1 did not finish: attempt 1: memMb 2048 != 4096 on m1; attempt 2: memMb 2048 != 4096 on m1; the workspace keeps this machine and its disk$/);
+    expect(calls).toEqual({ pause: 2, resume: 2, kill: 0 });
+    expect(order).toEqual([]);
+    expect(ws.machineId).toBe("m1");
+    expect(ws.currentPhase).toBe("napping");
   });
 
-  it("a workspace given wakeAttempts 1 never re-pauses: one resume, a failed check, and the fork replaces it", async () => {
+  it("a workspace given wakeAttempts 1 never re-pauses: one resume, a failed check, and the wake fails on the same machine", async () => {
     const { machine, calls } = counting();
     const ws = new Workspace(machine, {
       goldenSnapshot: "snap_g",
@@ -146,32 +142,25 @@ describe("Workspace verified wake", () => {
       wakeCheck: async () => "daemon did not answer",
     });
     await ws.nap();
-    const result = await ws.wake();
+    await expect(ws.wake()).rejects.toThrow("the wake of m1 did not finish: attempt 1: daemon did not answer");
     // A provider that bills every start declares one attempt: the re-pause and second resume never happen.
-    expect(calls).toEqual({ pause: 1, resume: 1, kill: 1 });
-    expect(ws.machineId).toBe("m2");
-    expect(result).toEqual({ resurrected: true, reason: "attempt 1: daemon did not answer" });
+    expect(calls).toEqual({ pause: 1, resume: 1, kill: 0 });
+    expect(ws.machineId).toBe("m1");
   });
 
-  it("a resume that ends with the guest unusable is a fault: no check runs, the fork replaces the machine, the vault comes back, and the reason carries the provider's words", async () => {
+  it("a resume that ends with the guest unusable fails the wake with the provider's words: no check runs, no fork, and the machine stays", async () => {
     const { machine, calls } = counting({ resume: async () => { throw new GuestUnusableError("m1", "Box by ASCII", "Error 24", 200); } });
-    const restored: string[] = [];
     const ws = new Workspace(machine, {
       goldenSnapshot: "snap_g",
       wakeAttempts: 2,
       resurrect: async () => stubMachine({ id: "m2" }),
-      restoreVault: async m => { restored.push(m.id); },
       wakeCheck: async () => { throw new Error("a machine nothing can run on is never checked"); },
     });
     await ws.nap();
-    const result = await ws.wake();
-    expect(result.resurrected).toBe(true);
-    expect(result.reason).toMatch(/Box by ASCII left m1 running but nothing on it can run: Error 24/);
-    expect(ws.machineId).toBe("m2");
-    expect(ws.currentPhase).toBe("running");
-    expect(restored).toEqual(["m2"]);
-    // The fault is the machine's, not the moment's: no second resume, no re-pause, and the old box is killed.
-    expect(calls).toEqual({ pause: 1, resume: 0, kill: 1 });
+    await expect(ws.wake()).rejects.toThrow(/Box by ASCII left m1 running but nothing on it can run: Error 24/);
+    expect(ws.machineId).toBe("m1");
+    expect(ws.currentPhase).toBe("napping");
+    expect(calls).toEqual({ pause: 1, resume: 0, kill: 0 });
   });
 
   it("nap stashes the vault before the pause", async () => {
@@ -180,22 +169,6 @@ describe("Workspace verified wake", () => {
     const ws = new Workspace(machine, { goldenSnapshot: "snap_g", wakeAttempts: 2, stashVault: async () => { order.push("stash"); } });
     await ws.nap();
     expect(order).toEqual(["stash", "pause"]);
-  });
-
-  it("a machine that vanished while paused is replaced and gets the stashed vault too", async () => {
-    const dead = stubMachine({ resume: async () => { throw Object.assign(new Error("gone"), { kind: "missing" }); } });
-    const restored: string[] = [];
-    const ws = new Workspace(dead, {
-      goldenSnapshot: "snap_g",
-      wakeAttempts: 2,
-      resurrect: async () => stubMachine({ id: "m2" }),
-      restoreVault: async m => { restored.push(m.id); },
-    });
-    await ws.nap();
-    const result = await ws.wake();
-    expect(restored).toEqual(["m2"]);
-    expect(result.resurrected).toBe(true);
-    expect(result.reason).toContain("vanished");
   });
 
   it("noteRunning puts a napping phase back to running, so the next nap pauses the machine for real", async () => {
@@ -210,7 +183,7 @@ describe("Workspace verified wake", () => {
     expect(ws.currentPhase).toBe("napping");
   });
 
-  it("a failed wake with no resurrect hook throws and leaves the workspace napping", async () => {
+  it("a failed wake with no resurrect hook throws and leaves the workspace napping, as one with a hook does", async () => {
     const { machine } = counting();
     const ws = new Workspace(machine, { goldenSnapshot: "snap_g", wakeAttempts: 2, wakeCheck: async () => "no daemon" });
     await ws.nap();

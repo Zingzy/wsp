@@ -1,0 +1,63 @@
+{
+  "tool": "skills_remove",
+  "cases": [
+    {
+      "case": "removed",
+      "arguments": {
+        "name": "review\tx",
+        "workspace": "landing",
+        "project": true
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
+        "skills.remove": "{\"id\":1,\"ok\":true,\"removed\":[\"~/.agents/skills/review\",\"~/.claude/skills/review\u0085\"]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"review x is gone from ~/.agents/skills/review, ~/.claude/skills/review.\"}],\"structuredContent\":{\"removed\":[\"~/.agents/skills/review\",\"~/.claude/skills/review\\u0085\"]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "landing"
+        },
+        {
+          "op": "skills.remove",
+          "target": {
+            "workspaceId": "ws_1"
+          },
+          "name": "review\tx",
+          "project": true
+        }
+      ]
+    },
+    {
+      "case": "both aimed",
+      "arguments": {
+        "name": "review",
+        "workspace": "landing",
+        "on": "attic"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"A workspace already names its computer; give the workspace or --on <computer>, not both. skills_remove takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"A workspace already names its computer; give the workspace or --on <computer>, not both. skills_remove takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "name": "wsp"
+      },
+      "replies": {
+        "skills.remove": "{\"id\":1,\"ok\":false,\"error\":\"wsp's own skill is always on\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"wsp's own skill is always on\"}],\"structuredContent\":{\"error\":\"wsp's own skill is always on\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "skills.remove",
+          "target": {
+            "placeId": "here"
+          },
+          "name": "wsp"
+        }
+      ]
+    }
+  ]
+}

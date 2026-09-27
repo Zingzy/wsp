@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use wsp_frames::{words, DaemonErrorCode, GitPrReply, PullRequest};
+use wsp_frames::{numbers, words, DaemonErrorCode, GitPrListReply, GitPrReply, HostItem, HostItemKind, PullRequest};
 
 use crate::git::Runs;
 use crate::paths::OpError;
@@ -27,6 +27,10 @@ pub(crate) trait PullRequests: Sync {
     /// The pull request one of those lines answered with, off its JSON and never its prose; nothing where the JSON
     /// is not one this module reads.
     fn read(&self, stdout: &str) -> Option<PullRequest>;
+    /// The line that answers with the repository's open items of one kind as JSON, at most GIT_PR_LIST_CAP of them.
+    fn list_argv(&self, kind: HostItemKind) -> Vec<String>;
+    /// The items one of those lines answered with, off its JSON; nothing where the JSON is not one this module reads.
+    fn read_list(&self, kind: HostItemKind, stdout: &str) -> Option<Vec<HostItem>>;
     /// The exit code that program answers with when it is there and nobody is signed in, where it has one of its
     /// own. Read off the code and not the sentence: a sentence is the program's to reword between releases.
     fn sign_in_exit(&self) -> Option<i32>;
@@ -130,6 +134,51 @@ pub(crate) async fn open<R: Runs>(
     match find(runner, ask).await? {
         Some(pr) => Ok(GitPrReply { pr, created: true }),
         None => Err(OpError::plain(format!("{} opened the pull request and then answered with none for {}", host.program(), ask.branch))),
+    }
+}
+
+/// The repository's open pull requests, then its open issues. A project with no remote has none to list; a host with
+/// no signed-in command line here is an empty list with the note saying so; a list the command line refused for any
+/// other reason, such as a repository with issues turned off, is left out with the first line it said as the note,
+/// which the composer shows in a one-line slot, and the other list still stands.
+pub(crate) async fn list<R: Runs>(runner: &R, cwd: &Path) -> Result<GitPrListReply, OpError> {
+    let Some((_, remote_url)) = crate::bring_back::remote_if_any(runner, cwd).await? else {
+        return Ok(GitPrListReply { items: Vec::new(), note: None, no_cli_for: None });
+    };
+    let named = host_name(&remote_url).unwrap_or_else(|| remote_url.clone());
+    let unlisted = || GitPrListReply { items: Vec::new(), note: None, no_cli_for: Some(named.clone()) };
+    let ask = Ask { cwd, remote_url: &remote_url, branch: "" };
+    let host = match cli_for(runner, &ask).await {
+        Ok(host) => host,
+        Err(e) if e.code == Some(DaemonErrorCode::NoHostCli) => return Ok(unlisted()),
+        Err(e) => return Err(e),
+    };
+    let mut reply = GitPrListReply { items: Vec::new(), note: None, no_cli_for: None };
+    for kind in [HostItemKind::PullRequest, HostItemKind::Issue] {
+        let (code, stdout, stderr) = match run_cli(runner, host, &ask, &host.list_argv(kind)).await {
+            Ok(done) => done,
+            Err(e) if e.code == Some(DaemonErrorCode::NoHostCli) => return Ok(unlisted()),
+            Err(e) => return Err(e),
+        };
+        match (code, host.read_list(kind, &stdout)) {
+            (Some(0), Some(items)) => reply.items.extend(items),
+            _ if reply.note.is_none() => {
+                let first = |text: &str| text.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_owned);
+                let said = first(&stderr).or_else(|| first(&stdout)).unwrap_or_default();
+                reply.note = Some(format!("{} said: {said}", host.program()));
+            }
+            _ => {}
+        }
+    }
+    Ok(reply)
+}
+
+/// A body as a list carries it: at most GIT_PR_LIST_BODY_CAP characters, the cut marked with an ellipsis.
+pub(crate) fn cut_body(body: &str) -> String {
+    let body = body.trim();
+    match body.char_indices().nth(numbers::GIT_PR_LIST_BODY_CAP) {
+        Some((at, _)) => format!("{}…", &body[..at]),
+        None => body.to_owned(),
     }
 }
 
@@ -283,6 +332,73 @@ mod tests {
         // And a branch with no pull request is still a branch with no pull request rather than a refusal.
         let quiet = Recorded::new(&["gh"]).answering_said(vec![(1, "", "no pull requests found for branch")]);
         assert_eq!(find(&quiet, &ask).await.unwrap(), None);
+    }
+
+    const PR_JSON: &str =
+        "[{\"number\":42,\"title\":\"Login breaks on Safari\",\"body\":\"cookie\",\"url\":\"https://github.com/o/r/pull/42\"}]";
+    const ISSUE_JSON: &str = "[{\"number\":7,\"title\":\"Add dark mode\",\"body\":\"\",\"url\":\"https://github.com/o/r/issues/7\"}]";
+
+    #[tokio::test]
+    async fn the_open_pull_requests_then_issues_are_listed_by_argv_in_the_checkout() {
+        let runner =
+            Recorded::new(&["gh"]).answering(vec![(0, "origin\n"), (0, "git@github.com:o/r.git\n"), (0, PR_JSON), (0, ISSUE_JSON)]);
+        let listed = list(&runner, Path::new("/private/tmp/proof/repo")).await.unwrap();
+        assert_eq!(listed.note, None);
+        let numbers: Vec<(u64, HostItemKind)> = listed.items.iter().map(|i| (i.number, i.kind)).collect();
+        assert_eq!(numbers, [(42, HostItemKind::PullRequest), (7, HostItemKind::Issue)]);
+        let calls = runner.asked();
+        assert!(calls.iter().all(|c| c.cwd == "/private/tmp/proof/repo" && c.stdin.is_none()), "a call ran somewhere else");
+        assert_eq!(calls[2].program, "gh");
+        assert_eq!(calls[2].args, ["pr", "list", "--state", "open", "--limit", "50", "--json", "number,title,body,url"]);
+        assert_eq!(calls[3].args, ["issue", "list", "--state", "open", "--limit", "50", "--json", "number,title,body,url"]);
+    }
+
+    #[tokio::test]
+    async fn a_gh_nobody_signed_in_lists_nothing_with_one_line_saying_why() {
+        let runner =
+            Recorded::new(&["gh"]).answering_said(vec![(0, "origin\n", ""), (0, "https://github.com/o/r\n", ""), (4, "", SIGN_IN_SAID)]);
+        let listed = list(&runner, Path::new("/private/tmp/proof/repo")).await.unwrap();
+        assert!(listed.items.is_empty());
+        assert_eq!((listed.no_cli_for.as_deref(), listed.note), (Some("github.com"), None));
+        // No gh on the PATH reads the same, and nothing is run for it.
+        let bare = Recorded::new(&[]).answering(vec![(0, "origin\n"), (0, "git@github.com:o/r.git\n")]);
+        let listed = list(&bare, Path::new("/private/tmp/proof/repo")).await.unwrap();
+        assert_eq!((listed.no_cli_for.as_deref(), listed.note), (Some("github.com"), None));
+        assert!(bare.asked().iter().all(|c| c.program == "git"));
+    }
+
+    #[tokio::test]
+    async fn a_list_gh_refused_is_left_out_with_what_it_said_and_the_other_stands() {
+        let said = "the 'o/r' repository has disabled issues";
+        let runner = Recorded::new(&["gh"]).answering_said(vec![
+            (0, "origin\n", ""),
+            (0, "git@github.com:o/r.git\n", ""),
+            (0, PR_JSON, ""),
+            (1, "", said),
+        ]);
+        let listed = list(&runner, Path::new("/private/tmp/proof/repo")).await.unwrap();
+        assert_eq!(listed.items.len(), 1);
+        assert_eq!(listed.note, Some(format!("gh said: {said}")));
+    }
+
+    #[tokio::test]
+    async fn a_list_gh_refused_in_two_lines_is_noted_by_its_first() {
+        let runner = Recorded::new(&["gh"]).answering_said(vec![
+            (0, "origin\n", ""),
+            (0, "git@github.com:o/r.git\n", ""),
+            (1, "", "\nerror connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n"),
+            (1, "", "error connecting to api.github.com\n"),
+        ]);
+        let listed = list(&runner, Path::new("/private/tmp/proof/repo")).await.unwrap();
+        assert_eq!(listed.note.as_deref(), Some("gh said: error connecting to api.github.com"));
+    }
+
+    #[tokio::test]
+    async fn a_project_with_no_remote_has_nothing_to_list_and_asks_no_host() {
+        let runner = Recorded::new(&["gh"]).answering(vec![(0, "")]);
+        let listed = list(&runner, Path::new("/private/tmp/proof/repo")).await.unwrap();
+        assert_eq!((listed.items.len(), listed.note), (0, None));
+        assert_eq!(runner.asked().len(), 1);
     }
 
     #[tokio::test]
