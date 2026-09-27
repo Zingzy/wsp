@@ -29,15 +29,17 @@ export const INITIALIZED_LINE = line({ method: "initialized" });
 export interface ThreadOptions {
   cwd?: string;
   model?: string;
+  /** The model's faster output, on a model the catalog marks as offering it. */
+  serviceTier?: "fast";
   access: AccessParams;
 }
 
 export function threadStartLine(o: ThreadOptions): string {
-  return line({ id: REQUEST.thread, method: "thread/start", params: { ...named({ cwd: o.cwd, model: o.model }), ...o.access } });
+  return line({ id: REQUEST.thread, method: "thread/start", params: { ...named({ cwd: o.cwd, model: o.model, serviceTier: o.serviceTier }), ...o.access } });
 }
 
 export function threadResumeLine(o: ThreadOptions & { threadId: string }): string {
-  return line({ id: REQUEST.thread, method: "thread/resume", params: { threadId: o.threadId, ...named({ cwd: o.cwd, model: o.model }), ...o.access } });
+  return line({ id: REQUEST.thread, method: "thread/resume", params: { threadId: o.threadId, ...named({ cwd: o.cwd, model: o.model, serviceTier: o.serviceTier }), ...o.access } });
 }
 
 /** A copy of the thread that is never written to disk, in a read-only sandbox that asks nobody: what a side question

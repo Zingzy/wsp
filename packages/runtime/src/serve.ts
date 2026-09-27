@@ -1372,6 +1372,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
                 ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),
                 ...(msg.contextWindow !== undefined ? { contextWindow: msg.contextWindow } : {}),
+                ...(msg.fast !== undefined ? { fast: msg.fast } : {}),
                 ...(msg.startedBy !== undefined ? { startedBy: msg.startedBy } : {}),
                 ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
                 ...(msg.attempt !== undefined ? { attempt: msg.attempt } : {}),

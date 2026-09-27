@@ -106,7 +106,7 @@ export function scriptedAgent(reply: (prompt: string) => string, names?: (title:
         let settle!: (r: TurnResult) => void;
         const waiting = new Promise<TurnResult>(r => (settle = r));
         queueMicrotask(() => {
-          o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+          o.onEvent({ type: "session.start", sessionId, model: o.model ?? "claude-sonnet-4-5" });
           o.onEvent({ type: "permission.ask", sessionId, ask: SCRIPTED_ASK });
         });
         return {
@@ -127,7 +127,7 @@ export function scriptedAgent(reply: (prompt: string) => string, names?: (title:
       const text = cut ? "" : reply(o.prompt);
       const result: TurnResult = cut ? { status: "failed", error: CUT_LINE } : text === "" ? { status: "failed", error: "the harness died" } : { status: "completed", text };
       const finished = Promise.resolve().then(() => {
-        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+        o.onEvent({ type: "session.start", sessionId, model: o.model ?? "claude-sonnet-4-5" });
         if (text !== "") {
           o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: text.slice(0, 4) });
           o.onEvent({ type: "turn.delta", sessionId, kind: "tool_use", text: JSON.stringify({ command: "ls" }), toolName: "Bash", toolUseId: "toolu_1" });
@@ -164,7 +164,7 @@ export function bornDeadAgent(reply: (prompt: string) => string) {
       }
       const result: TurnResult = { status: "completed", text: reply(o.prompt) };
       const finished = Promise.resolve().then(() => {
-        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+        o.onEvent({ type: "session.start", sessionId, model: o.model ?? "claude-sonnet-4-5" });
         o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: result.text ?? "" });
         o.onEvent({ type: "turn.done", sessionId, result });
         o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
@@ -187,7 +187,7 @@ export function doneOnlyAgent(reply: (prompt: string) => string) {
       const sessionId = o.resume ?? randomUUID();
       const result: TurnResult = { status: "completed", text: reply(o.prompt) };
       const finished = Promise.resolve().then(() => {
-        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+        o.onEvent({ type: "session.start", sessionId, model: o.model ?? "claude-sonnet-4-5" });
         o.onEvent({ type: "turn.delta", sessionId, kind: "text", text: result.text ?? "" });
         o.onEvent({ type: "turn.done", sessionId, result });
         return result;
@@ -290,7 +290,7 @@ export function sayingAgent(said: ReadonlyArray<ScriptedSay | ScriptedCall>, res
     start: o => {
       const sessionId = o.resume ?? randomUUID();
       const finished = Promise.resolve().then(() => {
-        o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+        o.onEvent({ type: "session.start", sessionId, model: o.model ?? "claude-sonnet-4-5" });
         for (const [i, piece] of said.entries()) {
           if ("kind" in piece) {
             o.onEvent({ type: "turn.delta", sessionId, kind: piece.kind, text: piece.text, ...(piece.messageId !== undefined ? { messageId: piece.messageId } : {}) });

@@ -22,6 +22,8 @@ export interface StartOptions {
   effort?: string;
   permissionMode?: string;
   contextWindow?: string;
+  /** The model's faster output for this turn. */
+  fast?: boolean;
   /** The name the session is opened under; the CLI records it as the person's own, so nothing generated replaces it. */
   title?: string;
   /** Images for this turn, read off their bytes: this CLI takes them inline, so none of them is on the machine. */
@@ -744,6 +746,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       effort: options.effort,
       permissionMode: options.permissionMode,
       contextWindow: options.contextWindow,
+      ...(options.fast === true ? { fast: true } : {}),
       ...(options.title !== undefined ? { name: options.title } : {}),
       ...(options.mcpServers !== undefined ? { mcpServers: options.mcpServers } : {}),
     });

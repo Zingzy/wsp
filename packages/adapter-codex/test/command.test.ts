@@ -2,6 +2,7 @@
 import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LAUNCH_ENV, TURN_TOKEN_ENV } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { accessParams, buildCommand, buildEnv } from "../src/command.js";
+import { threadResumeLine, threadStartLine } from "../src/rpc.js";
 
 describe("buildEnv", () => {
   it("sets CODEX_HOME to the home named and keeps the base environment", () => {
@@ -84,4 +85,20 @@ describe("accessParams", () => {
   it("refuses any other mode by the three it takes", () => {
     expect(() => accessParams("yolo")).toThrow("permissionMode must be one of read-only, workspace-write, danger-full-access");
   });
+
+  it("a fast thread asks the server for the fast service tier, and a thread that is not fast names no tier", () => {
+    const access = accessParams(undefined);
+    expect(JSON.parse(threadStartLine({ access, serviceTier: "fast" })).params.serviceTier).toBe("fast");
+    expect(JSON.parse(threadResumeLine({ access, serviceTier: "fast", threadId: "t1" })).params.serviceTier).toBe("fast");
+    expect(JSON.parse(threadStartLine({ access })).params).not.toHaveProperty("serviceTier");
+  });
+
+  it("plan reads in a sandbox that asks nobody, with the planning instructions as the thread's developer instructions", () => {
+    const plan = accessParams("plan");
+    expect(plan).toMatchObject({ sandbox: "read-only", approvalPolicy: "never" });
+    expect(plan.developerInstructions).toContain("Plan Mode");
+    expect(JSON.parse(threadStartLine({ access: plan })).params.developerInstructions).toContain("Plan Mode");
+    expect(accessParams("read-only")).not.toHaveProperty("developerInstructions");
+  });
 });
+
