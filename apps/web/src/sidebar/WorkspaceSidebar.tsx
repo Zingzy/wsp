@@ -23,7 +23,7 @@ import { ChevronDownIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-rea
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, computerOffline, creationAwaits, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
-import { CREATION_ASKED, rebuildRefusedLine } from "../actions/format.js";
+import { CREATION_ASKED, THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { projectActions, type ProjectVerbs } from "../actions/projectActions.js";
 import { settledFoldActions, threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
@@ -47,11 +47,11 @@ import { AddProjectDialog } from "./AddProjectDialog.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ProjectSwitcher } from "./ProjectSwitcher.js";
 import { ComputerSwitcher } from "./ComputerSwitcher.js";
-import { workspacesOn } from "./computerPick.js";
+import { COMPUTER_PICK_KEY, PROJECT_PICK_KEY, pickCodec, underPicks } from "./picks.js";
 import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, SETTLED_ROW_ID, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { resolveAdjacentThreadId, topSidebarThread } from "./Sidebar.logic.js";
-import { SIDEBAR_SECTIONS, dropMarks, projectGroups, settleableRoots, sidebarTiles, treeSettle, treeThreadIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
+import { SIDEBAR_SECTIONS, dropMarks, settleableRoots, sidebarTiles, treeSettle, treeThreadIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
 import { SnoozeDialog } from "./SnoozeDialog.js";
 import { SettingsRow } from "./SettingsRow.js";
 import { HostFoot } from "../hosts/HostFoot.js";
@@ -64,22 +64,10 @@ import { PROJECT_WORDS, SECTION_WORDS } from "./words.js";
 
 /** Whether the Settled fold is open. It starts shut: it holds the tiles a person has stopped looking at. */
 const SETTLED_OPEN_KEY = "wsp:sidebar-settled-open";
-/** The project the list is filtered to. A view of this window alone, so it never follows a person to another one. */
-const PROJECT_PICK_KEY = "wsp:sidebar-project";
-/** The computer the list is filtered to, of this window alone as the project pick is. */
-const COMPUTER_PICK_KEY = "wsp:sidebar-computer";
 const openCodec: Codec<boolean> = {
   decode: raw => {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "boolean") throw new Error(`Expected true or false, got ${raw}.`);
-    return parsed;
-  },
-  encode: value => JSON.stringify(value),
-};
-const pickCodec: Codec<string | null> = {
-  decode: raw => {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "string") throw new Error(`Expected an id, got ${raw}.`);
     return parsed;
   },
   encode: value => JSON.stringify(value),
@@ -185,14 +173,12 @@ export function WorkspaceSidebar() {
   // known, and the line under the head says why nothing moves.
   const asleep = hostAsleep(conn);
   const fleet = useSidebarProjects();
-  // A pick for a computer this host no longer holds reads as every computer.
-  const computerPicked = places.some(place => place.id === computerStored) ? computerStored : null;
-  const projects = useMemo(() => workspacesOn(fleet, places, computerPicked), [fleet, places, computerPicked]);
+  const { projects, groups, computer: computerPicked, picked } = useMemo(
+    () => underPicks(fleet, { places, recorded, order: projectOrder, stored: { project: pickStored, computer: computerStored } }),
+    [fleet, places, recorded, projectOrder, pickStored, computerStored],
+  );
   const launches = useLaunches();
-  const groups = useMemo(() => projectGroups(recorded, projects, projectOrder), [recorded, projects, projectOrder]);
   const named = useMemo(() => placeNames(places), [places]);
-  // A pick for a project this host no longer holds reads as every project.
-  const picked = pickStored === null ? null : groups.find(group => group.project.id === pickStored) ?? null;
   // The thread the centre shows, which the time fold leaves alone while it is on screen.
   const open = useMemo(() => {
     const runs = fleet.find(p => p.id === selectedId);
@@ -391,8 +377,10 @@ export function WorkspaceSidebar() {
     const node = tiles.live.find(root => root.thread.id === rootId);
     if (node === undefined || node.thread.thread === null) return;
     if (place === "settled") {
+      // The menu's Settle is held with this sentence while the tree works, and a drop says the same.
       const tree = treeSettle(node);
-      if (!tree.working) void settleThreads(tree.threadIds);
+      if (tree.working) addNotice({ kind: "error", text: THREAD_TREE_WORKING });
+      else void settleThreads(tree.threadIds);
       return;
     }
     const marks = dropMarks(node, place);

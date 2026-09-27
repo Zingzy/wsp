@@ -27,6 +27,7 @@ import { absenceOf } from "../settings/places.js";
 import { sidebarThreadOrder, topSidebarThread } from "../sidebar/Sidebar.logic.js";
 import { currentWorkspaceId } from "../adapt/workspaces.js";
 import { nextNeedsYou, rootHolding, sidebarTiles, threadTree, treeSettle } from "../sidebar/threadTree.js";
+import { storedPicks, underPicks } from "../sidebar/picks.js";
 import { workspaceOrHere } from "../terminal/computer.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { resetTerminalZoom, stepTerminalZoom } from "../terminal/fontSetting.js";
@@ -234,14 +235,15 @@ export function settleOpenThread(): void {
   if (!settle.working) void settleThreads(settle.threadIds);
 }
 
-/** Opens the next thread after the open one that needs the person, in the order the sidebar draws every workspace's
- * threads, wrapping; nothing while none does. */
+/** Opens the next thread after the open one that needs the person, in the order the sidebar draws its list under the
+ * project and computer picks, wrapping; nothing while none it shows does. */
 export function openNextNeedsYou(): void {
-  const { selectedId, selectedThreadId, select } = useStore.getState();
-  const projects = sidebarProjects();
-  const runs = projects.find(project => project.id === selectedId);
+  const { selectedId, selectedThreadId, select, places, projects: recorded, preferences } = useStore.getState();
+  const fleet = sidebarProjects();
+  const runs = fleet.find(project => project.id === selectedId);
   const open = runs === undefined ? undefined : (selectedThreadId === null ? undefined : runs.threads.find(thread => thread.threadId === selectedThreadId)) ?? topSidebarThread(runs.threads);
-  const next = nextNeedsYou(sidebarTiles(projects, { picked: null, nowMs: Date.now(), open: open?.id ?? null }).live, open?.id ?? null);
+  const { projects, picked } = underPicks(fleet, { places, recorded, order: preferences.projectOrder, stored: storedPicks() });
+  const next = nextNeedsYou(sidebarTiles(projects, { picked: picked?.project.id ?? null, nowMs: Date.now(), open: open?.id ?? null }).live, open?.id ?? null);
   if (next?.thread != null) select(next.thread.workspaceId, next.thread.threadId);
 }
 

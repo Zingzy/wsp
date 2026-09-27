@@ -343,4 +343,41 @@ describe("the jump to the next thread that needs the person", () => {
     jump();
     expect(useStore.getState().selectedThreadId).toBe("th_read");
   });
+
+  it("walks only the threads the sidebar shows under its project and computer picks, never one the picks hide", () => {
+    const now = Date.now();
+    const row = (id: string, workspaceId: string, over: Record<string, unknown> = {}) => ({ id: `s_${id}`, workspaceId, threadId: id, harness: "claude", status: "completed", startedAt: now - 60_000, endedAt: now - 30_000, readAt: now - 40_000, ...over });
+    const workspace = (id: string, project: string, computer: string) => ({ id, name: id, machineId: `m_${id}`, phase: "running", golden: "", createdAt: "2026-09-27T00:00:00Z", project: { id: project, name: project, path: "/root", computer } });
+    const places = [
+      { id: "here", kind: "computer", name: "mac", label: "Mac", default: true },
+      { id: "p_box", kind: "computer", name: "box", label: "box" },
+    ];
+    useStore.setState({
+      places,
+      projects: [],
+      workspaces: [workspace("ws_a", "pr_a", "here"), workspace("ws_b", "pr_b", "here"), workspace("ws_c", "pr_a", "p_box")],
+      statuses: {},
+      selectedId: "ws_a",
+      selectedThreadId: "th_a",
+      sessions: { ws_a: [row("th_a", "ws_a", { readAt: now })], ws_b: [row("th_b", "ws_b", { startedAt: now - 10_000 })], ws_c: [row("th_c", "ws_c", { startedAt: now - 20_000 })] },
+    } as never);
+    const jump = () => runShellCommand("thread.nextNeedsYou", { workspaceId: "ws_a", toggleSidebar: () => {} } as never, []);
+    try {
+      // Every project and computer: the next one waiting is on the other project.
+      jump();
+      expect(useStore.getState().selectedThreadId).toBe("th_b");
+      // Under project pr_a the other project's thread is hidden, so the jump lands on the box's thread of pr_a.
+      useStore.setState({ selectedId: "ws_a", selectedThreadId: "th_a" } as never);
+      window.localStorage.setItem("wsp:sidebar-project", JSON.stringify("pr_a"));
+      jump();
+      expect(useStore.getState().selectedThreadId).toBe("th_c");
+      // And with the Mac picked as well, nothing the sidebar shows is waiting: the jump stays put.
+      useStore.setState({ selectedId: "ws_a", selectedThreadId: "th_a" } as never);
+      window.localStorage.setItem("wsp:sidebar-computer", JSON.stringify("here"));
+      jump();
+      expect(useStore.getState().selectedThreadId).toBe("th_a");
+    } finally {
+      window.localStorage.clear();
+    }
+  });
 });

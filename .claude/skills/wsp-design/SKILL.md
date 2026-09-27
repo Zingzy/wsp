@@ -221,21 +221,6 @@ tone, no glyph, the title muted. Any new turn or message brings a tree back.
 The list scrolls under a hard edge, never a fade: a faded tile part way
 under the head reads as a tile with no first row.
 
-### Sections
-
-The live list above the fold is drawn under five heads in the fold's own
-dress (the section caps, the count, 28px, 12px between sections): PINNED,
-NEEDS YOU, WORKING, DONE, IDLE, each holding only while it has a tile. A
-root's tree sits under the most pressing state in it (a question or a
-failure, then a running turn, then a finish nobody opened), newest first
-inside. Pin on a root's menu keeps it under PINNED, latest pin on top, and it
-never folds by time; Snooze hides the tree until the picked time or until a
-thread in it needs the person, and it comes back Done. A root tile dragged
-onto another section stays there while its state holds, onto PINNED pins it,
-onto SETTLED settles it; while one is dragged every head stands, the empty
-ones too, and the section under the pointer takes the row hover fill. A
-settled root's menu offers Restore where Settle stood.
-
 The crab is the Whimsy Loaders pixel crab as is (https://www.whimsically.app/loaders,
 by Sasha); credit it in THIRD_PARTY_NOTICES in the change that brings it in
 (the owner's ruling, 2026-09-26). A 16×14 css box, canvas at the device ratio,

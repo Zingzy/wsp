@@ -3,7 +3,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { cloneElement, createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type Capabilities, type PlaceView, type ProjectView, type WorkspaceView , type WorkspaceLanding } from "@wsp/protocol";
+import { THREAD_TREE_WORKING } from "../actions/format.js";
 import { workspaceActions } from "../actions/workspaceActions.js";
+import { clearNotices, lastNotice } from "../../test/notice-text.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
 import type { Api } from "../protocol/client.js";
 import { provideDaemonWire } from "../files/wire.js";
@@ -544,6 +546,18 @@ describe("the sidebar's list of thread tiles", () => {
       expect(markThreads.mock.calls).toHaveLength(calls);
       drag(rowOf("read already"), document.querySelector<HTMLElement>("[data-row-id=settled]")!);
       await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_idle"]));
+    });
+
+    it("a tree with a thread still working dropped on Settled settles nothing and says why in the menu's own sentence", async () => {
+      const { settleThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () =>
+        useStore.setState({ sessions: sessions([...all, { ws: "ws_a", id: "th_builder", prompt: "its builder", parent: "th_idle", startedAgo: 10 * 60_000 }]) } as never),
+      );
+      await waitFor(() => expect(screen.getByText("its builder")).toBeDefined());
+      clearNotices();
+      drag(rowOf("read already"), document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+      await waitFor(() => expect(lastNotice()).toBe(THREAD_TREE_WORKING));
+      expect(settleThreads).not.toHaveBeenCalled();
     });
 
     it("while a tile is dragged every section stands as a place to drop it, even one holding nothing", async () => {
