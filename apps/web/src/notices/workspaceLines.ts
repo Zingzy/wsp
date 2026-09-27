@@ -3,8 +3,9 @@
 // as notices with the same words: what the runtime is doing to a machine's
 // daemon, a daemon that is not there, a drop with memory near full, and what a
 // bring back answered. A standing line is keyed and stands until it clears; a
-// bring back is said once, when its answer arrives.
-import { kindWords, machineLacksShort, outOfMemoryRowLine, workspaceKind, type BringBackResult, type MemoryReading, type ReachState, type WorkspaceKindWords } from "@wsp/protocol";
+// bring back is said once, when its answer arrives. A paused or pausing machine
+// stands on no line: a pause is expected, often because the work is done.
+import { kindWords, machineLacksShort, outOfMemoryRowLine, pausedOrPausing, workspaceKind, workspaceStateOf, type BringBackResult, type MemoryReading, type ReachState, type WorkspaceKindWords } from "@wsp/protocol";
 import { useEffect, useRef } from "react";
 import { broughtBackRowLine } from "../actions/format.js";
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
@@ -18,7 +19,7 @@ import { addNotice, useNotices, type NoticeKind } from "./store.js";
  * whose machines serve no daemon. */
 export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWords, lacks?: string): string | undefined {
   if (!kind.daemon) return undefined;
-  if (reach === "no-daemon") return "no daemon answering";
+  if (reach === "no-daemon") return "Running but not answering";
   if (reach !== "unsupported" || kind.driven || lacks === undefined) return undefined;
   return machineLacksShort(lacks);
 }
@@ -42,6 +43,7 @@ export interface StandingLine {
 
 /** The lines one workspace stands on now, each under a key of its own so it is said once and ends when it clears. */
 export function standingLines(project: Pick<SidebarProjectSnapshot, "id" | "status" | "workspace" | "reach">, memory: MemoryReading | undefined): StandingLine[] {
+  if (pausedOrPausing(workspaceStateOf(project.workspace, project.status))) return [];
   const gone = daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace)), (project.status ?? project.workspace).daemonRefusedAt?.why);
   const note = daemonNote(project);
   return [

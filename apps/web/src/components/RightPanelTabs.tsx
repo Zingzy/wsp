@@ -14,6 +14,7 @@ import {
 import type { RightPanelSurface } from "../rightPanelStore";
 import { PANE_KINDS, paneOf, paneTitle, type RightPanelKind } from "../panes";
 import { cn } from "../lib/utils";
+import { CARD_SURFACE } from "../settings/rows";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { Kbd } from "./ui/kbd";
@@ -234,7 +235,8 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
   const isHighlighted = (action: SurfaceAction) =>
     highlightIndex !== -1 && availableActions[highlightIndex] === action;
 
-  const rowClass = "flex w-full items-center gap-3 rounded-md px-2 py-2 text-left";
+  // py-2 and the hairline around 36px of text make a 54px tile, on the 4px pitch.
+  const tileClass = cn(CARD_SURFACE, "flex w-full items-center gap-3 px-3 py-2 text-left");
   const rowText = (action: SurfaceAction, line: string, head?: string) => {
     const Icon = action.icon;
     return (
@@ -267,10 +269,10 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
         <div className="absolute inset-x-0 bottom-full mb-5 text-center">
           <h3 className="font-medium text-foreground text-sm">Open a panel</h3>
           <p className="mt-1 text-muted-foreground text-xs">
-            A browser, a terminal, the diff, the task or what runs on it.
+            A browser, a terminal, the diff, the computer or what runs on it.
           </p>
         </div>
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col gap-2">
           {actions.map((action) =>
             action.available ? (
               <button
@@ -285,9 +287,10 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
                   )
                 }
                 className={cn(
-                  rowClass,
-                  "cursor-pointer transition-colors duration-150 hover:bg-accent",
-                  isHighlighted(action) && "bg-accent",
+                  tileClass,
+                  // Not the accent: on the dark themes the accent and the card are the same few percent of white.
+                  "cursor-pointer transition-colors duration-150 hover:bg-card-hover",
+                  isHighlighted(action) && "bg-card-hover",
                 )}
               >
                 {rowText(action, action.description)}
@@ -297,7 +300,7 @@ function RightPanelEmptyState(props: { actions: readonly SurfaceAction[] }) {
                 key={action.label}
                 data-surface-launch={action.key}
                 data-available="false"
-                className={rowClass}
+                className={tileClass}
               >
                 {/* The dimming sits on the glyph, the label and the key, never on the reason, which is the one
                     sentence a person is asked to read. */}

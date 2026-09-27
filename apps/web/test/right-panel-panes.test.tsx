@@ -59,7 +59,7 @@ describe("the right panel's Workspace and Processes panes", () => {
     render(<Panel id={WS} />);
     expect(card("machine").tagName).toBe("BUTTON");
     expect(card("processes").dataset["available"]).toBe("false");
-    expect(card("processes").textContent).toContain("Available while the task is running.");
+    expect(card("processes").textContent).toContain("Available while this runs.");
     expect(screen.queryByText("Files")).toBeNull();
     expect(screen.queryByText("Screen")).toBeNull();
   });

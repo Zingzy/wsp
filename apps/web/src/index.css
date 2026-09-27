@@ -187,6 +187,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(mobile-d
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  /* The design skill's hover for a filled control, 5% foreground into the card; inline, so --card is the tile's own. */
+  --color-card-hover: color-mix(in srgb, var(--foreground) 5%, var(--card));
   --color-foreground: var(--foreground);
   --color-background: var(--background);
   --color-surface-raised: var(--surface-raised);

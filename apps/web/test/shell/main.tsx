@@ -54,7 +54,9 @@
 // away with the longest name the spec draws; ?init=building puts the init job
 // mid-build so the cloud row's progress line can be measured; ?version=behind holds a shell older than the host that
 // served the page, so the one line the app says about it can be measured; ?host=1 runs the host-event rules on a
-// prompt and a dead thread, so the notices they raise can be photographed.
+// prompt and a dead thread, so the notices they raise can be photographed; ?toast= takes &kind= and &action= for
+// each kind of notice; ?silent=1 has the running and the napping machine both read no daemon, under the app's own
+// workspace-line rule, so only the running one is said.
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, workspaceAccess, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
@@ -64,7 +66,8 @@ import type { Api, ProtocolEvent } from "../../src/protocol/client";
 import { getLive } from "../../src/machine/live";
 import { useStore } from "../../src/protocol/store";
 import { useHostNotices } from "../../src/notices/hostNotices.js";
-import { addNotice } from "../../src/notices/store.js";
+import { addNotice, type NoticeKind } from "../../src/notices/store.js";
+import { useWorkspaceLineNotices } from "../../src/notices/workspaceLines.js";
 import { useRightPanelStore } from "../../src/rightPanelStore";
 import { useBrowserTabs } from "../../src/browser/tabs";
 import { parseAddress } from "../../src/browser/url";
@@ -406,7 +409,9 @@ const api: Api = {
     workspaces.map(w =>
       w.id === MAC.id
         ? statusOf(w, { kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, facts: { os: "macOS 15.5", uptimeMs: 3 * 86_400_000 + 4 * 3_600_000, folder: "/Users/zingzy/wsp" } })
-        : statusOf(w, params.get("offline") === "1" ? { reach: { state: statusOf(w).reach.state, offline: true } } : w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
+        : params.get("silent") === "1" && w.phase !== "gone"
+          ? statusOf(w, { reach: { state: "no-daemon" } })
+          : statusOf(w, params.get("offline") === "1" ? { reach: { state: statusOf(w).reach.state, offline: true } } : w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
     ),
   forget: async () => {},
   nap: async id => workspaces.find(w => w.id === id)!,
@@ -513,7 +518,8 @@ if (params.get("version") === "behind") {
 const toast = params.get("toast");
 const shown = params.get("ws");
 useStore.setState({ conn: "live", ...(shown !== null ? { selectedId: shown } : {}) });
-if (toast !== null) addNotice({ kind: "error", text: toast, where: params.get("where") ?? "spoo" });
+const toastAction = params.get("action");
+if (toast !== null) addNotice({ kind: (params.get("kind") as NoticeKind | null) ?? "error", text: toast, where: params.get("where") ?? "spoo", ...(toastAction === null ? {} : { action: { word: toastAction, run: () => {} } }) });
 // ?sidebar=<px> is the width the host's record holds, and ?spaces=1 the body it holds; the fixture's api answers no
 // preferences op, so the record is put in place here as the host's answer would put it. The shell is where the
 // surfaces behind labs are shot, so labs is on unless ?labs=0 asks for the record a host without it serves.
@@ -659,8 +665,13 @@ function HostRule() {
   }, []);
   return null;
 }
+function LineRule() {
+  useWorkspaceLineNotices();
+  return null;
+}
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
+    {params.get("silent") === "1" ? <LineRule /> : null}
     {params.get("version") === "behind" ? <VersionRule /> : null}
     {params.get("host") === "1" ? <HostRule /> : null}
     <AppShell>

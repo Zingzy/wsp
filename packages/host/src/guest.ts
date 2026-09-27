@@ -9,7 +9,7 @@
 // One concern per interface: this door binds a session to the workspace its
 // link serves and picks the kind; each kind is one module, and adding a kind is
 // one module and one row in the table below.
-import { agentsOffRefusal, type DaemonEvent, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV, UNAUTHORIZED, type GuestKind } from "@wsp/protocol";
+import { agentsOffRefusal, type DaemonEvent, guestNoKindLine, guestNoLoopbackLine, guestNoSessionLine, guestNoTokenRefusal, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV, UNAUTHORIZED, type GuestKind } from "@wsp/protocol";
 import type { Authed, GuestKindModule, GuestSession } from "@wsp/runtime";
 
 /** The road back down to one machine's daemon, and which workspace that machine is. */
@@ -36,8 +36,8 @@ export interface GuestDoorOptions {
   kinds: Readonly<Record<GuestKind, GuestKindModule>>;
 }
 
-/** The act a guest's token is minted for: the launch mints none where the workspace's agents may not spawn, so a
- * line from a turn that carries no token is that switch being off, said in the words the switch is turned on by. */
+/** The act a turn's token is minted for: a launch mints none where the workspace's agents may not spawn, so a turn's
+ * line that carries no thread's token is that switch being off, said in the words the switch is turned on by. */
 const NO_TOKEN_ACT = "thread_new" as const;
 
 const keyOf = (workspaceId: string, session: string): string => `${workspaceId} ${session}`;
@@ -90,7 +90,10 @@ export function guestDoor(o: GuestDoorOptions): GuestDoor {
   };
 
   const opened = async (e: Extract<DaemonEvent, { type: "guest.opened" }>, held: Held): Promise<void> => {
-    if (e.token === "") return endHere(held, e.session, agentsOffRefusal(held.workspaceId, NO_TOKEN_ACT));
+    if (e.token === "") {
+      const refusal = e.turnToken === undefined || e.turnToken === "" ? guestNoTokenRefusal(held.workspaceId) : agentsOffRefusal(held.workspaceId, NO_TOKEN_ACT);
+      return endHere(held, e.session, refusal);
+    }
     const who = await o.authorize(e.token);
     // The guest went while its token was being read, or a session took this one's name; nothing is opened either way.
     if (held.ended) return;

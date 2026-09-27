@@ -2523,6 +2523,13 @@ export function agentsOffRefusal(workspace: string, act: SpawnAct): string {
   return `agents on ${workspace} may not ${SPAWN_ACTS[act]}; turn it on with wsp workspaces agents ${workspace} --spawn on`;
 }
 
+/** The one sentence the guest door refuses a line that carries neither a thread's token nor a turn's with: a
+ * person's shell or a `wsp exec` on the machine. The switch may well be on, so the sentence names the missing
+ * identity and never tells anyone to turn it on. */
+export function guestNoTokenRefusal(workspace: string): string {
+  return `this line came from no thread's turn on ${workspace}, so it carries no thread's token; wsp hands one only to a turn it starts on a workspace whose agents may spawn`;
+}
+
 /** The one word the socket door closes a socket whose token names nobody with, and the one the guest door refuses a
  * session with. Spelled once so the two roads into this host cannot drift apart in what they say. */
 export const UNAUTHORIZED = "unauthorized";
