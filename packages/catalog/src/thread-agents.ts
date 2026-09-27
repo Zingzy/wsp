@@ -6,7 +6,7 @@
 // table behind both the command line and the MCP tools read it, and none of
 // them may pull the runtime in.
 
-export const THREAD_AGENTS = ["claude", "codex"] as const;
+export const THREAD_AGENTS = ["claude", "codex", "opencode", "cursor"] as const;
 export type ThreadAgent = (typeof THREAD_AGENTS)[number];
 
 /** Whether wsp can open a thread on this agent; the others it installs and manages only. */

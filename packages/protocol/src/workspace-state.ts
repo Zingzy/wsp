@@ -189,6 +189,25 @@ export function deleteNotice(threads: number, kind: WorkspaceKind, copy?: Pick<P
   return `Its ${onDeleteOf(kind, copy, machineId).asked}; its record and ${fmtThreads(threads)} leave this computer.`;
 }
 
+/** One of the copies Keep this one deletes, as its row names it and as its kind decides what a delete does to it. */
+export interface CopyToDelete {
+  name: string;
+  kind: WorkspaceKind;
+  copy?: Pick<ProjectCopy, "path">;
+  machineId?: string;
+}
+
+/** What deleting the other copies one send to several models made takes, the sentence Keep this one confirms with:
+ * what goes on each copy's computer in its own kind's words, one sentence where they all go the same way, then their
+ * records and threads, which leave from here whatever the kind. */
+export function deleteCopiesNotice(copies: readonly CopyToDelete[], threads: number): string {
+  const asked = copies.map(c => onDeleteOf(c.kind, c.copy, c.machineId).asked);
+  const records = `their records and ${fmtThreads(threads)} leave this computer.`;
+  if (new Set(asked).size === 1) return `Each one's ${asked[0]}; ${records}`;
+  const each = copies.map((c, i) => `${c.name}: its ${asked[i]}.`).join(" ");
+  return `${each} ${records.charAt(0).toUpperCase()}${records.slice(1)}`;
+}
+
 /** What a delete does to a create that failed before any machine was made, which is the one record with no machine id. */
 const NO_MACHINE_MADE: MachineOnDelete = { asked: "create failed before any computer was made, so there is none to delete", done: () => "its create had made no computer" };
 

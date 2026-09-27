@@ -269,6 +269,26 @@ importers:
         specifier: ^22.20.1
         version: 22.20.1
 
+  packages/adapter-cursor:
+    dependencies:
+      '@wsp/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+
+  packages/adapter-opencode:
+    dependencies:
+      '@wsp/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
+
   packages/catalog:
     dependencies:
       '@wsp/protocol':
@@ -409,6 +429,12 @@ importers:
       '@wsp/adapter-codex':
         specifier: workspace:*
         version: link:../adapter-codex
+      '@wsp/adapter-cursor':
+        specifier: workspace:*
+        version: link:../adapter-cursor
+      '@wsp/adapter-opencode':
+        specifier: workspace:*
+        version: link:../adapter-opencode
       '@wsp/catalog':
         specifier: workspace:*
         version: link:../catalog

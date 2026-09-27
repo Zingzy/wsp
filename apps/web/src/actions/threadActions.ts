@@ -4,12 +4,13 @@
 // sessions.interrupt is keyed by; the rename opens the name for editing on
 // the row by the thread's own key, and the row sends it. A settle and a
 // restore take a root thread with every thread under it; a pin and a snooze
-// mark the root alone, which carries its tree with it.
-import { AlarmClockIcon, ArchiveIcon, ArchiveRestoreIcon, LinkIcon, PencilIcon, PinIcon, PinOffIcon, SquareIcon, Trash2Icon } from "lucide-react";
+// mark the root alone, which carries its tree with it. Keep this one, on a
+// thread one send to several models opened, deletes the copies the others run in.
+import { AlarmClockIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, LinkIcon, PencilIcon, PinIcon, PinOffIcon, SquareIcon, Trash2Icon } from "lucide-react";
 import type { HarnessCatalog, SessionStatus, ThreadMarks, WorkspaceState } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { addressLink } from "../protocol/address.js";
-import { CLIENT_CANNOT_MARK, CLIENT_CANNOT_RESTORE, CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal } from "./format.js";
+import { CLIENT_CANNOT_DELETE, CLIENT_CANNOT_MARK, CLIENT_CANNOT_RESTORE, CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal } from "./format.js";
 import type { ActionEntry } from "./registry.js";
 
 export interface ThreadTarget {
@@ -38,6 +39,9 @@ export interface ThreadTarget {
    * person pinned the root, and whether the tree sits in the Settled fold. Null on a thread under another, which
    * goes where its root goes. */
   readonly root: RootTree | null;
+  /** The workspaces the other threads of this thread's send to several models run in, which Keep this one deletes;
+   * empty on a thread opened alone. */
+  readonly others: ReadonlyArray<string>;
 }
 
 export interface RootTree {
@@ -53,6 +57,7 @@ export function threadTarget(
   thread: SidebarThreadSnapshot,
   machine: { catalog: HarnessCatalog | null; state: WorkspaceState; goneWords?: string | undefined },
   root: RootTree | null = null,
+  others: ReadonlyArray<string> = [],
 ): ThreadTarget {
   return {
     id: thread.id,
@@ -67,6 +72,7 @@ export function threadTarget(
     state: machine.state,
     ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}),
     root,
+    others,
   };
 }
 
@@ -88,6 +94,9 @@ export interface ThreadVerbs {
   /** Opens the snooze's pick of times for a thread, by fold key; the surface that draws the rows puts its own opener
    * here, as it does the rename's. */
   readonly snooze?: ((threadId: string) => void) | undefined;
+  /** Asks to delete these workspaces, the copies with them: the surface that draws the rows puts its confirmation
+   * here, as it does the rename's opener, and a client with no road to the op leaves it out. */
+  readonly keep?: ((workspaceIds: ReadonlyArray<string>) => void) | undefined;
   readonly copyText: (text: string) => Promise<void>;
 }
 
@@ -157,6 +166,16 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     title: () => THREAD_WORDS.copyLink,
     refusal: target => (target.threadId === null ? THREAD_HAS_NO_ID : null),
     run: (target, verbs) => (target.threadId === null ? undefined : verbs.copyText(threadLink(target, target.threadId))),
+  },
+  {
+    id: "keep",
+    group: "remove",
+    icon: () => CheckIcon,
+    destructive: true,
+    applies: target => target.others.length > 0,
+    title: () => THREAD_WORDS.keep,
+    refusal: (_target, verbs) => (verbs.keep === undefined ? CLIENT_CANNOT_DELETE : null),
+    run: (target, verbs) => verbs.keep?.(target.others),
   },
   {
     id: "forget",

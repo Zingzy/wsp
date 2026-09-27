@@ -818,6 +818,31 @@ describe("runtime session history", () => {
     await rt.close();
   });
 
+  it("stamps the attempt a start names on the thread's row, keeps it through a restart, and folds it onto the thread", async () => {
+    const m = manual();
+    const store = memoryStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go", attempt: "att_1" });
+    expect(handle.view()).toMatchObject({ attempt: "att_1" });
+    m.start();
+    m.done("done");
+    m.end();
+    await handle.finished;
+    expect(foldThreads(await rt.sessions.list(ws.id))).toMatchObject([{ id: handle.view().threadId, attempt: "att_1" }]);
+    expect(m.lastStart()).not.toHaveProperty("attempt");
+    await rt.close();
+    const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter } });
+    expect((await rt2.sessions.list(ws.id)).map(row => row.attempt)).toEqual(["att_1"]);
+    const other = await rt2.sessions.start(ws.id, { prompt: "alone" });
+    expect(other.view()).not.toHaveProperty("attempt");
+    m.start();
+    m.done("done");
+    m.end();
+    await other.finished;
+    await rt2.close();
+  });
+
   it("passes the picked model, effort and permission mode to the harness and records them on the SessionView", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });

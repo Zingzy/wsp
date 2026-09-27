@@ -81,6 +81,9 @@
               "rootThreadId": {
                 "type": "string"
               },
+              "attempt": {
+                "type": "string"
+              },
               "asking": {
                 "type": "string"
               },
@@ -332,6 +335,9 @@
                 "type": "string"
               },
               "rootThreadId": {
+                "type": "string"
+              },
+              "attempt": {
                 "type": "string"
               },
               "asking": {

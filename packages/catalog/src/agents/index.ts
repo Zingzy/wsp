@@ -6,6 +6,7 @@ import { AMP } from "./amp.js";
 import { CLAUDE } from "./claude.js";
 import { CODEX } from "./codex.js";
 import { CRUSH } from "./crush.js";
+import { CURSOR_AGENT } from "./cursor.js";
 import { GEMINI } from "./gemini.js";
 import { GOOSE } from "./goose.js";
 import { HERMES_AGENT } from "./hermes.js";
@@ -13,4 +14,4 @@ import { OPENCODE } from "./opencode.js";
 import { PI } from "./pi.js";
 import { QWEN } from "./qwen.js";
 
-export const AGENT_MODULES: readonly AgentEntry[] = [CLAUDE, CODEX, GEMINI, OPENCODE, PI, HERMES_AGENT, CRUSH, QWEN, GOOSE, AMP];
+export const AGENT_MODULES: readonly AgentEntry[] = [CLAUDE, CODEX, GEMINI, OPENCODE, PI, HERMES_AGENT, CRUSH, QWEN, GOOSE, AMP, CURSOR_AGENT];

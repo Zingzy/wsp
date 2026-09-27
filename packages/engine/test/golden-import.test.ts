@@ -1393,18 +1393,18 @@ describe("agentInstallsFor", () => {
       expect(a.smoke, name).toMatch(/--version/);
       expect(a.install, name).not.toMatch(/\|\s*(ba)?sh\b/);
       expect(a.install, name).not.toMatch(/@latest\b/);
-      // Every agent's line names the version it installs, the harness vendor's binary included.
-      expect(a.install, name).toMatch(/@\d|==\d|--branch v?\d|releases\/download\/v?\d|\/\d+\.\d+\.\d+\//);
+      // Every agent's line names the version it installs, the harness vendor's binary and a cask's own version line included.
+      expect(a.install, name).toMatch(/@\d|==\d|--branch v?\d|releases\/download\/v?\d|\/\d+\.\d+\.\d+\/|\bver='\d/);
     }
-    expect(Object.keys(AGENT_INSTALLERS).sort()).toEqual(["aider", "amp", "claude", "codex", "crush", "gemini", "goose", "hermes", "opencode", "pi", "qwen"]);
+    expect(Object.keys(AGENT_INSTALLERS).sort()).toEqual(["aider", "amp", "claude", "codex", "crush", "cursor", "gemini", "goose", "hermes", "opencode", "pi", "qwen"]);
     // The harness installs at the version its own text fixes, so a copy built from the pin gets that version.
     expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: CLAUDE_INSTALL, smoke: "claude --version", road: "script", pin: { read: expect.stringContaining("'claude' --version"), fixed: true, words: "by its own installer" } });
     // The road each line walks, which is what bounds a step that runs it on a computer somebody owns.
-    expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.road]))).toEqual({ claude: "script", codex: "npm", gemini: "npm", opencode: "npm", aider: "uv", pi: "npm", hermes: "script", crush: "release", qwen: "npm", goose: "release", amp: "npm" });
+    expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.road]))).toEqual({ claude: "script", codex: "npm", gemini: "npm", opencode: "npm", aider: "uv", pi: "npm", hermes: "script", crush: "release", qwen: "npm", goose: "release", amp: "npm", cursor: "vendor" });
     expect(AGENT_INSTALLERS["codex"]!.pin).toEqual({ read: expect.stringContaining("npm root -g"), fixed: true, words: "as an npm global" });
     expect(AGENT_INSTALLERS["hermes"]!.pin).toEqual({ read: expect.stringContaining("'hermes' --version"), fixed: true, words: "by its own installer" });
     // Engines floors as the registry states them at the pinned versions.
-    expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.node]))).toEqual({ claude: undefined, codex: 16, gemini: 20, opencode: undefined, aider: undefined, pi: 22, hermes: undefined, crush: undefined, qwen: 22, goose: undefined, amp: undefined });
+    expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.node]))).toEqual({ claude: undefined, codex: 16, gemini: 20, opencode: undefined, aider: undefined, pi: 22, hermes: undefined, crush: undefined, qwen: 22, goose: undefined, amp: undefined, cursor: undefined });
   });
 
   it("takes each agent off the way its line put it on: the global uninstalled, the checkout removed, the pinned binary's one file deleted", () => {
@@ -1412,8 +1412,7 @@ describe("agentInstallsFor", () => {
     expect(agentUninstall(AGENT_INSTALLERS["claude"]!)).toEqual({ cmd: `rm -f ${LOCAL_BIN}/claude` });
     expect(agentUninstall(AGENT_INSTALLERS["codex"]!)).toEqual({ cmd: `${NODE_PATH_LINE}\nnpm uninstall -g @openai/codex` });
     expect(agentUninstall(AGENT_INSTALLERS["aider"]!)).toEqual({ cmd: "uv tool uninstall aider-chat" });
-    expect(agentUninstall(AGENT_INSTALLERS["hermes"]!)).toEqual({ cmd: "rm -rf /root/.hermes/venvs/hermes /root/.hermes/hermes-agent /usr/local/bin/hermes" });
-    expect(agentUninstall({ name: "Nothing", install: "echo hi", smoke: "nothing --version", road: "script" })).toEqual({ note: "Nothing has no uninstaller; left on the machine" });
+    expect(agentUninstall(AGENT_INSTALLERS["hermes"]!)).toEqual({ cmd: "rm -rf /root/.hermes/venvs/hermes /root/.hermes/hermes-agent /usr/local/bin/hermes" });    expect(agentUninstall({ name: "Nothing", install: "echo hi", smoke: "nothing --version", road: "script" })).toEqual({ note: "Nothing has no uninstaller; left on the machine" });
   });
 
   it("installs only the ticked agents, in recipe order, each from the catalog's table", () => {

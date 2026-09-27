@@ -620,9 +620,9 @@ describe("the host's own key", () => {
 });
 
 describe("what this computer says about itself", () => {
-  it("names itself by its own name lowercased, reads its own shape, and says which line runs wsp here", () => {
+  it("names itself by its own name lowercased, reads its own shape, and says which line runs wsp here", async () => {
     const home = tmp("report-home");
-    const report = placeReport({ name: placeNameHere(), home, env: { PATH: "/usr/bin", HOME: home } });
+    const report = await placeReport({ name: placeNameHere(), home, env: { PATH: "/usr/bin", HOME: home } });
     expect(report.name).toBe(report.name.toLowerCase());
     expect(report.shape.cpu).toBeGreaterThan(0);
     expect(report.login["HOME"]).toBe(home);
@@ -633,19 +633,44 @@ describe("what this computer says about itself", () => {
     expect(report.uptimeMs).toBeGreaterThan(0);
   });
 
-  it("reads the PATH a login shell here gives, not the one the shell that typed the join happened to hold", () => {
+  it("reads the PATH a login shell here gives, not the one the shell that typed the join happened to hold", async () => {
     const home = tmp("report-path");
     // A login file of the person's own, which a service's bare environment would never have read: without HOME a
     // login shell reads none of their files and answers the service's own PATH.
     writeFileSync(join(home, ".profile"), `export PATH=${home}/bin:$PATH\n`);
     // A service starts with almost no environment: what the agent reports has to be the person's own login PATH,
     // or every tool they installed under their home is unfindable to a turn.
-    const report = placeReport({ name: "x", home, env: { PATH: "/only/this", HOME: home } });
+    const report = await placeReport({ name: "x", home, env: { PATH: "/only/this", HOME: home } });
     expect(report.login["PATH"]).not.toBe("/only/this");
     expect(report.login["PATH"]).toContain(`${home}/bin`);
   });
 
-  it("draws this computer's own row without starting a login shell, which the report alone reads", () => {
+  it("reads the login PATH once the shell answers when a login file leaves a job holding its output open, and the job ends with it", async () => {
+    const home = tmp("report-held");
+    const pids = join(home, "pids");
+    writeFileSync(join(home, ".profile"), `sleep 300 & echo $! >> ${pids}\nexport PATH=${home}/bin:$PATH\n`);
+    const alive = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const pidsIn = (): number[] => (existsSync(pids) ? readFileSync(pids, "utf8").split("\n").filter(l => l !== "").map(Number) : []);
+    const started = Date.now();
+    try {
+      const report = await placeReport({ name: "x", home, env: { PATH: "/only/this", HOME: home } });
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(report.login["PATH"]).toContain(`${home}/bin`);
+      expect(pidsIn().length).toBe(1);
+      await vi.waitFor(() => expect(pidsIn().filter(alive)).toEqual([]));
+    } finally {
+      for (const pid of pidsIn()) if (alive(pid)) process.kill(pid, "SIGKILL");
+    }
+  }, 30_000);
+
+  it("draws this computer's own row without starting a login shell, which the report alone reads", async () => {
     const home = tmp("report-row");
     const read = join(home, "login-read");
     writeFileSync(join(home, ".profile"), `echo read >> ${read}\n`);
@@ -654,13 +679,13 @@ describe("what this computer says about itself", () => {
     // Nearly every verb lists places, and a login file can take seconds: the row has no use for the login it reads.
     placeHere("x");
     expect(existsSync(read)).toBe(false);
-    placeReport({ name: "x", home, env: { PATH: "/usr/bin", HOME: home } });
+    await placeReport({ name: "x", home, env: { PATH: "/usr/bin", HOME: home } });
     expect(readFileSync(read, "utf8")).toBe("read\n");
   });
 
-  it("leaves a store folder that is not a plain path out of the login, since what is there lands in a command", () => {
+  it("leaves a store folder that is not a plain path out of the login, since what is there lands in a command", async () => {
     const home = tmp("report-store");
-    const report = placeReport({ name: "x", home, env: { PATH: "/usr/bin", CLAUDE_CONFIG_DIR: "/tmp/a; rm -rf /" } });
+    const report = await placeReport({ name: "x", home, env: { PATH: "/usr/bin", CLAUDE_CONFIG_DIR: "/tmp/a; rm -rf /" } });
     expect(report.login["CLAUDE_CONFIG_DIR"]).toBeUndefined();
   });
 });
@@ -2256,7 +2281,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     // shape both sides read, so a deploy and a hand-run join cannot disagree about whether a report is valid.
     expect(box.ran.join("\n")).not.toContain("docker");
     expect(Object.keys(PlaceReport.shape)).not.toContain("docker");
-    expect(PlaceReport.safeParse({ ...placeReport({ name: "box", home: tmp("one-reader-home") }), dialed: "http://192.168.1.20:4400" }).success).toBe(true);
+    expect(PlaceReport.safeParse({ ...(await placeReport({ name: "box", home: tmp("one-reader-home") })), dialed: "http://192.168.1.20:4400" }).success).toBe(true);
   });
 
   it("throws one sentence when a deploy will not come up and leaves the commands it was running to the host's log", async () => {

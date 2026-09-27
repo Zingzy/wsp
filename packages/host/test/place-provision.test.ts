@@ -99,7 +99,7 @@ describe("the recipe this host holds, planned for a computer you own", () => {
     // The version the catalog pins, since a computer somebody owns keeps no sealed version and so no pins.
     const road = catalogEntry("codex")!.installRoad;
     expect(codex.asks).toBe(road.road === "npm" ? road.version : undefined);
-    expect(codex.asks).toBe("0.153.0");
+    expect(codex.asks).toBe("0.155.1");
     // A row this computer has as a Homebrew formula takes the Homebrew road on that computer too, as it does on
     // the image: the formula's own step, after the Homebrew the plan bootstraps for it.
     const gh = plan.steps.find(t => t.id === "tools/brew/gh")!;

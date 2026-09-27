@@ -240,10 +240,10 @@ const refusingSignIn = (sequence: { exitCode: number; sawResult: boolean; error:
 
 describe("a turn the agent refused for want of a sign-in", () => {
   // Claude Code writes its init line, then its own refusal as an api error message, then a result flagged in error;
-  // codex announces thread.started, retries the 401 and dies at 101 with no turn event. Announcing is what both do
-  // first, so it says nothing about whether the turn worked.
+  // codex's app server announces the thread, retries the 401 and completes the turn as failed. Announcing is what
+  // both do first, so it says nothing about whether the turn worked.
   const CLAUDE = { exitCode: 1, sawResult: true, error: `Not logged in · Please run /login; ${signInRefusalLine({ kind: "local" })}` };
-  const CODEX = { exitCode: 101, sawResult: false, error: codexNotSignedInLine("codex login --device-auth") };
+  const CODEX = { exitCode: 0, sawResult: true, error: codexNotSignedInLine("codex login --device-auth") };
 
   it("is a thread that ran nothing on either agent, whatever the row's session id says, and the forget takes it", async () => {
     const store = memoryStore();

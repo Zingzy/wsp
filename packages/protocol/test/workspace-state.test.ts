@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, workspaceStateLine, whereWord, agentsMayDrive, computerOffline, deleteNotice, onDeleteOf, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, goneRoadRefusal, NOT_ON_THIS_KIND, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, workspaceStateLine, whereWord, agentsMayDrive, computerOffline, type CopyToDelete, deleteCopiesNotice, deleteNotice, onDeleteOf, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, goneRoadRefusal, NOT_ON_THIS_KIND, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -251,6 +251,24 @@ describe("what a workspace's kind changes about its words", () => {
     expect(deleteNotice(1, "local", copy)).toBe("Its copy at /Users/dev/app-fix is removed and the project folder is left as it is; its record and 1 thread leave this computer.");
     expect(onDeleteOf("local", copy).done("local")).toBe("its copy at /Users/dev/app-fix is removed and the project folder is left as it is");
     expect(onDeleteOf("local")).toBe(WORKSPACE_KIND_WORDS.local.onDelete);
+  });
+
+  it("the sentence Keep this one confirms with says what goes on each copy's own kind of computer", () => {
+    // Forks on a cloud all go the same way, so one sentence covers them.
+    const forks = [
+      { name: "fix (Opus 5.5)", kind: "cloud" as const, machineId: "m_1" },
+      { name: "fix (GPT-5.6-Sol)", kind: "cloud" as const, machineId: "m_2" },
+    ];
+    expect(deleteCopiesNotice(forks, 2)).toBe("Each one's computer is deleted in the cloud; their records and 2 threads leave this computer.");
+    // Copies on this Mac each leave their own folder, so each is named with its own.
+    const copies = [
+      { name: "fix (Opus 5.5)", kind: "local" as const, copy: { path: "/Users/dev/fix-opus" }, machineId: "local" },
+      { name: "fix (Sonnet 5)", kind: "local" as const, copy: { path: "/Users/dev/fix-sonnet" }, machineId: "local" },
+    ];
+    expect(deleteCopiesNotice(copies, 2)).toBe(
+      "fix (Opus 5.5): its copy at /Users/dev/fix-opus is removed and the project folder is left as it is. fix (Sonnet 5): its copy at /Users/dev/fix-sonnet is removed and the project folder is left as it is. Their records and 2 threads leave this computer.",
+    );
+    for (const c of [...forks, ...copies] as CopyToDelete[]) expect(deleteCopiesNotice([c, c], 1)).toContain(onDeleteOf(c.kind, c.copy, c.machineId).asked);
   });
 
   it("the delete sentence for a create that failed before any computer was made names none going", () => {

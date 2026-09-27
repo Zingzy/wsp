@@ -576,6 +576,7 @@ describe("moveProjectState", () => {
       ["qwen", "transcript-only"],
       ["goose", "transcript-only"],
       ["amp", "transcript-only"],
+      ["cursor", "transcript-only"],
     ]);
     expect(tree(claude)).toEqual(claudeAfter("-root-work-b-2-x"));
     expect(Object.keys(tree(pi))).toContain("sessions/--root-work-b_2.x--/2026-09-05T21-56-00-000Z_s1.jsonl");
