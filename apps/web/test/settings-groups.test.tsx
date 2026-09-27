@@ -283,7 +283,7 @@ describe("General", () => {
     const { api, sets } = settingsApi({ editorList: async () => editors } as Partial<Api>);
     mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
-    expect(rowTitles()).toEqual([GENERAL_WORDS.editor]);
+    expect(rowTitles()).toEqual([GENERAL_WORDS.editor, AWAKE_WORDS.keepAwake]);
     expect(descriptionOf("editor")).toBe(GENERAL_WORDS.editorDescription);
     const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=editor]")!;
     expect(select.textContent).toBe("Cursor");
@@ -306,7 +306,7 @@ describe("Appearance", () => {
     const { api, sets } = settingsApi();
     mountSettings({ api, at: { kind: "group", group: "appearance" } });
     await settle();
-    expect(rowTitles()).toEqual([FONT_WORDS.app, FONT_WORDS.code, NOTIFY_WORDS.sound, AWAKE_WORDS.keepAwake]);
+    expect(rowTitles()).toEqual([FONT_WORDS.app, FONT_WORDS.code, NOTIFY_WORDS.sound]);
     expect(descriptionOf("notify-sound")).toBe(NOTIFY_WORDS.soundDescription);
     const toggle = (): HTMLElement => document.querySelector<HTMLElement>("[data-k=notify-sound]")!;
     expect(toggle().getAttribute("aria-checked")).toBe("true");
@@ -322,9 +322,9 @@ describe("Appearance", () => {
 });
 
 describe("Keeping the computer awake", () => {
-  it("is one switch on Appearance, on by default, that writes the record and restores to on", async () => {
-    const { api, sets } = settingsApi();
-    mountSettings({ api, at: { kind: "group", group: "appearance" } });
+  it("is one switch on General, on by default, that writes the record", async () => {
+    const { api, sets } = settingsApi({ editorList: async () => [] } as Partial<Api>);
+    mountSettings({ api, at: { kind: "group", group: "general" } });
     await settle();
     expect(descriptionOf("keep-awake")).toBe(AWAKE_WORDS.keepAwakeDescription);
     expect(`${AWAKE_WORDS.keepAwake} ${AWAKE_WORDS.keepAwakeDescription}`).not.toMatch(/host|daemon|service/i);
@@ -334,10 +334,7 @@ describe("Keeping the computer awake", () => {
     await settle();
     expect(sets).toEqual([{ keepAwake: false }]);
     expect(useStore.getState().preferences.keepAwake).toBe(false);
-    fireEvent.click(document.querySelector<HTMLElement>("[data-k=restore-defaults]")!);
-    await settle();
-    expect(sets.at(-1)).toMatchObject({ keepAwake: true });
-    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
   });
 });
 

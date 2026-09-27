@@ -236,9 +236,8 @@ export const NOTIFY_WORDS = {
   soundDescription: "A finished turn and a permission prompt make a sound while wsp is not in front.",
 } as const;
 
-/** Settings > Appearance's While threads work: the one switch over the desktop app keeping this computer awake. */
+/** Settings > General's switch over the desktop app keeping this computer awake. */
 export const AWAKE_WORDS = {
-  head: "While threads work",
   keepAwake: "Keep this computer awake",
   keepAwakeDescription: "The wsp app stops this computer sleeping on its own while a thread works on it.",
 } as const;

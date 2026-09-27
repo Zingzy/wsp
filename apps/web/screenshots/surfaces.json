@@ -379,6 +379,17 @@
       "settleMs": 700
     },
     {
+      "name": "settings-general",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-general"
+      ],
+      "wait": "k=keep-awake"
+    },
+    {
       "name": "settings-appearance",
       "at": "/",
       "steps": [

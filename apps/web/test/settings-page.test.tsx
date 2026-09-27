@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type PlaceView, type ProjectView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
-import { ABOUT_WORDS, AWAKE_WORDS, FONT_WORDS, NOTIFY_WORDS, SETTINGS_WORDS, groupBlurbs } from "../src/settings/format.js";
+import { ABOUT_WORDS, FONT_WORDS, NOTIFY_WORDS, SETTINGS_WORDS, groupBlurbs } from "../src/settings/format.js";
 import { SETTINGS_GROUPS } from "../src/settings/groups.js";
 import { useSettingsStore } from "../src/settings/settingsStore.js";
 import { SYSTEM_DARK_QUERY, useFontEffect, useThemeEffect } from "../src/settings/theme.js";
@@ -355,7 +355,7 @@ describe("Appearance", () => {
     const head = document.querySelector<HTMLElement>("[data-settings-page] [data-k=settings-page-head]")!;
     expect(head.querySelector("h1")!.textContent).toBe(SETTINGS_WORDS.appearance);
     expect(head.querySelector("p")!.textContent).toBe(groupBlurbs("").appearance);
-    expect(rowTitles()).toEqual([FONT_WORDS.app, FONT_WORDS.code, NOTIFY_WORDS.sound, AWAKE_WORDS.keepAwake]);
+    expect(rowTitles()).toEqual([FONT_WORDS.app, FONT_WORDS.code, NOTIFY_WORDS.sound]);
     expect(document.querySelectorAll("[data-settings-page] [data-settings-line]")).toHaveLength(0);
     expect(document.querySelector("[data-k=sidebar-width]")).toBeNull();
     expect(document.querySelector("[data-k=terminal-size-row]")).toBeNull();
@@ -376,7 +376,7 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.theme).toBe("system");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", notifySound: true, keepAwake: true });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", notifySound: true });
   });
 
   it("a theme picked for either side is off the defaults, and Restore defaults puts both sides back", async () => {
@@ -389,7 +389,7 @@ describe("Appearance", () => {
     await waitFor(() => expect(restore()).toBeNull());
     expect(useStore.getState().preferences.darkTheme).toBe("graphite");
     await settle();
-    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", notifySound: true, keepAwake: true });
+    expect(sets.at(-1)).toEqual({ theme: "system", lightTheme: "paper", darkTheme: "graphite", appFont: "", codeFont: "", notifySound: true });
   });
 });
 

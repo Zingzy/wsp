@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > General: the editor Open in editor opens a file in, picked from
-// the editors installed on the computer the host runs on.
+// the editors installed on the computer the host runs on, and whether the
+// desktop app keeps this computer awake while a thread works on it.
 import type { EditorId } from "@wsp/protocol";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../components/ui/select.js";
-import { GENERAL_WORDS } from "./format.js";
+import { Switch } from "../components/ui/switch.js";
+import { AWAKE_WORDS, GENERAL_WORDS } from "./format.js";
 import type { SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 
@@ -35,6 +37,13 @@ export function generalCards(ctx: SettingsContext): SettingsCardData[] {
                 </SelectPopup>
               </Select>
             ),
+        },
+        {
+          kind: "row",
+          id: "keep-awake",
+          title: AWAKE_WORDS.keepAwake,
+          description: AWAKE_WORDS.keepAwakeDescription,
+          control: <Switch data-k="keep-awake" aria-label={AWAKE_WORDS.keepAwake} checked={ctx.preferences.keepAwake} onCheckedChange={keepAwake => ctx.setPreferences({ keepAwake })} />,
         },
       ],
     },
