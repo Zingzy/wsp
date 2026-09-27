@@ -11,7 +11,7 @@
 // workspace awake and billing forever.
 
 import { MachineUnreachableError, isMissing, roadFailed, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
-import { appendCostPoint, goneWords, monthStart, reachShown, spentSince, workspacePlaceId, type EventUnion, type MachineFacts, type PlaceSpend, type PlaceView, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { accruedPast, appendCostPoint, dayStart, goneWords, monthStart, placeSpendLimit, reachShown, spentSince, workspacePlaceId, type EventUnion, type MachineFacts, type PlaceSpend, type PlaceView, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import type { Store } from "./store.js";
 
@@ -155,10 +155,11 @@ export interface StatusApi {
   watch(opts?: StatusWatchOptions): () => void;
   /** The workspace's cost ticks since metering began, across host restarts, folded to the rate changes and the newest tick. */
   history(workspaceId: string): Promise<WorkspaceCostEvent[]>;
-  /** What each row of the places list has cost since the first of the month, over every workspace metered on it in
-   * that month, the deleted ones with the rest, and what it burns now over the ones still there. The list is the
-   * caller's because the tracker meters workspaces and holds no view of the computers they stand on; rows nothing
-   * was metered on are left out, and the order is the list's own. */
+  /** What each row of the places list has cost since midnight and since the first of the month, over every workspace
+   * metered on it then, the deleted ones with the rest, and what it burns now over the ones still there. A machine
+   * still running reads up to `at` at its newest tick's rate. The list is the caller's because the tracker meters
+   * workspaces and holds no view of the computers they stand on; a row with a spend limit always answers, zeros where
+   * nothing was metered, any other row nothing was metered on is left out, and the order is the list's own. */
   spend(places: readonly PlaceView[], at?: number): Promise<PlaceSpend[]>;
 }
 
@@ -271,7 +272,7 @@ function factsBackoffMs(misses: number): number {
  * lands at every event that opens or re-prices a stretch (a create, a wake, a size change), so that rate is the one
  * that held until this tick; only the first tick ever has none behind it, and its stretch ran at the size now. */
 function accrue(last: WorkspaceCostEvent | undefined, awakeMs: number, rateNow: number): number {
-  return (last?.accruedUsd ?? 0) + ((last?.rateUsdPerHour ?? rateNow) * (awakeMs - (last?.awakeMs ?? 0))) / 3_600_000;
+  return accruedPast({ accruedUsd: last?.accruedUsd ?? 0, rateUsdPerHour: last?.rateUsdPerHour ?? rateNow }, awakeMs - (last?.awakeMs ?? 0));
 }
 
 /** Rejects once ms pass; the underlying promise is left to settle on its own. */
@@ -389,6 +390,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   }
   o.on("workspace.deleted", e => {
     if (e.type !== "workspace.deleted") return;
+    closeSeries(e.workspaceId);
     meters.delete(e.workspaceId);
     closedByGone.delete(e.workspaceId);
     forget(e.workspaceId);
@@ -441,6 +443,18 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const document = (id: string): CostHistoryRecord => {
     const where = stood.get(id);
     return { workspaceId: id, points: histories.get(id) ?? [], ...(where !== undefined ? { where } : {}), ...(ended.has(id) ? { ended: true } : {}) };
+  };
+
+  /** A deleted workspace's series ends on a tick at the instant it went, closing the stretch it was in: nothing ticks
+   * it again, and a series read later stops at its newest tick. */
+  const closeSeries = (id: string): void => {
+    const before = histories.get(id);
+    const last = before?.at(-1);
+    const m = meters.get(id);
+    if (before === undefined || last === undefined || m === undefined) return;
+    const now = clock.now();
+    const awakeMs = m.awakeMs + (m.mark !== undefined ? Math.max(0, now - m.mark) : 0);
+    histories.set(id, appendCostPoint(before, { ...last, phase: "gone", rateUsdPerHour: 0, awakeMs, accruedUsd: accrue(last, awakeMs, last.rateUsdPerHour), at: new Date(now).toISOString() }));
   };
 
   /** A deleted workspace's meter is over, and what it spent this month is not: the series is written where it
@@ -766,14 +780,14 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     }
   };
 
-  // A tick at every event that opens, re-prices or ends a stretch for good: the rate a tick carries then holds until
-  // the next one, so a size change an hour after an unwatched wake still bills that hour at the size it woke at, and
-  // a machine found gone reads rate 0 from that instant rather than from the timer's next tick.
+  // A tick at every event that opens, re-prices or ends a stretch: the rate a tick carries then holds until the next
+  // one, so a size change an hour after an unwatched wake still bills that hour at the size it woke at, and a machine
+  // napped or found gone reads rate 0 from that instant rather than from the timer's next tick.
   const eventTick = (id: string): void => guarded("cost", () => costTick(id))();
   o.on("workspace.created", e => {
     if (e.type === "workspace.created") eventTick(e.workspace.id);
   });
-  for (const type of ["workspace.woken", "workspace.upgraded", "workspace.gone"] as const) {
+  for (const type of ["workspace.woken", "workspace.upgraded", "workspace.napped", "workspace.gone"] as const) {
     o.on(type, e => {
       if (e.type === type) eventTick(e.workspaceId);
     });
@@ -828,17 +842,23 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
 
   const spend: StatusApi["spend"] = async (places, at = clock.now()) => {
     await loading;
-    const from = monthStart(at);
-    const rows = new Map<string, PlaceSpend>();
+    const day = dayStart(at);
+    const month = monthStart(at);
+    const zero = (place: string): PlaceSpend => ({ place, todayUsd: 0, monthUsd: 0, rateUsdPerHour: 0 });
+    const running = new Set((await o.records()).filter(r => r.phase === "running").map(r => r.id));
+    const rows = new Map(places.filter(place => placeSpendLimit(place) !== undefined).map(place => [place.id, zero(place.id)]));
     for (const [id, points] of histories) {
       const where = stood.get(id);
       const place = where === undefined ? undefined : workspacePlaceId(where, places);
       if (place === undefined) continue;
-      const row = rows.get(place) ?? { place, monthUsd: 0, rateUsdPerHour: 0 };
-      row.monthUsd += spentSince(points, from);
-      // What is burning now is what is still there: a deleted workspace's last tick is the instant it stopped
-      // costing anything, whatever rate that tick was carrying when the person took it away.
-      if (!ended.has(id)) row.rateUsdPerHour += points[points.length - 1]?.rateUsdPerHour ?? 0;
+      const row = rows.get(place) ?? zero(place);
+      // Only a machine whose record says running goes on past its newest tick: a deleted one's series ends where it
+      // went, and a napping record whose stored newest tick still runs (the host died before the nap's tick was
+      // written) reads nothing past that tick.
+      const until = running.has(id) ? at : undefined;
+      row.todayUsd += spentSince(points, day, until);
+      row.monthUsd += spentSince(points, month, until);
+      if (until !== undefined) row.rateUsdPerHour += points[points.length - 1]?.rateUsdPerHour ?? 0;
       rows.set(place, row);
     }
     return places.flatMap(place => {
