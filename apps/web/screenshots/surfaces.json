@@ -938,6 +938,20 @@
       ]
     },
     {
+      "name": "tiles-snoozed-working",
+      "at": "/",
+      "fixture": "tiles-snoozed",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger"
+      ],
+      "wait": "thread-status=snoozed",
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
       "name": "tiles-attempt-group",
       "at": "/",
       "fixture": "tiles-attempt",

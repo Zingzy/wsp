@@ -198,6 +198,12 @@ in one slot, gap 4, tabular, weight 500 when toned.
 | Waiting | hourglass | Waiting | | muted, no tone |
 | Idle, read | | | age: `14m`, `3h`, `2d` | the row's muted ink |
 | Settled | | Merged or Closed as text, else the age | | muted |
+| Snoozed, threads working | alarm-clock | `N working` | | the row's muted ink, weight 400, no crab |
+
+The snoozed state lives on the tile alone: a snoozed tree whose threads run
+keeps its root, folded, at the foot of Idle, and the THREADS list and the
+palette keep each thread's own mark. A child that asks for the person or fails
+ends the snooze; a finished turn does not (ruling of 2026-09-28).
 
 In a one-line row the slot is 88px, right-aligned, 12px, and the crab follows
 the time. A held thread's reason rides the hover title, never the slot.
