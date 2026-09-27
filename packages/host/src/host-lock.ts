@@ -230,13 +230,19 @@ export function takeLock(lockPath: string, statePath: string, ports: { port: num
   } finally {
     rmSync(mine, { force: true });
   }
-  // Every marker is some start's, finished or crashed, and none may remove a live lock, so the holder clears them.
-  for (const name of readdirSync(dirname(lockPath))) if (name.startsWith(`${basename(lockPath)}.taking.`)) rmSync(join(dirname(lockPath), name), { force: true });
+  // With a live lock standing no marker's holder may remove it, since its text is not the stale one any of them read,
+  // so every marker goes, and each marker's words a crash left beside it.
+  const base = basename(lockPath);
+  for (const name of readdirSync(dirname(lockPath))) {
+    const left = /^(\d+)\.taking$/.exec(name.slice(base.length + 1));
+    if (name.startsWith(`${base}.taking.`) || (name.startsWith(`${base}.`) && left !== null && !pidAlive(Number(left[1])))) rmSync(join(dirname(lockPath), name), { force: true });
+  }
   return lock;
 }
 
-/** How long a take-over marker stands before it is read as a crash's, whatever its pid says: a take-over is a few
- * file calls, and a pid is a number the system hands out again. */
+/** How long a take-over marker that names no pid stands before it is read as a crash's: a take-over is a few file
+ * calls. A marker that names a pid stands for as long as that pid lives, however long, since a pid handed out again
+ * costs a refusal and a live holder read as gone would cost two hosts. */
 export const MARKER_MS = 10_000;
 
 /** Takes over the stale lock standing at the path, one start at a time: the one that holds the marker, and only
@@ -260,8 +266,9 @@ function takeOverStale(lockPath: string, statePath: string, mine: string): void 
   } else if (!linkInto(mine, lockPath)) throw tookFirst(lockPath, statePath);
 }
 
-/** The first take-over marker nobody live holds, linked whole as the lock is. A marker is only ever given up, never
- * removed by another start, so two starts that both find one abandoned race for the next one and only one gets it. */
+/** The first take-over marker nobody live holds, linked whole as the lock is. A start that finds one abandoned never
+ * removes it (only the sweep does, once a live lock stands), so two starts that both find it race for the next one and
+ * only one gets it. */
 function holdMarker(lockPath: string, statePath: string): string {
   const text = `${lockPath}.${process.pid}.taking`;
   writeFileSync(text, JSON.stringify({ pid: process.pid }));
@@ -277,15 +284,20 @@ function holdMarker(lockPath: string, statePath: string): string {
   }
 }
 
-/** The live start a marker is held by, or nothing where it is a crash's: its pid gone, or older than MARKER_MS. One
- * that says no pid yet is a start still writing it, on a file system that creates before it writes. */
+/** The live start a marker is held by, or nothing where it is a crash's: its pid gone. One that names no pid yet is a
+ * start still writing it, on a file system that creates before it writes, until it is older than MARKER_MS. */
 function markerHolder(marker: string): number | "unknown" | undefined {
+  let pid: unknown;
   try {
-    if (Date.now() - statSync(marker).mtimeMs > MARKER_MS) return undefined;
-    const pid: unknown = (JSON.parse(readFileSync(marker, "utf8")) as { pid?: unknown }).pid;
-    return typeof pid !== "number" ? "unknown" : pidAlive(pid) ? pid : undefined;
+    pid = (JSON.parse(readFileSync(marker, "utf8")) as { pid?: unknown }).pid;
   } catch (e) {
-    return errnoCode(e) === "ENOENT" ? undefined : "unknown";
+    if (errnoCode(e) === "ENOENT") return undefined;
+  }
+  if (typeof pid === "number") return pidAlive(pid) ? pid : undefined;
+  try {
+    return Date.now() - statSync(marker).mtimeMs > MARKER_MS ? undefined : "unknown";
+  } catch {
+    return undefined;
   }
 }
 

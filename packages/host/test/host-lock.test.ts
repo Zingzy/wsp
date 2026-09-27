@@ -243,7 +243,8 @@ describeWithDists("hosts starting at once against a stale lock", ["protocol", "o
     import { takeLock } from ${JSON.stringify(fileURLToPath(new URL("../src/host-lock.ts", import.meta.url)))};
     const [dir] = process.argv.slice(2);
     const nap = new Int32Array(new SharedArrayBuffer(4));
-    for (let seen = -1; ; ) {
+    const parent = process.ppid;
+    for (let seen = -1; process.ppid === parent; ) {
       let round;
       try {
         round = JSON.parse(readFileSync(join(dir, "round"), "utf8"));
@@ -273,8 +274,25 @@ describeWithDists("hosts starting at once against a stale lock", ["protocol", "o
   const TAKERS = 6;
   const ROUNDS = 30;
 
-  /** One busy loop per core for as long as the case runs, so the takers are preempted mid-take as a loaded Mac does. */
-  const loadEveryCore = (): ChildProcess[] => Array.from({ length: availableParallelism() }, () => spawn(process.execPath, ["-e", "for (;;) {}"], { stdio: "ignore" }));
+  /** One busy loop per core for as long as the case runs, so the takers are preempted mid-take as a loaded Mac does.
+   * Each is a process group of its own, killed however the case ends, and one whose worker was killed outright ends
+   * itself once it finds its parent gone. */
+  const BUSY = "const parent = process.ppid; for (let i = 0; ; i++) if (i % 1e8 === 0 && process.ppid !== parent) process.exit();";
+  const loadEveryCore = (): { stop(): void } => {
+    const loops = Array.from({ length: availableParallelism() }, () => spawn(process.execPath, ["-e", BUSY], { stdio: "ignore", detached: true }));
+    const stop = (): void => {
+      process.off("exit", stop);
+      for (const loop of loops) {
+        try {
+          process.kill(-loop.pid!, "SIGKILL");
+        } catch {
+          // Gone already.
+        }
+      }
+    };
+    process.on("exit", stop);
+    return { stop };
+  };
 
   it("exactly one of six takes it in every round on a loaded computer, the lock names that one, and the token is that one's", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-lock-race-"));
@@ -322,7 +340,8 @@ describeWithDists("hosts starting at once against a stale lock", ["protocol", "o
       }
       setRound({ r: "done" });
     } finally {
-      for (const child of [...takers, ...load]) child.kill("SIGKILL");
+      load.stop();
+      for (const child of takers) child.kill("SIGKILL");
       rmSync(dir, { recursive: true, force: true });
     }
   }, 180_000);
