@@ -203,6 +203,13 @@ export const ACCOUNT_WORDS = {
 } as const;
 
 /** Settings > Privacy: what this wsp asks of a service outside the person's computers. */
+/** Settings > General. */
+export const GENERAL_WORDS = {
+  editor: "Editor",
+  editorDescription: "Where Open in editor opens a file or a thread's folder.",
+  noEditor: "No editor wsp opens files in is installed: VS Code, Cursor, Zed or a JetBrains IDE.",
+} as const;
+
 export const PRIVACY_WORDS = {
   title: "Privacy",
   serverIcons: "Server icons from Google",

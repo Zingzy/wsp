@@ -230,6 +230,28 @@ pub struct FsListReply {
     pub total: u64,
 }
 
+/// One fs.search hit: a path relative to the folder searched, and in text mode the line it is on (from 1) and that
+/// line's text, cut to a few hundred characters.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FsSearchHit {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub text: Option<String>,
+}
+
+/// truncated: the walk stopped at a cap or at its time budget before it had looked everywhere.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FsSearchReply {
+    pub hits: Vec<FsSearchHit>,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct FsReadReply {

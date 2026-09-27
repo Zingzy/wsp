@@ -10,7 +10,7 @@ import type { BundleOutcome, DesktopBridge, DeviceView, PlaceView, ProjectView, 
 import { DAEMON_VERSION, DEFAULT_PREFERENCES, DEVICES_TICKET_REFUSAL, HOST_NO_RESTART_LINE, UP_RESTART_LINE, fmtBytes, projectInUseRefusal } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
+import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, GENERAL_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { builtWhen } from "../src/settings/image.js";
 import { chordsOf, keybindingCards } from "../src/settings/keybindings.js";
 import { JUMP_WORD, KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
@@ -276,6 +276,30 @@ describe("Account", () => {
   });
 });
 
+describe("General", () => {
+  it("offers the editors installed where the host runs, the pick first and the first installed without one, and a pick writes the preference", async () => {
+    const editors = [{ id: "cursor", name: "Cursor" }, { id: "zed", name: "Zed" }, { id: "finder", name: "Finder" }];
+    const { api, sets } = settingsApi({ editorList: async () => editors } as Partial<Api>);
+    mountSettings({ api, at: { kind: "group", group: "general" } });
+    await settle();
+    expect(rowTitles()).toEqual([GENERAL_WORDS.editor]);
+    expect(descriptionOf("editor")).toBe(GENERAL_WORDS.editorDescription);
+    const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=editor]")!;
+    expect(select.textContent).toBe("Cursor");
+    await pickOption(select, "Zed");
+    await waitFor(() => expect(sets).toEqual([{ editor: "zed" }]));
+    // The pick's popup is a portal; unmounted before the page's own teardown empties the body under it.
+    cleanup();
+  });
+
+  it("says no editor is installed, with nothing to pick, where the host found none", async () => {
+    mountSettings({ api: settingsApi({ editorList: async () => [] } as Partial<Api>).api, at: { kind: "group", group: "general" } });
+    await settle();
+    expect(descriptionOf("editor")).toBe(GENERAL_WORDS.noEditor);
+    expect(document.querySelector("[data-settings-page] [data-k=editor]")).toBeNull();
+  });
+});
+
 describe("Privacy", () => {
   it("offers server icons from Google as one switch, on by default, that writes the record and restores to on", async () => {
     const { api, sets } = settingsApi();
@@ -343,7 +367,7 @@ describe("Keybindings", () => {
     expect(label("workspace.select.1", tab)).toEqual([]);
     const cards = keybindingCards(DEFAULT_KEYBINDINGS, mac);
     expect(cards.map(card => card.head)).toEqual([undefined, KEYBINDINGS_WORDS.workspacesAndThreads, KEYBINDINGS_WORDS.terminal, KEYBINDINGS_WORDS.fixed]);
-    expect(cards[0]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["Search", "Settings", "Toggle the sidebar", "Toggle the terminal drawer", "Toggle the right panel", "Toggle the preview"]);
+    expect(cards[0]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["Search", "Find a file", "Search in files", "Settings", "Toggle the sidebar", "Toggle the terminal drawer", "Toggle the right panel", "Toggle the preview"]);
     expect(cards[1]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["New thread", "Next task", "Previous task", "Next thread", "Previous thread", "Settle thread", JUMP_WORD]);
     expect(cards[3]!.items.map(item => (item.kind === "line" ? [item.label, item.keys] : []))).toEqual([
       [KEYBINDINGS_WORDS.sendMessage, [["Enter"]]],

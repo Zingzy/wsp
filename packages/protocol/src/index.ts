@@ -15,6 +15,7 @@ import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
+import type { FsSearchReply as WireFsSearchReply } from "./generated/FsSearchReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
@@ -1886,6 +1887,19 @@ export const ThemeId = z.string().min(1);
 /** Each side's theme before a person picks one. */
 const THEME_PICK_DEFAULTS = { lightTheme: "paper", darkTheme: "graphite" } as const;
 
+/** The editors a file on the computer running the host can open in, the one table the host's opener is keyed by:
+ * the host lists the ones installed there and runs its own command for each, never a command a client names.
+ * Finder is the Mac's own and reveals the file rather than opening it. */
+export const EditorId = z.enum(["vscode", "cursor", "vscode-insiders", "zed", "idea", "webstorm", "pycharm", "goland", "rustrover", "clion", "phpstorm", "rubymine", "rider", "finder"]);
+export type EditorId = z.infer<typeof EditorId>;
+export const EditorChoice = z.object({ id: EditorId, name: z.string() });
+export type EditorChoice = z.infer<typeof EditorChoice>;
+
+/** What Open in editor says for a workspace whose files are on another machine, named as the person reads it. */
+export const editorOpensHereLine = (name: string): string => `These files are on ${name}, so they open here.`;
+/** The refusal for an editor.open on a socket let in on a ticket: a program starts only for this computer's own window. */
+export const EDITOR_TICKET_REFUSAL = "a socket let in on a ticket cannot open an editor on this computer; open it from the app on the computer the host runs on";
+
 export const Preferences = z.object({
   theme: ThemePreference,
   /** Each side's pick. Defaulted rather than required, so a record from a host older than the picks still parses on the
@@ -1917,6 +1931,8 @@ export const Preferences = z.object({
   /** Whether the host asks each agent's vendor for its newest version. On unless the person turns it off, and
    * WSP_UPDATE_CHECK=0 in the host's environment stops it whatever this says; defaulted as serverIcons is. */
   agentVersions: z.boolean().default(true),
+  /** The editor Open in editor opens a file in; absent opens the first one installed on the computer running the host. */
+  editor: EditorId.optional(),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -1964,6 +1980,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     return next;
   };
   const target = patch.target === undefined ? current.target : patch.target;
+  const editor = patch.editor ?? current.editor;
   return {
     theme: patch.theme ?? current.theme,
     lightTheme: patch.lightTheme ?? current.lightTheme,
@@ -1979,6 +1996,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
+    ...(editor === undefined ? {} : { editor }),
   };
 }
 
@@ -3110,6 +3128,18 @@ export type FsReadEncoding = z.infer<typeof FsReadEncoding>;
 export const FsReadReply = z.object({ content: z.string(), size: z.number(), truncated: z.boolean() });
 export type FsReadReply = z.infer<typeof FsReadReply>;
 
+export const FsSearchMode = z.enum(["files", "text"]);
+export type FsSearchMode = z.infer<typeof FsSearchMode>;
+/** path is relative to the folder searched; a text hit adds its line, from 1, and that line's text. truncated means
+ * the walk stopped at FS_SEARCH_CAP_FILES or FS_SEARCH_CAP_HITS, or at its time or byte budget, before it had looked
+ * everywhere. */
+export const FsSearchReply = z.object({
+  hits: z.array(z.object({ path: z.string(), line: z.number().int().positive().optional(), text: z.string().optional() })),
+  truncated: z.boolean(),
+});
+export type FsSearchReply = WireFsSearchReply;
+type FsSearchReplyHeld = Held<Same<z.infer<typeof FsSearchReply>, FsSearchReply>>;
+
 /** Porcelain v2 branch header: head is "(detached)" off a branch, oid
  * "(initial)" before the first commit; without an upstream, or with one whose
  * tracking ref is gone, upstream is absent and ahead/behind count against the
@@ -3304,7 +3334,7 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * symlink, is refused with code outside-root. gitignore hides .git and the
    * entries git would ignore.
    *
-   * machineId, on these seven and on no other op of this road: the workspace the frame is for, on a daemon that
+   * machineId, on these eight and on no other op of this road: the workspace the frame is for, on a daemon that
    * runs workspaces. A workspace on a computer somebody owns runs no daemon of its own, so the daemon of the
    * computer holding it answers for it: the path then names the folder as that workspace sees it, a file is read
    * through the workspace's own rootfs and a git operation runs inside the workspace, in its namespaces and its
@@ -3318,6 +3348,12 @@ export const DaemonRequest = z.discriminatedUnion("op", [
     machineId: z.string().optional(),
   }),
   z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional(), machineId: z.string().optional() }),
+  /** Searches under one folder, resolved as fs.list resolves its path: files answers every file whose path below the
+   * folder holds the query's letters in order, text every line of a text file there that holds the query, both
+   * case-insensitive. The walk reads the folder's .gitignore and .ignore files, leaves hidden names out, never
+   * follows a symlink, and skips a file over FS_READ_CAP_BYTES or holding a NUL byte; it answers what it found when a
+   * cap or its time budget stops it, with truncated set. */
+  z.object({ id: reqId, op: z.literal("fs.search"), path: z.string(), query: z.string(), mode: FsSearchMode, machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string(), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional(), machineId: z.string().optional() }),
   /** Pushes the branch the checkout is on to its remote and answers a GitPushReply. The base branch itself is
@@ -3983,6 +4019,7 @@ const DAEMON_CONTENTS = [
   "c76e7e2a3b9a767beaa281b973a409e1bc8869969255fa6c9fdeb6211b38ce3d",
   "be3d9077764035f8bf2b96ab6b50c018017046ec74a30827404f64752ef19bdf",
   "837e923920b718c42e372f7d84dd08d4d51add8e7b86de1ab4afb4a156afb8ae",
+  "1d08649bc5bd86bbc8d6a3a4d85c72481c9ffc6d5d78f45149cf7da6aa928bd7",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4195,7 +4232,9 @@ const DAEMON_CONTENTS = [
  * Version 77 forwards a guest's `wsp mcp` to the running host over the daemon's link, so a thread's MCP server needs no host process of its own on the machine.
  * Version 78 changes no behaviour: the pty broker's cases moved to a test binary of their own, and the file they left is hashed.
  * Version 79 changes no behaviour: every wire type in the protocol crate derives the TypeScript the protocol package re-exports, which moves the crate's sources and the lock.
- * Version 80 answers git.status on a stopped workspace with the branch alone, read off its copy's git directory with no program run, and says the edits were not read; running or stopped, a branch with no upstream counts ahead and behind against the default branch; a stopped copy's history too long or slow to walk answers countsUnknown. */
+ * Version 80 answers git.status on a stopped workspace with the branch alone, read off its copy's git directory with no program run, and says the edits were not read; running or stopped, a branch with no upstream counts ahead and behind against the default branch; a stopped copy's history too long or slow to walk answers countsUnknown.
+ * Version 81 answers fs.search: the files under a folder whose path holds a query's letters in order, or the lines of text there that hold it, walked with the folder's ignore rules and never through a link, under a cap and a time budget.
+ */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5496,6 +5535,16 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * again on every ask so a saved change reaches the next terminal opened; `scheme` picks the theme of a
    * light:...,dark:... value and is dark when absent. */
   z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
+  /** Replies with { editors: EditorChoice[] }: the editors installed on the computer running the host, in the
+   * table's order. None where the host runs on a computer it keeps no table for. */
+  z.object({ id: reqId, op: z.literal("editor.list") }),
+  /** Opens a file or a folder of one workspace in the person's editor on the computer running the host and replies
+   * with { editor }, the one it opened in: the preference's, else the first installed. The path must resolve inside
+   * that workspace's copy or its project folder on this computer, a link included; a workspace whose files are on
+   * another machine is refused with editorOpensHereLine. `line`, from 1, lands the editor on that line where it
+   * takes one. The command is the host's own table's, run with the path as one argument and never through a shell.
+   * Only this computer's own window may ask. */
+  z.object({ id: reqId, op: z.literal("editor.open"), workspaceId: z.string(), path: z.string(), line: z.number().int().positive().optional() }),
   /** Replies with { report: AgentsReport }: the agents, skills and MCP servers standing on one computer or workspace,
    * read as the login the computer was added with and never as root. Nothing is started: no server is spawned and no
    * login file is read, only whether one is there. A napping workspace is not woken; it answers the last report read

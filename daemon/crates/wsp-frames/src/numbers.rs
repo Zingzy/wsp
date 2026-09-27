@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 80;
+pub const DAEMON_VERSION: u32 = 81;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -103,6 +103,9 @@ pub const EXEC_DEADLINE_EXIT: i32 = 124;
 
 pub const FS_READ_CAP_BYTES: u64 = 2 * 1024 * 1024;
 pub const FS_LIST_CAP_ENTRIES: usize = 10_000;
+/// Paths one fs.search in files mode carries, and hits one in text mode carries; truncated says the walk stopped there.
+pub const FS_SEARCH_CAP_FILES: usize = 5_000;
+pub const FS_SEARCH_CAP_HITS: usize = 500;
 pub const GIT_DIFF_CAP_BYTES: usize = 2 * 1024 * 1024;
 pub const SCROLLBACK_CAP_BYTES: usize = 256 * 1024;
 /// How much of /proc/<pid>/cmdline a process row carries.

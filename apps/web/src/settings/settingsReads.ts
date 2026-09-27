@@ -50,6 +50,14 @@ export function useSettingsReads(): void {
       },
       () => {},
     );
+    void api?.editorList?.().then(
+      editors => {
+        if (live) setReads({ editors });
+      },
+      () => {
+        if (live) setReads({ editors: [] });
+      },
+    );
     void api?.account?.().then(
       account => {
         if (live) setReads({ account });

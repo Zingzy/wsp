@@ -28,6 +28,15 @@ describe("the preferences record", () => {
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: null } }).success).toBe(true);
   });
 
+  it("the editor pick lands and stays through a patch that names none, and an editor off the table is refused", () => {
+    const picked = applyPreferencesPatch(DEFAULT_PREFERENCES, { editor: "zed" });
+    expect(picked).toEqual({ ...DEFAULT_PREFERENCES, editor: "zed" });
+    expect(applyPreferencesPatch(picked, { theme: "dark" }).editor).toBe("zed");
+    expect(preferencesFrom({ editor: "cursor" }).editor).toBe("cursor");
+    expect(PreferencesPatch.safeParse({ editor: "emacs" }).success).toBe(false);
+    expect(PreferencesPatch.safeParse({ editor: "sh -c 'open /'" }).success).toBe(false);
+  });
+
   it("each side keeps its own theme pick: a patch lands either, an old record reads with the side defaults, and an empty id is refused", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { darkTheme: "denim" });
     expect(one).toEqual({ ...DEFAULT_PREFERENCES, darkTheme: "denim" });

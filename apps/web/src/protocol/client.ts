@@ -37,6 +37,8 @@ import {
   type GoldenManifest,
   type GoldenVersion,
   HostFolderListing,
+  EditorChoice,
+  EditorId,
   InitJob,
   InitSetup,
   type InitRoad,
@@ -520,6 +522,13 @@ export interface Api {
   /** The person's Ghostty config on the computer running the host, as the terminal pane applies it, read now for the
    * scheme the app shows. Optional so fixtures without a terminal need not fake it; without it the pane keeps its defaults. */
   hostTerminalConfig?(scheme: TerminalScheme): Promise<TerminalConfig>;
+  /** The editors installed on the computer running the host, for the picker in Settings. Optional so a fixture with
+   * no Settings page need not fake it. */
+  editorList?(): Promise<EditorChoice[]>;
+  /** Opens a workspace's file, at its line, or its folder in the person's editor on the computer running the host,
+   * and answers which editor. Optional so a fixture that opens nothing need not fake it; without it the button is
+   * not drawn. */
+  openInEditor?(workspaceId: string, path: string, line?: number): Promise<EditorId>;
   /** Every computer this wsp runs on: this one, the ones joined to it, and the provider it forks on; and beside
    * them every add over ssh the host is running and the last it finished. Optional so a fixture with no Settings
    * page need not fake it. */
@@ -756,6 +765,9 @@ export function makeApi(c: ProtocolClient): Api {
       HostFolderListing.parse((await c.request<{ listing?: unknown }>("host.folders", { ...(dir !== undefined ? { dir } : {}), ...(hidden !== undefined ? { hidden } : {}), ...(repos === true ? { repos } : {}) })).listing),
     // Parsed, not trusted: the pane paints only values the wire type vouches for.
     hostTerminalConfig: async scheme => TerminalConfig.parse((await c.request<{ config?: unknown }>("host.terminalConfig", { scheme })).config),
+    editorList: async () => EditorChoice.array().parse((await c.request<{ editors?: unknown }>("editor.list")).editors),
+    openInEditor: async (workspaceId, path, line) =>
+      EditorId.parse((await c.request<{ editor?: unknown }>("editor.open", { workspaceId, path, ...(line !== undefined ? { line } : {}) })).editor),
     addComputerOverSsh: async (login, addId) =>
       PlaceView.parse((await c.request<{ place?: unknown }>("places.add", { addId, address: login.address, ...(login.port === undefined ? {} : { sshPort: login.port }) })).place),
     // Parsed, not trusted: the sheet draws only steps and states the wire type vouches for.

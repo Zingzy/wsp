@@ -49,6 +49,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+0", command: "terminal.zoomReset", when: "terminalFocus" },
   { key: "mod+shift+j", command: "preview.toggle" },
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalOwnsMod" },
+  { key: "mod+p", command: "files.quickOpen", when: "!terminalOwnsMod" },
+  { key: "mod+shift+f", command: "files.search", when: "!terminalOwnsMod" },
   { key: "mod+,", command: "settings.toggle" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+t", command: "chat.new", when: "!terminalFocus" },

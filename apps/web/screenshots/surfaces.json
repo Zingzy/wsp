@@ -809,6 +809,115 @@
       ],
       "wait": "testid=composer-editor",
       "settleMs": 800
+    },
+    {
+      "name": "files-tree",
+      "at": "/",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:ControlOrMeta+Alt+b",
+        "surface-launch=files"
+      ],
+      "wait": "files-pane",
+      "settleMs": 800
+    },
+    {
+      "name": "files-file",
+      "at": "/",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:ControlOrMeta+Alt+b",
+        "surface-launch=files",
+        "item-path=README.md"
+      ],
+      "wait": "markdown-preview",
+      "settleMs": 800
+    },
+    {
+      "name": "file-finder",
+      "at": "/",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "key:ControlOrMeta+p",
+        "file-finder-input=files",
+        "type:rea"
+      ],
+      "wait": "file-finder=files",
+      "settleMs": 800
+    },
+    {
+      "name": "file-search",
+      "at": "/",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "key:ControlOrMeta+Shift+f",
+        "file-finder-input=text",
+        "type:thing"
+      ],
+      "wait": "file-finder=text",
+      "settleMs": 800
+    },
+    {
+      "name": "files-stopped",
+      "at": "/",
+      "fixture": "ascii-only",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=ws:ws_api",
+        "390:key:Escape",
+        "390:key:ControlOrMeta+Alt+b"
+      ],
+      "wait": "surface-launch=files",
+      "settleMs": 800
+    },
+    {
+      "name": "settings-editor",
+      "at": "/",
+      "widths": [
+        1440,
+        390
+      ],
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-general"
+      ],
+      "wait": "k=editor",
+      "settleMs": 600
     }
   ]
 }

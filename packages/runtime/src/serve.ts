@@ -75,6 +75,9 @@ import {
   markedCut,
   requestSecrets,
   RUNTIME_OPS,
+  EDITOR_TICKET_REFUSAL,
+  editorOpensHereLine,
+  isLocalWorkspace,
   type AccountDevice,
   type AccountView,
   type DeviceView,
@@ -105,7 +108,7 @@ import type { DaemonChannel } from "./daemon-channel.js";
 import { NO_DEVICE_DOOR, safeEqual, threadOf, type DeviceDoor, type HeldDevice } from "./devices.js";
 import { NO_PLACE_DOOR, type PlaceDoor } from "./places.js";
 import { keyFingerprint, openFrame, verifyPlaceBytes, type Seal } from "@wsp/keys";
-import type { HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
+import type { HostEditor, HostFolders, HostTerminalConfig, InitDoor, ProjectBundler, ProjectLander, Runtime } from "./runtime.js";
 
 /** The port forwards a host holds, as the app lists and stops them. The
  * runtime keeps none itself: the host that owns the daemon links supplies this. */
@@ -170,6 +173,9 @@ export interface ServeOptions {
   folders?: HostFolders;
   /** How the person's terminal config is read off this computer for host.terminalConfig; without it the op is refused. */
   terminalConfig?: HostTerminalConfig;
+  /** The editors on this computer and how a workspace's file opens in one, for editor.list and editor.open; without it
+   * both are refused. */
+  editor?: HostEditor;
   /** The init job the host runs on this computer, for the init.* ops and the init.job events; without it the ops are refused. */
   init?: InitDoor;
   /** The doctor's computer road as this host runs it, for places.doctor and the doctor.line events; without it the
@@ -350,6 +356,13 @@ function releaseFrom(opts: ServeOptions): () => ReleaseDoor {
   };
 }
 
+function editorFrom(opts: ServeOptions): () => HostEditor {
+  return () => {
+    if (opts.editor === undefined) throw new Error("this runtime cannot open an editor on this computer");
+    return opts.editor;
+  };
+}
+
 function terminalConfigFrom(opts: ServeOptions): () => HostTerminalConfig {
   return () => {
     if (opts.terminalConfig === undefined) throw new Error("this runtime cannot read the terminal config on this computer");
@@ -387,6 +400,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
   const lander = landerFrom(opts);
   const folders = foldersFrom(opts);
   const terminalConfig = terminalConfigFrom(opts);
+  const editor = editorFrom(opts);
   const release = releaseFrom(opts);
   const init = initFrom(opts);
   const imageExport = imageExportFrom(opts);
@@ -1669,6 +1683,22 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "host.terminalConfig":
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
               return;
+            case "editor.list":
+              send({ id: msg.id, ok: true, editors: await editor().list() });
+              return;
+            case "editor.open": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: EDITOR_TICKET_REFUSAL, kind: "ticket" });
+                return;
+              }
+              const workspace = await rt.workspaces.get(msg.workspaceId, origin);
+              if (!isLocalWorkspace(workspace)) throw new Error(editorOpensHereLine(workspace.name));
+              const inside = [workspace.copy?.path, workspace.project.path].filter((folder): folder is string => folder !== undefined);
+              const { editor: picked } = await rt.preferences.get();
+              const opened = await editor().open({ path: msg.path, inside, ...(msg.line !== undefined ? { line: msg.line } : {}), ...(picked !== undefined ? { editor: picked } : {}) });
+              send({ id: msg.id, ok: true, editor: opened });
+              return;
+            }
             case "init.get":
               send({ id: msg.id, ok: true, setup: await init().get(msg.on === undefined ? {} : { on: msg.on }) });
               return;

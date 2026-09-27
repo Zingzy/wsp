@@ -16,6 +16,7 @@
 import { terminalRefusedLine } from "../actions/format.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
+import { openFileFinder } from "../files/finderBus.js";
 import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, type WorkspaceSelectSlot } from "../keybindingTypes.js";
 import { threadFolderOf } from "../files/root.js";
 import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
@@ -266,6 +267,11 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       return;
     case "commandPalette.toggle":
       toggleCommandPalette();
+      return;
+    // The finder reads the open thread's files, so it stands only where one is open and Settings is not.
+    case "files.quickOpen":
+    case "files.search":
+      if (workspaceId && !useStore.getState().settingsOpen) openFileFinder(command === "files.quickOpen" ? "files" : "text");
       return;
     case "settings.toggle":
       useStore.getState().toggleSettings();

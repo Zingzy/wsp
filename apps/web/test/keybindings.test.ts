@@ -106,6 +106,38 @@ describe("default shortcuts", () => {
     expect(resolve(ctrl("k"), LINUX)).toBe("commandPalette.toggle");
   });
 
+  it("finds a file on mod+p and searches the files on mod+shift+f, from a focused terminal on macOS and never over ctrl in a shell elsewhere", () => {
+    expect(resolve(cmd("p"), MAC)).toBe("files.quickOpen");
+    expect(resolve(ctrl("p"), LINUX)).toBe("files.quickOpen");
+    expect(resolve(cmd("f", { shiftKey: true }), MAC)).toBe("files.search");
+    expect(resolve(cmd("F", { shiftKey: true }), MAC)).toBe("files.search");
+    expect(resolve(ctrl("f", { shiftKey: true }), LINUX)).toBe("files.search");
+    expect(resolve(cmd("p"), MAC, { terminalFocus: true })).toBe("files.quickOpen");
+    expect(resolve(ctrl("p"), LINUX, { terminalFocus: true })).toBeNull();
+    expect(resolve(cmd("f"), MAC)).toBeNull();
+    for (const platform of [MAC, LINUX]) {
+      expect(browserTabClaimsShortcut(parseKeybindingShortcut("mod+p")!, platform)).toBe(false);
+      expect(browserTabClaimsShortcut(parseKeybindingShortcut("mod+shift+f")!, platform)).toBe(false);
+    }
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "files.quickOpen", MAC)).toBe("⌘P");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "files.search", LINUX)).toBe("Ctrl+Shift+F");
+  });
+
+  it("opens the finder in its mode for the open thread, and not over Settings or with no thread open", () => {
+    const opened: string[] = [];
+    const listen = (e: Event) => opened.push((e as CustomEvent<string>).detail);
+    window.addEventListener("wsp:open-file-finder", listen);
+    const target = { workspaceId: "ws_a", toggleSidebar: () => {} };
+    runShellCommand("files.quickOpen", target, []);
+    runShellCommand("files.search", target, []);
+    runShellCommand("files.search", { ...target, workspaceId: null }, []);
+    useStore.setState({ settingsOpen: true });
+    runShellCommand("files.quickOpen", target, []);
+    useStore.setState({ settingsOpen: false });
+    window.removeEventListener("wsp:open-file-finder", listen);
+    expect(opened).toEqual(["files", "text"]);
+  });
+
   it("matches on the physical key for non-Latin layouts", () => {
     expect(resolve({ ...cmd("б"), code: "KeyB" }, MAC)).toBe("sidebar.toggle");
   });

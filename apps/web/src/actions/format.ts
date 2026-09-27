@@ -43,6 +43,12 @@ export const THREAD_WORDS = {
   settleRead: "Settle all read",
 } as const;
 
+export const FILE_WORDS = {
+  open: "Open file",
+  showDiff: "Show in diff",
+  copyPath: "Copy path",
+} as const;
+
 export const TERMINAL_WORDS = {
   copy: "Copy",
   paste: "Paste",

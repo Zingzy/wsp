@@ -9,6 +9,7 @@ import { installFakeLayout } from "./fake-layout.js";
 import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
 import { LIST_PRICE_WORD, QUESTION_TOOL, pickedOptionId, questionOptions } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
+import { useRightPanelStore } from "../src/rightPanelStore.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
 import type { ChatThreadHandle } from "../src/components/chat/useChatThread.js";
@@ -854,6 +855,28 @@ describe("ChatView", () => {
     expect(within(stopped).getByText("Cancelled with the turn")).toBeDefined();
     // Neither offers an option any more: there is nothing left to pick.
     for (const row of [waited, stopped]) expect(row.querySelectorAll("[data-permission-option]")).toHaveLength(0);
+  });
+});
+
+describe("a file a reply names", () => {
+  it("opens as its own tab in the Files pane at its line, read against the folder the thread worked in", async () => {
+    const sc = { workspaceId: WS, sessionId: "sess_files", turnId: "turn_files" };
+    const history: SessionEvent[] = [
+      { type: "session.start", ...sc, at: T0, model: "claude-sonnet-4-5", prompt: "name one line", cwd: "/root/app" },
+      { type: "session.delta", ...sc, at: T0 + 300, kind: "text", text: "See [the route](src/main.ts#L12) and `lib/panes.ts:45`." },
+      { type: "session.done", ...sc, at: T0 + 900, result: { status: "completed", durationMs: 900, costUsd: 0.001 } },
+      { type: "session.end", ...sc, at: T0 + 950, exitCode: 0, sawResult: true },
+    ];
+    useRightPanelStore.setState({ byWorkspaceId: {} });
+    const { api } = fixtureApi([workspace], { [WS]: history });
+    await setup(api);
+    fireEvent.click(await screen.findByRole("button", { name: /main\.ts/ }));
+    const panel = () => useRightPanelStore.getState().byWorkspaceId[WS]!;
+    expect(panel().activeSurfaceId).toBe("file:/root/app/src/main.ts");
+    expect(panel().surfaces.find(s => s.id === panel().activeSurfaceId)).toMatchObject({ kind: "files", path: "/root/app/src/main.ts", line: 12 });
+    fireEvent.click(screen.getByRole("button", { name: /panes\.ts/ }));
+    expect(panel().surfaces.find(s => s.id === panel().activeSurfaceId)).toMatchObject({ kind: "files", path: "/root/app/lib/panes.ts", line: 45 });
+    expect(panel().surfaces.some(s => s.kind === "diff")).toBe(false);
   });
 });
 

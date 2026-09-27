@@ -32,19 +32,19 @@ const cards = () => [...document.querySelectorAll<HTMLElement>("[data-surface-la
 afterEach(cleanup);
 
 describe("the right panel's launcher", () => {
-  it("offers Browser, Terminal, Diff, Computer, Processes and Agents and nothing else", () => {
+  it("offers Browser, Terminal, Diff, Files, Computer, Processes and Agents and nothing else", () => {
     draw();
-    expect(cards()).toEqual(["preview", "terminal", "diff", "machine", "processes", "agents"]);
-    for (const label of ["Browser", "Terminal", "Diff", "Computer", "Processes", "Agents"]) expect(screen.getByText(label)).toBeTruthy();
-    expect(screen.queryByText("Files")).toBeNull();
+    expect(cards()).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents"]);
+    for (const label of ["Browser", "Terminal", "Diff", "Files", "Computer", "Processes", "Agents"]) expect(screen.getByText(label)).toBeTruthy();
     expect(screen.queryByText("Screen")).toBeNull();
     expect(screen.queryByText("Workspace")).toBeNull();
-    expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDMPA");
+    expect(document.querySelector("[data-surface-launcher-keys]")?.getAttribute("data-surface-launcher-keys")).toBe("BTDFMPA");
   });
 
   it("says what each pane is for in the person's own words, never a task", () => {
     draw();
-    expect(screen.getByText("A browser, a terminal, the diff, the computer or what runs on it.")).toBeTruthy();
+    expect(screen.getByText("A browser, a terminal, the diff, the files, the computer or what runs on it.")).toBeTruthy();
+    expect(screen.getByText("Browse and read the files here.")).toBeTruthy();
     expect(screen.getByText("Open your dev server or a URL.")).toBeTruthy();
     expect(screen.getByText("Start a shell here.")).toBeTruthy();
     expect(screen.getByText("Review the changes here.")).toBeTruthy();
@@ -59,7 +59,7 @@ describe("the right panel's launcher", () => {
 
   it("keeps a pane it cannot open drawn, held, with the one line that says why", () => {
     draw({ diffAvailable: false });
-    expect(cards()).toEqual(["preview", "terminal", "diff", "machine", "processes", "agents"]);
+    expect(cards()).toEqual(["preview", "terminal", "diff", "files", "machine", "processes", "agents"]);
     const diff = document.querySelector<HTMLElement>('[data-surface-launch="diff"]')!;
     expect(diff.dataset["available"]).toBe("false");
     expect(diff.textContent).toContain("Review the changes once it runs.");
@@ -93,8 +93,8 @@ describe("the right panel's launcher", () => {
     expect(lit()).toEqual(["preview"]);
     fireEvent.keyDown(launcher, { key: "ArrowDown" });
     fireEvent.keyDown(launcher, { key: "ArrowDown" });
-    expect(lit()).toEqual(["machine"]);
-    expect(document.querySelector('[data-surface-launch="machine"]')!.classList).not.toContain("bg-card");
+    expect(lit()).toEqual(["files"]);
+    expect(document.querySelector('[data-surface-launch="files"]')!.classList).not.toContain("bg-card");
     fireEvent.keyDown(launcher, { key: "ArrowUp" });
     expect(lit()).toEqual(["terminal"]);
   });

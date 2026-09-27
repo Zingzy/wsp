@@ -3,8 +3,9 @@
 // keyed by the selected workspace. A pane the workspace cannot serve yet (not
 // running) stays greyed out in the picker with a reason. Terminal
 // surfaces mount the Ghostty drawer in panel mode over the workspace's daemon
-// link. The diff runs in its own worker pool, themed for the side the page is
-// drawing. With no workspace selected the panel is this computer's own.
+// link. The diff and the files run in their own worker pool, themed for the
+// side the page is drawing. With no workspace selected the panel is this
+// computer's own.
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useWorkspacePorts } from "../browser/model.js";
 import { previewTabSnapshots, useBrowserTabs, useWorkspaceBrowserTabs } from "../browser/tabs.js";
@@ -18,6 +19,8 @@ import { BrowserSurface } from "../components/preview/BrowserSurface.js";
 import type { PreviewPanelMode } from "../components/preview/PreviewPanelShell.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { DiffSurface } from "../diffs/DiffSurface.js";
+import { FilePreviewSurface } from "../files/FilePreviewSurface.js";
+import { FilesSurface } from "../files/FilesSurface.js";
 import { useAbsentComputer, useWorkspace } from "../protocol/store.js";
 import { useAppDark } from "../settings/theme.js";
 import { PANE_KINDS, paneOf, type PaneContext, type RightPanelKind } from "../panes.js";
@@ -44,6 +47,13 @@ const PANE_VIEWS: { readonly [K in RightPanelKind]: PaneView<K> } = {
     Surface: ({ workspaceId, theme }) => (
       <DiffWorkerPoolProvider theme={theme}>
         <DiffSurface workspaceId={workspaceId} theme={theme} />
+      </DiffWorkerPoolProvider>
+    ),
+  },
+  files: {
+    Surface: ({ workspaceId, surface, theme }) => (
+      <DiffWorkerPoolProvider theme={theme}>
+        {surface.path === null ? <FilesSurface workspaceId={workspaceId} theme={theme} /> : <FilePreviewSurface key={surface.id} workspaceId={workspaceId} surface={surface} theme={theme} />}
       </DiffWorkerPoolProvider>
     ),
   },
