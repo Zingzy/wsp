@@ -11,6 +11,7 @@ import { envFileFor, savedEnv, writeEnvFile } from "../src/env-keys.js";
 import { placeWiring } from "../src/places.js";
 import { providerKeySet } from "../src/providers.js";
 import type { Runtime } from "@wsp/runtime";
+import { CLOUD_ON } from "../src/cloud.js";
 
 const homes: string[] = [];
 const runtimes: Runtime[] = [];
@@ -47,7 +48,7 @@ describe("a provider key saved from the app", () => {
     ["box", "ascii_live_fake"],
     ["solari", "slr_live_fake"],
   ] as const) {
-    it(`makes ${provider} a computer on the host that saved it and on a fresh read of the same home`, async () => {
+    it.runIf(CLOUD_ON)(`makes ${provider} a computer on the host that saved it and on a fresh read of the same home`, async () => {
       const statePath = freshState();
       const rt = hostOn(statePath);
       expect(await computers(rt)).toEqual([]);
@@ -57,7 +58,7 @@ describe("a provider key saved from the app", () => {
     });
   }
 
-  it("makes both providers computers once both keys are saved", async () => {
+  it.runIf(CLOUD_ON)("makes both providers computers once both keys are saved", async () => {
     const statePath = freshState();
     const rt = hostOn(statePath);
     saveKey(rt, statePath, "box", "ascii_live_fake");

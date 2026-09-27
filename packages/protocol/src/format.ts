@@ -1370,10 +1370,10 @@ export const IDLE_REASON = {
   windowIn: (reason: string | undefined): string | undefined => (reason === undefined ? undefined : (/^idle (\d+ min)$/.exec(reason)?.[1] ?? undefined)),
 } as const;
 
-/** The one line the sidebar puts above the rows while the probes fail before leaving this computer; the rows keep
- * their last word. It names what could not be reached, not the computer: the road out was up and every other name
- * resolved while this one did not (measured 2026-09-07). */
-export const PROVIDER_UNREACHED_LINE = "Solari cannot be reached from this computer";
+/** The one line the sidebar puts above the rows while a probe fails before leaving this computer; the rows keep
+ * their last word. It names neither the computer nor a provider: the road out can be up while one machine's name
+ * does not resolve (measured 2026-09-07), and the probe knows the machine it asked and nothing else. */
+export const MACHINE_UNREACHED_LINE = "A machine cannot be reached from this computer";
 
 /** What a window on another computer says while the wsp it shows has gone quiet: the computer that host runs on is
  * asleep or off, and the workspaces on every other computer keep working. It reads as a fact in the sidebar's own
@@ -1786,6 +1786,9 @@ export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
  * person who typed wsp new on a fresh home reads, and a variable named there is neither one of the sixteen words
  * nor true of the other providers. wsp add with no argument prints the words it takes. */
 export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; wsp add <provider> connects one, and wsp init then builds your image on it";
+
+/** The same refusal where no provider can be added at all: what is missing, and the one road that brings it. */
+export const NO_MACHINES_LINE = "this needs a machine wsp starts, and nothing here starts one; wsp add user@host joins a computer of yours that does";
 
 /** What an image build is refused with when no place this host holds runs workspaces: a joined computer whose doctor
  * said yes is such a place, and so is a provider with a key. The init job and the command line beside it both say it. */
