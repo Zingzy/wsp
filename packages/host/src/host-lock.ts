@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One state file, one host: the lock names the process serving it and the
 // port it bound, so a second host refuses and other local tools find it.
-import { existsSync, linkSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, linkSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { authority, isWildcard, LOOPBACK, relayUrlOf, WS_PATH, type HostShape } from "@wsp/protocol";
 import { ownFolder } from "@wsp/own-file";
 import type { HostStarter } from "./host-start.js";
@@ -79,9 +79,22 @@ export const pidAlive = (pid: number): boolean => signalled(pid) !== "gone";
 export const ownPid = (pid: number): boolean => signalled(pid) === "own";
 
 function readLock(path: string): HostLock | undefined {
+  const text = readText(path);
+  return text === undefined ? undefined : lockOf(text);
+}
+
+function readText(path: string): string | undefined {
   if (!existsSync(path)) return undefined;
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function lockOf(text: string): HostLock | undefined {
+  try {
+    const parsed: unknown = JSON.parse(text);
     return isHostLock(parsed) ? parsed : undefined;
   } catch {
     return undefined;
@@ -202,8 +215,8 @@ export function refuseIfServed(lockPath: string, statePath: string): void {
 /** Seeded with the requested port so a refusal during startup can name it;
  * rewritten with the bound port once the host is up. A lock only ever appears
  * whole: it is written to a file of this process's own and linked into place,
- * which fails where any lock stands, so of two starts only one gets past here
- * and the other never reaches the token. */
+ * which fails where any lock stands, so of starts at once only one gets past
+ * here and the others never reach the token. */
 export function takeLock(lockPath: string, statePath: string, ports: { port: number; address?: string; startedBy?: HostStarted }): HostLock {
   refuseIfServed(lockPath, statePath);
   const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
@@ -213,15 +226,72 @@ export function takeLock(lockPath: string, statePath: string, ports: { port: num
   const mine = `${lockPath}.${process.pid}`;
   writeFileSync(mine, JSON.stringify(lock));
   try {
-    if (linkInto(mine, lockPath)) return lock;
-    refuseIfServed(lockPath, statePath);
-    setAsideStale(lockPath, statePath);
-    if (linkInto(mine, lockPath)) return lock;
-    const winner = readLock(lockPath);
-    throw winner !== undefined ? heldBy(winner, statePath) : new Error(`another wsp host just took ${lockPath}`);
+    if (!linkInto(mine, lockPath)) takeOverStale(lockPath, statePath, mine);
   } finally {
     rmSync(mine, { force: true });
   }
+  // Every marker is some start's, finished or crashed, and none may remove a live lock, so the holder clears them.
+  for (const name of readdirSync(dirname(lockPath))) if (name.startsWith(`${basename(lockPath)}.taking.`)) rmSync(join(dirname(lockPath), name), { force: true });
+  return lock;
+}
+
+/** How long a take-over marker stands before it is read as a crash's, whatever its pid says: a take-over is a few
+ * file calls, and a pid is a number the system hands out again. */
+export const MARKER_MS = 10_000;
+
+/** Takes over the stale lock standing at the path, one start at a time: the one that holds the marker, and only
+ * while the lock is still the one it read. Only a marker's holder removes a lock, and only that one, so a live lock
+ * is never moved and the path stands empty only in the moment before the holder links its own, where a start that
+ * links first wins and the holder refuses. */
+function takeOverStale(lockPath: string, statePath: string, mine: string): void {
+  const stale = readText(lockPath);
+  if (stale !== undefined) {
+    const held = lockOf(stale);
+    if (held !== undefined && pidAlive(held.pid)) throw heldBy(held, statePath);
+    const marker = holdMarker(lockPath, statePath);
+    try {
+      const now = readText(lockPath);
+      if (now !== undefined && now !== stale) throw tookFirst(lockPath, statePath);
+      rmSync(lockPath, { force: true });
+      if (!linkInto(mine, lockPath)) throw tookFirst(lockPath, statePath);
+    } finally {
+      rmSync(marker, { force: true });
+    }
+  } else if (!linkInto(mine, lockPath)) throw tookFirst(lockPath, statePath);
+}
+
+/** The first take-over marker nobody live holds, linked whole as the lock is. A marker is only ever given up, never
+ * removed by another start, so two starts that both find one abandoned race for the next one and only one gets it. */
+function holdMarker(lockPath: string, statePath: string): string {
+  const text = `${lockPath}.${process.pid}.taking`;
+  writeFileSync(text, JSON.stringify({ pid: process.pid }));
+  try {
+    for (let n = 0; ; n++) {
+      const marker = `${lockPath}.taking.${n}`;
+      if (linkInto(text, marker)) return marker;
+      const holder = markerHolder(marker);
+      if (holder !== undefined) throw new Error(`another wsp host${typeof holder === "number" ? ` (pid ${holder})` : ""} is starting on ${statePath} right now; it serves in a moment.`);
+    }
+  } finally {
+    rmSync(text, { force: true });
+  }
+}
+
+/** The live start a marker is held by, or nothing where it is a crash's: its pid gone, or older than MARKER_MS. One
+ * that says no pid yet is a start still writing it, on a file system that creates before it writes. */
+function markerHolder(marker: string): number | "unknown" | undefined {
+  try {
+    if (Date.now() - statSync(marker).mtimeMs > MARKER_MS) return undefined;
+    const pid: unknown = (JSON.parse(readFileSync(marker, "utf8")) as { pid?: unknown }).pid;
+    return typeof pid !== "number" ? "unknown" : pidAlive(pid) ? pid : undefined;
+  } catch (e) {
+    return errnoCode(e) === "ENOENT" ? undefined : "unknown";
+  }
+}
+
+function tookFirst(lockPath: string, statePath: string): Error {
+  const winner = readLock(lockPath);
+  return winner !== undefined ? heldBy(winner, statePath) : new Error(`another wsp host just took ${lockPath}`);
 }
 
 /** The lock rewritten by the host holding it, swapped in whole, so a start reading it never meets half a file and
@@ -252,27 +322,5 @@ function linkInto(from: string, to: string): boolean {
   } catch (e) {
     if (errnoCode(e) === "EEXIST") return false;
     throw e;
-  }
-}
-
-/** Moves a stale lock out of the way in one rename, which only one of two starts can win. The rename moves whatever
- * stands there by then, so a live host's lock that took the place since the last read is put back, and this start
- * refuses. */
-function setAsideStale(lockPath: string, statePath: string): void {
-  const aside = `${lockPath}.${process.pid}.stale`;
-  try {
-    renameSync(lockPath, aside);
-  } catch (e) {
-    if (errnoCode(e) === "ENOENT") return;
-    throw e;
-  }
-  const moved = readLock(aside);
-  try {
-    if (moved !== undefined && pidAlive(moved.pid)) {
-      linkInto(aside, lockPath);
-      throw heldBy(moved, statePath);
-    }
-  } finally {
-    rmSync(aside, { force: true });
   }
 }
