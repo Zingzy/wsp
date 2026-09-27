@@ -5,7 +5,9 @@
 // exactly as they did.
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { BOX_BUDGETS } from "@wsp/engine";
-import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
+import type { AddressInfo } from "node:net";
+import { WebSocketServer } from "ws";
+import { DAEMON_TOKEN_PATH, WAKE_STOPPED } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
@@ -33,6 +35,35 @@ function guestBackend(): { backend: StubBackend; tars: string[]; untars: string[
     vi.fn(async (_url: string, init?: { method?: string }) => (init?.method === "PUT" ? new Response(null, { status: 200 }) : new Response(Buffer.from("tarbytes")))),
   );
   return { backend, tars, untars };
+}
+
+/** A daemon on a local socket, as a box's preview route reaches it: it takes the socket at once, holds its answer
+ * to the auth frame until `up()` is called, and answers every other frame at once. */
+async function slowDaemon(): Promise<{ url: string; up: () => void; close: () => Promise<void> }> {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await new Promise(resolve => server.once("listening", resolve));
+  let answering = false;
+  const held: (() => void)[] = [];
+  server.on("connection", sock =>
+    sock.on("message", raw => {
+      const { id, op } = JSON.parse(String(raw)) as { id: number; op: string };
+      const answer = (): void => sock.send(JSON.stringify({ id, ok: true }));
+      if (op === "auth" && !answering) held.push(answer);
+      else answer();
+    }),
+  );
+  return {
+    url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    up: () => {
+      answering = true;
+      for (const answer of held.splice(0)) answer();
+    },
+    close: () =>
+      new Promise(resolve => {
+        for (const sock of server.clients) sock.terminate();
+        server.close(() => resolve());
+      }),
+  };
 }
 
 /** Every command every machine of this backend was asked, oldest first. */
@@ -126,59 +157,90 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
     }
   });
 
-  it("a Boat wake whose daemon answers two and a half minutes after the box is up succeeds on the first send, on the same machine", async () => {
-    // What the dev host's log saw on 2026-09-27: five wakes whose daemon had not answered 120 s after the box read
-    // ready, each of which answered at the next probe after the wake gave up.
+  /** A napped workspace whose machine is reached the way a Boat box is, by its preview route: the daemon behind it
+   * takes the socket at once and answers its auth frame only once `daemon.up()` is called, so the wait is on the
+   * link, as it is on a box whose disk is still streaming in. The clock is the runtime's, stepped by `pump`. */
+  async function boatWake() {
     const { backend, store } = imageless();
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store, adapters: {}, clock });
-    try {
-      backend.lifecycle.budgets = { ...BOX_BUDGETS };
-      const ws = await createOn(rt, { name: "x" });
-      const m1 = backend.machines[0]!;
-      await rt.workspaces.nap(ws.id);
-      let answersAt: number | undefined;
-      m1.daemonAnswers = async () => clock.now() >= (answersAt ??= clock.now() + 150_000);
-      let done = false;
-      const waking = rt.workspaces.wake(ws.id).finally(() => (done = true));
-      for (let spent = 0; !done && spent < 10 * 60_000; spent += 500) {
-        await new Promise(resolve => setImmediate(resolve));
+    backend.lifecycle.budgets = { ...BOX_BUDGETS };
+    const daemon = await slowDaemon();
+    const ws = await createOn(rt, { name: "x" });
+    const m1 = backend.machines[0]!;
+    m1.previewUrl = async () => ({ url: daemon.url, token: "e", expiresAt: Date.now() + 3_600_000 });
+    await rt.workspaces.nap(ws.id);
+    /** Steps the clock half a second at a time, turning the loop between steps so the socket's frames are read,
+     * until `done` holds or ten minutes have passed. */
+    const pump = async (done: () => boolean, each: () => void = () => {}): Promise<void> => {
+      for (let spent = 0; !done() && spent < 10 * 60_000; spent += 500) {
+        for (let turn = 0; turn < 5; turn++) await new Promise(resolve => setImmediate(resolve));
         advance(500);
+        each();
       }
-      await expect(waking).resolves.toMatchObject({ machineId: "m1", phase: "running" });
-      expect(backend.machines).toHaveLength(1);
-    } finally {
+    };
+    const close = async (): Promise<void> => {
       await rt.close();
+      await daemon.close();
       vi.unstubAllGlobals();
+    };
+    return { rt, ws, m1, backend, clock, daemon, pump, close };
+  }
+
+  it("a Boat wake whose daemon answers two and a half minutes after the box is up succeeds on the first send, on the same machine", async () => {
+    // Five wakes on the dev host (2026-09-27) had no daemon answer 120 s after the box read ready; the one kept after
+    // its failure, bx_eva5rxgz, served on the next send.
+    const t = await boatWake();
+    try {
+      const began = t.clock.now();
+      let done = false;
+      const waking = t.rt.workspaces.wake(t.ws.id).finally(() => (done = true));
+      waking.catch(() => {});
+      await t.pump(() => done, () => (t.clock.now() - began >= 150_000 ? t.daemon.up() : undefined));
+      await expect(waking).resolves.toMatchObject({ machineId: "m1", phase: "running" });
+      expect(t.backend.machines).toHaveLength(1);
+    } finally {
+      await t.close();
     }
   });
 
   it("a Boat wake whose daemon never answers fails once its five minutes are out, saying so, and keeps the machine", async () => {
-    const { backend, store } = imageless();
-    const { clock, advance } = fakeClock();
-    const rt = createRuntime({ backend, store, adapters: {}, clock });
+    const t = await boatWake();
     try {
-      backend.lifecycle.budgets = { ...BOX_BUDGETS };
-      const ws = await createOn(rt, { name: "x" });
-      const m1 = backend.machines[0]!;
-      await rt.workspaces.nap(ws.id);
-      m1.daemonAnswers = async () => false;
+      const began = t.clock.now();
       let done = false;
-      const started = clock.now();
-      const waking = rt.workspaces.wake(ws.id).finally(() => (done = true));
+      const waking = t.rt.workspaces.wake(t.ws.id).finally(() => (done = true));
       waking.catch(() => {});
-      for (let spent = 0; !done && spent < 10 * 60_000; spent += 500) {
-        await new Promise(resolve => setImmediate(resolve));
-        advance(500);
-      }
-      await expect(waking).rejects.toThrow(/the wake of m1 did not finish: attempt 1: nothing listens on the daemon's port inside m1.*the workspace keeps this machine and its disk/);
-      expect(clock.now() - started).toBeGreaterThanOrEqual(5 * 60_000);
-      expect(clock.now() - started).toBeLessThan(6 * 60_000);
-      expect((await rt.workspaces.get(ws.id)).machineId).toBe("m1");
-      expect(m1.killed).toBe(false);
+      await t.pump(() => done);
+      await expect(waking).rejects.toThrow(/the wake of m1 did not finish: attempt 1: daemon on m1 did not answer within 300000 ms \(daemon link timed out after \d+ ms\).*the workspace keeps this machine and its disk/);
+      expect(t.clock.now() - began).toBeGreaterThanOrEqual(5 * 60_000);
+      expect(t.clock.now() - began).toBeLessThan(6 * 60_000);
+      expect((await t.rt.workspaces.get(t.ws.id)).machineId).toBe("m1");
+      expect(t.m1.killed).toBe(false);
     } finally {
-      await rt.close();
-      vi.unstubAllGlobals();
+      await t.close();
+    }
+  });
+
+  it("a stop pulled ten seconds into a Boat wake whose daemon has not answered lets go at once, not when the five minutes are out", async () => {
+    const t = await boatWake();
+    try {
+      let done = false;
+      const waking = t.rt.workspaces.wake(t.ws.id).finally(() => (done = true));
+      waking.catch(() => {});
+      const began = t.clock.now();
+      await t.pump(() => t.clock.now() - began >= 10_000);
+      const pulled = t.clock.now();
+      let stopped = false;
+      const stopping = t.rt.workspaces.stopWake(t.ws.id).finally(() => (stopped = true));
+      await t.pump(() => stopped);
+      await stopping;
+      expect(t.clock.now() - pulled).toBeLessThanOrEqual(1_000);
+      await expect(waking).rejects.toThrow(WAKE_STOPPED);
+      expect(done).toBe(true);
+      expect((await t.rt.workspaces.get(t.ws.id)).machineId).toBe("m1");
+    } finally {
+      await t.close();
     }
   });
 

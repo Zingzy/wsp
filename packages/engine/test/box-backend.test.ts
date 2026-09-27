@@ -221,7 +221,7 @@ describe("BoxBackend declarations", () => {
     expect(BOX_INLINE_MAX_MS).toBeLessThan(70_000);
   });
 
-  it("declares its lifecycle: one wake attempt, two minutes for the daemon, no asking again, a backstop the runtime pushes", () => {
+  it("declares its lifecycle: one wake attempt, five minutes for the daemon, no asking again, a backstop the runtime pushes", () => {
     const { backend } = backendOn(new FakeBox());
     expect(backend.lifecycle.budgets).toBe(BOX_BUDGETS);
     expect(BOX_BUDGETS).toEqual({ wakeAttempts: 1, daemonAnswersMs: 300_000 });
