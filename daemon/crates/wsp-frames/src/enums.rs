@@ -61,6 +61,15 @@ pub enum FsReadEncoding {
     Base64,
 }
 
+/// What fs.search looks for: file paths, or lines of text inside the files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "lowercase")]
+pub enum FsSearchMode {
+    Files,
+    Text,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "lowercase")]

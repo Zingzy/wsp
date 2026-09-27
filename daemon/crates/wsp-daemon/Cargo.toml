@@ -28,6 +28,8 @@ getrandom = "0.4"
 # A stopped workspace's commits are inflated here rather than read by a git that would run its config.
 flate2 = "1"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
+# fs.search walks with ripgrep's own walker, so a folder's ignore rules are read the way rg reads them, with no program run.
+ignore = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"

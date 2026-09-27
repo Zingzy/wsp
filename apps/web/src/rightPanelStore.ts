@@ -5,8 +5,9 @@
  * This is intentionally a shallow model: it owns an ordered set of surface
  * descriptors and the active surface, while each feature continues to own
  * its durable resource state. Browser surfaces point at preview tab ids,
- * terminal surfaces point at terminal session ids, and the diff, the
- * workspace's own readings, its processes and the agents are singleton surfaces.
+ * terminal surfaces point at terminal session ids, the files pane holds its
+ * tree and one surface per open file, and the diff, the workspace's own
+ * readings, its processes and the agents are singleton surfaces.
  *
  * Keyed by workspace id: a wsp workspace is one machine, and every surface
  * here belongs to the machine, not to one conversation on it.
@@ -18,8 +19,9 @@ import { PANE_KINDS, type RightPanelKind } from "./panes.js";
 
 export type { RightPanelKind } from "./panes.js";
 
-/** A pane of one surface per workspace; the browser and the terminal hold one per tab and pty. */
-type SingletonKind = Exclude<RightPanelKind, "preview" | "terminal">;
+/** A pane of one surface per workspace; the browser and the terminal hold one per tab and pty, and the files pane
+ * its tree and one per open file. */
+type SingletonKind = Exclude<RightPanelKind, "preview" | "terminal" | "files">;
 type OpenableKind = Exclude<RightPanelKind, "terminal">;
 
 export type RightPanelSurface =
@@ -32,6 +34,17 @@ export type RightPanelSurface =
       terminalIds: string[];
       activeTerminalId: string;
       splitDirection?: "horizontal" | "vertical";
+    }
+  | { id: "files"; kind: "files"; path: null }
+  | {
+      id: `file:${string}`;
+      kind: "files";
+      /** Absolute, as the daemon names it. */
+      path: string;
+      /** The line to show and mark, from 1; null opens the file at its top. */
+      line: number | null;
+      /** Counts every ask to open this file, so asking again for the same line scrolls to it again. */
+      reveal: number;
     }
   | { [K in SingletonKind]: { id: K; kind: K } }[SingletonKind];
 
@@ -49,6 +62,7 @@ interface RightPanelStoreState {
   byWorkspaceId: Record<string, WorkspaceRightPanelState>;
   open: (workspaceId: string, kind: OpenableKind) => void;
   openBrowser: (workspaceId: string, tabId: string | null) => void;
+  openFile: (workspaceId: string, path: string, line?: number) => void;
   openTerminal: (workspaceId: string, terminalId: string) => void;
   splitTerminal: (
     workspaceId: string,
@@ -85,7 +99,7 @@ const EMPTY_WORKSPACE_STATE: WorkspaceRightPanelState = {
 const EMPTY_HERE_STATE: WorkspaceRightPanelState = { ...EMPTY_WORKSPACE_STATE, isOpen: false };
 const emptyFor = (key: string): WorkspaceRightPanelState => (key === HERE_KEY ? EMPTY_HERE_STATE : EMPTY_WORKSPACE_STATE);
 
-const isSingleton = (kind: RightPanelKind): kind is SingletonKind => kind !== "preview" && kind !== "terminal";
+const isSingleton = (kind: RightPanelKind): kind is SingletonKind => kind !== "preview" && kind !== "terminal" && kind !== "files";
 /** Whether the store's open takes this kind; a terminal surface opens only onto a pty that exists. */
 export const isOpenable = (kind: RightPanelKind): kind is OpenableKind => kind !== "terminal";
 const SINGLETONS = new Map(
@@ -97,6 +111,21 @@ const browserSurface = (tabId: string | null): RightPanelSurface =>
   tabId
     ? { id: `browser:${tabId}`, kind: "preview", resourceId: tabId }
     : { id: "browser:new", kind: "preview", resourceId: null };
+
+const FILES_TREE: RightPanelSurface = { id: "files", kind: "files", path: null };
+
+const fileSurface = (path: string, line: number | null, reveal: number): RightPanelSurface => ({ id: `file:${path}`, kind: "files", path, line, reveal });
+
+function revealLine(line: unknown): number | null {
+  return typeof line === "number" && Number.isFinite(line) && line >= 1 ? Math.trunc(line) : null;
+}
+
+/** The surface open asks for: a kind's one surface, the browser's first tab, or the files pane's tree. */
+function openedSurface(current: WorkspaceRightPanelState, kind: OpenableKind): RightPanelSurface {
+  if (kind === "preview") return current.surfaces.find((surface) => surface.kind === "preview") ?? browserSurface(null);
+  if (kind === "files") return FILES_TREE;
+  return singletonSurface(kind);
+}
 
 const terminalSurface = (terminalId: string): RightPanelSurface => ({
   id: `terminal:${terminalId}`,
@@ -157,6 +186,11 @@ function usableSurface(raw: unknown): RightPanelSurface | null {
   if (!isKnownKind(kind)) return null;
   if (isSingleton(kind)) return singletonSurface(kind);
   switch (kind) {
+    case "files": {
+      const path = surface["path"];
+      if (path === null || path === undefined) return FILES_TREE;
+      return typeof path === "string" ? fileSurface(path, revealLine(surface["line"]), 0) : null;
+    }
     case "preview": {
       const resourceId = surface["resourceId"];
       if (resourceId !== null && typeof resourceId !== "string") return null;
@@ -213,13 +247,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
       byWorkspaceId: {},
       open: (workspaceId, kind) =>
         set((state) => ({
-          byWorkspaceId: updateWorkspace(state.byWorkspaceId, workspaceId, (current) => {
-            if (kind === "preview") {
-              const existing = current.surfaces.find((surface) => surface.kind === "preview");
-              return upsertSurface(current, existing ?? browserSurface(null));
-            }
-            return upsertSurface(current, singletonSurface(kind));
-          }),
+          byWorkspaceId: updateWorkspace(state.byWorkspaceId, workspaceId, (current) =>
+            upsertSurface(current, openedSurface(current, kind)),
+          ),
         })),
       openBrowser: (workspaceId, tabId) =>
         set((state) => ({
@@ -229,6 +259,18 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               ? current.surfaces.filter((entry) => entry.id !== "browser:new")
               : current.surfaces;
             return upsertSurface({ ...current, surfaces: withoutPlaceholder }, surface);
+          }),
+        })),
+      openFile: (workspaceId, path, line) =>
+        set((state) => ({
+          byWorkspaceId: updateWorkspace(state.byWorkspaceId, workspaceId, (current) => {
+            const existing = current.surfaces.find((surface) => surface.id === `file:${path}`);
+            const surface = fileSurface(path, revealLine(line), existing?.kind === "files" && existing.path !== null ? existing.reveal + 1 : 1);
+            return {
+              isOpen: true,
+              activeSurfaceId: surface.id,
+              surfaces: existing ? current.surfaces.map((entry) => (entry.id === surface.id ? surface : entry)) : [...current.surfaces, surface],
+            };
           }),
         })),
       openTerminal: (workspaceId, terminalId) =>
@@ -464,11 +506,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             if (current.isOpen && active?.kind === kind) {
               return { ...current, isOpen: false };
             }
-            if (kind === "preview") {
-              const existing = current.surfaces.find((surface) => surface.kind === "preview");
-              return upsertSurface(current, existing ?? browserSurface(null));
-            }
-            return upsertSurface(current, singletonSurface(kind));
+            return upsertSurface(current, openedSurface(current, kind));
           }),
         })),
       removeWorkspace: (workspaceId) =>

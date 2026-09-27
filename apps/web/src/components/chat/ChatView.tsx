@@ -19,8 +19,8 @@ import { Button } from "../ui/button";
 import { useCapabilities, useHarnessCatalog, usePlaces, useSidebarProjects, useStore, useThreadSessions, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { Facts } from "../Facts.js";
 import { ThreadRows } from "../threads/ThreadRows.js";
-import { useDiffRevealStore } from "../../diffs/reveal";
-import { useRightPanelStore } from "../../rightPanelStore";
+import { openNamedFile } from "../../files/open";
+import { threadFolderOf } from "../../files/root";
 import { cn } from "../../lib/utils";
 import { DEFAULT_TIMESTAMP_FORMAT, turnWait, type TimestampFormat, type TurnSummary } from "./adapt";
 import { useReadStamp } from "./useReadStamp";
@@ -61,21 +61,19 @@ export function ChatView({
   // the transcript itself records that a turn opened one.
   const projects = useSidebarProjects();
   const opened = useMemo(() => threadsOpenedBy(projects, thread.threadKey), [projects, thread.threadKey]);
-  const openSurface = useRightPanelStore(s => s.open);
-  const revealInDiff = useDiffRevealStore(s => s.request);
   const api = useStore(s => s.api);
   const listRef = useRef<LegendListRef | null>(null);
   const { view } = thread;
   const empty = view.entries.length === 0 && !view.running;
   const cwd = view.cwd ?? undefined;
-  // A file named in the transcript is read in the Diff pane, which is the one pane that shows a file now: the
-  // reveal waits there until that pane has a diff to look in, and a file the diff does not touch is named in a line.
+  // A file named in the transcript opens as its own tab in the Files pane at the line it names, read against the
+  // folder the thread worked in, which is what the agent wrote the path from.
   const onOpenFile = useCallback(
-    (path: string) => {
-      revealInDiff(workspaceId, path);
-      openSurface(workspaceId, "diff");
+    (path: string, line?: number) => {
+      const from = cwd ?? threadFolderOf(workspaceId);
+      if (from !== null) openNamedFile(workspaceId, path, from, line);
     },
-    [openSurface, revealInDiff, workspaceId],
+    [cwd, workspaceId],
   );
   // The prompt row's own options: the answer travels straight to the runtime and the row closes on the event the
   // runtime records, never on the reply here, so two clients watching one prompt end up saying the same thing.

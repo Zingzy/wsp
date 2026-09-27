@@ -122,7 +122,7 @@ import {
   DiskSyncError,
   syncDisk,
 } from "@wsp/engine";
-import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, PlaceReport, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
+import type { AgentsReport, AgentsSignInEvent, AgentsTarget, DaemonFrame, DaemonResponse, EditorChoice, EditorId, PlaceReport, ServerAdd, ServerAsk, ServerToolsAnswer, SignInLine, SkillAdded, SkillHit, SkillPreview } from "@wsp/protocol";
 import type {
   AdapterAttachOptions,
   AdapterEvent,
@@ -566,6 +566,15 @@ export interface HostFolders {
  * the disk itself, the host that owns it does. */
 export interface HostTerminalConfig {
   read(scheme?: TerminalScheme): Promise<TerminalConfig>;
+}
+
+/** The editors on the computer running the host and how a path opens in one; the runtime never starts a program on
+ * this computer itself, the host that owns it does. */
+export interface HostEditor {
+  list(): Promise<EditorChoice[]>;
+  /** Opens the path in the editor named, else the first installed, and answers which one; refused where the path
+   * does not resolve inside one of the folders given. */
+  open(req: { path: string; line?: number; inside: readonly string[]; editor?: EditorId }): Promise<EditorId>;
 }
 
 /** The init job on the computer running the host: wsp init's run, read and driven from the app over the wire. The
@@ -3248,7 +3257,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The whole of what a client's channel into a served workspace carries, for the reason DEVICE_OPS is a list: that
    * computer's daemon runs every other op on the computer itself, so a deny list would let an op added later reach it.
    * Each of these names the workspace it is for, and the daemon answers it inside that workspace. */
-  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list", "fs.list", "fs.read", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "ping"];
+  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list", "fs.list", "fs.read", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "ping"];
   /** And the host's own guest road, which answers the sessions that computer relays by the id it gave them. */
   const GUEST_ROAD_FRAMES = [...WORKSPACE_FRAMES, "guest.watch", "guest.reply", "guest.close"];
 

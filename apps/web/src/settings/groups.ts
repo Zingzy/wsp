@@ -4,8 +4,7 @@
 // the one that states the pages under it. The sidebar, the search, the
 // breadcrumb and Restore defaults all read this table; adding a group is one
 // id in groupIds.ts, one entry here and its page module. A group marked empty
-// is not drawn, which is General today: no pick the record holds is a
-// behaviour yet.
+// is not drawn.
 import { FolderIcon, InfoIcon, KeyboardIcon, MonitorIcon, PaletteIcon, ShieldIcon, SlidersHorizontalIcon, SmartphoneIcon, UserIcon, type LucideIcon } from "lucide-react";
 import { PLACES_WORDS } from "@wsp/protocol";
 import type { Preferences, PreferencesPatch } from "@wsp/protocol";
@@ -14,6 +13,7 @@ import { accountCards } from "./account.js";
 import { APPEARANCE_DEFAULTS, appearanceCards, appearanceOffDefaults } from "./appearance.js";
 import { computerSubPages, computersCards } from "./computers.js";
 import { devicesCards } from "./devices.js";
+import { generalCards } from "./general.js";
 import { ABOUT_WORDS, ACCOUNT_WORDS, DEVICES_WORDS, KEYBINDINGS_WORDS, PRIVACY_WORDS, PROJECTS_WORDS, SETTINGS_WORDS } from "./format.js";
 import { SETTINGS_GROUP_IDS, type SettingsGroupId } from "./groupIds.js";
 import { KEYBINDING_DEFAULTS, keybindingsCards, keybindingsOffDefaults } from "./keybindings.js";
@@ -42,7 +42,7 @@ export interface SettingsGroup {
 }
 
 const TABLE: Record<SettingsGroupId, Omit<SettingsGroup, "id">> = {
-  general: { name: "General", glyph: SlidersHorizontalIcon, empty: true, cards: () => [] },
+  general: { name: "General", glyph: SlidersHorizontalIcon, cards: generalCards },
   appearance: { name: SETTINGS_WORDS.appearance, glyph: PaletteIcon, restore: { off: appearanceOffDefaults, patch: APPEARANCE_DEFAULTS }, cards: appearanceCards },
   computers: { name: PLACES_WORDS.section, glyph: MonitorIcon, cards: computersCards, sub: computerSubPages },
   projects: { name: PROJECTS_WORDS.title, glyph: FolderIcon, cards: projectsCards, sub: projectSubPages },

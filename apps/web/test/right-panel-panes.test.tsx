@@ -60,8 +60,31 @@ describe("the right panel's Workspace and Processes panes", () => {
     expect(card("machine").tagName).toBe("BUTTON");
     expect(card("processes").dataset["available"]).toBe("false");
     expect(card("processes").textContent).toContain("Available while this runs.");
-    expect(screen.queryByText("Files")).toBeNull();
+    expect(card("files").dataset["available"]).toBe("false");
+    expect(card("files").textContent).toContain("Available while this runs.");
     expect(screen.queryByText("Screen")).toBeNull();
+  });
+
+  it("opens the Files pane on its tree, then each file as a tab named by the file, and keeps the file and its line across a reload", () => {
+    act(() => useRightPanelStore.getState().open(WS, "files"));
+    const { unmount } = render(<Panel id={WS} />);
+    expect(document.querySelector("[data-right-panel-tab-list]")!.textContent).toContain("Files");
+    unmount();
+    act(() => useRightPanelStore.getState().openFile(WS, "/root/src/a.ts", 12));
+    render(<Panel id={WS} />);
+    const tabs = [...document.querySelectorAll("[data-right-panel-tab-list] [data-active-tab]")].map(t => t.textContent);
+    expect(tabs).toEqual(["Files", "a.ts"]);
+    const glyphs = [...document.querySelectorAll("[data-right-panel-tab-list] [data-active-tab]")].map(t => t.querySelector("svg")?.getAttribute("class") ?? "");
+    expect([glyphs[0]!.includes("lucide-folder"), glyphs[1]!.includes("lucide-file")]).toEqual([true, true]);
+    const saved = window.localStorage.getItem("wsp:right-panel-state:v1");
+    act(() => useRightPanelStore.setState({ byWorkspaceId: {} }));
+    window.localStorage.setItem("wsp:right-panel-state:v1", saved!);
+    act(() => void useRightPanelStore.persist.rehydrate());
+    expect(useRightPanelStore.getState().byWorkspaceId[WS]?.surfaces).toEqual([
+      { id: "files", kind: "files", path: null },
+      { id: "file:/root/src/a.ts", kind: "files", path: "/root/src/a.ts", line: 12, reveal: 0 },
+    ]);
+    expect(useRightPanelStore.getState().byWorkspaceId[WS]?.activeSurfaceId).toBe("file:/root/src/a.ts");
   });
 
   it("keeps an open pane across a reload", () => {
