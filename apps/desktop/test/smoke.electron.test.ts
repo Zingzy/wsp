@@ -23,6 +23,7 @@ import { builtExecutableHere } from "./packaged.js";
 import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
 import { notForThisPage } from "../src/origin.js";
 import { QUIT_WORD } from "../src/quit.js";
+import { TRAY_WORDS, type TrayAct, type TrayModel } from "../src/tray.js";
 import { writeStub } from "../../../packages/protocol/test/stub-script.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
@@ -426,7 +427,7 @@ function twoAgents(home: string): void {
 /** Claude Code as a turn on this computer meets it, on a PATH of its own: it opens the session the host named, says
  * one line, and waits for the gate file before it says its reply, so a turn is running for as long as a case needs.
  * Each turn's pid is a line of its own in the pid file, where the case can check it is alive and stop it. */
-function claudeStandIn(dir: string, gate: string, pidFile: string): void {
+function claudeStandIn(dir: string, gate: string, pidFile: string, o: { asks?: boolean } = {}): void {
   mkdirSync(dir, { recursive: true });
   const say = (id: number, text: string): string =>
     `printf '%s\\n' '{"type":"assistant","message":{"id":"msg_${id}","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"${text}"}],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":1}},"parent_tool_use_id":null,"session_id":"'"$sid"'","uuid":"u${id}"}'`;
@@ -441,6 +442,14 @@ function claudeStandIn(dir: string, gate: string, pidFile: string): void {
       `printf '%s\\n' '{"type":"system","subtype":"init","cwd":"'"$PWD"'","session_id":"'"$sid"'","tools":[],"mcp_servers":[],"model":"claude-sonnet-4-5","permissionMode":"bypassPermissions","slash_commands":[],"apiKeySource":"none","uuid":"init"}'`,
       say(1, "reading the ticket"),
       `while [ ! -f ${JSON.stringify(gate)} ]; do sleep 0.1; done`,
+      // With asks, the gate raises a prompt for a Bash call over the CLI's own control channel, and the turn goes on
+      // once an answer comes back down stdin, whichever window or menu gave it.
+      ...(o.asks === true
+        ? [
+            `printf '%s\\n' '{"type":"control_request","request_id":"ask_1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"sleep 5"},"description":"sleep 5","tool_use_id":"toolu_1"}}'`,
+            `while IFS= read -r line; do case "$line" in *control_response*) break;; esac; done`,
+          ]
+        : []),
       say(2, "wrote the fix"),
       `printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"duration_ms":10,"num_turns":1,"result":"wrote the fix","session_id":"'"$sid"'","total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":1},"uuid":"r1"}'`,
       "cat > /dev/null",
@@ -967,6 +976,86 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     }
   }, 120_000);
 
+  it.runIf(process.platform === "darwin")(
+    "with the window closed, the menu bar counts a working thread and holds the computer awake, marks the prompt it raises, and its Allow lets the turn finish",
+    async () => {
+      const agents = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-agents-"));
+      const gate = join(agents, "gate");
+      const pidFile = join(agents, "claude.pids");
+      claudeStandIn(join(agents, "bin"), gate, pidFile, { asks: true });
+      const env = { PATH: `${join(agents, "bin")}:${process.env["PATH"] ?? ""}` };
+      try {
+        launched = await launch(env, seedTwoLocalWorkspaces);
+        const { app, home } = launched;
+        const win = await windowAt(app, APP_URL);
+        await win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`).waitFor();
+        const appPid = app.process().pid!;
+        await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(w => w.close()));
+        await vi.waitFor(() => expect(appWindows(app)).toHaveLength(0), { timeout: 10_000, interval: 100 });
+        const wsp = (...args: string[]): string => {
+          const ran = spawnSync(shimPath(home), args, { encoding: "utf8", env: { ...process.env, ...env, HOME: home, WSP_HOME: home }, cwd: join(home, "cwd"), timeout: 30_000 });
+          expect(ran.status, `${ran.stdout}${ran.stderr}`).toBe(0);
+          return ran.stdout;
+        };
+        const menu = (): Promise<{ model: TrayModel | undefined; awake: boolean }> =>
+          app.evaluate(() => {
+            const handle = (globalThis as unknown as { wspTray: { model(): TrayModel | undefined; awake(): boolean } }).wspTray;
+            return { model: handle.model(), awake: handle.awake() };
+          });
+        // The app's own pid or one of its helpers': which of them Chromium takes the assertion in is Chromium's. pmset
+        // lists it by process as NoIdleSleepAssertion, which its summary counts as PreventUserIdleSystemSleep.
+        const ours = (): number[] => [appPid, ...spawnSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8", timeout: 20_000 }).stdout.split("\n").map(l => l.trim().split(/\s+/).map(Number)).filter(([, ppid]) => ppid === appPid).map(([pid]) => pid!)];
+        const held = (): boolean => {
+          const pids = ours();
+          return spawnSync("pmset", ["-g", "assertions"], { encoding: "utf8", timeout: 20_000 }).stdout.split("\n").some(line => /NoIdleSleepAssertion|PreventUserIdleSystemSleep/.test(line) && pids.some(pid => line.includes(`pid ${pid}(`)));
+        };
+        const thread = wsp("run", LOCAL_WORKSPACE.name, "--agent", "claude", "--detach", "print a line, then run sleep 5").trim().split(/\s+/).find(word => /^[0-9a-f]{8,}$/.test(word));
+
+        // Working: the count reads 1 and this computer is held awake, which pmset names by the app's own pid.
+        await vi
+          .waitFor(async () => expect(await menu()).toMatchObject({ model: { title: "1", needsYou: false }, awake: true }), { timeout: 30_000, interval: 200 })
+          .catch(async (e: unknown) => {
+            const turns = existsSync(pidFile) ? readFileSync(pidFile, "utf8").trim() : "(no turn started)";
+            console.error(["the menu:", JSON.stringify(await menu()), "the threads:", wsp("threads", "--json"), "the stand-in's turns:", turns].join("\n"));
+            throw e;
+          });
+        // Chromium takes the assertion on a task of its own, a moment after the app asked for it.
+        await vi.waitFor(() => expect(held()).toBe(true), { timeout: 10_000, interval: 250 }).catch((e: unknown) => {
+          console.error([`the app and its helpers: ${ours().join(" ")}`, spawnSync("pmset", ["-g", "assertions"], { encoding: "utf8", timeout: 20_000 }).stdout].join("\n"));
+          throw e;
+        });
+
+        // Asking: the mark stands, the row offers Allow, and a thread waiting on the person is not working.
+        writeFileSync(gate, "go\n");
+        const allow = await vi.waitFor(
+          async () => {
+            const { model, awake } = await menu();
+            expect(model?.needsYou).toBe(true);
+            expect(awake).toBe(false);
+            const row = model!.rows.find(r => r.kind === "thread");
+            const pick = row?.kind === "thread" ? row.actions.find(a => a.label === TRAY_WORDS.allow) : undefined;
+            expect(pick).toBeDefined();
+            return pick!.act;
+          },
+          { timeout: 30_000, interval: 200 },
+        );
+        await app.evaluate((_electron, act) => (globalThis as unknown as { wspTray: { pick(what: TrayAct): void } }).wspTray.pick(act), allow);
+
+        // Allowed: the turn finishes, the menu has no live row, the assertion is gone and the dock counts the finish
+        // nobody has seen yet.
+        await vi.waitFor(async () => expect((await menu()).model?.rows.some(r => r.kind === "thread")).toBe(false), { timeout: 30_000, interval: 200 });
+        expect((await menu()).awake).toBe(false);
+        await vi.waitFor(() => expect(held()).toBe(false), { timeout: 10_000, interval: 250 });
+        await vi.waitFor(async () => expect(await app.evaluate(({ app: electronApp }) => electronApp.getBadgeCount())).toBe(1), { timeout: 10_000, interval: 200 });
+        if (thread !== undefined) expect(wsp("thread", "read", thread)).toContain("wrote the fix");
+      } finally {
+        for (const pid of existsSync(pidFile) ? readFileSync(pidFile, "utf8").trim().split("\n").map(Number) : []) if (alive(pid)) process.kill(pid, "SIGKILL");
+        rmSync(agents, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
   it("no frame in the window registers a service worker on a loopback origin, and a host page loads into a session holding none", async () => {
     const served = await workerPage();
     standIn = served.server;
@@ -1135,7 +1224,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const home = win.url();
     await win.waitForSelector("[data-host-foot]");
     const here = computerNameHere();
-    expect(await win.locator("[data-host-label]").textContent()).toBe(here);
+    // The foot draws before the shell has answered which host the window is on, and names it once it has.
+    await vi.waitFor(async () => expect(await win.locator("[data-host-label]").textContent()).toBe(here), { timeout: 10_000, interval: 100 });
     await hostsMenu(launched.app, "box");
     await win.waitForURL(`${at}/`);
     // The shell's own menu lists every host on the account, so the owner still moves from one to another while the

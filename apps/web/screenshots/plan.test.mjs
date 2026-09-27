@@ -225,6 +225,7 @@ describe("the surfaces list this repo ships", () => {
       "settings-image-recipe",
       "settings-computer-open",
       "remove-computer",
+      "settings-general",
       "settings-appearance",
       "settings-projects",
       "settings-devices",

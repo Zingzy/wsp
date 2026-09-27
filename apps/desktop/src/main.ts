@@ -1,22 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, computerNameHere, daemonBinaryHere, installEach, mcpServerSpec, runningWsp, shimPath, systemService, wspHome, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentsHere, aimedHost, computerNameHere, daemonBinaryHere, dialHost, installEach, mcpServerSpec, runningWsp, shimPath, systemService, wspHome, type CliIO } from "@wsp/host";
 import { HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
-import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { BrowserWindow, Menu, Notification, Tray, app, dialog, ipcMain, nativeImage, nativeTheme, powerSaveBlocker, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import { awakeWanted } from "./awake.js";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { deepLinks, linkInArgv } from "./deep-link.js";
 import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, type BundleShell } from "./get-bundle.js";
-import { firstLaunch, homeOf, openHost, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch } from "./host-lifecycle.js";
+import { homeOf, openHost, openHostReady, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { sayOutside, showBadge, type Notifier } from "./needs-you.js";
 import { allowed, fromAppPage, fromOnboardingPage, hostsViewFor, notForThisPage } from "./origin.js";
+import { hostFeed, type FeedEvent, type FeedState, type HostFeed } from "./host-feed.js";
 import { guardWorkers, loadHostPage } from "./page-session.js";
 import { pagePreviews } from "./previews.js";
 import { QUIT_WORD, quitChoice, quitPrompt } from "./quit.js";
 import { installShim, shimText } from "./shim.js";
+import { trayModel, trayNotice, type TrayAct, type TrayModel, type TrayRow } from "./tray.js";
 import { windowOptions } from "./window.js";
 import { isShellZoomChord, shellChordOf } from "./zoom.js";
 
@@ -247,8 +250,12 @@ function where(): { home: string; statePath: string } {
 /** The host the window opens on: the one serving this launch's state file, the account's, or this computer's own
  * service, installed and started first where it is not serving. */
 function attach(): Promise<HostSession> {
+  return openHost(hostOptions());
+}
+
+function hostOptions(): OpenHostOptions {
   const { home, statePath } = where();
-  return openHost({ statePath, home, shim: shimPath(wspHome()), io, service: systemService() });
+  return { statePath, home, shim: shimPath(wspHome()), io, service: systemService() };
 }
 
 /** The window, on the host it was handed. */
@@ -269,6 +276,7 @@ async function showApp(on: HostSession): Promise<void> {
     here: computerNameHere(),
     load: async (next, hash) => {
       session = next;
+      follow(next);
       await loadHostPage(page, `${next.url}${hash ?? ""}`, { log: io.error });
     },
     log: io.log,
@@ -295,7 +303,15 @@ async function showApp(on: HostSession): Promise<void> {
     event.preventDefault();
     page.webContents.send("shell:chord", shellChordOf(input));
   });
-  page.on("closed", () => terminalFocus.delete(contentsId));
+  page.on("closed", () => {
+    terminalFocus.delete(contentsId);
+    if (win !== page) return;
+    // The window went and the app stays in the menu bar: a link or a row's Open brings a new one back.
+    win = undefined;
+    pageUp = false;
+    drawTray();
+  });
+  follow(on);
   await loadHostPage(page, `${on.url}${links.take()}`, { log: io.error });
   pageUp = true;
   links.ready();
@@ -348,15 +364,25 @@ async function showOnboarding(): Promise<void> {
   await page.loadFile(ONBOARDING_PAGE);
 }
 
+/** Set once the app is on its way out: a page that stops loading because its host was just stopped, or its window
+ * destroyed, is the quit and not a start that failed, and a dialog raised for it would hold the quit open. */
+let quitting = false;
+app.on("before-quit", () => {
+  quitting = true;
+});
+
 /** The question the menu's Quit asks while the window is on this computer's own host: quit and leave wsp running, or
  * stop it too. A window on a host somewhere else quits with nothing to ask. */
 async function askQuit(): Promise<void> {
   if (local === undefined || local.remote) return app.quit();
   const { home, statePath } = where();
   const working = await workingHere(statePath, home).catch(() => 0);
+  // Picked from the menu bar, the app may not be frontmost, and the question would open behind another app's window.
+  app.focus({ steal: true });
   const choice = quitChoice((await dialog.showMessageBox({ type: "question", ...quitPrompt(working) })).response);
   if (choice === "cancel") return;
   if (choice === "stop") {
+    quitting = true;
     try {
       await stopWsp(statePath, home, systemService());
     } catch (e) {
@@ -369,7 +395,143 @@ async function askQuit(): Promise<void> {
   app.quit();
 }
 
-app.on("window-all-closed", () => app.quit());
+// On a Mac the app lives on in the menu bar with no window; elsewhere the last window closing is the quit.
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
+app.on("activate", () => void reopen());
+
+/** The window for this launch: the app on the host it attaches to, or the first launch's screen where that host holds
+ * nothing yet. */
+async function openWindow(): Promise<void> {
+  // Read across a restart: a launch that meets the host on its way down attaches again to the one coming up.
+  const { session: on, first } = await openHostReady(hostOptions());
+  if (!first) await showApp(on);
+  else await showOnboarding();
+}
+
+let reopening: Promise<void> | undefined;
+/** The window brought back, from the menu bar or the Dock: the one standing is raised, and a closed one opened again. */
+function reopen(): Promise<void> {
+  if (win !== undefined) {
+    raiseWindow(win);
+    return Promise.resolve();
+  }
+  return (reopening ??= openWindow()
+    .catch((e: unknown) => {
+      const why = e instanceof Error ? e.message : String(e);
+      io.error(`wsp could not open: ${why}`);
+      if (!quitting) dialog.showErrorBox("wsp could not open", why);
+    })
+    .finally(() => (reopening = undefined)));
+}
+
+/** The menu bar: its icon, its count and its menu, drawn from the feed on the host the window is on. */
+let tray: Tray | undefined;
+let feed: HostFeed | undefined;
+let fed: FeedState | undefined;
+let fedFrom: HostSession | undefined;
+let drawn: TrayModel | undefined;
+/** The assertion that keeps this computer from sleeping on its own, while one is held. */
+let awake: number | undefined;
+
+const trayImage = (asking: boolean): Electron.NativeImage => {
+  const image = nativeImage.createFromPath(here(`./tray/${asking ? "trayAskTemplate" : "trayTemplate"}.png`));
+  image.setTemplateImage(true);
+  return image;
+};
+
+/** Dials the host a session names, once per session: the window moving to another host moves the feed with it. */
+function follow(on: HostSession): void {
+  if (fedFrom === on) return;
+  feed?.close();
+  fedFrom = on;
+  fed = undefined;
+  const { home, statePath } = where();
+  feed = hostFeed({
+    dial: () => dialHost(statePath, { aim: on.remote && on.alias !== undefined ? aimedHost(statePath, { host: on.alias, home }) : { kind: "here" }, home }),
+    changed: state => {
+      fed = state;
+      drawTray();
+      holdAwake();
+    },
+    event: sayWhileClosed,
+    log: io.error,
+  });
+}
+
+function menuOf(rows: readonly TrayRow[]): Electron.MenuItemConstructorOptions[] {
+  return rows.map(row => {
+    if (row.kind === "separator") return { type: "separator" };
+    if (row.kind === "line") return { label: row.label, enabled: row.act !== undefined, ...(row.act !== undefined ? { click: act(row.act) } : {}) };
+    return { label: row.label, sublabel: row.sublabel, submenu: row.actions.map(a => ({ label: a.label, click: act(a.act) })) };
+  });
+}
+
+function drawTray(): void {
+  if (fed === undefined || fedFrom === undefined) return;
+  drawn = trayModel({ ...fed, host: { label: fedFrom.label, remote: fedFrom.remote, lost: fed.lost } });
+  // Elsewhere the last window closing is the quit, so there is no menu bar app to show.
+  if (process.platform !== "darwin") return;
+  tray ??= new Tray(trayImage(false));
+  tray.setImage(trayImage(drawn.needsYou));
+  tray.setTitle(drawn.title);
+  tray.setToolTip(drawn.title === "" ? "wsp" : `wsp ${drawn.title}`);
+  tray.setContextMenu(Menu.buildFromTemplate(menuOf(drawn.rows)));
+  // The page puts the count on the dock while it is up; with no window, the menu bar's feed does.
+  if (win === undefined) showBadge(drawn.badge, app);
+}
+
+/** What a menu row does when it is picked. */
+const act = (what: TrayAct) => (): void => {
+  const failed = (e: unknown): void => io.error(`menu bar: ${e instanceof Error ? e.message : String(e)}`);
+  switch (what.kind) {
+    case "open":
+      // A thread on a host somewhere else is read in that host's window; the link road is this computer's own.
+      if (fedFrom?.remote !== true) links.open(`wsp://thread/${what.threadId}`);
+      void reopen();
+      return;
+    case "answer":
+      void feed?.answer(what.sessionId, what.askId, what.optionId).catch(failed);
+      return;
+    case "stop":
+      void feed?.interrupt(what.sessionId).catch(failed);
+      return;
+    case "start":
+      void attach()
+        .then(() => feed?.redial())
+        .catch(failed);
+      return;
+    case "openApp":
+      void reopen();
+      return;
+    case "quit":
+      void askQuit();
+      return;
+  }
+};
+
+/** Holds the assertion while a thread works on this computer and the switch is on, and lets it go at none. */
+function holdAwake(): void {
+  const want = fed !== undefined && !fed.lost && fedFrom?.remote === false && awakeWanted(fed.sessions, fed.workspaces, fed.keepAwake);
+  if (want && awake === undefined) awake = powerSaveBlocker.start("prevent-app-suspension");
+  if (!want && awake !== undefined) {
+    powerSaveBlocker.stop(awake);
+    awake = undefined;
+  }
+}
+
+/** A finish or a prompt said over the system while no window is open to say it; the page says them while it is up. */
+function sayWhileClosed(e: FeedEvent): void {
+  if (win !== undefined || fed === undefined || (e.type !== "session.done" && e.type !== "session.permission")) return;
+  const line = trayNotice(e as Parameters<typeof trayNotice>[0], fed, fed.notifySound);
+  if (line === undefined) return;
+  const threadId = typeof e["threadId"] === "string" ? e["threadId"] : undefined;
+  sayOutside(line, { focused: () => false, raise: () => void reopen(), open: () => void (threadId !== undefined && fedFrom?.remote !== true && links.open(`wsp://thread/${threadId}`)) }, NOTIFIER);
+}
+
+// The smoke reads the menu and picks its rows through this, since a menu bar menu is not a window it can drive.
+if (process.env["WSP_DESKTOP_SMOKE"] === "1") Object.assign(globalThis, { wspTray: { model: () => drawn, pick: (what: TrayAct) => act(what)(), awake: () => awake !== undefined } });
 
 /** The wsp command on this computer, rewritten whenever this app is not the one it names: an update or a move
  * changes the path inside the bundle, and the shim is what every agent's config and the service run. A home that
@@ -421,15 +583,12 @@ app
     // Then, before the service is written and before the first launch reads the agents on this computer: a window
     // opened from Finder or the Dock was handed launchd's PATH, and the service runs with the PATH this launch holds.
     await adoptLoginPath(line => io.log(line));
-    const on = await attach();
-    const { home, statePath } = where();
-    if (on.remote || !(await firstLaunch(statePath, home))) await showApp(on);
-    else await showOnboarding();
+    await openWindow();
   })
   .catch((e: unknown) => {
     const why = e instanceof Error ? e.message : String(e);
     // A launch nobody watches has only its log to say why it quit.
     io.error(`wsp could not start: ${why}`);
-    dialog.showErrorBox("wsp could not start", why);
+    if (!quitting) dialog.showErrorBox("wsp could not start", why);
     app.quit();
   });
