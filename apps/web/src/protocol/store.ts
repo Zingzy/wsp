@@ -417,15 +417,17 @@ export const useStore = create<State>((set, get) => {
    * the thread another client started meanwhile, and nothing reads that workspace again until the turn ends. */
   let rowReads = 0;
   const rowsFrom = new Map<string, number>();
-  /** The rows a read of every workspace answered, less the workspaces a newer read has already drawn. */
-  const newerKept = (read: Record<string, SessionView[]>, asked: number, drawn: Record<string, SessionView[]>): Record<string, SessionView[]> => {
-    const kept = { ...read };
+  /** The rows a read of every workspace answered, less the workspaces a newer read has already drawn. A read that
+   * answered covers every workspace, those it found no rows for too, so each is stamped with it: an older read landing
+   * later may not put back rows this one found gone. */
+  const newerKept = (read: Record<string, SessionView[]> | null, asked: number, covered: readonly string[], drawn: Record<string, SessionView[]>): Record<string, SessionView[]> => {
+    const kept = { ...(read ?? {}) };
     for (const [id, from] of rowsFrom) {
       if (from <= asked) continue;
       if (drawn[id] === undefined) delete kept[id];
       else kept[id] = drawn[id];
     }
-    for (const id of Object.keys(read)) if ((rowsFrom.get(id) ?? 0) < asked) rowsFrom.set(id, asked);
+    if (read !== null) for (const id of new Set([...covered, ...Object.keys(read), ...rowsFrom.keys()])) if ((rowsFrom.get(id) ?? 0) < asked) rowsFrom.set(id, asked);
     return kept;
   };
   const readCapabilities = (api: Api): void => {
@@ -687,7 +689,7 @@ export const useStore = create<State>((set, get) => {
       const [workspaces, answered] = await Promise.all([api.listWorkspaces(), api.listSessions().then(rows => rows, () => null)]);
       const s = get();
       const rows = answered ?? NO_SESSIONS;
-      const sessions = newerKept(groupSessions(rows), asked, s.sessions);
+      const sessions = newerKept(answered === null ? null : groupSessions(rows), asked, workspaces.map(w => w.id), s.sessions);
       // The address is read on every refresh, not only the first: a reconnect after the host restarted rebuilds this
       // store from nothing, and what the person is reading is recorded there rather than here.
       const address = readAddress();

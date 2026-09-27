@@ -598,6 +598,37 @@ describe("store sessions", () => {
     expect(useStore.getState().sessions["ws_a"]).toEqual([row]);
   });
 
+  it("an older read of one workspace's rows that answers after a newer read of every row finds none there puts nothing back", async () => {
+    const stale: SessionView = { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", threadId: "thr_gone" };
+    const { api } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    let answerOlder = (_rows: SessionView[]): void => {};
+    api.listSessions = id => (id === "ws_a" ? new Promise(resolve => (answerOlder = resolve)) : Promise.resolve([]));
+    const older = useStore.getState().reloadSessions("ws_a");
+    await useStore.getState().refresh();
+    answerOlder([stale]);
+    await older;
+    expect(useStore.getState().sessions["ws_a"] ?? []).toEqual([]);
+  });
+
+  it("of two reconnect reads of every row, the one asked later stands, whichever answers last", async () => {
+    const stale: SessionView = { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", threadId: "thr_gone" };
+    const { api } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    const answers: ((rows: SessionView[]) => void)[] = [];
+    api.listSessions = () => new Promise(resolve => answers.push(resolve));
+    const older = useStore.getState().refresh();
+    const newer = useStore.getState().refresh();
+    await flush();
+    answers[1]!([]);
+    await newer;
+    answers[0]!([stale]);
+    await older;
+    expect(useStore.getState().sessions["ws_a"] ?? []).toEqual([]);
+  });
+
   it("holds a send the runtime has no row for and drops it only once the rows that replace it are in", async () => {
     const sessions: SessionView[] = [];
     const { api, emit } = fakeApi([view("ws_a")], sessions);
