@@ -1,0 +1,51 @@
+{
+  "tool": "skills_disable",
+  "cases": [
+    {
+      "case": "off",
+      "arguments": {
+        "name": "review",
+        "on": "attic"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws_1\",\"name\":\"landing\",\"machineId\":\"m1\",\"phase\":\"running\",\"golden\":\"snap_gold\",\"createdAt\":\"2026-09-25T00:00:00.000Z\",\"project\":{\"id\":\"pr_1\",\"name\":\"api\",\"path\":\"/root/api\",\"computer\":\"place-9\"}}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"label\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"default\":false,\"os\":\"linux\",\"shape\":{\"cpu\":8,\"memMb\":16384},\"diskFreeBytes\":123456789012,\"present\":true,\"agentVersions\":{\"2\":\"an index key\",\"claude\":\"2.1.0\"},\"forks\":{\"running\":1,\"room\":2}},{\"id\":\"place-solari\",\"kind\":\"provider\",\"name\":\"solari\",\"default\":true,\"rateUsdPerHour\":0.30000000000000004}]}",
+        "skills.toggle": "{\"id\":1,\"ok\":true,\"paths\":[\"~/.agents/skills/review/SKILL.md.off\"]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"review is off.\"}],\"structuredContent\":{\"paths\":[\"~/.agents/skills/review/SKILL.md.off\"]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "skills.toggle",
+          "target": {
+            "placeId": "place-9"
+          },
+          "name": "review",
+          "on": false
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "name": "gone"
+      },
+      "replies": {
+        "skills.toggle": "{\"id\":1,\"ok\":false,\"error\":\"There is no skill named gone there.\",\"kind\":\"not-found\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"There is no skill named gone there.\"}],\"structuredContent\":{\"error\":\"There is no skill named gone there.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "skills.toggle",
+          "target": {
+            "placeId": "here"
+          },
+          "name": "gone",
+          "on": false
+        }
+      ]
+    }
+  ]
+}

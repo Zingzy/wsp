@@ -1,0 +1,55 @@
+{
+  "tool": "skills_search",
+  "cases": [
+    {
+      "case": "hits",
+      "arguments": {
+        "query": "review code",
+        "limit": 2
+      },
+      "replies": {
+        "skills.search": "{\"id\":1,\"ok\":true,\"skills\":[{\"name\":\"code-review \u0085\\ttabbed\\nsplit 🧪\",\"installs\":123456,\"id\":\"zingzy/skills/code-review\",\"extra\":true,\"source\":\"zingzy/skills\",\"skillId\":\"code-review\"},{\"id\":\"a/b/c\",\"source\":\"a/b\",\"skillId\":\"c\",\"name\":\"c\",\"installs\":0}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"SKILL                         INSTALLS  ADD WITH\\ncode-review  tabbed split 🧪  123456    zingzy/skills/code-review\\nc                             0         a/b/c\"}],\"structuredContent\":{\"skills\":[{\"id\":\"zingzy/skills/code-review\",\"source\":\"zingzy/skills\",\"skillId\":\"code-review\",\"name\":\"code-review \\u0085\\ttabbed\\nsplit 🧪\",\"installs\":123456},{\"id\":\"a/b/c\",\"source\":\"a/b\",\"skillId\":\"c\",\"name\":\"c\",\"installs\":0}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "skills.search",
+          "q": "review code",
+          "limit": 2
+        }
+      ]
+    },
+    {
+      "case": "none",
+      "arguments": {
+        "query": "nothing"
+      },
+      "replies": {
+        "skills.search": "{\"id\":1,\"ok\":true,\"skills\":[]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no skills on skills.sh match\"}],\"structuredContent\":{\"skills\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "skills.search",
+          "q": "nothing"
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "query": ""
+      },
+      "replies": {
+        "skills.search": "{\"id\":1,\"ok\":false,\"error\":\"the query is empty\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the query is empty\"}],\"structuredContent\":{\"error\":\"the query is empty\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "skills.search",
+          "q": ""
+        }
+      ]
+    }
+  ]
+}

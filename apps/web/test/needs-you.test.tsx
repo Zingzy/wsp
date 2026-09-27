@@ -222,7 +222,7 @@ describe("a machine that came up while the person looked away", () => {
     render(<Harness />);
     act(() => useStore.setState({ workspaces: [WOKEN], selectedId: null }));
     const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
-    act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1", resurrected: false }));
+    act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" }));
     expect(FakeNotification.built).toEqual([{ title: NEEDS_YOU, body: workspaceAwakeLine("b1"), silent: true }]);
     FakeNotification.last!.onclick!();
     expect(focus).toHaveBeenCalled();
@@ -236,14 +236,14 @@ describe("a machine that came up while the person looked away", () => {
     render(<Harness />);
     act(() => useStore.setState({ workspaces: [WOKEN] }));
     hidden = false;
-    act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1", resurrected: false }));
+    act(() => emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" }));
     expect(FakeNotification.built).toEqual([]);
   });
 
   it("says nothing about a workspace this page never knew", () => {
     const emit = bindEvents();
     render(<Harness />);
-    act(() => emit({ type: "workspace.woken", workspaceId: "ws_gone", machineId: "m9", resurrected: false }));
+    act(() => emit({ type: "workspace.woken", workspaceId: "ws_gone", machineId: "m9" }));
     expect(FakeNotification.built).toEqual([]);
   });
 });

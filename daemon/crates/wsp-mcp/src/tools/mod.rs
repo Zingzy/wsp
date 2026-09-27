@@ -3,6 +3,9 @@
 //! call that answers it through the host. CONTRIBUTING.md in this crate says how one is added.
 
 mod computers;
+mod servers;
+mod skills;
+mod target;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -27,7 +30,21 @@ pub struct Tool {
 
 pub type Call = Pin<Box<dyn Future<Output = Result<Answer, Refused>> + Send>>;
 
-pub const TOOLS: &[Tool] = &[computers::TOOL];
+pub const TOOLS: &[Tool] = &[
+    computers::TOOL,
+    skills::SEARCH,
+    skills::SHOW,
+    skills::ADD,
+    skills::REMOVE,
+    skills::DISABLE,
+    skills::ENABLE,
+    servers::TOOLS,
+    servers::ADD,
+    servers::REMOVE,
+    servers::DISABLE,
+    servers::ENABLE,
+    servers::ADD_TOOLS,
+];
 
 /// The tool of that name the state lists, with its entry there; none where that state lists no such tool, which the
 /// TypeScript server does not register.
@@ -67,7 +84,6 @@ impl Answer {
     }
 
     /// The text is a line of its own and the value rides beside it: asText in packages/host/src/verbs.ts.
-    #[allow(dead_code)]
     pub fn text<T: Serialize>(text: String, value: &T) -> Answer {
         Answer { text, structured: serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned()) }
     }
@@ -129,9 +145,18 @@ pub(crate) mod held {
         assert_eq!(names(&ours), names(&theirs), "{side}: the fields");
         assert_eq!(required(derived), required(listed), "{side}: the fields required");
         for ((name, ours), (_, theirs)) in ours.iter().zip(&theirs) {
-            if ours.get("type").is_some() {
-                assert_eq!(ours["type"], theirs["type"], "{side}.{name}: the type");
+            if let Some(kind) = ours.get("type") {
+                assert_eq!(optional_as_zod(kind), theirs["type"], "{side}.{name}: the type");
             }
+        }
+    }
+
+    /// An `Option` field derives as its type or null; zod's optional field is its type, left out when absent, which
+    /// is what `skip_serializing_if` writes.
+    fn optional_as_zod(kind: &Value) -> Value {
+        match kind.as_array().map(|kinds| kinds.iter().filter(|k| *k != "null").collect::<Vec<_>>()) {
+            Some(kinds) if kinds.len() == 1 => kinds[0].clone(),
+            _ => kind.clone(),
         }
     }
 

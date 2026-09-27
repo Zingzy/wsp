@@ -1959,7 +1959,7 @@ export class PrepareStoppedError extends Error {
 }
 
 /** Stand-in for a machine that vanished while we were away; resume() failing with
- * kind "missing" is exactly what triggers Workspace's resurrect path. */
+ * kind "missing" is what a wake settles gone on. */
 function deadMachine(id: string): Machine {
   const gone = () => Object.assign(new Error(`machine ${id} is gone`), { kind: "missing", status: 404 });
   return {
@@ -2729,7 +2729,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     until(machine.state(), clock.now() + providerReadMs, `state of ${machine.id}`, clock).catch(() => undefined);
   /** What a read of the machine before a wake asks again comes to: a resume the backend gave up on went through
    * after all, or as far as anything here can tell it did not. A read that could not be had leaves the resume
-   * unsent, and a machine the read calls gone meets its 404 on the next ask and takes the resurrect road. */
+   * unsent, and a machine the read calls gone meets its 404 on the next ask and settles gone. */
   const tookTheResume = (reads: MachineState | undefined): boolean => reads === "running" || reads === "starting";
   /** Resolves after ms on the runtime's clock. Unref'd: a host asked to exit while a wake waits to ask again exits. */
   const sleeps = (ms: number): Promise<void> => new Promise<void>(resolve => clock.schedule(() => resolve(), ms, { unref: true }));
@@ -3257,7 +3257,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The whole of what a client's channel into a served workspace carries, for the reason DEVICE_OPS is a list: that
    * computer's daemon runs every other op on the computer itself, so a deny list would let an op added later reach it.
    * Each of these names the workspace it is for, and the daemon answers it inside that workspace. */
-  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list", "fs.list", "fs.read", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "ping"];
+  const WORKSPACE_FRAMES = ["pty.create", "pty.attach", "pty.detach", "pty.write", "pty.resize", "pty.kill", "pty.list", "fs.list", "fs.files", "fs.read", "fs.search", "git.status", "git.diff", "git.push", "git.pr", "git.prState", "git.prList", "ping"];
   /** And the host's own guest road, which answers the sessions that computer relays by the id it gave them. */
   const GUEST_ROAD_FRAMES = [...WORKSPACE_FRAMES, "guest.watch", "guest.reply", "guest.close"];
 
@@ -4486,7 +4486,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.ws.noteRunning();
         followMachine(entry);
         await persist(entry.record);
-        bus.emit({ type: "workspace.woken", workspaceId: entry.record.id, machineId: entry.record.machineId, resurrected: false });
+        bus.emit({ type: "workspace.woken", workspaceId: entry.record.id, machineId: entry.record.machineId });
         await emitStatus(entry, reachOf(entry), ALREADY_RUNNING);
       } finally {
         delete entry.adopting;
@@ -4560,7 +4560,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       delete entry.record.gone;
     }
     await persist(entry.record);
-    if (phase === "running") bus.emit({ type: "workspace.woken", workspaceId: entry.record.id, machineId: entry.record.machineId, resurrected: false });
+    if (phase === "running") bus.emit({ type: "workspace.woken", workspaceId: entry.record.id, machineId: entry.record.machineId });
     else bus.emit({ type: "workspace.napped", workspaceId: entry.record.id, found: true });
     await emitStatus(entry, phase === "running" ? reachOf(entry) : "napping", NOT_GONE);
     return phase;
@@ -5539,7 +5539,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (entry.waking) return entry.waking;
       if (entry.record.phase === "gone") {
         const left = await recoverGone(entry);
-        if (left === undefined) throw new Error(goneRefusal("wake", entry.record.gone));
+        if (left === undefined) throw new Error(goneRefusal(entry.record.name, "wake", entry.record.gone));
         // A record that left gone for napping is a machine the provider holds paused: the wake goes on and resumes it.
         if (left === "running") return view(entry.record);
       }
@@ -5554,7 +5554,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return "gone";
         });
         if (read === "gone" && settled(await settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), ...(answer !== undefined ? { answer } : {}) })))) {
-          throw new Error(goneRefusal("wake", entry.record.gone));
+          throw new Error(goneRefusal(entry.record.name, "wake", entry.record.gone));
         }
         if (read === "paused") await adoptPause(entry);
       } else if (await runsUnderNapping(entry)) await adoptRunning(entry);
@@ -5596,7 +5596,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               followMachine(entry);
               delete entry.record.wakeRefused;
               await persist(entry.record);
-              bus.emit({ type: "workspace.woken", workspaceId: id, machineId: entry.record.machineId, resurrected: result.resurrected });
+              bus.emit({ type: "workspace.woken", workspaceId: id, machineId: entry.record.machineId });
               if (result.reason !== undefined) console.warn(`wake of ${id}: ${result.reason}`);
               await emitStatus(entry, reachOf(entry), result.reason);
               return view(entry.record);
@@ -5615,6 +5615,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                   continue;
                 }
               }
+              // A resume the provider answered 404 for is a sighting like any other: the record settles gone only
+              // where the reads agree, and the refusal says what went with the machine.
+              if (!stopped() && isMissing(e) && settled(await settleGone(entry, goneWords(entry.record.machineId, { by: "wake", at: clock.now(), answer: providerSaid(e) })))) {
+                throw new Error(goneRefusal(entry.record.name, "wake", entry.record.gone));
+              }
               // The provider would not resume it for the whole of the asking: the record carries the road out until
               // something replaces the machine, since nothing about it changes on its own from here.
               const gaveUp = !stopped() && e instanceof ResumeUnansweredError ? wakeGaveUpLine(ask, clock.now() - began) : undefined;
@@ -5625,6 +5630,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               await persist(entry.record);
               delete entry.wakeAsk;
               const words = stopped() ? WAKE_STOPPED : (gaveUp ?? (e instanceof Error ? e.message : String(e)));
+              if (!stopped()) console.warn(`wake of ${id} failed: ${words}`);
               await emitStatus(entry, "napping", words);
               armLateRead(entry);
               throw stopped() ? new Error(WAKE_STOPPED) : gaveUp !== undefined ? new Error(gaveUp) : e;
@@ -7036,7 +7042,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const o = { ...opened, ...(carried !== undefined ? { harness: carried.harness } : opened.harness === undefined && remembered !== undefined ? { harness: remembered } : {}) };
       if (carried !== undefined) delete o.permissionMode;
       const refuse = (): void => {
-        const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
+        const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
         if (refusal !== null) throw new Error(refusal);
       };
       refuse();
@@ -7397,7 +7403,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!s) return { outcome: "not-found" };
       const entry = await entryOfRow(s.view, origin);
       if (entry === undefined) return { outcome: "not-found" };
-      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
+      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
       if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
       if (s.handle.steer === undefined) return { outcome: "unsupported" };
@@ -7413,7 +7419,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!s) return { outcome: "not-found" };
       const entry = await entryOfRow(s.view, origin);
       if (entry === undefined) return { outcome: "not-found" };
-      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
+      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
       if (s.handle?.answer === undefined) return { outcome: s.handle === undefined ? "gone" : "unsupported" };
       return { outcome: await s.handle.answer(o.askId, { optionId: o.optionId }) };
@@ -7425,7 +7431,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!s) return { outcome: "not-found" };
       const entry = await entryOfRow(s.view, origin);
       if (entry === undefined) return { outcome: "not-found" };
-      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
+      const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
       const { harness, adapter } = adapterFor(entry, s.view.harness);
       const table = harnessCatalog(harness);
@@ -7466,7 +7472,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const harnessSessionId = s.view.claudeSessionId;
       const entry = await entryOfRow(s.view, origin);
       if (entry === undefined) return { outcome: "not-found" };
-      const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "rename", entry.record.gone);
+      const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "rename", entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
       await copyBlocked(entry);
       const write = adapterFor(entry, s.view.harness).adapter.renameSession;
@@ -9052,7 +9058,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async import(o, origin) {
       spawnGuard("import", origin);
       const entry = await entryOf(o.workspaceId, origin);
-      const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "import", entry.record.gone);
+      const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "import", entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
       await copyBlocked(entry);
       const began = clock.now();
@@ -9075,7 +9081,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async export(o, origin) {
       spawnGuard("export", origin);
       const entry = await entryOf(o.workspaceId, origin);
-      const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "export", entry.record.gone);
+      const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "export", entry.record.gone, entry.record.name);
       if (refusal !== null) throw new Error(refusal);
       await copyBlocked(entry);
       const began = clock.now();
@@ -9214,7 +9220,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     for (const row of listing) {
       // The engine kills only a running row, so a paused one stays reported rather than silently left.
       if (known.has(row.id) || (dropped.has(row.id) && row.state === "running") || !lostWorkspace(row, owner, now)) continue;
-      // A stamped id another machine now holds is a body a rebuild or a wake replaced and failed to stop: the engine kills it.
+      // A stamped id another machine now holds is a body a rebuild or an image move replaced and failed to stop: the engine kills it.
       const stamped = row.labels[WORKSPACE_LABEL];
       if (stamped !== undefined && live.has(stamped)) continue;
       const kept = stamped === undefined ? undefined : ((await store.get(WORKSPACE_NAMES, stamped)) as NamedWorkspace | undefined);

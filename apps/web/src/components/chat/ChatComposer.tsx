@@ -49,6 +49,9 @@
 // the agent as a command it does not have, and come back as a question about
 // a stray slash with a turn's price on it. A slash command nobody announced
 // with words after it still goes as text, since the words may be meant.
+// Typing @, # or $ opens the thread's folder's files, the repository's open
+// pull requests and issues, or the person's skills the thread's agent loads,
+// and a pick lands as a chip whose text is what the agent reads.
 // The checkout row under the composer picks the folder a fresh thread starts
 // in; a resumed one is started where its harness last said it was. The
 // model, effort, context window and access picks in the box's footer ride a
@@ -57,22 +60,29 @@
 // next turn, and never the agent or the access, which are that thread's own
 // off its rows.
 import { cn } from "../../lib/utils";
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
-import { composerHeldLine, foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { composerHeldLine, foldThreads, FS_FILES_CAP_ENTRIES, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
 import { useComputerName } from "../../sidebar/workspaceRows";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
-import { useThreadStart } from "../../files/root";
+import { useThreadFolder, useThreadStart } from "../../files/root";
+import { useDaemonWire } from "../../files/wire";
+import { DaemonOpError, fsFiles, gitPrList } from "../../terminal/daemon-fs";
+import { useAgentsReport } from "../agents/useAgentsReport";
 import { useLinkDownLine } from "../../terminal/paneWords";
-import { composerSubmissionIntentForEnter, detectComposerTrigger, replaceTextRange } from "../../composer-logic";
+import { collapseExpandedComposerCursor, composerSubmissionIntentForEnter, detectComposerTrigger, expandCollapsedComposerCursor, insertComposerBlock, isCollapsedCursorAdjacentToInlineToken, replaceTextRange } from "../../composer-logic";
+import { hostItemText, serializeComposerMention, splitPromptIntoComposerSegments } from "../../composer-editor-mentions";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
 import { canPickFolder, ComposerCheckoutRow, HomeCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
-import { composerCommandGroups, type ComposerCommandGroup } from "./composerCommandGroups";
+import type { ComposerCommandGroup } from "./composerCommandGroups";
+import { fileGroups, referenceGroups, skillGroups, slashGroups } from "./composerMenuItems";
+import { useComposerList } from "./useComposerList";
+import { useComposerTriggerState } from "./useComposerTriggerState";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ChatImageThumb } from "./ChatImages";
 import { attachmentOf, recordOf, useComposerImages, useComposerImagesStore } from "./composerImages";
@@ -82,13 +92,35 @@ import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerQueue } from "./ComposerQueue";
-import { slashCommandItemsForPromptPosition } from "./composerSlashCommandSearch";
 import { ComposerSurface } from "./ComposerSurface";
 import { useAnimatedHeight, useFlip, useTallDraft } from "./composerMotion";
 import { Button } from "../ui/button";
 import type { ChatThreadHandle } from "./useChatThread";
 
 const noop = () => {};
+
+/** What the @ and # menus say where the wsp on the computer the copy is on predates the lists they read. */
+export const menuListUnserved = (computer: string): string => `${computer}'s wsp is older than this app, so the list is not there yet; it arrives with its next update`;
+
+/** What an empty # menu says where no signed-in command line for the project's git host is on that computer. */
+export const noHostListLine = (host: string, computer: string): string => `no signed-in command line for ${host} is on ${computer}, so its pull requests and issues are not listed`;
+
+/** What the @ menu says under a checkout with more files than one list carries. */
+export const FILES_CUT_LINE = `this checkout has more than ${FS_FILES_CAP_ENTRIES.toLocaleString("en-US")} files; the menu lists the first ${FS_FILES_CAP_ENTRIES.toLocaleString("en-US")}`;
+
+/** A list read whose refusal is the computer's wsp not knowing the read yet reads as that, in the person's words. */
+const inPersonsWords = <T,>(read: Promise<T>, computer: string): Promise<T> =>
+  read.catch((e: unknown) => {
+    throw e instanceof DaemonOpError && e.code === "unsupported" ? new Error(menuListUnserved(computer)) : e;
+  });
+
+/** The draft as the height mirror measures it: a chip draws on one line whatever its text holds, so each one stands
+ * as a short run of characters rather than the block it sends. */
+function mirrorText(prompt: string): string {
+  return splitPromptIntoComposerSegments(prompt)
+    .map(segment => (segment.type === "text" ? segment.text : "\u2003".repeat(8)))
+    .join("");
+}
 
 /** What blocks a send right now, or null; the refusal table gives its words. The socket comes first: with it down
  * every other reading is stale, and a state the app has no workspace for at all is one it cannot name. A paused machine
@@ -205,7 +237,6 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
   const [highlightedSearchKey, setHighlightedSearchKey] = useState<string | null>(null);
-  const [dismissedSearchKey, setDismissedSearchKey] = useState<string | null>(null);
 
   const absent = useAbsentComputer(workspaceId);
   const computer = useComputerName(workspaceId);
@@ -272,6 +303,52 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other gets the turn stopped.
   const canSteer = canStop && harnessCatalog?.steers === true && api?.steerSession !== undefined;
+  // The draft holds the collapsed caret, where a chip is one place; a trigger reads the text as sent. A caret beside a
+  // chip opens nothing, so a chip's own text never reads as a token being typed.
+  const candidate = useMemo(() => {
+    if (isCollapsedCursorAdjacentToInlineToken(draft.prompt, draft.cursor, "left") || isCollapsedCursorAdjacentToInlineToken(draft.prompt, draft.cursor, "right")) return null;
+    return detectComposerTrigger(draft.prompt, expandCollapsedComposerCursor(draft.prompt, draft.cursor));
+  }, [draft]);
+  const { trigger, setTrigger, dismissTrigger } = useComposerTriggerState(() => candidate);
+  useLayoutEffect(() => setTrigger(candidate), [candidate, setTrigger]);
+  const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
+  const wire = useDaemonWire(workspaceId);
+  const startFolder = useThreadFolder(workspaceId);
+  // The folder the thread runs in, which is where its @ paths are read from and the one the checkout row names.
+  const folder = pickable ? startFolder : (viewCwd ?? startFolder);
+  const listed = onStart === undefined && unavailable === null && wire !== null && folder !== null;
+  const session = trigger === null ? "" : `${trigger.kind}:${trigger.rangeStart}`;
+  const files = useComposerList(listed && trigger?.kind === "path" ? `${workspaceId}\0files\0${folder}` : null, session, () => inPersonsWords(fsFiles(wire!, folder!), computer));
+  const references = useComposerList(listed && trigger?.kind === "pull-request" ? `${workspaceId}\0items\0${folder}` : null, session, () => inPersonsWords(gitPrList(wire!, folder!), computer));
+  const skillsWanted = onStart === undefined && (trigger?.kind === "slash-command" || trigger?.kind === "skill");
+  const skills = useAgentsReport(skillsWanted ? { workspaceId } : null).report?.skills;
+  const groups = useMemo<ComposerCommandGroup[]>(() => {
+    if (trigger === null || unavailable !== null) return [];
+    switch (trigger.kind) {
+      case "slash-command":
+        if (trigger.rangeStart !== 0) return [];
+        return slashGroups({ harness: catalog.harness, announced: catalog.slashCommands, skills: skills ?? [], query: trigger.query });
+      case "skill":
+        return skillGroups({ harness: catalog.harness, skills: skills ?? [], query: trigger.query });
+      case "path":
+        return files.data === null ? [] : fileGroups(files.data.files, trigger.query);
+      case "pull-request":
+        return references.data === null ? [] : referenceGroups(references.data.items, trigger.query);
+    }
+  }, [catalog, files.data, references.data, skills, trigger, unavailable]);
+  // A list the menu could not read, or one its host could not answer, says why in the slot while its token stands.
+  const unlisted = references.data?.noCliFor;
+  const menuLine =
+    trigger?.kind === "path"
+      ? (files.error ?? (files.data?.truncated === true ? FILES_CUT_LINE : null))
+      : trigger?.kind === "pull-request"
+        ? (references.error ?? (groups.length === 0 ? (unlisted !== undefined ? noHostListLine(unlisted, computer) : (references.data?.note ?? null)) : null))
+        : null;
+  // The keyboard walks the menu as it is drawn, so the groups decide the order the arrows take and not the other way round.
+  const items = useMemo<ComposerCommandItem[]>(() => groups.flatMap(group => group.items), [groups]);
+  // A token that matched nothing draws no menu: the slot above the box already holds the one line that says so, and
+  // an empty drawer under it would say it a second time in other words.
+  const menuOpen = groups.length > 0;
   // One line in the slot above the box, and what blocks a send heads it: every other line here is about a send this
   // composer could make, so while it can make none the block is the one true thing to say and the slot, the button's
   // name and an Enter all read it. Under it: the newest failure, then the screen command Enter refused, then the turn
@@ -289,30 +366,12 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
             ? sendNowFailedLine(steerAttempt.error)
             : screenLine !== null
               ? screenLine
-              : runningTurn?.replied === true
+              : menuLine !== null
+                ? menuLine
+                : runningTurn?.replied === true
                 ? stillWorkingLine(workingTitle)
                 : (accessPick.line ?? linkDown);
 
-  const trigger = useMemo(() => detectComposerTrigger(draft.prompt, draft.cursor), [draft]);
-  const searchKey = trigger ? `${trigger.kind}:${trigger.query.trim().toLowerCase()}` : null;
-  const menuTriggered = offersSlashCommands(catalog) && trigger !== null && trigger.rangeStart === 0 && dismissedSearchKey !== searchKey && unavailable === null;
-  const groups = useMemo<ComposerCommandGroup[]>(() => {
-    if (!menuTriggered || trigger === null) return [];
-    const all = catalog.slashCommands.map(command => ({
-      id: `provider-slash-command:${catalog.harness}:${command.name}`,
-      type: "provider-slash-command" as const,
-      harness: catalog.harness,
-      command,
-      label: `/${command.name}`,
-      description: command.description ?? command.input?.hint ?? "",
-    }));
-    return composerCommandGroups(slashCommandItemsForPromptPosition(all, trigger.rangeStart === 0), trigger.query);
-  }, [catalog, menuTriggered, trigger]);
-  // The keyboard walks the menu as it is drawn, so the groups decide the order the arrows take and not the other way round.
-  const items = useMemo<ComposerCommandItem[]>(() => groups.flatMap(group => group.items), [groups]);
-  // A slash that matched nothing draws no menu: the slot above the box already holds the one line that says so, and
-  // an empty drawer under it would say it a second time in other words.
-  const menuOpen = groups.length > 0;
   const activeItemId = resolveComposerMenuActiveItemId({ items, highlightedItemId, currentSearchKey: searchKey, highlightedSearchKey });
 
   useEffect(() => {
@@ -418,8 +477,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     // The same reading the slot and the send button are already wearing: an Enter that lands here leaves the draft
     // where it was typed and that line standing.
     if (sendHeld !== null) return;
-    const snapshot = editorRef.current?.readSnapshot() ?? { value: draft.prompt, cursor: draft.cursor };
-    const prompt = snapshot.value.trim();
+    const prompt = (editorRef.current?.readSnapshot().value ?? draft.prompt).trim();
     if (prompt === "") return;
     // A command the CLI runs only in its own terminal would come back as not available, so the draft stays for
     // editing and the line names the wsp control that serves it instead.
@@ -427,7 +485,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     if (screen !== null && harnessCatalog !== null) {
       setScreenLine(screenCommandLine(screen, harnessCatalog, workspace ?? {}));
       setImageRefusal(null);
-      setDismissedSearchKey(searchKey);
+      dismissTrigger(trigger);
       return;
     }
     // A queued row keeps only its words, so a message with images waits for the turn rather than losing them.
@@ -454,7 +512,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     }
     enqueue(threadKey, prompt, held ? "head" : "tail");
     release(threadKey);
-  }, [busy, draft, enqueue, harnessCatalog, held, images, onStart, release, searchKey, sendHeld, sending, setDraft, start, threadKey, workspace, workspaceId]);
+  }, [busy, dismissTrigger, draft, enqueue, harnessCatalog, held, images, onStart, release, sendHeld, sending, setDraft, start, threadKey, trigger, workspace, workspaceId]);
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];
@@ -511,15 +569,24 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
 
   const selectItem = useCallback(
     (item: ComposerCommandItem) => {
-      const snapshot = editorRef.current?.readSnapshot() ?? { value: draft.prompt, cursor: draft.cursor };
-      const active = detectComposerTrigger(snapshot.value, snapshot.cursor);
+      const snapshot = editorRef.current?.readSnapshot() ?? { value: draft.prompt, expandedCursor: expandCollapsedComposerCursor(draft.prompt, draft.cursor) };
+      const active = detectComposerTrigger(snapshot.value, snapshot.expandedCursor);
       if (active === null) return;
-      const replacement = `/${item.command.name} `;
-      const rangeEnd = snapshot.value[active.rangeEnd] === " " ? active.rangeEnd + 1 : active.rangeEnd;
-      const next = replaceTextRange(snapshot.value, active.rangeStart, rangeEnd, replacement);
-      setDraft(workspaceId, { prompt: next.text, cursor: next.cursor });
+      let next: { text: string; cursor: number };
+      if (item.type === "reference") {
+        // A pull request or issue goes as a block on lines of its own, which the # typed to find it gives way to.
+        const cut = replaceTextRange(snapshot.value, active.rangeStart, active.rangeEnd, "");
+        next = insertComposerBlock(cut.text, cut.cursor, hostItemText(item.item));
+      } else {
+        const replacement =
+          item.type === "path" ? `${serializeComposerMention(item.path)} ` : item.type === "skill" && !item.announced ? `$${item.command.name} ` : `/${item.command.name} `;
+        const rangeEnd = snapshot.value[active.rangeEnd] === " " ? active.rangeEnd + 1 : active.rangeEnd;
+        next = replaceTextRange(snapshot.value, active.rangeStart, rangeEnd, replacement);
+      }
+      const cursor = collapseExpandedComposerCursor(next.text, next.cursor);
+      setDraft(workspaceId, { prompt: next.text, cursor });
       setHighlightedItemId(null);
-      window.requestAnimationFrame(() => editorRef.current?.focusAt(next.cursor));
+      window.requestAnimationFrame(() => editorRef.current?.focusAt(cursor));
     },
     [draft, setDraft, workspaceId],
   );
@@ -528,7 +595,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     (key: ComposerCommandKey, event: KeyboardEvent): boolean => {
       if (key === "Escape") {
         if (menuOpen) {
-          setDismissedSearchKey(searchKey);
+          dismissTrigger(trigger);
           return true;
         }
         return false;
@@ -561,7 +628,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
       }
       return false;
     },
-    [activeItemId, highlight, items, menuOpen, searchKey, selectItem, send],
+    [activeItemId, dismissTrigger, highlight, items, menuOpen, selectItem, send, trigger],
   );
 
   // A home's thread carries a history-unavailable row and no message, so the count is of messages alone.
@@ -700,7 +767,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                           ref={mirrorRef}
                           className="invisible absolute inset-x-0 top-0 whitespace-pre-wrap wrap-break-word leading-relaxed [font-family:var(--font-composer,var(--font-sans))] [font-size:var(--font-size-prompt,0.875rem)]"
                         >
-                          {compact ? `${draft.prompt}\u200b` : null}
+                          {compact ? `${mirrorText(draft.prompt)}\u200b` : null}
                         </div>
                       </div>
                       <div ref={setMenuAnchor} className={cn("relative col-start-1 row-start-1 min-w-0", (!compact || tall) && "col-end-4", !compact && "pb-1")}>

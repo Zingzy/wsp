@@ -51,5 +51,6 @@ export function isMarkdownFile(path: string): boolean {
 }
 
 export function baseName(path: string): string {
-  return path.slice(path.lastIndexOf("/") + 1);
+  const bare = path.replace(/\/+$/, "");
+  return bare.slice(bare.lastIndexOf("/") + 1);
 }
