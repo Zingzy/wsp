@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, type Capabilities, type PlaceView, type ProjectView, type WorkspaceView , type WorkspaceLanding } from "@wsp/protocol";
+import { THREAD_TREE_WORKING } from "../actions/format.js";
 import { workspaceActions } from "../actions/workspaceActions.js";
+import { clearNotices, lastNotice } from "../../test/notice-text.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
 import type { Api } from "../protocol/client.js";
 import { provideDaemonWire } from "../files/wire.js";
@@ -66,8 +68,14 @@ const MAC_ROW: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", l
 function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: WorkspaceView[] }) {
   const create = vi.fn(async (_project: string, name: string) => ({ ...workspace("ws_new", name, "pr_1") }));
   const settleThreads = vi.fn(async (_threadIds: readonly string[]) => {});
+  const markThreads = vi.fn(async (_threadIds: readonly string[], _marks: unknown) => {});
+  const restoreThreads = vi.fn(async (_threadIds: readonly string[]) => {});
+  const setPreferences = vi.fn(async (patch: unknown) => ({ ...DEFAULT_PREFERENCES, ...(patch as object) }));
   const api = {
     settleThreads,
+    markThreads,
+    restoreThreads,
+    setPreferences,
     subscribe: () => () => {},
     listWorkspaces: async () => workspaces,
     listSessions: async () => [],
@@ -106,7 +114,7 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
       <WorkspaceSidebar />
     </SidebarProvider>,
   );
-  return { create, settleThreads };
+  return { create, settleThreads, markThreads, restoreThreads, setPreferences };
 }
 
 const rowIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-sidebar-row]")].map(row => row.dataset["rowId"] ?? "");
@@ -115,9 +123,12 @@ const depthOf = (text: string): number => Number(rowOf(text).dataset["depth"]);
 const HOUR = 60 * 60_000;
 const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
 
-/** Sessions for the store, one per thread, keyed by workspace. */
-/** A turn that ended was shown as it ended unless `readAgo` says the last showing was earlier. */
-const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number; readAgo?: number; settledAgo?: number }>) => {
+/** Sessions for the store, one per thread, keyed by workspace, every time read off one clock reading so two rows
+ * given the same age share it exactly. A turn that ended was shown as it ended unless `readAgo` says the last
+ * showing was earlier. */
+const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?: string; status?: string; startedAgo?: number; endedAgo?: number; readAgo?: number; settledAgo?: number; asking?: string; pinnedAgo?: number; snoozed?: boolean; section?: { name: string; whileState: string } }>) => {
+  const now = Date.now();
+  const before = (ms: number): string => new Date(now - ms).toISOString();
   const by: Record<string, unknown[]> = {};
   for (const r of rows) {
     (by[r.ws] ??= []).push({
@@ -129,9 +140,13 @@ const sessions = (rows: Array<{ ws: string; id: string; prompt: string; parent?:
       prompt: r.prompt,
       startedBy: r.parent === undefined ? "person" : "agent",
       ...(r.parent === undefined ? {} : { parentThreadId: r.parent }),
-      startedAt: ago(r.startedAgo ?? HOUR),
-      ...(r.endedAgo === undefined ? {} : { endedAt: ago(r.endedAgo), readAt: ago(r.readAgo ?? r.endedAgo) }),
-      ...(r.settledAgo === undefined ? {} : { settledAt: ago(r.settledAgo) }),
+      startedAt: before(r.startedAgo ?? HOUR),
+      ...(r.endedAgo === undefined ? {} : { endedAt: before(r.endedAgo), readAt: before(r.readAgo ?? r.endedAgo) }),
+      ...(r.settledAgo === undefined ? {} : { settledAt: before(r.settledAgo) }),
+      ...(r.asking === undefined ? {} : { asking: r.asking }),
+      ...(r.pinnedAgo === undefined ? {} : { pinnedAt: now - r.pinnedAgo }),
+      ...(r.snoozed === true ? { snoozedUntil: now + HOUR } : {}),
+      ...(r.section === undefined ? {} : { section: r.section }),
     });
   }
   return by;
@@ -219,8 +234,19 @@ describe("the sidebar's list of thread tiles", () => {
     it("reads a fork's branch once however many tiles it has, and every tile shows it", async () => {
       const terms = linked("ws_f", wireAnswering(async () => ({ branch: { oid: "abc", head: "fix/cart-rounding", ahead: 0, behind: 0 }, entries: [], root: "/root/spoo" })));
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
+      // Two threads started together, built on a clock that moves a millisecond each time it is read, as a loaded
+      // run's clock does between two rows: their order is the sort's tie-break and nothing the clock decides.
+      const real = Date.now();
+      let reads = 0;
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => real + reads++);
+      let rows: ReturnType<typeof sessions>;
+      try {
+        rows = sessions([{ ws: "ws_f", id: "th_one", prompt: "round the total once" }, { ws: "ws_f", id: "th_two", prompt: "pin the cart order" }]);
+      } finally {
+        clock.mockRestore();
+      }
       await act(async () => {
-        useStore.setState({ sessions: sessions([{ ws: "ws_f", id: "th_one", prompt: "round the total once" }, { ws: "ws_f", id: "th_two", prompt: "pin the cart order" }]) } as never);
+        useStore.setState({ sessions: rows } as never);
       });
       await waitFor(() => expect(rowIds()).toEqual(["thread:th_one", "thread:th_two"]));
       await act(async () => terms.feedStatus("live"));
@@ -455,5 +481,122 @@ describe("the sidebar's list of thread tiles", () => {
     expect(scroller).not.toBeNull();
     expect(scroller.className).not.toMatch(/mask-/);
   });
-});
 
+  describe("the sections, the marks and the drag", () => {
+    const heads = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-section-head]")].map(head => head.dataset["sectionHead"] ?? "");
+    const drag = (tile: HTMLElement, onto: HTMLElement): void => {
+      const data = new Map<string, string>();
+      const dataTransfer = { setData: (type: string, value: string) => void data.set(type, value), getData: (type: string) => data.get(type) ?? "", types: ["text/plain"], effectAllowed: "move", dropEffect: "move" };
+      fireEvent.dragStart(tile, { dataTransfer });
+      fireEvent.dragOver(onto, { dataTransfer });
+      fireEvent.drop(onto, { dataTransfer });
+      fireEvent.dragEnd(tile, { dataTransfer });
+    };
+    const all = [
+      { ws: "ws_a", id: "th_asks", prompt: "wants an answer", startedAgo: 5 * 60_000, asking: "Permission for Bash: ls" },
+      { ws: "ws_a", id: "th_works", prompt: "still going", startedAgo: 6 * 60_000 },
+      { ws: "ws_a", id: "th_done", prompt: "finished unseen", status: "completed", startedAgo: 9 * 60_000, endedAgo: 8 * 60_000, readAgo: HOUR },
+      { ws: "ws_a", id: "th_idle", prompt: "read already", status: "completed", startedAgo: 12 * 60_000, endedAgo: 11 * 60_000 },
+      { ws: "ws_a", id: "th_pinned", prompt: "kept on top", status: "completed", startedAgo: 30 * 60_000, endedAgo: 29 * 60_000, pinnedAgo: 60_000 },
+      { ws: "ws_a", id: "th_away", prompt: "snoozed away", status: "completed", startedAgo: 40 * 60_000, endedAgo: 39 * 60_000, snoozed: true },
+    ];
+
+    it("draws the live list under Pinned, Needs you, Working, Done and Idle, leaves a snoozed tree out, and a finish nobody opened reads Done", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions(all) } as never));
+      await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
+      expect(heads()).toEqual(["pinned", "needs-you", "working", "done", "idle"]);
+      expect([...document.querySelectorAll("[data-section-head]")].map(head => head.querySelector("[data-group-word]")!.textContent)).toEqual(["Pinned", "Needs you", "Working", "Done", "Idle"]);
+      expect(rowIds()).toEqual(["thread:th_pinned", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle", "settled"]);
+      expect(screen.queryByText("snoozed away")).toBeNull();
+      expect(rowOf("finished unseen").querySelector("[data-thread-status]")!.textContent).toBe("Done");
+    });
+
+    it("a root's menu pins, unpins and snoozes it, and a folded root's menu restores its tree", async () => {
+      const { markThreads, restoreThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions([...all, { ws: "ws_a", id: "th_folded", prompt: "put away", status: "completed", startedAgo: 20 * 60_000, endedAgo: 10 * 60_000, settledAgo: 5 * 60_000 }]) } as never));
+      await waitFor(() => expect(screen.getByText("read already")).toBeDefined());
+      const picked: string[][] = [];
+      const choose = (id: string) => (window.wsp = { contextMenu: async (items: Array<{ id: string }>) => (picked.push(items.map(item => item.id)), id) } as never);
+      try {
+        choose("pin");
+        fireEvent.contextMenu(rowOf("read already"));
+        await waitFor(() => expect(markThreads).toHaveBeenCalledWith(["th_idle"], { pinned: true }));
+        choose("pin");
+        fireEvent.contextMenu(rowOf("kept on top"));
+        await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["th_pinned"], { pinned: false }));
+        choose("snooze");
+        fireEvent.contextMenu(rowOf("read already"));
+        const dialog = await screen.findByRole("dialog");
+        fireEvent.click(within(dialog).getByRole("button", { name: /In 1 hour/ }));
+        await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["th_idle"], { snoozedUntil: expect.any(Number) }));
+        const until = (markThreads.mock.calls.at(-1)![1] as { snoozedUntil: number }).snoozedUntil;
+        expect(Math.abs(until - (Date.now() + HOUR))).toBeLessThan(5_000);
+        fireEvent.click(document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+        choose("restore");
+        fireEvent.contextMenu(rowOf("put away"));
+        await waitFor(() => expect(restoreThreads).toHaveBeenCalledWith(["th_folded"]));
+      } finally {
+        delete (window as { wsp?: unknown }).wsp;
+      }
+    });
+
+    it("a tile dropped on another section holds there by a mark, one dropped on Pinned pins, one dropped back on its own section clears the mark, and one dropped on Settled settles its tree", async () => {
+      const { markThreads, settleThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions([...all, { ws: "ws_a", id: "th_moved", prompt: "moved by hand", startedAgo: 7 * 60_000, section: { name: "done", whileState: "working:s_th_moved" } }]) } as never));
+      await waitFor(() => expect(screen.getByText("still going")).toBeDefined());
+      expect(document.querySelector("[data-section=done]")!.textContent).toContain("moved by hand");
+      const section = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-section=${id}]`)!;
+      drag(rowOf("still going"), section("done"));
+      await waitFor(() => expect(markThreads).toHaveBeenCalledWith(["th_works"], { section: { name: "done", whileState: "working:s_th_works" } }));
+      drag(rowOf("read already"), section("pinned"));
+      await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["th_idle"], { pinned: true }));
+      drag(rowOf("kept on top"), section("working"));
+      await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["th_pinned"], { pinned: false, section: { name: "working", whileState: "idle:s_th_pinned" } }));
+      drag(rowOf("moved by hand"), section("working"));
+      await waitFor(() => expect(markThreads).toHaveBeenLastCalledWith(["th_moved"], { section: null }));
+      const calls = markThreads.mock.calls.length;
+      drag(rowOf("finished unseen"), section("done"));
+      expect(markThreads.mock.calls).toHaveLength(calls);
+      drag(rowOf("read already"), document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+      await waitFor(() => expect(settleThreads).toHaveBeenCalledWith(["th_idle"]));
+    });
+
+    it("a tree with a thread still working dropped on Settled settles nothing and says why in the menu's own sentence", async () => {
+      const { settleThreads } = mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () =>
+        useStore.setState({ sessions: sessions([...all, { ws: "ws_a", id: "th_builder", prompt: "its builder", parent: "th_idle", startedAgo: 10 * 60_000 }]) } as never),
+      );
+      await waitFor(() => expect(screen.getByText("its builder")).toBeDefined());
+      clearNotices();
+      drag(rowOf("read already"), document.querySelector<HTMLElement>("[data-row-id=settled]")!);
+      await waitFor(() => expect(lastNotice()).toBe(THREAD_TREE_WORKING));
+      expect(settleThreads).not.toHaveBeenCalled();
+    });
+
+    it("while a tile is dragged every section stands as a place to drop it, even one holding nothing", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions([all[1]!]) } as never));
+      await waitFor(() => expect(heads()).toEqual(["working"]));
+      fireEvent.dragStart(rowOf("still going"), { dataTransfer: { setData: () => {}, effectAllowed: "move" } });
+      expect(heads()).toEqual(["pinned", "needs-you", "working", "done", "idle"]);
+      fireEvent.dragEnd(rowOf("still going"));
+      expect(heads()).toEqual(["working"]);
+    });
+  });
+
+  it("orders the project switcher's rows as the person drags them, and keeps that order in the host's preferences", async () => {
+    const { setPreferences } = mount({ projects: [project("pr_1", "spoo"), project("pr_2", "wsp"), project("pr_3", "docs")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+    await act(async () => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, projectOrder: ["pr_3"] } } as never));
+    fireEvent.click(document.querySelector<HTMLElement>("[data-k=project-switcher]")!);
+    const options = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-switcher-option]")].map(o => o.dataset["switcherOption"] ?? "");
+    expect(options()).toEqual(["all", "pr_3", "pr_1", "pr_2"]);
+    const option = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-switcher-option=${id}]`)!;
+    const data = new Map<string, string>();
+    const dataTransfer = { setData: (type: string, value: string) => void data.set(type, value), getData: (type: string) => data.get(type) ?? "", effectAllowed: "move", dropEffect: "move" };
+    fireEvent.dragStart(option("pr_2"), { dataTransfer });
+    fireEvent.dragOver(option("pr_3"), { dataTransfer });
+    fireEvent.drop(option("pr_3"), { dataTransfer });
+    await waitFor(() => expect(setPreferences).toHaveBeenCalledWith({ projectOrder: ["pr_2", "pr_3", "pr_1"] }));
+  });
+});

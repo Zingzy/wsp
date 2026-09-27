@@ -88,6 +88,8 @@ export interface ServiceManager {
   unit(at: ServiceAddress): ServiceUnit;
   /** The unit file's whole text. */
   text(plan: ServicePlan): string;
+  /** Whether a unit file this manager wrote runs this program, whatever else it says. */
+  runs(text: string, program: string): boolean;
   /** Run in order once the file is written, so it serves now and again at login. */
   load(at: ServiceAddress): ReadonlyArray<readonly string[]>;
   /** Run in order to stop it and leave the manager holding nothing. */
@@ -174,6 +176,7 @@ const launchd: ServiceManager = {
       "</plist>",
       "",
     ].join("\n"),
+  runs: (text, program) => text.includes(`<key>ProgramArguments</key>\n  <array>\n    <string>${xml(program)}</string>\n`),
   load: at => [["launchctl", "bootstrap", `gui/${at.uid}`, launchdUnit(at).path]],
   unload: launchdUnload,
   holds: at => ["launchctl", "print", `gui/${at.uid}/${launchdName(at)}`],
@@ -242,6 +245,7 @@ const systemd: ServiceManager = {
       `WantedBy=${systemdScoped(plan) === "user" ? "default.target" : "multi-user.target"}`,
       "",
     ].join("\n"),
+  runs: (text, program) => text.split("\n").some(line => line === `ExecStart=${shellQuote(program)}` || line.startsWith(`ExecStart=${shellQuote(program)} `)),
   // A restart rather than a start: an install writes the unit file over whatever was there and puts a new binary
   // beside it, and a unit whose old process is still up would go on running the binary that was replaced. Restart
   // starts a unit that is stopped, so the one line covers both.
@@ -448,7 +452,7 @@ export interface HostProbe {
   (lock: HostLock): Promise<boolean>;
 }
 
-const PROBE_MS = 2_000;
+export const PROBE_MS = 2_000;
 
 export const httpProbe: HostProbe = async lock => {
   const stop = new AbortController();

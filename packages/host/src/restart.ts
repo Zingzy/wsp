@@ -3,7 +3,7 @@
 // way it comes up. The service exits and its manager brings it back on the
 // same line; a verb's host starts its successor on the port it held, so a tab
 // on them reconnects; a host wsp up holds in a terminal refuses, since only
-// that terminal brings it back. The app's own road lives in the desktop shell.
+// that terminal brings it back.
 import { UP_RESTART_LINE, type HostShape } from "@wsp/protocol";
 import type { HostStarted } from "./host-lock.js";
 

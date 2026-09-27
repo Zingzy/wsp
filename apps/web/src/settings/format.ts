@@ -229,6 +229,13 @@ export const PRIVACY_WORDS = {
   agentVersionsHeld: "Off on the host: WSP_UPDATE_CHECK is 0.",
 } as const;
 
+/** Settings > Appearance's Notifications: the one switch over the sound a notification makes. */
+export const NOTIFY_WORDS = {
+  head: "Notifications",
+  sound: "Sound",
+  soundDescription: "A finished turn and a permission prompt make a sound while wsp is not in front.",
+} as const;
+
 /** Settings > Devices: every computer and browser paired with this wsp, and the one act on each. */
 export const DEVICES_WORDS = {
   title: "Devices",

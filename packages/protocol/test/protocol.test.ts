@@ -77,7 +77,9 @@ import {
   foldThreads,
   threadState,
   threadStateWord,
+  threadNeedsYou,
   threadUnread,
+  DEVICE_OPS,
   threadWordOf,
   threadsFollowed,
   waitingLine,
@@ -1602,6 +1604,50 @@ describe("thread provenance", () => {
     expect(threadWordOf(thread!)).toBe("Done");
   });
 
+  it("a snooze that passed reads Done until a read at or after its end, and the thread's marks ride the latest row into the fold", () => {
+    const read = { status: "completed" as const, endedAt: 2_000, readAt: 3_000 };
+    expect(threadWordOf(read)).toBe("Idle");
+    expect(threadWordOf({ ...read, wokeAt: 4_000 })).toBe("Done");
+    expect(threadWordOf({ ...read, readAt: 4_000, wokeAt: 4_000 })).toBe("Idle");
+    // A snooze still standing reads as the read stamp says, and a failure says so whatever the snooze.
+    const snoozed = { ...read, snoozedUntil: 9_000 };
+    expect(threadWordOf(snoozed)).toBe("Idle");
+    expect(threadWordOf({ ...read, status: "failed", wokeAt: 4_000 })).toBe("Failed");
+    const placed = { name: "done" as const, whileState: "completed s2" };
+    const [thread] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", status: "completed", endedAt: 1_000 },
+      { ...row, id: "s2", threadId: "thr_a", status: "completed", endedAt: 2_000, pinnedAt: 10, snoozedUntil: 20, wokeAt: 15, section: placed },
+    ]);
+    expect(ThreadView.parse(thread!)).toMatchObject({ pinnedAt: 10, snoozedUntil: 20, wokeAt: 15, section: placed });
+  });
+
+  it("a thread needs the person while it asks, while a finish or a failure sits unseen, and not once a window has shown it", () => {
+    expect(threadNeedsYou({ status: "running", asking: "Permission for Bash: ls" })).toBe(true);
+    const behind = { threadId: "thr_b", workspaceId: "ws_a", sessionId: "s_b", title: "child", prompt: { askId: "ask_1", toolName: "Bash", input: "{}", options: [] } };
+    expect(threadNeedsYou({ status: "running", waitingOn: behind })).toBe(true);
+    expect(threadNeedsYou({ status: "running" })).toBe(false);
+    expect(threadNeedsYou({ status: "completed", endedAt: 2_000, readAt: 1_000 })).toBe(true);
+    expect(threadNeedsYou({ status: "failed", endedAt: 2_000, readAt: 1_000 })).toBe(true);
+    expect(threadNeedsYou({ status: "failed", endedAt: 2_000, readAt: 2_000 })).toBe(false);
+    expect(threadNeedsYou({ status: "completed", endedAt: 2_000, readAt: 2_000 })).toBe(false);
+    expect(threadNeedsYou({ status: "completed", endedAt: 2_000, readAt: 3_000, wokeAt: 4_000 })).toBe(true);
+  });
+
+  it("the marks, the restore and the search are ops a paired device sends; a thread's token searches its own tree and marks nothing", () => {
+    expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: ["thr_a"], marks: { pinned: true } }).success).toBe(true);
+    expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: ["thr_a"], marks: { snoozedUntil: null, section: null } }).success).toBe(true);
+    expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: ["thr_a"], marks: { section: { name: "working", whileState: "running s1" } } }).success).toBe(true);
+    expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: ["thr_a"], marks: { section: { name: "pinned", whileState: "x" } } }).success).toBe(false);
+    expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: [], marks: { pinned: true } }).success).toBe(false);
+    expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.mark", threadIds: ["thr_a"], marks: { settledAt: 3 } }).success).toBe(false);
+    expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.restore", threadIds: ["thr_a"] }).success).toBe(true);
+    expect(RuntimeRequest.safeParse({ id: 1, op: "sessions.search", query: "canonical" }).success).toBe(true);
+    expect(DEVICE_OPS).toEqual(expect.arrayContaining(["sessions.mark", "sessions.restore", "sessions.search"]));
+    expect(THREAD_OPS).toContain("sessions.search");
+    expect(THREAD_OPS).not.toContain("sessions.mark");
+    expect(THREAD_OPS).not.toContain("sessions.restore");
+  });
+
   it("foldThreads carries the latest turn's folder, so every director shows where the thread works; a row without one shows none", () => {
     const [worked, bare] = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", prompt: "make a server", cwd: "/root/work/proj" },
@@ -1839,7 +1885,7 @@ describe("the newest release as the host read it", () => {
     expect(wire.ReleaseView.parse(release)).toEqual(release);
     expect(wire.EventUnion.parse({ type: "release.changed", release, seq: 3 })).toEqual({ type: "release.changed", release, seq: 3 });
     // Off carries no reading, so nothing drawn off it can offer a download the person turned checks off for.
-    expect(wire.ReleaseView.parse({ state: "off", shape: "app" })).toEqual({ state: "off", shape: "app" });
+    expect(wire.ReleaseView.parse({ state: "off" })).toEqual({ state: "off" });
     expect(wire.ReleaseView.safeParse({ ...release, state: "stale" }).success).toBe(false);
     // The line that moves this host onto the release rides beside it, read on the road the host was installed by.
     const behind = { ...release, update: "npm i -g @zingzy/wsp@0.3.0" };
@@ -1857,13 +1903,13 @@ describe("the newest release as the host read it", () => {
   });
 
   it("reads the release as ahead only when it is above a version that runs", () => {
-    const view = wire.ReleaseView.parse({ state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "u", publishedAt: "p" }, shape: "app" });
+    const view = wire.ReleaseView.parse({ state: "read", latest: { version: "0.3.0", tag: "v0.3.0", url: "u", publishedAt: "p" } });
     expect(wire.releaseAbove(view, "0.2.0")).toBe(true);
     expect(wire.releaseAbove(view, "0.3.0", "0.2.0")).toBe(true);
     expect(wire.releaseAbove(view, "0.3.0")).toBe(false);
     // A host built ahead of the newest release, a prerelease or a checkout's, reads level.
     expect(wire.releaseAbove(view, "0.4.0-rc.1")).toBe(false);
-    expect(wire.releaseAbove(wire.ReleaseView.parse({ state: "checking", shape: "app" }), "0.2.0")).toBe(false);
+    expect(wire.releaseAbove(wire.ReleaseView.parse({ state: "checking" }), "0.2.0")).toBe(false);
   });
 });
 

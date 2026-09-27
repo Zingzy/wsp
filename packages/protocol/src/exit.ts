@@ -27,7 +27,8 @@ export const EXIT_WORDS: Readonly<Record<ExitClass, string>> = {
 export const VerbFailure = z.object({ error: z.string(), class: ExitClass.exclude(["ok"]), exit: z.number().int() });
 export type VerbFailure = z.infer<typeof VerbFailure>;
 
-const KIND_CLASS: Readonly<Record<string, Exclude<ExitClass, "ok">>> = { usage: "usage", invalid: "usage", auth: "auth", "not-found": "usage" };
+/** Which class each kind an error is stamped with belongs to; a kind missing here is the provider's. */
+export const KIND_CLASS: Readonly<Record<string, Exclude<ExitClass, "ok">>> = { usage: "usage", invalid: "usage", auth: "auth", "not-found": "usage" };
 
 /** The class of an error, by the kind stamped on it; one with no kind, or a kind no class claims, is the provider's. */
 export function exitClassOf(e: unknown): Exclude<ExitClass, "ok"> {

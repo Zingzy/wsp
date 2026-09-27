@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// How a need, a prompt or a machine that came up is said outside the app. Which
+// How a need, a prompt, a machine that came up or a finished turn is said
+// outside the app. Which
 // road that takes belongs to the shell, so there is one road per shell and the
 // app picks by which one holds: the desktop shell owns its window's focus, so
 // the page hands it the sentence and it decides whether to show anything; a
 // browser tab has the browser's own notifications, asked for on the press that
 // opens the setup and spoken only while the tab is hidden. Nothing is said
-// while the app is in front of the person, and nothing makes a sound.
-import { NEEDS_YOU, type InitNeedsYou } from "@wsp/protocol";
+// while the app is in front of the person, and a line makes a sound only
+// where it says so.
+import type { OutsideLine } from "@wsp/protocol";
 import { desktopBridge } from "../lib/desktopShell.js";
 
 /** Whether the shell holding this page owns its own notifications: the one reading of which road speaks, so the
  * browser's own leave is neither asked for nor needed there. */
-const shellOwnsNotices = (): boolean => desktopBridge()?.needsYou !== undefined;
+const shellOwnsNotices = (): boolean => desktopBridge()?.sayOutside !== undefined;
 
 /** Leave to notify, asked at most once a page and only where the browser owns the notifications. It rides a press
  * rather than an event on purpose: Safari ignores a request made outside a gesture and the others quieten it to a
@@ -33,20 +35,20 @@ export function resetAskedToNotify(): void {
 export interface NeedsYouRoad {
   /** Asks for whatever the road needs before it can speak; nothing on a shell that needs no leave. */
   ready(): void;
-  /** Says the need outside the app, or nothing while the app already has the person's eyes. */
-  say(need: InitNeedsYou): void;
+  /** Says the line outside the app, or nothing while the app already has the person's eyes. */
+  say(line: OutsideLine): void;
   /** Drops the listener for a click on whatever this road showed, and anything it left standing. */
   close(): void;
 }
 
-/** The desktop shell's road: the need goes over the bridge and the shell decides on its own window's focus, since a
- * page cannot read it. A click there raises the window and the page opens the build. */
+/** The desktop shell's road: the line goes over the bridge and the shell decides on its own window's focus, since a
+ * page cannot read it. A click there raises the window and the page opens what it was about. */
 function desktopRoad(onOpen: () => void): NeedsYouRoad {
   const bridge = desktopBridge()!;
   const off = bridge.onNeedsYouOpen?.(onOpen);
   return {
     ready: () => {},
-    say: need => bridge.needsYou?.(need),
+    say: line => bridge.sayOutside?.(line),
     close: () => off?.(),
   };
 }
@@ -57,9 +59,9 @@ function browserRoad(onOpen: () => void): NeedsYouRoad {
   const has = (): boolean => typeof Notification !== "undefined";
   return {
     ready: askToNotify,
-    say: need => {
+    say: line => {
       if (!has() || Notification.permission !== "granted" || !document.hidden) return;
-      const shown = new Notification(NEEDS_YOU, { body: need.what, silent: true });
+      const shown = new Notification(line.title, { body: line.body, silent: !line.sound });
       standing.add(shown);
       shown.onclick = () => {
         window.focus();

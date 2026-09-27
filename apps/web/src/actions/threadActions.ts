@@ -2,13 +2,14 @@
 // The thread's actions, one registry: what a thread row's context menu offers
 // for one session. Stop takes the runtime's session id, the one
 // sessions.interrupt is keyed by; the rename opens the name for editing on
-// the row by the thread's own key, and the row sends it. A settle takes a root
-// thread with every thread under it.
-import { ArchiveIcon, LinkIcon, PencilIcon, SquareIcon, Trash2Icon } from "lucide-react";
-import type { HarnessCatalog, SessionStatus, WorkspaceState } from "@wsp/protocol";
+// the row by the thread's own key, and the row sends it. A settle and a
+// restore take a root thread with every thread under it; a pin and a snooze
+// mark the root alone, which carries its tree with it.
+import { AlarmClockIcon, ArchiveIcon, ArchiveRestoreIcon, LinkIcon, PencilIcon, PinIcon, PinOffIcon, SquareIcon, Trash2Icon } from "lucide-react";
+import type { HarnessCatalog, SessionStatus, ThreadMarks, WorkspaceState } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { addressLink } from "../protocol/address.js";
-import { CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal } from "./format.js";
+import { CLIENT_CANNOT_MARK, CLIENT_CANNOT_RESTORE, CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal } from "./format.js";
 import type { ActionEntry } from "./registry.js";
 
 export interface ThreadTarget {
@@ -33,9 +34,17 @@ export interface ThreadTarget {
   readonly state: WorkspaceState;
   /** What the runtime said about a machine that is gone, for the refusal that names it. */
   readonly goneWords?: string | undefined;
-  /** The tree a settle takes where this thread is a root: its fold key and every one under it, and whether one of
-   * them is working. Null on a thread under another, which settles with its root. */
-  readonly settle: { readonly threadIds: ReadonlyArray<string>; readonly working: boolean } | null;
+  /** The tree this thread roots: its fold key and every one under it, whether one of them is working, whether the
+   * person pinned the root, and whether the tree sits in the Settled fold. Null on a thread under another, which
+   * goes where its root goes. */
+  readonly root: RootTree | null;
+}
+
+export interface RootTree {
+  readonly threadIds: ReadonlyArray<string>;
+  readonly working: boolean;
+  readonly pinned: boolean;
+  readonly settled: boolean;
 }
 
 /** One thread as its actions read it: the row, the agent's catalog row for the machine it runs on, and that
@@ -43,7 +52,7 @@ export interface ThreadTarget {
 export function threadTarget(
   thread: SidebarThreadSnapshot,
   machine: { catalog: HarnessCatalog | null; state: WorkspaceState; goneWords?: string | undefined },
-  settle: ThreadTarget["settle"] = null,
+  root: RootTree | null = null,
 ): ThreadTarget {
   return {
     id: thread.id,
@@ -57,7 +66,7 @@ export function threadTarget(
     catalog: machine.catalog,
     state: machine.state,
     ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}),
-    settle,
+    root,
   };
 }
 
@@ -72,6 +81,13 @@ export interface ThreadVerbs {
   readonly forget?: ((thread: { threadId: string; workspaceId: string }) => void) | undefined;
   /** Settles threads by hand through the host, by fold key; left out by a client with no road to the op. */
   readonly settle?: ((threadIds: ReadonlyArray<string>) => Promise<void>) | undefined;
+  /** Takes settled threads back out of the fold through the host, by fold key; left out as settle is. */
+  readonly restore?: ((threadIds: ReadonlyArray<string>) => Promise<void>) | undefined;
+  /** Pins, snoozes or places threads through the host, by fold key; left out as settle is. */
+  readonly mark?: ((threadIds: ReadonlyArray<string>, marks: ThreadMarks) => Promise<void>) | undefined;
+  /** Opens the snooze's pick of times for a thread, by fold key; the surface that draws the rows puts its own opener
+   * here, as it does the rename's. */
+  readonly snooze?: ((threadId: string) => void) | undefined;
   readonly copyText: (text: string) => Promise<void>;
 }
 
@@ -93,10 +109,19 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     group: "state",
     icon: () => ArchiveIcon,
     shortcutCommand: "thread.settle",
-    applies: target => target.settle !== null,
+    applies: target => target.root !== null && !target.root.settled,
     title: () => THREAD_WORDS.settle,
-    refusal: (target, verbs) => (verbs.settle === undefined ? CLIENT_CANNOT_SETTLE : target.settle?.working ? THREAD_TREE_WORKING : null),
-    run: (target, verbs) => (target.settle === null ? undefined : verbs.settle?.(target.settle.threadIds)),
+    refusal: (target, verbs) => (verbs.settle === undefined ? CLIENT_CANNOT_SETTLE : target.root?.working ? THREAD_TREE_WORKING : null),
+    run: (target, verbs) => (target.root === null ? undefined : verbs.settle?.(target.root.threadIds)),
+  },
+  {
+    id: "restore",
+    group: "state",
+    icon: () => ArchiveRestoreIcon,
+    applies: target => target.root?.settled === true,
+    title: () => THREAD_WORDS.restore,
+    refusal: (_target, verbs) => (verbs.restore === undefined ? CLIENT_CANNOT_RESTORE : null),
+    run: (target, verbs) => (target.root === null ? undefined : verbs.restore?.(target.root.threadIds)),
   },
   {
     id: "rename",
@@ -106,6 +131,24 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     refusal: (target, verbs) =>
       threadRenameRefusal({ catalog: target.catalog, harness: target.harness, state: target.state, goneWords: target.goneWords, hasVerb: verbs.rename !== undefined }),
     run: (target, verbs) => verbs.rename?.(target.id),
+  },
+  {
+    id: "pin",
+    group: "place",
+    icon: target => (target.root?.pinned ? PinOffIcon : PinIcon),
+    applies: target => target.root !== null && !target.root.settled,
+    title: target => (target.root?.pinned ? THREAD_WORDS.unpin : THREAD_WORDS.pin),
+    refusal: (_target, verbs) => (verbs.mark === undefined ? CLIENT_CANNOT_MARK : null),
+    run: (target, verbs) => verbs.mark?.([target.id], { pinned: !target.root?.pinned }),
+  },
+  {
+    id: "snooze",
+    group: "place",
+    icon: () => AlarmClockIcon,
+    applies: target => target.root !== null && !target.root.settled,
+    title: () => THREAD_WORDS.snooze,
+    refusal: (_target, verbs) => (verbs.mark === undefined || verbs.snooze === undefined ? CLIENT_CANNOT_MARK : null),
+    run: (target, verbs) => verbs.snooze?.(target.id),
   },
   {
     id: "copy-link",

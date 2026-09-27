@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
+import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -257,6 +257,10 @@ interface State {
   readThread(threadId: string): Promise<void>;
   /** Settles the threads by hand through the host, a root and every thread under it; a refusal is a toast. */
   settleThreads(threadIds: readonly string[]): Promise<void>;
+  /** Pins, snoozes or places threads through the host, or takes one of those back; a refusal is a toast. */
+  markThreads(threadIds: readonly string[], marks: ThreadMarks): Promise<void>;
+  /** Takes settled threads back out of the fold through the host; a refusal is a toast. */
+  restoreThreads(threadIds: readonly string[]): Promise<void>;
   /** Names the workspace through the runtime, which holds the name on this computer, and puts the record it answers
    * with in place of the row. True once the runtime took the name; a refusal (a name another workspace holds, a blank
    * one) is false and a toast, so the caller can leave the name where a person can still see it. */
@@ -755,6 +759,24 @@ export const useStore = create<State>((set, get) => {
       if (!api?.settleThreads || threadIds.length === 0) return;
       try {
         await api.settleThreads(threadIds);
+      } catch (e: unknown) {
+        noticeFailure(e);
+      }
+    },
+    async markThreads(threadIds, marks) {
+      const api = get().api;
+      if (!api?.markThreads || threadIds.length === 0) return;
+      try {
+        await api.markThreads(threadIds, marks);
+      } catch (e: unknown) {
+        noticeFailure(e);
+      }
+    },
+    async restoreThreads(threadIds) {
+      const api = get().api;
+      if (!api?.restoreThreads || threadIds.length === 0) return;
+      try {
+        await api.restoreThreads(threadIds);
       } catch (e: unknown) {
         noticeFailure(e);
       }
