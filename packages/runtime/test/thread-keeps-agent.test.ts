@@ -4,9 +4,7 @@
 // request naming another agent is refused before anything is started: that
 // agent would resume a harness session it never wrote, at its own access. An
 // access named on such a send is dropped the same way, since a thread's
-// access is changed through sessions.access and by no message. A session
-// named beside the thread is the thread's own or the send is refused, so no
-// other thread's transcript or access is read as this thread's. The record
+// access is changed through sessions.access and by no message. The record
 // outlives the rows: a thread whose rows fell off the index cap still keeps
 // both. A thread the send opens takes the request's picks whole, which is
 // where an agent and an access are chosen.
@@ -15,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { HERE_PLACE_ID, resumeNotOfThreadLine, threadRunsOnLine, type TurnResult } from "@wsp/protocol";
+import { HERE_PLACE_ID, threadRunsOnLine, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -93,10 +91,6 @@ describe("the agent and the access a send into an existing thread runs on", () =
     // holds the one turn it ran.
     expect(claude.starts).toEqual([]);
     expect((await rt.sessions.list(workspaceId)).map(s => s.harness)).toEqual(["codex"]);
-    // The same refusal on the road that names the harness session instead of the thread, which is what the
-    // command line and the MCP door send.
-    await expect(rt.sessions.start(workspaceId, { prompt: "two", resume: CODEX_SESSION, harness: "claude" })).rejects.toThrow("this thread runs on codex");
-    expect(claude.starts).toEqual([]);
   });
 
   it("keeps the thread's own access where a send names one, so a read-only thread stays read-only", async () => {
@@ -111,26 +105,6 @@ describe("the agent and the access a send into an existing thread runs on", () =
     expect(codex.starts).toHaveLength(3);
   });
 
-  it("refuses a session named beside the thread that is not one of the thread's own turns, and the thread's next turn is its own", async () => {
-    const { workspaceId, thread } = await openThread("codex", "read-only");
-    const wide = await openThread("claude", "bypassPermissions", workspaceId);
-    // A send into the read-only thread that names the wide thread's session: taken, it would run the wide thread's
-    // transcript under the read-only thread's id and read the wide thread's access as this one's.
-    await expect(rt.sessions.start(workspaceId, { prompt: "two", thread, resume: CLAUDE_SESSION })).rejects.toThrow(resumeNotOfThreadLine(CLAUDE_SESSION, thread));
-    // A session no thread here ran is refused by the same sentence, so the two cannot be told apart by asking.
-    await expect(rt.sessions.start(workspaceId, { prompt: "two", thread, resume: "33333333-3333-4333-8333-333333333333" })).rejects.toThrow(resumeNotOfThreadLine("33333333-3333-4333-8333-333333333333", thread));
-    expect(codex.starts).toHaveLength(1);
-    expect(claude.starts).toHaveLength(1);
-    // The thread's own session is what a send into it resumes, at the thread's own access, and naming that session
-    // beside the thread is no refusal.
-    await (await rt.sessions.start(workspaceId, { prompt: "two", thread, resume: CODEX_SESSION })).finished;
-    await (await rt.sessions.start(workspaceId, { prompt: "three", thread })).finished;
-    expect(codex.starts.map(s => [s.resume, s.permissionMode])).toEqual([[undefined, "read-only"], [CODEX_SESSION, "read-only"], [CODEX_SESSION, "read-only"]]);
-    const rows = (await rt.sessions.list(workspaceId)).map(s => [s.threadId, s.harness, s.permissionMode]);
-    expect(rows).toHaveLength(2);
-    expect(rows).toEqual(expect.arrayContaining([[thread, "codex", "read-only"], [wide.thread, "claude", "bypassPermissions"]]));
-  });
-
   it("keeps the agent and the access of a thread whose rows fell off the index cap, off the thread's own record", async () => {
     const { workspaceId, thread } = await openThread("codex", "read-only");
     await rt.close();
@@ -140,13 +114,12 @@ describe("the agent and the access a send into an existing thread runs on", () =
     await store.put("sessions", workspaceId, { ...doc, sessions: [] });
     rt = runtime();
     expect(await rt.sessions.list(workspaceId)).toEqual([]);
-    // The sighting past the cap: the other agent named on the road that names the harness session. Refused in the
-    // thread's own words, and the other agent never launched.
-    await expect(rt.sessions.start(workspaceId, { prompt: "two", resume: CODEX_SESSION, harness: "claude" })).rejects.toThrow(threadRunsOnLine("codex", "claude"));
+    // The other agent named on a send past the cap: refused in the thread's own words, and never launched.
+    await expect(rt.sessions.start(workspaceId, { prompt: "two", thread, harness: "claude" })).rejects.toThrow(threadRunsOnLine("codex", "claude"));
     expect(claude.starts).toEqual([]);
     // A send that names an access alone is a send into the thread, which drops it: the turn runs on the thread's
     // agent at the thread's access, under the thread's own id.
-    const again = await rt.sessions.start(workspaceId, { prompt: "two", resume: CODEX_SESSION, permissionMode: "danger-full-access" });
+    const again = await rt.sessions.start(workspaceId, { prompt: "two", thread, permissionMode: "danger-full-access" });
     await again.finished;
     expect(codex.starts.map(s => [s.resume, s.permissionMode])).toEqual([[CODEX_SESSION, "read-only"]]);
     expect(again.view().threadId).toBe(thread);

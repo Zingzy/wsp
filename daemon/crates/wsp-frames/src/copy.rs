@@ -8,28 +8,26 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-/// Which road made a workspace's copy on a computer that copies by directory: a directory clone of the folder, a
-/// git worktree of it, or the folder itself worked where it sits.
+/// Which road made a workspace's copy on a computer that copies by directory: a directory clone of the folder or a
+/// git worktree of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 #[serde(rename_all = "kebab-case")]
 pub enum CopyRoadName {
     Clonefile,
     Worktree,
-    InPlace,
 }
 
 impl CopyRoadName {
     /// Every road a record or a line can name. Adding a road is its variant, its row here and its word below,
     /// and the test beside them holds all three to the words the wire carries.
-    pub const ALL: [CopyRoadName; 3] = [CopyRoadName::Clonefile, CopyRoadName::Worktree, CopyRoadName::InPlace];
+    pub const ALL: [CopyRoadName; 2] = [CopyRoadName::Clonefile, CopyRoadName::Worktree];
 
     /// The word the wire carries, which is also the word the verb's `--road` takes.
     pub fn word(self) -> &'static str {
         match self {
             CopyRoadName::Clonefile => "clonefile",
             CopyRoadName::Worktree => "worktree",
-            CopyRoadName::InPlace => "in-place",
         }
     }
 
@@ -116,9 +114,9 @@ mod tests {
             assert_eq!(CopyRoadName::of_word(road.word()), Some(road));
         }
         // The list is every variant: one the wire carries and this list has not got would read back as no road.
-        assert_eq!(CopyRoadName::ALL.len(), 3);
+        assert_eq!(CopyRoadName::ALL.len(), 2);
         assert_eq!(CopyRoadName::of_word("rsync"), None);
-        assert_eq!(CopyRoadName::words(), "clonefile, worktree, in-place");
+        assert_eq!(CopyRoadName::words(), "clonefile, worktree");
     }
 
     #[test]

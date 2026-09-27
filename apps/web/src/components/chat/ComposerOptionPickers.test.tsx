@@ -103,7 +103,6 @@ const ran = (threadKey: string, model: string, recorded: Pick<ChatThreadView, "a
     busy: false,
     sending: false,
     fresh: false,
-    resume: "sess",
     thread: threadKey,
     threadKey,
     named: null,

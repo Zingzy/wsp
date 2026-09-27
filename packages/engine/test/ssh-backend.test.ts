@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ARCH_READ, OS_READ, SHELL_READ, SYSTEM_READ, UPTIME_READ, archOf, readValues } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 import { probeCommand } from "../src/machine-context.js";
-import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostsWritten, offeredHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshHostName, sshWordReach, SSH_WORD_REFUSAL, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, hostKeyFound, knownHostFiles, knownHostKey, knownHostsWritten, offeredHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshHostName, sshWordReach, SSH_WORD_REFUSAL, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -37,35 +37,6 @@ const knownKey: SshHostKeyReader = async () => FOUND_KEY;
 const sshBackend = (transport: SshTransport, hostKey: SshHostKeyReader = knownKey): SshBackend => new SshBackend({ transport, hostKey });
 
 describe("ssh backend", () => {
-  it("every capability a machine wsp forks has and one it only reaches does not is false, and it says the machine is kept", () => {
-    const backend = new SshBackend();
-    expect(backend.capabilities).toEqual({
-      liveCloneForks: false,
-      replacesMachine: false,
-      previewUrls: false,
-      signedUrls: false,
-      callbackRelay: false,
-      diskSnapshots: false,
-      images: false,
-      snapshotsAnyLife: false,
-      snapshotListing: false,
-      templates: false,
-      kept: true,
-      // wsp reaches this machine and nothing more: a project on it is worked where it sits and no copy is made.
-      copies: false,
-      ownNetwork: false,
-      sizes: [],
-    });
-    expect(backend.pricing.rateUsdPerHour({ cpu: 8, memMb: 16384 })).toBe(0);
-  });
-
-  it("the machine id is the dial: user, host, port and key go in and come back out", () => {
-    expect(parseSshMachineId(sshMachineId(REACH))).toEqual(REACH);
-    expect(parseSshMachineId(sshMachineId({ user: "dev", host: "box", port: 22 }))).toEqual({ user: "dev", host: "box", port: 22 });
-    expect(parseSshMachineId("local")).toBeUndefined();
-    expect(parseSshMachineId("m_ab12cd")).toBeUndefined();
-  });
-
   it("user@host names the dial, with the port and key the person gave", () => {
     expect(parseSshAddress("dev@box")).toEqual({ user: "dev", host: "box", port: 22 });
     expect(parseSshAddress("dev@box:2222")).toEqual({ user: "dev", host: "box", port: 2222 });
@@ -98,9 +69,7 @@ describe("ssh backend", () => {
     expect(shape).toEqual({ cpu: 8, memMb: 16000 });
     // The turn's environment is the machine's own login: its home, who it runs as, and the PATH their shell gives.
     expect(login).toEqual({ HOME: "/home/dev", USER: "dev", PATH: "/home/dev/.local/bin:/usr/bin" });
-    expect(parseSshMachineId(machine.id)).toEqual(REACH);
-    // The record keeps the id alone, and a later host process reaches the same machine from it.
-    expect(parseSshMachineId((await backend.get(machine.id)).id)).toEqual(REACH);
+    expect(machine.id).toBe(sshMachineId(REACH));
   });
 
   it("holds each folder of the machine's own PATH to the rule the home is held to, and falls back with nothing left", () => {
@@ -317,13 +286,9 @@ describe("ssh backend", () => {
     expect(machine.previewUrl).toBeUndefined();
     await expect(machine.downloadUrl("/x")).rejects.toThrow("no signed download URL");
     await expect(machine.uploadUrl("/x")).rejects.toThrow("no signed upload URL");
-    await expect(backend.create()).rejects.toThrow("already exists");
-    await expect(backend.deleteSnapshot()).rejects.toThrow("no snapshots");
-    await expect(backend.get("local")).rejects.toThrow("is not a machine this host reaches over ssh");
-    // Deleting an ssh workspace drops its record only: kill is a no-op, and nothing lists the person's machines.
+    // Nothing here ends the person's machine: kill is a no-op.
     await expect(machine.kill()).resolves.toBeUndefined();
     expect(await machine.state()).toBe("running");
-    expect(await backend.list()).toEqual([]);
   });
 });
 

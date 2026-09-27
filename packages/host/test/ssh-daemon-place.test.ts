@@ -10,10 +10,10 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SYSTEMD_LINE, shellQuote, sshDaemonPaths, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
+import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SYSTEMD_LINE, shellQuote, placeDaemonPaths, WSP_WORKSPACE_APPARMOR_PATH } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
-import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonBinaryOn, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, profileSourceStep, DAEMON_UNIT, daemonUnit, deployScript, loginFilesStep, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
+import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonBinaryOn, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, profileSourceStep, DAEMON_UNIT, daemonUnit, deployScript, loginFilesStep, sshDaemonPlace, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 
 const LOGIN = { home: "/home/maya", path: "/usr/local/bin:/usr/bin:/bin" };
@@ -96,7 +96,7 @@ describe("what keeps the daemon running is a module, not a question the deploy a
     // machine has not got, and naming the thing is the whole of what they say.
     const asking = (script: string): string => MACHINE_LACKS_LINES.reduce((text, said) => text.split(said).join(""), script);
     for (const place of [CLOUD_PLACE, CONTAINER_PLACE, sshDaemonPlace(LOGIN)]) {
-      for (const script of [deployScript(place, "aabbcc"), removeDaemonScript(place), preflightScript(place)]) {
+      for (const script of [deployScript(place, "aabbcc"), preflightScript(place)]) {
         for (const word of ["entrypoint", "systemd ", "supervisor ===", '"cloud"', '"ssh"']) expect(asking(script), word).not.toContain(word);
       }
     }
@@ -118,7 +118,7 @@ describe("what keeps the daemon running is a module, not a question the deploy a
 
 describe("the place a machine reached over ssh keeps its daemon", () => {
   it("puts every path under the login's own home and nothing under /root", () => {
-    const at = sshDaemonPaths(LOGIN.home);
+    const at = placeDaemonPaths(LOGIN.home);
     const s = script();
     expect(s).toContain(`mkdir -p '${at.dir}' '${at.inbox}' '${at.binDir}' '${at.unitDir}'`);
     expect(s).toContain(`tar --no-same-owner -xzf '${at.bundle}' -C '${at.dir}'`);
@@ -172,7 +172,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
       "--roots-path",
       "/home/maya/.wsp/roots",
       "--kind",
-      "ssh",
+      "place",
       "--inbox",
       "/home/maya/.wsp/inbox",
       "--manifest",
@@ -251,12 +251,8 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
 
   it("quotes every path it writes, since the home came from the machine and may hold a space", () => {
     const spaced = sshDaemonPlace({ home: "/home/Jane Doe", path: "/usr/bin" });
-    const off = removeDaemonScript(spaced);
-    // Unquoted, this line is `rm -rf /home/Jane Doe/.wsp/daemon`, which is /home/Jane and a relative path.
-    expect(off).toContain("rm -rf '/home/Jane Doe/.wsp/daemon'");
-    expect(off).not.toMatch(/rm -[rf]+ [^'\n]*\/home\/Jane Doe/);
     const on = deployScript(spaced, "aabbcc");
-    for (const line of [...on.split("\n"), ...off.split("\n")]) {
+    for (const line of on.split("\n")) {
       // Every naked mention of the home is inside quotes; the one exception is the unit heredoc, which is systemd's
       // language and quoted below.
       if (!line.includes("/home/Jane Doe")) continue;
@@ -360,79 +356,6 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     // A fork's own systemd is the machine's, so nothing there asks about a login.
     expect(preflightScript(CLOUD_PLACE)).not.toContain("Linger");
     expect(deployScript(CLOUD_PLACE, "aabbcc")).not.toContain("Linger");
-  });
-
-  it("takes everything it put on the machine off again, so nothing of wsp's outlives the record", () => {
-    const at = sshDaemonPaths(LOGIN.home);
-    const off = removeDaemonScript(sshDaemonPlace(LOGIN));
-    expect(off).toContain(`systemctl --user disable --now ${DAEMON_UNIT}`);
-    expect(off).toContain(`rm -f '${at.unitDir}/${DAEMON_UNIT}'`);
-    for (const path of [at.dir, at.bundle, at.inbox, at.tokenPath, at.rootsPath, at.profileFile, at.openSocket, at.portFile, at.runDir, `${at.binDir}/wsp-open`, `${at.binDir}/xdg-open`]) {
-      expect(off, path).toContain(`'${path}'`);
-    }
-    // The one line wsp added to their own login file goes too: left behind it would print an error at every
-    // login for a file that is gone.
-    // Matched by the file it names and not by one spelling of the line, so the removal takes out the line a
-    // computer joined before the guard carries as surely as the one written now.
-    expect(off).toContain(`grep -vF '${at.profileFile}' '/home/maya/.profile'`);
-    // The working copy goes whether the rewrite landed or not: a read that failed must not leave them an empty
-    // login file, and must not leave a file of wsp's beside their own either.
-    expect(off).toContain("rm -f '/home/maya/.profile.wsp-out'");
-    expect(off).toContain(`echo ${DAEMON_GONE_LINE}`);
-    // Only what wsp put there, each path named. Their home, their bin folder and their login file stay, and so
-    // does wsp's own folder itself: another road of wsp keeps things beside the daemon in it, and a machine on
-    // this test's own box once held one builder's file there while another's record was being deleted.
-    expect(off).not.toMatch(/rm -rf [^\n]*\/home\/maya(\s|$)/);
-    expect(off).not.toMatch(new RegExp(`rm -rf [^\n]*${at.wsp}(\\s|$)`));
-    expect(off).not.toContain(`rm -rf ${at.binDir}`);
-    expect(off).not.toMatch(/rm -[rf]+ [^\n]*\/home\/maya\/\.profile(\s|$)/);
-  });
-
-  it("leaves a login file it never wrote to byte for byte as it was, symlink and all", async () => {
-    // The sweep runs on every machine recorded over ssh now, including one whose deploy never landed, so the
-    // removal must not touch a login file wsp put no line in. Run for real: their .profile is a symlink into a
-    // dotfiles checkout on many machines, and a rewrite that replaces the file turns it into a plain one.
-    const dir = mkdtempSync(join(tmpdir(), "wsp-profile-"));
-    try {
-      const home = join(dir, "home");
-      const dotfiles = join(dir, "dotfiles");
-      mkdirSync(home, { recursive: true });
-      mkdirSync(dotfiles, { recursive: true });
-      const real = join(dotfiles, "profile");
-      const theirs = "# mine\nexport EDITOR=vim\n";
-      writeFileSync(real, theirs);
-      symlinkSync(real, join(home, ".profile"));
-      const before = statSync(real);
-
-      await promisify(execFile)("bash", ["-c", removeDaemonScript(sshDaemonPlace({ home, path: "/usr/bin" }))]);
-
-      // Byte for byte, the same inode, and still a symlink.
-      expect(readFileSync(real, "utf8")).toBe(theirs);
-      expect(statSync(real).ino).toBe(before.ino);
-      expect(lstatSync(join(home, ".profile")).isSymbolicLink()).toBe(true);
-      expect(existsSync(`${join(home, ".profile")}.wsp-out`)).toBe(false);
-
-      // And with wsp's line in it, in the spelling a computer joined before the guard carries, the line goes and
-      // everything else stays, the symlink and inode with it.
-      const at = sshDaemonPaths(home);
-      writeFileSync(real, `# mine\n. ${at.profileFile}\nexport EDITOR=vim\n`);
-      const kept = statSync(real).ino;
-      await promisify(execFile)("bash", ["-c", removeDaemonScript(sshDaemonPlace({ home, path: "/usr/bin" }))]);
-      expect(readFileSync(real, "utf8")).toBe(theirs);
-      expect(statSync(real).ino).toBe(kept);
-      expect(lstatSync(join(home, ".profile")).isSymbolicLink()).toBe(true);
-
-      // The guarded spelling a deploy writes now goes the same way, and a file holding nothing but wsp's own line
-      // loses it too, which reading what grep says about a file it selected nothing from is there for.
-      writeFileSync(real, `# mine\n[ -f ${at.profileFile} ] && . ${at.profileFile}\n`);
-      await promisify(execFile)("bash", ["-c", removeDaemonScript(sshDaemonPlace({ home, path: "/usr/bin" }))]);
-      expect(readFileSync(real, "utf8")).toBe("# mine\n");
-      writeFileSync(real, `. ${at.profileFile}\n`);
-      await promisify(execFile)("bash", ["-c", removeDaemonScript(sshDaemonPlace({ home, path: "/usr/bin" }))]);
-      expect(readFileSync(real, "utf8")).toBe("");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   it("writes its one line under set -e on a login with no file of its own, and leaves one line on a second deploy", async () => {
@@ -569,21 +492,6 @@ describe("the place a computer joined over ssh keeps its agent", () => {
     const box = fakeMachine({ preflight: { exitCode: 1, stdout: `${PLACE_NEEDS_ROOT_LINE}\n` } });
     await expect(deployDaemon(box.machine, { place, daemonDir: emptyBundle(), cliDir: emptyCli() })).rejects.toThrow(PLACE_NEEDS_ROOT_LINE);
     expect(box.wrote).toEqual([]);
-  });
-
-  it("takes the workspace profile back off, so a remove leaves a root install holding nothing of wsp's", () => {
-    const place = joinedPlace(LOGIN, JOIN);
-    const off = removeDaemonScript(place);
-    // Unloaded before the file goes: the kernel holds a profile by name, so a bare rm would leave it loaded for a
-    // binary that is gone. Guarded the way the step that wrote it is, and only where this scope could write it.
-    expect(off).toContain(`apparmor_parser -R ${shellQuote(WSP_WORKSPACE_APPARMOR_PATH)}`);
-    expect(off).toContain(`rm -f ${shellQuote(WSP_WORKSPACE_APPARMOR_PATH)}`);
-    expect(off.indexOf("apparmor_parser -R")).toBeLessThan(off.indexOf(`rm -f ${shellQuote(WSP_WORKSPACE_APPARMOR_PATH)}`));
-    expect(off).toContain("command -v apparmor_parser >/dev/null 2>&1");
-    // The two scopes that write no such profile take none off: a login's own daemon owns no /etc.
-    expect(removeDaemonScript(sshDaemonPlace(LOGIN))).not.toContain("apparmor_parser");
-    // What the deploy wrote is what the remove takes: one path, named once.
-    expect(deployScript(place, "aabbcc")).toContain(WSP_WORKSPACE_APPARMOR_PATH);
   });
 
   it("says so when a place it is given names no wsp to join, rather than writing a join line with nothing in it", () => {

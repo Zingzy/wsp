@@ -27,16 +27,5 @@
     "bytes": 21474836481,
     "ms": 12400,
     "fellBack": "the folder is 20.0 GB and a clone above 20.0 GB is not taken"
-  },
-  {
-    "road": "in-place",
-    "path": "/Users/dev/spoo-landing",
-    "base": "",
-    "branch": "",
-    "fetched": false,
-    "carried": "nothing",
-    "excluded": [],
-    "bytes": 0,
-    "ms": 0
   }
 ]

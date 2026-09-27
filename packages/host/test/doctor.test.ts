@@ -38,7 +38,6 @@ import {
   VITE_ALLOWED_HOSTS_ENV,
   deployFailureLine,
   joinedPlace,
-  removeDaemonScript,
   GUEST_ENVS,
   claudeEnvs,
   CLOUD_PLACE,
@@ -486,8 +485,6 @@ describe("stageDaemonBundle", () => {
     expect(script).toContain(`chmod 0755 ${GUEST_WSP_PATH}`);
     expect(GUEST_WSP_PATH).toBe("/usr/local/bin/wsp");
     expect(script.split("\n")).toContain(`tar --no-same-owner -xzf ${GUEST_DAEMON_DIR}.tgz -C ${GUEST_DAEMON_DIR}`);
-    // And it goes when the rest of wsp does.
-    expect(removeDaemonScript(CLOUD_PLACE)).toContain(GUEST_WSP_PATH);
   });
 
   it("carries the wsp command whole where the place says a machine somebody owns still runs it on node", async () => {
@@ -1446,7 +1443,7 @@ describe("deployScript", () => {
     // A login's own place quotes each path, since a home may carry a space; the flags and the words stay bare.
     const login = sshDaemonPlace({ home: "/home/maya doe", path: "/usr/bin:/bin" });
     expect(daemonUnit(login, GUEST_TARGET)).toContain(
-      `ExecStart="${daemonBinaryOn(login.dir, GUEST_TARGET)}" --host 127.0.0.1 --port 0 --token-path "/home/maya doe/.wsp/daemon-token" --root "/home/maya doe" --roots-path "/home/maya doe/.wsp/roots" --kind ssh --inbox "/home/maya doe/.wsp/inbox" --manifest "/home/maya doe/.wsp/manifest.json" --open-socket "/home/maya doe/.wsp/open.sock" --port-file "/home/maya doe/.wsp/daemon.port"`,
+      `ExecStart="${daemonBinaryOn(login.dir, GUEST_TARGET)}" --host 127.0.0.1 --port 0 --token-path "/home/maya doe/.wsp/daemon-token" --root "/home/maya doe" --roots-path "/home/maya doe/.wsp/roots" --kind place --inbox "/home/maya doe/.wsp/inbox" --manifest "/home/maya doe/.wsp/manifest.json" --open-socket "/home/maya doe/.wsp/open.sock" --port-file "/home/maya doe/.wsp/daemon.port"`,
     );
   });
 

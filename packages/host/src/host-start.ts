@@ -12,9 +12,9 @@ import { runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
 import { httpProbe, logSince, logSize, logTail, registeredService, untilServing, type HostProbe, type RegisteredService } from "./service.js";
 
 /** Starts a host serving this state file on this computer and answers with its lock once it answers on its port.
- * Free ports unless `ports` names the ones a host that is restarting itself held. */
+ * A free port unless `ports` names the one a host that is restarting itself held. */
 export interface HostStarter {
-  (statePath: string, say: (line: string) => void, ports?: { port: number; wsPort: number }): Promise<HostLock>;
+  (statePath: string, say: (line: string) => void, ports?: { port: number }): Promise<HostLock>;
 }
 
 export interface StartDeps {
@@ -74,9 +74,9 @@ export function hostStarter(deps: StartDeps): HostStarter {
     const log = openSync(logPath, "a");
     let child: ReturnType<typeof nodeSpawn>;
     try {
-      // Free ports on purpose: another host, the app's or a service, often holds the default on this computer, and
+      // A free port on purpose: another host, the app's or a service, often holds the default on this computer, and
       // every client dials the address the lock records rather than a number written down anywhere.
-      child = deps.spawn(deps.wsp.command, [...deps.wsp.args, "up", "--state", statePath, "--port", String(ports?.port ?? 0), "--ws-port", String(ports?.wsPort ?? 0)], {
+      child = deps.spawn(deps.wsp.command, [...deps.wsp.args, "up", "--state", statePath, "--port", String(ports?.port ?? 0)], {
         detached: true,
         stdio: ["ignore", log, log],
         env: { ...deps.env, [STARTED_BY_ENV]: "verb" },

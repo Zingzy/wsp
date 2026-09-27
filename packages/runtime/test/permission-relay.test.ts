@@ -450,33 +450,6 @@ describe("the access a thread starts at", () => {
     expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "bypassPermissions"]);
   });
 
-  it("a resumed thread whose rows fell off the index cap reads its access off its own start event, not off the adapter's default", async () => {
-    const { rt, picks } = recording();
-    const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
-    const first = await rt.sessions.start(local.id, { prompt: "one", permissionMode: "default" });
-    await first.finished;
-    expect(picks).toEqual(["default"]);
-    // The start row carries the access, which is what survives the cap: the index keeps 200 rows per workspace and
-    // drops the oldest finished ones, while the transcript keeps the thread.
-    const start = (await rt.sessions.history(local.id)).find(e => e.type === "session.start");
-    expect(start).toMatchObject({ permissionMode: "default" });
-    const harnessSession = first.view().claudeSessionId!;
-    await rt.close();
-
-    // The state the cap leaves: the transcript holds the thread, the index holds no row of it. A send that names
-    // the harness session, as `wsp send` and the MCP door do, is the road that still resumes it.
-    const kept = (await store.get("transcripts", local.id)) as { events: unknown[] };
-    await store.put("sessions", local.id, { workspaceId: local.id, sessions: [] });
-    const after = recording();
-    expect(((await store.get("transcripts", local.id)) as { events: unknown[] }).events).toHaveLength(kept.events.length);
-    const resumed = await after.rt.sessions.start(local.id, { prompt: "two", resume: harnessSession });
-    await resumed.finished;
-    // Without the fallback this reached the adapter as nothing, which every adapter here reads as its own
-    // skip-everything flag, and a thread its person had put in a narrower mode would have run without asking.
-    expect(after.picks).toEqual(["default"]);
-    await after.rt.close();
-  });
-
   it("a thread nobody named an access for starts at the pick the composer last made in that workspace", async () => {
     const { rt, picks } = recording();
     const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });

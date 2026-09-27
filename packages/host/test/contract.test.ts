@@ -13,7 +13,7 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { DAEMON_TOKEN_PATH, EXIT_CODES, FORWARD_ENV, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, shellQuote, TURN_TOKEN_ENV, VerbFailure } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, EXIT_CODES, FORWARD_ENV, SCOPED_MCP_ARG, scopedNoPairLine, HERE_PLACE_ID, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, shellQuote, TURN_TOKEN_ENV, VerbFailure, WS_PATH } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import type { RestartRoad } from "../src/restart.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -224,12 +224,12 @@ describe("the agent contract on the command line and the tool door", () => {
         await handle?.close();
         rt = runtime();
         vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_contract_key");
-        handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt, restart: road });
+        handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt, restart: road });
         vi.stubEnv("SOLARI_API_KEY", "");
       },
     };
     rt = runtime();
-    handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt, restart: road });
+    handle = await serve(captured(), { port: 0, statePath, webDir, runtime: rt, restart: road });
     // A workspace is one project's copy, so every line that makes one needs a project first.
     await rt.projects.add({ source: "https://github.com/dev/alpha.git", on: "default" });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -489,8 +489,8 @@ describe("the agent contract on the command line and the tool door", () => {
     const serve = async (answer: (socket: import("ws").WebSocket, id: number) => void): Promise<{ code: number; io: Captured }> => {
       const old = new WebSocketServer({ port: 0, host: "127.0.0.1" });
       await new Promise<void>(r => old.once("listening", r));
-      const wsPort = (old.address() as AddressInfo).port;
-      writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: wsPort, wsPort, startedAt: new Date().toISOString() }));
+      const port = (old.address() as AddressInfo).port;
+      writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() }));
       old.on("connection", socket => socket.once("message", raw => answer(socket, (JSON.parse(String(raw)) as { id: number }).id)));
       try {
         return await run("threads", "--json");
@@ -697,7 +697,7 @@ describe("the agent contract on the command line and the tool door", () => {
       return io;
     };
     const door = await asked(["mcp", "--state", statePath], "door");
-    expect(door.lines.map(line => JSON.parse(line) as unknown)).toEqual([{ url: `ws://127.0.0.1:${handle!.wsPort}`, token: readFileSync(hostTokenPath(statePath), "utf8").trim() }]);
+    expect(door.lines.map(line => JSON.parse(line) as unknown)).toEqual([{ url: `ws://127.0.0.1:${handle!.port}${WS_PATH}`, token: readFileSync(hostTokenPath(statePath), "utf8").trim() }]);
     expect(door.errors).toEqual([]);
     // A stdout that is a terminal gets nothing, since the line carries the host's token.
     const screen = await asked(["mcp", "--state", statePath], "door", undefined, { ...captured(), redraw: { write: () => undefined, columns: () => 80 } });

@@ -240,7 +240,7 @@ function deps(dir: string, extra: Partial<RelayDeps> = {}): RelayDeps {
 function servingStateHere(): string {
   const home = join(homedir(), ".wsp");
   mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, startedAt: new Date().toISOString() }));
+  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, startedAt: new Date().toISOString() }));
   return join(home, "state.json");
 }
 
@@ -287,7 +287,7 @@ describe("wsp host link", () => {
     expect(log).toContain(`relay       ${relay.url}`);
     expect(log).toContain("host        the box");
     // The one spelling of the state line, so the link and wsp status never name it two ways.
-    expect(log).toContain(addressLines(statePath, { port: 4400, wsPort: 4410 }).find(l => l.startsWith("state"))!);
+    expect(log).toContain(addressLines(statePath, { port: 4400 }).find(l => l.startsWith("state"))!);
   });
 
   it("says which state the host on this computer serves, and the --state that reaches it, before anything is written", async () => {

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseCatalogProbe } from "@wsp/adapter-claude";
 import { CLAUDE_CODE, THREAD_AGENTS } from "@wsp/catalog";
-import { HarnessCatalog, catalogSourceLine, effortsFor, everyModel, workspaceAccess, listedPick, markedDefault, modelOf, noModelsLine, OVER_SSH, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
+import { HarnessCatalog, catalogSourceLine, effortsFor, everyModel, workspaceAccess, listedPick, markedDefault, modelOf, noModelsLine, startPicks, THIS_COMPUTER, type HarnessCatalogProbe } from "@wsp/protocol";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "../src/harness-catalog.js";
 
 describe("harness catalogs", () => {
@@ -257,25 +257,6 @@ describe("the access a thread starts at, per kind of workspace", () => {
     ]);
   });
 
-  it("on a computer somebody owns the mark sits on the mode that asks, and that computer is named on the mode that does not", () => {
-    const kept = workspaceAccess(harnessCatalog("claude")!, "ssh");
-    expect(markedDefault(kept.permissionModes)?.value).toBe("default");
-    expect(kept.permissionModes.filter(o => o.isDefault)).toHaveLength(1);
-    // The machine named is that kind's own word for its machine, never this computer's: the pick hands over the box.
-    expect(kept.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe(`Bypass on ${OVER_SSH}`);
-    // The CLI's own word stays as the short form the picker's button wears; no other row has one.
-    expect(kept.permissionModes.find(o => o.value === "bypassPermissions")?.short).toBe("Bypass");
-    expect(kept.permissionModes.filter(o => o.short !== undefined).map(o => o.value)).toEqual(["bypassPermissions"]);
-    // Same modes, same order, same descriptions: every other mode is one pick away, where it was.
-    expect(kept.permissionModes.map(o => o.value)).toEqual(harnessCatalog("claude")!.permissionModes.map(o => o.value));
-    expect(kept.permissionModes.map(o => o.description)).toEqual(harnessCatalog("claude")!.permissionModes.map(o => o.description));
-    expect(HarnessCatalog.parse(kept)).toEqual(kept);
-    const codex = workspaceAccess(harnessCatalog("codex")!, "ssh");
-    expect(markedDefault(codex.permissionModes)?.value).toBe("workspace-write");
-    expect(codex.permissionModes.find(o => o.value === "danger-full-access")?.label).toBe(`Full access on ${OVER_SSH}`);
-    expect(codex.permissionModes.find(o => o.value === "danger-full-access")?.short).toBe("Full access");
-  });
-
   it("this computer's own word is on its own pick, and a machine wsp forked names none", () => {
     const mac = workspaceAccess(harnessCatalog("claude")!, "local");
     expect(mac.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe(`Bypass on ${THIS_COMPUTER}`);
@@ -302,15 +283,13 @@ describe("startPicks", () => {
   it("a start that opens a thread without a pick runs every default the composer shows, the access included; a resume keeps the thread's own", () => {
     // Claude names no default effort per model, so the catalog's own mark is what the pick runs at. The access is
     // filled in like the other two: an unnamed one used to reach the adapter as nothing, which it reads as bypass.
-    // On this computer the same start runs bypass too, and the only kinds that ask are the computers a person owns.
+    // On this computer the same start runs bypass too.
     expect(startPicks(claude, {}, true)).toEqual({ model: "claude-opus-5-5", effort: "high", permissionMode: "bypassPermissions" });
     expect(startPicks(claude, {}, false)).toEqual({});
     expect(startPicks(claude, { model: "claude-sonnet-5", effort: "low", permissionMode: "plan" }, true)).toEqual({ model: "claude-sonnet-5", effort: "low", permissionMode: "plan" });
     expect(startPicks(claude, { effort: "max" }, false)).toEqual({ effort: "max" });
     const noDefault = { ...claude, models: claude.models.map(({ isDefault: _d, ...m }) => m) };
     expect(startPicks(noDefault, {}, true)).toEqual({ effort: "high", permissionMode: "bypassPermissions" });
-    // On a computer the person owns the same start runs the mode its harness asks in, and nothing else changes.
-    expect(startPicks(workspaceAccess(harnessCatalog("claude")!, "ssh"), {}, true)).toEqual({ model: "claude-opus-5-5", effort: "high", permissionMode: "default" });
   });
 
   it("listedPick keeps a remembered pick this list carries and drops one it does not, which is not a refusal", () => {
