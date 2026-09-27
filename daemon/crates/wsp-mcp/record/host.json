@@ -1,0 +1,110 @@
+{
+  "files": {
+    "lock": "host.lock",
+    "token": "host-token",
+    "log": "host.log",
+    "relay": "relay.json",
+    "hosts": "hosts",
+    "home": ".wsp"
+  },
+  "env": {
+    "host": "WSP_HOST",
+    "home": "WSP_HOME",
+    "url": "WSP_HOST_URL",
+    "token": "WSP_HOST_TOKEN",
+    "key": "WSP_HOST_KEY",
+    "startedBy": "WSP_STARTED_BY",
+    "cloud": "WSP_CLOUD"
+  },
+  "clouds": {
+    "0": false,
+    "1": true,
+    "": false,
+    "true": false,
+    " 1": false
+  },
+  "startedBy": "verb",
+  "wsPath": "/ws",
+  "nearWindowMs": 5000,
+  "farWindowMs": 15000,
+  "closeGraceMs": 500,
+  "unauthorizedClose": 4401,
+  "stoppingClose": 4001,
+  "startWaitMs": 20000,
+  "pollMs": 200,
+  "probeMs": 2000,
+  "loopback": "127.0.0.1",
+  "loopbacks": {
+    "localhost": true,
+    "::1": true,
+    "[::1]": true,
+    "127.0.0.1": true,
+    "127.1.2.3": true,
+    "127.0.0.1.2": false,
+    "10.0.0.1": false,
+    "example.com": false,
+    "0.0.0.0": false
+  },
+  "wildcards": {
+    "0.0.0.0": true,
+    "::": true,
+    "127.0.0.1": false,
+    "::1": false,
+    "": false
+  },
+  "urls": {
+    "http://127.0.0.1:4000": {
+      "isUrl": true,
+      "hostname": "127.0.0.1",
+      "ws": "ws://127.0.0.1:4000/ws"
+    },
+    "https://box.example.com/": {
+      "isUrl": true,
+      "hostname": "box.example.com",
+      "ws": "wss://box.example.com/ws"
+    },
+    "HTTPS://Box.Example.com:443/pre/fix//": {
+      "isUrl": true,
+      "hostname": "box.example.com",
+      "ws": "wss://box.example.com/pre/fix/ws"
+    },
+    "ws://[::1]:9/": {
+      "isUrl": true,
+      "hostname": null,
+      "ws": "ws://[::1]:9/ws"
+    },
+    "wss://h.example:8443/a?b=c#d": {
+      "isUrl": true,
+      "hostname": null,
+      "ws": "wss://h.example:8443/a/ws"
+    },
+    "http://user:pw@host.example:80/x": {
+      "isUrl": true,
+      "hostname": "host.example",
+      "ws": "ws://host.example/x/ws"
+    },
+    "box.example.com": {
+      "isUrl": false,
+      "hostname": null,
+      "ws": null
+    },
+    "ftp://x.example": {
+      "isUrl": false,
+      "hostname": null,
+      "ws": null
+    }
+  },
+  "aliases": {
+    "attic": true,
+    "A.b_c-9": true,
+    "9lives": true,
+    "-lead": false,
+    ".dot": false,
+    "a..b": false,
+    "a/b": false,
+    "a b": false,
+    "": false,
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": true,
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx": false
+  }
+}

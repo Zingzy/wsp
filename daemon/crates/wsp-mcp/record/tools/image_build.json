@@ -1,0 +1,79 @@
+{
+  "cloudOff": null,
+  "cloudOn": {
+    "name": "image_build",
+    "description": "Builds this host's image at a place from the record alone: a builder is forked there with the recipe the image was sealed from and every sign-in set to skip, the sign-ins the seal held are landed on it out of the vault, and the copy is sealed and recorded under that place at the record's hash. Nothing signs in again and no Keychain is read. A place that already holds a copy built from this record is answered with that copy and `built` false, so asking twice costs nothing; a place whose copy is building is answered with that build, never a second one. A joined computer builds its copy at the end of its setup; every other copy, and every copy a newer version left behind, is built only when this line asks or when a fork there finds no current copy, and that fork says so before the build starts, since a build bills where it runs. Refused in one line for a place this host does not hold, for a place that takes no copy at all, and for a record sealed without the recipe it was built from. A record holding no sign-ins is refused too, since every copy of it would ask for them again; `force` builds it anyway.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "place": {
+          "type": "string",
+          "description": "the place to build the copy at, by the name wsp places lists"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "build even where the record holds no sign-ins, so the copy asks for every one of them again"
+        }
+      },
+      "required": [
+        "place"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "copy": {
+          "type": "object",
+          "properties": {
+            "place": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "hash": {
+              "type": "string",
+              "minLength": 64,
+              "maxLength": 64
+            },
+            "snapshotId": {
+              "type": "string"
+            },
+            "templateId": {
+              "type": "string"
+            },
+            "builtAt": {
+              "type": "string"
+            },
+            "sizeBytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "place",
+            "version",
+            "snapshotId",
+            "builtAt"
+          ],
+          "additionalProperties": false
+        },
+        "built": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "copy",
+        "built"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

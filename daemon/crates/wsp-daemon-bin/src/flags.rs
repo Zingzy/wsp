@@ -105,8 +105,11 @@ impl Flags {
                 std::process::exit(0)
             }
             Err(e) => {
+                // Clap's error runs on to the lines under it (a missing flag is named on the second) until a blank
+                // line opens its own usage and tips, which the usage below stands in for.
                 let rendered = e.render().to_string();
-                eprintln!("{}", rendered.lines().next().unwrap_or("bad flags"));
+                let said: Vec<&str> = rendered.lines().take_while(|line| !line.trim().is_empty()).map(str::trim).collect();
+                eprintln!("{}", if said.is_empty() { "bad flags".to_owned() } else { said.join(" ") });
                 eprintln!("{USAGE}");
                 std::process::exit(2)
             }
