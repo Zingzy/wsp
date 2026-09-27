@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { appendFileSync, mkdirSync } from "node:fs";
-import { createServer } from "node:net";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { accountAim, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, homeNamed, hostLogPath, hostTokenFor, lockPathFor, ownPid, readHost, serve, servingHost, severalAccountHostsLine, wspHome, type CliIO, type HereAt, type HostLock, type HostRecord, type RestartRoad, type RunningWsp, type UrlOpener } from "@wsp/host";
-import { LOOPBACK, authority, bootLineOf, isLoopback, type BootPayload } from "@wsp/protocol";
-import { safeEqual, tokenDigest, type Runtime } from "@wsp/runtime";
+import { STARTED_BY_ENV, accountAim, aimedAlias, aimedHost, computerNameHere, defaultHomeIn, devCheckoutState, dialAddress, dialHost, downCommand, homeNamed, hostLogPath, hostTokenFor, httpProbe, installService, lockPathFor, logTail, noManagerLine, ownPid, readHost, runAll, runFailureLine, serviceAddressHere, serviceEnv, servingHost, severalAccountHostsLine, stopService, untilServing, type CliIO, type HostLock, type HostRecord, type HostProbe, type RunFailure, type ServiceDeps, type ServicePlan } from "@wsp/host";
+import { LOOPBACK, authority, bootLineOf, fmtDuration, holdsNothing, isLocalWorkspace, isLoopback, type BootPayload, type GoldenManifest, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { safeEqual, tokenDigest } from "@wsp/runtime";
 
 export interface HostSession {
   url: string;
   port: number;
-  /** True when this process started the host and must stop it on quit. */
-  owned: boolean;
   /** True for a host on another computer, whose device token the shell holds. */
   remote: boolean;
   /** What the window and the menu call this host. */
@@ -20,14 +17,6 @@ export interface HostSession {
   alias?: string;
   /** The token this computer holds for that host, handed to the page over the bridge and never written into it. */
   deviceToken?: string;
-  close(): Promise<void>;
-}
-
-export interface Located {
-  /** Where keys and state are read from when no host is serving. */
-  home: string;
-  /** A host already serving: through the lock, or the port. */
-  session?: HostSession;
 }
 
 /** How this app was launched, as everything that decides where its state file sits reads it. */
@@ -40,31 +29,19 @@ export interface Launch {
   cwd: string;
 }
 
+/** This computer's own service manager and how long a start is given, as wsp up --service and wsp down read them. */
+export type ServiceRoad = Pick<ServiceDeps, "platform" | "manager" | "run" | "waitMs">;
+
 export interface OpenHostOptions {
-  port: number;
-  wsPort: number;
   statePath: string;
-  webDir: string;
+  /** The wsp home the service runs in. */
+  home: string;
+  /** The wsp command this app writes, which the service runs. */
+  shim: string;
   io: CliIO;
-  runtime?: Runtime;
-  /** How a guest tool's sign-in URL reaches this computer's browser; the platform opener when absent. */
-  openUrl?: UrlOpener;
-  /** How this process is started again, for the wsp tools the init job writes into an agent's config: the shim. */
-  running?: RunningWsp;
   /** How a host on the account is dialled, which is the command line's own dial. */
   dial?: typeof dialHost;
-  /** How the host this window starts restarts itself: the app relaunching. */
-  restart?: RestartRoad;
-  /** The loopback cell the runtime's reach reads, filled by the host once it binds. */
-  here?: HereAt;
-}
-
-function canListen(port: number): Promise<boolean> {
-  return new Promise(resolve => {
-    const probe = createServer();
-    probe.once("error", () => resolve(false));
-    probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
-  });
+  service: ServiceRoad;
 }
 
 /** The boot object of the page served at this authority, or nothing where nothing there answers as a wsp host. */
@@ -85,11 +62,11 @@ export const portOf = (url: string): number => Number(new URL(url).port) || 80;
  * the device token the shell holds for it and hands the page over the bridge. Written once, since the window reaches
  * such a host by opening on it and by moving to it. */
 export function remoteSession(alias: string, record: HostRecord, url: string): HostSession {
-  return { url, port: portOf(url), owned: false, remote: true, alias, label: alias, deviceToken: record.deviceToken, close: async () => {} };
+  return { url, port: portOf(url), remote: true, alias, label: alias, deviceToken: record.deviceToken };
 }
 
 function attached(port: number, url: string): HostSession {
-  return { url, port, owned: false, remote: false, label: computerNameHere(), close: async () => {} };
+  return { url, port, remote: false, label: computerNameHere() };
 }
 
 /** Whether a digest is the one of the token the host serving this state file holds, compared the one way this repo
@@ -122,8 +99,8 @@ export function statePathIn(home: string, launch: Launch): string {
  * its page with the digest of its own token inlined, so the page is held to the digest of the token file beside
  * the state. A host bound beyond this computer serves a page with no digest by design, and the lock alone is the
  * reading for it. Either road is dialled where the lock says that host answers, which for a host on ::1 or on
- * 127.0.0.2 is there and nowhere else. Anything else is a refusal: this window starts no second host on a state
- * file another process holds. */
+ * 127.0.0.2 is there and nowhere else. Anything else is a refusal: this window starts no service on a state file
+ * another process holds. */
 async function lockedHost(statePath: string): Promise<HostSession | undefined> {
   const held = servingHost(statePath);
   if (held === undefined) return undefined;
@@ -150,14 +127,6 @@ export function userDataIn(launch: Launch): string {
   return join(dirname(statePathIn(homeOf(launch), launch)), "desktop");
 }
 
-/** Runs before the setup gate: a serving host is the proof of setup. The lock beside the launch's home's state file
- * is the one thing read. */
-export async function locateHost(opts: Launch): Promise<Located> {
-  const home = homeOf(opts);
-  const session = await lockedHost(statePathIn(home, opts));
-  return { home, ...(session !== undefined ? { session } : {}) };
-}
-
 /** How long this window's one dial at the account's host waits. A line at a terminal gives a relayed road fifteen
  * seconds, which is a window with nothing in it for that long; a person who opened the app is watching it, so a
  * host that has not answered is one the window opens without, with the host's own sentence in the log. The floor
@@ -170,10 +139,10 @@ const ACCOUNT_DIAL_MS = 8_000;
  * rule, so a record holding a token and no key for the host is refused here as every verb refuses it, and dialled
  * once, which admits this computer over there and hands the page a token that opens. Nothing where the rule names
  * no alias, where several hosts on the account stand, or where the one it named refused or did not answer; the
- * window starts a host here as it always did and the sentence is logged, since the screen that would ask which host
- * is the first run's. */
+ * window opens on the service here and the sentence is logged, since the screen that would ask which host is the
+ * first run's. */
 async function accountSession(opts: OpenHostOptions): Promise<HostSession | undefined> {
-  const home = wspHome();
+  const home = opts.home;
   const alias = aimedAlias(opts.statePath, home);
   if (alias === undefined) {
     const aim = accountAim(opts.statePath, home);
@@ -190,57 +159,132 @@ async function accountSession(opts: OpenHostOptions): Promise<HostSession | unde
   // What the dial left under that alias: the device token the host answered this computer's key with, which a
   // record off the account's listing held none of until now.
   const record = readHost(home, alias);
-  if (record === undefined) return undefined;
-  // Nothing is served on this computer, so the runtime the setup gate built goes away rather than lingering
-  // behind the window, which is the rule that gate applies when it has nothing to show.
-  await opts.runtime?.close();
-  return remoteSession(alias, record, record.url);
+  return record === undefined ? undefined : remoteSession(alias, record, record.url);
 }
 
-/** The io the host inside the app writes through: every line also lands in the host.log a service host writes, since
- * a packaged app's own stdout and stderr go nowhere a person can read. */
-function loggedTo(io: CliIO, logPath: string): CliIO {
-  const kept = (line: string): void => {
-    try {
-      mkdirSync(dirname(logPath), { recursive: true });
-      appendFileSync(logPath, `${line}\n`);
-    } catch {
-      // A log that cannot be written never stops the host that writes it.
-    }
-  };
+/** What the service this app installs is told: the shim serving this state file, with the service mark, so every
+ * other client on this computer starts this unit rather than a host of its own. HOME rides along because a unit is
+ * started with the manager's own environment, and the unit sits under that home. */
+function servicePlan(opts: Pick<OpenHostOptions, "statePath" | "home" | "shim">): ServicePlan {
+  const at = serviceAddressHere(opts.statePath);
   return {
-    ...io,
-    log: line => {
-      kept(line);
-      io.log(line);
-    },
-    error: line => {
-      kept(line);
-      io.error(line);
-    },
+    ...at,
+    argv: [opts.shim, "up", "--state", opts.statePath],
+    cwd: opts.home,
+    env: { ...serviceEnv(process.env), HOME: at.home, [STARTED_BY_ENV]: "service" },
+    logPath: hostLogPath(opts.statePath),
   };
 }
 
-/** Attaches to the host already serving this state file, which its lock names
- * and this window has proof of, else opens on the host a line with no name on
- * it takes, else starts one the way the wsp bin does. Defaults held by
- * anything else give way to free ports. */
+const refused = (failure: RunFailure): Error => new Error(runFailureLine(failure));
+
+/** Whether the host a lock names is the one this window will attach to: its page carries the digest of the token
+ * beside the state. The host binds its page, then sweeps and lists before it writes that file, so a page read in
+ * that gap is a start still in flight and the wait reads it again. A host bound beyond this computer serves no
+ * digest, and its answer is the whole reading. */
+const answersAsOwn =
+  (statePath: string): HostProbe =>
+  async lock => {
+    if (!isLoopback(lock.address ?? LOOPBACK)) return httpProbe(lock);
+    const boot = await bootAt(authority(dialAddress(lock), lock.port));
+    return boot?.tokenHash !== undefined && hostTokenMatches(statePath, boot.tokenHash);
+  };
+
+/** Makes this computer's own manager serve the state file with the shim, and waits until wsp answers. A unit that
+ * says anything else than this launch would write (another shim, another home, a PATH the login shell has since
+ * changed) is stopped and written again; one that says exactly this is loaded where the manager has let it go.
+ * Read only when nothing serves, so a rewrite never restarts wsp under a window attached to it. */
+export async function ensureService(opts: Pick<OpenHostOptions, "statePath" | "home" | "shim" | "service">): Promise<void> {
+  const { manager, run } = opts.service;
+  if (manager === undefined) throw new Error(noManagerLine(opts.service.platform));
+  const plan = servicePlan(opts);
+  const unit = manager.unit(plan);
+  const text = manager.text(plan);
+  const written = existsSync(unit.path) ? readFileSync(unit.path, "utf8") : undefined;
+  if (written !== text) {
+    if (written !== undefined) {
+      const stopped = await stopService(manager, plan, run);
+      const failure = stopped.unsure ?? stopped.failure;
+      if (failure !== undefined) throw refused(failure);
+    }
+    const { failure } = await installService(manager, plan, run);
+    if (failure !== undefined) throw refused(failure);
+  } else if ((await run(manager.holds(plan))).code !== 0) {
+    const failure = await runAll(manager.load(plan), run);
+    if (failure !== undefined) throw refused(failure);
+  }
+  if ((await untilServing(opts.statePath, opts.service.waitMs, answersAsOwn(opts.statePath))) === undefined) {
+    throw new Error([`wsp did not start within ${fmtDuration(opts.service.waitMs)}; its log is ${plan.logPath}`, ...logTail(plan.logPath)].join("\n"));
+  }
+}
+
+/** Attaches to the host already serving this state file, which its lock names and this window has proof of, else
+ * opens on the host a line with no name on it takes, else makes this computer's own service serve it and attaches
+ * to that. The window never serves a host itself, so closing it stops nothing. */
 export async function openHost(opts: OpenHostOptions): Promise<HostSession> {
   const held = await lockedHost(opts.statePath);
   if (held !== undefined) return held;
   const away = await accountSession(opts);
   if (away !== undefined) return away;
-  const defaultsFree = (opts.port === 0 || (await canListen(opts.port))) && (opts.wsPort === 0 || (await canListen(opts.wsPort)));
-  const ports = defaultsFree ? { port: opts.port, wsPort: opts.wsPort } : { port: 0, wsPort: 0 };
-  const handle = await serve(loggedTo(opts.io, hostLogPath(opts.statePath)), {
-    ...ports,
-    statePath: opts.statePath,
-    webDir: opts.webDir,
-    ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),
-    ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
-    ...(opts.running !== undefined ? { running: opts.running } : {}),
-    ...(opts.restart !== undefined ? { restart: opts.restart } : {}),
-    ...(opts.here !== undefined ? { here: opts.here } : {}),
-  });
-  return { url: `http://${authority(LOOPBACK, handle.port)}`, port: handle.port, owned: true, remote: false, label: computerNameHere(), close: () => handle.close() };
+  await ensureService(opts);
+  const served = await lockedHost(opts.statePath);
+  if (served === undefined) throw new Error(`wsp started and stopped again; its log is ${hostLogPath(opts.statePath)}`);
+  return served;
+}
+
+/** Whether the host here holds nothing to show, which is the app's first launch: asked of the host, since the state
+ * file is its to read. */
+export async function firstLaunch(statePath: string, home: string, dial: typeof dialHost = dialHost): Promise<boolean> {
+  const client = await dial(statePath, { aim: { kind: "here" }, home });
+  try {
+    const { manifest } = await client.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
+    const { workspaces } = await client.request<{ workspaces: unknown[] }>("workspaces.list");
+    return holdsNothing(manifest, workspaces);
+  } finally {
+    client.close();
+  }
+}
+
+/** The turns running on this computer's own workspaces, which stopping wsp would leave with nobody reading them. A
+ * turn on a box runs on that box and goes on whether wsp here serves or not. */
+export function runningHere(sessions: readonly Pick<SessionView, "id" | "workspaceId" | "status">[], workspaces: readonly Pick<WorkspaceView, "id" | "kind">[]): string[] {
+  const here = new Set(workspaces.filter(isLocalWorkspace).map(w => w.id));
+  return sessions.filter(s => s.status === "running" && here.has(s.workspaceId)).map(s => s.id);
+}
+
+async function runningOn(statePath: string, home: string, dial: typeof dialHost): Promise<{ client: Awaited<ReturnType<typeof dialHost>>; running: string[] } | undefined> {
+  if (servingHost(statePath) === undefined) return undefined;
+  const client = await dial(statePath, { aim: { kind: "here" }, home });
+  try {
+    const { sessions } = await client.request<{ sessions: SessionView[] }>("sessions.list");
+    const { workspaces } = await client.request<{ workspaces: WorkspaceView[] }>("workspaces.list");
+    return { client, running: runningHere(sessions, workspaces) };
+  } catch (e) {
+    client.close();
+    throw e;
+  }
+}
+
+/** How many turns stopping wsp would stop, for the question the quit asks; none where nothing serves. */
+export async function workingHere(statePath: string, home: string, dial: typeof dialHost = dialHost): Promise<number> {
+  const on = await runningOn(statePath, home, dial);
+  on?.client.close();
+  return on?.running.length ?? 0;
+}
+
+/** Quit and stop wsp: every turn on this computer's workspaces is interrupted, then wsp down's own road stops what
+ * serves the state file, the service and its unit or a host a line started. The lines it says are the answer where
+ * something still serves after it. */
+export async function stopWsp(statePath: string, home: string, service: ServiceDeps, dial: typeof dialHost = dialHost): Promise<void> {
+  const on = await runningOn(statePath, home, dial);
+  if (on !== undefined) {
+    try {
+      for (const sessionId of on.running) await on.client.request("sessions.interrupt", { sessionId });
+    } finally {
+      on.client.close();
+    }
+  }
+  const said: string[] = [];
+  const quiet: CliIO = { log: () => {}, error: line => said.push(line), ask: q => Promise.reject(new Error(q)), askSecret: q => Promise.reject(new Error(q)) };
+  if ((await downCommand(quiet, { statePath }, service)) !== 0 && servingHost(statePath) !== undefined) throw new Error(said.join("\n"));
 }

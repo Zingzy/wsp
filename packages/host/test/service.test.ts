@@ -31,6 +31,7 @@ import {
 import { stateIgnoredLine, writeHost } from "../src/hosts.js";
 import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import type { HostClient } from "../src/verbs.js";
+import { runningWsp } from "../src/mcp-install.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
@@ -550,6 +551,14 @@ describe("wsp up --service, wsp down and wsp status", () => {
       `log         ${join(home, ".wsp", "host.log")}`,
       "Stop it with wsp down.",
     ]);
+  });
+
+  it("behind the app's shim, the unit runs the shim: the app's binary is node only under the variable the shim sets", async () => {
+    keyInFile();
+    const fake = svc();
+    const shim = join(home, ".wsp", "bin", "wsp");
+    expect(await upServiceCommand(quietIO(), { ...opts, running: { ...runningWsp(), shim } }, fake.deps)).toBe(0);
+    expect(fake.plans[0]!.argv).toEqual([shim, "up", "--state", statePath, "--port", "4400", "--ws-port", "4410", "--listen", "127.0.0.1"]);
   });
 
   it("refuses before writing anything when the key is only in this shell, since the service starts without it", async () => {

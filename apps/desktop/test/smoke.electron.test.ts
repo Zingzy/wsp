@@ -6,9 +6,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createServer, type Server } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { LAUNCHD_PATH, computerNameHere, placeWiring, serve, shimPath, startHost, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
+import { LAUNCHD_PATH, computerNameHere, placeWiring, serve, serviceManagerFor, servingHost, shimPath, startHost, stopService, systemRunner, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
 import { GET_THE_APP_WORD, HOST_WORDS } from "@wsp/protocol";
 import { createRuntime, memoryStore, tokenDigest, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
@@ -22,6 +22,7 @@ import { VERSION } from "../../../packages/host/src/version.js";
 import { builtExecutableHere } from "./packaged.js";
 import { menuShapeOf, workspaceMenuShape } from "./workspace-menu.js";
 import { notForThisPage } from "../src/origin.js";
+import { QUIT_WORD } from "../src/quit.js";
 import { writeStub } from "../../../packages/protocol/test/stub-script.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
@@ -112,15 +113,21 @@ function seedAccountHost(home: string, alias: string, url: string, token: string
 
 /** The lock and the token file a host serving this home left beside its state, which is what the window reads to
  * attach to it: a page on a port is no reason to, whoever is serving there. */
-function seedServingLock(home: string, at: { port: number; token: string }): void {
+function seedServingLock(home: string, at: { port: number; wsPort: number; token: string }): void {
   mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: at.port, wsPort: 0, startedAt: new Date().toISOString() }));
+  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: at.port, wsPort: at.wsPort, startedAt: new Date().toISOString() }));
   writeFileSync(join(home, "host-token"), `${at.token}\n`);
 }
 
 interface Launched {
   app: ElectronApplication;
   home: string;
+  /** HOME as the app was launched, which the service's unit sits under. */
+  user: string;
+  /** The state file the launch serves, whose service the teardown takes away. */
+  statePath: string;
+  /** What the app printed, read out when a case fails: nothing else in a CI log shows why a window never came. */
+  said: string[];
 }
 
 const APP_URL = /^http:\/\/127\.0\.0\.1:\d+\/$/;
@@ -192,9 +199,9 @@ function loginShellIn(home: string): string {
   return shell;
 }
 
-/** HOME is the temp dir too, so the app's ~/.wsp (and the pointer a host it
- * starts would write there) never touch this machine's. A value of undefined
- * removes that variable, the way a Finder launch has no WSP_HOME. */
+/** HOME is the temp dir too, so the app's ~/.wsp and the service unit it writes under ~/Library never touch this
+ * machine's: the unit's label carries the digest of the temp state file, so it is never the owner's own. A value of
+ * undefined removes that variable, the way a Finder launch has no WSP_HOME. */
 async function launch(env: Record<string, string | undefined>, prepare: (home: string) => void = () => {}): Promise<Launched> {
   const home = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-"));
   prepare(home);
@@ -210,13 +217,57 @@ async function launchIn(home: string, env: Record<string, string | undefined>): 
   delete inherited["ANTHROPIC_API_KEY"];
   // The app reads WSP_DESKTOP_SMOKE to know it is driven: the bundle runs out of dist, and the move to Applications
   // it would otherwise offer has nobody to press a button.
-  const merged = { ...inherited, HOME: home, WSP_HOME: home, WSP_PORT: "0", WSP_WS_PORT: "0", WSP_DESKTOP_SMOKE: "1", SHELL: loginShellIn(home), ...env };
+  const merged = { ...inherited, HOME: home, WSP_HOME: home, WSP_DESKTOP_SMOKE: "1", SHELL: loginShellIn(home), ...env };
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(merged)) if (v !== undefined) clean[k] = v;
+  const user = clean["HOME"]!;
+  const statePath = join(clean["WSP_HOME"] ?? join(user, ".wsp"), "state.json");
   // Playwright emulates a light prefers-color-scheme in the renderer unless told not to; the page's system theme has to
   // read the Mac's own appearance, the one the window's glass is drawn from, or the two sides split in the shot.
   const app = await electron.launch({ executablePath: builtApp(), cwd, env: clean, colorScheme: null });
-  return { app, home };
+  const said: string[] = [];
+  const keep = (chunk: Buffer): void => void said.push(...chunk.toString().split("\n").filter(line => line.trim() !== ""));
+  app.process().stdout?.on("data", keep);
+  app.process().stderr?.on("data", keep);
+  return { app, home, user, statePath, said };
+}
+
+/** The service a launch installed, as this computer's manager names it. */
+const serviceAt = (launched: Pick<Launched, "user" | "statePath">) => ({ statePath: launched.statePath, home: launched.user, uid: process.getuid?.() ?? 0 });
+
+/** Takes away whatever service the launch installed, with the manager's own stop, and waits until nothing serves its
+ * state file. A launch that attached to a fixture's host installed none, and the stop finds nothing. */
+async function stopServiceOf(launched: Pick<Launched, "user" | "statePath">): Promise<void> {
+  const manager = serviceManagerFor(process.platform);
+  if (manager === undefined) return;
+  const lock = servingHost(launched.statePath);
+  const stopped = await stopService(manager, serviceAt(launched), systemRunner);
+  if (stopped.held && lock !== undefined) await vi.waitFor(() => expect(alive(lock.pid)).toBe(false), { timeout: 30_000, interval: 100 });
+}
+
+/** Quits the app. A plain quit is every road out of the app but the menu's own row, and asks nothing; the other
+ * answer is the menu's Quit, pressed as a person presses it, with the question it asks answered by that button. */
+async function quit(app: ElectronApplication, answer: "Quit" | "Quit and stop wsp" = "Quit"): Promise<void> {
+  if (answer === "Quit") return app.close();
+  const exited = new Promise<void>(resolve => app.process().once("exit", () => resolve()));
+  await app.evaluate(({ Menu, dialog }, [label, row]) => {
+    dialog.showMessageBox = (async (...args: unknown[]) => {
+      const options = args.at(-1) as { buttons?: string[] };
+      return { response: options.buttons?.indexOf(label) ?? 0, checkboxChecked: false };
+    }) as typeof dialog.showMessageBox;
+    const find = (items: Electron.MenuItem[]): Electron.MenuItem | undefined => {
+      for (const item of items) {
+        if (item.label === row) return item;
+        const inner = item.submenu === undefined || item.submenu === null ? undefined : find(item.submenu.items);
+        if (inner !== undefined) return inner;
+      }
+      return undefined;
+    };
+    const item = find(Menu.getApplicationMenu()?.items ?? []);
+    if (item === undefined) throw new Error(`no ${row} row in the menu`);
+    item.click();
+  }, [answer, QUIT_WORD] as const);
+  await exited;
 }
 
 /** A host of another release, as an app attached to one it did not start meets it. The real host serves the page and
@@ -501,23 +552,45 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   let launched: Launched | undefined;
   let existing: HostHandle | undefined;
   let standIn: Server | undefined;
-  afterEach(async () => {
-    await launched?.app.close().catch(() => {});
-    if (launched) rmSync(launched.home, { recursive: true, force: true });
+  afterEach(async ({ task }) => {
+    if (task.result?.state === "fail" && launched !== undefined) {
+      const log = join(dirname(launched.statePath), "host.log");
+      console.error([`the app said:`, ...launched.said.slice(-40), `${log}:`, ...(existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").slice(-40) : ["(none)"])].join("\n"));
+    }
+    const app = launched?.app;
+    // A case that timed out may leave the app stuck; its pid is the one this suite started, and the service it
+    // installed is taken away whatever state the app is in.
+    let child: ReturnType<ElectronApplication["process"]> | undefined;
+    try {
+      child = app?.process();
+    } catch {
+      // Playwright lets go of a closed app's process, and a case that quit it itself has nothing left to stop.
+    }
+    if (app !== undefined) await Promise.race([quit(app).catch(() => {}), new Promise(resolve => setTimeout(resolve, 10_000))]);
+    if (child !== undefined && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    if (launched) {
+      await stopServiceOf(launched);
+      rmSync(launched.home, { recursive: true, force: true });
+    }
     launched = undefined;
     await existing?.close();
     existing = undefined;
     if (standIn !== undefined) await new Promise<void>(resolve => standIn!.close(() => resolve()));
     standIn = undefined;
     vi.unstubAllEnvs();
-  });
+  }, 60_000);
 
   it("is built", () => {
     expect(existsSync(builtApp())).toBe(true);
   });
 
-  it("opens one window on the host it started, titled wsp, with the token's digest in the boot object and never the token, and stops the host on quit", async () => {
-    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, seedGolden);
+  it("opens one window, titled wsp, on the service it installed, whose parent is the manager and not the app; a quit leaves it serving and the next launch attaches; Quit and stop wsp leaves nothing", async () => {
+    // Claude Code by its config alone, for the agent the service writes the wsp tools into.
+    launched = await launch({ SOLARI_API_KEY: FAKE_SOLARI }, home => {
+      seedGolden(home);
+      mkdirSync(join(home, ".claude"));
+    });
+    const { home, user, statePath } = launched;
     const win = await windowAt(launched.app, APP_URL);
     const boot = await bootOf(win);
     const url = win.url();
@@ -527,8 +600,49 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(boot.token).toBeUndefined();
     expect(boot.wsPort).toBeGreaterThan(0);
     expect(appWindows(launched.app)).toHaveLength(1);
-    await launched.app.close();
+
+    // The unit is this launch's own, under its temp home, and it runs the wsp command the app wrote.
+    const manager = serviceManagerFor(process.platform)!;
+    const at = serviceAt(launched);
+    const unit = manager.unit(at);
+    expect(unit.path.startsWith(user)).toBe(true);
+    expect(readFileSync(unit.path, "utf8")).toContain(shimPath(home));
+    const holds = (): { code: number; output: string } => {
+      const [cmd, ...args] = manager.holds(at);
+      const ran = spawnSync(cmd!, args, { encoding: "utf8", timeout: 20_000 });
+      return { code: ran.status ?? -1, output: `${ran.stdout}${ran.stderr}` };
+    };
+    expect(holds().code).toBe(0);
+    const host = servingHost(statePath)!;
+    expect(host.startedBy).toBe("service");
+    const parent = Number(spawnSync("ps", ["-o", "ppid=", "-p", String(host.pid)], { encoding: "utf8", timeout: 20_000 }).stdout.trim());
+    expect(parent).not.toBe(launched.app.process().pid);
+    if (process.platform === "darwin") expect(parent).toBe(1);
+    const env = { ...process.env, HOME: user, WSP_HOME: home };
+    expect(spawnSync(shimPath(home), ["status"], { encoding: "utf8", env, timeout: 20_000 }).stdout).toContain(`service     ${manager.words} ${unit.name}, loaded`);
+    // The service runs wsp behind the command the app wrote, so what it writes into an agent's config runs that
+    // command and never the app's binary, which is node only under the variable the command sets.
+    const added = spawnSync(shimPath(home), ["agents", "addtools", "claude"], { encoding: "utf8", env, cwd: join(home, "cwd"), timeout: 20_000 });
+    expect(added.status, `${added.stdout}${added.stderr}`).toBe(0);
+    expect((JSON.parse(readFileSync(join(user, ".claude.json"), "utf8")) as { mcpServers: { wsp: { command: string } } }).mcpServers.wsp.command).toBe(shimPath(home));
+
+    await quit(launched.app);
+    expect(await refused(url)).toBe(false);
+    expect(alive(host.pid)).toBe(true);
+
+    launched = await launchIn(home, { SOLARI_API_KEY: FAKE_SOLARI });
+    const again = await windowAt(launched.app, APP_URL);
+    expect(again.url()).toBe(url);
+    expect(servingHost(statePath)?.pid).toBe(host.pid);
+
+    await quit(launched.app, "Quit and stop wsp");
+    expect(servingHost(statePath)).toBeUndefined();
+    expect(alive(host.pid)).toBe(false);
     expect(await refused(url)).toBe(true);
+    expect(existsSync(unit.path)).toBe(false);
+    const gone = holds();
+    expect(manager.absent(gone), gone.output).toBe(true);
+    if (process.platform === "darwin") expect(gone.code).toBe(113);
   });
 
   it("the window's theme source follows the page, which draws the side this computer is set to", async () => {
@@ -564,7 +678,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await seedProject(existing);
     const api = await existing.createWorkspace("api");
     const web = await existing.createWorkspace("web");
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, wsPort: existing!.wsPort, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     await win.waitForSelector(`[data-row-id='ws:${api.id}']`);
     await win.waitForSelector(`[data-row-id='ws:${web.id}']`);
@@ -743,7 +857,8 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await welcome.waitForLoadState("domcontentloaded");
     expect(await welcome.textContent("#start")).toContain("Get started");
     expect(appWindows(launched.app).filter(w => APP_URL.test(w.url()))).toHaveLength(0);
-    await launched.app.close();
+    await quit(launched.app);
+    await stopServiceOf(launched);
     rmSync(launched.home, { recursive: true, force: true });
 
     launched = await launch({}, seedLocalWorkspace);
@@ -853,12 +968,13 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     // Any login on this computer can bind a port and answer with the boot line; the lock beside the state file of
     // the home this launch resolved is what says a host of the owner's is serving, and there is none here.
     existing = await fixtureHost();
-    launched = await launch({ WSP_HOME: undefined, WSP_PORT: String(existing.port) });
+    launched = await launch({ WSP_HOME: undefined });
     const page = await windowAt(launched.app, ONBOARDING_URL);
     await page.waitForLoadState("domcontentloaded");
     expect(await page.textContent("#start")).toContain("Get started");
     expect(appWindows(launched.app).filter(w => APP_URL.test(w.url()))).toHaveLength(0);
-    await launched.app.close();
+    expect(servingHost(launched.statePath)?.port).not.toBe(existing.port);
+    await quit(launched.app);
     // The host on that port was never touched: it is still serving, with the page it was serving before.
     expect(await refused(`http://127.0.0.1:${existing.port}/`)).toBe(false);
   });
@@ -867,7 +983,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     existing = await startHost({ runtime: testRuntime(true, LABS_ON), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     const stand = await hostOfVersion(existing, "9.9.9");
     standIn = stand.server;
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }));
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, wsPort: existing!.wsPort, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const notice = win.locator("[data-notice]", { hasText: VERSION_LINE });
     await notice.waitFor();
@@ -888,7 +1004,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     const stand = await hostOfVersion(existing, "0.0.1");
     standIn = stand.server;
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, token: existing!.authToken }));
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: stand.port, wsPort: existing!.wsPort, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const notice = win.locator("[data-notice]", { hasText: VERSION_LINE });
     await notice.waitFor();
@@ -898,7 +1014,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
 
   it("attached to a host of its own release, says nothing at all", async () => {
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, wsPort: existing!.wsPort, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     await win.waitForSelector("[data-slot=sidebar-container]");
     // The page asks the shell for its hosts on load and says the versions once that answers; a second ask answers
@@ -917,7 +1033,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     vi.stubEnv("SOLARI_API_KEY", FAKE_SOLARI);
     vi.stubEnv("HOME", user);
     vi.stubEnv("WSP_HOME", custom);
-    existing = await serve(quiet, { port: 0, wsPort: 0, statePath: join(custom, "state.json"), webDir: fakeWebDir(), runtime: testRuntime() });
+    existing = await serve(quiet, { port: 0, wsPort: 0, statePath: join(custom, "state.json"), webDir: fakeWebDir(), runtime: testRuntime(true) });
     vi.unstubAllEnvs();
     // The host wrote every file of its own under the home it serves and nothing under the person's own.
     expect(existsSync(join(custom, "host.lock"))).toBe(true);
@@ -928,7 +1044,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     const boot = await bootOf(win);
     expect(win.url()).toBe(`http://127.0.0.1:${existing.port}/`);
     expect(boot.tokenHash).toBe(tokenDigest(existing.authToken));
-    await launched.app.close();
+    await quit(launched.app);
     expect(await refused(`http://127.0.0.1:${existing.port}/`)).toBe(false);
     rmSync(user, { recursive: true, force: true });
   });
@@ -938,7 +1054,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     existing = await startHost({ runtime: testRuntime(true), webDir: workspaceAsset("web"), port: 0, wsPort: 0 });
     await seedProject(existing);
     const first = await existing.createWorkspace("first");
-    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, token: existing!.authToken }));
+    launched = await launch({ WSP_HOME: undefined }, home => seedServingLock(join(home, ".wsp"), { port: existing!.port, wsPort: existing!.wsPort, token: existing!.authToken }));
     const win = await windowAt(launched.app, APP_URL);
     const row = `[data-row-id='ws:${first.id}']`;
     await win.waitForSelector(row);
@@ -1040,9 +1156,9 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
       expect((await hostsMenuRows(launched!.app)).map(r => r.checked)).toEqual([true, false, false]);
     }, { timeout: 30_000, interval: 100 });
     expect(await win.locator("[data-host-label]").textContent()).toBe(here);
-    // The app's own host was never stopped by the move.
-    await launched.app.close();
-    expect(await refused(home)).toBe(true);
+    // The app's own host was never stopped by the move, nor by the quit.
+    await quit(launched.app);
+    expect(await refused(home)).toBe(false);
   });
 
   it("a host under some other home is nothing to a launch that names none: the first launch runs on ~/.wsp", async () => {

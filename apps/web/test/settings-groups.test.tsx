@@ -400,7 +400,6 @@ describe("About and the newest release", () => {
     // An hour past the day, so the page's minute clock reads the same whole days as this one.
     checkedAt: new Date(Date.now() - 3 * DAY - 60 * 60_000).toISOString(),
     triedAt: new Date(Date.now() - 3 * DAY - 60 * 60_000).toISOString(),
-    shape: "app",
     ...over,
   });
   const shell = (app: string | undefined, host: string): void => {
@@ -440,7 +439,7 @@ describe("About and the newest release", () => {
     expect(latestWord()).toBe("0.3.0");
     expect(latest()?.title).toBe(ABOUT_WORDS.missedHover("3 d ago", builtWhen(tried)));
     for (const [state, word] of [["checking", "checking"], ["unreached", "unreached"], ["off", "off"]] as const) {
-      await show({ state, shape: "app", ...(state === "unreached" ? { triedAt: tried } : {}) });
+      await show({ state, ...(state === "unreached" ? { triedAt: tried } : {}) });
       expect(latestWord()).toBe(word);
       expect(inks()).toContain("text-muted-foreground");
     }
@@ -480,7 +479,7 @@ describe("About and the newest release", () => {
     fireEvent.click(screen.getByRole("button", { name: ABOUT_WORDS.releases }));
     expect(opened.at(-1)).toMatch(/\/releases$/);
     // Under the switch no number stands, so nothing is offered off a stale one.
-    await show({ state: "off", shape: "app" });
+    await show({ state: "off" });
     expect(buttons()).toEqual([ABOUT_WORDS.releases]);
   });
 
@@ -614,7 +613,7 @@ describe("About and the newest release", () => {
 
   it("shows the host's own refusal as it arrives, whatever road it names, and draws no Restart", async () => {
     shell("0.2.0", "0.2.0");
-    useStore.setState({ release: read("0.3.0", { shape: "app", installed: "0.3.0", restartRefusal: HOST_NO_RESTART_LINE }) });
+    useStore.setState({ release: read("0.3.0", { installed: "0.3.0", restartRefusal: HOST_NO_RESTART_LINE }) });
     await mount({}, "about");
     expect(buttons()).toEqual([ABOUT_WORDS.get("0.3.0"), ABOUT_WORDS.releases]);
     expect(hostHover()).toBe(ABOUT_WORDS.hostInstalledHover("0.3.0", HOST_NO_RESTART_LINE));
@@ -646,7 +645,7 @@ describe("About and the newest release", () => {
     expect(document.querySelectorAll("[data-slot=sidebar] [data-settings-meta]").length).toBe(1);
     await show(read("0.2.0"));
     expect(aboutMeta()).toBeUndefined();
-    await show({ state: "unreached", shape: "app" });
+    await show({ state: "unreached" });
     expect(aboutMeta()).toBeUndefined();
   });
 

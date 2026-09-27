@@ -2254,6 +2254,11 @@ export function goldenHead(manifest: GoldenManifest | undefined): GoldenVersion 
   return manifest?.versions.find(v => v.version === manifest.head);
 }
 
+/** Whether a host holds nothing for the app to show: no sealed golden to fork from and no workspace record, this
+ * computer's included. One rule for wsp up, which says there is no project yet, and the app, which opens on its
+ * first launch screens. */
+export const holdsNothing = (golden: GoldenManifest | undefined, workspaces: readonly unknown[]): boolean => goldenHead(golden) === undefined && workspaces.length === 0;
+
 /** What a fork of a version boots from and the lineage's word for it: the durable template once one is recorded,
  * the snapshot until then. The one rule for every road that creates from a version and every row that says whether
  * the version survives the provider losing its snapshot store; a durable version gets no word, since a word every

@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dialHost, hostTokenFor, localWiring, localWorkFolder, makeRuntime, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord } from "@wsp/host";
-import { WS_PATH, hostNoKeyLine } from "@wsp/protocol";
+import { SERVICE_MANAGERS, dialHost, httpProbe, localWiring, localWorkFolder, makeRuntime, noManagerLine, serviceAddressHere, serviceTag, severalAccountHostsLine, startHost, writeHost, type CliIO, type HostHandle, type HostRecord, type ServiceDeps, type ServiceRunner } from "@wsp/host";
+import { hostNoKeyLine } from "@wsp/protocol";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { copyingFake, fakeDaemonStart } from "../../../packages/host/test/verbs-fixture.js";
-import { hostTokenMatches, locateHost, openHost, statePathIn, userDataIn, type HostSession } from "../src/host-lifecycle.js";
-import { checkSetup } from "../src/setup.js";
+import { ensureService, firstLaunch, homeOf, hostTokenMatches, openHost, runningHere, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type OpenHostOptions, type ServiceRoad } from "../src/host-lifecycle.js";
 
 const PAGE = `<!doctype html>
 <html><head><title>wsp</title></head>
@@ -57,8 +56,6 @@ async function bootOf(url: string): Promise<{ wsPort: number; tokenHash?: string
   return m ? (JSON.parse(m[1]!) as { wsPort: number; tokenHash?: string; token?: string }) : undefined;
 }
 
-/** A sha256 in hex, which is what the loopback page carries of the host's token. */
-const DIGEST = /^[0-9a-f]{64}$/;
 const digestOf = (token: string): string => createHash("sha256").update(token).digest("hex");
 
 /** A host's page as another process on this computer sees it pass by: every request the window sent, with the
@@ -90,63 +87,196 @@ const ipv6Loopback = await new Promise<boolean>(resolve => {
   probe.listen(0, "::1", () => probe.close(() => resolve(true)));
 });
 
-async function refused(url: string): Promise<boolean> {
-  try {
-    await fetch(url);
-    return false;
-  } catch {
-    return true;
-  }
+/** A lock and a token file as a host serving this state file leaves them beside it. */
+function serving(statePath: string, h: HostHandle, over: Record<string, unknown> = {}): void {
+  writeFileSync(join(statePath, "..", "host.lock"), JSON.stringify({ pid: process.pid, port: h.port, wsPort: h.wsPort, startedAt: new Date().toISOString(), ...over }));
+  writeFileSync(join(statePath, "..", "host-token"), `${h.authToken}\n`);
+}
+
+/** launchd as far as this window reads it: the real manager's unit files and lines, answered by a fake that serves
+ * a real host once a unit is loaded, as the shim's `wsp up` would, and takes it away at a bootout. */
+function fakeLaunchd(statePath: string, runtime: () => Runtime = testRuntime): { road: ServiceRoad & ServiceDeps; ran: string[][]; loaded: () => boolean; host: () => HostHandle | undefined; load: () => Promise<void> } {
+  const ran: string[][] = [];
+  let loaded = false;
+  let host: HostHandle | undefined;
+  const load = async (): Promise<void> => {
+    loaded = true;
+    host = await startHost({ runtime: runtime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    serving(statePath, host, { startedBy: "service" });
+  };
+  const run: ServiceRunner = async argv => {
+    ran.push([...argv]);
+    const verb = argv[1];
+    if (verb === "print") return loaded ? { code: 0, output: "state = running" } : { code: 113, output: "Could not find service" };
+    if (verb === "bootstrap") {
+      await load();
+      return { code: 0, output: "" };
+    }
+    if (verb === "bootout") {
+      loaded = false;
+      await host?.close();
+      host = undefined;
+      rmSync(join(statePath, "..", "host.lock"), { force: true });
+      return { code: 0, output: "" };
+    }
+    return { code: 1, output: `unexpected ${argv.join(" ")}` };
+  };
+  const road = {
+    platform: "darwin",
+    manager: SERVICE_MANAGERS.launchd,
+    run,
+    waitMs: 10_000,
+    answers: httpProbe,
+    keys: { env: {}, cwd: tmpdir() },
+    dial: dialHost,
+    stop: () => {},
+    here: async () => undefined,
+  };
+  return { road, ran, loaded: () => loaded, host: () => host, load };
 }
 
 describe("openHost", () => {
   let home: string;
-  let session: HostSession | undefined;
+  let statePath: string;
+  let shim: string;
   let existing: HostHandle | undefined;
+  let launchd: ReturnType<typeof fakeLaunchd>;
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "wsp-desktop-home-"));
+    statePath = join(home, "state.json");
+    shim = join(home, "bin", "wsp");
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_desktop_key");
     vi.stubEnv("HOME", home);
     vi.stubEnv("WSP_HOME", home);
+    launchd = fakeLaunchd(statePath);
   });
   afterEach(async () => {
-    await session?.close();
+    await launchd.host()?.close();
     await existing?.close();
-    session = undefined;
     existing = undefined;
     vi.unstubAllEnvs();
     rmSync(home, { recursive: true, force: true });
   });
 
-  function open(port: number, wsPort: number): Promise<HostSession> {
-    return openHost({
-      port,
-      wsPort,
-      statePath: join(home, "state.json"),
-      webDir: fakeWebDir(),
-      io: quietIO(),
-      runtime: testRuntime(),
-    });
+  const unitPath = (): string => SERVICE_MANAGERS.launchd.unit(serviceAddressHere(statePath)).path;
+
+  function open(over: Partial<OpenHostOptions> = {}, lines: string[] = []): Promise<HostSession> {
+    return openHost({ statePath, home, shim, io: quietIO(lines), service: launchd.road, ...over });
   }
 
-  it("the host inside the app writes every line it says, and one per refused frame, to host.log beside the state file", async () => {
-    const lines: string[] = [];
-    const statePath = join(home, "state.json");
-    session = await openHost({ port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), io: quietIO(lines), runtime: testRuntime() });
-    const ws = new WebSocket(`${session.url.replace(/^http/, "ws")}${WS_PATH}`);
-    const replies: { id?: number; ok?: boolean }[] = [];
-    ws.onmessage = m => replies.push(JSON.parse(String(m.data)) as { id?: number; ok?: boolean });
-    await new Promise(resolve => (ws.onopen = resolve));
-    ws.send(JSON.stringify({ id: 1, op: "auth", token: hostTokenFor(statePath) }));
-    ws.send(JSON.stringify({ id: 2, op: "workspaces.get", workspaceId: "nope" }));
-    await vi.waitFor(() => expect(replies.find(r => r.id === 2)).toMatchObject({ ok: false }));
-    ws.close();
-    const logged = readFileSync(join(home, "host.log"), "utf8").split("\n").filter(l => l !== "");
-    expect(logged.length).toBeGreaterThan(0);
-    expect(logged).toEqual(lines);
-    expect(logged.some(l => l.startsWith("refused workspaces.get "))).toBe(true);
-  }, 20_000);
+  it("installs the unit running the shim with the service mark when none is registered, loads it, waits for the lock, attaches", async () => {
+    const session = await open();
+    expect(launchd.ran.map(argv => argv.slice(0, 2).join(" "))).toEqual(["launchctl bootstrap"]);
+    const unit = readFileSync(unitPath(), "utf8");
+    expect(unitPath()).toBe(join(home, "Library", "LaunchAgents", `com.wsp.host.${serviceTag(statePath)}.plist`));
+    const words = [...unit.matchAll(/<string>([^<]*)<\/string>/g)].map(m => m[1]);
+    expect(words.slice(1, 5)).toEqual([shim, "up", "--state", statePath]);
+    expect(unit).toContain("<key>WSP_STARTED_BY</key><string>service</string>");
+    expect(unit).toContain(`<key>HOME</key><string>${home}</string>`);
+    expect(unit).toContain(`<key>WSP_HOME</key><string>${home}</string>`);
+    expect(unit).toContain(`<key>WorkingDirectory</key><string>${home}</string>`);
+    expect(unit).toContain(`<key>StandardOutPath</key><string>${join(home, "host.log")}</string>`);
+    expect(session).toMatchObject({ url: `http://127.0.0.1:${launchd.host()!.port}`, remote: false });
+    expect((await bootOf(session.url))?.tokenHash).toBe(digestOf(launchd.host()!.authToken));
+  });
+
+  it("a unit naming another shim is rewritten: the unit is stopped, written over, and loaded again", async () => {
+    const other = { ...serviceAddressHere(statePath), argv: ["/Applications/Old.app/wsp", "up"], cwd: home, env: {}, logPath: join(home, "host.log") };
+    mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
+    writeFileSync(unitPath(), SERVICE_MANAGERS.launchd.text(other));
+    // Loaded, and serving nothing: the old shim names an app that is gone, and launchd keeps starting it.
+    const run = launchd.road.run;
+    let first = true;
+    launchd.road.run = async (argv, waitMs) => {
+      if (first && argv[1] === "print") {
+        first = false;
+        return { code: 0, output: "state = spawn scheduled" };
+      }
+      return run(argv, waitMs);
+    };
+    await open();
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["bootout", "bootstrap"]);
+    expect(readFileSync(unitPath(), "utf8")).toContain(`<string>${shim}</string>`);
+    expect(readFileSync(unitPath(), "utf8")).not.toContain("Old.app");
+  });
+
+  it("a unit written as this launch would write it and let go by launchd is loaded, not rewritten", async () => {
+    await open();
+    await launchd.road.run(["launchctl", "bootout", "x"]);
+    const before = readFileSync(unitPath(), "utf8");
+    launchd.ran.length = 0;
+    await open();
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["print", "bootstrap"]);
+    expect(readFileSync(unitPath(), "utf8")).toBe(before);
+  });
+
+  it("waits past a page that answers before the host has written its token, which a start still in flight serves", async () => {
+    // The host binds its page, then sweeps and lists before it writes the token file beside the state: a window
+    // that read the page in that gap and compared digests would refuse its own host.
+    const run = launchd.road.run;
+    launchd.road.run = async (argv, waitMs) => {
+      if (argv[1] !== "bootstrap") return run(argv, waitMs);
+      const answered = await run(argv, waitMs);
+      rmSync(join(home, "host-token"));
+      setTimeout(() => writeFileSync(join(home, "host-token"), `${launchd.host()!.authToken}\n`), 400);
+      return answered;
+    };
+    const session = await open();
+    expect(session.url).toBe(`http://127.0.0.1:${launchd.host()!.port}`);
+  });
+
+  it("a serving host means no unit written", async () => {
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    serving(statePath, existing);
+    const session = await open();
+    expect(session.url).toBe(`http://127.0.0.1:${existing.port}`);
+    expect(launchd.ran).toEqual([]);
+    expect(existsSync(unitPath())).toBe(false);
+  });
+
+  it("two homes are two units, one per state file", async () => {
+    await open();
+    const other = join(home, "other");
+    mkdirSync(other);
+    const second = fakeLaunchd(join(other, "state.json"));
+    try {
+      await openHost({ statePath: join(other, "state.json"), home: other, shim, io: quietIO(), service: second.road });
+      const units = readdirSync(join(home, "Library", "LaunchAgents")).sort();
+      expect(units).toEqual([`com.wsp.host.${serviceTag(statePath)}.plist`, `com.wsp.host.${serviceTag(join(other, "state.json"))}.plist`].sort());
+    } finally {
+      await second.host()?.close();
+    }
+  });
+
+  it("the systemd table on Linux: the same plan, written as a user unit and started through systemctl", async () => {
+    const ran: string[][] = [];
+    const road = { ...launchd.road, platform: "linux", manager: SERVICE_MANAGERS.systemd, run: async (argv: readonly string[]) => {
+      ran.push([...argv]);
+      if (argv.at(-1)?.endsWith(".service") && argv.includes("restart")) await launchd.load();
+      return { code: 0, output: "" };
+    } };
+    await open({ service: road });
+    const unit = readFileSync(join(home, ".config", "systemd", "user", `wsp-host-${serviceTag(statePath)}.service`), "utf8");
+    expect(unit).toContain(`ExecStart='${shim}' 'up' '--state' '${statePath}'`);
+    expect(unit).toContain("Environment='WSP_STARTED_BY=service'");
+    expect(ran.map(argv => argv.slice(0, 3).join(" "))).toEqual(["systemctl --user daemon-reload", "systemctl --user enable", "systemctl --user restart"]);
+  });
+
+  it("refuses on a platform wsp writes no service for, in the one sentence wsp up --service says", async () => {
+    await expect(open({ service: { ...launchd.road, platform: "win32", manager: undefined } })).rejects.toThrow(noManagerLine("win32"));
+  });
+
+  it("a service that never serves says so, with the end of its log", async () => {
+    const road = { ...launchd.road, waitMs: 300, run: async () => ({ code: 0, output: "" }) };
+    writeFileSync(join(home, "host.log"), "wsp: this state file was written by a newer wsp\n");
+    await expect(open({ service: road })).rejects.toThrow(/wsp did not start within .*host\.log\nwsp: this state file was written by a newer wsp/s);
+  });
+
+  it("a refused load is the manager's own line", async () => {
+    const road = { ...launchd.road, run: async (argv: readonly string[]) => ({ code: 5, output: `Bootstrap failed: 5: Input/output error (${argv[1]})` }) };
+    await expect(open({ service: road })).rejects.toThrow(/launchctl bootstrap .* exited 5 and said: Bootstrap failed: 5/);
+  });
 
   /** A record wsp hosts wrote off the account's listing: the address the relay named, the key pinned at first
    * sight, and no token until a dial admits this computer over there. */
@@ -197,141 +327,86 @@ describe("openHost", () => {
     };
   }
 
-  function openWith(dial: typeof dialHost, lines: string[] = [], runtime: Runtime = testRuntime()): Promise<HostSession> {
-    return openHost({ port: 0, wsPort: 0, statePath: join(home, "state.json"), webDir: fakeWebDir(), io: quietIO(lines), runtime, dial });
-  }
+  const openWith = (dial: typeof dialHost, lines: string[] = []): Promise<HostSession> => open({ dial }, lines);
 
-  it("opens on the one host the account names, after one dial that admits this computer there, and starts no host here", async () => {
+  /** The window opened on this computer's own service, which it installed and loaded. */
+  const onServiceHere = (session: HostSession): void => {
+    expect(session).toMatchObject({ remote: false, url: `http://127.0.0.1:${launchd.host()!.port}` });
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["bootstrap"]);
+  };
+
+  it("the account's host means no unit here: one dial admits this computer there and nothing is installed or started on this one", async () => {
     writeHost(home, "box", accountRecord());
     const { dial, dialled, windows } = admittingDial({ deviceId: "d_2", deviceToken: "tok-fresh" });
-    const runtime = testRuntime();
-    const closed = vi.spyOn(runtime, "close");
-    session = await openWith(dial, [], runtime);
+    const session = await openWith(dial);
     expect(dialled).toEqual(["box"]);
     // A person is watching an empty window while this dial waits, so it is well under the fifteen seconds a line
     // at a terminal gives a relayed road, and over the hold that road was measured at, which the constant names.
     expect(windows[0]).toBeGreaterThan(0);
     expect(windows[0]).toBeLessThan(10_000);
-    // The runtime the setup gate built serves nothing here, so it goes rather than lingering behind the window.
-    expect(closed).toHaveBeenCalledOnce();
-    expect(session).toMatchObject({ url: "https://hbox1.boxes.example", owned: false, remote: true, alias: "box", label: "box", deviceToken: "tok-fresh" });
-    // Nothing was started on this computer: no lock beside the state file, and the token the page is handed is
-    // the one the dial wrote into the record.
+    expect(session).toMatchObject({ url: "https://hbox1.boxes.example", remote: true, alias: "box", label: "box", deviceToken: "tok-fresh" });
+    expect(launchd.ran).toEqual([]);
+    expect(existsSync(unitPath())).toBe(false);
     expect(existsSync(join(home, "host.lock"))).toBe(false);
   });
 
-  it("starts a host here when the one host on the account is this computer, which is where a line with no name goes anyway", async () => {
+  it("opens on the service here when the one host on the account is this computer, which is where a line with no name goes anyway", async () => {
     writeHost(home, "macbook", accountRecord({ via: { kind: "account", hostId: "hmac" } }));
     linkedAs("hmac");
     const { dial, dialled } = admittingDial();
-    session = await openWith(dial);
+    onServiceHere(await openWith(dial));
     expect(dialled).toEqual([]);
-    expect(session).toMatchObject({ owned: true, remote: false });
-    expect(session.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-  }, 20_000);
+  });
 
-  it("starts a host here and says why when the account names several hosts", async () => {
+  it("opens on the service here and says why when the account names several hosts", async () => {
     writeHost(home, "box", accountRecord());
     writeHost(home, "attic", accountRecord({ url: "https://hattic.boxes.example", hostKey: "SHA256:attic", via: { kind: "account", hostId: "hattic" } }));
     const lines: string[] = [];
     const { dial, dialled } = admittingDial();
-    session = await openWith(dial, lines);
+    onServiceHere(await openWith(dial, lines));
     expect(dialled).toEqual([]);
-    expect(session.owned).toBe(true);
     expect(lines.join("\n")).toContain(severalAccountHostsLine(["attic", "box"]));
-  }, 20_000);
+  });
 
-  it("starts a host here over a record a pairing code left, which names no account and is read as no record", async () => {
+  it("opens on the service here over a record a pairing code left, which names no account and is read as no record", async () => {
     mkdirSync(join(home, "hosts"), { recursive: true });
     writeFileSync(join(home, "hosts", "lan.json"), JSON.stringify({ url: "http://192.168.1.9:4400", deviceId: "d_9", deviceToken: "tok-lan", hostKey: "SHA256:lan", pairedAt: "2026-09-01T00:00:00.000Z" }));
     const { dial, dialled } = admittingDial();
-    session = await openWith(dial);
+    onServiceHere(await openWith(dial));
     expect(dialled).toEqual([]);
-    expect(session).toMatchObject({ owned: true, remote: false });
-  }, 20_000);
+  });
 
-  it("starts a host here and prints the host's own sentence when the account's host refuses this computer", async () => {
+  it("opens on the service here and prints the host's own sentence when the account's host refuses this computer", async () => {
     writeHost(home, "box", accountRecord());
     const lines: string[] = [];
     const refusing: typeof dialHost = async () => {
       throw Object.assign(new Error("this host admits no device under that key"), { kind: "auth" });
     };
-    session = await openWith(refusing, lines);
-    expect(session).toMatchObject({ owned: true, remote: false });
+    onServiceHere(await openWith(refusing, lines));
     expect(lines.join("\n")).toContain("this host admits no device under that key");
     // The record is left as it was: the window said what happened and opened here, and the Hosts menu still holds it.
     expect(existsSync(join(home, "hosts", "box.json"))).toBe(true);
-  }, 20_000);
+  });
 
   it("refuses a record holding a token and no key for the host before it dials, as every line aimed at one is refused", async () => {
     writeHost(home, "box", accountRecord({ deviceToken: "tok-held", hostKey: undefined }));
     const lines: string[] = [];
     const { dial, dialled } = admittingDial({ deviceId: "d_2", deviceToken: "tok-fresh" });
-    session = await openWith(dial, lines);
+    onServiceHere(await openWith(dial, lines));
     expect(dialled).toEqual([]);
-    expect(session).toMatchObject({ owned: true, remote: false });
     expect(lines.join("\n")).toContain(hostNoKeyLine("box"));
-  }, 20_000);
-
-  it("starts the host on a free port and serves the app with the digest of its token, never the token", async () => {
-    session = await open(0, 0);
-    expect(session.owned).toBe(true);
-    expect(session.port).toBeGreaterThan(0);
-    expect(session.url).toBe(`http://127.0.0.1:${session.port}`);
-    const boot = await bootOf(session.url);
-    expect(boot?.tokenHash).toMatch(DIGEST);
-    expect(boot?.token).toBeUndefined();
-    expect(boot?.wsPort).toBeGreaterThan(0);
   });
 
-  it("stops the host it started when closed", async () => {
-    session = await open(0, 0);
-    const url = session.url;
-    await session.close();
-    session = undefined;
-    expect(await refused(url)).toBe(true);
-  });
-
-  it("starts its own host rather than attaching to a wsp host on the port no lock beside this state file names", async () => {
+  it("starts the service rather than attaching to a wsp host on a port no lock beside this state file names", async () => {
     // Any login on this computer can bind a port and serve a page with the boot line in it; the lock beside the
     // state file is what says a host of the owner's is serving, and there is none here.
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
-    session = await open(existing.port, 0);
-    expect(session.owned).toBe(true);
+    const session = await open();
     expect(session.port).not.toBe(existing.port);
-    expect((await bootOf(session.url))?.tokenHash).toMatch(DIGEST);
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["bootstrap"]);
   });
 
-  it("falls back to free ports when the defaults are held by something else", async () => {
-    const other = createServer((_req, res) => res.end("nope"));
-    const port = await listen(other);
-    try {
-      session = await open(port, 0);
-      expect(session.owned).toBe(true);
-      expect(session.port).not.toBe(port);
-      expect((await bootOf(session.url))?.tokenHash).toBeDefined();
-    } finally {
-      await closeServer(other);
-    }
-  });
-
-  it("falls back to free ports when only the websocket port is taken", async () => {
-    const taken = createTcpServer();
-    const wsPort = await listen(taken);
-    const free = createTcpServer();
-    const port = await listen(free);
-    await closeServer(free);
-    try {
-      session = await open(port, wsPort);
-      expect(session.owned).toBe(true);
-      const boot = await bootOf(session.url);
-      expect(boot?.wsPort).not.toBe(wsPort);
-    } finally {
-      await closeServer(taken);
-    }
-  });
-
-  it("attaches to the host named in host.lock when its page carries the digest of the token beside this state file, whatever port it was asked for, and sends that page nothing", async () => {
+  it("attaches to the host named in host.lock when its page carries the digest of the token beside this state file, and sends that page nothing", async () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
     // The page passes through a recorder standing where the lock says the host is, so what the window sent to
     // settle the question is read: a squatter on that port would read the same bytes.
@@ -341,12 +416,8 @@ describe("openHost", () => {
       writeFileSync(join(home, "host.lock"), JSON.stringify(lock));
       writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
 
-      session = await open(0, 0);
-      expect(session.owned).toBe(false);
+      const session = await open();
       expect(session.url).toBe(`http://127.0.0.1:${seen.port}`);
-      await session.close();
-      session = undefined;
-      expect((await bootOf(`http://127.0.0.1:${existing.port}`))?.tokenHash).toBe(digestOf(existing.authToken));
       expect(JSON.parse(readFileSync(join(home, "host.lock"), "utf8"))).toEqual(lock);
       // One read of the page, carrying no bearer and no token: the compare happened here, against the file.
       expect(seen.requests.length).toBeGreaterThan(0);
@@ -359,45 +430,12 @@ describe("openHost", () => {
     }
   });
 
-  it("opens on a computer with no provider key, over the state file this computer is recorded in", async () => {
-    // No key in any layer, and the window's io answers nothing: the road that asks for one dies here.
-    vi.stubEnv("SOLARI_API_KEY", "");
-    vi.stubEnv("ANTHROPIC_API_KEY", "");
-    const statePath = join(home, "state.json");
-    // The copy road alone is faked: every workspace here is a copy, and this checkout stages no daemon binary.
-    const recorded = makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(home, process.env, fakeDaemonStart, statePath, copyingFake()));
-    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-lifecycle-")));
-    execFileSync("git", ["init", "-q", folder]);
-    const project = await recorded.projects.add({ source: folder, name: "thisbox" });
-    await recorded.workspaces.create({ project: project.id, name: "thisbox" });
-    await recorded.close();
-
-    // The two steps main.ts takes, over the runtime the gate built rather than a fixture's.
-    const state = await checkSetup({ statePath });
-    expect(state.ready).toBe(true);
-    session = await openHost({ port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), io: quietIO(), ...(state.ready ? { runtime: state.runtime } : {}) });
-    expect(session.owned).toBe(true);
-    expect((await bootOf(session.url))?.tokenHash).toMatch(DIGEST);
-    // The workspace is a copy of a folder on this computer, so the folder its commands start in is here.
-    expect(existsSync(localWorkFolder(home))).toBe(true);
-  });
-
-  it("is not ready rather than failing when there is no key, no golden and no workspace", async () => {
-    vi.stubEnv("SOLARI_API_KEY", "");
-    vi.stubEnv("ANTHROPIC_API_KEY", "");
-    // Nothing recorded: the gate answers before any host is started, so the window has a first launch to show.
-    expect(await checkSetup({ statePath: join(home, "state.json") })).toEqual({ ready: false });
-    // And a first launch that ends there leaves the person's home as it was: no workspace was recorded here.
-    expect(existsSync(localWorkFolder(home))).toBe(false);
-  });
-
-  it("refuses a loopback lock whose page carries another token's digest than the file beside the state, or none, and starts nothing", async () => {
+  it("refuses a loopback lock whose page carries another token's digest than the file beside the state, or none, and installs nothing", async () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
     writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() }));
     writeFileSync(join(home, "host-token"), "a-token-of-some-other-host\n");
-    await expect(open(0, 0)).rejects.toThrow(/holds .*host\.lock on port \d+ but the page it serves carries another token's digest/);
-    // The lock is the one the other process wrote: a host this window started would have taken it.
-    expect((JSON.parse(readFileSync(join(home, "host.lock"), "utf8")) as { port: number }).port).toBe(existing.port);
+    await expect(open()).rejects.toThrow(/holds .*host\.lock on port \d+ but the page it serves carries another token's digest/);
+    expect(launchd.ran).toEqual([]);
 
     // A page with the boot line and no digest at all: what a host bound beyond this computer serves, standing on a
     // loopback lock that says otherwise.
@@ -406,10 +444,11 @@ describe("openHost", () => {
     try {
       writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
       writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: barePort, wsPort: 0, startedAt: new Date().toISOString() }));
-      await expect(open(0, 0)).rejects.toThrow(/but the page it serves carries another token's digest/);
+      await expect(open()).rejects.toThrow(/but the page it serves carries another token's digest/);
     } finally {
       await closeServer(bare);
     }
+    expect(existsSync(unitPath())).toBe(false);
   });
 
   it("refuses a loopback lock with no wsp host answering on its port, which is the stale lock a squatter took", async () => {
@@ -417,7 +456,7 @@ describe("openHost", () => {
     const port = await listen(squatter);
     try {
       writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port, wsPort: 0, startedAt: new Date().toISOString() }));
-      await expect(open(0, 0)).rejects.toThrow(/but no wsp host answers there/);
+      await expect(open()).rejects.toThrow(/but no wsp host answers there/);
     } finally {
       await closeServer(squatter);
     }
@@ -426,101 +465,158 @@ describe("openHost", () => {
   it.runIf(ipv6Loopback)("dials a loopback lock where its address says that host answers, not this computer's other loopback name", async () => {
     // A host up with --listen ::1 binds a loopback address, so its page carries its token's digest, and it answers
     // there and nowhere else.
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "::1", statePath: join(home, "state.json") });
-    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, address: "::1", startedAt: new Date().toISOString() }));
-    writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
-    session = await open(0, 0);
-    expect(session.owned).toBe(false);
-    expect(session.url).toBe(`http://[::1]:${existing.port}`);
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "::1", statePath });
+    serving(statePath, existing, { address: "::1" });
+    expect((await open()).url).toBe(`http://[::1]:${existing.port}`);
   });
 
   it("attaches through the lock alone to a host bound beyond this computer, whose page carries no digest by design", async () => {
-    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "0.0.0.0", statePath: join(home, "state.json") });
-    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, address: "0.0.0.0", startedAt: new Date().toISOString() }));
+    existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0, listen: "0.0.0.0", statePath });
     // No token file is written and none is asked for: that page inlines no digest, and the lock is the whole reading.
-    session = await open(0, 0);
-    expect(session.owned).toBe(false);
-    expect(session.url).toBe(`http://127.0.0.1:${existing.port}`);
+    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: existing.port, wsPort: existing.wsPort, address: "0.0.0.0", startedAt: new Date().toISOString() }));
+    expect((await open()).url).toBe(`http://127.0.0.1:${existing.port}`);
   });
 
   it.runIf(process.getuid !== undefined && process.getuid() !== 0)("refuses a lock naming a process of another login, whatever answers on its port", async () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
-    writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: 1, port: existing.port, wsPort: existing.wsPort, startedAt: new Date().toISOString() }));
-    writeFileSync(join(home, "host-token"), `${existing.authToken}\n`);
-    await expect(open(0, 0)).rejects.toThrow(/but that process is not this login's/);
+    serving(statePath, existing, { pid: 1 });
+    await expect(open()).rejects.toThrow(/but that process is not this login's/);
   });
 
-  it("ignores a host.lock whose pid is gone and starts its own host", async () => {
+  it("ignores a host.lock whose pid is gone and starts the service", async () => {
     existing = await startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
-    const stale = { pid: deadPid(), port: existing.port, wsPort: existing.wsPort, startedAt: "2026-09-01T00:00:00.000Z" };
-    writeFileSync(join(home, "host.lock"), JSON.stringify(stale));
-
-    session = await open(0, 0);
-    expect(session.owned).toBe(true);
-    expect(session.port).not.toBe(existing.port);
-    const lock = JSON.parse(readFileSync(join(home, "host.lock"), "utf8")) as { pid: number; port: number };
-    expect(lock.pid).toBe(process.pid);
-    expect(lock.port).toBe(session.port);
+    serving(statePath, existing, { pid: deadPid() });
+    const session = await open();
+    expect(session.port).toBe(launchd.host()!.port);
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["bootstrap"]);
   });
 });
 
-describe("locateHost", () => {
-  let user: string;
-  let cwd: string;
-  let existing: HostHandle | undefined;
-  const alive = (h: HostHandle): string => JSON.stringify({ pid: process.pid, port: h.port, wsPort: h.wsPort, startedAt: new Date().toISOString() });
+describe("the first launch, read off the host", () => {
+  let home: string;
+  let statePath: string;
+  let host: HostHandle | undefined;
 
   beforeEach(() => {
-    user = mkdtempSync(join(tmpdir(), "wsp-desktop-user-"));
-    cwd = join(user, "cwd");
-    mkdirSync(cwd);
-    vi.stubEnv("HOME", user);
+    home = mkdtempSync(join(tmpdir(), "wsp-desktop-first-"));
+    statePath = join(home, "state.json");
   });
   afterEach(async () => {
-    await existing?.close();
-    existing = undefined;
+    await host?.close();
+    host = undefined;
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  async function served(runtime: Runtime): Promise<void> {
+    host = await startHost({ runtime, webDir: fakeWebDir(), port: 0, wsPort: 0 });
+    serving(statePath, host);
+  }
+
+  it("is the first launch where the host holds no golden and no workspace", async () => {
+    await served(testRuntime());
+    expect(await firstLaunch(statePath, home)).toBe(true);
+  });
+
+  it("is not where a golden is sealed, which is what wsp init leaves", async () => {
+    const store = memoryStore();
+    await store.put("goldens", "default", { head: 1, versions: [{ version: 1, snapshotId: "snap", baseTemplate: "base", setupSha: "x", createdAt: "2026-09-01T00:00:00Z" }] });
+    await served(createRuntime({ backend: stubBackend(), store, adapters: {} }));
+    expect(await firstLaunch(statePath, home)).toBe(false);
+  });
+
+  it("is not where a workspace of this computer is recorded, with no provider key at all", async () => {
+    vi.stubEnv("SOLARI_API_KEY", "");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    try {
+      // The copy road alone is faked: every workspace here is a copy, and this checkout stages no daemon binary.
+      const runtime = makeRuntime({}, statePath, undefined, process.env, undefined, localWiring(home, process.env, fakeDaemonStart, statePath, copyingFake()));
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-lifecycle-")));
+      execFileSync("git", ["init", "-q", folder]);
+      const project = await runtime.projects.add({ source: folder, name: "thisbox" });
+      await runtime.workspaces.create({ project: project.id, name: "thisbox" });
+      await served(runtime);
+      expect(await firstLaunch(statePath, home)).toBe(false);
+      expect(existsSync(localWorkFolder(home))).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe("quit and stop wsp", () => {
+  let home: string;
+  let statePath: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), "wsp-desktop-stop-"));
+    statePath = join(home, "state.json");
+    vi.stubEnv("HOME", home);
+  });
+  afterEach(() => {
     vi.unstubAllEnvs();
-    rmSync(user, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
   });
 
-  function fixture(): Promise<HostHandle> {
-    return startHost({ runtime: testRuntime(), webDir: fakeWebDir(), port: 0, wsPort: 0 });
+  const sessions = [
+    { id: "s_mac", workspaceId: "ws_mac", status: "running" as const },
+    { id: "s_asks", workspaceId: "ws_mac", status: "running" as const },
+    { id: "s_done", workspaceId: "ws_mac", status: "completed" as const },
+    { id: "s_box", workspaceId: "ws_box", status: "running" as const },
+  ];
+  const workspaces = [
+    { id: "ws_mac", kind: "local" as const },
+    { id: "ws_box", kind: "cloud" as const },
+  ];
+
+  /** A socket to the host here answering the two lists and taking each interrupt it is sent. */
+  function hostHere(): { dial: typeof dialHost; interrupted: string[] } {
+    const interrupted: string[] = [];
+    const client = {
+      request: async <T extends Record<string, unknown>>(op: string, params?: Record<string, unknown>): Promise<T> => {
+        if (op === "sessions.list") return { sessions } as unknown as T;
+        if (op === "workspaces.list") return { workspaces } as unknown as T;
+        if (op === "sessions.interrupt") interrupted.push(String(params?.["sessionId"]));
+        return {} as T;
+      },
+      events: async () => {},
+      onFrame: () => () => {},
+      closed: Promise.resolve(),
+      closeWords: () => "",
+      close: () => {},
+      terminate: () => {},
+    };
+    return { interrupted, dial: async () => client };
   }
 
-  /** A home with a lock naming the fixture and the token it serves, the way a host serving it leaves things. */
-  function homeServedBy(h: HostHandle, lock: string = alive(h)): string {
-    const dir = mkdtempSync(join(tmpdir(), "wsp-desktop-custom-"));
-    writeFileSync(join(dir, "host.lock"), lock);
-    writeFileSync(join(dir, "host-token"), `${h.authToken}\n`);
-    return dir;
-  }
-
-  it("finds nothing to attach to where a wsp host is on a port and no lock beside the resolved home names it", async () => {
-    existing = await fixture();
-    expect(await locateHost({ packaged: false, cwd })).toEqual({ home: join(user, ".wsp") });
+  it("counts the turns running on this computer's own workspaces, never a box's, whose turns go on without wsp here", () => {
+    expect(runningHere(sessions, workspaces)).toEqual(["s_mac", "s_asks"]);
   });
 
-  it("names ~/.wsp with nothing to attach to when there is no host", async () => {
-    expect(await locateHost({ packaged: false, cwd })).toEqual({ home: join(user, ".wsp") });
+  it("interrupts every turn on this computer, then stops the service and takes its unit away", async () => {
+    const launchd = fakeLaunchd(statePath);
+    await ensureService({ statePath, home, shim: join(home, "bin", "wsp"), service: launchd.road });
+    const { dial, interrupted } = hostHere();
+    expect(await workingHere(statePath, home, dial)).toBe(2);
+    launchd.ran.length = 0;
+    await stopWsp(statePath, home, launchd.road, dial);
+    expect(interrupted).toEqual(["s_mac", "s_asks"]);
+    expect(launchd.ran.map(argv => argv[1])).toEqual(["print", "bootout"]);
+    expect(launchd.loaded()).toBe(false);
+    expect(existsSync(SERVICE_MANAGERS.launchd.unit(serviceAddressHere(statePath)).path)).toBe(false);
+    expect(existsSync(join(home, "host.lock"))).toBe(false);
+    expect(await workingHere(statePath, home, dial)).toBe(0);
   });
+});
 
-  it("opens on the home WSP_HOME names, and a host serving some other home is not attached to", async () => {
-    // The one way a window opens on a home somebody moved is being launched with that home named; a file under the
-    // person's own home saying where a host went is a file two hosts would write.
-    existing = await fixture();
-    const custom = homeServedBy(existing);
-    const env = join(user, "env-home");
-    const found = await locateHost({ packaged: false, env, cwd });
-    expect(found).toEqual({ home: env });
-    expect(await locateHost({ packaged: false, env: custom, cwd })).toMatchObject({ home: custom, session: { url: `http://127.0.0.1:${existing.port}` } });
-  });
-
-  it("attaches through the lock next to the state file of the home it resolved", async () => {
-    existing = await fixture();
-    const env = homeServedBy(existing);
-    const found = await locateHost({ packaged: false, env, cwd });
-    expect(found.home).toBe(env);
-    expect(found.session?.url).toBe(`http://127.0.0.1:${existing.port}`);
+describe("homeOf", () => {
+  it("names ~/.wsp where the launch names no home, and the home WSP_HOME names where it does", () => {
+    vi.stubEnv("HOME", "/Users/someone");
+    try {
+      expect(homeOf({ packaged: true, cwd: "/" })).toBe(join("/Users/someone", ".wsp"));
+      expect(homeOf({ packaged: true, cwd: "/", env: "/tmp/elsewhere" })).toBe("/tmp/elsewhere");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

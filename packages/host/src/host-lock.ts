@@ -16,14 +16,13 @@ export interface HostLock {
   startedAt: string;
   /** What brought this host up, where wsp brought it up itself: a verb that needed one, the wsp up a person typed,
    * or this computer's own manager holding the unit for the state file. wsp down stops any of them, and a second
-   * wsp up is told so. Absent is a host wsp did not start from the command line, which is the app's own, and
-   * nothing here may stop that one. */
+   * wsp up is told so. Absent is a host a process serves inside itself, which nothing here may stop. */
   startedBy?: HostStarted;
 }
 
 /** The three roads a host is started by, as the lock records them: two a person's command line takes, and the
  * service this computer's own manager holds. */
-export type HostStarted = Exclude<HostShape, "app">;
+export type HostStarted = HostShape;
 
 /** The variable a host something else started carries. A verb's own child and the service's unit each mark the
  * host they start, so wsp down tells them from a host a person is holding open in a terminal, and a client tells

@@ -177,11 +177,11 @@ describe("the login shell PATH", () => {
     const main = readFileSync(new URL("../../../apps/desktop/src/main.ts", import.meta.url), "utf8");
     const shim = main.indexOf("installCommand();");
     const read = main.indexOf("await adoptLoginPath(");
-    const gate = main.indexOf("await locate()");
+    const service = main.indexOf("const on = await attach()");
     expect(shim, "the desktop never writes the wsp command").toBeGreaterThanOrEqual(0);
     expect(read, "the desktop never reads the login shell PATH").toBeGreaterThanOrEqual(0);
     expect(shim, "the read waits on a shell before the command is written").toBeLessThan(read);
-    expect(read, "the setup gate builds its runtime before the read").toBeLessThan(gate);
+    expect(read, "the service is written before the login shell PATH is read").toBeLessThan(service);
   });
 });
 
