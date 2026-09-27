@@ -8,7 +8,7 @@ import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./contex
 import { deepLinks, linkInArgv } from "./deep-link.js";
 import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, type BundleShell } from "./get-bundle.js";
-import { firstLaunch, homeOf, openHost, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch } from "./host-lifecycle.js";
+import { homeOf, openHost, openHostReady, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch, type OpenHostOptions } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
 import { sayOutside, showBadge, type Notifier } from "./needs-you.js";
@@ -247,8 +247,12 @@ function where(): { home: string; statePath: string } {
 /** The host the window opens on: the one serving this launch's state file, the account's, or this computer's own
  * service, installed and started first where it is not serving. */
 function attach(): Promise<HostSession> {
+  return openHost(hostOptions());
+}
+
+function hostOptions(): OpenHostOptions {
   const { home, statePath } = where();
-  return openHost({ statePath, home, shim: shimPath(wspHome()), io, service: systemService() });
+  return { statePath, home, shim: shimPath(wspHome()), io, service: systemService() };
 }
 
 /** The window, on the host it was handed. */
@@ -421,9 +425,9 @@ app
     // Then, before the service is written and before the first launch reads the agents on this computer: a window
     // opened from Finder or the Dock was handed launchd's PATH, and the service runs with the PATH this launch holds.
     await adoptLoginPath(line => io.log(line));
-    const on = await attach();
-    const { home, statePath } = where();
-    if (on.remote || !(await firstLaunch(statePath, home))) await showApp(on);
+    // Read across a restart: a launch that meets the host on its way down attaches again to the one coming up.
+    const { session: on, first } = await openHostReady(hostOptions());
+    if (!first) await showApp(on);
     else await showOnboarding();
   })
   .catch((e: unknown) => {
