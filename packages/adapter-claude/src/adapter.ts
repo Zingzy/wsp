@@ -7,7 +7,7 @@ import { ASIDE_WALL_MS, INTERRUPT_GRACE_MS, PERMISSION_ALLOW, PERMISSION_DENY, R
 import type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, ExecStream, ExecStreamFactory, HarnessCatalogProbe, McpServerSpec, PermissionAsk, PermissionOutcome, ScreenCommand, SessionAsker, SessionHarness, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult, TurnStatus } from "@wsp/protocol";
 import { SKIP_PROMPTS_MODE, controlAllowLine, controlAnswerLine, controlErrorLine, controlLine, modeOptionOn, setModeLine } from "./permissions.js";
 import { CLAUDE_SCREEN_COMMANDS, catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
-import { asideAnswer, asideCommand } from "./aside.js";
+import { asideAnswer, asideCommand, forkCleanupCommand } from "./aside.js";
 import { parseRename, parseSessionTitle, parseTitleFor, renameCommand, sessionTitleCommand, titleForCommand } from "./session-title.js";
 import { buildCommand, buildEnv, newSessionId, userMessageLine } from "./landmines.js";
 import { shellCwdAfter } from "./shell-cwd.js";
@@ -751,6 +751,14 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     return follow({ stream, localId, announced: false, command, onEvent: options.onEvent });
   };
 
+  /** Removes the fork's file on the same road, once the side question's own run has ended; a removal that fails leaves
+   * the answer standing. */
+  const removeFork = async (fork: string): Promise<void> => {
+    const cleanup = deps.exec(forkCleanupCommand({ fork, configDir: deps.configDir }), { env: { ...env } });
+    for await (const _ of cleanup.lines);
+    await cleanup.exited;
+  };
+
   /** One run on the turn's road and environment, read to its end so the answer lands after the fork's file is gone. */
   const aside = async (q: AsideQuestion): Promise<AsideAnswer> => {
     const fork = newSessionId();
@@ -764,6 +772,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     }, wallMs);
     let answer: AsideAnswer | { error: string } | undefined;
     const said: string[] = [];
+    let code: number | null;
     try {
       for await (const raw of stream.lines) {
         const event = parseLine(raw);
@@ -777,10 +786,13 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         stream.closeInput();
         void endAfterResult(stream, deps.resultExitMs ?? RUN_EXIT_MS, deps.interruptGraceMs ?? INTERRUPT_GRACE_MS).catch(() => {});
       }
+      code = await stream.exited;
     } finally {
       clearTimeout(wall);
+      // Every road out, a transport that threw included, waits for the run to end and then removes the fork's file.
+      await stream.exited.catch(() => null);
+      await removeFork(fork).catch(() => {});
     }
-    const code = await stream.exited;
     if (answer !== undefined) {
       if ("error" in answer) throw new Error(answer.error);
       return answer;

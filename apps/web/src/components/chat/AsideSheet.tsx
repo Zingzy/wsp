@@ -7,7 +7,7 @@ import ChatMarkdown from "../ChatMarkdown";
 import { useAppDark } from "../../settings/theme.js";
 import { RefusalSlot } from "../../settings/sheetParts.js";
 import { Crab } from "../status/Crab.js";
-import { Button, NEUTRAL_RING } from "../ui/button.js";
+import { Button } from "../ui/button.js";
 import { Dialog, DialogClose, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog.js";
 
 export function AsideSheet({ question, answer, error, onClose }: { question: string; answer?: string; error?: string; onClose: () => void }) {
@@ -37,7 +37,7 @@ export function AsideSheet({ question, answer, error, onClose }: { question: str
           )}
         </DialogPanel>
         <DialogFooter>
-          <DialogClose render={<Button variant="outline" className={NEUTRAL_RING} />}>Close</DialogClose>
+          <DialogClose render={<Button variant="outline" />}>Close</DialogClose>
         </DialogFooter>
       </DialogPopup>
     </Dialog>

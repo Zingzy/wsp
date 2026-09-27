@@ -15,7 +15,7 @@ export function ComposerModelChips({ workspaceId }: { workspaceId: string }) {
         <li
           key={`${pick.harness}:${pick.model}`}
           data-composer-model-chip={`${pick.harness}:${pick.model}`}
-          className="inline-flex h-6 min-w-0 items-center gap-1.5 rounded-lg border border-input bg-(--input-fill) ps-2 pe-0.5 text-xs text-foreground"
+          className="inline-flex h-6 min-w-0 items-center gap-1.5 rounded-md border border-input bg-(--input-fill) ps-2 pe-0.5 text-xs text-foreground"
         >
           <HarnessMark harness={pick.harness} label={agentName(pick.harness)} className="size-3.5 shrink-0" />
           <span className="truncate">{pick.label}</span>
@@ -23,7 +23,7 @@ export function ComposerModelChips({ workspaceId }: { workspaceId: string }) {
             type="button"
             aria-label={`Remove ${pick.label}`}
             onClick={() => togglePick(workspaceId, null, pick)}
-            className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <XIcon aria-hidden className="size-3" />
           </button>

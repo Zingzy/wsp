@@ -4,8 +4,8 @@
 // --no-session-persistence is not used: nothing read on 2.1.283 says it holds
 // for the file a fork copies the transcript into. The fork's id is pinned with
 // --session-id instead (the 2.1.283 binary refuses --session-id beside --resume
-// unless --fork-session is given) and the same line removes that file once the
-// CLI has exited.
+// unless --fork-session is given) and a second run removes that file once the
+// CLI's run has ended, since the kill a stuck one gets takes its shell with it.
 
 import { inFolder, shellQuote } from "@wsp/protocol";
 import type { AsideAnswer } from "@wsp/protocol";
@@ -14,7 +14,7 @@ import { UUID_RE, slugFlag } from "./landmines.js";
 export interface AsideCommandOptions {
   /** The thread's own session, as the CLI keys it. */
   session: string;
-  /** The id the fork is written under, minted by the caller so the line can remove it. */
+  /** The id the fork is written under, minted by the caller so its file can be removed after. */
   fork: string;
   /** The CLI's config dir on the machine, whose projects folder holds every session file. */
   configDir: string;
@@ -26,7 +26,7 @@ export interface AsideCommandOptions {
  * The one shell line a side question runs. --safe-mode leaves the person's hooks, MCP servers, plugins and skills out
  * and --strict-mcp-config leaves out any server a managed config adds, since --tools governs the built-in set alone
  * and an MCP tool or a SessionStart hook would run a command on the copy. The question is the one stream-json user
- * line on stdin, the same channel a turn takes, and the CLI's exit code is the line's.
+ * line on stdin, the same channel a turn takes.
  */
 export function asideCommand(options: AsideCommandOptions): string {
   const { session, fork, configDir, cwd, model } = options;
@@ -44,8 +44,15 @@ export function asideCommand(options: AsideCommandOptions): string {
     "--fork-session",
     `--session-id ${fork}`,
   ].join(" ");
-  const projects = shellQuote(`${configDir}/projects`);
-  return inFolder(cwd, `${claude}; code=$?; rm -rf ${projects}/*/${fork}.jsonl ${projects}/*/${fork}; exit $code`);
+  return inFolder(cwd, claude);
+}
+
+/** Removes the fork's transcript and its folder wherever the CLI filed them under the projects folder, leaving the
+ * thread's own session beside them. */
+export function forkCleanupCommand(options: { fork: string; configDir: string }): string {
+  if (!UUID_RE.test(options.fork)) throw new Error(`session identifier must be a UUID, got "${options.fork}"`);
+  const projects = shellQuote(`${options.configDir}/projects`);
+  return `rm -rf ${projects}/*/${options.fork}.jsonl ${projects}/*/${options.fork}`;
 }
 
 /** The answer a result event carries, or the CLI's own words for why it gave none. */

@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, deleteCopiesNotice, type PlaceView, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, deleteCopiesNotice, onDeleteOf, workspaceKind, type PlaceView, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
@@ -874,6 +874,18 @@ describe("one send to several models", () => {
     });
     // One head carrying the task, and under it a tile per model in the order the send made them, each on the rail.
     expect(group.querySelector("[data-attempt-title]")!.textContent).toBe("fix the flaky login test");
+    // The head is a one-line row of the sidebar's own, 36 px, a control and not a title above a list: it names how
+    // many copies it holds and folds them under it.
+    const head = group.querySelector<HTMLElement>("[data-attempt-head]")!;
+    expect(head.tagName).toBe("BUTTON");
+    expect(head.className).toContain("h-9");
+    expect(head.getAttribute("aria-expanded")).toBe("true");
+    expect(head.querySelector("[data-attempt-count]")!.textContent).toBe("3");
+    fireEvent.click(head);
+    expect(head.getAttribute("aria-expanded")).toBe("false");
+    expect(group.querySelectorAll("[data-sidebar-row]")).toHaveLength(0);
+    fireEvent.click(head);
+    expect(head.getAttribute("aria-expanded")).toBe("true");
     await waitFor(() => expect([...group.querySelectorAll<HTMLElement>("[data-sidebar-row] [data-thread-title]")].map(t => t.textContent)).toEqual(["Opus 5", "Sonnet 5", "GPT-6 Astra"]));
     expect(rowIds()).toEqual(["thread:th_alone", "thread:th_opus", "thread:th_sonnet", "thread:th_astra"]);
     for (const id of ["th_opus", "th_sonnet", "th_astra"]) expect(depthOf(document.querySelector<HTMLElement>(`[data-row-id='thread:${id}']`)!)).toBe(1);
@@ -893,7 +905,10 @@ describe("one send to several models", () => {
     act(() => useContextMenuStore.getState().choose("keep"));
     let dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByRole("heading").textContent).toBe("Delete the other 2 copies?");
-    expect(dialog.textContent).toContain(deleteCopiesNotice(2, 2));
+    // Each copy's computer in its own kind's words, which a copy's row carries; these rows are forks on a cloud.
+    const kept = [OPUS, ASTRA].map(w => ({ name: w.name, kind: workspaceKind(w), ...(w.copy !== undefined ? { copy: w.copy } : {}) }));
+    expect(dialog.textContent).toContain(deleteCopiesNotice(kept, 2));
+    expect(dialog.textContent).toContain(onDeleteOf(workspaceKind(OPUS), OPUS.copy).asked);
     // The dialog's own confirm is the one place red stands at rest: the solid destructive button.
     expect(within(dialog).getByRole("button", { name: "Delete" }).className).toContain("bg-destructive");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));

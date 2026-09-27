@@ -12,7 +12,9 @@ import {
   INTERRUPT_GRACE_MS,
   PERMISSION_ALLOW,
   PERMISSION_DENY,
+  ASIDE_WALL_MS,
   RUN_EXIT_MS,
+  asideWallLine,
   codexKeyRefusedLine,
   codexMissingEnvLine,
   codexNotSignedInLine,
@@ -113,6 +115,8 @@ export interface CodexAdapterDeps {
   resultExitMs?: number;
   /** How long a run of Reconnecting errors with no turn progress may last before the turn is failed. */
   reconnectStallMs?: number;
+  /** How long a side question may run before its process is ended; ASIDE_WALL_MS unless a test says otherwise. */
+  asideWallMs?: number;
 }
 
 export interface CodexAdapter {
@@ -488,6 +492,17 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
       }
     };
 
+    /** A side question's own limit: a fork that never completes its turn and never says Reconnecting would hold its
+     * process and the window's request for good. */
+    const asideWallMs = deps.asideWallMs ?? ASIDE_WALL_MS;
+    const asideWall =
+      o.aside === true
+        ? setTimeout(() => {
+            words = { line: asideWallLine(asideWallMs) };
+            void escalate();
+          }, asideWallMs)
+        : undefined;
+
     const finished = (async (): Promise<TurnResult> => {
       let streamError: string | undefined;
       try {
@@ -518,6 +533,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         streamError = cause instanceof Error ? cause.message : String(cause);
       }
       const exitCode = await stream.exited;
+      if (asideWall !== undefined) clearTimeout(asideWall);
       exited = true;
       progress();
       for (const askId of [...pending.keys()]) closeAsk(askId, "cancelled");

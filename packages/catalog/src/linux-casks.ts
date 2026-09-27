@@ -94,7 +94,6 @@ export const KUBECTL: LinuxCask = {
 };
 
 const CURSOR_HOME = "/opt/cursor-agent";
-const CURSOR_BINS = ["agent", "cursor-agent"];
 
 /** Cursor publishes a tarball per version and arch and no sum, and its own installer checks none, so the sums are the
  * tarballs' own as read on 2026-09-27 at the address that installer (https://cursor.com/install) names. */
@@ -122,10 +121,10 @@ export const CURSOR: LinuxCask = {
     `rm -rf ${CURSOR_HOME}`,
     `mkdir -p ${CURSOR_HOME}`,
     `tar --strip-components=1 -xzf "$tmp/$pkg" -C ${CURSOR_HOME}`,
-    ...CURSOR_BINS.map(b => `ln -sf ${CURSOR_HOME}/cursor-agent /usr/local/bin/${b}`),
+    `ln -sf ${CURSOR_HOME}/cursor-agent /usr/local/bin/cursor-agent`,
     'echo "WSP_ROAD release cursor-agent-$ver-linux-$a $sha $ver"',
   ].join("\n"),
-  uninstall: `rm -rf ${CURSOR_HOME} ${CURSOR_BINS.map(b => `/usr/local/bin/${b}`).join(" ")}`,
+  uninstall: `rm -rf ${CURSOR_HOME} /usr/local/bin/cursor-agent`,
 };
 
 export const LINUX_CASKS: readonly LinuxCask[] = [GCLOUD, KUBECTL, CURSOR];

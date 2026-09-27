@@ -19,7 +19,7 @@
 // here; the tiles are ThreadTile beside this file. The surface itself is the
 // shell's sidebar-glass: nothing here paints a background.
 import { openProjectSettings } from "../settings/openAt.js";
-import { ChevronDownIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
 import { HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, computerOffline, creationAwaits, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
@@ -50,7 +50,7 @@ import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ProjectSwitcher } from "./ProjectSwitcher.js";
 import { ComputerSwitcher } from "./ComputerSwitcher.js";
 import { COMPUTER_PICK_KEY, PROJECT_PICK_KEY, pickCodec, underPicks } from "./picks.js";
-import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, SETTLED_ROW_ID, TILE_TITLE_CLASS, threadRowId, workspaceRowId } from "./rowGrammar.js";
+import { CHILD_LIST_CLASS, ONE_LINE_ROW_CLASS, RAIL_ITEM_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, SETTLED_ROW_ID, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
 import { resolveAdjacentThreadId, topSidebarThread } from "./Sidebar.logic.js";
 import { SIDEBAR_SECTIONS, dropMarks, settleableRoots, sidebarTiles, treeSettle, treeThreadIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
@@ -102,6 +102,28 @@ interface DialogState {
 /** A project trip's dialog open for one workspace; keyed per opening so its folder and plan reset. */
 interface ProjectTripState extends ProjectTripRequest {
   readonly key: number;
+}
+
+/** The copies one send to several models made, under one head: the sidebar's one-line row, the task's name, how many
+ * copies it holds, and the chevron that folds them, so the group reads as a row a person can act on rather than a
+ * title standing above a list. Its tiles keep the tile's own pitch on the rail. */
+function AttemptGroup({ title, copies, children }: { title: string; copies: number; children: ReactNode }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <li data-thread-item data-attempt-group className="min-w-0">
+      <SidebarMenuButton size="sm" data-attempt-head aria-expanded={open} className={ONE_LINE_ROW_CLASS} onClick={() => setOpen(was => !was)}>
+        <CopyIcon aria-hidden className="size-4 shrink-0 text-sidebar-muted-foreground" />
+        <span data-attempt-title className="min-w-0 flex-1 truncate text-sidebar-foreground" title={title}>
+          {title}
+        </span>
+        <span data-attempt-count className={cn(ROW_META_CLASS, "shrink-0")}>
+          {copies}
+        </span>
+        <ChevronDownIcon aria-hidden className={cn("size-4 shrink-0 transition-transform duration-150", !open && "-rotate-90")} />
+      </SidebarMenuButton>
+      {open ? <ul className={CHILD_LIST_CLASS}>{children}</ul> : null}
+    </li>
+  );
 }
 
 export function WorkspaceSidebar() {
@@ -278,14 +300,9 @@ export function WorkspaceSidebar() {
     if (item.groupTitle !== undefined) {
       const copies = children.map(child => child.thread.runs.id);
       return (
-        <li key={item.id} data-thread-item data-attempt-group className="min-w-0">
-          <div className="flex h-8 min-w-0 items-center px-2">
-            <span data-attempt-title className={cn(TILE_TITLE_CLASS, "text-sidebar-foreground")} title={item.groupTitle}>
-              {item.groupTitle}
-            </span>
-          </div>
-          <ul className={CHILD_LIST_CLASS}>{children.map(child => tileItem(child, depth + 1, null, settled, copies.filter(id => id !== child.thread.runs.id)))}</ul>
-        </li>
+        <AttemptGroup key={item.id} title={item.groupTitle} copies={children.length}>
+          {children.map(child => tileItem(child, depth + 1, null, settled, copies.filter(id => id !== child.thread.runs.id)))}
+        </AttemptGroup>
       );
     }
     const copyActions = above === runs.id ? [] : resolveActions(workspaceActions, workspaceTarget(runs.workspace, runs.status, places), verbs);

@@ -49,7 +49,7 @@ export interface ModelPickerProps {
 }
 
 /** The foot's line where a shift-click adds a model, since nothing else on the menu says it can. */
-export const ADD_MODEL_LINE = "Shift-click a model to send to it too";
+export const ADD_MODEL_LINE = "Shift-click a model, or Shift+Enter on it, to send to it too";
 
 /** The line under the model the composer names that this list has no row for: it may be the one the thread runs on
  * or a pick the binary has since dropped, and this is true of both. */

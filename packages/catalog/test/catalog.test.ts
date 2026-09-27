@@ -367,10 +367,10 @@ describe("catalog", () => {
     expect(run.stderr).toBe("");
     expect(run.status).toBe(0);
     expect(run.stdout).toContain(`WSP_ROAD release cursor-agent-2026.09.26-dd393fe-linux-x64 ${sum} 2026.09.26-dd393fe`);
-    for (const name of ["agent", "cursor-agent"]) {
-      expect(readlinkSync(join(bin, name)), name).toBe(join(home, "cursor-agent"));
-      expect(readFileSync(join(bin, name), "utf8"), name).toBe("the launcher\n");
-    }
+    // The one name every road gives it; the generic "agent" its installer also links is left off the PATH.
+    expect(readlinkSync(join(bin, "cursor-agent"))).toBe(join(home, "cursor-agent"));
+    expect(readFileSync(join(bin, "cursor-agent"), "utf8")).toBe("the launcher\n");
+    expect(existsSync(join(bin, "agent"))).toBe(false);
   });
 
   it("says which agents wsp opens threads on", () => {

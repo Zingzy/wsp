@@ -70,7 +70,12 @@ export function ForgetWorkspaceDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{many ? `${road.word} the other ${workspaces.length} copies?` : `${road.word} ${workspace.name}?`}</AlertDialogTitle>
           <AlertDialogDescription>
-            {many ? deleteCopiesNotice(workspaces.length, threads) : act === "delete" ? deleteNotice(threads, workspaceKind(workspace), workspace.copy) : forgetNotice(threads)}
+            {many
+              ? deleteCopiesNotice(
+                  workspaces.map(w => ({ name: w.name, kind: workspaceKind(w), ...(w.copy !== undefined ? { copy: w.copy } : {}) })),
+                  threads,
+                )
+              : act === "delete" ? deleteNotice(threads, workspaceKind(workspace), workspace.copy) : forgetNotice(threads)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <div className="px-5 pt-2">

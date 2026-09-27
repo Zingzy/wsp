@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// app-server-turn.jsonl is written by hand from `codex app-server generate-json-schema` on codex-cli 0.155.1, in the
-// shapes that binary printed for its handshake under an empty CODEX_HOME; no-login-app-server.jsonl is that binary's
-// own output for a turn with no sign-in, stderr lines and all.
+// Both fixtures are codex-cli 0.155.1's own output, stderr lines and all, driven through this adapter's own lines:
+// app-server-turn.jsonl a signed-in turn in a read-only sandbox that asked to run a command, was allowed and took one
+// steer (MCP server names, hook paths and the host scrubbed), no-login-app-server.jsonl a turn under an empty
+// CODEX_HOME.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
+import { asideWallLine, codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
 import type { AdapterEvent, ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { createCodexAdapter, type CodexSession } from "../src/adapter.js";
 
 const THREAD_ID = "01a0e2c1-5d10-7b42-9a6e-3f1c2d4b5a60";
 const TURN_ID = "01a0e2c1-5e02-7c11-8d3f-9b2a1c0d4e71";
+const RECORDED_THREAD = "01a0e365-72f3-77e3-ba3a-3d18e12e9b95";
+const RECORDED_TURN = "01a0e365-73b9-7e10-8045-3ff9e93753f9";
+const RECORDED_COMMAND = "exec-267f4a9f-3715-4cb1-b8fc-14f9a57ec2f9";
 const NO_LOGIN_THREAD = "01a0e2b2-493b-7c53-ae59-446697cb28db";
 
 function fixtureLines(name: string): string[] {
@@ -186,76 +190,106 @@ describe("CodexAdapter over codex app-server", () => {
     expect(call.input?.map(l => parse(l).method)).toEqual(["initialize", "initialized", "thread/start"]);
     expect(parse(call.input![2]!).params).toEqual({ cwd: "/root/app", model: "gpt-5.5", sandbox: "workspace-write", approvalPolicy: "on-request" });
     const turn = launch.wires[0]!.written.find(m => m.method === "turn/start")!;
-    expect(turn.params).toEqual({ threadId: THREAD_ID, input: [{ type: "text", text: "list the repo" }], effort: "low" });
+    expect(turn.params).toEqual({ threadId: RECORDED_THREAD, input: [{ type: "text", text: "list the repo" }], effort: "low" });
     // The reply is the turn's end, so stdin closes there and the server exits on its own.
     expect(launch.wires[0]!.closed).toBe(true);
   });
 
-  it("normalizes the server's notifications into session.start, one delta per item, turn.done and session.end", async () => {
+  it("reads a recorded turn: session.start, the CLI's warning as a note, each item as deltas, the approval, turn.done and session.end", async () => {
     const launch = launcher(server(fixtureLines("app-server-turn")));
     const { events, onEvent } = collect();
-    const session = adapterOver(launch).start({ prompt: "list the repo", cwd: "/root/app", onEvent });
+    let session: CodexSession | undefined;
+    // Answered as the recording's person answered it: the command ran once it was allowed.
+    const answering = (e: AdapterEvent): void => {
+      onEvent(e);
+      if (e.type === "permission.ask") void session!.answer(e.ask.askId, { optionId: PERMISSION_ALLOW, outcome: "allowed", denyMessage: "" });
+    };
+    session = adapterOver(launch).start({ prompt: "Run the shell command `touch hi.txt` in this folder, then reply with one short line.", permissionMode: "read-only", onEvent: answering });
     const result = await session.finished;
 
-    expect(events.map(e => e.type)).toEqual(["session.start", ...Array<string>(11).fill("turn.delta"), "turn.done", "session.end"]);
-    expect(events[0]).toEqual({ type: "session.start", sessionId: THREAD_ID, model: "gpt-5.6-sol", cwd: "/root/app" });
-    const deltas = deltasOf(events);
-    expect(deltas.map(d => [d.kind, d.toolName, d.toolUseId])).toEqual([
-      ["note", undefined, undefined],
-      ["thinking", undefined, undefined],
-      ["tool_use", "command_execution", "call_1"],
-      ["tool_result", undefined, "call_1"],
-      ["tool_use", "file_change", "call_2"],
-      ["tool_result", undefined, "call_2"],
-      ["tool_use", "wsp.threads", "call_3"],
-      ["tool_result", undefined, "call_3"],
-      ["tool_use", "web_search", "ws_1"],
-      ["tool_result", undefined, "ws_1"],
-      ["text", undefined, undefined],
+    expect(events.map(e => (e.type === "turn.delta" ? `delta:${e.kind}` : e.type))).toEqual([
+      "session.start",
+      "delta:note",
+      "delta:text",
+      "delta:tool_use",
+      "permission.ask",
+      "permission.close",
+      "delta:tool_result",
+      "delta:text",
+      "turn.done",
+      "session.end",
     ]);
-    const opened = deltas.filter(d => d.kind === "tool_use").map(d => d.toolUseId);
-    const closed = deltas.filter(d => d.kind === "tool_result").map(d => d.toolUseId);
-    for (const id of opened) expect(closed, id).toContain(id);
-    expect(deltas[0]!.text).toBe("one MCP server did not answer");
-    expect(deltas[1]!.text).toBe("Listing the repository first.");
-    expect(deltas[2]!.text).toBe(JSON.stringify({ command: "/bin/bash -lc ls" }));
-    expect(deltas[3]).toMatchObject({ text: "docs\nsdk\nexamples\n", isError: false });
-    expect(deltas[4]!.text).toBe(JSON.stringify({ changes: [{ path: "README.md", kind: "update" }, { path: "docs/new.md", kind: "add" }] }));
-    expect(deltas[5]).toMatchObject({ text: "update README.md\nadd docs/new.md", isError: false });
-    expect(deltas[6]!.text).toBe(JSON.stringify({ workspace: "first" }));
-    expect(deltas[7]).toMatchObject({ text: JSON.stringify([{ type: "text", text: '{"threads":[]}' }]), isError: false });
-    expect(deltas[8]!.text).toBe(JSON.stringify({ query: "codex app-server" }));
-    expect(deltas[9]).toMatchObject({ text: "codex app-server", isError: false });
-    for (const d of deltas) expect(d.sessionId).toBe(THREAD_ID);
+    expect(events[0]).toEqual({ type: "session.start", sessionId: RECORDED_THREAD, model: "gpt-5.6-sol", cwd: "/private/tmp/b7-real" });
+    const deltas = deltasOf(events);
+    expect(deltas[0]!.text).toMatch(/^loading hooks from both /);
+    expect(deltas[1]).toMatchObject({ text: "I\u2019ll create `hi.txt` in the current folder.", messageId: "msg_0567d7bf2c7ea0de016ab930865e9087d09774946388412886" });
+    expect(deltas[2]).toMatchObject({ toolName: "command_execution", toolUseId: RECORDED_COMMAND, text: JSON.stringify({ command: "/bin/zsh -lc 'touch hi.txt'" }) });
+    const ask = events.find((e): e is Extract<AdapterEvent, { type: "permission.ask" }> => e.type === "permission.ask")!.ask;
+    expect(ask).toMatchObject({ askId: "0", toolName: "command_execution", toolUseId: RECORDED_COMMAND, detail: "Allow me to create hi.txt in the current folder?" });
+    expect(JSON.parse(ask.input)).toEqual({ command: "/bin/zsh -lc 'touch hi.txt'", cwd: "/private/tmp/b7-real" });
+    expect(launch.wires[0]!.written).toContainEqual({ id: 0, result: { decision: "accept" } });
+    // The server's own resolved notice for that request finds nothing open, so the prompt closes once.
+    expect(events.filter(e => e.type === "permission.close")).toEqual([{ type: "permission.close", sessionId: RECORDED_THREAD, askId: "0", outcome: "allowed", optionId: PERMISSION_ALLOW }]);
+    expect(deltas[3]).toMatchObject({ kind: "tool_result", toolUseId: RECORDED_COMMAND, text: "", isError: false });
+    expect(deltas[4]).toMatchObject({ kind: "text", text: "Created hi.txt in this folder." });
+    for (const d of deltas) expect(d.sessionId).toBe(RECORDED_THREAD);
 
     expect(result.status).toBe("completed");
-    expect(result.text).toBe("Repo contains docs, sdk, and examples directories.");
-    // The usage keeps the snake_case names codex exec printed, so a reader of either road reads one shape.
-    expect(result.usage).toEqual({ input_tokens: 24763, cached_input_tokens: 24448, cache_write_input_tokens: 0, output_tokens: 122, reasoning_output_tokens: 0 });
-    expect(result.durationMs).toBeGreaterThanOrEqual(0);
-    expect(events.at(-1)).toEqual({ type: "session.end", sessionId: THREAD_ID, exitCode: 0, sawResult: true });
-    expect(session.threadId).toBe(THREAD_ID);
-    expect(session.localId).not.toBe(THREAD_ID);
+    expect(result.text).toBe("Created hi.txt in this folder.");
+    // The last call's counts, under the snake_case names codex exec printed, so a reader of either road reads one shape.
+    expect(result.usage).toEqual({ input_tokens: 20869, cached_input_tokens: 20608, cache_write_input_tokens: 0, output_tokens: 44, reasoning_output_tokens: 31 });
+    expect(events.at(-1)).toEqual({ type: "session.end", sessionId: RECORDED_THREAD, exitCode: 0, sawResult: true });
+    expect(session.threadId).toBe(RECORDED_THREAD);
+    expect(session.localId).not.toBe(RECORDED_THREAD);
   });
 
-  it("a reply is one text line when its item completes, carrying the server's id for it; the streamed deltas draw nothing twice", async () => {
-    const launch = launcher(server(fixtureLines("app-server-turn")));
+  it("the recorded steer answers with the running turn's id, which is what reads as accepted", () => {
+    const answer = fixtureLines("app-server-turn").map(l => (l.startsWith("{") ? parse(l) : {})).find(m => m.id === "wsp-steer-1");
+    expect(answer).toEqual({ id: "wsp-steer-1", result: { turnId: RECORDED_TURN } });
+  });
+
+  it("file changes, MCP calls and web searches, which that turn made none of, draw as codex exec's calls did", async () => {
+    // Written from the 0.155.1 schema's ThreadItem variants, since the recorded turn ran one command and no other tool.
+    const item = (phase: "started" | "completed", body: Record<string, unknown>) => `{"method":"item/${phase}","params":{"item":${JSON.stringify(body)},"threadId":"${THREAD_ID}","turnId":"${TURN_ID}"}}`;
+    const change = { type: "fileChange", id: "call_2", changes: [{ path: "README.md", kind: { type: "update", move_path: null }, diff: "" }, { path: "docs/new.md", kind: { type: "add" }, diff: "" }] };
+    const mcp = { type: "mcpToolCall", id: "call_3", server: "wsp", tool: "threads", arguments: { workspace: "first" } };
+    const search = { type: "webSearch", id: "ws_1", query: "codex app-server" };
+    const launch = launcher(
+      scripted([
+        item("started", { ...change, status: "inProgress" }),
+        item("completed", { ...change, status: "completed" }),
+        item("started", { ...mcp, status: "inProgress", result: null, error: null }),
+        item("completed", { ...mcp, status: "completed", result: { content: [{ type: "text", text: '{"threads":[]}' }] }, error: null }),
+        item("completed", { type: "reasoning", id: "rs_1", summary: ["Listing the repository first."], content: [] }),
+        item("started", search),
+        item("completed", search),
+        completed("completed"),
+      ]),
+    );
     const { events, onEvent } = collect();
-    await adapterOver(launch).start({ prompt: "list the repo", onEvent }).finished;
-    const texts = deltasOf(events).filter(d => d.kind === "text");
-    expect(texts.map(d => [d.text, d.messageId])).toEqual([["Repo contains docs, sdk, and examples directories.", "msg_1"]]);
+    await adapterOver(launch).start({ prompt: "x", onEvent }).finished;
+    const deltas = deltasOf(events);
+    expect(deltas.map(d => [d.kind, d.toolName, d.toolUseId, d.text])).toEqual([
+      ["tool_use", "file_change", "call_2", JSON.stringify({ changes: [{ path: "README.md", kind: "update" }, { path: "docs/new.md", kind: "add" }] })],
+      ["tool_result", undefined, "call_2", "update README.md\nadd docs/new.md"],
+      ["tool_use", "wsp.threads", "call_3", JSON.stringify({ workspace: "first" })],
+      ["tool_result", undefined, "call_3", JSON.stringify([{ type: "text", text: '{"threads":[]}' }])],
+      ["thinking", undefined, undefined, "Listing the repository first."],
+      ["tool_use", "web_search", "ws_1", JSON.stringify({ query: "codex app-server" })],
+      ["tool_result", undefined, "ws_1", "codex app-server"],
+    ]);
   });
 
   it("resumes a thread by the id the row holds: the registry key is that id and the seed asks thread/resume", async () => {
     const launch = launcher(server(fixtureLines("app-server-turn")));
     const adapter = adapterOver(launch);
     const { events, onEvent } = collect();
-    const session = adapter.start({ prompt: "next", resume: THREAD_ID, permissionMode: "read-only", cwd: "/root/app", onEvent });
+    const session = adapter.start({ prompt: "next", resume: RECORDED_THREAD, permissionMode: "read-only", cwd: "/root/app", onEvent });
     await session.finished;
-    expect(session.localId).toBe(THREAD_ID);
-    expect(adapter.sessions.get(THREAD_ID)).toBe(session);
-    expect(parse(launch.calls[0]!.input![2]!)).toEqual({ id: "wsp-thread", method: "thread/resume", params: { threadId: THREAD_ID, cwd: "/root/app", sandbox: "read-only", approvalPolicy: "on-request" } });
-    expect(new Set(events.map(e => e.sessionId))).toEqual(new Set([THREAD_ID]));
+    expect(session.localId).toBe(RECORDED_THREAD);
+    expect(adapter.sessions.get(RECORDED_THREAD)).toBe(session);
+    expect(parse(launch.calls[0]!.input![2]!)).toEqual({ id: "wsp-thread", method: "thread/resume", params: { threadId: RECORDED_THREAD, cwd: "/root/app", sandbox: "read-only", approvalPolicy: "on-request" } });
+    expect(new Set(events.map(e => e.sessionId))).toEqual(new Set([RECORDED_THREAD]));
   });
 
   it("images ride the turn as local paths, and one with no path on the machine is refused before anything launches", async () => {
@@ -588,13 +622,13 @@ describe("a turn a later host attaches to", () => {
     const adapter = adapterOver(launch);
     expect(adapter.start({ prompt: "go", onEvent: () => {} }).run).toBe(RUN_HANDLE);
     const { events, onEvent } = collect();
-    const session = (await adapter.attach!({ run: RUN_HANDLE, sessionId: THREAD_ID, startedAt: 1, model: "gpt-5.5", cwd: "/root/app", onEvent })) as CodexSession;
+    const session = (await adapter.attach!({ run: RUN_HANDLE, sessionId: RECORDED_THREAD, startedAt: 1, model: "gpt-5.5", cwd: "/root/app", onEvent })) as CodexSession;
     const result = await session.finished;
     expect(attached).toEqual([{ run: RUN_HANDLE, input: true }]);
     expect(session.command).toBeUndefined();
     expect(result.status).toBe("completed");
     expect(replay.written).toEqual([]);
-    expect(events[0]).toMatchObject({ type: "session.start", sessionId: THREAD_ID, model: "gpt-5.5", cwd: "/root/app" });
+    expect(events[0]).toMatchObject({ type: "session.start", sessionId: RECORDED_THREAD, model: "gpt-5.5", cwd: "/root/app" });
     expect(events.slice(-2)).toMatchObject([{ type: "turn.done" }, { type: "session.end", exitCode: 0, sawResult: true }]);
   });
 });
@@ -619,9 +653,10 @@ describe("the process a finished turn leaves", () => {
 
 describe("a side question on a Codex thread", () => {
   const FORK = "01a0e2d0-0000-7000-8000-000000000001";
-  const forking = (onTurn: (self: Wire) => void) =>
+  const forking = (onTurn: (self: Wire) => void, opts: { hang?: boolean } = {}) =>
     launcher(seed => {
       const w = wire({
+        ...opts,
         onWrite: (message, self) => {
           if (message.method === "thread/fork")
             self.push('{"id":"wsp-initialize","result":{}}', `{"id":"wsp-thread","result":{"thread":{"id":"${FORK}","ephemeral":true,"forkedFromId":"${THREAD_ID}"},"model":"gpt-5.6-sol"}}`);
@@ -665,6 +700,21 @@ describe("a side question on a Codex thread", () => {
     const answer = await adapterOver(launch).aside!({ session: THREAD_ID, question: "list the files" });
     expect(answer.text).toBe("I would rather not run that.");
     expect(launch.wires[0]!.written.find(m => m.id === 3)).toEqual({ id: 3, result: { decision: "decline" } });
+  });
+
+  it("ends a fork that answers nothing for the whole wall with its tree, and says so", async () => {
+    const launch = forking(() => {}, { hang: true });
+    const adapter = createCodexAdapter({ exec: launch.factory, home: "/root/.codex", login: LOGIN, asideWallMs: 20, interruptGraceMs: 10 });
+    await expect(adapter.aside({ session: THREAD_ID, question: "still there?" })).rejects.toThrow(asideWallLine(20));
+    expect(launch.wires[0]!.order).toEqual(["teardown", "kill"]);
+  });
+
+  it("a turn is held to no wall of the side question's", async () => {
+    const launch = launcher(scripted([], { hang: true }));
+    const session = createCodexAdapter({ exec: launch.factory, home: "/root/.codex", login: LOGIN, asideWallMs: 20, interruptGraceMs: 10 }).start({ prompt: "x", onEvent: () => {} });
+    await new Promise(r => setTimeout(r, 60));
+    expect(launch.wires[0]!.order).toEqual([]);
+    await session.interrupt();
   });
 
   it("rejects in the server's words when the fork fails, and in the sign-in line when it failed for want of one", async () => {

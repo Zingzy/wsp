@@ -13,7 +13,7 @@ import { memoryStore } from "../src/store.js";
 import { createOn, stubBackend, type StubBackend } from "./stub-backend.js";
 
 const CLAUDE_SESSION = "e16ed170-8257-4668-879e-fe836341633c";
-const CODEX_THREAD = "01a0e2c1-5d10-7b42-9a6e-3f1c2d4b5a60";
+const CODEX_THREAD = "01a0e365-72f3-77e3-ba3a-3d18e12e9b95";
 
 const fixture = (at: string): string[] =>
   readFileSync(new URL(at, import.meta.url), "utf8")
