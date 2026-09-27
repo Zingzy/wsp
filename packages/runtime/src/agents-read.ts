@@ -49,6 +49,8 @@ export interface AgentsReader {
   /** Drops what was kept for the target, which a sign-in there has just changed. */
   forget?(key: string): void;
   tools(on: AgentsOn, ask: ServerToolsAsk): Promise<ServerToolsAnswer>;
+  /** Ends every command a read or a tools ask started on this computer and is still waiting on. */
+  close?(): void;
 }
 
 /** A pty road to a target's daemon, frame by frame, with every event it pushes: what a sign-in's pty runs over. */
