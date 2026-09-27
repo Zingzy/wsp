@@ -29,6 +29,7 @@ import {
   HOST_STOPPING_CLOSE,
   HOST_CLOSED_LINE,
   HOST_STOPPING_LINE,
+  fmtDuration,
   HostFolderListing,
   AgentRow,
   AgentsReport,
@@ -251,8 +252,11 @@ import {
   placeDaemonBehind,
   absentComputer,
   placeRoom,
+  placeSpendLimit,
   placeStateOf,
+  PlaceSpend,
   provisionWord,
+  spendMeterWord,
   namesPlace,
   noSuchPlaceRefusal,
   placeForksNowhereLine,
@@ -271,7 +275,7 @@ import type { CliIO } from "./cli.js";
 import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
 import type { RelayTerminal } from "./signin-relay.js";
 import { gitRootOf } from "./repo-root.js";
-import { dialAddress, heldOrStarted, hostTokenFor, hostTokenPath, servingHost } from "./host-lock.js";
+import { dialAddress, heldOrStarted, hostTokenFor, hostTokenPath, POLL_MS, SERVICE_WAIT_MS, servingHost } from "./host-lock.js";
 import type { HostStarter } from "./host-start.js";
 import { addressNotPairedLine, aimAddress, aimHolds, aimName, aimedHost, deviceRefusedLine, dialWindowMs, hostSideOnlyFix, hostSideOnlyLine, noAnswerRefusal, noAnswerWithin, READ_THE_HOSTS, stateIgnoredLine, wsUrlOf, wspHome, writeHost, type HostAim, type HostPick } from "./hosts.js";
 import { readDeviceKeyPair } from "./account.js";
@@ -289,8 +293,8 @@ export interface HostClient {
   events(): Promise<void>;
   /** Every frame that is not a reply: events after events(), the frames an exec pushes. */
   onFrame(fn: (frame: Frame) => void): () => void;
-  /** Settles when the socket is gone, however it went. */
-  readonly closed: Promise<void>;
+  /** Settles when the socket is gone, however it went, with the close code where the host sent one. */
+  readonly closed: Promise<number | void>;
   /** Why the socket is gone, in the words the person reads: a host that let it go as it stopped says the turn goes
    * on, since the run is the machine's; anything else is a host that went. */
   closeWords(): string;
@@ -388,6 +392,9 @@ export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<
   return client;
 }
 
+/** Whether a socket's close code is the host letting it go as it stopped, rather than the socket breaking. */
+const hostStopping = (code: number | void | undefined): boolean => code === HOST_STOPPING_CLOSE;
+
 /** One socket to the host: the token rides in the first frame, never in the URL; then request and reply by id.
  * Open and auth share one deadline, so a port that accepts and never answers fails in one line, and that deadline
  * is the window the road gets rather than one number for every road. `again` is the one retry above: it is handed
@@ -407,10 +414,10 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
     ws.once("error", fail);
   });
   let closeCode: number | undefined;
-  const closed = new Promise<void>(done =>
+  const closed = new Promise<number>(done =>
     ws.once("close", code => {
       closeCode = code;
-      done();
+      done(code);
     }),
   );
   let next = 1;
@@ -438,7 +445,7 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
     }
     for (const fn of listeners) fn(frame);
   });
-  const closeWords = (): string => (closeCode === HOST_STOPPING_CLOSE ? HOST_STOPPING_LINE : HOST_CLOSED_LINE);
+  const closeWords = (): string => (hostStopping(closeCode) ? HOST_STOPPING_LINE : HOST_CLOSED_LINE);
   ws.on("close", () => {
     for (const w of pending.values()) w.fail(new Error(closeWords()));
     pending.clear();
@@ -566,6 +573,37 @@ async function dialOnce(statePath: string, opts: DialOpts, again?: (refused: unk
   };
 }
 
+/** Whether the host let this socket go as it stopped, which is the one close a wait dials through: that host is
+ * coming back, and the turn it was waited on for goes on without it. Read once the socket is gone. */
+async function stoppedUnder(client: HostClient): Promise<boolean> {
+  return hostStopping(await Promise.race([client.closed, Promise.resolve()]));
+}
+
+/** What a line waiting on a turn says on stderr while it dials a host that stopped under it. */
+export const HOST_RESTARTING_LINE = "the host is restarting; waiting for it to come back";
+
+/** A socket to the host again after it stopped under a wait: dialled until one opens within `windowMs`, each dial
+ * handed what is left of it as its own deadline, so a port that accepts and never answers cannot carry the wait past
+ * it. Past that the last dial's own refusal is the answer, which says what stands now: no host serving the file, or
+ * one that does not answer. */
+export async function hostAgain(dial: (withinMs: number) => Promise<HostClient>, windowMs: number): Promise<HostClient> {
+  const until = Date.now() + windowMs;
+  for (;;) {
+    try {
+      return await dial(Math.max(1, until - Date.now()));
+    } catch (e) {
+      if (Date.now() >= until) throw e;
+    }
+    await new Promise(r => setTimeout(r, Math.min(POLL_MS, Math.max(0, until - Date.now()))));
+  }
+}
+
+/** The host that came back after it stopped under a wait, within `withinMs`: as long as a host is given to come up
+ * on this computer unless the caller's own wait has less left. */
+function hostBack(deps: Pick<VerbDeps, "client" | "hostWaitMs">, withinMs: number = deps.hostWaitMs ?? SERVICE_WAIT_MS): Promise<HostClient> {
+  return hostAgain(left => deps.client({ withinMs: left }), withinMs);
+}
+
 /** A follower's promise, or a failure when the host goes away first: a director waiting on a turn must never hang. */
 function untilSettled<T>(client: HostClient, work: Promise<T>): Promise<T> {
   return Promise.race([
@@ -659,9 +697,10 @@ export const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" 
  * person uses for them. Every fact is what that computer last reported; a cloud row carries its rate and no shape,
  * since nothing about a machine exists there until one is forked. No row is marked default: which computer a
  * workspace lands on is its project's to say. The platform is handed in, since what this computer is called is
- * read where the host runs and not guessed here. */
-export function computerLines(places: readonly PlaceView[], platform: "darwin" | "linux"): string[] {
+ * read where the host runs and not guessed here, and so is the spend, which is a read of its own. */
+export function computerLines(places: readonly PlaceView[], platform: "darwin" | "linux", spend: readonly PlaceSpend[] = []): string[] {
   if (places.length === 0) return ["This host holds no computer. wsp add prints the join line for a computer you are sitting at."];
+  const todayOf = (p: PlaceView): number | undefined => spend.find(s => s.place === p.id)?.todayUsd;
   const rows = places.map(p => [
     p.name,
     computerKindWord(p, platform),
@@ -673,7 +712,8 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     p.kind === "provider" ? fmtPrice(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     ...capCells(p),
-    placeStateOf(p, p.present === false ? absentComputer(p.name, null) : null).word,
+    spendCell(p, todayOf(p)),
+    placeStateOf(p, p.present === false ? absentComputer(p.name, null) : null, todayOf(p)).word,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     placeDaemonBehind(p) ?? "",
     p.build ?? "",
@@ -684,7 +724,20 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     // cloud account and on this computer, neither of which reports an agent.
     agentsCell(p),
   ]);
-  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows]);
+  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "THREADS", "MACHINES", "SPEND", "STATE", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows]);
+}
+
+/** What wsp computers answers: every row, and what each cloud has spent, both read on the road the list is. */
+async function readComputers(client: HostClient): Promise<{ computers: PlaceView[]; spend: PlaceSpend[] }> {
+  const [listed, spent] = await Promise.all([client.request<{ places: PlaceView[] }>("places.list"), client.request<{ places: PlaceSpend[] }>("cost.spend")]);
+  return { computers: listed.places, spend: spent.places };
+}
+
+/** The SPEND cell: what the row spent today against its spend per day, empty where its kind has no spend limit or
+ * no spend was read, since a figure is never guessed. */
+function spendCell(p: PlaceView, todayUsd: number | undefined): string {
+  const limit = placeSpendLimit(p);
+  return limit === undefined || todayUsd === undefined ? "" : spendMeterWord(todayUsd, limit);
 }
 
 /** The THREADS and MACHINES cells: what the row's cap counts against the cap, under the column named for what it counts. */
@@ -714,8 +767,14 @@ export interface VerbDeps {
   /** The environment the caller runs in, which is where the token of the turn a verb is running inside comes from.
    * Both doors hand in this process's; a test hands in the one it means, never the shell that started it. */
   env: Readonly<Record<string, string | undefined>>;
-  /** The socket to the host: a verb's own dial, closed when it returns; a tool server's one dial across calls. */
-  client(): Promise<HostClient>;
+  /** The socket to the host: a verb's own dial, closed when it returns; a tool server's one dial across calls.
+   * `again` is the dial after the host let the last socket go as it stopped, within the time the wait has left:
+   * whatever restarts that host brings it back, so this one starts nothing, since a host it started would hold the
+   * lock the returning one needs. */
+  client(again?: { withinMs: number }): Promise<HostClient>;
+  /** How long a line whose host stopped under it waits for that host to come back: the time a host is given to
+   * start, unless a test hands in a shorter one. */
+  hostWaitMs?: number;
   /** What brings the host up when nothing serves the state file here; both doors hand in the one built from how
    * this process was started. Absent starts nothing, which is what a caller with no wsp to spawn has. */
   start?: HostStarter;
@@ -1320,7 +1379,7 @@ export function renameLine(renamed: Renamed): string {
 
 /** What a delete does to this workspace's machine, in its kind's own words: both lines about what a delete takes
  * read the one entry, so neither can say the other kind's sentence. */
-const onDelete = (workspace: WorkspaceView): MachineOnDelete => onDeleteOf(workspaceKind(workspace), workspace.copy);
+const onDelete = (workspace: WorkspaceView): MachineOnDelete => onDeleteOf(workspaceKind(workspace), workspace.copy, workspace.machineId);
 
 /** What dropping a workspace takes off this computer, counted before anyone is asked: its record and its threads. */
 export interface Dropping {
@@ -1349,7 +1408,7 @@ export function forgotLine(f: Dropping): string {
 
 /** The one confirmation a delete asks, in the words every client shows: what a forget takes, and the machine too. */
 export function deleteQuestion(d: Dropping): string {
-  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy)}`;
+  return `Delete ${d.workspace.name}?\n${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId)}`;
 }
 
 /** The one confirmation a project image's removal asks: the id, and what goes with it. */
@@ -1912,40 +1971,110 @@ export async function startDetached(client: HostClient, start: Record<string, un
 
 /** Starts a turn as `startedBy` and follows it to its reply: `on.queued` when the runtime says the start waits behind
  * the thread's running turn, `on.started` the thread as soon as the runtime names it, `on.event` every event of the
- * turn with the turn so far. Fails when the host goes away first. Events are picked by the turn's id: a start that
- * waited behind the thread's running turn must not read that turn's end as its own. The follow ends at
- * session.done, which carries the whole reply: session.end follows the runtime's exit read and reap, minutes later
- * when the machine is slow to answer. A turn the runtime ended itself has no done, so its end is the last event
- * instead. */
+ * turn with the turn so far. Events are picked by the turn's id: a start that waited behind the thread's running
+ * turn must not read that turn's end as its own. The follow ends at session.done, which carries the whole reply:
+ * session.end follows the runtime's exit read and reap, minutes later when the machine is slow to answer. A turn the
+ * runtime ended itself has no done, so its end is the last event instead. A host that stops under the follow once
+ * the turn is named is dialled again through `redial`, `on.redialed` says so, and the follow goes on from the new
+ * host, which re-opens the run: an end the transcript already holds is read off it, and the rest arrive as they
+ * come. Fails when the host goes away any other way, or stops before the turn is named. */
 export async function follow(
   client: HostClient,
   start: Record<string, unknown>,
   startedBy: SessionOrigin,
-  on: { queued?(): void; steered?(event: SessionSteerEvent): void; started?(turn: Turn): void; event(e: SessionEvent, turn: Turn): void },
+  on: { queued?(): void; steered?(event: SessionSteerEvent): void; started?(turn: Turn): void; redialed?(): void; event(e: SessionEvent, turn: Turn): void },
+  redial?: () => Promise<HostClient>,
 ): Promise<Turn> {
-  const pushed = pushedFrames(client);
-  try {
-    const { turn, turnId } = await begin(client, start, startedBy, { ...(on.queued !== undefined ? { queued: on.queued } : {}), ...(on.steered !== undefined ? { steered: on.steered } : {}) });
-    on.started?.(turn);
-    const ended = new Promise<Turn>(done => {
-      pushed.follow(
-        f => sessionEvent(f) && f.turnId === turnId,
-        f => {
-          const e = f as unknown as SessionEvent;
-          if (e.type === "session.start" && e.afterCut === true) turn.afterCut = true;
-          if (e.type === "session.done") turn.result = e.result;
-          if (e.type === "session.end" && e.reason !== undefined) turn.reason = e.reason;
-          on.event(e, turn);
-          if (e.type !== "session.done" && e.type !== "session.end") return;
-          pushed.stop();
-          done(turn);
-        },
-      );
-    });
-    return await untilSettled(client, ended);
-  } finally {
-    pushed.stop();
+  let named: { turn: Turn; turnId: string } | undefined;
+  let over = false;
+  const take = (f: Frame, turn: Turn): void => {
+    if (over) return;
+    const e = f as unknown as SessionEvent;
+    if (e.type === "session.start" && e.afterCut === true) turn.afterCut = true;
+    if (e.type === "session.done") turn.result = e.result;
+    if (e.type === "session.end" && e.reason !== undefined) turn.reason = e.reason;
+    on.event(e, turn);
+    over = e.type === "session.done" || e.type === "session.end";
+  };
+  let socket = client;
+  for (;;) {
+    const pushed = pushedFrames(socket);
+    try {
+      if (named === undefined) {
+        named = await begin(socket, start, startedBy, { ...(on.queued !== undefined ? { queued: on.queued } : {}), ...(on.steered !== undefined ? { steered: on.steered } : {}) });
+        on.started?.(named.turn);
+      } else await socket.events();
+      const { turn, turnId } = named;
+      const ended = new Promise<Turn>(done => {
+        pushed.follow(
+          f => sessionEvent(f) && f.turnId === turnId,
+          f => {
+            take(f, turn);
+            if (over) done(turn);
+          },
+        );
+      });
+      if (socket !== client) {
+        for (const e of await history(socket, turn.session.workspaceId)) {
+          if (e.turnId === turnId && (e.type === "session.done" || e.type === "session.end")) take(e as unknown as Frame, turn);
+        }
+        if (over) return turn;
+      }
+      return await untilSettled(socket, ended);
+    } catch (e) {
+      if (redial === undefined || named === undefined || !(await stoppedUnder(socket))) throw e;
+      on.redialed?.();
+      socket = await redial();
+    } finally {
+      pushed.stop();
+    }
   }
+}
+
+/** The first of the named threads to leave running, as `firstEnded` answers it, dialled through a host that stops
+ * under the wait: the threads went on without it, so the question is asked again of the host that comes back. A
+ * deadline that passes while that host is still coming back is the deadline's answer, as it is anywhere else. */
+async function waitThrough(deps: Pick<VerbDeps, "client" | "hostWaitMs">, named: readonly ThreadView[], timeoutMs?: number, redialed?: () => void): Promise<Waited> {
+  const until = timeoutMs === undefined ? undefined : Date.now() + timeoutMs;
+  const left = (): number | undefined => (until === undefined ? undefined : Math.max(0, until - Date.now()));
+  let client = await deps.client();
+  for (;;) {
+    try {
+      return await firstEnded(client, named, left());
+    } catch (e) {
+      if (!(await stoppedUnder(client))) throw e;
+      redialed?.();
+      const hostWait = deps.hostWaitMs ?? SERVICE_WAIT_MS;
+      try {
+        client = await hostBack(deps, Math.min(hostWait, left() ?? hostWait));
+      } catch (refused) {
+        if (timeoutMs !== undefined && left() === 0) return { timedOutMs: timeoutMs };
+        throw refused;
+      }
+    }
+  }
+}
+
+/** What a restart that the host answered and never acted on says: the host is still the one that was asked. */
+export const hostDidNotStopLine = (waitMs: number): string => `the host took the restart and was still serving after ${fmtDuration(waitMs)}`;
+
+/** What a restart says once the host that replaced the old one serves: the threads still running on it, which went
+ * on across the restart and which that host re-opened. */
+export const hostRestartedLine = (running: readonly string[]): string =>
+  `the host restarted and serves again; ${running.length === 0 ? "no thread is running on it" : `${running.length === 1 ? "1 thread is" : `${running.length} threads are`} still running on it: ${running.map(id => id.slice(0, 8)).join(", ")}`}`;
+
+/** Has the host restart on the road it came up on and answers, once the host that replaced it serves, with the
+ * threads running there. The host answers the ask before it closes, so the close after the answer is the restart
+ * under way; a road that would not bring it back refuses the ask in its own words, before anything stops. */
+async function restartHost(deps: Pick<VerbDeps, "client" | "hostWaitMs">): Promise<{ running: string[] }> {
+  const client = await deps.client();
+  await client.request("host.restart");
+  let timer: NodeJS.Timeout | undefined;
+  const stopped = await Promise.race([client.closed.then(() => true), new Promise<false>(done => (timer = setTimeout(() => done(false), SERVICE_WAIT_MS)))]);
+  clearTimeout(timer);
+  if (!stopped) throw new Error(hostDidNotStopLine(SERVICE_WAIT_MS));
+  const back = await hostBack(deps);
+  return { running: (await threads(back)).filter(t => t.status === "running").map(threadIdOf) };
 }
 
 /** A thread's turn as it ended, for whoever waited on it: the thread and the runtime's result for the turn. */
@@ -2202,7 +2331,7 @@ async function answerOpenAsk(client: HostClient, ref: string, road: AnswerRoad &
  * and, where somebody is at the keyboard, the answer they type sent back as the option it picks. A prompt closed by
  * anyone (this terminal, another one, the app, the turn ending) releases the read, so nothing sits on stdin after
  * the question it belonged to is gone. */
-function answering(ctx: VerbContext, client: HostClient, say: (line: string) => void): { opened(ask: SessionPermissionEvent, threadId: string): void; closed(askId: string): void; stop(): void } {
+function answering(ctx: VerbContext, say: (line: string) => void): { opened(ask: SessionPermissionEvent, threadId: string): void; closed(askId: string): void; stop(): void } {
   let open: { askId: string; release: () => void } | undefined;
   const release = (): void => {
     open?.release();
@@ -2226,7 +2355,8 @@ function answering(ctx: VerbContext, client: HostClient, say: (line: string) => 
       void keyed(roads.map(({ road }) => road.key), until)
         .then(async typed => {
           const picked = roads.find(({ road }) => road.key === typed);
-          if (picked !== undefined) await answerAsk(client, ask.sessionId, ask.askId, picked.option.id);
+          // The line's socket as it stands when the key is typed, which is the host that came back where one restarted.
+          if (picked !== undefined) await answerAsk(await ctx.client(), ask.sessionId, ask.askId, picked.option.id);
         })
         .catch((e: unknown) => ctx.io.error(e instanceof Error ? e.message : String(e)));
     },
@@ -2266,13 +2396,16 @@ interface SaidAbout {
 async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}, said: SaidAbout = {}, onTurn?: (turn: Turn) => void): Promise<Turn> {
   const { opened, spend } = said;
   const stream = turnStream(ctx);
-  const asks = answering(ctx, client, line => stream.says(line));
+  const asks = answering(ctx, line => stream.says(line));
   /** Each call this turn has open, by the id the harness named it, so its result is read against the call's own
    * input rather than against the harness's words for it. */
   const calls = new Map<string, { name: string; input: string }>();
   // What the runtime said about the turn this message joined, kept for the line under the join: the steer is
   // recorded as the harness takes the message, which is before the start this follow is waiting on is answered.
   let joinedWaiting = false;
+  // Set once the host stopped under the turn: the stream on the screen has a gap where it went, so it is no copy of
+  // the reply and the reply is printed whole.
+  let redialed = false;
   let turn: Turn;
   try {
     turn = await follow(client, start, "cli", {
@@ -2287,8 +2420,15 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
         if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome](picks));
         if (joinedWaiting) ctx.io.error(WAITING_ON_A_PERSON);
       },
+      redialed: () => {
+        redialed = true;
+        ctx.io.error(HOST_RESTARTING_LINE);
+      },
       event: (e, t) => {
-        ctx.out.emit(e, e.type === "session.done" ? stream.reply(e.result.text) : undefined);
+        if (e.type === "session.done") {
+          const reply = stream.reply(e.result.text);
+          ctx.out.emit(e, redialed ? e.result.text : reply);
+        } else ctx.out.emit(e);
         if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
         // The person's turn as the transcript keeps it: one bracket per image, since a terminal draws no pixels.
         if (e.type === "session.start") for (const image of e.attachments ?? []) stream.line(imageLine(image));
@@ -2314,7 +2454,7 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
         if (e.type === "session.done") stream.line(turnSettledLine(e.result, spend));
         if (e.type === "session.notify" && e.notify === NOTIFY_ME) ctx.io.error(e.text);
       },
-    });
+    }, () => hostBack(ctx));
   } finally {
     asks.stop();
   }
@@ -2973,21 +3113,21 @@ export const VERBS: readonly Verb[] = [
   {
     name: "computers",
     usage: "wsp computers",
-    about: "your computers: this Mac, each box you added and each cloud account, with what each has, whether it is connected, how many workspaces it holds and what runs there against its cap",
+    about: "your computers: this Mac, each box you added and each cloud account, with what each has, whether it is connected, how many workspaces it holds, what runs there against its cap and what each cloud spent today",
     page: "front",
     options: {},
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp computers takes no positional arguments.", usageIs(ctx));
-      const places = (await (await ctx.client()).request<{ places: PlaceView[] }>("places.list")).places;
-      ctx.out.emit({ computers: places }, computerLines(places, hostPlatform()).join("\n"));
+      const read = await readComputers(await ctx.client());
+      ctx.out.emit(read, computerLines(read.computers, hostPlatform(), read.spend).join("\n"));
       return 0;
     },
     tool: tool({
       description:
-        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on, each box joined to it and each cloud account. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now; a cloud row carries its hourly rate. Every row carries its cap, threads at once on a computer and machines at once and spend per day on a cloud (the number the person set, else one thread per 2.5 GB of memory up to its cores, and 3 machines and $10 a day), and running, the threads running there now on a computer or the machines holding a slot on a cloud; a row whose running meets its cap is full. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
+        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on, each box joined to it and each cloud account. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now; a cloud row carries its hourly rate. Every row carries its cap, threads at once on a computer and machines at once and spend per day on a cloud (the number the person set, else one thread per 2.5 GB of memory up to its cores, and 3 machines and $10 a day), and running, the threads running there now on a computer or the machines holding a slot on a cloud; a row whose running meets its cap is full. spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
       input: {},
-      output: { computers: z.array(PlaceView) },
-      call: async (_args, deps) => asJson({ computers: (await (await deps.client()).request<{ places: PlaceView[] }>("places.list")).places }),
+      output: { computers: z.array(PlaceView), spend: z.array(PlaceSpend) },
+      call: async (_args, deps) => asJson(await readComputers(await deps.client())),
     }),
   },
   {
@@ -3542,11 +3682,11 @@ export const VERBS: readonly Verb[] = [
     run: async ctx => {
       if (ctx.args.length === 0) throw usageRefusal("wsp threads wait takes one thread or more.", usageIs(ctx));
       const timeoutMs = timeoutFlag(flag(ctx.flags, "timeout"));
-      const client = await ctx.client();
-      const named = await threadsOf(client, ctx.args);
+      const named = await threadsOf(await ctx.client(), ctx.args);
       // The whole reply unless the tail was asked for: a last line is a paragraph's end or a code fence, and a
       // person waiting on a thread is waiting for its answer, not for the shape of its final line.
-      const { value, line } = waitAnswer(named, await firstEnded(client, named, timeoutMs), ctx.flags["tail"] === true ? "tail" : "whole");
+      const waited = await waitThrough(ctx, named, timeoutMs, () => ctx.io.error(HOST_RESTARTING_LINE));
+      const { value, line } = waitAnswer(named, waited, ctx.flags["tail"] === true ? "tail" : "whole");
       if (value.timedOut === true) {
         ctx.out.emit(value);
         ctx.io.error(line);
@@ -3561,9 +3701,8 @@ export const VERBS: readonly Verb[] = [
       },
       output: WaitOut.shape,
       call: async ({ threads: refs, timeout }, deps) => {
-        const client = await deps.client();
-        const named = await threadsOf(client, refs);
-        const { value, line } = waitAnswer(named, await firstEnded(client, named, timeout === undefined ? undefined : timeout * 1_000));
+        const named = await threadsOf(await deps.client(), refs);
+        const { value, line } = waitAnswer(named, await waitThrough(deps, named, timeout === undefined ? undefined : timeout * 1_000));
         return asText(line, value);
       },
     }),
@@ -3819,7 +3958,7 @@ export const VERBS: readonly Verb[] = [
         if (task === undefined) return asJson(created);
         let failure: string;
         try {
-          const turn = await follow(client, openingOf(deps.env, created.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []), elsewhere: deps.elsewhere }), "agent", QUIET_TURN);
+          const turn = await follow(client, openingOf(deps.env, created.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []), elsewhere: deps.elsewhere }), "agent", QUIET_TURN, () => hostBack(deps));
           const ended = turnFailure(turn);
           if (ended === undefined) return asJson({ ...created, turn: turnView(turn) });
           failure = ended;
@@ -4121,7 +4260,7 @@ export const VERBS: readonly Verb[] = [
         // The command line asks a person before this and the app will; over MCP the second call is that step, so a
         // machine is never killed by one tool call the caller made on its own.
         if (confirm !== true) {
-          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy)} Ask the person, then call delete again with confirm true.`, going), isError: true };
+          return { ...asText(`${d.workspace.name} kept. ${deleteNotice(d.threads, workspaceKind(d.workspace), d.workspace.copy, d.workspace.machineId)} Ask the person, then call delete again with confirm true.`, going), isError: true };
         }
         await deleteWorkspace(client, d);
         return asText(deletedLine(d), going);
@@ -4172,7 +4311,7 @@ export const VERBS: readonly Verb[] = [
         let started: Turn | undefined;
         try {
           if (detach === true) return detachedOut(await startDetached(client, opening, "agent"), opened);
-          const out = turnOut(await follow(client, opening, "agent", { ...QUIET_TURN, started: t => (started = t) }));
+          const out = turnOut(await follow(client, opening, "agent", { ...QUIET_TURN, started: t => (started = t) }, () => hostBack(deps)));
           return asText(opened === undefined ? turnText(out) : `${opened(out.threadId)}\n${turnText(out)}`, out);
         } catch (e) {
           throw withLine(e, await napAfterDeadLaunch(client, woken, started));
@@ -4299,8 +4438,31 @@ export const VERBS: readonly Verb[] = [
         await checkedStart(client, message, thread.harness, input, thread.workspaceId);
         await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
         if (detach === true) return detachedOut(await startDetached(client, messageTo(thread, message, input, images, deps.elsewhere), "agent"));
-        const out = turnOut(await follow(client, messageTo(thread, message, input, images, deps.elsewhere), "agent", QUIET_TURN));
+        const out = turnOut(await follow(client, messageTo(thread, message, input, images, deps.elsewhere), "agent", QUIET_TURN, () => hostBack(deps)));
         return asText(turnText(out), out);
+      },
+    }),
+  },
+  {
+    name: "restart",
+    usage: "wsp restart",
+    about: "stops the host and brings it back on the road it came up on, its service, the verb that started it or the app; running turns go on and the host that comes back re-opens them. A host wsp up holds in a terminal refuses",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      if (ctx.args.length !== 0) throw usageRefusal("wsp restart takes no arguments.", usageIs(ctx));
+      const back = await restartHost(ctx);
+      ctx.out.emit(back, hostRestartedLine(back.running));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Stops the host and brings it back on the road it came up on: its service's manager, the verb that started it, or the app. Running turns go on across it and the host that comes back re-opens them, your own turn included, so a coordinator thread lands a host change with this and keeps working. Answers once that host serves, with running the ids of the threads running on it then. A run, send or wait this cut dials the host again and carries on. Refused for a host wsp up holds in a terminal, which only that terminal brings back.",
+      input: {},
+      output: { running: z.array(z.string()) },
+      call: async (_, deps) => {
+        const back = await restartHost(deps);
+        return asText(hostRestartedLine(back.running), back);
       },
     }),
   },
@@ -4758,12 +4920,14 @@ export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<s
     ...(deps.elsewhere === true ? { elsewhere: true } : {}),
     ...(deps.terminal !== undefined ? { terminal: deps.terminal } : {}),
     ...(deps.open !== undefined ? { open: deps.open } : {}),
-    client: async () => {
+    client: async again => {
       if (stateNote !== undefined && !noted) {
         noted = true;
         io.error(stateNote);
       }
-      return (client ??= await (deps.dial ?? dialHost)(statePath, { aim, say: line => io.error(line), ...(deps.start !== undefined ? { start: deps.start } : {}) }));
+      if (client !== undefined && again === undefined) return client;
+      client = await (deps.dial ?? dialHost)(statePath, { aim, say: line => io.error(line), ...(again !== undefined ? { deadlineMs: again.withinMs } : deps.start !== undefined ? { start: deps.start } : {}) });
+      return client;
     },
   };
   try {

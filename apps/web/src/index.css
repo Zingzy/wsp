@@ -1415,8 +1415,8 @@ code {
 
 /* Dark mode on the Mac: the whole window stands on the glass, each region the theme's material ground at its own
    share over it. The dev build's Material panel moves these same variables, so a share changes here and there
-   together. Inside the panel every edge is a hairline and cards a faint tint, on the line tokens every border utility
-   reads. Light mode keeps its solid ground. */
+   together. Inside the panel and on the settings page every edge is a hairline and cards a faint tint, on the line
+   tokens every border utility reads. Light mode keeps its solid ground. */
 .desktop-mac.dark [data-slot="sidebar-inset"] {
   background: transparent;
 }
@@ -1469,11 +1469,36 @@ html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-tran
 .desktop-mac.dark [data-preview-panel-mode="inline"] {
   background: color-mix(in srgb, var(--material-ground) var(--material-panel), transparent);
   border-color: var(--border);
+}
+
+.desktop-mac.dark :is([data-preview-panel-mode="inline"], [data-settings-page]) {
   --background: transparent;
   --card: rgb(255 255 255 / var(--material-card));
   --muted: rgb(255 255 255 / calc(var(--material-card) + 1%));
   --border: rgb(255 255 255 / var(--material-line));
   --input: rgb(255 255 255 / calc(var(--material-line) + 6%));
+  /* A picture's panes stand on the chrome's ground, which over the glass is the raised material the composer takes. */
+  --app-chrome-background: var(--material-raised);
+}
+
+/* The agents block's head pins over its rows as the settings page scrolls. At rest it stands on the glass like the
+   cards; pinned, it takes the glass recipe's blur and ground so the rows under it do not show through. */
+.desktop-mac.dark [data-settings-page] [data-agents-top] {
+  container-type: scroll-state;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+  }
+
+  @container scroll-state(stuck: top) {
+    &::before {
+      background-color: var(--card);
+      @apply glass-backdrop;
+    }
+  }
 }
 
 /* Light mode on the Mac: the sidebar alone stands on the glass, under a veil of its own ground. Over a dark desktop

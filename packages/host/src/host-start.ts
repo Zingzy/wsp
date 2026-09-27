@@ -7,9 +7,9 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 import { fmtDuration } from "@wsp/protocol";
-import { hostLogPath, servingHost, STARTED_BY_ENV, type HostLock } from "./host-lock.js";
+import { hostLogPath, SERVICE_WAIT_MS, servingHost, STARTED_BY_ENV, type HostLock } from "./host-lock.js";
 import { runningWsp, wspCommand, type RunningWsp } from "./mcp-install.js";
-import { httpProbe, logSince, logSize, logTail, registeredService, SERVICE_WAIT_MS, untilServing, type HostProbe, type RegisteredService } from "./service.js";
+import { httpProbe, logSince, logSize, logTail, registeredService, untilServing, type HostProbe, type RegisteredService } from "./service.js";
 
 /** Starts a host serving this state file on this computer and answers with its lock once it answers on its port.
  * Free ports unless `ports` names the ones a host that is restarting itself held. */

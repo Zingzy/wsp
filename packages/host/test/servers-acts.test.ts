@@ -138,6 +138,14 @@ describe("adding an MCP server", () => {
     expect(vaulted).toEqual(Array.from({ length: 6 }, () => ({ ACME_TOKEN: secret })));
   });
 
+  it("reads a variable the same add gives with env as held, so the first address that names it is written with the vault still empty", async () => {
+    const at = fixture();
+    const vaulted: Record<string, string>[] = [];
+    await serversActs({ vault: memVault(vaulted) }).add(box(at, road(at).machine), { agent: "claude", name: "acme", url: "https://mcp.acme.example/mcp?key=${ACME_TOKEN}", env: { ACME_TOKEN: "sk_TESTONLY_first" } });
+    expect(json(join(at.home, ".claude.json")).mcpServers!.acme).toEqual({ type: "http", url: "https://mcp.acme.example/mcp?key=${ACME_TOKEN}" });
+    expect(vaulted).toEqual([{ ACME_TOKEN: "sk_TESTONLY_first" }]);
+  });
+
   it("refuses a variable an argument or the address names for Codex, which reads no variable there, naming the argument and writing nothing", async () => {
     const at = fixture();
     const file = join(at.home, ".codex/config.toml");
