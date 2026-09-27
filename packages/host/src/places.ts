@@ -1683,7 +1683,7 @@ async function handshake(
   // One key agreement per join, thrown away with the socket: from the prove on every frame rides inside it, so
   // the code this computer spends and the report it sends are read by the host and by nobody carrying the bytes.
   const mine = freshEphemeral();
-  const report = { ...placeReport({ name, home }), dialed: url };
+  const report = { ...(await placeReport({ name, home })), dialed: url };
   const ws = dial(url);
   let seal: Seal | undefined;
   let answered: { placeId: string; hostPublicKey: string; hostName: string } | undefined;
@@ -1875,7 +1875,7 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
   // and a manager that hands it the login's own default would put them somewhere else entirely. PATH is the one a
   // login shell here gives, which is what the daemon reports and what a turn on this computer finds: a service
   // starts with almost none, and the app that asked for this join may hold a bare one itself.
-  const env = { ...serviceEnv(process.env), HOME: home, PATH: placeLogin(process.env, home)["PATH"]! };
+  const env = { ...serviceEnv(process.env), HOME: home, PATH: (await placeLogin(process.env, home))["PATH"]! };
   preparePlaceHome(home);
   const { unit, installed, failure } = await installService(manager, { ...at, argv: [bin, ...placeDaemonFlags(home, file, opts.wsp)], cwd: home, env, logPath }, opts.run ?? systemRunner);
   if (failure !== undefined) {

@@ -73,7 +73,8 @@ export function scriptGuest(backend: StubBackend, steps: Step[], otherwise?: Stu
       if (probeGarbles) return { exitCode: 1, stdout: "", stderr: "bash: line 1: unexpected" };
       return { exitCode: 0, stdout: claimed ? "WSP_RUN\n" : "WSP_GONE\n", stderr: "" };
     }
-    if (cmd.includes("kill -KILL") || cmd.includes("kill -TERM")) {
+    // The machine-context probe kills the group its own alias scan ran in; that is not a signal to the run.
+    if (!cmd.includes("echo WSP_CTX") && (cmd.includes("kill -KILL") || cmd.includes("kill -TERM"))) {
       kills.push(cmd);
       // A signal to the group takes the leader and what it spawned; one to a pid takes that pid alone.
       if (cmd.includes("-- -$P")) child = false;
