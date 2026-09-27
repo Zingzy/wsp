@@ -17,7 +17,7 @@ import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime, type ForwardsSource } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, copyingFake, createOn, projectOn, testPlatform } from "./stub-backend.js";
-import { grandchild, sweepStrays } from "./strays.js";
+import { alive, grandchild, sweepStrays } from "./strays.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
@@ -1039,8 +1039,7 @@ describe("a local turn and a host restart", () => {
    * the run its stream named and re-opens one an earlier host process left, which is what both shipped adapters do
    * with the factory's own attach. A line the run prints is one delta; the exit code ends the turn. */
   const runAdapter = (command: string): HarnessAdapterFactory => ctx => {
-    const sessionId = "33333333-3333-4333-8333-333333333333";
-    const read = (stream: ExecStream, onEvent: (event: AdapterEvent) => void): HarnessSession => {
+    const read = (stream: ExecStream, onEvent: (event: AdapterEvent) => void, sessionId: string = randomUUID()): HarnessSession => {
       const finished = (async () => {
         onEvent({ type: "session.start", sessionId, cwd: root });
         let text = "";
@@ -1065,7 +1064,7 @@ describe("a local turn and a host restart", () => {
         : {
             attach: async (o: AdapterAttachOptions) => {
               const stream = await attach(o.run, { input: false });
-              return stream === "gone" ? "gone" : read(stream, o.onEvent);
+              return stream === "gone" ? "gone" : read(stream, o.onEvent, o.sessionId);
             },
           }),
     };
@@ -1103,6 +1102,27 @@ describe("a local turn and a host restart", () => {
     const history = await rt2.sessions.history(ws.id);
     expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual(["reading the ticket", "wrote the fix"]);
     expect((await rt2.sessions.list(ws.id))[0]!.status).toBe("running");
+    await rt2.close();
+  }, 30_000);
+
+  it("turns on two workspaces of this computer both outlive the host: each workspace's sweep of the one run folder they share keeps the other's run", async () => {
+    const gate = join(root, "gate");
+    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo reading the ticket; while [ ! -f ${gate} ]; do sleep 0.05; done; echo wrote the fix; sleep 30`) }, local: localWiring });
+    const api = await createOn(rt1, { on: HERE_PLACE_ID, name: "api" });
+    const web = await createOn(rt1, { on: HERE_PLACE_ID, name: "web" });
+    await rt1.sessions.start(api.id, { prompt: "build the api" });
+    await rt1.sessions.start(web.id, { prompt: "build the site" });
+    for (const ws of [api, web]) await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.delta"));
+    const leaders = await Promise.all(readdirSync(runDir).filter(name => name.endsWith(".pid")).map(name => grandchild(join(runDir, name))));
+    expect(leaders).toHaveLength(2);
+    await rt1.close();
+
+    const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter("true") }, local: localWiring });
+    for (const ws of [api, web]) expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    expect(leaders.filter(pid => !alive(pid)), "a sweep ended a turn another workspace's row holds").toEqual([]);
+    writeFileSync(gate, "go\n");
+    for (const ws of [api, web]) await until(async () => (await rt2.sessions.history(ws.id)).some(e => e.type === "session.delta" && e.text === "wrote the fix"), 20_000);
+    for (const ws of [api, web]) expect((await rt2.sessions.list(ws.id))[0]!.status).toBe("running");
     await rt2.close();
   }, 30_000);
 

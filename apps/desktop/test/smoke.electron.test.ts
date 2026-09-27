@@ -83,6 +83,20 @@ function seedLocalWorkspace(home: string): void {
   writeFileSync(join(home, "state.json"), JSON.stringify({ projects: { [project.id]: project }, workspaces: { [LOCAL_WORKSPACE.id]: workspace } }));
 }
 
+/** A second workspace of the same project on this computer, beside the seeded one. */
+const SECOND_WORKSPACE = { ...LOCAL_WORKSPACE, id: "ws_2", name: "seeded-second" };
+
+/** Both workspaces with the copies a turn in each works in on disk, which is what wsp new --local leaves. */
+function seedTwoLocalWorkspaces(home: string): void {
+  seedLocalWorkspace(home);
+  const statePath = join(home, "state.json");
+  const state = JSON.parse(readFileSync(statePath, "utf8")) as { workspaces: Record<string, { copy: { path: string } }> };
+  const first = state.workspaces[LOCAL_WORKSPACE.id]!;
+  state.workspaces[SECOND_WORKSPACE.id] = { ...first, ...SECOND_WORKSPACE, copy: { ...first.copy, path: join(home, "work", SECOND_WORKSPACE.name) } };
+  for (const ws of Object.values(state.workspaces)) mkdirSync(ws.copy.path, { recursive: true });
+  writeFileSync(statePath, JSON.stringify(state));
+}
+
 /** The project a fixture host's workspaces are copies of: a repo on the provider computer that host serves, which
  * is what wsp add records. A workspace is one project's copy, so a host holding none refuses to make one. */
 async function seedProject(host: HostHandle): Promise<void> {
@@ -172,7 +186,7 @@ function deadPid(): number {
  * would read the shell of the Mac running the suite and find its agents instead of the fixture's. */
 function loginShellIn(home: string): string {
   const bin = join(home, "bin");
-  mkdirSync(bin);
+  mkdirSync(bin, { recursive: true });
   const shell = join(home, "login-shell");
   writeStub(shell, `#!/bin/sh\nprintf %s ${JSON.stringify(`${bin}:${LAUNCHD_PATH.join(":")}`)}\n`);
   return shell;
@@ -183,9 +197,14 @@ function loginShellIn(home: string): string {
  * removes that variable, the way a Finder launch has no WSP_HOME. */
 async function launch(env: Record<string, string | undefined>, prepare: (home: string) => void = () => {}): Promise<Launched> {
   const home = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-"));
-  const cwd = join(home, "cwd");
-  mkdirSync(cwd);
   prepare(home);
+  return launchIn(home, env);
+}
+
+/** The app launched again on a home an earlier launch left behind, which is what a relaunch is. */
+async function launchIn(home: string, env: Record<string, string | undefined>): Promise<Launched> {
+  const cwd = join(home, "cwd");
+  mkdirSync(cwd, { recursive: true });
   const inherited = { ...process.env };
   delete inherited["SOLARI_API_KEY"];
   delete inherited["ANTHROPIC_API_KEY"];
@@ -339,6 +358,41 @@ function twoAgents(home: string): void {
   writeFileSync(join(home, ".claude", "settings.json"), "{}\n");
   mkdirSync(join(home, ".codex"));
   writeFileSync(join(home, ".codex", "config.toml"), "");
+}
+
+/** Claude Code as a turn on this computer meets it, on a PATH of its own: it opens the session the host named, says
+ * one line, and waits for the gate file before it says its reply, so a turn is running for as long as a case needs.
+ * Each turn's pid is a line of its own in the pid file, where the case can check it is alive and stop it. */
+function claudeStandIn(dir: string, gate: string, pidFile: string): void {
+  mkdirSync(dir, { recursive: true });
+  const say = (id: number, text: string): string =>
+    `printf '%s\\n' '{"type":"assistant","message":{"id":"msg_${id}","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"${text}"}],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":1}},"parent_tool_use_id":null,"session_id":"'"$sid"'","uuid":"u${id}"}'`;
+  writeStub(
+    join(dir, "claude"),
+    [
+      "#!/bin/bash",
+      `sid=""; while [ $# -gt 0 ]; do case "$1" in --session-id|--resume) sid="$2"; shift;; esac; shift; done`,
+      // Anything that names no session is the catalog's probe, which a version line answers.
+      `[ -z "$sid" ] && { echo "2.1.280 (Claude Code)"; exit 0; }`,
+      `echo $$ >> ${JSON.stringify(pidFile)}`,
+      `printf '%s\\n' '{"type":"system","subtype":"init","cwd":"'"$PWD"'","session_id":"'"$sid"'","tools":[],"mcp_servers":[],"model":"claude-sonnet-4-5","permissionMode":"bypassPermissions","slash_commands":[],"apiKeySource":"none","uuid":"init"}'`,
+      say(1, "reading the ticket"),
+      `while [ ! -f ${JSON.stringify(gate)} ]; do sleep 0.1; done`,
+      say(2, "wrote the fix"),
+      `printf '%s\\n' '{"type":"result","subtype":"success","is_error":false,"duration_ms":10,"num_turns":1,"result":"wrote the fix","session_id":"'"$sid"'","total_cost_usd":0,"usage":{"input_tokens":1,"output_tokens":1},"uuid":"r1"}'`,
+      "cat > /dev/null",
+      "",
+    ].join("\n"),
+  );
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function refused(url: string): Promise<boolean> {
@@ -609,7 +663,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(Object.keys(state.workspaces ?? {})).toEqual([]);
     expect(Object.keys(state.projects ?? {})).toEqual([]);
     expect(existsSync(join(home, ".env"))).toBe(false);
-    expect(await win.locator("[data-workspace-name]").count()).toBe(0);
+    expect(await win.locator("[data-row-id^='ws:']").count()).toBe(0);
     // The tick was live, so both agents found here carry the wsp server and its skill, with the shim as the command.
     expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { wsp: { command: shim, args: ["mcp", "--state", join(home, "state.json")] } } });
     expect(existsSync(join(home, ".claude", "skills", "wsp", "SKILL.md"))).toBe(true);
@@ -698,13 +752,69 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(boot.tokenHash).toMatch(DIGEST);
     const row = win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`);
     await row.waitFor();
-    expect(await row.locator("[data-workspace-name]").textContent()).toBe(LOCAL_WORKSPACE.name);
-    // Line two is the branch the seeded copy stands on.
-    expect(await row.locator("[data-workspace-meta]").textContent()).toBe("main");
+    expect(await row.locator("[data-thread-title]").textContent()).toBe(LOCAL_WORKSPACE.name);
+    // Row three is the branch the seeded copy stands on.
+    expect(await row.locator("[data-tile-branch]").textContent()).toBe("main");
     // The seeded record is the whole list: nothing was recorded on the way in.
-    expect(await win.locator("[data-workspace-name]").count()).toBe(1);
+    expect(await win.locator("[data-row-id^='ws:']").count()).toBe(1);
     expect(appWindows(launched.app).filter(w => ONBOARDING_URL.test(w.url()))).toHaveLength(0);
     expect(existsSync(join(launched.home, ".env"))).toBe(false);
+  });
+
+  it("turns on two workspaces of this computer outlive a SIGTERM to the app: the next launch reads both working and both replies land", async () => {
+    // What a supervisor relaunching the app sends: a raw SIGTERM to the main process, which no quit menu or window
+    // close precedes. Two workspaces, since the run folder is this computer's and every workspace on it shares it.
+    const agents = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-agents-"));
+    const gate = join(agents, "gate");
+    const pidFile = join(agents, "claude.pids");
+    claudeStandIn(join(agents, "bin"), gate, pidFile);
+    const env = { PATH: `${join(agents, "bin")}:${process.env["PATH"] ?? ""}` };
+    let claudes: number[] = [];
+    try {
+      launched = await launch(env, seedTwoLocalWorkspaces);
+      const { home } = launched;
+      const win = await windowAt(launched.app, APP_URL);
+      await win.locator(`[data-row-id='${workspaceRowId(SECOND_WORKSPACE.id)}']`).waitFor();
+      const wsp = (...args: string[]): string => {
+        const ran = spawnSync(shimPath(home), args, { encoding: "utf8", env: { ...process.env, ...env, HOME: home, WSP_HOME: home }, cwd: join(home, "cwd") });
+        expect(ran.status, `${ran.stdout}${ran.stderr}`).toBe(0);
+        return ran.stdout;
+      };
+      for (const ws of [LOCAL_WORKSPACE, SECOND_WORKSPACE]) wsp("run", ws.name, "--agent", "claude", "--detach", `fix ${ws.name}`);
+      claudes = await vi.waitFor(
+        () => {
+          const pids = readFileSync(pidFile, "utf8").trim().split("\n").map(Number);
+          expect(pids).toHaveLength(2);
+          return pids;
+        },
+        { timeout: 30_000, interval: 100 },
+      );
+      const statuses = (page: Page): Promise<(string | null)[]> => page.locator("[data-row-id^='thread:'] [data-thread-status]").evaluateAll(marks => marks.map(m => m.getAttribute("data-thread-status")));
+      await vi.waitFor(async () => expect(await statuses(win)).toEqual(["working", "working"]), { timeout: 30_000, interval: 100 });
+      const threads = await win.locator("[data-row-id^='thread:']").evaluateAll(rows => rows.map(r => r.getAttribute("data-row-id")!.slice("thread:".length)));
+
+      const first = launched.app.process();
+      const ended = new Promise<void>(resolve => first.once("exit", () => resolve()));
+      process.kill(first.pid!, "SIGTERM");
+      await ended;
+      expect(claudes.filter(pid => !alive(pid)), "a turn went with the app").toEqual([]);
+
+      launched = await launchIn(home, env);
+      const again = await windowAt(launched.app, APP_URL);
+      await vi.waitFor(async () => expect(await statuses(again)).toHaveLength(2), { timeout: 30_000, interval: 100 });
+      // Read for a while rather than once: a turn written off on the way back reads working until the re-opened reader
+      // finds its process gone.
+      for (let i = 0; i < 20; i++) {
+        expect(await statuses(again)).toEqual(["working", "working"]);
+        await again.waitForTimeout(150);
+      }
+      expect(claudes.filter(pid => !alive(pid)), "the next launch ended a turn").toEqual([]);
+      writeFileSync(gate, "go\n");
+      for (const thread of threads) await vi.waitFor(() => expect(wsp("thread", "read", thread)).toContain("wrote the fix"), { timeout: 30_000, interval: 250 });
+    } finally {
+      for (const pid of claudes) if (alive(pid)) process.kill(pid, "SIGKILL");
+      rmSync(agents, { recursive: true, force: true });
+    }
   });
 
   it("no frame in the window registers a service worker on a loopback origin, and a host page loads into a session holding none", async () => {

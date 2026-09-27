@@ -6917,9 +6917,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (isHeldAway(entry.record.id)) return;
     const sweep = execFactoryFor(entry).sweep;
     if (sweep === undefined) return;
+    // Every running row's run and not this workspace's alone: the workspaces on one computer share its run folder,
+    // so a sweep that kept only its own would end the turns of the others.
     const held: string[] = [];
     for (const s of sessions.values()) {
-      if (s.view.workspaceId === entry.record.id && s.view.status === "running" && s.run !== undefined) held.push(s.run);
+      if (s.view.status === "running" && s.run !== undefined) held.push(s.run);
     }
     const swept = await sweep(held).catch((e: unknown) => {
       console.warn(`the runs on ${entry.record.id} were left as they are: ${e instanceof Error ? e.message : String(e)}`);
@@ -7679,13 +7681,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * with its doctor's reason, and a place that forks nothing refuses with NO_PROVIDER_LINE when no place here runs
    * workspaces, else naming the places that do, so nobody is sent to a provider they do not need. */
   const landingBackend = async (placeId: string | undefined): Promise<MachineBackend> => {
+    const at = await forkingAt(placeId);
+    if (at !== undefined) return at;
+    const running = (await buildPlaces()).map(r => r.name);
+    throw conflict(running.length === 0 ? NO_PROVIDER_LINE : placeForksNothingPickLine(placeName(placeId ?? places.wired), running));
+  };
+  /** The backend a fork on that place would land on, or nothing where it forks nothing, with no refusal worded: the
+   * refusal lists the places, and a list read while the records load waits on that load. */
+  const forkingAt = async (placeId: string | undefined): Promise<MachineBackend | undefined> => {
     // The first fork on a joined computer is where this host learns what that computer forks with; every road after
     // it reads the answer off the place's record.
     if (placeId !== undefined) await placeDoorOf().forkingBackend(placeId);
     const at = backendOfKind("cloud", placeId);
-    if (!forksNoMachines(at.capabilities)) return at;
-    const running = (await buildPlaces()).map(r => r.name);
-    throw conflict(running.length === 0 ? NO_PROVIDER_LINE : placeForksNothingPickLine(placeName(placeId ?? places.wired), running));
+    return forksNoMachines(at.capabilities) ? undefined : at;
   };
   const placeName = (place: string): string => placeDoor?.nameOf(place) ?? place;
   /** Where the image's own seal stands: the place the record names, or the provider this host forks on for a record
@@ -8757,7 +8765,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const { placeId } = await landingPlace(computer);
     // A computer this host cannot read a backend for holds nothing of a project: the record still stands, as it
     // did before this road existed, and the road that would have to fork there says so itself when it is asked.
-    const at = await landingBackend(placeId).catch(() => undefined);
+    const at = await forkingAt(placeId).catch(() => undefined);
     const deps: LandingDeps = {
       async worker(o) {
         const forking = await landingBackend(placeId);
