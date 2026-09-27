@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DAEMON_VERSION, STATE_SHAPE, type StateShape } from "@wsp/protocol";
 import { writeOwn } from "@wsp/own-file";
-import { jsonFileStore, memoryStore, STATE_SHAPE_KEY, stateNotAnObjectLine, stateShapeUnreadableLine, stateUnreadableLine, stateWrittenByNewerLine, type Store } from "../src/store.js";
+import { jsonFileStore, memoryStore, STATE_SHAPE_KEY, stateNotAnObjectLine, stateShapeUnreadableLine, stateUnreadableLine, stateWrittenByNewerLine, stateWrittenByOlderLine, type Store } from "../src/store.js";
 
 const dir = mkdtempSync(join(tmpdir(), "wsp-store-"));
 /** Who a store in this file says wrote its file: every caller names a build, and this one is the suite. */
@@ -69,7 +69,6 @@ describe("the shape a state file was written in", () => {
     const held = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
     expect(held[STATE_SHAPE_KEY]).toMatchObject({ shape: STATE_SHAPE, ...writer });
     expect(Date.parse((held[STATE_SHAPE_KEY] as StateShape).at)).toBeGreaterThan(0);
-    expect(await store.shape()).toMatchObject({ shape: STATE_SHAPE, ...writer });
     // Every other top-level name is a collection of documents by id; this one is not, so it reads as no collection
     // at all rather than as one whose ids are the document's own fields.
     expect(await store.list(STATE_SHAPE_KEY)).toEqual([]);
@@ -97,8 +96,6 @@ describe("the shape a state file was written in", () => {
     await expect(store.delete("workspaces", "a")).rejects.toThrow(refusal);
     await expect(store.putBlob("vaults", "ws_1", Buffer.from("x"))).rejects.toThrow(refusal);
     expect(readFileSync(path, "utf8")).toBe(before);
-    // The document itself is still readable, since the refusal has to name the build that wrote the file.
-    expect(await store.shape()).toEqual(wrote);
   });
 
   it("refuses every read and write of a file that is present and does not parse, in one sentence naming the path, and leaves its bytes alone", async () => {
@@ -122,7 +119,6 @@ describe("the shape a state file was written in", () => {
     await expect(store.put("workspaces", "b", { id: "b" })).rejects.toThrow(refusal);
     await expect(store.delete("workspaces", "a")).rejects.toThrow(refusal);
     await expect(store.putBlob("vaults", "ws_1", Buffer.from("x"))).rejects.toThrow(refusal);
-    await expect(store.shape()).rejects.toThrow(refusal);
     expect(readFileSync(path, "utf8")).toBe(bytes);
 
     // A path with no file behind it is not this rule: that is the first wsp up on a fresh home, which reads an
@@ -149,14 +145,12 @@ describe("the shape a state file was written in", () => {
       await expect(store.put("workspaces", "b", { id: "b" })).rejects.toThrow(refusal);
       await expect(store.delete("workspaces", "a")).rejects.toThrow(refusal);
       await expect(store.putBlob("vaults", "ws_1", Buffer.from("x"))).rejects.toThrow(refusal);
-      await expect(store.shape()).rejects.toThrow(refusal);
       expect(readFileSync(path, "utf8")).toBe(before);
     }
   });
 
   it("refuses every read and write of a file whose shape document does not parse, and leaves its bytes alone", async () => {
-    // The reading this is from: a copy of a state file had its $shape set to the bare number 3 by hand, and the
-    // host served it as a file written before the document existed, which is the one case the guard is for.
+    // A copy of a state file had its $shape set to the bare number 3 by hand: no build can be named off that.
     for (const document of [3, null, { shape: STATE_SHAPE }]) {
       const path = join(dir, `shape-not-a-document-${JSON.stringify(document)}.json`);
       writeFileSync(path, JSON.stringify({ workspaces: { a: { id: "a" } }, [STATE_SHAPE_KEY]: document }, null, 2));
@@ -169,37 +163,41 @@ describe("the shape a state file was written in", () => {
       await expect(store.put("workspaces", "b", { id: "b" })).rejects.toThrow(refusal);
       await expect(store.delete("workspaces", "a")).rejects.toThrow(refusal);
       await expect(store.putBlob("vaults", "ws_1", Buffer.from("x"))).rejects.toThrow(refusal);
-      await expect(store.shape()).rejects.toThrow(refusal);
       expect(readFileSync(path, "utf8")).toBe(before);
     }
   });
 
-  it("reads a file written before the document existed as it always did, and writes the document at its next save", async () => {
-    const path = join(dir, "shape-older.json");
-    writeFileSync(path, JSON.stringify({ workspaces: { a: { id: "a" } } }));
-    const store = jsonFileStore(path, writer);
-    expect(await store.shape()).toBeUndefined();
-    expect(await store.get("workspaces", "a")).toEqual({ id: "a" });
-    await store.put("workspaces", "b", { id: "b" });
-    expect((await store.shape())?.shape).toBe(STATE_SHAPE);
-    expect(await store.keys("workspaces")).toEqual(["a", "b"]);
+  it("refuses every read and write of a file in an older shape, or with no shape at all, in one sentence, and leaves its bytes alone", async () => {
+    const older: StateShape = { shape: STATE_SHAPE - 1, wsp: "0.1.0", daemon: DAEMON_VERSION - 1, bin: "/Users/z/.local/bin/wsp", at: "2026-09-10T08:00:00.000Z" };
+    for (const [name, document] of [["shape-older.json", older], ["shape-none.json", undefined]] as const) {
+      const path = join(dir, name);
+      writeFileSync(path, JSON.stringify({ workspaces: { a: { id: "a" } }, ...(document !== undefined ? { [STATE_SHAPE_KEY]: document } : {}) }));
+      const before = readFileSync(path, "utf8");
+      const store = jsonFileStore(path, writer);
+      const refusal = stateWrittenByOlderLine(path, document);
+      await expect(store.get("workspaces", "a")).rejects.toThrow(refusal);
+      await expect(store.list("workspaces")).rejects.toThrow(refusal);
+      await expect(store.put("workspaces", "b", { id: "b" })).rejects.toThrow(refusal);
+      await expect(store.putBlob("vaults", "ws_1", Buffer.from("x"))).rejects.toThrow(refusal);
+      expect(readFileSync(path, "utf8")).toBe(before);
+    }
+    expect(stateWrittenByOlderLine("/Users/z/.wsp/state.json", undefined)).toBe(
+      `/Users/z/.wsp/state.json holds state in an older shape (none recorded; this wsp reads shape ${STATE_SHAPE}): move the file aside and this wsp starts a fresh one`,
+    );
+    expect(stateWrittenByOlderLine("/Users/z/.wsp/state.json", older)).toBe(
+      `/Users/z/.wsp/state.json holds state in an older shape (shape ${STATE_SHAPE - 1}, written 2026-09-10T08:00:00.000Z by /Users/z/.local/bin/wsp (wsp 0.1.0, daemon ${DAEMON_VERSION - 1}); this wsp reads shape ${STATE_SHAPE}): move the file aside and this wsp starts a fresh one`,
+    );
   });
 
-  it("is 2 on this build, since the seeded record changed shape, and a file at 3 is refused", async () => {
-    // The number every save writes, pinned: a record's schema changed, so a host that reads the older number
-    // meets a file it cannot read and says so instead of reading a record in a form it does not know.
+  it("is 2 on this build, since the seeded record changed shape, and a file at 3 is refused as newer", async () => {
+    // The number every save writes, pinned: a record's schema changed, so a host that reads another number meets a
+    // file it cannot read and says so instead of reading a record in a form it does not know.
     expect(STATE_SHAPE).toBe(2);
     const path = join(dir, "shape-three.json");
     const wrote: StateShape = { shape: 3, wsp: "0.4.0", daemon: DAEMON_VERSION, bin: "/Users/z/.local/bin/wsp", at: "2026-09-19T08:00:00.000Z" };
     writeFileSync(path, JSON.stringify({ projects: { p: { id: "p" } }, [STATE_SHAPE_KEY]: wrote }, null, 2));
     const store = jsonFileStore(path, writer);
     await expect(store.get("projects", "p")).rejects.toThrow(stateWrittenByNewerLine(path, wrote));
-  });
-
-  it("a store with no file behind it carries none, since the document is about a file another build could write", async () => {
-    const store = memoryStore();
-    await store.put("workspaces", "a", { id: "a" });
-    expect(await store.shape()).toBeUndefined();
   });
 });
 
@@ -224,7 +222,7 @@ describe("what the owner's state folder stands at", () => {
     const path = join(home, "state.json");
     mkdirSync(join(home, "blobs", "image-vaults"), { recursive: true });
     for (const wide of [home, join(home, "blobs"), join(home, "blobs", "image-vaults")]) chmodSync(wide, 0o755);
-    writeFileSync(path, "{}", { mode: 0o644 });
+    writeFileSync(path, JSON.stringify({ [STATE_SHAPE_KEY]: { shape: STATE_SHAPE, ...WRITER, at: "2026-09-27T00:00:00.000Z" } }), { mode: 0o644 });
     chmodSync(path, 0o644);
     const store = jsonFileStore(path, WRITER);
     await store.put("workspaces", "a", { id: "a" });

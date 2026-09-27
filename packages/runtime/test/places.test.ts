@@ -252,7 +252,6 @@ function yielding(inner: Store): Store {
     getBlob: async (c, id) => (await soon(), inner.getBlob(c, id)),
     putBlob: async (c, id, b) => (await soon(), inner.putBlob(c, id, b)),
     deleteBlob: async (c, id) => (await soon(), inner.deleteBlob(c, id)),
-    shape: async () => (await soon(), inner.shape()),
   };
 }
 
@@ -676,7 +675,7 @@ const saysItsFacts = (facts: () => Record<string, unknown>, asks: { count: numbe
 };
 
 /** Where a computer keeps the logins its workspaces share, as its daemon reports one. */
-const LOGINS = "/var/lib/wsp/logins";
+const LOGINS = "/wsp/logins";
 
 describe("what a computer says it forks with", () => {
   it("is asked once per computer, and asked again when it dials back on another daemon, so a field the version before it never carried lands on the row", async () => {
@@ -763,10 +762,10 @@ describe("a channel to the daemon on a computer you own", () => {
     const opened = await mine.request("daemon.open", { placeId });
     expect(opened.ok, String(opened["error"])).toBe(true);
     const channel = String(opened["channel"]);
-    const sent = await mine.request("daemon.send", { channel, frame: { op: "pty.create", cols: 80, rows: 24, env: { CODEX_HOME: "/var/lib/wsp/logins/codex" } } });
+    const sent = await mine.request("daemon.send", { channel, frame: { op: "pty.create", cols: 80, rows: 24, env: { CODEX_HOME: "/wsp/logins/codex" } } });
     expect(sent["reply"]).toMatchObject({ ok: true, ptyId: "pty_7" });
     // The frame reached that computer whole, the environment the sign-in runs with included.
-    expect(asked.at(-1)).toMatchObject({ op: "pty.create", cols: 80, env: { CODEX_HOME: "/var/lib/wsp/logins/codex" } });
+    expect(asked.at(-1)).toMatchObject({ op: "pty.create", cols: 80, env: { CODEX_HOME: "/wsp/logins/codex" } });
     await until(async () => mine.events.some(e => e.type === "daemon.event" && e["channel"] === channel && String((e["event"] as Record<string, unknown>)["data"]).includes("auth.openai.com")));
     // One daemon per channel: naming both, or neither, is the caller not saying which.
     expect((await mine.request("daemon.open", { placeId, workspaceId: "w_1" })).ok).toBe(false);

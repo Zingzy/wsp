@@ -9,7 +9,6 @@ use ts_rs::TS;
 pub enum WorkspaceKind {
     Cloud,
     Local,
-    Ssh,
     Place,
 }
 
@@ -23,7 +22,6 @@ impl WorkspaceKind {
         match self {
             WorkspaceKind::Cloud => "cloud",
             WorkspaceKind::Local => "local",
-            WorkspaceKind::Ssh => "ssh",
             WorkspaceKind::Place => "place",
         }
     }

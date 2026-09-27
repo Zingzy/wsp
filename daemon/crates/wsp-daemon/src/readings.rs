@@ -64,15 +64,9 @@ enum Road {
     ByPlatform,
 }
 
-/// The kinds a daemon serves these two readings for. A machine over ssh runs the same daemon a fork does, on the
-/// same Linux, so it reads the same /proc: the difference between the two is how the host reaches the daemon, not
-/// what the daemon can see of its own machine.
-const KIND_READINGS: [(WorkspaceKind, Road); 4] = [
-    (WorkspaceKind::Cloud, Road::Proc),
-    (WorkspaceKind::Ssh, Road::Proc),
-    (WorkspaceKind::Local, Road::Host),
-    (WorkspaceKind::Place, Road::ByPlatform),
-];
+/// The kinds a daemon serves these two readings for.
+const KIND_READINGS: [(WorkspaceKind, Road); 3] =
+    [(WorkspaceKind::Cloud, Road::Proc), (WorkspaceKind::Local, Road::Host), (WorkspaceKind::Place, Road::ByPlatform)];
 
 fn by_platform(platform: &str) -> &'static KindReadings {
     if platform == "linux" {
@@ -101,7 +95,7 @@ mod tests {
 
     #[test]
     fn has_a_module_for_every_kind_whose_machines_carry_a_daemon() {
-        for kind in ["cloud", "ssh", "local", "place"] {
+        for kind in ["cloud", "local", "place"] {
             assert!(readings_for(kind, "linux").is_ok(), "{kind}");
             assert!(readings_for(kind, "macos").is_ok(), "{kind}");
         }
@@ -122,18 +116,12 @@ mod tests {
 
     #[test]
     fn every_kind_the_wire_names_has_a_row_and_the_words_are_read_as_the_wire_reads_them() {
-        for kind in [WorkspaceKind::Cloud, WorkspaceKind::Ssh, WorkspaceKind::Local, WorkspaceKind::Place] {
+        for kind in [WorkspaceKind::Cloud, WorkspaceKind::Local, WorkspaceKind::Place] {
             assert_eq!(WorkspaceKind::from_word(kind.as_str()), Some(kind));
             assert!(KIND_READINGS.iter().any(|(row, _)| *row == kind), "{kind:?}");
         }
         assert_eq!(WorkspaceKind::from_word("Cloud"), None);
         assert!(readings_for("Cloud", "linux").is_err());
-    }
-
-    #[test]
-    fn gives_a_machine_over_ssh_the_same_proc_modules_a_fork_gets_since_the_daemon_on_it_is_the_same_daemon() {
-        assert!(std::ptr::eq(readings_for("ssh", "linux").unwrap(), readings_for("cloud", "linux").unwrap()));
-        assert!(std::ptr::eq(readings_for("ssh", "macos").unwrap(), readings_for("cloud", "linux").unwrap()));
     }
 
     #[test]

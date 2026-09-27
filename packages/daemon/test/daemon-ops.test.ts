@@ -312,14 +312,6 @@ describe("nothing a pane asks for stays pending", () => {
     });
   });
 
-  it("a machine reached over ssh reads its own machine, since the daemon on it is the one a fork runs", async () => {
-    // Its metrics module is the fork's own object, which this file's cloud cases already drive; what is proved
-    // here is that the kind takes the watch at all rather than refusing it as a kind with no row.
-    await withDaemon({ kind: "ssh", root: tmp, procRoot, procIntervalMs: 20 }, async c => {
-      expect(await c.request("proc.watch")).toMatchObject({ ok: true });
-    });
-  });
-
   it("a metrics module that cannot read this machine refuses the watch with its own words, so no row sits at pending", async () => {
     // A /proc with nothing in it: the module names the file it could not read, and the pane prints that. The three
     // files are read at once, so which one the refusal names is the first to answer; the root is in all of them.

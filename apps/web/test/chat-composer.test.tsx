@@ -634,7 +634,7 @@ describe("composer while the workspace is not live", () => {
       expect(send.disabled).toBe(true);
       expect(isEditable(composerEditor())).toBe(false);
       // A page the host served on this computer says what it has always said: wsp itself is not running here.
-      (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0", tokenHash: "a".repeat(64) };
+      (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: true, version: "0.0.0", tokenHash: "a".repeat(64) };
       act(() => useStore.getState().setConn("closed"));
       await waitFor(() => expect(screen.getByRole("status").textContent).toBe(sendRefusal("closed")));
     } finally {

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The composer under the chat thread: the transplanted prompt editor, slash
 // menu, send and stop buttons over one draft per workspace. Enter starts one
-// turn through sessions.start, resumed with the workspace's Claude session
-// unless a new thread was requested; a thread with no session to resume, its
-// launch having failed, is named instead, and the runtime runs the message as
-// its first turn. A failed send puts the draft back. Stop
+// turn through sessions.start in the thread the view shows unless a new thread
+// was requested; the runtime resumes that thread's latest session, or, after a
+// launch that failed, runs the message as its first turn. A failed send puts
+// the draft back. Stop
 // sends one sessions.interrupt for the turn on screen and waits, disabled,
 // for the turn's end; the runtime pushes the interrupted done before it
 // answers, and the composer opens when the process exits. not-running means
@@ -408,7 +408,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     [searchKey],
   );
 
-  const { setSending, appendUserTurn, appendLocalError, resume, thread: into, busy, sending } = thread;
+  const { setSending, appendUserTurn, appendLocalError, thread: into, busy, sending } = thread;
   const start = useCallback(
     (prompt: string, onRefused: () => void) => {
       if (!api) return;
@@ -417,9 +417,9 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
       setSending(true);
       hold(threadKey);
       appendUserTurn(prompt, requestId, images.map(recordOf));
-      // A send that names neither a thread nor a session to resume opens one the runtime has written no row for, so
-      // the sidebar is handed the same thread the transcript has until that row arrives.
-      if (into === undefined && resume === undefined) launching(workspaceId, { requestId, title: prompt, harness: harnessId });
+      // A send that names no thread opens one the runtime has written no row for, so the sidebar is handed the same
+      // thread the transcript has until that row arrives.
+      if (into === undefined) launching(workspaceId, { requestId, title: prompt, harness: harnessId });
       // The images leave the composer with the send and are kept under its request id, which is what the person's
       // row in the transcript is drawn from; a refused send hands them back rather than losing them.
       sendImagesAs(workspaceId, requestId);
@@ -432,7 +432,6 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
             workspaceId,
             prompt,
             requestId,
-            ...(resume ? { resume } : {}),
             ...(into !== undefined ? { thread: into } : {}),
             ...folderStart,
             ...(attachments.length > 0 ? { attachments } : {}),
@@ -447,7 +446,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
           appendLocalError(err instanceof Error ? err.message : String(err));
         });
     },
-    [api, appendLocalError, appendUserTurn, folderStart, harnessId, hold, images, into, launched, launching, pinned, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
+    [api, appendLocalError, appendUserTurn, folderStart, harnessId, hold, images, into, launched, launching, pinned, restoreImages, sendImagesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
   const send = useCallback(() => {

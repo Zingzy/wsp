@@ -2,12 +2,11 @@
 // Production wiring: every running workspace in the store gets a
 // WorkspaceTerminals in the registry, linked through the host's relay.
 import { homedir } from "node:os";
-import { startOldDaemon, type OldDaemon } from "../../../packages/daemon/test/old-daemon.js";
-import { DAEMON_VERSION, type DaemonLinkStatus, type WorkspaceView } from "@wsp/protocol";
+import type { DaemonLinkStatus, WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { getDaemonRoot, getDaemonVersion } from "../src/files/wire.js";
+import { getDaemonRoot } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { getProcs, resetProcs } from "../src/machine/procs.js";
 import { terminalEmptyLine, terminalPaneState, terminalPaneTitle } from "../src/adapt/index.js";
@@ -75,7 +74,6 @@ function fakeApi(workspaces: WorkspaceView[], relay: () => RelayHarness) {
 }
 
 let relay: RelayHarness | undefined;
-let oldDaemon: OldDaemon | undefined;
 let unwire: (() => void) | undefined;
 
 beforeEach(async () => {
@@ -94,8 +92,6 @@ afterEach(async () => {
   unwire = undefined;
   await relay?.close();
   relay = undefined;
-  await oldDaemon?.close();
-  oldDaemon = undefined;
 });
 
 describe("wireTerminals", () => {
@@ -183,30 +179,6 @@ describe("wireTerminals", () => {
     // daemon for the same stream would set a second sampler going on the one machine both would be reading.
     await until(() => getLive("ws_fork").snapshot().samples.length > 1);
     expect(getLive("ws_here").snapshot()).toEqual({ samples: [], reach: "unreachable", unavailable: null });
-  }, 15_000);
-
-  it("a daemon from before the version says so in its hello, its refusals read unavailable instead of pending, and a redeployed daemon fills the rows", async () => {
-    oldDaemon = await startOldDaemon(harnessMachineToken("m1"));
-    relay!.setRoad(`ws://127.0.0.1:${oldDaemon.port}`);
-    const { api } = fakeApi([view("ws_a")], () => relay!);
-    unwire = wireTerminals(useStore, { backoffMs: () => 30 });
-    useStore.getState().bind(api);
-    await until(() => getTerminals("ws_a")?.status() === "live");
-    expect(getDaemonRoot("ws_a")).toBe("/root");
-    // A hello without a version is the first one; the app knows what it lacks from that alone.
-    expect(getDaemonVersion("ws_a")).toBe(1);
-    // The daemon answered sys.watch with an error and the app kept it: the rows read unavailable, never pending.
-    await until(() => getLive("ws_a").snapshot().unavailable !== null);
-    expect(getLive("ws_a").snapshot()).toEqual({ samples: [], reach: "live", unavailable: "unknown op: sys.watch" });
-    expect(oldDaemon.ops.filter(op => op === "sys.watch")).toEqual(["sys.watch"]);
-
-    // The update: the old daemon goes down and the current one answers the next dial on the same road.
-    relay!.setRoad(`ws://127.0.0.1:${relay!.daemon.port}`);
-    await oldDaemon.close();
-    oldDaemon = undefined;
-    await until(() => getDaemonVersion("ws_a") === DAEMON_VERSION);
-    await until(() => getLive("ws_a").snapshot().samples.length > 0);
-    expect(getLive("ws_a").snapshot().unavailable).toBeNull();
   }, 15_000);
 
   it("a host socket that leaves live parks every link, and relinks them when it is back", async () => {

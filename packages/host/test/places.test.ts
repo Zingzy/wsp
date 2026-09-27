@@ -31,7 +31,7 @@ afterEach(() => {
 });
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, configHardLinkRefusal, backUrl, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, sshDaemonPaths, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, configHardLinkRefusal, backUrl, PLACE_LOGIN_REFUSED_KIND, hostKeyAsk, hostKeyMismatchRefusal, hostKeyUnconfirmedRefusal, hostKeyUnscannableRefusal, PLACE_ROOT_SHELLS, placeRootShellRefusal, addedProjectLine, addedProjectOn, agentsCell, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeFileText, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeKeptForLinkLine, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceBack, type PlaceDoorView, type PlaceView, type SignInLine } from "@wsp/protocol";
 import { CATALOG_AGENTS, CODEX_TOML } from "@wsp/catalog";
 import { PlaceAddTakenBackError, PlaceLoginRefusedError, freshEphemeral, makeSeal, sealKeys, sharedSecret, type PlaceBackHolder, type PlaceLogin, type PlaceStaging, type PlaceUpdateRequest, type Seal } from "@wsp/runtime";
 import { MissingKnownHostsError, missingKnownHostsLine, OWN_MARK, SshBackend, SSH_LINE_CAP, SSH_READ_SCRIPT, SSH_WORD_REFUSAL, keyFingerprint, sshWordReach, type SshLocalRun, type SshReach, type SshTransport } from "@wsp/engine";
@@ -1334,7 +1334,7 @@ describe("wsp add on a computer reached over ssh", () => {
         { id: "tools/brew/gh", label: "gh", outcome: "present" },
       ],
     };
-    const place: PlaceView = { id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true, agents: ["codex"], logins: "/var/lib/wsp/logins" };
+    const place: PlaceView = { id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true, agents: ["codex"], logins: "/wsp/logins" };
     const client = {
       request: async (op: string, params?: Record<string, unknown>) => {
         if (op === "places.list") return { places: [{ ...place, provision: done }] } as Record<string, unknown>;
@@ -1384,7 +1384,7 @@ describe("wsp add on a computer reached over ssh", () => {
       present: true,
       takesForks: true,
       agents: ["claude", "codex"],
-      logins: "/var/lib/wsp/logins",
+      logins: "/wsp/logins",
     };
     const client = {
       request: async (op: string) => (op === "agents.signInLine" ? { line: { command: "codex login --device-auth", prepare: "mkdir -p x" } } : ({ place, hostKey: "ssh-ed25519 SHA256:abc" } as Record<string, unknown>)),
@@ -2890,7 +2890,7 @@ describe("wsp add <place> --sign-in <agent>", () => {
     default: true,
     joinedAt: new Date(0).toISOString(),
     agents: ["claude", "codex"],
-    logins: "/var/lib/wsp/logins",
+    logins: "/wsp/logins",
   };
 
   /** A host holding one joined computer, answering the listing and planning each line: the sign-in itself is handed in. */
@@ -3346,8 +3346,8 @@ describe("wsp's own login files on a computer already joined, written by every u
     const execs = frames.filter(f => f["op"] === "exec");
     expect(execs).toHaveLength(1);
     expect(execs[0]!["cmd"]).toBe(FILES);
-    expect(String(execs[0]!["cmd"])).toContain(profileSourceLine(sshDaemonPaths(HOME).profileFile));
-    expect(String(execs[0]!["cmd"])).toContain(`grep -vF '${sshDaemonPaths(HOME).profileFile}' '${HOME}/.profile'`);
+    expect(String(execs[0]!["cmd"])).toContain(profileSourceLine(placeDaemonPaths(HOME).profileFile));
+    expect(String(execs[0]!["cmd"])).toContain(`grep -vF '${placeDaemonPaths(HOME).profileFile}' '${HOME}/.profile'`);
     // Ahead of the bytes: the swap restarts that daemon and drops this link, so an exec sent after it reaches
     // nothing.
     expect(frames.findIndex(f => f["op"] === "exec")).toBeLessThan(frames.findIndex(f => f["op"] === "place.update"));
@@ -3430,7 +3430,7 @@ describe("wsp's own login files on a computer already joined, written by every u
 
   it("leaves a login file holding the old unguarded line with exactly one guarded line and the rest byte for byte", async () => {
     const home = tmp("login-files-live");
-    const at = sshDaemonPaths(home);
+    const at = placeDaemonPaths(home);
     // What the correction read on that computer: the line the deploy wrote before the guard, with the person's
     // own lines around it.
     writeFileSync(join(home, ".profile"), `# theirs\n. ${at.profileFile}\n# after\n`);
@@ -3451,7 +3451,7 @@ describe("wsp's own login files on a computer already joined, written by every u
 
   it("makes the one line over ssh where the login has no file of its own, and says it once however often it runs", async () => {
     const home = tmp("login-files-fresh");
-    const at = sshDaemonPaths(home);
+    const at = placeDaemonPaths(home);
     const box = fakeBox({ exitCode: 0, stdout: "", stderr: "" }, home);
     await placeUpdater({ daemonDir: tmp("login-files-fresh-asset"), backend: box.backend as never })({
       placeId: "p_1",
@@ -3770,7 +3770,7 @@ describe("the daemon's line on a joined computer", () => {
     const flags = placeDaemonFlags(home, file, { execPath: "/usr/bin/node", execArgv: [], argv: ["/usr/bin/node", "/opt/wsp/bin.js"], version: "9.9.9", PATH: "" });
     const at = placeDaemonPaths(home);
     // Loopback, a port of the machine's own, every file under the login's folder, and the kind that picks the readings.
-    expect(flags.slice(0, flags.indexOf("--home"))).toEqual(daemonFlags({ ...sshDaemonPlace({ home, path: "" }), kind: "place" }));
+    expect(flags.slice(0, flags.indexOf("--home"))).toEqual(daemonFlags(sshDaemonPlace({ home, path: "" })));
     expect(flags).toContain("127.0.0.1");
     expect(flags[flags.indexOf("--kind") + 1]).toBe("place");
     expect(flags[flags.indexOf("--port-file") + 1]).toBe(at.portFile);
@@ -3887,7 +3887,7 @@ describe("wsp add <folder> --on <computer>: the menu before anything travels", (
     remote: PLAN.remote,
     defaultBranch: "main",
     memoryKey: PLAN.memory.key,
-    memoryDir: "/var/lib/wsp/projects/pr_1/memory",
+    memoryDir: "/wsp/projects/pr_1/memory",
     createdAt: new Date(0).toISOString(),
   };
 

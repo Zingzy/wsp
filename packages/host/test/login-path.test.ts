@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nodeHost } from "@wsp/collect";
-import { loginPathLine } from "@wsp/protocol";
-import { createRuntime, jsonFileStore } from "@wsp/runtime";
+import { loginPathLine, STATE_SHAPE } from "@wsp/protocol";
+import { createRuntime, jsonFileStore, STATE_SHAPE_KEY } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { up, type CliIO } from "../src/cli.js";
 import { stateWriterHere } from "../src/version.js";
@@ -16,7 +16,7 @@ import { writeStub } from "../../protocol/test/stub-script.js";
 
 const PAGE = `<!doctype html>
 <html><head></head><body><div id="root"></div>
-<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>
+<script>window.__WSP__ = window.__WSP__ || { token: "" };</script>
 </body></html>
 `;
 
@@ -125,7 +125,7 @@ describe("the login shell PATH", () => {
     writeFileSync(join(webDir, "index.html"), PAGE);
     const statePath = join(home, "state", "state.json");
     mkdirSync(join(home, "state"), { recursive: true });
-    writeFileSync(statePath, JSON.stringify({ goldens: { default: SEALED_GOLDEN } }));
+    writeFileSync(statePath, JSON.stringify({ goldens: { default: SEALED_GOLDEN }, [STATE_SHAPE_KEY]: { shape: STATE_SHAPE, ...stateWriterHere(), at: new Date().toISOString() } }));
     // A tool only the login shell's PATH names, so a lookup that finds it read the resolved PATH and nothing else.
     const bin = join(dir, "bin");
     mkdirSync(bin);
@@ -141,7 +141,6 @@ describe("the login shell PATH", () => {
     const io: CliIO = { log: () => {}, error: () => {}, ask: noPrompt, askSecret: noPrompt };
     const handle: HostHandle | undefined = await up(io, {
       port: 0,
-      wsPort: 0,
       statePath,
       webDir,
       runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, stateWriterHere()), adapters: {} }),
