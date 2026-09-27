@@ -15,6 +15,7 @@ import { openApp, pickPorts } from "./init-serve.js";
 import type { PortProbes } from "./ports.js";
 import type { HostHandle, WorkspaceRoads } from "./server.js";
 import { CLOUD_ON } from "./cloud.js";
+import { addedProviders } from "./providers.js";
 import { KEY_LAYER_WORDS } from "./env-keys.js";
 import type { InitIO, InitResult } from "./init.js";
 
@@ -27,7 +28,7 @@ export function noKeyLines(upCommand: string): string[] {
   return [
     NO_PROVIDER_LINE,
     `So this run seals nothing and boots nothing. ${copy}`,
-    `Put a Solari API key in ${KEY_LAYER_WORDS} and run wsp init again for the cloud half: an image of this computer, and machines forked from it. This workspace stays as it is.`,
+    `Put a ${addedProviders().map(m => m.keyName).join(" or ")} in ${KEY_LAYER_WORDS} and run wsp init again for the cloud half: an image of this computer, and machines forked from it. This workspace stays as it is.`,
     started,
   ];
 }

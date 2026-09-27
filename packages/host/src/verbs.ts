@@ -276,6 +276,7 @@ import { relaySignIn, targetLink, type BoxSignedIn } from "./place-signin.js";
 import type { RelayTerminal } from "./signin-relay.js";
 import { gitRootOf } from "./repo-root.js";
 import { CLOUD_ON } from "./cloud.js";
+import { cloudText } from "./skill.js";
 import { dialAddress, heldOrStarted, hostTokenFor, hostTokenPath, POLL_MS, SERVICE_WAIT_MS, servingHost } from "./host-lock.js";
 import type { HostStarter } from "./host-start.js";
 import { addressNotPairedLine, aimAddress, aimHolds, aimName, aimedHost, deviceRefusedLine, dialWindowMs, hostSideOnlyFix, hostSideOnlyLine, noAnswerRefusal, noAnswerWithin, READ_THE_HOSTS, stateIgnoredLine, wsUrlOf, wspHome, writeHost, type HostAim, type HostPick } from "./hosts.js";
@@ -3121,7 +3122,7 @@ export const ALL_VERBS: readonly Verb[] = [
   {
     name: "computers",
     usage: "wsp computers",
-    about: "your computers: this Mac, each box you added and each cloud account, with what each has, whether it is connected, how many workspaces it holds, what runs there against its cap and what each cloud spent today",
+    about: "your computers: this Mac, each box you added<!-- cloud --> and each cloud account<!-- /cloud -->, with what each has, whether it is connected, how many workspaces it holds and what runs there against its cap<!-- cloud -->, and what each cloud spent today<!-- /cloud -->",
     page: "front",
     options: {},
     run: async ctx => {
@@ -3132,7 +3133,7 @@ export const ALL_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on, each box joined to it and each cloud account. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now; a cloud row carries its hourly rate. Every row carries its cap, threads at once on a computer and machines at once and spend per day on a cloud (the number the person set, else one thread per 2.5 GB of memory up to its cores, and 3 machines and $10 a day), and running, the threads running there now on a computer or the machines holding a slot on a cloud; a row whose running meets its cap is full. spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
+        "Every computer this host holds, which is the whole of where work can run: the computer the app runs on<!-- cloud -->, each box joined to it and each cloud account<!-- /cloud --><!-- no cloud --> and each box joined to it<!-- /no cloud -->. A row carries what that computer last reported (cores, memory, free disk, the engine it has for a project's own containers) and whether it is connected right now<!-- cloud -->; a cloud row carries its hourly rate<!-- /cloud -->. Every row carries its cap, threads at once on a computer<!-- cloud --> and machines at once and spend per day on a cloud<!-- /cloud --> (the number the person set, else one thread per 2.5 GB of memory up to its cores<!-- cloud -->, and 3 machines and $10 a day<!-- /cloud -->), and running, the threads running there now on a computer<!-- cloud --> or the machines holding a slot on a cloud<!-- /cloud -->; a row whose running meets its cap is full.<!-- cloud --> spend holds one row per cloud, what it has spent today (since midnight where the host runs) and this month and what it burns an hour now; a cloud whose spend today reaches its spend per day is at its limit and starts no new machine until midnight, while the machines already running there go on.<!-- /cloud --> A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why. A computer is not a workspace: a project lives on a computer, and a workspace is a copy of that computer with the project inside, which wsp workspaces lists.",
       input: {},
       output: { computers: z.array(PlaceView), spend: z.array(PlaceSpend) },
       call: async (_args, deps) => asJson(await readComputers(await deps.client())),
@@ -4559,7 +4560,7 @@ export const ALL_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "The folders directly inside one folder on the person's own computer, or on a box they added, one level at a time, as the app's import dialog browses them: each folder's absolute path, whether git tracks it, and how many hidden ones the level holds. Browse this to name a folder for import instead of guessing a path. The roots are that computer's home folder and the folder of every project on it; a path outside those is refused, and folder absent lists the home folder. A cloud account keeps no computer to browse and is refused. Folders only: no file is named and nothing is read.",
+        "The folders directly inside one folder on the person's own computer, or on a box they added, one level at a time, as the app's import dialog browses them: each folder's absolute path, whether git tracks it, and how many hidden ones the level holds. Browse this to name a folder for import instead of guessing a path. The roots are that computer's home folder and the folder of every project on it; a path outside those is refused, and folder absent lists the home folder.<!-- cloud --> A cloud account keeps no computer to browse and is refused.<!-- /cloud --> Folders only: no file is named and nothing is read.",
       input: {
         folder: z.string().optional().describe("the folder to list, absolute and inside the roots; absent lists the home folder"),
         hidden: z.boolean().optional().describe("true lists the hidden folders too, which are otherwise only counted"),
@@ -4576,7 +4577,7 @@ export const ALL_VERBS: readonly Verb[] = [
   {
     name: "setup",
     usage: "wsp setup",
-    about: "the cloud setup on this host as the app's Set up cloud machines modal reads it: which keys are held (never their values), the agents here, what a machine costs, and the init job's phase, rows and progress when one runs or ran",
+    about: "the setup on this host as the app's Settings reads it: which keys are held (never their values), the agents here<!-- cloud -->, what a machine costs<!-- /cloud -->, and the init job's phase, rows and progress when one runs or ran",
     page: "app",
     options: {},
     run: async ctx => {
@@ -4587,7 +4588,7 @@ export const ALL_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "The cloud setup on this host, as the app's Set up cloud machines modal reads it: which keys the host holds (their presence, never a value), the agents on this computer and whether each carries the wsp tools, what a machine costs, and the init job when one runs or ran: its road, phase, screens, rows and progress. The rows are the image's stages, each sign-in with the page the person opens on this computer and the code it asks for while it waits, then its state, and the first workspace once forked. Read it to tell the person where the build is and which sign-in waits for them; the build is started from the app's sidebar row, and wsp init --recipe from a shell is the same run.",
+        "The setup on this host, as the app's Settings reads it: which keys the host holds (their presence, never a value), the agents on this computer and whether each carries the wsp tools<!-- cloud -->, what a machine costs<!-- /cloud -->, and the init job when one runs or ran: its road, phase, screens, rows and progress. The rows are the image's stages, each sign-in with the page the person opens on this computer and the code it asks for while it waits, then its state, and the first workspace once forked. Read it to tell the person where the build is and which sign-in waits for them; the build is started from the app's Settings, and wsp init --recipe from a shell is the same run.",
       input: {},
       output: { setup: InitSetup },
       call: async (_args, deps) => asJson({ setup: await initSetup(await deps.client()) }),
@@ -4682,9 +4683,16 @@ function withoutCloudFlags(v: Verb): Verb {
   return { ...v, options, usage, tool: { ...v.tool, input } };
 }
 
+/** A verb in the words this process says it in: its phrase and its tool's description, each span kept or dropped by
+ * its cloud mark, as the skill's are. */
+function inCloudWords(v: Verb): Verb {
+  const worded = "about" in v ? { ...v, about: cloudText(v.about, CLOUD_ON) } : v;
+  return hasTool(worded) ? { ...worded, tool: { ...worded.tool, description: cloudText(worded.tool.description, CLOUD_ON) } } : worded;
+}
+
 /** The verbs this process answers: every one where a cloud is registered, and with none, every one but the cloud's,
  * each without its cloud flags. What the pages, the tool server and the skill's rows are all built from. */
-export const VERBS: readonly Verb[] = CLOUD_ON ? ALL_VERBS : ALL_VERBS.filter(v => !isCloudVerb(v)).map(withoutCloudFlags);
+export const VERBS: readonly Verb[] = (CLOUD_ON ? ALL_VERBS : ALL_VERBS.filter(v => !isCloudVerb(v)).map(withoutCloudFlags)).map(inCloudWords);
 
 /** The line a person typed, as the cloud line it is when no cloud is registered here: the verb it opens, or that
  * verb with the cloud flag it carries. Nothing where the line means something without one. */

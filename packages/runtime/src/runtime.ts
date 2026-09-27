@@ -987,6 +987,9 @@ export interface RuntimeOptions {
   /** The environment labs is read from; this process's when unset, which the entry points mean and a test does not:
    * a test says the environment it means here rather than inheriting the shell that started it. */
   env?: Readonly<Record<string, string | undefined>>;
+  /** What a road that needs a machine says where nothing here starts one; the host names it from what it registered.
+   * NO_PROVIDER_LINE when unset. */
+  noMachinesLine?: string;
 }
 
 export interface WakeOptions {
@@ -2616,7 +2619,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const cannotLine = (record: WorkspaceRecord, action: string): string => {
     const kind = record.kind;
     if (!kindWords(kind).driven) return undrivenRefusal(record.name, machineWord(kind), action);
-    if (forksNoMachines(backendFor(record).capabilities)) return NO_PROVIDER_LINE;
+    if (forksNoMachines(backendFor(record).capabilities)) return opts.noMachinesLine ?? NO_PROVIDER_LINE;
     return providerCannotRefusal(record.name, machineWord(kind), action);
   };
   /** The one throw every gate below goes through, so every capability a verb reads refuses in the same sentence. */
@@ -7704,7 +7707,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const at = await forkingAt(placeId);
     if (at !== undefined) return at;
     const running = (await buildPlaces()).map(r => r.name);
-    throw conflict(running.length === 0 ? NO_PROVIDER_LINE : placeForksNothingPickLine(placeName(placeId ?? places.wired), running));
+    throw conflict(running.length === 0 ? (opts.noMachinesLine ?? NO_PROVIDER_LINE) : placeForksNothingPickLine(placeName(placeId ?? places.wired), running));
   };
   /** The backend a fork on that place would land on, or nothing where it forks nothing, with no refusal worded: the
    * refusal lists the places, and a list read while the records load waits on that load. */

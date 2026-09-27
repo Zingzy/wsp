@@ -34,7 +34,7 @@ import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_AGENT_IDS, THREAD_AGENTS, s
 import { authRefusal, cloudOffRefusal, FORWARD_ENV, hostFromEnv, jsonLine, SCOPED_MCP_ARG, scopedNoPairLine, imageHomeKeptLine, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, loopbackThreadsLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, verbFailure, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, verbCopier } from "@wsp/engine";
 import { CLOUD_ON } from "./cloud.js";
-import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
+import { noMachinesLine, providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredPlaceRow, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
 import { DAEMON_DEPLOYED_LINE, cappedLine, claudeEnvs, deployDaemon, doctor, doctorOverHost, hostDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { daemonFixLine, releaseUpdateLine } from "./daemon-fix.js";
@@ -320,7 +320,7 @@ export interface LoadedKeys {
 export async function loadKeys(
   io: CliIO,
   sources: KeySources,
-  ask: { anthropic: boolean; noSolari?: NoProviderKey; checkSaved?: boolean } = { anthropic: true },
+  ask: { anthropic: boolean; noProviderKey?: NoProviderKey; checkSaved?: boolean } = { anthropic: true },
 ): Promise<LoadedKeys> {
   const ownEnv = envFileFor(sources.statePath);
   const layers = keyLayers(sources);
@@ -356,19 +356,19 @@ export async function loadKeys(
   // provider's, and a local thread uses it as a fork would.
   // A refused key is never quietly dropped for the local road: nobody asked for this computer, the provider did.
   if (refusedSaved !== undefined && io.isTTY !== true) throw authRefusal(refusedSaved);
-  if (keyEnv === undefined || ask.noSolari === "local" || (ask.noSolari === "offer" && io.isTTY !== true)) return loaded(undefined);
+  if (keyEnv === undefined || ask.noProviderKey === "local" || (ask.noProviderKey === "offer" && io.isTTY !== true)) return loaded(undefined);
 
   // Not wrapped: the CLI's IOs already refuse a secret as the contract's auth class, so a caller with no terminal
   // to type one on exits on that code rather than on a generic failure.
   const where = row?.keyConsole !== undefined ? `\n${row.keyConsole}` : "";
-  const skip = ask.noSolari === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : "";
+  const skip = ask.noProviderKey === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : "";
   // The variable is said once, on the line that says where a key goes so this screen is not drawn again.
   let why = refusedSaved ?? `No ${keyEnv} in ${KEY_LAYER_WORDS}.`;
   let key: string;
   for (let attempt = 1; ; attempt++) {
     const typed = (await io.askSecret(`${row?.keyName ?? keyEnv}\n${why}${where}${skip}`, keyEnv)).trim();
     if (!typed) {
-      if (ask.noSolari === "offer") return loaded(undefined);
+      if (ask.noProviderKey === "offer") return loaded(undefined);
       throw authRefusal(`${keyEnv} is needed to start.`);
     }
     // Checked before it is written, so a key the provider refuses never reaches the file the whole setup reads.
@@ -752,6 +752,7 @@ export function makeRuntime(
   // starts with no key swaps its module in when one is saved, and its copies belong to the module that made them.
   const pick: ProviderPick = { id: wiredProviderId(env), env };
   const rt = createRuntime({
+    noMachinesLine: noMachinesLine(),
     places: providerPlaces(
       () => pick.id,
       slot.backend,
@@ -1156,7 +1157,7 @@ async function init(
   const beside = held === undefined ? undefined : await besideHost(held, opts, flags.upCommand, flags.on);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
   const { keys, env: providerEnv } =
-    beside !== undefined ? { keys: keysFound(keySources(opts.providerEnv, opts.statePath)), env: opts.providerEnv } : await loadKeys(say, keySources(opts.providerEnv, opts.statePath), { anthropic: false, noSolari: "offer", checkSaved: true });
+    beside !== undefined ? { keys: keysFound(keySources(opts.providerEnv, opts.statePath)), env: opts.providerEnv } : await loadKeys(say, keySources(opts.providerEnv, opts.statePath), { anthropic: false, noProviderKey: "offer", checkSaved: true });
   // One wiring for every runtime this run builds and for the host it serves at the end: the links and the recipe
   // planner are the same on both roads below.
   const links = placeWiring(opts.statePath, opts.advertise);
@@ -1293,7 +1294,7 @@ export interface ServeOptions {
  * window that can ask nothing. */
 export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
-  const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noSolari: "local" });
+  const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noProviderKey: "local" });
   // One wiring for the runtime and for the host over it, so the links this host holds and the recipe its doctor
   // reads come from the same place.
   const links = placeWiring(opts.statePath, opts.advertise);
@@ -1327,7 +1328,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
-  const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noSolari: "local" });
+  const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv ?? process.env, opts.statePath), { anthropic: false, noProviderKey: "local" });
   // Read first, for the reason readOnce carries.
   const store = await readOnce(opts.statePath);
   const links = placeWiring(opts.statePath, opts.advertise);
@@ -1916,12 +1917,12 @@ export const DOCTOR_HANDLES_ENV = "WSP_DOCTOR_HANDLES";
 /** What the doctor's roads that touch no provider load: no key, and no question about one. The local road and the
  * computer road fork nothing and bill nothing, so a person with a computer of their own and no cloud account is
  * never asked for a cloud key; the agents' key rides along from the files either way. */
-const NO_CLOUD_KEY = { anthropic: false, noSolari: "local" } as const;
+const NO_CLOUD_KEY = { anthropic: false, noProviderKey: "local" } as const;
 
 /** Which keys one doctor road needs: a cloud row's road forks a machine at that provider and bills while it runs,
  * so its key is asked for the way every cloud road asks for one; every other road forks nothing and is handed no
  * key at all. Read after the row, since the row is what says which road this is. */
-export const doctorKeyAsk = (computer?: Pick<PlaceView, "kind">): { anthropic: boolean; noSolari?: "local" } =>
+export const doctorKeyAsk = (computer?: Pick<PlaceView, "kind">): { anthropic: boolean; noProviderKey?: "local" } =>
   computer?.kind === "provider" ? { anthropic: true } : NO_CLOUD_KEY;
 
 /** The row a word names, or the refusal naming the rows this host holds and the line that lists them. The one

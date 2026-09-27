@@ -9,7 +9,7 @@
 
 import { agentName, vaultVariableRow } from "@wsp/catalog";
 import { BoxBackend, FakeBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
-import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PROVIDER_KEY_WORDS, providerKeyName, standInRecordsPath } from "@wsp/protocol";
+import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, NO_MACHINES_LINE, NO_PROVIDER_LINE, PROVIDER_KEY_WORDS, providerKeyName, standInRecordsPath } from "@wsp/protocol";
 import type { PlaceBackends } from "@wsp/runtime";
 import { CLOUD_ON } from "./cloud.js";
 import { keyIn } from "./env-keys.js";
@@ -119,9 +119,13 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     // No machine behind it, so no place to add and none to show: it is the row that refuses every road in one line.
     envNames: [],
     selects: () => true,
-    build: () => new NoProviderBackend(),
+    build: () => new NoProviderBackend(noMachinesLine()),
   },
 ];
+
+/** What a road that needs a machine says where nothing here starts one: how to add a provider where one can be
+ * added, else how to join a computer. Read off the registered rows, so the line never names a road the table lacks. */
+export const noMachinesLine = (modules: readonly ProviderModule[] = PROVIDER_MODULES): string => (addedProviders(modules).length > 0 ? NO_PROVIDER_LINE : NO_MACHINES_LINE);
 
 /** Whether a word names a cloud that is not registered here, which is a line to refuse by the flag rather than one
  * nobody answers to. */

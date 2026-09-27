@@ -1795,6 +1795,9 @@ export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
  * nor true of the other providers. wsp add with no argument prints the words it takes. */
 export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; wsp add <provider> connects one, and wsp init then builds your image on it";
 
+/** The same refusal where no provider can be added at all: what is missing, and the one road that brings it. */
+export const NO_MACHINES_LINE = "this needs a machine wsp starts, and nothing here starts one; wsp add user@host joins a computer of yours that does";
+
 /** What an image build is refused with when no place this host holds runs workspaces: a joined computer whose doctor
  * said yes is such a place, and so is a provider with a key. The init job and the command line beside it both say it. */
 export const NO_BUILD_PLACE_LINE = "no place here runs workspaces, so there is nowhere to build your image; join a computer that runs them with wsp add, or save a provider key";

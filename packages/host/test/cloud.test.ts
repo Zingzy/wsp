@@ -13,7 +13,7 @@ import type { RunningWsp } from "../src/mcp-install.js";
 import { mcpServer } from "../src/mcp.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { PROVIDER_MODULES } from "../src/providers.js";
-import { CLOUD_MARK, CLOUD_SPAN_END, INSTRUCTIONS, skillFor, WSP_SKILL } from "../src/skill.js";
+import { CLOUD_MARK, CLOUD_SPAN_END, INSTRUCTIONS, NO_CLOUD_MARK, NO_CLOUD_SPAN_END, skillFor, WSP_SKILL } from "../src/skill.js";
 import { CLI_VERBS, VERBS } from "../src/verbs.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
@@ -25,6 +25,17 @@ const captured = (): CliIO & { lines: string[]; errors: string[] } => {
 
 /** Every word a cloud goes by: the two providers, the one's product and the other's company. */
 const CLOUD_WORDS = ["Solari", "ASCII", "Box by ASCII", "Boat"];
+
+/** Where the word cloud stands with the cloud off, each with why. */
+const CLOUD_ALLOWED: string[] = [
+  // A project's glyph by name, in every schema that carries a workspace's look: a picture of a cloud, not a provider.
+  '"cloud","globe"',
+  // A computer's icon by name, the same picture on a computer's own row.
+  '"server","cloud","cpu"',
+  // The wire's word for a workspace on a provider's machine, in the schemas that carry a workspace: no record with the
+  // cloud off holds it, and a wire value is not renamed by a flag.
+  '"enum":["cloud","local","ssh"]',
+];
 
 /** The tool list as an agent reads it: every name, description and field description. */
 async function toolList(): Promise<{ names: string[]; text: string; inputs: Record<string, string[]> }> {
@@ -77,11 +88,26 @@ describe.runIf(!CLOUD_ON)("with the cloud off", () => {
     expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["fake", "none"]);
   });
 
+  it("refuses on the row with no machine by what is missing, naming no line the flag refuses", async () => {
+    const refused = await PROVIDER_MODULES.at(-1)!.build({}).create({} as never).catch((e: unknown) => (e as Error).message);
+    expect(refused).not.toContain("<provider>");
+    expect(refused).toContain("wsp add user@host");
+  });
+
   it("no page, tool, skill line or instruction names a cloud", async () => {
     const tools = await toolList();
     const read = { "wsp --help": HELP, "wsp --help agent": agentPage(), "the tool list": tools.text, "the skill": WSP_SKILL, "the instructions": INSTRUCTIONS };
     const named = Object.entries(read).flatMap(([where, text]) => CLOUD_WORDS.filter(word => text.includes(word)).map(word => `${where}: ${word}`));
     expect(named).toEqual([]);
+  });
+
+  it("no page, tool, skill line or instruction says cloud, but for the uses allowed here", async () => {
+    const tools = await toolList();
+    const read = { "wsp --help": HELP, "wsp --help agent": agentPage(), "the tool list": tools.text, "the skill": WSP_SKILL, "the instructions": INSTRUCTIONS };
+    const said = Object.entries(read).flatMap(([where, text]) =>
+      [...text.matchAll(/[^.\n]*\bclouds?\b[^.\n]*/gi)].map(m => m[0].trim()).filter(line => !CLOUD_ALLOWED.some(allowed => line.includes(allowed))).map(line => `${where}: ${line}`),
+    );
+    expect(said).toEqual([]);
   });
 
   it("serves none of the provider's tools, and new takes no project image", async () => {
@@ -126,18 +152,20 @@ describe.runIf(CLOUD_ON)("with the cloud on", () => {
     expect(WSP_SKILL).toContain("SOLARI_API_KEY");
     expect(WSP_SKILL).not.toContain(CLOUD_MARK);
     expect(WSP_SKILL).not.toContain(CLOUD_SPAN_END);
+    expect(WSP_SKILL).not.toContain(NO_CLOUD_MARK);
+    expect(WSP_SKILL).not.toContain("with none joined this run builds nothing");
   });
 });
 
 describe("the skill's cloud marks", () => {
-  const skill = ["# t", "a line", "only on a cloud " + CLOUD_MARK, `both ${CLOUD_MARK}cloud ${CLOUD_SPAN_END}ways`, `## cloud part ${CLOUD_MARK}`, "under it", "```", "# not a heading", "```", "### deeper", "## next", "kept"].join("\n");
+  const skill = ["# t", "a line", "only on a cloud " + CLOUD_MARK, `both ${CLOUD_MARK}cloud ${CLOUD_SPAN_END}${NO_CLOUD_MARK}local ${NO_CLOUD_SPAN_END}ways`, `## cloud part ${CLOUD_MARK}`, "under it", "```", "# not a heading", "```", "### deeper", "## next", "kept"].join("\n");
 
   it("keeps the text and drops the marks with the cloud on", () => {
     expect(skillFor(skill, true)).toBe(["# t", "a line", "only on a cloud", "both cloud ways", "## cloud part", "under it", "```", "# not a heading", "```", "### deeper", "## next", "kept"].join("\n"));
   });
 
   it("drops a marked line, a marked span and a marked heading's whole section with it off", () => {
-    expect(skillFor(skill, false)).toBe(["# t", "a line", "both ways", "## next", "kept"].join("\n"));
+    expect(skillFor(skill, false)).toBe(["# t", "a line", "both local ways", "## next", "kept"].join("\n"));
   });
 
   it("marks every cloud verb's row, so the rows and the table go together", () => {

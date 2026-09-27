@@ -651,8 +651,8 @@ describe("the agent contract on the command line and the tool door", () => {
     // computer the person owns. A cloud row is in the places list only once its key is held, so this rule is what
     // says which road would ask rather than a state a run can be put in.
     expect(doctorKeyAsk({ kind: "provider" })).toEqual({ anthropic: true });
-    expect(doctorKeyAsk({ kind: "computer" })).toEqual({ anthropic: false, noSolari: "local" });
-    expect(doctorKeyAsk()).toEqual({ anthropic: false, noSolari: "local" });
+    expect(doctorKeyAsk({ kind: "computer" })).toEqual({ anthropic: false, noProviderKey: "local" });
+    expect(doctorKeyAsk()).toEqual({ anthropic: false, noProviderKey: "local" });
   });
 
   it("the tool door answers a failure as a tool error whose structured content is the same object with the same class", async () => {

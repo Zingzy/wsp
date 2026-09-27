@@ -14,6 +14,15 @@ export const SKILL_NAME = WSP_SKILL_NAME;
  * the file shows the text and not the mark. */
 export const CLOUD_MARK = "<!-- cloud -->";
 export const CLOUD_SPAN_END = "<!-- /cloud -->";
+/** A span said only with the cloud off, where the road it stands in for reads otherwise without one. */
+export const NO_CLOUD_MARK = "<!-- no cloud -->";
+export const NO_CLOUD_SPAN_END = "<!-- /no cloud -->";
+
+/** Text as a process with or without a cloud reads it: each span kept or dropped by its mark, the marks gone. What the
+ * skill's lines and every verb's own words go through, so both follow one rule. */
+export function cloudText(text: string, cloud: boolean): string {
+  return text.replace(/<!-- cloud -->(.*?)<!-- \/cloud -->/g, (_, kept: string) => (cloud ? kept : "")).replace(/<!-- no cloud -->(.*?)<!-- \/no cloud -->/g, (_, kept: string) => (cloud ? "" : kept));
+}
 
 /** The skill as a process with or without a cloud reads it: the marks gone either way, and with no cloud everything
  * they mark gone too. */
@@ -34,7 +43,7 @@ export function skillFor(skill: string, cloud: boolean): string {
       continue;
     }
     const bare = marked ? line.slice(0, -CLOUD_MARK.length - 1) : line;
-    out.push(bare.replace(/<!-- cloud -->(.*?)<!-- \/cloud -->/g, (_, kept: string) => (cloud ? kept : "")));
+    out.push(cloudText(bare, cloud));
   }
   return out.join("\n");
 }

@@ -21,7 +21,7 @@ const held = (loaded: LoadedKeys, name: string = SOLARI_KEY_ENV): Record<string,
   ...loaded.keys,
 });
 
-const loadHeld = async (io: CliIO, sources: KeySources, ask?: { anthropic: boolean; noSolari?: NoProviderKey; checkSaved?: boolean }, name?: string): Promise<Record<string, string | undefined>> =>
+const loadHeld = async (io: CliIO, sources: KeySources, ask?: { anthropic: boolean; noProviderKey?: NoProviderKey; checkSaved?: boolean }, name?: string): Promise<Record<string, string | undefined>> =>
   held(await loadKeys(io, sources, ask), name);
 
 const SOLARI = "slr_live_fake_solari_key";
@@ -392,7 +392,7 @@ describe("loadKeys", () => {
     const checkKey = (key: string): Promise<KeyCheck> => (checked.push(key), Promise.resolve(key === SOLARI ? { state: "refused", said: "401 Unauthorized" } : { state: "taken" }));
     // wsp init, the road that is about to build with it.
     const io = fakeIO(["slr_live_new", "yes"], true);
-    expect(await loadHeld(io, { env: {}, cwd, statePath: state, checkKey }, { anthropic: false, noSolari: "offer", checkSaved: true })).toEqual({ SOLARI_API_KEY: "slr_live_new" });
+    expect(await loadHeld(io, { env: {}, cwd, statePath: state, checkKey }, { anthropic: false, noProviderKey: "offer", checkSaved: true })).toEqual({ SOLARI_API_KEY: "slr_live_new" });
     expect(checked).toEqual([SOLARI, "slr_live_new"]);
     expect(stripVTControlCharacters(io.output[0]!)).toContain(savedKeyRefusedLine("401 Unauthorized", "solari"));
   });
@@ -402,7 +402,7 @@ describe("loadKeys", () => {
     mkdirSync(home);
     writeFileSync(join(home, ".env"), `WSP_PROVIDER=box\nBOX_API_KEY=box_live_x\n`);
     const sources = { env: {}, cwd, statePath: state, checkKey: async () => ({ state: "refused" as const, said: "401 Unauthorized" }) };
-    await expect(loadKeys(fakeIO([]), sources, { anthropic: false, noSolari: "offer", checkSaved: true })).rejects.toThrow("Box by ASCII refused the saved key: 401 Unauthorized");
+    await expect(loadKeys(fakeIO([]), sources, { anthropic: false, noProviderKey: "offer", checkSaved: true })).rejects.toThrow("Box by ASCII refused the saved key: 401 Unauthorized");
   });
 
   it.runIf(CLOUD_ON)("every other verb takes the saved key as it stands: nothing is asked of the provider and nothing of the person", async () => {
@@ -411,9 +411,9 @@ describe("loadKeys", () => {
     writeFileSync(join(home, ".env"), `SOLARI_API_KEY=${SOLARI}\n`);
     const checked: string[] = [];
     const sources = { env: {}, cwd, statePath: state, checkKey: (key: string): Promise<KeyCheck> => (checked.push(key), Promise.resolve({ state: "refused" as const, said: "401 Unauthorized" })) };
-    for (const noSolari of ["local", "offer", undefined] as const) {
+    for (const noProviderKey of ["local", "offer", undefined] as const) {
       const quiet = fakeIO([], true);
-      expect(await loadHeld(quiet, sources, { anthropic: false, ...(noSolari !== undefined ? { noSolari } : {}) })).toEqual({ SOLARI_API_KEY: SOLARI });
+      expect(await loadHeld(quiet, sources, { anthropic: false, ...(noProviderKey !== undefined ? { noProviderKey } : {}) })).toEqual({ SOLARI_API_KEY: SOLARI });
       expect(quiet.output).toEqual([]);
     }
     expect(checked).toEqual([]);
@@ -424,7 +424,7 @@ describe("loadKeys", () => {
     mkdirSync(home);
     writeFileSync(join(home, ".env"), `SOLARI_API_KEY=${SOLARI}\n`);
     const sources = { env: {}, cwd, statePath: state, checkKey: async () => ({ state: "refused" as const, said: "401 Unauthorized" }) };
-    await expect(loadKeys(fakeIO([]), sources, { anthropic: false, noSolari: "offer", checkSaved: true })).rejects.toThrow(savedKeyRefusedLine("401 Unauthorized", "solari"));
+    await expect(loadKeys(fakeIO([]), sources, { anthropic: false, noProviderKey: "offer", checkSaved: true })).rejects.toThrow(savedKeyRefusedLine("401 Unauthorized", "solari"));
   });
 
   it.runIf(CLOUD_ON)("refuses to start on an empty provider key without leaking anything", async () => {
@@ -436,7 +436,7 @@ describe("loadKeys", () => {
   it.runIf(CLOUD_ON)("init offers the key at a terminal, and an empty answer is the answer: no provider key, and the question said so", async () => {
     setup();
     const io = fakeIO([""], true);
-    expect(await loadHeld(io, { env: {}, cwd, statePath: state }, { anthropic: false, noSolari: "offer" })).toEqual({});
+    expect(await loadHeld(io, { env: {}, cwd, statePath: state }, { anthropic: false, noProviderKey: "offer" })).toEqual({});
     expect(stripVTControlCharacters(io.output[0]!)).toBe(
       "Solari API key\nNo SOLARI_API_KEY in the environment, ./.env, or the .env beside your state file (~/.wsp/.env unless you named a state).\nconsole.getsolari.com\nEnter with nothing skips the cloud: this computer alone becomes your workspace, and nothing is sealed.",
     );
@@ -447,21 +447,21 @@ describe("loadKeys", () => {
   it("init with nobody at a keyboard asks nothing at all", async () => {
     setup();
     const io = fakeIO([]);
-    expect(await loadHeld(io, { env: {}, cwd, statePath: state }, { anthropic: false, noSolari: "offer" })).toEqual({});
+    expect(await loadHeld(io, { env: {}, cwd, statePath: state }, { anthropic: false, noProviderKey: "offer" })).toEqual({});
     expect(io.output).toEqual([]);
   });
 
   it("the local road asks nothing even at a terminal: init already answered, and up, new --local and doctor --local seal nothing to skip", async () => {
     setup();
     const io = fakeIO([], true);
-    expect(await loadHeld(io, { env: { ANTHROPIC_API_KEY: ANTHROPIC }, cwd, statePath: state }, { anthropic: false, noSolari: "local" })).toEqual({ anthropic: ANTHROPIC });
+    expect(await loadHeld(io, { env: { ANTHROPIC_API_KEY: ANTHROPIC }, cwd, statePath: state }, { anthropic: false, noProviderKey: "local" })).toEqual({ anthropic: ANTHROPIC });
     expect(io.output).toEqual([]);
   });
 
   it("the Claude key rides the local road: it is the agents' key, not the provider's, and a thread here uses it", async () => {
     setup();
     const io = fakeIO([""], true);
-    expect(await loadHeld(io, { env: { ANTHROPIC_API_KEY: ANTHROPIC }, cwd, statePath: state }, { anthropic: false, noSolari: "offer" })).toEqual({ anthropic: ANTHROPIC });
+    expect(await loadHeld(io, { env: { ANTHROPIC_API_KEY: ANTHROPIC }, cwd, statePath: state }, { anthropic: false, noProviderKey: "offer" })).toEqual({ anthropic: ANTHROPIC });
   });
 
   it.runIf(CLOUD_ON)("the local road is the caller's to ask for: every other command still refuses an empty answer", async () => {
@@ -472,7 +472,7 @@ describe("loadKeys", () => {
   it("a key that is there answers the local road too, with nothing asked", async () => {
     setup();
     const io = fakeIO([]);
-    expect(await loadHeld(io, { env: { SOLARI_API_KEY: SOLARI }, cwd, statePath: state }, { anthropic: false, noSolari: "local" })).toEqual({ SOLARI_API_KEY: SOLARI });
+    expect(await loadHeld(io, { env: { SOLARI_API_KEY: SOLARI }, cwd, statePath: state }, { anthropic: false, noProviderKey: "local" })).toEqual({ SOLARI_API_KEY: SOLARI });
     expect(io.output).toEqual([]);
   });
 
@@ -505,7 +505,7 @@ describe("loadKeys", () => {
 
 describe("the key a run is asked for is the one its own provider reads", () => {
   const box = { WSP_PROVIDER: "box" };
-  const quiet = { anthropic: false, noSolari: "local" as const };
+  const quiet = { anthropic: false, noProviderKey: "local" as const };
 
   it.runIf(CLOUD_ON)("reads a registered row's key from each of the three layers, under the variable that row declares", async () => {
     setup();
@@ -525,7 +525,7 @@ describe("the key a run is asked for is the one its own provider reads", () => {
   it.runIf(CLOUD_ON)("names the wired provider's variable on the key screen and never another provider's", async () => {
     setup();
     const asked = fakeIO([""], true);
-    expect(await loadHeld(asked, { env: box, cwd, statePath: state }, { anthropic: false, noSolari: "offer" }, BOX_KEY_ENV)).toEqual({});
+    expect(await loadHeld(asked, { env: box, cwd, statePath: state }, { anthropic: false, noProviderKey: "offer" }, BOX_KEY_ENV)).toEqual({});
     const screen = stripVTControlCharacters(asked.output[0]!);
     // The title is the row's own words for its key, and the variable is said once, where the line says where to put
     // it so this screen is not drawn again.
@@ -535,12 +535,12 @@ describe("the key a run is asked for is the one its own provider reads", () => {
     expect(screen.toLowerCase()).not.toContain("solari");
     // With no provider named, the cloud a key alone wires is the one offered, by its own variable.
     const plain = fakeIO([""], true);
-    await loadKeys(plain, { env: {}, cwd, statePath: state }, { anthropic: false, noSolari: "offer" });
+    await loadKeys(plain, { env: {}, cwd, statePath: state }, { anthropic: false, noProviderKey: "offer" });
     expect(stripVTControlCharacters(plain.output[0]!)).toContain(SOLARI_KEY_ENV);
     expect(stripVTControlCharacters(plain.output[0]!)).not.toContain(BOX_KEY_ENV);
     // A provider that reads no key is asked for none: there is no screen to open.
     const keyless = fakeIO([], true);
-    expect(await loadHeld(keyless, { env: { WSP_PROVIDER: "fake" }, cwd, statePath: state }, { anthropic: false, noSolari: "offer" })).toEqual({});
+    expect(await loadHeld(keyless, { env: { WSP_PROVIDER: "fake" }, cwd, statePath: state }, { anthropic: false, noProviderKey: "offer" })).toEqual({});
     expect(keyless.output).toEqual([]);
   });
 
