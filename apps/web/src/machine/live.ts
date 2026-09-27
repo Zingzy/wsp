@@ -9,7 +9,7 @@
 // A daemon that refuses sys.watch leaves its reason here, so the rows can say
 // the stream is unavailable instead of waiting for it.
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import { memoryNearFull, workspaceState, type AwayWord, type DaemonLinkStatus, type MemoryReading, type SysSample, type WorkspacePhase } from "@wsp/protocol";
+import { memoryNearFull, pausedOrPausing, workspaceState, type AwayWord, type DaemonLinkStatus, type MemoryReading, type SysSample, type WorkspacePhase } from "@wsp/protocol";
 
 /** Two minutes at the daemon's two-second interval. */
 export const LIVE_WINDOW = 60;
@@ -23,8 +23,7 @@ export const LIVE_WINDOW = 60;
 export type StaleWord = "paused" | "unreachable" | AwayWord | null;
 
 export function staleWord(phase: WorkspacePhase, live: boolean): StaleWord {
-  const state = workspaceState({ phase });
-  if (state === "paused" || state === "pausing") return "paused";
+  if (pausedOrPausing(workspaceState({ phase }))) return "paused";
   return live ? null : "unreachable";
 }
 

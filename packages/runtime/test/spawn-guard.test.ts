@@ -40,7 +40,7 @@ import { HERE_PLACE_ID,
   type ThreadScope,
   type TurnResult,
 } from "@wsp/protocol";
-import { copyKey, createRuntime, type HarnessAdapterFactory, type HostReach, type LocalWiring, type Runtime } from "../src/runtime.js";
+import { copyKey, createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -100,7 +100,7 @@ describe("agents spawning agents", () => {
   /** The pair this host proves itself with, as every host a person starts holds one: the launch hands a turn its
    * fingerprint, and the wsp inside that turn refuses any host that proves another key. */
   const hostKey = newPlaceKeyPair();
-  const runtimeWith = (adapters: Record<string, HarnessAdapterFactory>, agents?: { reach?: HostReach; wspMcp?: McpServerSpec }, backend: MachineBackend = stubBackend()): Runtime =>
+  const runtimeWith = (adapters: Record<string, HarnessAdapterFactory>, agents?: { here?: { url?: string }; wspMcp?: McpServerSpec }, backend: MachineBackend = stubBackend()): Runtime =>
     createRuntime({
       backend,
       store,
@@ -151,7 +151,7 @@ describe("agents spawning agents", () => {
 
   it("with the switch on, a fork by a thread records the thread that asked and the root of its tree", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -169,7 +169,7 @@ describe("agents spawning agents", () => {
     const held = heldAdapter();
     const backend = stubBackend();
     backend.execImpl = (_m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: "pricing-page\norigin/pricing-page\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } }, backend);
+    const rt = runtimeWith({ claude: held.factory }, undefined, backend);
     const project = await projectOn(rt);
     const ws = await createOn(rt, { project: project.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
@@ -187,7 +187,7 @@ describe("agents spawning agents", () => {
   it("a thread's fork takes the image its own workspace runs, and one it names is refused before any machine is asked for", async () => {
     const held = heldAdapter();
     const backend = stubBackend();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } }, backend);
+    const rt = runtimeWith({ claude: held.factory }, undefined, backend);
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -209,7 +209,7 @@ describe("agents spawning agents", () => {
     const backend = stubBackend();
     // Each machine says which branch its checkout is on, so a read of the wrong one shows up in the child's base.
     backend.execImpl = (m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: `${m.id}-branch\norigin/${m.id}-branch\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } }, backend);
+    const rt = runtimeWith({ claude: held.factory }, undefined, backend);
     const project = await projectOn(rt);
     const ws = await createOn(rt, { project: project.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const theirs = await createOn(rt, { project: project.id, golden: "snap_g", name: "theirs" });
@@ -242,7 +242,7 @@ describe("agents spawning agents", () => {
 
   it("a thread works on its own project alone: another project's create and another project's workspace are both refused by it", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const mine = await projectOn(rt);
     const other = await projectOn(rt);
     const ws = await createOn(rt, { project: mine.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
@@ -271,7 +271,7 @@ describe("agents spawning agents", () => {
 
   it("a thread's landing resolves its own project alone, and the refusal names no other", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const mine = await projectOn(rt);
     const other = await projectOn(rt);
     const ws = await createOn(rt, { project: mine.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
@@ -294,7 +294,7 @@ describe("agents spawning agents", () => {
 
   it("a thread's landing over the wire reads its own project and no other", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const mine = await projectOn(rt);
     const other = await projectOn(rt);
     const ws = await createOn(rt, { project: mine.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
@@ -335,7 +335,7 @@ describe("agents spawning agents", () => {
 
   it("a thread the tree already spawned may not spawn again at one level", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -355,7 +355,7 @@ describe("agents spawning agents", () => {
 
   it("a thread may send into a thread of its own tree however deep it sits", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -440,7 +440,7 @@ describe("agents spawning agents", () => {
 
   it("a turn on a spawn enabled workspace carries a scoped device that is taken away at the exit", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     const threadId = handle.view().threadId!;
@@ -449,11 +449,10 @@ describe("agents spawning agents", () => {
     expect(listed[0]!.name).toBe(`thread ${threadWord(threadId)}`);
     expect(listed[0]!.scope).toEqual({ kind: "thread", threadId, workspaceId: ws.id, rootThreadId: threadId });
     const launch = held.launches[0]!;
-    expect(launch.env[HOST_URL_ENV]).toBe("http://10.0.0.2:4700");
     expect(launch.env[HOST_TOKEN_ENV]).toMatch(/\S/);
-    // The fingerprint of the key this host proves travels with them: the turn's own wsp holds the host to it
-    // before the token crosses, so a relay carrying the bytes or naming another host at that address gets nothing.
-    expect(launch.env[HOST_KEY_ENV]).toBe(keyFingerprint(hostKey.publicKey));
+    // A fork's wsp rides its daemon's link and dials no address, so there is none to hand it and no key to pin.
+    expect(launch.env[HOST_URL_ENV]).toBeUndefined();
+    expect(launch.env[HOST_KEY_ENV]).toBeUndefined();
     held.end(0);
     await handle.finished;
     await gone(rt);
@@ -461,35 +460,10 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("a fork whose machine knows none is told the address this host advertises", async () => {
-    const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://192.168.1.20:4700", port: 4700 } });
-    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
-    const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
-    expect(held.launches[0]!.env[HOST_URL_ENV]).toBe("http://192.168.1.20:4700");
-    held.end(0);
-    await handle.finished;
-    await rt.close();
-  });
-
-  it("the address the person named stands above the one this host bound", async () => {
-    const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { advertise: "https://box.example", url: "http://192.168.1.20:4700", port: 4700 } });
-    const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
-    const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
-    expect(held.launches[0]!.env[HOST_URL_ENV]).toBe("https://box.example");
-    held.end(0);
-    await handle.finished;
-    await rt.close();
-  });
-
-  it("a turn on this computer is told the loopback address and handed its own token, never the address a machine dials", async () => {
+  it("a turn on this computer is told the loopback address and handed its own token, and a fork's turn is told no address at all", async () => {
     const held = heldAdapter({ takesMcpServers: true });
-    // Every address this host knows at once: the one the person named, the relay's and its own loopback. The kind
-    // picks, so a Mac turn's token never leaves this computer and a fork is never told an address it cannot dial.
-    const reach: HostReach = { advertise: "https://box.example", url: "https://relay.example", here: "http://127.0.0.1:4801", port: 4700 };
     const wspMcp = { command: "node", args: ["/opt/wsp/dist/bin.js", "mcp"] };
-    const rt = runtimeWith({ claude: held.factory }, { reach, wspMcp });
+    const rt = runtimeWith({ claude: held.factory }, { here: { url: "http://127.0.0.1:4801" }, wspMcp });
     const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: AGENTS_ON });
     const lead = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const onMac = await rt.sessions.start(mac.id, { prompt: "hi" });
@@ -498,7 +472,11 @@ describe("agents spawning agents", () => {
     expect(macLaunch!.env[HOST_URL_ENV]).toBe("http://127.0.0.1:4801");
     expect(macLaunch!.env[HOST_TOKEN_ENV]).toMatch(/\S/);
     expect(macLaunch!.env[HOST_KEY_ENV]).toBe(keyFingerprint(hostKey.publicKey));
-    expect(leadLaunch!.env[HOST_URL_ENV]).toBe("https://box.example");
+    // A fork's wsp rides its daemon's link, so the loopback never leaves this computer and the fork dials nothing.
+    expect(leadLaunch!.env[HOST_URL_ENV]).toBeUndefined();
+    expect(leadLaunch!.env[HOST_KEY_ENV]).toBeUndefined();
+    expect(leadLaunch!.env[HOST_TOKEN_ENV]).toMatch(/\S/);
+    expect(leadLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ command: "wsp", args: ["mcp"] });
     // Every wsp variable the launch sets is on the one list an agent that filters its servers' environment is told
     // to pass, so a variable added to the launch and not the list fails here rather than going missing in a tool.
     expect(Object.keys(macLaunch!.env).filter(name => name.startsWith("WSP_")).sort()).toEqual([...LAUNCH_ENV].sort());
@@ -524,7 +502,7 @@ describe("agents spawning agents", () => {
 
   it("a turn on this computer under a host that listens on no loopback address is handed no token", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { advertise: "https://box.example", url: "http://192.168.1.20:4700" } });
+    const rt = runtimeWith({ claude: held.factory }, { here: {} });
     const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: AGENTS_ON });
     const handle = await rt.sessions.start(mac.id, { prompt: "hi" });
     expect(held.launches[0]!.env[HOST_URL_ENV]).toBeUndefined();
@@ -535,13 +513,15 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("a host that knows no address a machine can dial hands out no token at all", async () => {
+  it("a fork's turn is handed its token on a host that names no address a machine could dial", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
-    expect(await rt.devices.list()).toEqual([]);
-    expect(held.launches[0]!.env[HOST_TOKEN_ENV]).toBeUndefined();
+    const threadId = handle.view().threadId!;
+    expect((await rt.devices.list()).map(d => d.scope)).toEqual([{ kind: "thread", threadId, workspaceId: ws.id, rootThreadId: threadId }]);
+    expect(held.launches[0]!.env[HOST_TOKEN_ENV]).toMatch(/\S/);
+    expect(held.launches[0]!.env[HOST_URL_ENV]).toBeUndefined();
     held.end(0);
     await handle.finished;
     await rt.close();
@@ -549,7 +529,7 @@ describe("agents spawning agents", () => {
 
   it("a workspace with the switch off hands out no token either", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "quiet" });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     expect(await rt.devices.list()).toEqual([]);
@@ -561,13 +541,13 @@ describe("agents spawning agents", () => {
 
   it("the wsp tools ride the launch on a harness that takes servers, at the path the daemon bundle put them", async () => {
     const held = heldAdapter({ takesMcpServers: true });
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     expect(held.launches[0]!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ command: "wsp", args: ["mcp"] });
-    // The line carries no host word, and the launch still carries the pair a turn reads its host and token off.
+    // The line carries no host word, and the launch carries the token the daemon hands up with each session.
     expect(held.launches[0]!.mcpServers?.[MCP_SERVER_NAME]?.args).not.toContain("--host");
-    expect(held.launches[0]!.env[HOST_URL_ENV]).toBe("http://10.0.0.2:4700");
+    expect(held.launches[0]!.env[HOST_TOKEN_ENV]).toMatch(/\S/);
     held.end(0);
     await handle.finished;
     await rt.close();
@@ -575,7 +555,7 @@ describe("agents spawning agents", () => {
 
   it("a harness that takes no server with a launch gets none and is refused only where a caller named its own", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ codex: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ codex: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi", harness: "codex" });
     expect(held.launches[0]!.mcpServers).toBeUndefined();
@@ -589,7 +569,7 @@ describe("agents spawning agents", () => {
 
   it("a socket authed with a thread's token is stamped relayed and carries the scope, and may not pair a computer", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
@@ -619,13 +599,13 @@ describe("agents spawning agents", () => {
 
   it("a token whose turn the host went down under is taken away when the host comes back", async () => {
     const held = heldAdapter();
-    const first = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const first = runtimeWith({ claude: held.factory });
     const ws = await createOn(first, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     await first.sessions.start(ws.id, { prompt: "hi" });
     expect(await first.devices.list()).toHaveLength(1);
     // The host goes down under the running turn, so nothing reached the exit that hands the token back.
     await first.close();
-    const again = runtimeWith({ claude: heldAdapter().factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const again = runtimeWith({ claude: heldAdapter().factory });
     await again.workspaces.list();
     expect(await again.devices.list()).toEqual([]);
     await again.close();
@@ -633,7 +613,7 @@ describe("agents spawning agents", () => {
 
   it("a socket whose token is a thread's may not read or take away the devices paired with this host", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
@@ -657,7 +637,7 @@ describe("agents spawning agents", () => {
 
   it("the event stream a thread's socket subscribes to carries nothing about a workspace outside its tree", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const mine = await createOn(rt, { golden: "snap_g", name: "mine", agents: AGENTS_ON });
     const theirs = await createOn(rt, { golden: "snap_g", name: "theirs" });
     const handle = await rt.sessions.start(mine.id, { prompt: "hi" });
@@ -688,7 +668,7 @@ describe("agents spawning agents", () => {
 
   it("a thread that forks sees every creating stage of its own fork and none of another thread's", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const mine = await createOn(rt, { golden: "snap_g", name: "mine", agents: AGENTS_ON });
     const theirs = await createOn(rt, { golden: "snap_g", name: "theirs", agents: AGENTS_ON });
     const onMine = await rt.sessions.start(mine.id, { prompt: "hi" });
@@ -736,7 +716,7 @@ describe("agents spawning agents", () => {
 
   it("a thread's token opens the socket door on the host's own road alone, and a token with no scope on any road", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
@@ -772,7 +752,7 @@ describe("agents spawning agents", () => {
 
   it("every op this host answers is either one a thread may send or one its socket is refused", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
@@ -844,11 +824,11 @@ describe("agents spawning agents", () => {
     execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
     return repo;
   };
-  const MAC_REACH: HostReach = { url: "http://10.0.0.2:4700", here: "http://127.0.0.1:4801" };
+  const MAC_HERE = { url: "http://127.0.0.1:4801" };
 
   it("a thread on this computer drives the host as itself: its copies nest under it, and the person's doors stay shut", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: MAC_REACH });
+    const rt = runtimeWith({ claude: held.factory }, { here: MAC_HERE });
     const project = await projectOn(rt, HERE_PLACE_ID, committedRepo());
     const mac = await createOn(rt, { project: project.id, name: "mac", agents: { spawn: true, maxMachines: 3, maxDepth: 1 } });
     // What stands beside it and is not its own: the person's other copy of the same project, and another lead's
@@ -894,7 +874,7 @@ describe("agents spawning agents", () => {
 
   it("a thread on this computer is held to the ops a thread on a machine is, and no more", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: MAC_REACH });
+    const rt = runtimeWith({ claude: held.factory }, { here: MAC_HERE });
     const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: AGENTS_ON });
     const handle = await rt.sessions.start(mac.id, { prompt: "hi" });
     const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
@@ -924,7 +904,7 @@ describe("agents spawning agents", () => {
 
   it("a token whose record names a machine's road, or no road at all, reaches no workspace on this computer", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: MAC_REACH });
+    const rt = runtimeWith({ claude: held.factory }, { here: MAC_HERE });
     const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: AGENTS_ON });
     const lead = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const onLead = await rt.sessions.start(lead.id, { prompt: "hi" });
@@ -1036,7 +1016,7 @@ describe("agents spawning agents", () => {
 
   it("turning the lead's switch off stops the tree it spawned, not only the threads on the lead", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const lead = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
     const opener = await rt.sessions.start(lead.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -1058,7 +1038,7 @@ describe("agents spawning agents", () => {
 
   it("a thread on a fork is handed a token too, and under a lead allowing two levels it forks once more", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const lead = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
     const opener = await rt.sessions.start(lead.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -1068,7 +1048,6 @@ describe("agents spawning agents", () => {
     const onFork = await rt.sessions.start(forked.id, { prompt: "build" }, asThread(rootScope));
     const forkThread = onFork.view().threadId!;
     const launch = held.launches[1]!;
-    expect(launch.env[HOST_URL_ENV]).toBe("http://10.0.0.2:4700");
     expect(launch.env[HOST_TOKEN_ENV]).toMatch(/\S/);
     const scoped = (await rt.devices.list()).find(d => d.scope?.threadId === forkThread);
     expect(scoped?.scope).toEqual({ kind: "thread", threadId: forkThread, workspaceId: forked.id, rootThreadId: rootThread });
@@ -1093,7 +1072,7 @@ describe("agents spawning agents", () => {
 
   it("a turn refused before it launches leaves no token standing", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     // A harness this host has no adapter for is refused where the launch environment is built, after the mint.
     await expect(rt.sessions.start(ws.id, { prompt: "hi", harness: "nope" })).rejects.toThrow(/no adapter/);
@@ -1106,7 +1085,7 @@ describe("agents spawning agents", () => {
 
   it("a thread's own token drives its thread and the tree under it, and reads nothing else on the workspace they share", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 3 } });
     // Three trees on one workspace: the person's own thread, the lead whose token every line below runs on, and a
     // second lead the person opened beside it, which is the shape a box with two jobs on one machine has.
@@ -1173,7 +1152,7 @@ describe("agents spawning agents", () => {
 
   it("a thread's notify target is a thread of its own tree, and one outside it reads as no thread at all", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const lead = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
     const opener = await rt.sessions.start(lead.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -1215,7 +1194,7 @@ describe("agents spawning agents", () => {
 
   it("a notify target is a thread of the caller's tree: its parent, its sibling and its child pass, and the person's does not", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 3 } });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -1246,7 +1225,7 @@ describe("agents spawning agents", () => {
 
   it("the line a child's end delivers starts the target's turn under the thread that named it, and a refused line tells the person once", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 2, maxDepth: 2 } });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -1273,7 +1252,7 @@ describe("agents spawning agents", () => {
 
   it("a line held for a napping workspace keeps the road that tells the person, and falls away to them on the wake", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 2, maxDepth: 2 } });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -1304,7 +1283,7 @@ describe("agents spawning agents", () => {
     const held = heldAdapter();
     // One backend for both hosts: the machine the first host forked is the one the second comes back to.
     const backend = stubBackend();
-    const first = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } }, backend);
+    const first = runtimeWith({ claude: held.factory }, undefined, backend);
     const ws = await createOn(first, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 2, maxDepth: 2 } });
     const opener = await first.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -1320,7 +1299,7 @@ describe("agents spawning agents", () => {
     const doc = (await store.get("sessions", ws.id)) as { workspaceId: string; sessions: Record<string, unknown>[] };
     await store.put("sessions", ws.id, { ...doc, sessions: doc.sessions.map(({ notifyBy: _named, ...row }) => row) });
 
-    const again = runtimeWith({ claude: heldAdapter().factory }, { reach: { url: "http://10.0.0.2:4700" } }, backend);
+    const again = runtimeWith({ claude: heldAdapter().factory }, undefined, backend);
     await again.workspaces.list();
     await until(async () => (await again.sessions.history(ws.id)).some(e => e.type === "session.notify" && e.threadId === kidThread && (e as { notify: string }).notify === rootThread));
     // The turn the cut line asked for ran, switch or no switch, which is the road that stood when the row was
@@ -1332,7 +1311,7 @@ describe("agents spawning agents", () => {
 
   it("a thread cannot widen its own caps through the fork it asks for", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const tight = { spawn: true, maxMachines: 2, maxDepth: 1 };
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: tight });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
@@ -1352,7 +1331,7 @@ describe("agents spawning agents", () => {
 
   it("a thread's socket is pushed its own tree's session events and none of a sibling tree's", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 2, maxDepth: 2 } });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -1388,7 +1367,7 @@ describe("agents spawning agents", () => {
 
   it("the init job's own events reach no thread's socket either, since they are about this host", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     const token = held.launches[0]!.env[HOST_TOKEN_ENV]!;
@@ -1434,7 +1413,7 @@ describe("agents spawning agents", () => {
 
   it("a child on the copy its lead forked reaches the lead on the workspace the person made, on every session verb, and the lead reaches it back", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -1467,7 +1446,7 @@ describe("agents spawning agents", () => {
 
   it("the child's reach into its lead's workspace is the thread alone: the workspace verbs, the person's thread and another lead's tree all read as absent", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const mine = await rt.sessions.start(ws.id, { prompt: "the person's own" });
     const mineThread = mine.view().threadId!;
@@ -1503,7 +1482,7 @@ describe("agents spawning agents", () => {
 
   it("two children of one lead send into and steer each other", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -1531,7 +1510,7 @@ describe("agents spawning agents", () => {
 
   it("a child that stops its lead stops the whole tree, its sibling and itself included, and the answer names them", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;
@@ -1549,7 +1528,7 @@ describe("agents spawning agents", () => {
 
   it("stopping a root ends every thread its agents spawned under it", async () => {
     const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const rt = runtimeWith({ claude: held.factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
     const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
     const rootThread = opener.view().threadId!;

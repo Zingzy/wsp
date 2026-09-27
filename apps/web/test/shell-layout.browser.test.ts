@@ -392,7 +392,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
-  it("a toast with a 200-character token stands top right of the centre pane, inside its box and off the sidebar, its where-and-when one line, at every width, in both themes", async () => {
+  it("a toast with a 200-character token stands top right of the centre pane, inside its box and off the sidebar, its where one line and no clock, at every width, in both themes", async () => {
     const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);
     const toast = `${encodeURIComponent(`Stopped the builder ${token} to make room at the machine cap.`)}&where=${"spoo-".repeat(40)}`;
     for (const theme of ["dark", "light"] as const) {
@@ -401,17 +401,18 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         await page!.goto(`${base}?theme=${theme}&toast=${toast}`);
         const notice = page!.locator("[data-notice]").first();
         await notice.waitFor();
+        await page!.waitForTimeout(500);
         const centre = await box("[data-shell-center]");
         const header = await box("[data-shell-center] header");
-        const b = await box("[data-notice]");
+        const b = await box("[data-sonner-toast]");
         expect(b.x).toBeGreaterThanOrEqual(centre.x);
         expect(b.x + b.width).toBeLessThanOrEqual(centre.x + centre.width);
         expect(b.y).toBeGreaterThanOrEqual(header.y + header.height);
         expect(await notice.evaluate(el => el.scrollWidth - el.clientWidth)).toBe(0);
         expect(await notice.evaluate(el => el.closest("[data-app-sidebar]"))).toBeNull();
-        const when = notice.locator("[data-notice-when]");
-        expect((await when.boundingBox())!.height).toBeLessThan(20);
-        expect(await when.textContent()).toMatch(/\d{2}:\d{2}$/);
+        const where = notice.locator("[data-notice-where]");
+        expect((await where.boundingBox())!.height).toBeLessThan(20);
+        expect(await notice.textContent()).not.toMatch(/\d{2}:\d{2}/);
         const path = join(SHOTS_DIR, `notice-${theme}-${width}.png`);
         await page!.screenshot({ path });
         console.info(`notice screenshot: ${path}`);
@@ -420,19 +421,71 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     await page!.setViewportSize({ width: 1200, height: 800 });
   }, 60_000);
 
+  it("each kind of notice is its glyph in its tone at AA over the glass, the sentence and the quieter where, in both themes", async () => {
+    const kinds = [
+      { kind: "error", text: "api was not woken: the provider refused", icon: "--status-failed" },
+      { kind: "done", text: "agent/pricing-page pushed, pull request #212 opened", icon: "--status-done", action: "Open" },
+      { kind: "waiting", text: "Bash wants to run wsp --version", icon: "--status-input", action: "Open" },
+      { kind: "note", text: "wsp 0.2.1 is out", icon: "--muted-foreground", action: "Get the app" },
+    ];
+    for (const theme of ["dark", "light"] as const) {
+      for (const k of kinds) {
+        await page!.goto(`${base}?theme=${theme}&toast=${encodeURIComponent(k.text)}&kind=${k.kind}&where=${encodeURIComponent("api @ Solari")}${k.action === undefined ? "" : `&action=${encodeURIComponent(k.action)}`}`);
+        const notice = page!.locator(`[data-notice][data-kind=${k.kind}]`).first();
+        await notice.waitFor();
+        await page!.waitForTimeout(500);
+        const tone = await notice.evaluate((el, token) => {
+          const probe = document.createElement("span");
+          probe.style.color = `var(${token})`;
+          el.append(probe);
+          const want = getComputedStyle(probe).color;
+          probe.remove();
+          return [getComputedStyle(el.querySelector("svg[role=img]")!).color, want];
+        }, k.icon);
+        expect(tone[0]).toBe(tone[1]);
+        const scope = `[data-notice][data-kind=${k.kind}]`;
+        const [icon] = await textContrast(page!, `${scope} svg[role=img]`);
+        const [title] = await textContrast(page!, `${scope} [data-notice-title]`);
+        const [where] = await textContrast(page!, `${scope} [data-notice-where]`);
+        console.info(`${k.kind} at ${theme}: icon ${icon}, title ${title}, where ${where}`);
+        expect(icon).toBeGreaterThanOrEqual(3);
+        expect(title).toBeGreaterThanOrEqual(4.5);
+        expect(where).toBeGreaterThanOrEqual(4.5);
+        const path = join(SHOTS_DIR, `notice-kind-${k.kind}-${theme}.png`);
+        await page!.screenshot({ path, clip: { x: 0, y: 0, width: 1200, height: 260 } });
+        console.info(`notice kind screenshot: ${path}`);
+      }
+    }
+  }, 60_000);
+
+  it("a running machine with no daemon is said by name in plain words, and the napping one beside it says nothing, in both themes", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&silent=1`);
+      await page!.locator("[data-notice]").first().waitFor();
+      await page!.waitForTimeout(800);
+      const said = await page!.locator("[data-notice]").evaluateAll(els => els.map(el => [el.querySelector("[data-notice-title]")?.textContent, el.querySelector("[data-notice-where]")?.textContent]));
+      expect(said).toEqual([["Running but not answering", "api"]]);
+      const path = join(SHOTS_DIR, `notice-silent-${theme}.png`);
+      await page!.screenshot({ path });
+      console.info(`silent machine screenshot: ${path}`);
+    }
+  }, 30_000);
+
   it("a prompt and a dead thread on a workspace not open stand as a waiting and an error notice, each with an Open, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
       await page!.goto(`${base}?theme=${theme}&host=1`);
       await page!.locator("[data-notice]").nth(1).waitFor();
-      const notices = await page!.locator("[data-notice]").evaluateAll(els => els.map(el => el.textContent ?? ""));
+      const notices = await page!.locator("[data-notice]").evaluateAll(els => els.map(el => [el.getAttribute("data-kind"), el.textContent ?? ""]));
       console.info(`host notices at ${theme}: ${JSON.stringify(notices)}`);
-      expect(notices).toHaveLength(2);
-      expect(notices[0]).toMatch(/^waiting/);
-      expect(notices[1]).toMatch(/^error/);
-      expect(notices[1]).toContain("stopped before it replied: exit 1");
+      expect(notices.map(([kind]) => kind)).toEqual(["waiting", "error"]);
+      expect(notices[1]![1]).toContain("stopped before it replied: exit 1");
       expect(await page!.locator("[data-notice-action]").allTextContents()).toEqual(["Open", "Open"]);
+      await page!.waitForTimeout(500);
+      await page!.screenshot({ path: join(SHOTS_DIR, `notice-host-stacked-${theme}.png`), clip: { x: 0, y: 0, width: 1200, height: 300 } });
+      await page!.locator("[data-sonner-toast]").first().hover();
+      await page!.waitForTimeout(600);
       const path = join(SHOTS_DIR, `notice-host-${theme}.png`);
-      await page!.locator("[data-notices]").screenshot({ path });
+      await page!.screenshot({ path, clip: { x: 0, y: 0, width: 1200, height: 300 } });
       console.info(`host notices screenshot: ${path}`);
     }
   }, 30_000);
