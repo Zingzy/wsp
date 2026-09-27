@@ -16,7 +16,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
-import { CLOUD_ENV, cloudFromEnv, EXIT_CODES, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, LAUNCHED_WITH, LOOPBACK, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, refusalLine, scopedNoPairLine, type PlaceSpend, type PlaceView } from "@wsp/protocol";
+import { CATALOG, agentName } from "@wsp/catalog";
+import { CLOUD_ENV, cloudFromEnv, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, refusalLine, scopedNoPairLine, commandWords, noSuchPlaceRefusal, unclosedQuoteRefusal, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
@@ -25,7 +26,7 @@ import { PROBE_MS } from "../src/service.js";
 import { defaultHomeIn } from "../src/serving-home.js";
 import { addressNotPairedLine, aliasOk, deviceRefusedLine, dialWindowMs, hostsDir, NAME_ONE_HOST, noAnswerRefusal, noAnswerWithin, noSuchHostAmong, READ_THE_HOSTS, severalAccountHostsLine } from "../src/hosts.js";
 import { mcpServer, type Dialer } from "../src/mcp.js";
-import { c1Escaped, CLOSE_GRACE_MS, hostTokenMissingLine, noHostServingLine, UNAUTHORIZED_CLOSE, type HostClient } from "../src/verbs.js";
+import { agentCopyWords, aimedBothLine, aimedUsage, c1Escaped, CLOSE_GRACE_MS, goneFromLine, hostTokenMissingLine, isInAlsoLine, isInLine, noHostServingLine, noSkillHitsLine, notHeaderLine, otherVersion, PLACES_FIX, previewCutLine, projectOffComputerLine, projectScopeLine, projectUnnamedLine, SERVER_TOOL_COLUMNS, SKILL_HIT_COLUMNS, skillsShPlacelessLine, toolLines, toolsAddedLine, toolsProjectBareLine, turnedInLine, turnedLine, UNAUTHORIZED_CLOSE, unsetVariableLine, type HostClient } from "../src/verbs.js";
 import { VERSION } from "../src/version.js";
 
 const CRATE = fileURLToPath(new URL("../../../daemon/crates/wsp-mcp/", import.meta.url));
@@ -114,10 +115,28 @@ const refusals = (): Promise<{ tool: string; arguments: Record<string, unknown>;
     return said;
   });
 
+/** Command lines held to the split a server's command is sent as, each with the words it splits into, or null where a
+ * quote is never closed: quotes of both kinds, escapes in and out of them, and the spaces JavaScript's \s takes. */
+const COMMAND_LINES = [
+  String.raw`npx -y '@scope/pkg ${"$"}{X}' "a \"b\" \\ \n" c\ d` + "\te",
+  "  lead  trail  ",
+  "''",
+  '""x',
+  "a''b",
+  '"open',
+  "'open",
+  "end\\",
+  "end\\\\",
+  "",
+  "nbsp\u00a0split nel\u0085kept bom\ufeffsplit em\u2003split line\u2028split",
+];
+
 /** The sentences in the shape the Rust side fills: each `{name}` is a value it knows only at the time it says it.
- * A sentence whose words depend on a count is recorded through a stand-in list that answers the placeholders. */
-function words(): Record<string, string> {
+ * A sentence whose words depend on a count is recorded through a stand-in list that answers the placeholders. A
+ * refusal's fix is `{usage}`, which the tool fills with its own. */
+function words(): Record<string, unknown> {
   const standIn = { length: "{count}", join: () => "{aliases}" } as unknown as string[];
+  const tools = (answer: Partial<ServerToolsAnswer>): string[] => toolLines("{name}", { auth: "{auth}" as ServerToolsAnswer["auth"], readAt: "", ...answer });
   return {
     noHostServing: noHostServingLine("{state}"),
     hostTokenMissing: hostTokenMissingLine("{path}"),
@@ -136,6 +155,40 @@ function words(): Record<string, string> {
     startingHost: startingHostLine("{state}", "{log}"),
     noHostAnswered: noHostAnsweredLine("{state}", SERVICE_WAIT_MS),
     hostExited: hostExitedLine("{state}", "{ended}", "{log}"),
+    herePlaceId: HERE_PLACE_ID,
+    agentNames: Object.fromEntries(CATALOG.map(e => [e.id, agentName(e.id)])),
+    otherVersion: otherVersion("{op}"),
+    noSuchPlace: noSuchPlaceRefusal("{word}", ["{held}"]),
+    placesFix: PLACES_FIX,
+    aimedUsage: aimedUsage("{tool}"),
+    aimedBoth: refusalLine(aimedBothLine, "{usage}"),
+    projectUnnamed: refusalLine(projectUnnamedLine, "{usage}"),
+    projectOffComputer: refusalLine(projectOffComputerLine("{value}"), "{usage}"),
+    toolsProjectBare: refusalLine(toolsProjectBareLine, "{usage}"),
+    skillsShPlaceless: refusalLine(skillsShPlacelessLine("{skill}"), "{usage}"),
+    unsetVariable: refusalLine(unsetVariableLine("{variable}"), "{usage}"),
+    notHeader: refusalLine(notHeaderLine("{pair}"), "{usage}"),
+    unclosedQuote: refusalLine(unclosedQuoteRefusal, "{usage}"),
+    projectScope: refusalLine(projectScopeLine("{scope}"), "{usage}"),
+    noSkillHits: noSkillHitsLine,
+    skillHitColumns: SKILL_HIT_COLUMNS,
+    previewBytes: SKILL_PREVIEW_BYTES,
+    previewCut: previewCutLine("{kb}" as unknown as number),
+    isIn: isInLine("{name}", "{path}"),
+    isInAlso: isInAlsoLine("{name}", "{path}", "{copies}"),
+    agentCopy: agentCopyWords("{agent}", "{path}"),
+    goneFrom: goneFromLine("{name}", "{from}"),
+    turnedOn: turnedLine("{name}", true),
+    turnedOff: turnedLine("{name}", false),
+    turnedOnIn: turnedInLine("{name}", true, "{file}"),
+    turnedOffIn: turnedInLine("{name}", false, "{file}"),
+    toolsAdded: toolsAddedLine("{agent}", "{file}"),
+    serverToolsHead: tools({})[0],
+    serverToolsHeld: tools({ holder: "{holder}" })[0],
+    serverToolsRefused: tools({ refused: "{refused}" })[1],
+    serverToolsNone: tools({ tools: [] })[1],
+    serverToolColumns: SERVER_TOOL_COLUMNS,
+    commandWords: Object.fromEntries(COMMAND_LINES.map(line => [line, commandWords(line) ?? null])),
   };
 }
 
@@ -169,10 +222,12 @@ function host(): Record<string, unknown> {
 }
 
 /** A host as far as one tool call asks it: each op answered with the frame a host would send, parsed as the dial
- * parses it, a refusal thrown with its kind as the dial throws it. */
-function answeringHost(replies: Record<string, string>): HostClient {
+ * parses it, a refusal thrown with its kind as the dial throws it. Each op it is asked lands in `asked` with its
+ * fields as they cross the socket. */
+function answeringHost(replies: Record<string, string>, asked: Record<string, unknown>[]): HostClient {
   return {
-    request: async <T extends Record<string, unknown>>(op: string): Promise<T> => {
+    request: async <T extends Record<string, unknown>>(op: string, params: Record<string, unknown> = {}): Promise<T> => {
+      asked.push(JSON.parse(JSON.stringify({ op, ...params })) as Record<string, unknown>);
       const frame = JSON.parse(replies[op] ?? JSON.stringify({ ok: false, error: `${op} is not in this record` })) as Record<string, unknown>;
       if (frame["ok"] !== true) throw Object.assign(new Error(String(frame["error"])), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {});
       return frame as T;
@@ -187,11 +242,12 @@ function answeringHost(replies: Record<string, string>): HostClient {
 }
 
 /** The one line this server writes on stdio for one call against that host, through the same escaping the real one
- * writes through. */
-async function answeredLine(tool: string, args: Record<string, unknown>, replies: Record<string, string>): Promise<string> {
-  const host = answeringHost(replies);
+ * writes through, and every op the call asked the host. */
+async function answeredLine(tool: string, args: Record<string, unknown>, replies: Record<string, string>, env: Record<string, string> = {}): Promise<{ line: string; asked: Record<string, unknown>[] }> {
+  const asked: Record<string, unknown>[] = [];
+  const host = answeringHost(replies, asked);
   const dial = Object.assign(async () => host, { close: async () => {} }) as Dialer;
-  const server = mcpServer("/nonexistent/state.json", { env: {}, dial });
+  const server = mcpServer("/nonexistent/state.json", { env, dial });
   const input = new PassThrough();
   const output = new PassThrough();
   let written = "";
@@ -200,7 +256,7 @@ async function answeredLine(tool: string, args: Record<string, unknown>, replies
   input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: args } })}\n`);
   for (let waited = 0; !written.includes("\n") && waited < 5_000; waited += 10) await new Promise(r => setTimeout(r, 10));
   await server.close();
-  return written.slice(0, written.indexOf("\n"));
+  return { line: written.slice(0, written.indexOf("\n")), asked };
 }
 
 /** Rows that carry what a byte compare has to survive: a C1 control and DEL, a quote, a backslash, a newline, text
@@ -223,8 +279,129 @@ const SPEND: PlaceSpend = { place: "place-solari", todayUsd: 1.25, monthUsd: 30,
 
 const reply = (body: Record<string, unknown>): string => JSON.stringify({ id: 1, ok: true, ...body });
 
-/** The calls recorded per tool: the arguments, what the host answered each op with, and a case name. */
-const ANSWERED: Record<string, { case: string; arguments: Record<string, unknown>; replies: Record<string, string> }[]> = {
+const refused = (error: string, kind?: string): string => JSON.stringify({ id: 1, ok: false, error, ...(kind !== undefined ? { kind } : {}) });
+
+/** The calls recorded per tool: the arguments, what the host answered each op with, the environment the server runs
+ * in where the tool reads it, and a case name. */
+type Answered = Record<string, { case: string; arguments: Record<string, unknown>; replies: Record<string, string>; env?: Record<string, string> }[]>;
+
+/** A workspace and a computer a tool aims at by name. */
+const WORKSPACE = { id: "ws_1", name: "landing", machineId: "m1", phase: "running", golden: "snap_gold", createdAt: "2026-09-25T00:00:00.000Z", project: { id: "pr_1", name: "api", path: "/root/api", computer: "place-9" } };
+const AIMED = { "workspaces.resolve": reply({ workspace: WORKSPACE }), "places.list": reply({ places: [PLACE, CLOUD] }) };
+
+/** The skill and server tools: every road to the target, each line the text says, and each refusal before the host
+ * is asked. The host's rows come in an order of their own with a key no schema holds, which the answer drops. */
+const SKILLS_AND_SERVERS: Answered = {
+  skills_search: [
+    {
+      case: "hits",
+      arguments: { query: "review code", limit: 2 },
+      replies: {
+        "skills.search": reply({
+          skills: [
+            { name: "code-review \u0085\ttabbed\nsplit 🧪", installs: 123456, id: "zingzy/skills/code-review", extra: true, source: "zingzy/skills", skillId: "code-review" },
+            { id: "a/b/c", source: "a/b", skillId: "c", name: "c", installs: 0 },
+          ],
+        }),
+      },
+    },
+    { case: "none", arguments: { query: "nothing" }, replies: { "skills.search": reply({ skills: [] }) } },
+    { case: "refused", arguments: { query: "" }, replies: { "skills.search": refused("the query is empty", "usage") } },
+  ],
+  skills_show: [
+    { case: "skills.sh", arguments: { skill: "o/r/s" }, replies: { "skills.get": reply({ preview: { text: "# S\n\u001b[31mred\u0085\tend\r", size: 70000 } }) } },
+    { case: "here", arguments: { skill: "review" }, replies: { "skills.preview": reply({ preview: { size: 12, text: "# Review 🧪", more: 1 } }) } },
+    { case: "on a project", arguments: { skill: "review", on: "attic", project: "api" }, replies: { ...AIMED, "skills.preview": reply({ preview: { text: "x", size: 65536 } }) } },
+    { case: "in a workspace", arguments: { skill: "review", workspace: "landing", project: true }, replies: { ...AIMED, "skills.preview": reply({ preview: { text: "x", size: 65537 } }) } },
+    { case: "skills.sh on a computer", arguments: { skill: "o/r/s", on: "attic" }, replies: {} },
+    { case: "both aimed", arguments: { skill: "review", workspace: "landing", on: "attic" }, replies: {} },
+    { case: "project unnamed", arguments: { skill: "review", on: "attic", project: true }, replies: {} },
+    { case: "project off a computer", arguments: { skill: "review", project: "api" }, replies: {} },
+    { case: "no such computer", arguments: { skill: "review", on: "nowhere" }, replies: AIMED },
+    { case: "another version", arguments: { skill: "review", workspace: "landing" }, replies: { "workspaces.resolve": reply({}) } },
+    { case: "refused", arguments: { skill: "gone" }, replies: { "skills.preview": refused("There is no skill named gone there.", "not-found") } },
+  ],
+  skills_add: [
+    {
+      case: "copies",
+      arguments: { skill: "zingzy/skills/code\u0085review", agent: ["codex", "zed-x"] },
+      replies: { "skills.add": reply({ added: { agents: [{ path: "~/.codex/skills/code-review", agent: "codex" }, { agent: "zed-x", path: "~/.zed\n/skills" }], path: "~/.agents/skills/code-review", more: 1 } }) },
+    },
+    { case: "alone", arguments: { skill: "plain" }, replies: { "skills.add": reply({ added: { path: "~/.agents/skills/plain", agents: [] } }) } },
+    { case: "a project on a computer", arguments: { skill: "o/r/s", on: "place-solari", project: "api", agent: [] }, replies: { ...AIMED, "skills.add": reply({ added: { path: "/root/api/.agents/skills/s", agents: [] } }) } },
+    { case: "refused", arguments: { skill: "o/r/s", workspace: "landing" }, replies: { ...AIMED, "skills.add": refused("landing is napping, and its skills are read and changed only while it runs; wake it first") } },
+  ],
+  skills_remove: [
+    { case: "removed", arguments: { name: "review\tx", workspace: "landing", project: true }, replies: { ...AIMED, "skills.remove": reply({ removed: ["~/.agents/skills/review", "~/.claude/skills/review\u0085"] }) } },
+    { case: "both aimed", arguments: { name: "review", workspace: "landing", on: "attic" }, replies: {} },
+    { case: "refused", arguments: { name: "wsp" }, replies: { "skills.remove": refused("wsp's own skill is always on", "usage") } },
+  ],
+  skills_disable: [
+    { case: "off", arguments: { name: "review", on: "attic" }, replies: { ...AIMED, "skills.toggle": reply({ paths: ["~/.agents/skills/review/SKILL.md.off"] }) } },
+    { case: "refused", arguments: { name: "gone" }, replies: { "skills.toggle": refused("There is no skill named gone there.", "not-found") } },
+  ],
+  skills_enable: [{ case: "on", arguments: { name: "review" }, replies: { "skills.toggle": reply({ paths: [] }) } }],
+  servers_tools: [
+    {
+      case: "tools",
+      arguments: { name: "linear", agent: "claude" },
+      replies: {
+        "servers.tools": reply({
+          answer: {
+            readAt: "2026-09-27T00:00:00.000Z",
+            tools: [
+              { description: "Finds issues\nacross teams", name: "search_issues", params: [{ required: true, name: "query", type: "string", extra: 1 }, { name: "limit", required: false, description: "how many" }] },
+              { name: "whoami" },
+            ],
+            auth: "signed-in",
+            extra: "dropped",
+          },
+        }),
+      },
+    },
+    { case: "held", arguments: { name: "notion", agent: "codex", refresh: true }, replies: { "servers.tools": reply({ answer: { auth: "unknown", holder: "codex", readAt: "2026-09-27T00:00:00.000Z" } }) } },
+    { case: "refused by the server", arguments: { name: "slow", agent: "zed-x", workspace: "landing" }, replies: { ...AIMED, "servers.tools": reply({ answer: { auth: "failed", refused: "Did not answer in 20 s.", readAt: "2026-09-27T00:00:00.000Z" } }) } },
+    { case: "no tools", arguments: { name: "empty", agent: "claude", on: "attic", project: "api", refresh: false }, replies: { ...AIMED, "servers.tools": reply({ answer: { auth: "open", tools: [], readAt: "2026-09-27T00:00:00.000Z" } }) } },
+    { case: "not yet asked", arguments: { name: "empty", agent: "claude" }, replies: { "servers.tools": reply({ answer: { auth: "open", readAt: "2026-09-27T00:00:00.000Z" } }) } },
+    { case: "project bare", arguments: { name: "x", agent: "claude", on: "attic", project: "" }, replies: {} },
+    { case: "project off a computer", arguments: { name: "x", agent: "claude", project: "api" }, replies: {} },
+    { case: "refused", arguments: { name: "x", agent: "claude" }, replies: { "servers.tools": refused("claude has no MCP server named x", "not-found") } },
+  ],
+  servers_add: [
+    {
+      case: "command",
+      arguments: { name: "linear", agent: "claude", command: String.raw`npx -y '@scope/pkg ${"$"}{X}' "a \"b\"" c\ d	e`, env: ["WSP_RECORD_KEY"] },
+      env: { WSP_RECORD_KEY: "sk-ant-x" },
+      replies: { "servers.add": reply({ file: "~/.claude.json" }) },
+    },
+    { case: "address", arguments: { name: "remote", agent: "codex", url: "https://mcp.example/sse", header: ["Authorization=WSP_RECORD_KEY"], workspace: "landing", project: true }, env: { WSP_RECORD_KEY: "sk-ant-x" }, replies: { ...AIMED, "servers.add": reply({ file: "/root/api/.codex/config.toml" }) } },
+    { case: "unset variable", arguments: { name: "x", agent: "claude", command: "x", env: ["WSP_RECORD_UNSET"] }, replies: {} },
+    { case: "not a header", arguments: { name: "x", agent: "claude", url: "https://x.example", header: ["Authorization"] }, replies: {} },
+    { case: "header with no variable", arguments: { name: "x", agent: "claude", url: "https://x.example", header: ["Authorization="] }, replies: {} },
+    { case: "unclosed quote", arguments: { name: "x", agent: "claude", command: "npx 'x" }, replies: {} },
+    { case: "project unnamed", arguments: { name: "x", agent: "claude", command: "x", on: "attic", project: true }, replies: {} },
+    { case: "refused", arguments: { name: "x", agent: "claude", command: "" }, replies: { "servers.add": refused("claude already has a server named x in ~/.claude.json", "usage") } },
+  ],
+  servers_remove: [
+    { case: "scoped", arguments: { name: "linear", agent: "claude", scope: "home" }, replies: { "servers.remove": reply({ file: "~/.claude.json" }) } },
+    { case: "a project on a computer", arguments: { name: "linear", agent: "claude", on: "attic", project: "api" }, replies: { ...AIMED, "servers.remove": reply({ file: "/root/api/.mcp.json" }) } },
+    { case: "project and another scope", arguments: { name: "linear", agent: "claude", project: true, scope: "user" }, replies: {} },
+    { case: "refused", arguments: { name: "linear", agent: "claude" }, replies: { "servers.remove": refused("claude has no MCP server named linear", "not-found") } },
+  ],
+  servers_disable: [
+    { case: "off", arguments: { name: "linear", agent: "codex", workspace: "landing", scope: "project", project: true }, replies: { ...AIMED, "servers.toggle": reply({ file: "/root/api/.codex/config.toml" }) } },
+    { case: "refused", arguments: { name: "linear", agent: "claude" }, replies: { "servers.toggle": refused("Claude Code keeps no switch per server that wsp turns, so nothing was changed.", "usage") } },
+  ],
+  servers_enable: [{ case: "on", arguments: { name: "linear", agent: "gemini" }, replies: { "servers.toggle": reply({ file: "~/.gemini/settings.json" }) } }],
+  agents_addtools: [
+    { case: "added", arguments: { agent: "claude" }, replies: { "agents.addTools": reply({ file: "~/.claude.json" }) } },
+    { case: "an agent the catalog does not know", arguments: { agent: "zed-x" }, replies: { "agents.addTools": reply({ file: "~/.zed/settings.json", more: true }) } },
+    { case: "refused", arguments: { agent: "codex" }, replies: { "agents.addTools": refused("Codex is not installed here", "not-found") } },
+  ],
+};
+
+const ANSWERED: Answered = {
+  ...SKILLS_AND_SERVERS,
   computers: [
     { case: "rows", arguments: {}, replies: { "places.list": reply({ places: [PLACE, CLOUD] }), "cost.spend": reply({ places: [SPEND] }) } },
     { case: "empty", arguments: {}, replies: { "places.list": reply({ places: [] }), "cost.spend": reply({ places: [] }) } },
@@ -245,7 +422,7 @@ async function regenerated(): Promise<Files> {
   for (const name of new Set([...off.tools, ...on.tools].map(t => String(t["name"])))) files.set(`record/tools/${name}.json`, fileText({ cloudOff: entry(off.tools, name), cloudOn: entry(on.tools, name) }));
   for (const [tool, cases] of Object.entries(ANSWERED)) {
     const answered = [];
-    for (const c of cases) answered.push({ ...c, line: await answeredLine(tool, c.arguments, c.replies) });
+    for (const c of cases) answered.push({ ...c, ...(await answeredLine(tool, c.arguments, c.replies, c.env)) });
     files.set(`tests/answers/${tool}.json`, fileText({ tool, cases: answered }));
   }
   return files;

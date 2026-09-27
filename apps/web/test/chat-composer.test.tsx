@@ -98,7 +98,7 @@ async function setup(api: Api, conn: ConnStatus = "live", agents = true) {
 }
 
 const draft = () => useComposerDraftStore.getState().drafts[WS]?.prompt ?? "";
-const sendButton = () => screen.getByRole("button", { name: /Send message|Wake and send|Turn in flight|wsp|Workspace|Loading|Connecting/ }) as HTMLButtonElement;
+const sendButton = () => screen.getByRole("button", { name: /Send message|Wake and send|Turn in flight|wsp|Workspace|This workspace|Loading|Connecting/ }) as HTMLButtonElement;
 const menuItem = (name: string) => document.querySelector<HTMLElement>(`[data-composer-item-id="provider-slash-command:claude:${name}"]`);
 const menuDrawer = () => document.querySelector<HTMLElement>("[data-composer-command-drawer]");
 
@@ -747,7 +747,7 @@ describe("composer while the workspace is not live", () => {
     await setup(api);
     expect(isEditable(composerEditor())).toBe(false);
     expectPlainLine(sendRefusal("gone")!);
-    expect(sendButton().getAttribute("aria-label")).toBe("Workspace machine is gone; rebuild it to send");
+    expect(sendButton().getAttribute("aria-label")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to send, which brings back its home folder from the last saved nap");
     expect(sendButton().disabled).toBe(true);
   });
 

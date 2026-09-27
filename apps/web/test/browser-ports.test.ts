@@ -177,7 +177,7 @@ describe("port directory over the daemon link", () => {
     setPorts(a, [{ port: 4000 }]);
     await new Promise(r => setTimeout(r, 120));
 
-    emit({ type: "workspace.woken", workspaceId: a, machineId: `m_${a}`, resurrected: false });
+    emit({ type: "workspace.woken", workspaceId: a, machineId: `m_${a}` });
     await until(() => portsOf(a).includes(4000) && !portsOf(a).includes(3000));
     expect(portsOf(a)).toEqual([4000]);
   }, 20_000);

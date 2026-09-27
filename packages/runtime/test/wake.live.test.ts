@@ -104,11 +104,10 @@ describe.runIf(LIVE)("verified wake, live", () => {
           `, view ${JSON.stringify(shape)}, marker ${marker.stdout.trim() || `(exit ${marker.exitCode})`}${reason ? `, reason: ${reason}` : ""}`,
       );
       console.log(rows.at(-1));
+      expect(woken.machineId).toBe(before);
       expect(woken.phase).toBe("running");
       expect(marker.stdout.trim()).toBe("nap-vault-marker");
     }
     console.log(["", "verified wake, live:", ...rows].join("\n"));
-    const zombies = events.filter(e => e.type === "workspace.woken" && e.resurrected);
-    console.log(`resurrections: ${zombies.length}`);
   });
 });

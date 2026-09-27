@@ -472,7 +472,7 @@ describe("the noise", () => {
   it("presence, naps, wakes, forwards, projects, creates and image stages are said nowhere", () => {
     emit({ type: "place.present", placeId: "pl_box", from: "10.0.0.9" });
     emit({ type: "workspace.napped", workspaceId: "ws_1" });
-    emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1", resurrected: false });
+    emit({ type: "workspace.woken", workspaceId: "ws_1", machineId: "m1" });
     emit({ type: "forward.open", forward: { workspaceId: "ws_1", port: 3000, localPort: 3000 } } as unknown as ProtocolEvent);
     emit({ type: "project.removed", projectId: "pr_api" } as unknown as ProtocolEvent);
     emit({ type: "workspace.created", workspace: WS });

@@ -100,7 +100,7 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
     }
   });
 
-  it("resurrects a fresh copy when the wake runs out its attempts, carrying nothing onto it", async () => {
+  it("a wake that runs out its attempts fails on the same machine, and nothing is carried anywhere", async () => {
     const { backend, untars, store } = imageless();
     const { port, close: closePort } = await droppingPort();
     onTestFinished(closePort);
@@ -112,10 +112,10 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
       const m1 = backend.machines[0]!;
       m1.previewUrl = async () => ({ url: `ws://127.0.0.1:${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
       await rt.workspaces.nap(ws.id);
-      const woken = await rt.workspaces.wake(ws.id);
-      expect(woken.machineId).toBe("m2");
-      expect(m1.killed).toBe(true);
-      // The fresh copy is the computer's own disk again: nothing was stashed at the nap and nothing lands here.
+      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/daemon on m1 did not answer/);
+      expect((await rt.workspaces.get(ws.id)).machineId).toBe("m1");
+      expect(backend.machines).toHaveLength(1);
+      expect(m1.killed).toBe(false);
       expect(untars).toEqual([]);
       expect(await store.getBlob("vaults", ws.id)).toBeUndefined();
     } finally {
@@ -124,7 +124,7 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
     }
   });
 
-  it("leaves a computer that keeps an image exactly as it was: every nap stashes the vault and the wake reads it", async () => {
+  it("leaves a computer that keeps an image exactly as it was: every nap stashes the vault, a failed wake keeps the machine, and the rebuild reads the vault", async () => {
     const { backend, tars, untars } = guestBackend();
     const store = memoryStore();
     const { port, close: closePort } = await droppingPort();
@@ -140,8 +140,10 @@ describe("the nap of a workspace on a computer that keeps no image", () => {
       expect(tars).toEqual(["m1"]);
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
       expect((await rt.workspaces.get(ws.id)).vaultedAt).toBeDefined();
-      const woken = await rt.workspaces.wake(ws.id);
-      expect(woken.machineId).toBe("m2");
+      await expect(rt.workspaces.wake(ws.id)).rejects.toThrow(/daemon on m1 did not answer/);
+      expect(untars).toEqual([]);
+      const rebuilt = await rt.workspaces.rebuild(ws.id);
+      expect(rebuilt.machineId).toBe("m2");
       expect(untars).toEqual(["m2"]);
     } finally {
       await rt.close();

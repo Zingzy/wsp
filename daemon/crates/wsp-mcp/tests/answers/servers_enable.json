@@ -1,0 +1,27 @@
+{
+  "tool": "servers_enable",
+  "cases": [
+    {
+      "case": "on",
+      "arguments": {
+        "name": "linear",
+        "agent": "gemini"
+      },
+      "replies": {
+        "servers.toggle": "{\"id\":1,\"ok\":true,\"file\":\"~/.gemini/settings.json\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"linear is on in ~/.gemini/settings.json.\"}],\"structuredContent\":{\"file\":\"~/.gemini/settings.json\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "servers.toggle",
+          "target": {
+            "placeId": "here"
+          },
+          "agent": "gemini",
+          "name": "linear",
+          "on": true
+        }
+      ]
+    }
+  ]
+}

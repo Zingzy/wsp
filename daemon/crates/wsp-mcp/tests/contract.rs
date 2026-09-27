@@ -23,7 +23,10 @@ struct Case {
     case: String,
     arguments: Value,
     replies: BTreeMap<String, String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
     line: String,
+    asked: Vec<Value>,
 }
 
 /// A state folder a host on this port serves: the lock naming this process, which is alive, and the token beside it.
@@ -43,16 +46,28 @@ async fn every_recorded_answer_is_printed_byte_for_byte() {
         let recorded: Answers = serde_json::from_str(&std::fs::read_to_string(file.unwrap().path()).unwrap()).unwrap();
         for case in recorded.cases {
             let dir = tempfile::tempdir().unwrap();
-            let port = common::host("contract-token", case.replies).await;
+            let (port, frames) = common::host_asked("contract-token", case.replies).await;
             let state = served_state(dir.path(), port, "contract-token");
             let asked = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": recorded.tool, "arguments": case.arguments } });
             let input = format!("{asked}\n");
             let mut out = Vec::new();
-            let env = [("WSP_HOME".to_owned(), dir.path().join("home").to_string_lossy().into_owned())].into_iter().collect();
+            let mut env: wsp_mcp::Env = case.env.into_iter().collect();
+            env.insert("WSP_HOME".to_owned(), dir.path().join("home").to_string_lossy().into_owned());
             let code = wsp_mcp::serve(&Args { state, ..Args::default() }, &env, input.as_bytes(), &mut out).await;
             assert_eq!(code, 0);
             let printed = String::from_utf8(out).unwrap();
             assert_eq!(printed, format!("{}\n", case.line), "{} {}", recorded.tool, case.case);
+            let in_order = |mut frames: Vec<Value>| {
+                frames.sort_by_key(Value::to_string);
+                frames
+            };
+            assert_eq!(
+                in_order(frames.lock().unwrap().clone()),
+                in_order(case.asked),
+                "{} {}: what the host was asked",
+                recorded.tool,
+                case.case
+            );
             replayed += 1;
         }
     }
