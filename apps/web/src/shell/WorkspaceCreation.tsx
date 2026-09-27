@@ -1,145 +1,142 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The center while a workspace is being created: its name, an indeterminate
-// wavy bar and the runtime's stage log, one line per stage as it arrives.
-// A failure keeps the log with the failing line and offers a retry; success
-// is the store swapping this for the thread.
-//
-// Under the log, the view's own last line: what this workspace is made of and
-// what its copy has for a network, read off the record the create answered
-// with through the protocol's word table, in the same words the row it becomes
-// carries. The runtime's own stage words end on ready and say nothing about the
-// copy, and this screen writes no road of its own. The slot stands from the
-// first paint and is empty until that record lands, so nothing moves under it.
-import { useEffect, useRef } from "react";
-import { CREATION_ASKED } from "../actions/format.js";
+// The centre while a workspace is being made: the thread it becomes, empty,
+// drawn where ChatView draws an empty thread so nothing moves when the
+// workspace takes the page, with one folded "Setting up" row at the top for
+// the create's steps and the composer ready under the question. A message sent
+// now waits under the creation and goes to the workspace once it is up.
+import { useLayoutEffect, useRef, useState } from "react";
+import { ChevronDownIcon, ChevronRightIcon, CircleAlertIcon } from "lucide-react";
+import { ChatComposer } from "../components/chat/ChatComposer.js";
+import { EmptyThread } from "../components/chat/ChatView.js";
+import { HeroAtmosphere } from "../components/chat/EmptyHero.js";
+import { useChatThread } from "../components/chat/useChatThread.js";
+import { Crab } from "../components/status/Crab.js";
+import { WorkingSince } from "../components/status/WorkingSince.js";
 import { Button } from "../components/ui/button.js";
-import { ScrollArea } from "../components/ui/scroll-area.js";
-import { APP_LOCALE, localZoneLabel } from "../lib/timestampFormat.js";
 import { cn } from "../lib/utils.js";
 import { useStore, type Creation, type CreationLine } from "../protocol/store.js";
-import { FACT } from "../settings/format.js";
-import { hereName, isHere, placeName, placeOf } from "../settings/places.js";
-import { madeOfLine } from "../sidebar/workspaceRows.js";
-import { Spaced } from "../components/ui/spaced.js";
+import { formatWorkingDurationLabel } from "../sidebar/Sidebar.logic.js";
+import { CREATE_ASKED, currentStep, stepWords } from "./creationLog.js";
 
-const WAVE_PERIOD = 24;
+/** What the composer says over a message that waits for the machine. */
+export const creationWaitLine = (name: string): string => `Sends once ${name} is up`;
+
+const TIME_CLASS = "ml-auto shrink-0 font-mono text-xs tabular-nums text-muted-foreground";
 
 export function WorkspaceCreation({ creation }: { creation: Creation }) {
-  const retry = useStore(s => s.retryCreation);
-  const dismiss = useStore(s => s.dismissCreation);
-  const failed = creation.failed !== null;
-  const lastMessage = creation.lines.at(-1)?.message;
-  const log = useRef<HTMLOListElement>(null);
-  useEffect(() => {
-    log.current?.lastElementChild?.scrollIntoView({ block: "nearest" });
-  }, [creation.lines.length]);
+  const thread = useChatThread(creation.key, null, true);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  // ChatView's own measure, so the question stands over the composer at the height the thread will draw it at.
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const composer = composerRef.current;
+    if (root === null || composer === null) return;
+    const observer = new ResizeObserver(() => root.style.setProperty("--chat-composer-inset", `${composer.offsetHeight}px`));
+    observer.observe(composer);
+    return () => observer.disconnect();
+  }, []);
+  const project = creation.project === undefined ? {} : { projectId: creation.project };
   return (
-    <div data-testid="workspace-creation" aria-busy={!failed} className="flex h-full min-h-0 flex-col items-center overflow-y-auto bg-background px-6 py-12 text-foreground sm:py-16">
-      <div className="flex w-full max-w-xl flex-col items-center text-center">
-        <p className="text-[13px] leading-5 text-muted-foreground">{failed ? "Couldn't start" : "Starting"}</p>
-        <h1 className="mt-1 w-full truncate text-lg/7 font-medium tracking-[-0.01em]">{creation.name}</h1>
-        <Squiggle failed={failed} className="mt-6" />
-        <div data-testid="creation-log" className="mt-6 h-32 w-full text-left">
-          <ScrollArea scrollFade>
-            <ol ref={log} aria-label="Creation log" aria-live="polite" className="flex flex-col gap-1.5 py-3 font-mono text-xs tabular-nums">
-              {creation.lines.length === 0 ? <li className="text-muted-foreground">{CREATION_ASKED}</li> : null}
-              {creation.lines.map((line, i) => (
-                <LogLine key={i} line={line} current={i === creation.lines.length - 1} />
-              ))}
-            </ol>
-          </ScrollArea>
-        </div>
-        <p data-testid="creation-clock" className="mt-1.5 w-full text-right font-mono text-[11px] text-muted-foreground">{`clock in ${localZoneLabel()}`}</p>
-        <MadeOf creation={creation} />
-        {creation.failed ? (
-          <div className="mt-6 flex flex-col items-center gap-3 text-sm">
-            <p>
-              <span className="text-destructive-foreground">{creation.failed.title}</span>
-              {creation.failed.detail !== lastMessage ? <span className="text-muted-foreground"> {creation.failed.detail}</span> : null}
-            </p>
-            <div className="flex justify-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => void retry(creation.key)}>
-                Retry
-              </Button>
-              <Button variant="ghost-muted" size="sm" onClick={() => dismiss(creation.key)}>
-                Dismiss
-              </Button>
-            </div>
+    <div data-testid="workspace-creation" aria-busy={creation.failed === null} className="flex min-h-0 flex-1 flex-col" data-terminal-beside>
+      <div ref={rootRef} className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
+        <div className="absolute inset-0">
+          <HeroAtmosphere {...project} />
+          <div className="absolute inset-x-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem)]">
+            <EmptyThread workspaceName={creation.name} {...project} />
           </div>
-        ) : null}
+          <SettingUp creation={creation} />
+        </div>
+        <div ref={composerRef} data-chat-composer-dock data-centred className="pointer-events-none absolute inset-x-0 bottom-(--empty-lift) z-10 *:pointer-events-auto">
+          <ChatComposer key={creation.key} workspaceId={creation.key} thread={thread} waitLine={creationWaitLine(creation.name)} />
+        </div>
       </div>
     </div>
   );
 }
 
-/** The one line this view says in its own voice: the word table's reading of the record the create answered with.
- * Empty until that record is here, in a slot that was already there. */
-function MadeOf({ creation }: { creation: Creation }) {
-  const places = useStore(s => s.places);
-  const landing = useStore(s => (creation.project === undefined ? null : s.landings[creation.project] ?? null));
-  const loadLanding = useStore(s => s.loadLanding);
-  // The flags this line's second half reads are the landing's, and the landing is asked for per project: on the
-  // first run this screen is the first one drawn, with no row anywhere else to have asked, and the line read the
-  // copy word alone. The store asks once per project, so a sidebar that has asked already costs nothing here.
-  useEffect(() => {
-    if (creation.project !== undefined) void loadLanding(creation.project);
-  }, [creation.project, loadLanding]);
-  const workspace = useStore(s => (creation.workspaceId === null ? undefined : s.workspaces.find(w => w.id === creation.workspaceId)));
-  // The computer's name where the work did not land on the computer the app runs on, which is the row's own rule
-  // for the same line: this computer is not named on a screen that is already on it.
-  const at = workspace === undefined ? undefined : placeOf(places, workspace);
-  const computer = at === undefined || isHere(at) ? null : placeName(at);
-  const said = workspace === undefined ? [] : madeOfLine({ project: { workspace }, landing: landing === null ? null : landing.capabilities, computer, here: hereName(places) });
+/** The create's steps folded into one row at the top of the column, in the transcript's fold grammar with no rule
+ * under it: the crab, the step being waited on, and the time since the create was asked for. A refusal says why
+ * under it, with Retry and Dismiss. */
+function SettingUp({ creation }: { creation: Creation }) {
+  const retry = useStore(s => s.retryCreation);
+  const dismiss = useStore(s => s.dismissCreation);
+  const [open, setOpen] = useState(false);
+  const { failed, lines } = creation;
+  // The newest step and a refusal's buttons are what a clipped region must still show.
+  const below = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (below.current !== null) below.current.scrollTop = below.current.scrollHeight;
+  }, [open, lines.length, failed]);
+  const step = currentStep(creation);
+  const Chevron = open ? ChevronDownIcon : ChevronRightIcon;
   return (
-    <p data-k="made-of" className={cn(FACT, "mt-1.5 min-h-4 w-full text-left")} title={said.join(", ")}>
-      <Spaced parts={said} />
-    </p>
-  );
-}
-
-function LogLine({ line, current }: { line: CreationLine; current: boolean }) {
-  const failing = line.stage === "failed";
-  return (
-    <li className={cn("flex gap-3", failing ? "text-destructive-foreground" : current ? "text-foreground" : "text-muted-foreground")}>
-      <time dateTime={line.at} className="shrink-0 text-muted-foreground/70">
-        {clockLabel(line.at)}
-      </time>
-      <span className="min-w-0 flex-1 break-words" title={line.detail}>
-        {line.message}
-        {line.notice !== undefined ? <span className="block text-muted-foreground">{line.notice}</span> : null}
-      </span>
-      <span className="shrink-0 text-muted-foreground/70">{elapsedLabel(line.elapsedMs)}</span>
-    </li>
-  );
-}
-
-/** An indeterminate bar drawn as a wave that slides one period per loop; it stands still once the create failed. */
-function Squiggle({ failed, className }: { failed: boolean; className?: string }) {
-  return (
-    <div role="progressbar" aria-label={failed ? "Creation stopped" : "Creating"} className={cn("h-3 w-full overflow-hidden", className)}>
-      <svg
-        aria-hidden
-        className={cn("h-3 w-[calc(100%+24px)]", failed ? "text-destructive" : "text-foreground/70 motion-safe:animate-squiggle")}
-        data-state={failed ? "stopped" : "moving"}
-      >
-        <defs>
-          <pattern id="wsp-squiggle" width={WAVE_PERIOD} height="12" patternUnits="userSpaceOnUse">
-            <path d="M0 6 Q6 0 12 6 T24 6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </pattern>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#wsp-squiggle)" />
-      </svg>
+    // Ends above the question, measured the way ChatView places it: the question is two lines on a phone.
+    <div className="absolute inset-x-0 top-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+11.5rem)] flex flex-col px-3 pt-3 sm:bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+10.5rem)] sm:px-5 sm:pt-4">
+      <div className="mx-auto flex min-h-0 w-full min-w-0 max-w-3xl flex-col">
+        <button
+          type="button"
+          data-k="setting-up"
+          aria-expanded={open}
+          onClick={() => setOpen(o => !o)}
+          className="flex w-full min-w-0 shrink-0 cursor-pointer select-none items-center gap-2 rounded-md px-1 text-sm leading-relaxed text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        >
+          {failed === null ? <Crab className="text-status-working" /> : <CircleAlertIcon aria-hidden className="size-4 shrink-0 text-status-failed" />}
+          <span className="shrink-0 text-foreground">Setting up</span>
+          <span className={cn("min-w-0 truncate", failed !== null && "text-destructive-foreground")}>{step === undefined ? CREATE_ASKED : stepWords(step)}</span>
+          <Chevron aria-hidden className="size-3.5 shrink-0" />
+          <span data-step-time className={TIME_CLASS}>
+            {failed === null ? <WorkingSince since={new Date(creation.askedAt).toISOString()} /> : formatWorkingDurationLabel(lines.at(-1)?.elapsedMs ?? 0)}
+          </span>
+        </button>
+        <div ref={below} className="min-h-0 overflow-y-auto pb-1">
+          {open ? (
+            <ol aria-label="Setting up" aria-live="polite" className="mt-1 flex flex-col">
+              {lines.length === 0 ? <StepRow words={CREATE_ASKED} tone="current" /> : null}
+              {lines.map((line, i) => (
+                <StepRow key={i} words={stepWords(line)} line={line} tone={line.stage === "failed" ? "failed" : i === lines.length - 1 ? "current" : "done"} />
+              ))}
+            </ol>
+          ) : null}
+          {failed !== null ? (
+            <div className="mt-3 flex flex-col items-start gap-3 px-1 text-sm">
+              <p>
+                <span className="text-destructive-foreground">{failed.title}</span>
+                {failed.detail !== failed.title ? <span className="text-muted-foreground"> {failed.detail}</span> : null}
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => void retry(creation.key)}>
+                  Retry
+                </Button>
+                <Button variant="ghost-muted" size="sm" onClick={() => dismiss(creation.key)}>
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
 
-function clockLabel(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString(APP_LOCALE, { hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function elapsedLabel(ms: number): string {
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60_000);
-  return `${minutes}m ${Math.floor((ms - minutes * 60_000) / 1000)}s`;
+/** One step: its words in sans and the time since the create began right-aligned in mono. The runtime's sentence,
+ * a guest's refusal and a step's notice ride the hover, never a line a person reads as the step. */
+function StepRow({ words, line, tone }: { words: string; line?: CreationLine; tone: "done" | "current" | "failed" }) {
+  const title = line === undefined ? undefined : [line.message, line.detail, line.notice].filter(part => part !== undefined).join("\n");
+  return (
+    <li
+      title={title}
+      className={cn("flex min-w-0 items-baseline gap-3 py-0.5 ps-7 pe-1 text-[13px] leading-5", tone === "failed" ? "text-destructive-foreground" : tone === "current" ? "text-foreground" : "text-muted-foreground")}
+    >
+      <span data-step-words className="min-w-0 truncate">
+        {words}
+      </span>
+      {line === undefined ? null : (
+        <span data-step-time className={TIME_CLASS}>
+          {formatWorkingDurationLabel(line.elapsedMs)}
+        </span>
+      )}
+    </li>
+  );
 }

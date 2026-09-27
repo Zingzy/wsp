@@ -1,11 +1,34 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The creation log's own lines: the ones a create's stages already carry are
-// the runtime's words, folded straight in, and this file words the other half,
-// the image being built at the computer or provider the workspace is going to
-// the first time that one needs a copy. Every stage word is the protocol's
+// The words a workspace being made says for its steps, on its page and on its
+// tile: one plain word per stage of a create, from the table below, and the
+// runtime's own sentence for the step only on the row's hover. The other half
+// is the image being built at the computer or provider the workspace is going
+// to the first time that one needs a copy, worded off the protocol's
 // GOLDEN_STAGE_WORDS, the table the init screens and the terminal read too, so
 // a stage is never named twice in two spellings.
-import { GOLDEN_STAGE_WORDS, type GoldenStageEvent } from "@wsp/protocol";
+import { creationAwaits, GOLDEN_STAGE_WORDS, type GoldenStageEvent, type WorkspaceCreateStage } from "@wsp/protocol";
+import type { Creation, CreationLine } from "../protocol/store.js";
+
+export const CREATE_STEP_WORDS: Record<WorkspaceCreateStage, string> = {
+  "fork-requested": "Making the machine",
+  "hostname-set": "Naming the machine",
+  "preview-route": "Connecting to it",
+  "daemon-answering": "Waiting for it to answer",
+  "project-cloned": "Putting the project on it",
+  ready: "Ready",
+  failed: "Could not start",
+};
+
+/** What a creation says before the runtime has reported a step, which on a copy here is all it ever says. */
+export const CREATE_ASKED = "Asking wsp to start it";
+
+/** A step's words: the table's for a create's stage, and an image build's own line, which already carries the
+ * protocol's stage words, capitalised. */
+export const stepWords = (line: Pick<CreationLine, "stage" | "message">): string =>
+  line.stage === "image" ? line.message.charAt(0).toUpperCase() + line.message.slice(1) : CREATE_STEP_WORDS[line.stage];
+
+/** The step a creation is on: the last one it waits on, so a note on a step already taken never stands for it. */
+export const currentStep = (creation: Pick<Creation, "lines">): CreationLine | undefined => creation.lines.findLast(l => creationAwaits(l.stage));
 
 /** What the log says while the image is built somewhere else, with the stage's own words after it. The build runs
  * before the workspace can start, so the line names the computer rather than the workspace. */

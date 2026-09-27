@@ -1,255 +1,194 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The creation screen's layout: everything centred on one column, the stage
-// log in a box of fixed height that keeps its size from two lines to twenty,
-// and the newest line last. Geometry that needs a layout engine is measured in
-// creation-layout.browser.test.ts; this file checks the structure jsdom can see.
-// Under the log, the view's own last line: the word table's reading of the
-// record the create answered with, in the words the row it becomes carries.
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { HOSTNAME_KEPT, type WorkspaceView } from "@wsp/protocol";
-import { localZoneLabel } from "../src/lib/timestampFormat.js";
+// The page a workspace being made shows: the thread it will become, empty,
+// with one folded "Setting up" row at the top whose steps are the step words'
+// table and whose times stand right-aligned in mono, and the composer ready,
+// where a message waits until the machine is up.
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { HOSTNAME_KEPT, WorkspaceCreateStage } from "@wsp/protocol";
+import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { explainCreateRefusal, useStore, type Creation, type CreationLine } from "../src/protocol/store.js";
+import { CREATE_ASKED, CREATE_STEP_WORDS, stepWords } from "../src/shell/creationLog.js";
 import { WorkspaceCreation } from "../src/shell/WorkspaceCreation.js";
+import { press, typeInto } from "./composer-harness.js";
 
+beforeEach(() => {
+  useStore.setState({ creations: [], workspaces: [], places: [], landings: {}, api: null } as never);
+  useComposerDraftStore.setState({ drafts: {}, queues: {}, held: {} });
+});
 afterEach(cleanup);
 
-// The runtime's own refusal at the machine cap: the failing log line and the explanation's detail are one sentence.
+// The runtime's own refusal at the machine cap: the failing line and the explanation's detail are one sentence.
 const CAP_LINE = "both machine slots are in use: first, t-cap. Pause one or wait for a nap.";
 
-function lines(count: number): CreationLine[] {
-  return Array.from({ length: count }, (_, i) => ({
-    stage: i === count - 1 ? "failed" : "daemon-answering",
-    message: i === count - 1 ? CAP_LINE : `Stage ${i + 1} of the create ran and reported its progress here.`,
-    at: new Date(Date.UTC(2026, 8, 5, 12, 31, i)).toISOString(),
-    elapsedMs: 800 * (i + 1),
-  }));
-}
+const line = (stage: CreationLine["stage"], message: string, elapsedMs: number, over: Partial<CreationLine> = {}): CreationLine => ({
+  stage,
+  message,
+  at: new Date(Date.UTC(2026, 8, 5, 12, 31, 0) + elapsedMs).toISOString(),
+  elapsedMs,
+  ...over,
+});
 
-function failed(count: number): Creation {
-  return {
-    key: "creating:beta",
-    name: "beta",
-    askedAt: Date.now(),
-    workspaceId: "ws_beta",
-    lines: lines(count),
-    failed: { title: "Couldn't start beta: the provider has no room to start another now", detail: CAP_LINE },
-  };
-}
+const making = (lines: CreationLine[], over: Partial<Creation> = {}): Creation => ({
+  key: "creating:beta",
+  name: "beta",
+  askedAt: Date.now(),
+  workspaceId: "ws_beta",
+  lines,
+  failed: null,
+  ...over,
+});
 
-// Base UI's scroll area measures itself after mount; the act lets that settle.
 const mount = async (creation: Creation) => {
-  await act(async () => { render(<WorkspaceCreation creation={creation} />); });
+  await act(async () => {
+    render(<WorkspaceCreation creation={creation} />);
+  });
   return screen.getByTestId("workspace-creation");
 };
 
-describe("workspace creation layout", () => {
-  it("names what it is making, in flight and refused, and never says task or workspace", async () => {
-    const asking: Creation = { key: "creating:beta", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null };
-    let view = await mount(asking);
-    expect(view.textContent).toContain("Starting");
-    expect(view.textContent).not.toMatch(/\b(tasks?|workspaces?)\b/i);
-    cleanup();
-    view = await mount({ ...asking, lines: [], failed: explainCreateRefusal(new Error("Snapshot not found"), "beta") });
-    expect(view.textContent).toContain("Couldn't start beta");
-    expect(view.textContent).not.toMatch(/\b(tasks?|workspaces?)\b/i);
+const fold = (view: HTMLElement) => within(view).getByRole("button", { name: /^Setting up/ });
+const steps = (view: HTMLElement) => within(within(view).getByRole("list", { name: "Setting up" })).getAllByRole("listitem");
+
+describe("the step words", () => {
+  it("are one table with a plain word for every stage a create reports, and none of the runtime's names", () => {
+    expect(Object.keys(CREATE_STEP_WORDS).sort()).toEqual([...WorkspaceCreateStage.options].sort());
+    for (const words of [...Object.values(CREATE_STEP_WORDS), CREATE_ASKED]) {
+      expect(words).not.toMatch(/daemon|route|fork|hostname|preview|minted|clone/i);
+      expect(words.charAt(0)).toBe(words.charAt(0).toUpperCase());
+      expect(words).not.toMatch(/\.$/);
+    }
   });
 
-  it("centres the eyebrow, the name, the refusal sentence and the buttons on one column", async () => {
-    const view = await mount(failed(2));
-    const column = view.firstElementChild!;
-    expect(column.className).toContain("text-center");
-    expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("beta");
-    const buttons = within(view).getByRole("button", { name: "Retry" }).parentElement!;
-    expect(buttons.className).toContain("justify-center");
-    expect(within(buttons).getByRole("button", { name: "Dismiss" })).toBeDefined();
+  it("word an image build's line as its own sentence, capitalised, since the protocol's stage words are already in it", () => {
+    expect(stepWords(line("image", "building your image on Boat: installing agents", 0))).toBe("Building your image on Boat: installing agents");
+    expect(stepWords(line("preview-route", "Preview route to the daemon minted.", 0))).toBe(CREATE_STEP_WORDS["preview-route"]);
+  });
+});
+
+describe("the creation page", () => {
+  it("is the empty thread it becomes: the question with the name, and the composer centred in the dock", async () => {
+    const view = await mount(making([]));
+    expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("What should we build in beta?");
+    const dock = view.querySelector<HTMLElement>("[data-chat-composer-dock]")!;
+    expect(dock.hasAttribute("data-centred")).toBe(true);
+    expect(dock.querySelector("[data-chat-composer]")).not.toBeNull();
+    expect(view.getAttribute("aria-busy")).toBe("true");
   });
 
-  it("keeps the refusal's lead red, says the failing line's words once, Retry tactile and Dismiss as text", async () => {
-    const view = await mount(failed(2));
+  it("folds the steps into one row at the top: the crab, Setting up, the current step in plain words and the time in mono at the right", async () => {
+    const view = await mount(making([line("fork-requested", "starting beta on ascii", 0), line("preview-route", "Preview route to the daemon minted.", 3_400)]));
+    const row = fold(view);
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    expect(row.textContent).toContain("Setting up");
+    expect(row.textContent).toContain(CREATE_STEP_WORDS["preview-route"]);
+    expect(row.querySelector("canvas")).not.toBeNull();
+    const time = row.querySelector<HTMLElement>("[data-step-time]")!;
+    expect(time.className).toMatch(/font-mono/);
+    expect(time.className).toMatch(/tabular-nums/);
+    expect(time.className).toMatch(/ml-auto/);
+    expect(within(view).queryByRole("list", { name: "Setting up" })).toBeNull();
+    // Nothing that does no work: no wave, no clock line, no rule under the row, no runtime sentence.
+    expect(within(view).queryByRole("progressbar")).toBeNull();
+    expect(view.querySelector("[data-testid=creation-clock], hr, svg pattern")).toBeNull();
+    expect(row.className).not.toMatch(/border-b/);
+    expect(row.parentElement!.className).not.toMatch(/border/);
+    expect(view.textContent).not.toMatch(/clock in|minted|daemon|starting beta/);
+  });
+
+  it("unfolds into one row per step, the word in sans and the time right-aligned in mono, the current one in the foreground", async () => {
+    const refusal = "hostname beta on fk_c839 failed: sethostname: Operation not permitted";
+    const view = await mount(
+      making([
+        line("fork-requested", "starting beta on ascii", 400),
+        line("hostname-set", HOSTNAME_KEPT, 6_400, { detail: refusal }),
+        line("preview-route", "Preview route to the daemon minted.", 7_000),
+        line("daemon-answering", "Daemon answered.", 65_000, { notice: "the daemon took two tries" }),
+      ]),
+    );
+    fireEvent.click(fold(view));
+    expect(fold(view).getAttribute("aria-expanded")).toBe("true");
+    const rows = steps(view);
+    expect(rows.map(r => r.querySelector("[data-step-words]")!.textContent)).toEqual([
+      CREATE_STEP_WORDS["fork-requested"],
+      CREATE_STEP_WORDS["hostname-set"],
+      CREATE_STEP_WORDS["preview-route"],
+      CREATE_STEP_WORDS["daemon-answering"],
+    ]);
+    expect(rows.map(r => r.querySelector("[data-step-time]")!.textContent)).toEqual(["0s", "6s", "7s", "1m"]);
+    for (const r of rows) {
+      expect(r.querySelector("[data-step-words]")!.className).not.toMatch(/font-mono/);
+      expect(r.querySelector("[data-step-time]")!.className).toMatch(/font-mono.*tabular-nums|tabular-nums.*font-mono/);
+      expect(r.querySelector("[data-step-time]")!.className).toMatch(/ml-auto/);
+    }
+    expect(rows.map(r => r.className.includes("text-foreground"))).toEqual([false, false, false, true]);
+    // The runtime's sentence, the guest's refusal and a step's notice ride the row's hover, never a line of their own.
+    expect(rows[1]!.getAttribute("title")).toContain(refusal);
+    expect(rows[3]!.getAttribute("title")).toContain("the daemon took two tries");
+    expect(view.textContent).not.toMatch(/sethostname|two tries|Daemon answered/);
+  });
+
+  it("says it is asking before the runtime reports a step", async () => {
+    const view = await mount(making([], { workspaceId: null }));
+    expect(fold(view).textContent).toContain(CREATE_ASKED);
+  });
+
+  it("draws the image build's lines and the create's own as one list, in the order they arrived", async () => {
+    const view = await mount(
+      making(
+        [
+          line("image", "building your image on Boat: installing agents", 108_000),
+          line("image", "building your image on Boat: taking the snapshot", 130_000, { notice: "about 4.2 GB" }),
+          line("fork-requested", "starting beta on Boat", 190_000),
+        ],
+        { where: "p_1" },
+      ),
+    );
+    fireEvent.click(fold(view));
+    expect(steps(view).map(r => r.querySelector("[data-step-words]")!.textContent)).toEqual([
+      "Building your image on Boat: installing agents",
+      "Building your image on Boat: taking the snapshot",
+      CREATE_STEP_WORDS["fork-requested"],
+    ]);
+    expect(steps(view).map(r => r.querySelector("[data-step-time]")!.textContent)).toEqual(["1m", "2m", "3m"]);
+  });
+
+  it("a refusal: the failing step in red, the lead in red with the runtime's words once, Retry tactile and Dismiss as text", async () => {
+    const view = await mount(
+      making([line("fork-requested", "starting beta on ascii", 0), line("failed", CAP_LINE, 800)], {
+        failed: { title: "Couldn't start beta: the provider has no room to start another now", detail: CAP_LINE },
+      }),
+    );
+    expect(view.getAttribute("aria-busy")).toBe("false");
+    expect(fold(view).textContent).toContain(CREATE_STEP_WORDS.failed);
+    expect(fold(view).querySelector("canvas")).toBeNull();
+    fireEvent.click(fold(view));
+    const rows = steps(view);
+    expect(rows[1]!.className).toContain("text-destructive-foreground");
+    expect(rows[0]!.className).not.toContain("text-destructive-foreground");
     const lead = within(view).getByText("Couldn't start beta: the provider has no room to start another now");
     expect(lead.className).toContain("text-destructive-foreground");
-    expect(lead.nextElementSibling).toBeNull();
     expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);
     expect(within(view).getByRole("button", { name: "Retry" }).className).toContain("bg-popover");
     expect(within(view).getByRole("button", { name: "Dismiss" }).className).toContain("border-transparent");
   });
 
-  it("a detail the failing line does not already say is kept, muted, under the lead", async () => {
-    const view = await mount({ ...failed(2), failed: { title: "Not connected to the runtime", detail: "runtime connection lost" } });
-    const lead = within(view).getByText("Not connected to the runtime");
-    expect(lead.nextElementSibling!.className).toContain("text-muted-foreground");
-    expect(lead.nextElementSibling!.textContent).toContain("runtime connection lost");
-  });
-
-  it("puts the log in a box whose classes, and so its height, are the same with two lines and with twenty", async () => {
-    const two = await mount(failed(2));
-    const twoBox = within(two).getByTestId("creation-log");
-    expect(twoBox.className).toMatch(/\bh-\d+\b/);
-    expect(twoBox.className).not.toMatch(/\b(?:max|min)-h-/);
-    expect(within(twoBox).getAllByRole("listitem")).toHaveLength(2);
-    const twoClasses = twoBox.className;
+  it("names what it is making, in flight and refused, and never says task or workspace", async () => {
+    let view = await mount(making([], { workspaceId: null }));
+    expect(view.textContent).not.toMatch(/\b(tasks?|workspaces?)\b/i);
     cleanup();
-
-    const twenty = await mount(failed(20));
-    const twentyBox = within(twenty).getByTestId("creation-log");
-    expect(twentyBox.className).toBe(twoClasses);
-    const items = within(twentyBox).getAllByRole("listitem");
-    expect(items).toHaveLength(20);
-    expect(items[19]!.textContent).toContain(CAP_LINE);
-    expect(items[19]!.className).toContain("text-destructive-foreground");
+    view = await mount(making([], { workspaceId: null, failed: explainCreateRefusal(new Error("Snapshot not found"), "beta") }));
+    expect(view.textContent).toContain("Couldn't start beta");
+    expect(view.textContent).not.toMatch(/\b(tasks?|workspaces?)\b/i);
   });
 
-  it("keeps the timestamp and the duration in mono and lets the message wrap between them", async () => {
-    const view = await mount(failed(2));
-    const list = within(view).getByRole("list", { name: "Creation log" });
-    expect(list.className).toContain("font-mono");
-    expect(list.className).toContain("tabular-nums");
-    const [first] = within(list).getAllByRole("listitem");
-    const time = first!.querySelector("time")!;
-    expect(time.className).toContain("shrink-0");
-    const duration = first!.lastElementChild!;
-    expect(duration.textContent).toBe("0.8s");
-    expect(duration.className).toContain("shrink-0");
-    const message = time.nextElementSibling!;
-    expect(message.textContent).toContain("Stage 1 of the create");
-    expect(message.className).toContain("break-words");
-  });
-
-  it("the wave rule spans the same column as the log box", async () => {
-    const view = await mount(failed(2));
-    const wave = within(view).getByRole("progressbar", { name: "Creation stopped" });
-    const box = within(view).getByTestId("creation-log");
-    expect(wave.parentElement).toBe(box.parentElement);
-    expect(wave.className).toContain("w-full");
-    expect(box.className).toContain("w-full");
-  });
-
-  it("draws the image build's lines and the create's own as one log, in the order they arrived", async () => {
-    useStore.setState({ creations: [] });
-    const at = (second: number): string => new Date(Date.UTC(2026, 8, 12, 9, 27, second)).toISOString();
-    const view = await mount({
-      key: "creating:spoo-fix",
-      name: "spoo-fix",
-      askedAt: Date.now(),
-      where: "p_1",
-      workspaceId: "ws_fix",
-      failed: null,
-      lines: [
-        { stage: "image", message: "building your image on hetzner: installing agents", at: at(6), elapsedMs: 108_000 },
-        { stage: "image", message: "building your image on hetzner: taking the snapshot", notice: "about 4.2 GB", at: at(54), elapsedMs: 130_000 },
-        { stage: "fork-requested", message: "starting spoo-fix on hetzner", at: at(58), elapsedMs: 190_000 },
-        { stage: "ready", message: "ready", at: at(59), elapsedMs: 210_000 },
-      ],
-    });
-    const rows = within(within(view).getByRole("list", { name: "Creation log" })).getAllByRole("listitem");
-    expect(rows.map(row => row.querySelector("span")!.firstChild!.textContent)).toEqual([
-      "building your image on hetzner: installing agents",
-      "building your image on hetzner: taking the snapshot",
-      "starting spoo-fix on hetzner",
-      "ready",
-    ]);
-    // What a step answered rides under its own line, muted, and moves nothing beside it.
-    const notice = rows[1]!.querySelector("span span")!;
-    expect([notice.textContent, notice.className]).toEqual(["about 4.2 GB", "block text-muted-foreground"]);
-    // The last line is the one being waited on, so it alone wears the foreground ink.
-    expect(rows.map(row => row.className.includes("text-foreground"))).toEqual([false, false, false, true]);
-    expect(rows.map(row => row.lastElementChild!.textContent)).toEqual(["1m 48s", "2m 10s", "3m 10s", "3m 30s"]);
-  });
-
-  it("a guest's own words ride the line's title, never a line of their own, and the log says which clock it is on", async () => {
-    useStore.setState({ creations: [] });
-    const refusal = "hostname clone-test on fk_c839037a632d failed: hostname: sethostname: Operation not permitted";
-    const view = await mount({
-      key: "creating:clone-test",
-      name: "clone-test",
-      askedAt: Date.now(),
-      workspaceId: "ws_clone",
-      failed: null,
-      lines: [
-        { stage: "fork-requested", message: "starting clone-test on ascii", at: new Date(Date.UTC(2026, 8, 12, 19, 34, 1)).toISOString(), elapsedMs: 400 },
-        { stage: "hostname-set", message: HOSTNAME_KEPT, detail: refusal, at: new Date(Date.UTC(2026, 8, 12, 19, 34, 7)).toISOString(), elapsedMs: 6_400 },
-      ],
-    });
-    const rows = within(within(view).getByRole("list", { name: "Creation log" })).getAllByRole("listitem");
-    expect(rows.map(row => row.querySelector("span")!.firstChild!.textContent)).toEqual(["starting clone-test on ascii", HOSTNAME_KEPT]);
-    expect(rows[1]!.querySelector("span")!.getAttribute("title")).toBe(refusal);
-    // Nowhere on the screen does the shell's own text stand as a sentence.
-    expect(view.textContent).not.toContain("sethostname");
-    expect(rows[1]!.querySelector("span span")).toBeNull();
-    // The clock is this window's own, and the log says which zone that is, once.
-    const zone = within(view).getByTestId("creation-clock");
-    expect(zone.textContent).toBe(`clock in ${localZoneLabel()}`);
-    expect(zone.className).toContain("font-mono");
-  });
-
-  it("while creating, the same layout holds with the wave moving and no buttons", async () => {
-    useStore.setState({ creations: [] });
-    const view = await mount({ key: "k", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null });
-    expect(view.getAttribute("aria-busy")).toBe("true");
-    expect(view.firstElementChild!.className).toContain("text-center");
-    expect(within(view).getByTestId("creation-log").textContent).toContain("Asking wsp to start it.");
-    expect(within(view).getByRole("progressbar", { name: "Creating" })).toBeDefined();
-    expect(within(view).queryByRole("button", { name: "Retry" })).toBeNull();
-  });
-});
-
-describe("the view's own last line", () => {
-  /** A create that has been answered: the record the runtime handed back is in the store under the id the
-   * creation row already carried. */
-  const answered = (over: Partial<WorkspaceView> = {}): Creation => {
-    const workspace: WorkspaceView = {
-      id: "ws_new",
-      name: "add a LICENSE file",
-      kind: "local",
-      machineId: "local",
-      project: { id: "pr_1", name: "spoo", path: "/Users/dev/spoo", computer: "here" },
-      phase: "running",
-      golden: "",
-      createdAt: "2026-09-18T00:00:00.000Z",
-      copy: { road: "clonefile", path: "/Users/dev/spoo-ws_new", source: "/Users/dev/spoo", base: "abc", branch: "", carried: "deps-and-config" },
-      portBase: 3100,
-      ...over,
-    };
-    useStore.setState({
-      places: [{ id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: false, present: true, takesForks: false }] as never,
-      workspaces: [workspace],
-      landings: { pr_1: { name: "here", capabilities: { copies: true, ownNetwork: false } as never } },
-    } as never);
-    return { key: "creating:1", name: workspace.name, askedAt: Date.now(), project: "pr_1", workspaceId: workspace.id, lines: [], failed: null };
-  };
-
-  it("reads what the workspace is made of and what its copy has for a network off the record, in the row's own words", async () => {
-    const view = await mount(answered());
-    // The protocol's word table, the same one the row it becomes reads: this screen writes no road of its own and
-    // the runtime's stage words end on ready with nothing about the copy.
-    expect(view.querySelector("[data-k=made-of]")?.textContent).toBe("a copy shares zingzy's MacBook Pro's ports, PORT 3100");
-  });
-
-  it("says a copy by either road as that, and names the computer only where the work did not land here", async () => {
-    const view = await mount(answered({ copy: { road: "worktree", path: "/Users/dev/spoo-qr-codes", source: "/Users/dev/spoo", base: "", branch: "main", carried: "config-only" }, portBase: undefined }));
-    expect(view.querySelector("[data-k=made-of]")?.textContent).toBe("a copy shares zingzy's MacBook Pro's ports");
-    expect(view.textContent).not.toContain("zingzy-mbp");
-  });
-
-  it("asks for the landing of the project the create is on, since on a first run no other screen has", async () => {
-    const asked: string[] = [];
-    useStore.setState({
-      places: [],
-      workspaces: [],
-      landings: {},
-      api: { subscribe: () => () => {}, workspacesLanding: async (project: string) => { asked.push(project); return { name: "here", capabilities: { copies: true, ownNetwork: false } }; } },
-    } as never);
-    await mount({ key: "creating:1", name: "add a LICENSE file", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [], failed: null });
-    await waitFor(() => expect(asked).toEqual(["pr_1"]));
-  });
-
-  it("holds the slot empty until the record lands, so nothing under it moves when it does", async () => {
-    useStore.setState({ places: [], workspaces: [], landings: {} } as never);
-    const view = await mount({ key: "creating:1", name: "add a LICENSE file", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [], failed: null });
-    const slot = view.querySelector("[data-k='made-of']")!;
-    expect(slot.textContent).toBe("");
-    // The height is a line's whatever it holds: a slot that grew when the word arrived moved the log above it.
-    expect(slot.className).toContain("min-h-4");
+  it("takes a message while the machine is being made and holds it, saying so, with nothing sent", async () => {
+    const view = await mount(making([line("fork-requested", "starting beta on ascii", 0)]));
+    const editor = within(view).getByTestId("composer-editor");
+    await typeInto(editor, "add a LICENSE file");
+    await press(editor, "Enter");
+    expect(useComposerDraftStore.getState().queues["creating:beta"]?.map(r => r.prompt)).toEqual(["add a LICENSE file"]);
+    const queued = within(view).getByRole("list", { name: "Queued messages" });
+    expect(within(queued).getByRole("button", { name: "Send now" }).hasAttribute("disabled")).toBe(true);
+    expect(view.querySelector("[data-composer-refusal]")!.textContent).toBe("Sends once beta is up");
   });
 });

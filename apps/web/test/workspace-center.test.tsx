@@ -5,7 +5,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { HOSTNAME_KEPT, type EventUnion, type GoldenManifest, type WorkspaceView } from "@wsp/protocol";
-import { localZoneLabel } from "../src/lib/timestampFormat.js";
+import { TRANSCRIPT_LOADING } from "../src/transcript-words.js";
+import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
+import { CREATE_ASKED, CREATE_STEP_WORDS } from "../src/shell/creationLog.js";
 import { Shell } from "../src/App.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -15,6 +17,9 @@ import { installFakeLayout } from "./fake-layout.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { clearNotices } from "./notice-text.js";
+import { press, typeInto } from "./composer-harness.js";
+import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
+import { useComposerOptionsStore } from "../src/components/chat/composerOptionsStore.js";
 
 const WS = "ws_center";
 const workspace: WorkspaceView = { id: WS, name: "api", machineId: "m_api", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
@@ -51,6 +56,7 @@ afterAll(() => restoreLayout());
 
 beforeEach(() => {
   window.localStorage.clear();
+  useComposerDraftStore.setState({ drafts: {}, queues: {}, held: {} });
   useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, selectedId: null, creations: [], sessions: {}, ready: false, gaps: 0 });
   clearNotices();
   useTerminalDrawerStore.setState({ byWorkspaceId: {} });
@@ -112,56 +118,104 @@ describe("workspace creation view", () => {
   });
   const emit = (e: EventUnion) => act(() => useStore.getState().applyEvent(e));
 
-  it("creating opens the view in the center with the name, a moving wave and the log growing with timestamps; created swaps in the thread", async () => {
+  it("creating opens the empty thread it will become with one folded Setting up row; a message waits and goes to the workspace when it is up", async () => {
     let finish!: (w: WorkspaceView) => void;
     const api = fakeApi([workspace]);
+    const started: Array<{ workspaceId: string; prompt: string }> = [];
     api.createWorkspace = () => new Promise<WorkspaceView>(resolve => { finish = resolve; });
+    api.startSession = async o => { started.push({ workspaceId: o.workspaceId, prompt: o.prompt }); return { id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }; };
+    api.listHarnesses = async () => [TABLE_CATALOG];
     useStore.getState().bind(api);
+    await whenAgentsAnswered();
     render(<Shell />);
     await screen.findByRole("heading", { level: 1 });
     void useStore.getState().createWorkspace("pr_1", "beta");
     const view = await screen.findByTestId("workspace-creation");
     expect(view.getAttribute("aria-busy")).toBe("true");
-    expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("beta");
+    expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("What should we build in beta?");
     expect(screen.getByRole("banner").textContent).toContain("beta");
     // The compose glyph stays and is held: a creation is not yet a workspace to open a thread in.
     expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBe("true");
-    const wave = within(view).getByRole("progressbar", { name: "Creating" });
-    expect(wave.querySelector("svg")!.getAttribute("data-state")).toBe("moving");
-    expect(wave.querySelector("pattern path")!.getAttribute("stroke")).toBe("currentColor");
-    const log = within(view).getByRole("list", { name: "Creation log" });
-    expect(log.textContent).toContain("Asking wsp to start it.");
+    expect(within(view).queryByRole("progressbar")).toBeNull();
+    const fold = within(view).getByRole("button", { name: /^Setting up/ });
+    expect(fold.textContent).toContain(CREATE_ASKED);
 
     emit(stage({}));
     emit(stage({ stage: "preview-route", message: "Preview route to the daemon minted.", elapsedMs: 3_400 }));
     emit(stage({ stage: "hostname-set", message: HOSTNAME_KEPT, elapsedMs: 5_100, detail: "hostname beta on m1 failed: read-only" }));
-    const lines = within(log).getAllByRole("listitem");
-    expect(lines.map(l => l.textContent)).toEqual([
-      expect.stringMatching(/^\d\d:\d\d:\d\dstarting beta on ascii0\.0s$/),
-      expect.stringMatching(/^\d\d:\d\d:\d\dPreview route to the daemon minted\.3\.4s$/),
-      expect.stringMatching(new RegExp(`^\\d\\d:\\d\\d:\\d\\d${HOSTNAME_KEPT}5\\.1s$`)),
-    ]);
-    // The guest's own words stand on the line's title and nowhere a person reads a sentence.
-    expect(lines[2]!.querySelector("span")!.getAttribute("title")).toBe("hostname beta on m1 failed: read-only");
-    expect(view.textContent).not.toContain("read-only");
-    // Which clock the log is on, said once, in the zone this window is in.
-    expect(within(view).getByTestId("creation-clock").textContent).toBe(`clock in ${localZoneLabel()}`);
-    expect(lines.map(l => l.querySelector("time")!.getAttribute("datetime")).every(iso => !Number.isNaN(Date.parse(iso!)))).toBe(true);
-    expect(lines[2]!.className).toContain("text-foreground");
-    expect(lines[0]!.className).toContain("text-muted-foreground");
+    // The row names the step being waited on; naming the machine is a note on a step already taken.
+    expect(fold.textContent).toContain(CREATE_STEP_WORDS["preview-route"]);
+    fireEvent.click(fold);
+    const rows = within(within(view).getByRole("list", { name: "Setting up" })).getAllByRole("listitem");
+    expect(rows.map(r => r.textContent)).toEqual([`${CREATE_STEP_WORDS["fork-requested"]}0s`, `${CREATE_STEP_WORDS["preview-route"]}3s`, `${CREATE_STEP_WORDS["hostname-set"]}5s`]);
+    expect(view.textContent).not.toMatch(/read-only|minted|starting beta/);
     expect(within(view).queryByRole("button", { name: "Retry" })).toBeNull();
+
+    // A message typed now waits under the creation and is not sent anywhere yet.
+    const editor = within(view).getByTestId("composer-editor");
+    await typeInto(editor, "add a LICENSE file");
+    await press(editor, "Enter");
+    expect(within(view).getByRole("list", { name: "Queued messages" }).textContent).toContain("add a LICENSE file");
+    expect(started).toEqual([]);
+    const key = useStore.getState().selectedId!;
+    act(() => useComposerOptionsStore.getState().pick(key, "effort", "low"));
 
     const created: WorkspaceView = { ...workspace, id: "ws_beta", name: "beta" };
     emit({ type: "workspace.created", workspace: created });
     await act(async () => { finish(created); });
-    await waitFor(() => expect(screen.queryByTestId("workspace-creation")).toBeNull());
-    const heading = await screen.findByRole("heading", { level: 1 });
-    expect(heading.textContent).toContain("What should we build in");
-    expect(heading.textContent).toContain("beta");
-    expect(screen.getByRole("button", { name: "New thread" })).toBeDefined();
+    expect(screen.queryByTestId("workspace-creation")).toBeNull();
+    expect(screen.queryByText(TRANSCRIPT_LOADING)).toBeNull();
+    // A pick made over the waiting message goes with it.
+    expect(useComposerOptionsStore.getState().byWorkspaceId["ws_beta"]).toMatchObject({ effort: "low" });
+    await waitFor(() => expect(started).toEqual([{ workspaceId: "ws_beta", prompt: "add a LICENSE file" }]));
+    expect(useComposerDraftStore.getState().queues).toEqual({});
   });
 
-  it("a failure keeps the log with the failing line in red, stops the wave, explains the refusal, and retry runs the create again", async () => {
+  it("with nothing typed the workspace takes the page as its empty thread with no loading line between, the question and the composer where they were", async () => {
+    let finish!: (w: WorkspaceView) => void;
+    const api = fakeApi([workspace]);
+    api.createWorkspace = () => new Promise<WorkspaceView>(resolve => { finish = resolve; });
+    // A history read that never answers: the new workspace's page must not wait on it.
+    api.sessionHistory = () => new Promise(() => {});
+    useStore.getState().bind(api);
+    render(<Shell />);
+    await waitFor(() => expect(useStore.getState().ready).toBe(true));
+    void useStore.getState().createWorkspace("pr_1", "beta");
+    const view = await screen.findByTestId("workspace-creation");
+    emit(stage({}));
+    const dock = view.querySelector("[data-chat-composer-dock]")!;
+    expect(dock.hasAttribute("data-centred")).toBe(true);
+    const created: WorkspaceView = { ...workspace, id: "ws_beta", name: "beta" };
+    emit({ type: "workspace.created", workspace: created });
+    await act(async () => { finish(created); });
+    expect(screen.queryByTestId("workspace-creation")).toBeNull();
+    expect(useStore.getState().selectedId).toBe("ws_beta");
+    expect(screen.queryByText(TRANSCRIPT_LOADING)).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in beta?");
+    expect(document.querySelector("[data-chat-composer-dock]")!.hasAttribute("data-centred")).toBe(true);
+  });
+
+  it("a message left waiting under a creation before a reload never goes to the next workspace made", async () => {
+    // What a window left under a creation's key is read back held after a reload, when the keys start again.
+    const stale = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`creating:${i + 1}`, [{ id: `old-${i}`, prompt: "left from before the reload" }]]));
+    act(() => useComposerDraftStore.setState({ queues: stale, held: Object.fromEntries(Object.keys(stale).map(k => [k, true as const])) }));
+    const started: string[] = [];
+    const created: WorkspaceView = { ...workspace, id: "ws_beta", name: "beta" };
+    const api = fakeApi([workspace]);
+    api.createWorkspace = async () => created;
+    api.startSession = async o => { started.push(o.prompt); return { id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }; };
+    api.listHarnesses = async () => [TABLE_CATALOG];
+    useStore.getState().bind(api);
+    await whenAgentsAnswered();
+    render(<Shell />);
+    await screen.findByRole("heading", { level: 1 });
+    await act(() => useStore.getState().createWorkspace("pr_1", "beta"));
+    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_beta"));
+    expect(useComposerDraftStore.getState().queues["ws_beta"]).toBeUndefined();
+    expect(started).toEqual([]);
+  });
+
+  it("a failure names the failing step in red, explains the refusal once, and retry runs the create again", async () => {
     const CAP_LINE = "both machine slots are in use: first, t-cap. Pause one or wait for a nap.";
     const api = fakeApi([workspace]);
     const create = vi.fn<(name: string) => Promise<WorkspaceView>>();
@@ -178,17 +232,15 @@ describe("workspace creation view", () => {
     await act(() => useStore.getState().createWorkspace("pr_1", "beta"));
     const view = await screen.findByTestId("workspace-creation");
     expect(view.getAttribute("aria-busy")).toBe("false");
-    expect(view.textContent).toContain("Couldn't start");
-    const wave = within(view).getByRole("progressbar", { name: "Creation stopped" });
-    expect(wave.querySelector("svg")!.getAttribute("data-state")).toBe("stopped");
-    const lines = within(within(view).getByRole("list", { name: "Creation log" })).getAllByRole("listitem");
-    expect(lines).toHaveLength(2);
-    expect(lines[1]!.textContent).toContain(CAP_LINE);
-    expect(lines[1]!.className).toContain("text-destructive-foreground");
-    expect(lines[0]!.className).not.toContain("text-destructive-foreground");
-    // The runtime's words are the refusal: they appear once, on the failing line, and no second wording follows the title.
-    const lead = within(view).getByText("Couldn't start beta: the provider has no room to start another now");
-    expect(lead.nextElementSibling).toBeNull();
+    const fold = within(view).getByRole("button", { name: /^Setting up/ });
+    expect(fold.textContent).toContain(CREATE_STEP_WORDS.failed);
+    fireEvent.click(fold);
+    const rows = within(within(view).getByRole("list", { name: "Setting up" })).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[1]!.className).toContain("text-destructive-foreground");
+    expect(rows[0]!.className).not.toContain("text-destructive-foreground");
+    // The runtime's words are the refusal: they appear once, under the lead.
+    within(view).getByText("Couldn't start beta: the provider has no room to start another now");
     expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);
 
     fireEvent.click(within(view).getByRole("button", { name: "Retry" }));
@@ -199,7 +251,7 @@ describe("workspace creation view", () => {
     expect(within(screen.getByTestId("workspace-creation")).queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
-  it("dismissing a failed creation returns the center to the first workspace", async () => {
+  it("dismissing a failed creation returns the center to the first workspace and drops what waited for it", async () => {
     const api = fakeApi([workspace]);
     api.createWorkspace = async () => { throw new Error("no golden image yet"); };
     useStore.getState().bind(api);
@@ -208,9 +260,12 @@ describe("workspace creation view", () => {
     await act(() => useStore.getState().createWorkspace("pr_1", "beta"));
     const view = await screen.findByTestId("workspace-creation");
     expect(view.textContent).toContain("no golden image yet");
+    act(() => useComposerDraftStore.getState().enqueue(useStore.getState().selectedId!, "add a LICENSE file"));
     fireEvent.click(within(view).getByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(screen.queryByTestId("workspace-creation")).toBeNull());
     expect(useStore.getState().selectedId).toBe(WS);
+    // What waited for a machine that will never come goes with it, rather than into a thread nobody asked for.
+    expect(useComposerDraftStore.getState().queues).toEqual({});
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toContain("api");
   });
 });

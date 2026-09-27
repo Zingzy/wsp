@@ -35,8 +35,9 @@
 //   first-run-no-agent   the line for a computer with no agent on it, Start held
 //   first-run-agents     six agents on this computer, which fill the line's two
 //                        lines and are cut at the second
-//   creating         the creation view with its stage log and the word table's
-//                    own line under it, off the record the create answered with
+//   creating         a workspace being made on the box, its tile selected: the
+//                    image built there first, then the machine's own steps
+//   creating-refused the same create refused at the box
 //   settings-appearance   Settings on Appearance, the record at its defaults
 //   settings-light-picked the Light segment picked on the dark side
 //   settings-computers    the Computers list: this Mac, three boxes joined and
@@ -106,7 +107,7 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { CREATE_READY, DEFAULT_PREFERENCES, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
@@ -128,6 +129,7 @@ import { useAdds } from "../../src/settings/adds";
 import { useRightPanelStore } from "../../src/rightPanelStore";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "../fixtures/keyRefusedJob";
 import "../../src/index.css";
+import { imageBuildLine } from "../../src/shell/creationLog";
 
 const params = new URLSearchParams(window.location.search);
 const screen = params.get("screen") ?? "sidebar";
@@ -468,7 +470,32 @@ const DEVICES: DeviceView[] = [
   { id: "d_3", name: "zingzy-mbp", createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString(), lastSeenAt: new Date().toISOString(), here: true },
   { id: "d_4", name: "a thread's token", createdAt: AT, lastSeenAt: AT, scope: { kind: "thread", workspaceId: "ws_copy", threadId: "th_lead", rootThreadId: "th_lead" } },
 ];
-const drawsSidebar = !firstRunScreens.includes(screen) && screen !== "creating";
+/** A create on the box, in the runtime's own words as they arrive: the image is built there first, then the fork
+ * takes its steps. The page and the tile say each in the step words' table. */
+const MADE_AT = Date.now() - 196_000;
+const madeLine = (stage: string, message: string, elapsedMs: number, extra: object = {}) => ({ stage, message, at: new Date(MADE_AT + elapsedMs).toISOString(), elapsedMs, ...extra });
+const creation = {
+  key: "creating:wireframe",
+  name: "pricing page",
+  askedAt: MADE_AT,
+  project: LANDING.id,
+  where: "p_spoo",
+  workspaceId: CREATED_ID,
+  failed: screen === "creating-refused" ? { title: "Couldn't start pricing page: spoo has no room for another machine", detail: "spoo is running 4 of 4 machines. Pause one or wait for a nap." } : null,
+  lines: [
+    madeLine("fork-requested", copyFirstLine("spoo", "pricing page", 0), 0),
+    madeLine("image", imageBuildLine("spoo", "installing agents"), 48_000),
+    madeLine("image", imageBuildLine("spoo", "taking the snapshot"), 130_000, { notice: "about 4.2 GB" }),
+    madeLine("fork-requested", startingLine("pricing page", "spoo"), 190_000),
+    madeLine("hostname-set", hostnameSetLine("pricing-page"), 191_000),
+    ...(screen === "creating-refused"
+      ? [madeLine("failed", "spoo is running 4 of 4 machines. Pause one or wait for a nap.", 192_000)]
+      : [madeLine("preview-route", "Preview route to the daemon minted.", 192_000), madeLine("daemon-answering", "Daemon answered.", 195_000)]),
+  ],
+};
+
+const creatingScreen = screen === "creating" || screen === "creating-refused";
+const drawsSidebar = !firstRunScreens.includes(screen);
 /** The screens about the sidebar's shape with fewer records: nothing at all, and one project alone. */
 const emptyScreen = screen === "sidebar-empty";
 const oneProject = screen === "sidebar-one-project";
@@ -486,9 +513,7 @@ const HELD: WorkspaceView[] = emptyScreen
       // is what puts its row on the table: the fresh screens drop the one that stands on the box. The one-project
       // screen keeps spoo's two workspaces of their own and nothing else.
       WORKSPACES.filter(w => w.place === undefined || computers.some(place => place.id === w.place)).filter(w => !oneProject || (w.project.id === SPOO.id && w.parentThreadId === undefined))
-    : screen === "creating"
-      ? [copyHere(CREATED_ID, "add a LICENSE file", SPOO, 3100, "agent/license")]
-      : [];
+    : [];
 /** The threads of the workspaces this screen holds and no other. */
 const HELD_SESSIONS: Record<string, SessionView[]> = Object.fromEntries(Object.entries(SESSIONS).filter(([workspace]) => HELD.some(w => w.id === workspace)));
 
@@ -654,10 +679,11 @@ useStore.setState({
         : null,
   projects: drawsSidebar ? RECORDED : [],
   workspaces: HELD,
-  landings: drawsSidebar || screen === "creating" ? landings : {},
+  landings: drawsSidebar ? landings : {},
+  creations: creatingScreen ? [creation] : [],
   sessions: drawsSidebar ? HELD_SESSIONS : {},
   // The screen about Settings over a workspace's panel has that workspace selected; every other opens on none.
-  selectedId: screen === "settings-over-panel" ? "ws_copy" : screen === "panel-agents" ? "ws_box" : null,
+  selectedId: screen === "settings-over-panel" ? "ws_copy" : screen === "panel-agents" ? "ws_box" : creatingScreen ? creation.key : null,
   selectedThreadId: null,
 } as never);
 // This window watched the add fail: one read off the host at a reload alone leaves the form clean.
@@ -743,26 +769,6 @@ function AgentsStates() {
   );
 }
 
-/** How the runtime names the computer the host runs on in a line of prose. */
-const THIS_COMPUTER_LOWER = "this Mac";
-
-/** The creation view's own log, as the stages arrive. */
-const creation = {
-  key: "creating:1",
-  name: "add a LICENSE file",
-  askedAt: Date.parse(AT),
-  project: SPOO.id,
-  workspaceId: CREATED_ID,
-  failed: null,
-  // The lines the runtime reports for a create on the computer the host runs on, in its own words rather than words
-  // written here: the fork itself, and the last line the word table ends a create with. A workspace that is the
-  // folder worked in place lands no project, so those two are the whole log.
-  lines: [
-    { stage: "fork-requested" as const, message: startingLine("add a LICENSE file", THIS_COMPUTER_LOWER), at: AT, elapsedMs: 0 },
-    { stage: "ready" as const, message: CREATE_READY, at: AT, elapsedMs: 900 },
-  ],
-};
-
 /** The app's own theme rule, mounted on the settings screens so the Theme row's pick moves the page it stands on. */
 function ThemeRule() {
   useThemeEffect();
@@ -772,7 +778,7 @@ function ThemeRule() {
 function Centre() {
   // Settings opened from a screen that is not one of its own, as a door into it does, draws it as the app does.
   const settingsOpen = useStore(s => s.settingsOpen);
-  if (screen === "creating") return <WorkspaceCreation creation={creation as never} />;
+  if (creatingScreen) return <WorkspaceCreation creation={creation as never} />;
   if (settings || settingsOpen) {
     return (
       <>

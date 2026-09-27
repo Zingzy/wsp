@@ -21,6 +21,7 @@ import { noDaemonApi } from "./fake-daemon-api.js";
 import { WorkspaceTerminals, provideTerminals } from "../src/terminal/link.js";
 import { clearNotices, lastNotice } from "./notice-text.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
+import { CREATE_STEP_WORDS } from "../src/shell/creationLog.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
 // clicks the search row, and Base UI's positioning against jsdom's zero-size
@@ -954,7 +955,7 @@ describe("one lifted tile", () => {
 });
 
 describe("the creation tile", () => {
-  it("is a tile at the thread tile's height: where it will run, the name, the stage line cut with the whole on hover; a refused create says Failed in the slot", async () => {
+  it("is a tile at the thread tile's height: where it will run, Starting with the crab, the name, the step in plain words; a refused create says Failed in the slot", async () => {
     await mount(fakeApi([COPIED], [status(COPIED)]), "api");
     const long = "Forking the image, which takes a moment on a computer that has never made a copy of this project before.";
     act(() =>
@@ -974,11 +975,19 @@ describe("the creation tile", () => {
       expect(row.querySelector(".rounded-full, .bg-destructive")).toBeNull();
     }
     expect(beta.getAttribute("aria-busy")).toBe("true");
-    expect(beta.querySelector("[data-thread-status]")).toBeNull();
+    const starting = beta.querySelector<HTMLElement>("[data-thread-status]")!;
+    expect([starting.dataset.threadStatus, starting.textContent, starting.dataset.tone]).toEqual(["starting", "Starting", "working"]);
+    expect(starting.className).toContain("text-status-working");
+    expect(starting.className).toContain("font-medium");
+    // The step takes the branch's place on row three in the step words' table, the runtime's sentence left out, and
+    // the crab walks at that row's end as it does on a working thread's tile.
     const line = beta.querySelector<HTMLElement>("[data-creation-line]")!;
-    expect(line.textContent).toBe(long);
-    expect(beta.getAttribute("title")).toContain(long);
+    expect(line.textContent).toBe(CREATE_STEP_WORDS["fork-requested"]);
+    expect(beta.textContent).not.toContain(long);
     expect(line.className).toContain("truncate");
+    expect(line.parentElement!.querySelector("[data-crab]")).not.toBeNull();
+    expect(beta.getAttribute("title")).toContain(CREATE_STEP_WORDS["fork-requested"]);
+    expect(gamma.querySelector("[data-crab]")).toBeNull();
     expect(gamma.getAttribute("aria-busy")).toBeNull();
     expect(threadState(gamma)).toBe("Failed");
     expect(gamma.querySelector("[data-creation-line]")!.textContent).toBe("Couldn't start gamma");

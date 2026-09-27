@@ -21,9 +21,10 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, computerOffline, creationAwaits, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, computerOffline, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
-import { CREATION_ASKED, THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
+import { THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
+import { CREATE_ASKED, currentStep, stepWords } from "../shell/creationLog.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { projectActions, type ProjectVerbs } from "../actions/projectActions.js";
 import { settledFoldActions, threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
@@ -380,7 +381,8 @@ export function WorkspaceSidebar() {
     const project = recorded.find(p => p.id === creation.project);
     const where = creation.where ?? project?.computer;
     const failed = creation.failed !== null;
-    const line = failed ? creation.failed.title : creation.lines.findLast(l => creationAwaits(l.stage))?.message ?? CREATION_ASKED;
+    const step = currentStep(creation);
+    const line = failed ? creation.failed.title : step === undefined ? CREATE_ASKED : stepWords(step);
     return (
       <li key={creation.key}>
         <CreationTile

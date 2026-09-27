@@ -21,6 +21,8 @@ import { sameAt, useSettingsStore, type SettingsAt } from "../settings/settingsS
 import { imageBuildFrame } from "../shell/creationLog.js";
 import { requestNewThread } from "../shell/shellRequests.js";
 import { useSignInStore } from "../shell/signInStore.js";
+import { newId, useComposerDraftStore } from "../components/chat/composerDraftStore.js";
+import { useComposerOptionsStore } from "../components/chat/composerOptionsStore.js";
 
 export interface CostTick {
   rateUsdPerHour: number;
@@ -322,7 +324,31 @@ function firstRow(s: Pick<State, "workspaces" | "statuses" | "sessions">): strin
   return sidebarWorkspaceOrder(s)[0] ?? null;
 }
 
-let creationSeq = 0;
+/** A creation's page keys its draft, its waiting messages and its picks by the creation's key; the workspace takes
+ * them all, so what waited goes with the agent and the model picked over it. */
+function handOver(key: string, workspaceId: string): void {
+  const drafts = useComposerDraftStore.getState();
+  drafts.rekeyQueue(key, workspaceId);
+  const draft = drafts.drafts[key];
+  if (draft !== undefined) {
+    useComposerDraftStore.setState(s => {
+      const { [key]: _moved, ...rest } = s.drafts;
+      return { drafts: { ...rest, [workspaceId]: draft } };
+    });
+  }
+  useComposerOptionsStore.setState(s => {
+    const picked = s.byWorkspaceId[key];
+    return picked === undefined ? s : { byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: picked } };
+  });
+  const access = useStore.getState().preferences.access[key];
+  if (access !== undefined) void useStore.getState().setPreferences({ access: { [workspaceId]: access, [key]: null } });
+}
+
+/** What waited for a machine that will never come goes with its creation. */
+function dropWaiting(key: string): void {
+  const drafts = useComposerDraftStore.getState();
+  for (const row of drafts.queues[key] ?? []) drafts.removeQueued(key, row.id);
+}
 /** Sets on their way to the host. While one is, a reply or a preferences.changed for an earlier set would paint an
  * older record over the one the person sees; the last reply, or the record read after a refusal, settles it. */
 let preferenceSetsInFlight = 0;
@@ -340,12 +366,15 @@ export const useStore = create<State>((set, get) => {
   const patchCreation = (key: string, patch: (c: Creation) => Creation): void => {
     set(s => ({ creations: s.creations.map(c => (c.key === key ? patch(c) : c)) }));
   };
-  /** The row leaves with its workspace in place of it; the selection follows. */
+  /** The row leaves with its workspace in place of it; the selection follows, onto the workspace's next thread,
+   * and what was typed on the creation's page goes with it, the waiting messages to be sent from there. */
   const finishCreation = (key: string, workspaceId: string): void => {
+    handOver(key, workspaceId);
     const opened = get().selectedId === key;
     set(s => ({
       creations: s.creations.filter(c => c.key !== key),
       selectedId: opened ? workspaceId : s.selectedId,
+      freshThread: opened || s.freshThread,
     }));
     if (opened) writeAddress({ workspaceId });
   };
@@ -615,7 +644,8 @@ export const useStore = create<State>((set, get) => {
       // project on a computer with no image is refused by the runtime in its own sentence on the creation view.
       const computer = get().projects.find(p => p.id === project)?.computer;
       if (!get().api) return null;
-      const key = `creating:${++creationSeq}`;
+      // Unique across reloads: a draft or a waiting message persisted under a key must never meet another creation.
+      const key = `creating:${newId()}`;
       set(s => ({
         creations: [
           ...s.creations,
@@ -673,6 +703,7 @@ export const useStore = create<State>((set, get) => {
     dismissCreation(key) {
       // The runtime holds a create that failed with the id its stages carried, so every client's row goes with it.
       const workspaceId = get().creations.find(c => c.key === key)?.workspaceId ?? null;
+      dropWaiting(key);
       const deleting = get().api?.deleteWorkspace;
       if (workspaceId !== null && deleting !== undefined) void deleting(workspaceId).catch((e: unknown) => noticeFailure(e));
       set(s => {
@@ -1028,17 +1059,21 @@ export const useStore = create<State>((set, get) => {
           });
           return;
         }
-        case "workspace.created":
+        case "workspace.created": {
+          const creation = get().creations.find(c => c.workspaceId === e.workspace.id);
+          if (creation !== undefined) handOver(creation.key, e.workspace.id);
           set(s => {
             const rest = s.workspaces.filter(x => x.id !== e.workspace.id);
-            const creation = s.creations.find(c => c.workspaceId === e.workspace.id);
+            const opened = creation !== undefined && s.selectedId === creation.key;
             return {
               workspaces: [...rest, e.workspace].sort((a, b) => a.id.localeCompare(b.id)),
               creations: s.creations.filter(c => c !== creation),
-              selectedId: creation !== undefined && s.selectedId === creation.key ? e.workspace.id : s.selectedId,
+              selectedId: opened ? e.workspace.id : s.selectedId,
+              freshThread: opened || s.freshThread,
             };
           });
           return;
+        }
         // napped/woken carry only ids; they are also the optimistic toggle's reconcile.
         case "workspace.napped":
           setPhase(e.workspaceId, "napping");
