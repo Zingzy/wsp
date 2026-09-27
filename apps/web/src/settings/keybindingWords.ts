@@ -7,6 +7,15 @@ import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand, type KeybindingCommand 
 
 export const JUMP_WORD = "Jump to a task";
 
+/** What a line says while it listens for a chord, and why it refuses one. */
+export const CHORD_WORDS = {
+  capturing: "Press keys",
+  capture: (label: string): string => `Change the chord for ${label}`,
+  reset: "Reset",
+  taken: (holders: readonly string[]): string => `Taken by ${holders.join(" and ")}`,
+  tabKeeps: (chord: string): string => `A browser tab keeps ${chord} for itself`,
+} as const;
+
 export const KEYBINDING_WORDS: Record<KeybindingCommand, string> = {
   "commandPalette.toggle": "Search",
   "settings.toggle": "Settings",

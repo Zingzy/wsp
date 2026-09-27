@@ -6,7 +6,7 @@
 // action's own title, as the palette does.
 import { create } from "zustand";
 import type { ContextMenuItem } from "@wsp/protocol";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
+import { currentKeybindings } from "../shell/useKeybindings.js";
 import type { ShortcutMatchOptions } from "../keybindings.js";
 import { noticeFailure } from "../notices/store.js";
 import { useStore } from "../protocol/store.js";
@@ -90,7 +90,7 @@ export async function openContextMenu(
 ): Promise<void> {
   event.preventDefault();
   event.stopPropagation();
-  const items = toMenuItems(actions, DEFAULT_RESOLVED_KEYBINDINGS, options.shortcuts);
+  const items = toMenuItems(actions, currentKeybindings(), options.shortcuts);
   const bridge = typeof window === "undefined" ? undefined : window.wsp?.contextMenu;
   const chosen =
     bridge !== undefined

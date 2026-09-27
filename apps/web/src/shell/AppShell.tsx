@@ -11,8 +11,6 @@ import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, type SidebarWidthS
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { useViewportWidth } from "../hooks/useViewportWidth.js";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
-import { shortcutLabelForCommand } from "../keybindings.js";
 import { isDesktopMac } from "../lib/desktopShell.js";
 import { cn } from "../lib/utils.js";
 import { Notices } from "../notices/Notice.js";
@@ -20,6 +18,7 @@ import { useSelectedWorkspaceId, useSettingsOpen, useStore } from "../protocol/s
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY, sidebarMaxWidthBeside } from "../rightPanelLayout.js";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./sidebarWidth.js";
 import { trackThreadHistory } from "./threadHistory.js";
+import { useShortcutLabel } from "./useKeybindings.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { SettingsHeaderActions } from "../settings/SettingsHeaderActions.js";
 import { SettingsSidebar } from "../settings/SettingsSidebar.js";
@@ -45,8 +44,6 @@ const sidebarWidthStore: SidebarWidthStore = {
       if (s.preferences.sidebarWidth !== prev.preferences.sidebarWidth) onChange();
     }),
 };
-const RIGHT_PANEL_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "rightPanel.toggle");
-const TERMINAL_SHORTCUT_LABEL = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "terminal.toggle");
 
 export function AppShell({ children }: { children: ReactNode }) {
   const workspaceId = useSelectedWorkspaceId();
@@ -67,13 +64,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   const panelInline = rightPanelOpen && !useSheet;
   // The switch chord walks the threads last opened, so every selection is remembered from here on.
   useEffect(() => trackThreadHistory(), []);
+  const terminalShortcutLabel = useShortcutLabel("terminal.toggle");
+  const rightPanelShortcutLabel = useShortcutLabel("rightPanel.toggle");
 
   const layoutControls = (
     <PanelLayoutControls
       terminalOpen={terminalOpen}
-      terminalShortcutLabel={TERMINAL_SHORTCUT_LABEL}
+      terminalShortcutLabel={terminalShortcutLabel}
       rightPanelOpen={rightPanelOpen}
-      rightPanelShortcutLabel={RIGHT_PANEL_SHORTCUT_LABEL}
+      rightPanelShortcutLabel={rightPanelShortcutLabel}
       liveAgentCount={0}
       onToggleTerminal={() => toggleTerminal(terminalKey)}
       onToggleRightPanel={() => toggleVisibility(terminalKey)}

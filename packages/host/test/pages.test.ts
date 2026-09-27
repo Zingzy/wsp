@@ -110,9 +110,9 @@ describe("the pages wsp prints", () => {
         if (/^\[?<(workspace|thread)>\]?$/.test(word)) expect(at, usage).toBe(2);
       }
     }
-    // The only flag named anywhere in the rows is the one the sentence says a person meets, and it is on add.
+    // The only flags named anywhere in the rows are the two a person meets placing a repo, and they are on add.
     const block = HELP.split("\n\n")[2]!;
-    expect(block.split("\n").filter(line => line.includes("--")).map(line => line.trim())).toEqual(["with --on <computer>"]);
+    expect(block.split("\n").filter(line => line.includes("--")).map(line => line.trim())).toEqual(["--into <folder> here or --on <computer>"]);
     // run and send take the agent's own flags, as the sentence says, and their own help is where they are listed.
     // Send takes two of the three: a thread's access is the thread's own and a message does not change it.
     const reads = (name: string, pick: string): boolean => Object.hasOwn(CLI_VERBS.find(v => v.name === name)!.options, pick);
