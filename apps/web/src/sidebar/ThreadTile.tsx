@@ -8,7 +8,7 @@
 // on stand out. Renaming turns the title into the sidebar's one name box in the
 // same row, so the tile keeps its height while a name is typed.
 import type { DragEvent, MouseEvent, ReactNode } from "react";
-import { GitBranchIcon } from "lucide-react";
+import { AlarmClockIcon, GitBranchIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
 import { THREAD_WORDS, WORKSPACE_WORDS } from "../actions/format.js";
 import type { Launch, SidebarThreadSnapshot } from "../adapt/index.js";
@@ -22,6 +22,7 @@ import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { ProjectGlyph } from "../projects/look.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
+import { SNOOZE_WORDS } from "./words.js";
 import { TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_THREE_CLASS, TILE_TITLE_CLASS, threadRowId } from "./rowGrammar.js";
 
 /** Where a tile's thread runs, as row one names it: the project and the computer by the names a person reads, either
@@ -73,6 +74,15 @@ export function TileBranch({ branch }: { branch: string }) {
   );
 }
 
+/** The slot of a snoozed root while threads of its tree run: the snooze's glyph and how many, in the row's own ink,
+ * so the tree stays reachable without calling for the person. */
+const SnoozedWorking = ({ count }: { count: number }) => (
+  <span data-thread-status="snoozed" className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums">
+    <AlarmClockIcon aria-hidden className="size-3 shrink-0" />
+    {SNOOZE_WORDS.working(count)}
+  </span>
+);
+
 const Title = ({ text, idle, active, onDoubleClick }: { text: string; idle: boolean; active: boolean; onDoubleClick?: (() => void) | undefined }) => (
   <span
     data-thread-title
@@ -98,6 +108,7 @@ export function ThreadTile({
   depth,
   active,
   settled = false,
+  snoozedWorking,
   renaming,
   saving,
   onSelect,
@@ -120,6 +131,8 @@ export function ThreadTile({
   active: boolean;
   /** The tile sits in the Settled fold: it rests, its age muted and its title stepped back, whatever its state. */
   settled?: boolean;
+  /** The tile stands for a snoozed tree while threads of it run: how many, said quietly in place of the status. */
+  snoozedWorking?: number | undefined;
   /** The name is being typed on this tile: row two holds the input instead of the title. */
   renaming: boolean;
   /** That name is on its way to the machine: the field stays exactly as it is and takes no second Enter. */
@@ -137,7 +150,8 @@ export function ThreadTile({
    * of threads one send opened. */
   label?: string | undefined;
 }) {
-  const status = settled ? RESTING : threadStatusOf(thread);
+  const snoozed = snoozedWorking !== undefined;
+  const status = settled || snoozed ? RESTING : threadStatusOf(thread);
   // Only a resting thread steps back; a failed one or one waiting on the person keeps the foreground ink.
   const idle = status === RESTING;
   return (
@@ -149,14 +163,14 @@ export function ThreadTile({
       data-sidebar-row
       data-row-id={threadRowId(thread.id)}
       data-depth={depth}
-      title={tileHover(thread.title, place, thread.harness, thread.asking)}
+      title={tileHover(thread.title, place, thread.harness, snoozed ? SNOOZE_WORDS.workingHover(snoozedWorking) : thread.asking)}
       className={TILE_CLASS}
       {...(renaming ? {} : { onClick: onSelect, onContextMenu })}
       {...(renaming || onDragStart === undefined ? {} : { draggable: true, onDragStart, onDragEnd })}
     >
       <TileRows
         place={place}
-        status={<ThreadStatus thread={thread} age={time} settled={settled} />}
+        status={snoozed ? <SnoozedWorking count={snoozedWorking} /> : <ThreadStatus thread={thread} age={time} settled={settled} />}
         title={
           renaming ? (
             <span className="flex h-[18px] min-w-0">

@@ -7,7 +7,7 @@
 // passes brings its thread back reading Done.
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { foldThreads, threadNeedsYou, threadWordOf, type EventUnion, type TurnResult } from "@wsp/protocol";
+import { AGENTS_ON, foldThreads, threadNeedsYou, threadWordOf, type EventUnion, type ThreadScope, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
@@ -177,6 +177,90 @@ describe("a thread's read and settled stamps", () => {
     await rt.sessions.read(threadId);
     expect(threadWordOf(foldThreads(await rt.sessions.list(ws.id))[0]!)).toBe("Idle");
     await rt.close();
+  });
+
+  /** A lead whose turn finished and was snoozed, and a child it opened whose turn is held until the case says how it
+   * goes: a question for a Bash call, or an end, failed or completed. `snoozeChild` snoozes the child's own thread too. */
+  async function snoozedTree(o: { snoozeChild?: boolean } = {}) {
+    const store = await keptSinceLongAgo();
+    const { clock } = aheadClock();
+    let child: { ask: () => void; end: (status: TurnResult["status"]) => void } | undefined;
+    const factory: HarnessAdapterFactory = () => ({
+      steers: false,
+      start: s => {
+        const sessionId = randomUUID();
+        if (s.prompt === "lead") {
+          const result: TurnResult = { status: "completed", text: "done" };
+          const finished = Promise.resolve().then(() => (s.onEvent({ type: "session.start", sessionId }), s.onEvent({ type: "turn.done", sessionId, result }), s.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true }), result));
+          return { localId: sessionId, finished, interrupt: async () => {} };
+        }
+        let settle!: (r: TurnResult) => void;
+        const finished = new Promise<TurnResult>(resolve => (settle = resolve));
+        queueMicrotask(() => s.onEvent({ type: "session.start", sessionId }));
+        child = {
+          ask: () => s.onEvent({ type: "permission.ask", sessionId, ask: { askId: "ask_1", toolName: "Bash", input: '{"command":"sleep 5"}', options: [{ id: "allow", label: "Allow", effect: "allow" }] } }),
+          end: status => {
+            const result: TurnResult = { status, text: status === "failed" ? "the tests would not run" : "done" };
+            s.onEvent({ type: "turn.done", sessionId, result });
+            s.onEvent({ type: "session.end", sessionId, exitCode: status === "failed" ? 1 : 0, sawResult: true });
+            settle(result);
+          },
+        };
+        return { localId: sessionId, finished, interrupt: async () => {} };
+      },
+    });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: factory }, clock });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a", agents: AGENTS_ON });
+    const lead = await rt.sessions.start(ws.id, { prompt: "lead" });
+    await lead.finished;
+    const root = lead.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: root, workspaceId: ws.id, rootThreadId: root };
+    const started = await rt.sessions.start(ws.id, { prompt: "child" }, { origin: "relayed", by: scope });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const childThread = started.view().threadId!;
+    expect(started.view().rootThreadId).toBe(root);
+    const snoozed = o.snoozeChild === true ? [root, childThread] : [root];
+    await rt.sessions.mark(snoozed, { snoozedUntil: clock.now() + 60 * 60_000 });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const snoozeOf = async (threadId: string) => foldThreads(await rt.sessions.list(ws.id)).find(t => t.id === threadId)?.snoozedUntil;
+    const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+    return { rt, ws, root, childThread, child: child!, events, snoozeOf, settle, finished: started.finished };
+  }
+
+  it("a thread of a snoozed tree that asks for the person ends the snooze, and every window hears it", async () => {
+    const t = await snoozedTree();
+    expect(await t.snoozeOf(t.root)).toBeDefined();
+    t.child.ask();
+    await t.settle();
+    expect(await t.snoozeOf(t.root)).toBeUndefined();
+    expect(t.events.filter(e => e.type === "thread.marked")).toMatchObject([{ workspaceId: t.ws.id, threadIds: [t.root] }]);
+    await t.rt.close();
+  });
+
+  it("an asking thread's own snooze ends with its root's, in one mark", async () => {
+    const t = await snoozedTree({ snoozeChild: true });
+    expect([await t.snoozeOf(t.root), await t.snoozeOf(t.childThread)].every(until => until !== undefined)).toBe(true);
+    t.child.ask();
+    await t.settle();
+    expect([await t.snoozeOf(t.root), await t.snoozeOf(t.childThread)]).toEqual([undefined, undefined]);
+    expect(t.events.filter(e => e.type === "thread.marked")).toMatchObject([{ workspaceId: t.ws.id, threadIds: [t.childThread, t.root] }]);
+    await t.rt.close();
+  });
+
+  it("a thread of a snoozed tree that fails ends the snooze too, since it needs the person; one that finishes does not", async () => {
+    const failing = await snoozedTree();
+    failing.child.end("failed");
+    await failing.finished;
+    await failing.settle();
+    expect(await failing.snoozeOf(failing.root)).toBeUndefined();
+    await failing.rt.close();
+    const finishing = await snoozedTree();
+    finishing.child.end("completed");
+    await finishing.finished;
+    await finishing.settle();
+    expect(await finishing.snoozeOf(finishing.root)).toBeDefined();
+    await finishing.rt.close();
   });
 
   it("a snooze still standing when the host starts again brings its thread back on time", async () => {

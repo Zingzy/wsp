@@ -100,4 +100,7 @@ export const SECTION_WORDS: Record<"pinned" | ThreadSection, string> = {
 export const SNOOZE_WORDS = {
   custom: "Until",
   snooze: "Snooze",
+  /** The slot of a snoozed root while threads of its tree run, and its hover line. */
+  working: (n: number): string => `${n} working`,
+  workingHover: (n: number): string => `Snoozed, ${n} working in it`,
 } as const;
