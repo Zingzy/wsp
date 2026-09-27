@@ -559,6 +559,45 @@ describe("store sessions", () => {
     expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
   });
 
+  it("a thread another client starts while a reconnect's read of every row is still out stays: the older read does not replace the rows its start reread", async () => {
+    const sessions: SessionView[] = [];
+    const { api, emit } = fakeApi([view("ws_a")], sessions);
+    useStore.getState().bind(api);
+    await flush();
+    // The reconnect's read: the rows are read at once and the workspaces answer late, as a host listing
+    // computers that do not answer does, so the rows it holds are older than anything read after it.
+    let answer = (): void => {};
+    const rowsNow = api.listSessions;
+    api.listSessions = async id => [...(await rowsNow(id))];
+    const listed = api.listWorkspaces;
+    api.listWorkspaces = () => new Promise(resolve => (answer = () => void listed().then(resolve)));
+    const reading = useStore.getState().refresh();
+    await flush();
+    sessions.push({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1", threadId: "thr_cli", startedBy: "cli" });
+    emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c1", threadId: "thr_cli" });
+    await flush();
+    expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+    answer();
+    await reading;
+    expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+  });
+
+  it("of two reads of one workspace's rows, the one asked later stands, whichever answers last", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    const answers: ((rows: SessionView[]) => void)[] = [];
+    api.listSessions = () => new Promise(resolve => answers.push(resolve));
+    const older = useStore.getState().reloadSessions("ws_a");
+    const newer = useStore.getState().reloadSessions("ws_a");
+    const row: SessionView = { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", threadId: "thr_cli" };
+    answers[1]!([row]);
+    await newer;
+    answers[0]!([]);
+    await older;
+    expect(useStore.getState().sessions["ws_a"]).toEqual([row]);
+  });
+
   it("holds a send the runtime has no row for and drops it only once the rows that replace it are in", async () => {
     const sessions: SessionView[] = [];
     const { api, emit } = fakeApi([view("ws_a")], sessions);

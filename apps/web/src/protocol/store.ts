@@ -411,6 +411,23 @@ export const useStore = create<State>((set, get) => {
   let capabilitiesSaid = false;
   /** The workspaces whose refused thread list has been said since the bind. */
   const sessionsSaid = new Set<string>();
+  /** Every read of the thread rows is numbered as it is asked, and each workspace keeps the number its rows came from.
+   * A read answered after a newer one landed is older than what is drawn: a reconnect's read of every row, held up
+   * while the workspaces list waits on a computer that does not answer, would otherwise put back a workspace without
+   * the thread another client started meanwhile, and nothing reads that workspace again until the turn ends. */
+  let rowReads = 0;
+  const rowsFrom = new Map<string, number>();
+  /** The rows a read of every workspace answered, less the workspaces a newer read has already drawn. */
+  const newerKept = (read: Record<string, SessionView[]>, asked: number, drawn: Record<string, SessionView[]>): Record<string, SessionView[]> => {
+    const kept = { ...read };
+    for (const [id, from] of rowsFrom) {
+      if (from <= asked) continue;
+      if (drawn[id] === undefined) delete kept[id];
+      else kept[id] = drawn[id];
+    }
+    for (const id of Object.keys(read)) if ((rowsFrom.get(id) ?? 0) < asked) rowsFrom.set(id, asked);
+    return kept;
+  };
   const readCapabilities = (api: Api): void => {
     void api
       .capabilities()
@@ -666,10 +683,11 @@ export const useStore = create<State>((set, get) => {
     async refresh() {
       const api = get().api;
       if (!api) return;
+      const asked = ++rowReads;
       const [workspaces, answered] = await Promise.all([api.listWorkspaces(), api.listSessions().then(rows => rows, () => null)]);
       const s = get();
       const rows = answered ?? NO_SESSIONS;
-      const sessions = groupSessions(rows);
+      const sessions = newerKept(groupSessions(rows), asked, s.sessions);
       // The address is read on every refresh, not only the first: a reconnect after the host restarted rebuilds this
       // store from nothing, and what the person is reading is recorded there rather than here.
       const address = readAddress();
@@ -698,7 +716,10 @@ export const useStore = create<State>((set, get) => {
       const api = get().api;
       if (!api) return;
       try {
+        const asked = ++rowReads;
         const rows = await api.listSessions(workspaceId);
+        if ((rowsFrom.get(workspaceId) ?? 0) > asked) return;
+        rowsFrom.set(workspaceId, asked);
         set(s => ({ sessions: { ...s.sessions, [workspaceId]: rows } }));
       } catch (e) {
         // Said once per workspace for a refusal; anything else, the next session event asks again.
