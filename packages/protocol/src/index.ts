@@ -1883,6 +1883,10 @@ export type ComputerLook = z.infer<typeof ComputerLook>;
 /** A theme's id, one per side. The shape is checked here; which ids exist is the app's registry, which reads an id it
  * does not know as that side's default, so a theme added later needs nothing from the host. */
 export const ThemeId = z.string().min(1);
+/** A chord as the app spells it; which keys exist is the app's to say. */
+const ChordText = z.string().min(1).max(64);
+/** A font family by name, as the computer's font list or a person's typing names it. */
+const FontFamily = z.string().max(128);
 /** Each side's theme before a person picks one. */
 const THEME_PICK_DEFAULTS = { lightTheme: "paper", darkTheme: "graphite" } as const;
 
@@ -1917,6 +1921,12 @@ export const Preferences = z.object({
   /** Whether the host asks each agent's vendor for its newest version. On unless the person turns it off, and
    * WSP_UPDATE_CHECK=0 in the host's environment stops it whatever this says; defaulted as serverIcons is. */
   agentVersions: z.boolean().default(true),
+  /** The person's own chord for a command, by command id, in the app's chord spelling (mod+shift+b): it replaces every
+   * default chord that command has. Which commands and chords exist is the app's, so the shape alone is checked here. */
+  keybindings: z.record(z.string(), ChordText).default({}),
+  /** The family the app's text and its code are drawn in, empty for the system stack. The terminal keeps its own. */
+  appFont: FontFamily.default(""),
+  codeFont: FontFamily.default(""),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
   labs: z.boolean(),
@@ -1928,7 +1938,8 @@ export const labsFromEnv = (env: Record<string, string | undefined>): boolean =>
 
 /** What preferences.set takes: any of the record's fields but labs, which is the host's to say; a null sidebarWidth
  * clears it back to the default, terminalZoom and access name only the workspaces they move, a null entry dropping
- * that workspace's zoom or pick, and a null target clears the last target. Strict, so a field this record dropped
+ * that workspace's zoom or pick, keybindings names only the commands it moves, a null entry putting that command
+ * back on its defaults, and a null target clears the last target. Strict, so a field this record dropped
  * is refused rather than written into a state file nothing reads. */
 export const PreferencesPatch = Preferences.omit({ labs: true })
   .partial()
@@ -1939,11 +1950,12 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
     projectLook: z.record(z.string(), ProjectLook.nullable()).optional(),
     computerLook: z.record(z.string(), ComputerLook.nullable()).optional(),
     target: PreferencesTarget.nullable().optional(),
+    keybindings: z.record(z.string(), ChordText.nullable()).optional(),
   })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, keybindings: {}, appFont: "", codeFont: "", labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1976,6 +1988,9 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     computerLook: perWorkspace(current.computerLook, patch.computerLook),
     serverIcons: patch.serverIcons ?? current.serverIcons,
     agentVersions: patch.agentVersions ?? current.agentVersions,
+    keybindings: perWorkspace(current.keybindings, patch.keybindings),
+    appFont: patch.appFont ?? current.appFont,
+    codeFont: patch.codeFont ?? current.codeFont,
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),

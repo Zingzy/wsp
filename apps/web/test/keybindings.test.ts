@@ -6,6 +6,9 @@ import { describe, expect, it, vi } from "vitest";
 import { compileResolvedKeybindingsConfig, DEFAULT_KEYBINDINGS, DEFAULT_RESOLVED_KEYBINDINGS, parseKeybindingShortcut, parseKeybindingWhenExpression } from "../src/keybindingDefaults.js";
 import { useStore } from "../src/protocol/store.js";
 import { runShellCommand } from "../src/shell/shellCommands.js";
+import { chordRefusal, keybindingFromKeyboardEvent, keybindingsFor, rulesWith } from "../src/keybindingOverrides.js";
+import type { KeybindingCommand } from "../src/keybindingTypes.js";
+import { KEYBINDING_WORDS } from "../src/settings/keybindingWords.js";
 import { browserTabClaimsShortcut, eventHoldKeys, formatShortcutLabel, resolveShortcutCommand, shortcutLabelForCommand, type ShortcutEventLike } from "../src/keybindings.js";
 
 const MAC = "MacIntel";
@@ -315,5 +318,64 @@ describe("the settle chord's command", () => {
     put({ status: "running", endedAt: undefined });
     runShellCommand("thread.settle", { workspaceId: "ws_a", toggleSidebar: () => {} } as never, []);
     expect(settleThreads).not.toHaveBeenCalled();
+  });
+});
+
+describe("a person's own chords over the defaults", () => {
+  const read = { platform: MAC, labelOf: (command: KeybindingCommand): string => KEYBINDING_WORDS[command] };
+
+  it("replaces every default chord of the command with the one chord, keeps the default's when, and leaves the rest alone", () => {
+    const rules = rulesWith(DEFAULT_KEYBINDINGS, { "chat.new": "mod+alt+n" });
+    expect(rules.filter(rule => rule.command === "chat.new")).toEqual([{ key: "mod+alt+n", command: "chat.new", when: "!terminalFocus" }]);
+    expect(rules.filter(rule => rule.command !== "chat.new")).toEqual(DEFAULT_KEYBINDINGS.filter(rule => rule.command !== "chat.new"));
+    const compiled = compileResolvedKeybindingsConfig(rules);
+    expect(resolveShortcutCommand(cmd("n", { altKey: true }), compiled, { platform: MAC, context: { desktopShell: true } })).toBe("chat.new");
+    expect(resolveShortcutCommand(cmd("t"), compiled, { platform: MAC, context: { desktopShell: true } })).toBeNull();
+    expect(resolveShortcutCommand(cmd("n"), compiled, { platform: MAC, context: { desktopShell: true } })).toBeNull();
+    // The terminal's own mod+n is untouched: it was never chat.new's rule.
+    expect(resolveShortcutCommand(cmd("n"), compiled, { platform: MAC, context: { desktopShell: true, terminalFocus: true } })).toBe("terminal.new");
+    expect(shortcutLabelForCommand(compiled, "chat.new", { platform: MAC, context: { desktopShell: true } })).toBe("⌥⌘N");
+  });
+
+  it("drops an override for a command it does not know or a chord that does not parse, and no override is the defaults", () => {
+    expect(rulesWith(DEFAULT_KEYBINDINGS, {})).toEqual(DEFAULT_KEYBINDINGS);
+    expect(rulesWith(DEFAULT_KEYBINDINGS, { "rocket.launch": "mod+r", "sidebar.toggle": "mod+a+b" })).toEqual(DEFAULT_KEYBINDINGS);
+    expect(keybindingsFor({})).toBe(keybindingsFor({}));
+    const overrides = { "sidebar.toggle": "mod+shift+b" };
+    expect(keybindingsFor(overrides)).toBe(keybindingsFor(overrides));
+  });
+
+  it("reads a pressed chord in the rules' spelling, mod for the platform's own, and nothing for a modifier alone or a bare key", () => {
+    expect(keybindingFromKeyboardEvent(cmd("b", { shiftKey: true }), MAC)).toBe("mod+shift+b");
+    expect(keybindingFromKeyboardEvent(ctrl("b", { shiftKey: true }), LINUX)).toBe("mod+shift+b");
+    expect(keybindingFromKeyboardEvent(ctrl("b"), MAC)).toBe("ctrl+b");
+    expect(keybindingFromKeyboardEvent(cmd("ArrowUp", { altKey: true }), MAC)).toBe("mod+alt+arrowup");
+    expect(keybindingFromKeyboardEvent(cmd("Meta"), MAC)).toBeNull();
+    expect(keybindingFromKeyboardEvent(key("b"), MAC)).toBeNull();
+  });
+
+  it("refuses a chord another command holds where both can fire, naming it, and takes one whose rules never fire together", () => {
+    const rules = DEFAULT_KEYBINDINGS;
+    expect(chordRefusal(rules, "sidebar.toggle", "mod+j", read)).toBe("Taken by Toggle the terminal drawer");
+    // mod+n is the terminal's New terminal while it has focus and New thread otherwise.
+    expect(chordRefusal(rules, "terminal.split", "mod+n", read)).toBe("Taken by New terminal");
+    expect(chordRefusal(rules, "sidebar.toggle", "mod+n", read)).toBe("Taken by New terminal and New thread");
+    expect(chordRefusal(rules, "chat.new", "mod+d", read)).toBeNull();
+    // The command's own chords are not a clash: they are the ones being replaced.
+    expect(chordRefusal(rules, "chat.new", "mod+n", read)).toBeNull();
+    expect(chordRefusal(rules, "sidebar.toggle", "mod+shift+b", read)).toBeNull();
+    // Another command's override holds its chord the same way a default does.
+    expect(chordRefusal(rulesWith(rules, { "preview.toggle": "mod+shift+b" }), "sidebar.toggle", "mod+shift+b", read)).toBe("Taken by Toggle the preview");
+    // Off macOS the terminal owns mod while it has focus, so Search's mod+k and the terminal's chords never meet.
+    expect(chordRefusal(rules, "terminal.split", "mod+k", { ...read, platform: LINUX })).toBeNull();
+    expect(chordRefusal(rules, "terminal.split", "mod+k", read)).toBe("Taken by Search");
+  });
+
+  it("refuses a chord a browser tab keeps for itself, whichever shell is asking", () => {
+    expect(chordRefusal(DEFAULT_KEYBINDINGS, "sidebar.toggle", "mod+shift+t", read)).toBeNull();
+    expect(chordRefusal(DEFAULT_KEYBINDINGS, "sidebar.toggle", "mod+t", read)).toBe("Taken by New thread");
+    expect(chordRefusal(rulesWith(DEFAULT_KEYBINDINGS, { "chat.new": "mod+alt+n" }), "sidebar.toggle", "mod+t", read)).toBe("A browser tab keeps ⌘T for itself");
+    expect(chordRefusal(DEFAULT_KEYBINDINGS, "preview.toggle", "ctrl+tab", { ...read, platform: LINUX })).toBe("Taken by Next task");
+    expect(chordRefusal(rulesWith(DEFAULT_KEYBINDINGS, { "workspace.next": "mod+alt+n" }), "preview.toggle", "ctrl+tab", { ...read, platform: LINUX })).toBe("A browser tab keeps Ctrl+Tab for itself");
   });
 });

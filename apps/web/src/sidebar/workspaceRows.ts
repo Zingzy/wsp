@@ -9,13 +9,11 @@ import { HERE_PLACE_ID, isLocalWorkspace, madeOfWord, portsWord, whereWord as wh
 import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import type { ProjectRef } from "./threadTree.js";
 import { PLACE_KIND_WORDS, hereName, isHere, placeName, placeOf } from "../settings/places.js";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
-import { shortcutLabelForCommand } from "../keybindings.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
 import { usePlaces, useStatus, useWorkspace } from "../protocol/store.js";
 
-const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
-export const NEW_THREAD_TITLE = NEW_THREAD_SHORTCUT ? `New thread (${NEW_THREAD_SHORTCUT})` : "New thread";
+/** The new thread button's hover: its words, then the chord New thread is on. */
+export const newThreadTitle = (shortcut: string | null): string => (shortcut === null ? "New thread" : `New thread (${shortcut})`);
 
 /** What a workspace is made of, the row's second line: the word for its copy, the computer it stands on where
  * that is not the computer this window runs on (`here` names that one, whose ports a copy there shares), and what

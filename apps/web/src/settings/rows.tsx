@@ -83,6 +83,8 @@ export interface SettingsLineData {
   readonly keysJoiner?: string;
   /** One sentence on hover, never a description under the label. */
   readonly hover?: string;
+  /** What stands in the keycaps' place where the line can change them; the keys stay the words it is read by. */
+  readonly control?: ReactNode;
   readonly attrs?: Record<string, string>;
 }
 
@@ -203,7 +205,25 @@ export function Row({ id, title, lead, mark, description, chips, mono = false, w
  * label instead, a value with two lines of its own: at that width a label and a value sharing one line cut each
  * other, and a keycap cannot be cut at all, so the label went instead. A line with nothing at its right is a
  * sentence rather than a label, and takes the two lines there. */
-export function Line({ id, label, value, valueClass = "value", keys, keysJoiner, hover, attrs }: Omit<SettingsLineData, "kind">) {
+/** A chord's keycaps, one group per chord, with the word between them where they read as a range. */
+export function KeyCaps({ keys, joiner }: { keys: ReadonlyArray<ReadonlyArray<string>>; joiner?: string }) {
+  return (
+    <span data-settings-keys className="flex shrink-0 items-center gap-2 max-sm:justify-start">
+      {keys.map((chord, at) => (
+        <span key={chord.join("+")} className="flex items-center gap-2">
+          {at > 0 && joiner !== undefined ? <span className={FACT}>{joiner}</span> : null}
+          <KbdGroup>
+            {chord.map(key => (
+              <Kbd key={key}>{key}</Kbd>
+            ))}
+          </KbdGroup>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+export function Line({ id, label, value, valueClass = "value", keys, keysJoiner, hover, control, attrs }: Omit<SettingsLineData, "kind">) {
   const bare = value === undefined && keys === undefined;
   return (
     <div data-settings-line={id} className={cn(LINE_CLASS, "flex items-center gap-4 px-5 max-sm:flex-col max-sm:items-stretch max-sm:justify-center max-sm:gap-0")} {...(hover === undefined ? {} : { title: hover })} {...attrs}>
@@ -217,22 +237,7 @@ export function Line({ id, label, value, valueClass = "value", keys, keysJoiner,
           <WordsSlot words={value} />
         </span>
       )}
-      {keys === undefined ? null : (
-        <span data-settings-keys className="flex shrink-0 items-center gap-2 max-sm:justify-start">
-          {keys.map((chord, at) => (
-            <span key={chord.join("+")} className="flex items-center gap-2">
-              {at > 0 && keysJoiner !== undefined ? <span className={FACT}>{keysJoiner}</span> : null}
-              <KbdGroup>
-                {chord.map(key => (
-                  <Kbd key={key}>
-                    {key}
-                  </Kbd>
-                ))}
-              </KbdGroup>
-            </span>
-          ))}
-        </span>
-      )}
+      {control ?? (keys === undefined ? null : <KeyCaps keys={keys} {...(keysJoiner === undefined ? {} : { joiner: keysJoiner })} />)}
     </div>
   );
 }
