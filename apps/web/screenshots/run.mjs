@@ -98,6 +98,30 @@ async function asAnotherComputer(context) {
   });
 }
 
+/** Where the Mac preload marks the html element, copied from `DESKTOP_MAC_CLASS` in `packages/protocol/src/index.ts`
+ * for the same reason as the token key above. */
+const DESKTOP_MAC_CLASS = "desktop-mac";
+
+/** A context that reads as the Mac window: the html carries the class the preload sets, before the app's first
+ * render reads it, and a stand-in desktop paints behind the page's clear canvas where the window's glass would be.
+ * The stand-in runs from mid grey, the glass over a white desktop and the lightest ground its text has to hold AA
+ * on, into a dark blue so a share that lets it through shows as one. */
+async function asMacWindow(context) {
+  await context.addInitScript(className => {
+    const mark = html => {
+      html.classList.add(className);
+      html.style.backgroundImage = "linear-gradient(135deg, #808080, #1e2a44)";
+      html.style.minHeight = "100%";
+    };
+    if (document.documentElement !== null) return mark(document.documentElement);
+    new MutationObserver((_, watch) => {
+      if (document.documentElement === null) return;
+      watch.disconnect();
+      mark(document.documentElement);
+    }).observe(document, { childList: true });
+  }, DESKTOP_MAC_CLASS);
+}
+
 /** The page's socket to the host, in this run's hands. It connects as it would until the function this returns is
  * called, which shuts it and leaves every redial unanswered: that is what a window sees the moment the computer
  * running wsp falls asleep, and it is not what Playwright's own offline mode does, which leaves an open socket
@@ -122,6 +146,7 @@ async function holdSocket(page) {
 async function shoot(context, shot, base, out, token) {
   await letIn(context, token);
   if (shot.remote) await asAnotherComputer(context);
+  if (shot.mac) await asMacWindow(context);
   const page = await context.newPage();
   const fallAsleep = shot.steps.some(step => step.offline === true) ? await holdSocket(page) : undefined;
   await page.goto(`${base}${shot.at}`, { waitUntil: "domcontentloaded" });

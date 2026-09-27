@@ -1387,6 +1387,16 @@ export function providerRoadRetryLine(call: string, code: string, tryNumber: num
   return `${call} did not leave this computer (${code}); try ${tryNumber} of ${tries}`;
 }
 
+/** A fork the provider refused as "Snapshot not found" while its own listing holds that snapshot, asked again. */
+export function snapshotListedWaitLine(snapshotId: string, waitMs: number, waitedMs: number): string {
+  return `the provider lists snapshot ${snapshotId} yet answered "Snapshot not found"; asking again in ${fmtDuration(waitMs)} (${fmtDuration(waitedMs)} so far)`;
+}
+
+/** The same refusal once the wait for it has run out: the snapshot is listed, so it is not gone. */
+export function snapshotListedRefusedLine(snapshotId: string, waitedMs: number): string {
+  return `the provider lists snapshot ${snapshotId} yet answered "Snapshot not found" for ${fmtDuration(waitedMs)}; it is not gone, so ask again in a minute`;
+}
+
 /** When a turn is over, in the one sentence every door the agent reads quotes whole: the skill, the tool
  * descriptions, the command line's help and the machine's own context. The reply comes back at once from a follow;
  * the row settles only at the process exit, since a harness can keep working after it answers. */

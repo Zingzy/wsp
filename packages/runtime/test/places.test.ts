@@ -40,6 +40,7 @@ import {
   THREAD_OPS,
   placeDaemonPaths,
   absentComputer,
+  workspaceStateOf,
   placeBuildsNoImageLine,
   placeForksNowhereLine,
   placeCannotBootLine,
@@ -2734,6 +2735,25 @@ describe("a fork at a provider this host is not wired to", () => {
     const here = await createOn(runtime, { golden: "snap_g", name: "z", on: "solari" });
     expect(solari.machines).toHaveLength(1);
     expect(here.place).toBeUndefined();
+  });
+
+  it("a fork there reads the provider's word on its machine, never the silence of a computer with no link", async () => {
+    const solari = stubBackend();
+    const box = stubBackend();
+    runtime = createRuntime({
+      backend: solari,
+      store: memoryStore(),
+      adapters: {},
+      places: twoProviders("solari", { solari, box }),
+      placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }),
+    });
+    const there = await createOn(runtime, { golden: "snap_g", name: "x", on: "box" });
+    const row = (await runtime.status.list()).find(s => s.id === there.id)!;
+    expect(row.reason).toBeUndefined();
+    expect(workspaceStateOf(row, row)).toBe("running");
+    await runtime.workspaces.nap(there.id);
+    const napped = (await runtime.status.list()).find(s => s.id === there.id)!;
+    expect(workspaceStateOf(napped, napped)).toBe("paused");
   });
 
   it("a project image taken at that provider records the place and is removed there, never at the wired one", async () => {

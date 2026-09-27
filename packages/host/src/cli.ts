@@ -63,7 +63,7 @@ import { buildBesideHost } from "./init-beside.js";
 import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
 import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, refuseIfServed, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
+import { addressLines, hostInboxDir, hostLogPath, hostRootsPath, hostRunDir, hostTokenPath, lockPathFor, heldOrStarted, refuseIfServed, servingHost, startedByEnv, STARTED_BY_ENV, takeLock, type HostLock, type HostStarted } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
 import { startOnce } from "./start-once.js";
 import {
@@ -1138,9 +1138,12 @@ async function init(
   flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; rebuild?: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
   if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print.", "Drop one of them.");
+  // With --on the build is always the host's, whose objects land on its job and not on this stdout, so the pair is
+  // refused before a host is started for a run that could print nothing.
+  if (flags.json && flags.on !== undefined) throw usageRefusal(`wsp init --json prints the build's own objects, and with --on the build is run by the host serving ${opts.statePath}: its sign-ins and stages ride its own setup, which wsp setup --json reads.`, "Drop --json, or drop --on to build on this computer's provider.");
   await adoptLoginPath(line => io.log(line));
-  const held = servingHost(opts.statePath);
   // The places are the serving host's: a run with none serving builds on its own provider and knows no other place.
+  const held = flags.on === undefined ? servingHost(opts.statePath) : await heldOrStarted(opts.statePath, opts.start, line => io.error(line));
   if (held === undefined && flags.on !== undefined) throw usageRefusal(`wsp init: --on names a place of the host serving ${opts.statePath}, and none is serving it.`, "Start it with wsp up and run wsp init --on again, or drop --on to build on this computer's provider.");
   const flag = projectFlag("init", flags.project);
   if (!flag.ok) throw usageRefusal(flag.message, "Give --project a folder that is already here, or drop the flag and let the run ask.");
@@ -2390,7 +2393,7 @@ async function forwardDoor(io: CliIO, argv: string[], env: Readonly<Record<strin
   try {
     const statePath = statePathFrom(values.state, env, line => notes.push(line));
     const pick = { env, ...(values.host !== undefined ? { host: values.host } : {}) };
-    if (starts.start !== undefined && aimedHost(statePath, pick).kind === "here" && servingHost(statePath) === undefined) await starts.start(statePath, line => io.error(line));
+    if (aimedHost(statePath, pick).kind === "here") await heldOrStarted(statePath, starts.start, line => io.error(line));
     const door = hereDoor(statePath, pick);
     if (door === undefined) return 0;
     for (const note of notes) io.error(note);

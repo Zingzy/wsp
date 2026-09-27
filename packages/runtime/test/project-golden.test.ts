@@ -7,9 +7,9 @@ import { DEVICE_OPS, THREAD_OPS, diskSyncFailedLine, machineUnreachableLine, noP
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { copyKey, createRuntime, type PackedProject, type ProjectBundler, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import { memoryStore, type Store } from "../src/store.js";
+import type { Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
+import { ownedStore, stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { WsClient } from "./ws-client.js";
 import { until } from "./until.js";
 
@@ -22,7 +22,7 @@ afterEach(async () => {
 const SOURCE = "/Users/dev/code/proj";
 const DEST = "/root/work/proj";
 const T0 = Date.parse("2026-09-06T10:00:00.000Z");
-/** templateHost() takes the part after the last colon, so every name this host writes carries the mark "h1". */
+/** The host's part of the mark is "h1" (templateHost() takes the part after the last colon) and the state's owner is "s1". */
 const HOST = "box:h1";
 
 /** The golden the workspaces stand on: one sealed desktop version at head, sized above the provider default. */
@@ -48,7 +48,7 @@ function bundler(): ProjectBundler {
 /** The read-back window a snapshot's delete polls the listing under, short enough for a test to run it out. */
 const QUICK = { graceMs: 40, pollMs: 1 };
 
-async function setup(store: Store = memoryStore()): Promise<{ rt: Runtime; backend: StubBackend; store: Store; advance: (ms: number) => void }> {
+async function setup(store: Store = ownedStore()): Promise<{ rt: Runtime; backend: StubBackend; store: Store; advance: (ms: number) => void }> {
   const backend = stubBackend();
   await store.put("goldens", copyKey("default", "default"), MANIFEST);
   const { clock, advance } = fakeClock(T0);
@@ -84,7 +84,7 @@ describe("a project golden", () => {
     advance(5 * 60_000);
     const golden = await rt.workspaces.snapshot(ws.id);
     const expected: ProjectGolden = {
-      snapshotId: "snap_wsp-h1-project-proj-2026-09-06T10-06-00-000Z",
+      snapshotId: "snap_wsp-h1s1-project-proj-2026-09-06T10-06-00-000Z",
       projects: [PROJECT],
       golden: "snap_golden-v12",
       version: 12,
@@ -99,9 +99,9 @@ describe("a project golden", () => {
     expect(await store.get("workspaces", ws.id)).toMatchObject({ firstLife: true, golden: "snap_golden-v12" });
     advance(60_000);
     const second = await rt.workspaces.snapshot(ws.id);
-    expect(second.snapshotId).toBe("snap_wsp-h1-project-proj-2026-09-06T10-07-00-000Z");
+    expect(second.snapshotId).toBe("snap_wsp-h1s1-project-proj-2026-09-06T10-07-00-000Z");
     // The mark is what tells a later doctor run this host took it, since a snapshot carries no provider metadata.
-    expect(backend.snapshots.map(r => r.name)).toEqual(["wsp-h1-project-proj-2026-09-06T10-06-00-000Z", "wsp-h1-project-proj-2026-09-06T10-07-00-000Z"]);
+    expect(backend.snapshots.map(r => r.name)).toEqual(["wsp-h1s1-project-proj-2026-09-06T10-06-00-000Z", "wsp-h1s1-project-proj-2026-09-06T10-07-00-000Z"]);
     expect((await rt.golden.projects()).map(p => p.snapshotId)).toEqual([expected.snapshotId, second.snapshotId]);
   });
 

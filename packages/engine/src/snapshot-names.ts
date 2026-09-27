@@ -17,8 +17,9 @@ function marked(host: string, rest: string): string {
   return `${MARK}-${host}-${rest}`;
 }
 
-/** A golden version's snapshot and the template promoted from it: one name for one version. The host is in it
- * because the provider lets two names collide, so two hosts on one account with the same golden would read as one. */
+/** A golden version's snapshot and the template promoted from it: one name for one version. The mark of the state
+ * that made it is in it because the provider lets two names collide, so two states on one account with the same
+ * golden would read as one. */
 export const goldenName = (host: string, golden: string, version: number): string => marked(host, `${golden}-v${version}`);
 
 /** A project golden's snapshot: the workspace's project as it stood, stamped by the clock that took it. */
