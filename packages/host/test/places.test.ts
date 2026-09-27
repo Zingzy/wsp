@@ -10,7 +10,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sig
 import { appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, posix } from "node:path";
+import { basename, dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
@@ -3957,6 +3957,16 @@ describe("wsp add <folder> --on <computer>: the menu before anything travels", (
     expect(printed).toContain("--yes");
     // The computer's own kind is read first, then the menu, and nothing was recorded.
     expect(asked.map(a => a.op)).toEqual(["places.list", "project.seed.plan"]);
+  });
+
+  it("--into sends the folder a repo is cloned into, resolved where it was typed, and reads no seed menu", async () => {
+    const { dial, asked } = menuClient();
+    expect(await addCommand(captured(), opts(tmp("add-into")), ["https://github.com/spoo-me/spoo.me"], addFlags(undefined, undefined, undefined, undefined, undefined, undefined, undefined, {}, undefined, "clones/spoo.me"), menuDeps(dial))).toBe(0);
+    expect(asked.map(a => a.op)).toEqual(["places.list", "projects.add"]);
+    expect(asked.find(a => a.op === "projects.add")?.params).toEqual({ source: "https://github.com/spoo-me/spoo.me", into: resolve("clones/spoo.me") });
+    // The home and an absolute path are the host's to read as they stand.
+    expect(addFlags(undefined, undefined, undefined, undefined, undefined, undefined, undefined, {}, undefined, "~/code/spoo.me")).toEqual({ into: "~/code/spoo.me" });
+    expect(addFlags(undefined, undefined, undefined, undefined, undefined, undefined, undefined, {}, undefined, "/srv/spoo.me")).toEqual({ into: "/srv/spoo.me" });
   });
 
   it("with --yes it sends the ticks the catalogue decided, and the keeps and cuts move them", async () => {

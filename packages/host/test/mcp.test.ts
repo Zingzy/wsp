@@ -13,7 +13,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { type ProjectView, HERE_PLACE_ID, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, addedProjectLine, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
+import { type ProjectView, cloneIntoTakenLine, HERE_PLACE_ID, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, addedProjectLine, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
@@ -642,6 +642,10 @@ describe("the MCP server over the host", () => {
     expect((cloned.structured as { project: ProjectView }).project).toMatchObject({ name: "site", path: "/root/site", base: "trunk", computer: "default" });
     expect(await call("projects_add", { source: "https://github.com/dev/site.git", on: "default" })).toMatchObject({ isError: true });
     expect(await call("projects_add", { source: "https://github.com/dev/other.git" })).toMatchObject({ isError: true });
+    // A folder to clone into reaches the host, which refuses one that holds something before any clone runs.
+    const full = realpathSync(mkdtempSync(join(tmpdir(), "wsp-mcp-into-")));
+    writeFileSync(join(full, "notes.txt"), "mine");
+    expect(await call("projects_add", { source: "https://github.com/dev/other.git", into: full })).toMatchObject({ isError: true, text: expect.stringContaining(cloneIntoTakenLine(full)) });
 
     const listed = (await call("projects")).structured as { projects: ProjectView[] };
     expect(listed.projects.map(p => p.name)).toContain("site");
