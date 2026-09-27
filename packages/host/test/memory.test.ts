@@ -53,7 +53,7 @@ const home = ${JSON.stringify(home)};
 const webDir = join(home, "web");
 mkdirSync(join(webDir, "assets"), { recursive: true });
 writeFileSync(join(webDir, "assets", "app.js"), "console.log('app')\\n");
-writeFileSync(join(webDir, "index.html"), '<!doctype html><html><head><script type="module" crossorigin src="/assets/app.js"></script></head><body><div id="root"></div><script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script></body></html>');
+writeFileSync(join(webDir, "index.html"), '<!doctype html><html><head><script type="module" crossorigin src="/assets/app.js"></script></head><body><div id="root"></div><script>window.__WSP__ = window.__WSP__ || { token: "" };</script></body></html>');
 const statePath = join(home, "state", "state.json");
 mkdirSync(join(home, "state"), { recursive: true });
 
@@ -87,7 +87,7 @@ const runtime = createRuntime({
   store: jsonFileStore(statePath, stateWriterHere()),
   adapters: { claude: scripted },
 });
-const host = await startHost({ runtime, webDir, port: 0, wsPort: 0, statePath });
+const host = await startHost({ runtime, webDir, port: 0, statePath });
 // A workspace is one project's copy, so the measurement records a repo of its own here and copies it.
 const folder = join(home, "repo");
 mkdirSync(folder, { recursive: true });

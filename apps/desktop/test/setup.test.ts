@@ -7,7 +7,6 @@ import { LocalBackend, NoProviderBackend, type GoldenManifest } from "@wsp/engin
 import { AGENTS_ON, DAEMON_VERSION, HOST_TOKEN_ENV, HOST_URL_ENV, isLocalWorkspace, STATE_SHAPE, type StateShape, type WorkspaceView } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, STATE_SHAPE_KEY, stateWrittenByNewerLine, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fakeSsh } from "../../../packages/runtime/test/fake-ssh.js";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { copyingFake, heldAgent } from "../../../packages/host/test/verbs-fixture.js";
 import { checkSetup, openThisComputer } from "../src/setup.js";
@@ -69,7 +68,7 @@ describe("checkSetup", () => {
     made.length = 0;
     handed.length = 0;
     store = memoryStore();
-    const wiring = { store, adapters: {}, local: localWiring(join(dir, "user")), ssh: fakeSsh().wiring, hostId: "box:h1" };
+    const wiring = { store, adapters: {}, local: localWiring(join(dir, "user")), hostId: "box:h1" };
     keyed = createRuntime({ backend: stubBackend(), ...wiring });
     keyless = createRuntime({ backend: new NoProviderBackend(), ...wiring });
   });

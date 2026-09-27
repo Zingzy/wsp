@@ -11,7 +11,7 @@ describe("the app's restart road", () => {
     const road = appRestartRoad({ relaunch: () => void steps.push("relaunch"), quit: () => void steps.push("quit") });
     expect(road.shape).toBe("app");
     expect(road.refusal).toBeUndefined();
-    await road.restart({ port: 1, wsPort: 2, close: async () => void steps.push("close") });
+    await road.restart({ port: 1, close: async () => void steps.push("close") });
     expect(steps).toEqual(["relaunch", "quit"]);
   });
 });

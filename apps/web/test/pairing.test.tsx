@@ -14,7 +14,7 @@ import { DEVICE_TOKEN_KEY, deviceName, redeemPairingCode, runtimeUrl, storedDevi
 import { stubBackend } from "../../../packages/runtime/test/stub-backend.js";
 
 /** The page as the host serves it on its own computer: the digest of its token, never the token. */
-const boot = (over: Partial<BootPayload> = {}): BootPayload => ({ wsPort: 4410, wsPath: WS_PATH, paired: true, version: "0.0.0", tokenHash: "a".repeat(64), ...over });
+const boot = (over: Partial<BootPayload> = {}): BootPayload => ({ wsPath: WS_PATH, paired: true, version: "0.0.0", tokenHash: "a".repeat(64), ...over });
 
 let srv: RuntimeServer | undefined;
 let http: Server | undefined;
@@ -114,7 +114,7 @@ describe("the screen a page with no token shows", () => {
     const code = (await issued)["code"] as string;
     host.close();
 
-    render(<BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+    render(<BootGate boot={boot({ tokenHash: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
     expect(screen.getByText(PAIR_HEADING)).toBeTruthy();
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: code } });
@@ -126,7 +126,7 @@ describe("the screen a page with no token shows", () => {
 
   it("shows the host's refusal on a code it will not take, and stays on the screen", async () => {
     const { port } = await serving();
-    render(<BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+    render(<BootGate boot={boot({ tokenHash: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "AAAAAAAA" } });
       fireEvent.click(screen.getByRole("button", { name: "Pair" }));
@@ -140,7 +140,7 @@ describe("the screen a page with no token shows", () => {
     const { port } = await serving();
     window.localStorage.setItem(DEVICE_TOKEN_KEY, "a-token-this-host-never-minted");
     const page = render(
-      <BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />,
+      <BootGate boot={boot({ tokenHash: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />,
     );
     // The client's own close on unmount is not the host refusing anything: a token dropped here would send every
     // remount back to the code screen.
@@ -150,7 +150,7 @@ describe("the screen a page with no token shows", () => {
     expect(storedDeviceToken(window.localStorage)).toBe("a-token-this-host-never-minted");
 
     // The host refusing it is the one thing that drops it, and the page goes back to asking for a code.
-    render(<BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+    render(<BootGate boot={boot({ tokenHash: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
     await waitFor(() => expect(storedDeviceToken(window.localStorage)).toBeUndefined());
     expect(screen.getByText(PAIR_HEADING)).toBeTruthy();
   });
@@ -168,7 +168,7 @@ describe("the screen a page with no token shows", () => {
       },
     };
     try {
-      render(<BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+      render(<BootGate boot={boot({ tokenHash: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
       // Two asks: the first token the host refuses, and the one it is serving now.
       await waitFor(() => expect(asked).toHaveLength(2), { timeout: 5_000 });
       await waitFor(() => expect(screen.queryByTestId?.("booting") ?? null).toBeNull());
@@ -188,7 +188,7 @@ describe("the screen a page with no token shows", () => {
       },
     };
     try {
-      render(<BootGate boot={boot({ tokenHash: undefined, wsPort: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+      render(<BootGate boot={boot({ tokenHash: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
       expect(await screen.findByText(PAIR_HEADING, undefined, { timeout: 5_000 })).toBeTruthy();
       // The one token the shell holds was asked about once and refused once: nothing loops on it.
       expect(asked.length).toBeLessThanOrEqual(2);

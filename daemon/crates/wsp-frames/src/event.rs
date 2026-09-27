@@ -46,12 +46,7 @@ pub struct ProcEntry {
 pub enum DaemonEvent {
     /// The first frame after the auth reply: root is the directory every fs and git path resolves inside.
     #[serde(rename = "daemon.hello")]
-    DaemonHello {
-        root: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[ts(optional)]
-        version: Option<u32>,
-    },
+    DaemonHello { root: String, version: u32 },
     #[serde(rename = "pty.data", rename_all = "camelCase")]
     PtyData { pty_id: String, data: String },
     #[serde(rename = "pty.exit", rename_all = "camelCase")]

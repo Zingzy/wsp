@@ -20,12 +20,9 @@ import {
   NO_NODE_LINE,
   NO_SYSTEMD_LINE,
   noImportRoadLine,
-  noSshDaemonLine,
-  OVER_SSH,
   rootsPathIn,
-  sshDaemonPaths,
+  placeDaemonPaths,
   DAEMON_VERSION,
-  daemonVersionOf,
   DaemonAuthRequest,
   DaemonErrorCode,
   DaemonErrorResponse,
@@ -319,12 +316,12 @@ describe("protocol views", () => {
     const status = {
       id: "ws_1",
       name: "box",
-      machineId: "ssh://dev@box:22",
+      machineId: "m_box",
       phase: "running",
       golden: "",
       createdAt: "2026-09-11T00:00:00.000Z",
       project: { id: "pr_1a2b3c4d", name: "box", path: "/home/dev/box", computer: "pl_box" },
-      kind: "ssh",
+      kind: "cloud",
       machineState: "running",
       reach: { state: "reachable", url: "http://127.0.0.1:40000", expiresAt: 1789041249000 },
       size: { cpu: 8, memMb: 16384 },
@@ -714,7 +711,7 @@ describe("daemon wire types (one home for the ops the daemon answers)", () => {
     expect(DaemonResponse.parse({ id: 1, ok: false, error: "no such pty" })).toBeTruthy();
 
     const events = [
-      { type: "daemon.hello", root: "/root" },
+      { type: "daemon.hello", root: "/root", version: 2 },
       { type: "pty.data", ptyId: "p1", data: "hello" },
       { type: "pty.exit", ptyId: "p1", exitCode: 0, signal: undefined },
       { type: "port.open", port: 8080, pid: 12 },
@@ -725,12 +722,11 @@ describe("daemon wire types (one home for the ops the daemon answers)", () => {
     expect(() => DaemonEvent.parse({ type: "daemon.hello" })).toThrow();
   });
 
-  it("the hello carries the daemon's version; one without is the first version, as every daemon deployed before the field", () => {
+  it("the hello carries the daemon's version, and one without is refused", () => {
     expect(DAEMON_VERSION).toBeGreaterThanOrEqual(2);
     const current = DaemonEvent.parse({ type: "daemon.hello", root: "/root", version: DAEMON_VERSION });
     expect(current).toEqual({ type: "daemon.hello", root: "/root", version: DAEMON_VERSION });
-    expect(daemonVersionOf(current as { version?: number })).toBe(DAEMON_VERSION);
-    expect(daemonVersionOf(DaemonEvent.parse({ type: "daemon.hello", root: "/root" }) as { version?: number })).toBe(1);
+    expect(() => DaemonEvent.parse({ type: "daemon.hello", root: "/root" })).toThrow();
     expect(() => DaemonEvent.parse({ type: "daemon.hello", root: "/root", version: "2" })).toThrow();
     // No client asks for a daemon update: the runtime reads the hello on its own connect and replaces an old daemon itself.
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.updateDaemon", workspaceId: "ws_a" })).toThrow();
@@ -1264,7 +1260,7 @@ describe("daemon files and diff ops", () => {
   });
 
   it("names everywhere a daemon on a machine reached over ssh keeps something, all under one folder of its own", () => {
-    const at = sshDaemonPaths("/home/maya");
+    const at = placeDaemonPaths("/home/maya");
     expect(at).toEqual({
       wsp: "/home/maya/.wsp",
       dir: "/home/maya/.wsp/daemon",
@@ -1289,16 +1285,12 @@ describe("daemon files and diff ops", () => {
     // The deploy on the host writes these and the runtime reads the token and the port back off them, which is
     // why the rule sits here and in neither of them.
     expect(at.rootsPath).toBe(rootsPathIn("/home/maya"));
-    expect(sshDaemonPaths("/home/maya/")).toEqual(at);
+    expect(placeDaemonPaths("/home/maya/")).toEqual(at);
     // Nothing here is root's: the daemon on a machine somebody owns is installed under their own login.
     expect(Object.values(at).filter(path => !path.startsWith("/home/maya/"))).toEqual([]);
   });
 
-  it("says a machine over ssh is served no road to a daemon, and names no verb, since nobody can type one", () => {
-    // What the host does, not what the machine has: a daemon may be running there and nothing dials it. So the
-    // line names no verb and promises no later try, neither of which anybody here would keep.
-    expect(noSshDaemonLine("box")).toBe("box is a computer over ssh, and this host opens no road to a daemon on one, so its terminal, files and ports are not served");
-    expect(noSshDaemonLine("box")).not.toContain("daemon update");
+  it("refuses a login whose services stop with it", () => {
     // A login whose services stop with it would lose the daemon the moment the connection closed, so it is
     // refused with the one command that turns that off.
     expect(NO_LINGER_LINE).toContain("loginctl enable-linger");
@@ -1324,7 +1316,7 @@ describe("daemon files and diff ops", () => {
       expect(machineLacksShort(line).length).toBeLessThanOrEqual(30);
       expect(line.length).toBeGreaterThan(machineLacksShort(line).length);
     }
-    expect(noImportRoadLine("box", OVER_SSH)).toBe("box is a computer over ssh, which lands no folder yet; import to a fork, or register the folder on this computer");
+    expect(noImportRoadLine("box", "a plan9 box")).toBe("box is a plan9 box, which lands no folder yet; import to a fork, or register the folder on this computer");
   });
 });
 

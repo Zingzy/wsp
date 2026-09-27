@@ -296,7 +296,7 @@ describe("files surface", () => {
     const here = { ...imported, kind: "local" as const, machineId: "local" };
     const up = { ...here, machineState: "running", reach: { state: "reachable" }, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0 };
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING }));
-    provideDaemonHello(WS, { root: PROJECT_DEST, version: 3 });
+    provideDaemonHello(WS, { root: PROJECT_DEST });
     act(() =>
       useStore.setState({
         api: { subscribe: () => () => {} } as never,

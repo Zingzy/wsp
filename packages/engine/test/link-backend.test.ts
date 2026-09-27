@@ -148,12 +148,12 @@ describe("a machine over a link", () => {
 
   it("fills a create with the logins that computer signs in once and shares into every workspace on it", async () => {
     const l = link(sent =>
-      sent.op === "machine.backend" ? { ...FACTS, logins: "/var/lib/wsp/logins" } : sent.op === "machine.create" ? { machine: HANDLE } : {},
+      sent.op === "machine.backend" ? { ...FACTS, logins: "/wsp/logins" } : sent.op === "machine.create" ? { machine: HANDLE } : {},
     );
     const backend = await LinkBackend.open(l.link);
     await backend.create({ kind: "sandbox" });
     // The catalog's own rows, at the directory that computer said it keeps them in: Codex's auth.json today.
-    expect((l.sent.at(-1)!.params["spec"] as MachineSpec).shares).toEqual(sharesIn("/var/lib/wsp/logins"));
+    expect((l.sent.at(-1)!.params["spec"] as MachineSpec).shares).toEqual(sharesIn("/wsp/logins"));
     // A builder becomes an image, and a sign-in never sits in one, so it shares nothing at all.
     await backend.create({ kind: "sandbox", labels: { [BUILDER_LABEL]: "1" } });
     expect((l.sent.at(-1)!.params["spec"] as MachineSpec).shares).toBeUndefined();

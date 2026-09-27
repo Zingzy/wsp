@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // A lab: one fixture's app, served and left running, for a tester who drives it
 // by hand. It starts what the screenshot run starts, a throwaway home with a
-// fixture state in it and the built wsp command serving the built app on two
-// free ports, and then stays up instead of photographing anything and going.
+// fixture state in it and the built wsp command serving the built app on a
+// free port, and then stays up instead of photographing anything and going.
 //
 //   node lab.mjs start <name> --fixture <fixture> [--for <folder>]
 //   node lab.mjs stop <name> [--log <file>]
@@ -268,7 +268,6 @@ async function start({ name, fixture, for: keepLogIn }) {
     home,
     state,
     port,
-    wsPort: await freePort(),
     logPath: logPath(home),
     detached: true,
     // The lab's own home on both counts: the host's files and the home a turn's agent reads. What signs that agent

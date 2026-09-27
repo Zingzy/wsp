@@ -1176,7 +1176,7 @@ mod tests {
         let mut token = tempfile::NamedTempFile::new().unwrap();
         writeln!(token, "t").unwrap();
         let home = tempfile::tempdir().unwrap();
-        let under = std::path::Path::new("/var/lib/wsp-under-a-lower");
+        let under = std::path::Path::new("/var/wsp-under-a-lower");
         let mut options = Options::new(token.path());
         options.place_file = Some(home.path().join("place.json"));
         options.runtime_root = Some(under.to_path_buf());

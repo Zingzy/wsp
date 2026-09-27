@@ -4,11 +4,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PORT,
-  DEFAULT_WS_PORT,
   LOOPBACK,
   PORT_TAKEN_REFUSAL,
   WS_PATH,
-  WS_PORT_OFFSET,
   authority,
   isLoopback,
   isUrl,
@@ -41,33 +39,28 @@ describe("an address where an alias could go", () => {
   });
 });
 
-describe("the pair of ports the app is served on", () => {
-  it("names 4400 and 4410, one offset apart, as the pair nobody named", () => {
-    expect([DEFAULT_PORT, WS_PORT_OFFSET, DEFAULT_WS_PORT]).toEqual([4400, 10, 4410]);
-    expect(portsAsked({})).toEqual({ port: 4400, wsPort: 4410, named: false, address: LOOPBACK });
+describe("the port the app is served on", () => {
+  it("names 4400 as the port nobody named", () => {
+    expect(DEFAULT_PORT).toBe(4400);
+    expect(portsAsked({})).toEqual({ port: 4400, named: false, address: LOOPBACK });
   });
 
-  it("--port alone derives the WebSocket port at the defaults' own offset, and says a person named it", () => {
-    expect(portsAsked({ port: "4401" })).toEqual({ port: 4401, wsPort: 4411, named: true, address: LOOPBACK });
-    expect(portsAsked({ port: "5000" })).toEqual({ port: 5000, wsPort: 5010, named: true, address: LOOPBACK });
+  it("--port names the port, and says a person named it", () => {
+    expect(portsAsked({ port: "4401" })).toEqual({ port: 4401, named: true, address: LOOPBACK });
+    expect(portsAsked({ port: "5000" })).toEqual({ port: 5000, named: true, address: LOOPBACK });
   });
 
-  it("--ws-port names that port on its own, whether or not --port came with it", () => {
-    expect(portsAsked({ port: "4401", wsPort: "9000" })).toEqual({ port: 4401, wsPort: 9000, named: true, address: LOOPBACK });
-    expect(portsAsked({ wsPort: "9000" })).toEqual({ port: 4400, wsPort: 9000, named: true, address: LOOPBACK });
-  });
-
-  it("keeps both ports at 0, since 0 asks for any free port and the offset above it would be privileged", () => {
-    expect(portsAsked({ port: "0" })).toEqual({ port: 0, wsPort: 0, named: true, address: LOOPBACK });
+  it("keeps port 0 as it is, since 0 asks for any free port", () => {
+    expect(portsAsked({ port: "0" })).toEqual({ port: 0, named: true, address: LOOPBACK });
   });
 });
 
-describe("the address the pair is bound on", () => {
+describe("the address the port is bound on", () => {
   it("binds this computer alone unless --listen names another, and an empty word is no word", () => {
     expect(portsAsked({}).address).toBe("127.0.0.1");
     expect(portsAsked({ listen: "" }).address).toBe(LOOPBACK);
     expect(portsAsked({ listen: "0.0.0.0" }).address).toBe("0.0.0.0");
-    expect(portsAsked({ listen: "100.64.0.3" })).toEqual({ port: 4400, wsPort: 4410, named: false, address: "100.64.0.3" });
+    expect(portsAsked({ listen: "100.64.0.3" })).toEqual({ port: 4400, named: false, address: "100.64.0.3" });
   });
 
   it("reads 127.x, ::1 and localhost as this computer, and the wildcard, a private address and a hostname as beyond it", () => {
@@ -128,16 +121,14 @@ describe("who holds a port, and the lines about it", () => {
     expect(portTakenLine(4400, undefined)).toBe("Port 4400 is in use on this computer by another process.");
   });
 
-  it("the picked line names the pair it serves on and the port it stepped over with its holder", () => {
-    expect(portsPickedLine({ port: 4401, wsPort: 4411 }, 4400, { statePath: "/Users/z/.wsp/state.json" })).toBe(
-      "Serving on 4401 and 4411; 4400 is held by the host serving /Users/z/.wsp/state.json.",
+  it("the picked line names the port it serves on and the port it stepped over with its holder", () => {
+    expect(portsPickedLine({ port: 4401 }, 4400, { statePath: "/Users/z/.wsp/state.json" })).toBe(
+      "Serving on 4401; 4400 is held by the host serving /Users/z/.wsp/state.json.",
     );
   });
 
-  it("the refusal offers --port alone and says where its WebSocket port lands", () => {
-    expect(PORT_TAKEN_REFUSAL).toBe(
-      "Nothing was booted. Stop that process, or name a free app port with --port; the WebSocket port follows 10 above it unless --ws-port names another.",
-    );
+  it("the refusal offers stopping the holder or naming a free port with --port", () => {
+    expect(PORT_TAKEN_REFUSAL).toBe("Nothing was booted. Stop that process, or name a free port with --port.");
     expect(PORT_TAKEN_REFUSAL).not.toContain("—");
   });
 
@@ -146,12 +137,12 @@ describe("who holds a port, and the lines about it", () => {
   });
 });
 
-describe("one home for the pair and for the loopback address", () => {
+describe("one home for the default port and for the loopback address", () => {
   const HOME = join("packages", "protocol", "src", "app-ports.ts");
   const HOST = join("packages", "host", "src");
 
-  it("no other source file spells out a default port: the app and the desktop read them from here", () => {
-    const copies = sourceFiles().filter(rel => rel !== HOME && /\b(4400|4410)\b/.test(readFileSync(join(ROOT, rel), "utf8")));
+  it("no other source file spells out the default port: the app and the desktop read it from here", () => {
+    const copies = sourceFiles().filter(rel => rel !== HOME && /\b4400\b/.test(readFileSync(join(ROOT, rel), "utf8")));
     expect(copies).toEqual([]);
   });
 

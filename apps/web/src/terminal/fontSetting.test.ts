@@ -10,7 +10,7 @@ import { rememberTerminalFile } from "./terminalFile";
 const zoomOf = (workspaceId: string): number | undefined => useStore.getState().preferences.terminalZoom[workspaceId];
 
 const boot = (terminalFont?: string) => {
-  (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 1, token: "", ...(terminalFont !== undefined ? { terminalFont } : {}) };
+  (window as unknown as { __WSP__?: unknown }).__WSP__ = { token: "", ...(terminalFont !== undefined ? { terminalFont } : {}) };
 };
 
 describe("terminal font setting", () => {

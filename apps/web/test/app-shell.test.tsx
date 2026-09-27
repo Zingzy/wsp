@@ -92,7 +92,7 @@ const tabbar = () => document.querySelector("[data-right-panel-tabbar]");
 /** The boot object the host inlined into this page: with a token it was served on this computer's loopback, without
  * one it was served beyond it, which is the app's one reading of a window on another computer. */
 const served = (here: boolean): void => {
-  (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: here, version: "0.0.0", ...(here ? { wsPort: 7788, tokenHash: "a".repeat(64) } : {}) };
+  (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: here, version: "0.0.0", ...(here ? { tokenHash: "a".repeat(64) } : {}) };
 };
 // Lets the kit's post-mount effects (scroll fades, the machine surface's lineage fetch) settle inside act.
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));

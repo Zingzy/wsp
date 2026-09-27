@@ -389,20 +389,6 @@ async fn a_kind_with_no_modules_refuses_both_watches_in_the_words_the_pane_print
 }
 
 #[tokio::test]
-async fn a_machine_reached_over_ssh_reads_its_own_machine_since_the_daemon_on_it_is_the_one_a_fork_runs() {
-    let t = tree();
-    let d = start(|o| {
-        with_tree(&t)(o);
-        o.kind = "ssh".to_owned();
-    })
-    .await;
-    let mut c = Client::connect(d.addr).await;
-    assert_eq!(c.request("proc.watch", json!({})).await["ok"], true);
-    assert_eq!(c.request("sys.watch", json!({})).await["ok"], true);
-    c.close().await;
-}
-
-#[tokio::test]
 async fn a_metrics_module_that_cannot_read_this_machine_refuses_the_watch_with_its_own_words_so_no_row_sits_at_pending() {
     // A /proc with nothing in it: the module names the file it could not read, and the pane prints that.
     let empty = tempfile::tempdir().unwrap();
