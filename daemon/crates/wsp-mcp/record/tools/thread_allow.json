@@ -1,0 +1,86 @@
+{
+  "cloudOff": {
+    "name": "thread_allow",
+    "description": "Answers the prompt the thread is stopped on and lets the call run, by thread id or a prefix of it. A thread stopped on a prompt reads Needs you in threads and runs nothing until somebody picks, so this is how a thread you did not open is unstuck; the prompt itself is on the thread's own rows, which thread_read prints. Refused in one line when the thread is waiting on no prompt and when the prompt it is stopped on carries no such answer, which is what a call that asks the person something rather than for consent does.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "the thread's id, or a prefix of it that names one, as threads lists them"
+        }
+      },
+      "required": [
+        "thread"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "askId": {
+          "type": "string"
+        },
+        "optionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId",
+        "askId",
+        "optionId"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "thread_allow",
+    "description": "Answers the prompt the thread is stopped on and lets the call run, by thread id or a prefix of it. A thread stopped on a prompt reads Needs you in threads and runs nothing until somebody picks, so this is how a thread you did not open is unstuck; the prompt itself is on the thread's own rows, which thread_read prints. Refused in one line when the thread is waiting on no prompt and when the prompt it is stopped on carries no such answer, which is what a call that asks the person something rather than for consent does.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread": {
+          "type": "string",
+          "description": "the thread's id, or a prefix of it that names one, as threads lists them"
+        }
+      },
+      "required": [
+        "thread"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "threadId": {
+          "type": "string"
+        },
+        "askId": {
+          "type": "string"
+        },
+        "optionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId",
+        "askId",
+        "optionId"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

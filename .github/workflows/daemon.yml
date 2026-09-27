@@ -13,6 +13,7 @@ on:
       - "daemon/**"
       - "packages/daemon/**"
       - "packages/protocol/**"
+      - "packages/host/test/mcp-binary.test.ts"
       - ".github/workflows/daemon.yml"
   push:
     branches:
@@ -21,6 +22,7 @@ on:
       - "daemon/**"
       - "packages/daemon/**"
       - "packages/protocol/**"
+      - "packages/host/test/mcp-binary.test.ts"
       - ".github/workflows/daemon.yml"
 
 permissions:
@@ -66,17 +68,21 @@ jobs:
           ./scripts/libseccomp-archive.sh
       - name: Format
         run: cargo fmt --check
+      # The tool server is a feature of the binary the guest build leaves off; the lints and the tests read it on.
       - name: Lints
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets --features wsp-daemon-bin/mcp -- -D warnings
       - name: Tests
-        run: cargo test --locked
+        run: cargo test --locked --features wsp-daemon-bin/mcp
       # The protocol package re-exports the TypeScript wsp-frames writes, checked in so a build needs no cargo. The
       # folder is written again from nothing here, and any difference from the checkout fails: a hand edit, a file
       # added or removed by hand, or a change to the crate whose types were not written.
       - name: The TypeScript types are the ones the crate writes
         run: ./scripts/ts-types.sh --check
       - name: Release build
-        run: cargo build --locked --release
+        run: cargo build --locked --release --features wsp-daemon-bin/mcp
+      # What an agent pays at every session start is the shipped profile's, so the budget is measured there.
+      - name: The tool server's budget, in the shipped profile
+        run: cargo test --locked --release --features wsp-daemon-bin/mcp -p wsp-daemon-bin --test bin the_tool_server
       - name: C compiler for the musl target, and libseccomp built against musl
         # ring carries C, and its build looks for x86_64-linux-musl-gcc, which musl-tools provides. The static
         # binary links a libseccomp built against musl, since the distribution's archive is glibc's.
@@ -142,11 +148,13 @@ jobs:
         run: node packages/wspx/scripts/daemon-binary.mjs --triple x86_64-unknown-linux-musl
       # The wire suite as the contract: every daemon test drives a binary, and here it is the one this job built
       # rather than the static one staged above, so a change to daemon/ is gated on the binary it produced.
+      # The tool server in the same binary, held to the one the host package serves.
       - name: Wire suite against the binary
         working-directory: .
         env:
           WSP_DAEMON_BIN: daemon/target/release/wsp-daemon
-        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=1 packages/daemon
+          WSP_MCP_BIN: daemon/target/release/wsp-daemon
+        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=1 packages/daemon packages/host/test/mcp-binary.test.ts
 
   # The two Linux daemons this head would ship, uploaded on every run so staging one on another computer is a
   # download from the run that built the head instead of a release dispatched by hand. Outside a run that is

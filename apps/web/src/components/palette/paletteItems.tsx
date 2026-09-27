@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The palette's item list over the sidebar's project snapshots: the shell's
 // own actions, the selected workspace's actions from the workspace registry,
-// one row per workspace to switch to, recent threads at rest and every thread
-// whose title holds the typed query. Pure apart from the callbacks it is
-// handed, so the list is testable without the dialog.
+// one row per workspace to switch to, recent threads at rest, every thread
+// whose title holds the typed query and every other one whose messages hold
+// it, as the host found them. Pure apart from the callbacks it is handed, so
+// the list is testable without the dialog.
 import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, FolderIcon, FolderPlusIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { agentName } from "@wsp/catalog";
-import { PLACES_WORDS, type PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, type PlaceView, type SessionSearchHit } from "@wsp/protocol";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
@@ -49,6 +50,8 @@ export interface PaletteItemsInput {
   readonly selectedId: string | null;
   /** What the person typed; the thread search runs over it, the at-rest list ignores it. */
   readonly query: string;
+  /** The threads whose messages the host found the query in, for that query. */
+  readonly messageHits: ReadonlyArray<SessionSearchHit>;
   readonly canCreate: boolean;
   readonly handlers: PaletteHandlers;
   readonly verbs: WorkspaceVerbs;
@@ -62,6 +65,7 @@ export interface PaletteItems {
   readonly workspaceItems: ReadonlyArray<CommandPaletteActionItem>;
   readonly recentThreadItems: ReadonlyArray<CommandPaletteActionItem>;
   readonly threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  readonly messageSearchItems: ReadonlyArray<CommandPaletteActionItem>;
 }
 
 const sync = (fn: () => void) => async (): Promise<void> => {
@@ -264,10 +268,17 @@ export function buildPaletteItems(input: PaletteItemsInput): PaletteItems {
   );
   const item = (thread: (typeof threads)[number]) => threadItem(thread, thread.workspace, input.places, input.handlers);
   const latest = [...threads].sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+  const byTitle = searchSidebarThreadsByTitle(threads, input.query);
+  // A thread its title already finds is listed there once; a hit on a thread the sidebar does not hold opens nothing.
+  const byMessage = input.messageHits.flatMap(hit => {
+    const thread = threads.find(t => t.threadId === hit.threadId && t.workspaceId === hit.workspaceId);
+    return thread === undefined || byTitle.includes(thread) ? [] : [{ ...item(thread), value: `message:${thread.id}`, searchTerms: [input.query, hit.snippet], description: hit.snippet }];
+  });
   return {
     actionItems: actionItems(input),
     workspaceItems: workspaceItems(input),
     recentThreadItems: latest.slice(0, RECENT_THREAD_LIMIT).map(item),
-    threadSearchItems: searchSidebarThreadsByTitle(threads, input.query).map(item),
+    threadSearchItems: byTitle.map(item),
+    messageSearchItems: byMessage,
   };
 }

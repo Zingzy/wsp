@@ -11,7 +11,7 @@
 // absolute. Not persisted: a reload follows the thread again.
 import { useMemo } from "react";
 import { create } from "zustand";
-import type { ProjectRef } from "@wsp/protocol";
+import type { ProjectRef, WorkspaceView } from "@wsp/protocol";
 import { useStore } from "../protocol/store.js";
 import { parentPath, pathSegments, type PathSegment } from "./entries.js";
 import { getDaemonRoot, useDaemonRoot } from "./wire.js";
@@ -98,11 +98,18 @@ export const useRootStore = create<RootStoreState>()(set => ({
 }));
 
 /** The folder the panes show: the pin, else the agent's shell folder where the daemon can list it, else the thread's
- * folder, else the daemon's home (null until its hello). */
-export function selectRoot(byWorkspaceId: Record<string, WorkspaceRoot>, workspaceId: string, roots: readonly string[]): string | null {
+ * folder, else the workspace's project folder where the daemon can list it, else the daemon's home (null until its
+ * hello). A copy nobody has run a thread in yet opens on the copy, never on the whole home it sits in. */
+export function selectRoot(byWorkspaceId: Record<string, WorkspaceRoot>, workspaceId: string, roots: readonly string[], project: string | null = null): string | null {
   const entry = byWorkspaceId[workspaceId] ?? NONE;
-  const shell = entry.shell !== null && rootOf(roots, entry.shell) !== null ? entry.shell : null;
-  return entry.pinned ?? shell ?? entry.followed ?? roots[0] ?? null;
+  const listable = (dir: string | null): string | null => (dir !== null && rootOf(roots, dir) !== null ? dir : null);
+  return entry.pinned ?? listable(entry.shell) ?? entry.followed ?? listable(project) ?? roots[0] ?? null;
+}
+
+/** The folder a workspace's project sits in on its machine: a copy's own folder where the copy stands beside the
+ * project, else the project's. What the finder searches and what Open in editor opens for the thread. */
+export function projectFolderOf(workspace: Pick<WorkspaceView, "copy" | "project">): string {
+  return workspace.copy?.path ?? workspace.project.path;
 }
 
 /** The workspace's one project off the store: a workspace is one project's copy, so this is the whole of what it
@@ -120,7 +127,11 @@ export function useRoots(workspaceId: string): string[] {
 
 export function useRoot(workspaceId: string): string | null {
   const roots = useRoots(workspaceId);
-  return useRootStore(s => selectRoot(s.byWorkspaceId, workspaceId, roots));
+  const project = useStore(s => {
+    const workspace = s.workspaces.find(w => w.id === workspaceId);
+    return workspace === undefined ? null : projectFolderOf(workspace);
+  });
+  return useRootStore(s => selectRoot(s.byWorkspaceId, workspaceId, roots, project));
 }
 
 export function usePinned(workspaceId: string): boolean {
@@ -146,15 +157,18 @@ export function useChosenFolder(workspaceId: string): string | null {
 }
 
 /** The folder the next thread starts in, as the line under the composer shows it: the folder chosen outright, else
- * the default project's, else the kind's own folder as the runtime publishes it on the view, else the daemon's home,
+ * the project's as the workspace holds it (a copy's own folder, where the runtime starts its turns), else the kind's own folder as the runtime publishes it on the view, else the daemon's home,
  * which is where a kind that names no folder lands the shell (a fork's daemon runs from that home). A shown thread's
  * own folder is its row's, not this: a resume runs where its harness already is. */
 export function useThreadFolder(workspaceId: string): string | null {
   const daemonRoot = useDaemonRoot(workspaceId);
   const kindFolder = useStore(s => s.workspaces.find(w => w.id === workspaceId)?.folder);
-  const project = useDefaultProject(workspaceId);
+  const project = useStore(s => {
+    const workspace = s.workspaces.find(w => w.id === workspaceId);
+    return workspace === undefined ? undefined : projectFolderOf(workspace);
+  });
   const chosen = useChosenFolder(workspaceId);
-  return pickThreadFolder({ chosen, project: project?.path, kindFolder, daemonRoot });
+  return pickThreadFolder({ chosen, project, kindFolder, daemonRoot });
 }
 
 /** The rule itself, so the hook above and the command that opens a terminal cannot answer it two ways. */
@@ -167,7 +181,7 @@ export function threadFolderOf(workspaceId: string): string | null {
   const workspace = useStore.getState().workspaces.find(w => w.id === workspaceId);
   return pickThreadFolder({
     chosen: (useRootStore.getState().byWorkspaceId[workspaceId] ?? NONE).chosen,
-    project: workspace?.project?.path,
+    project: workspace === undefined ? undefined : projectFolderOf(workspace),
     kindFolder: workspace?.folder,
     daemonRoot: getDaemonRoot(workspaceId),
   });

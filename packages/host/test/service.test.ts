@@ -31,6 +31,7 @@ import {
 import { stateIgnoredLine, writeHost } from "../src/hosts.js";
 import { BOX_KEY_ENV, PROVIDER_ENV } from "../src/providers.js";
 import type { HostClient } from "../src/verbs.js";
+import { runningWsp } from "../src/mcp-install.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { CLOUD_ON } from "../src/cloud.js";
@@ -235,6 +236,18 @@ describe("one module per service manager", () => {
     expect(SERVICE_MANAGERS.systemd.text(plan)).toContain("Environment='WSP_STARTED_BY=service'");
   });
 
+  it("each manager reads the program a unit it wrote runs, and nothing but that program, whatever words follow it", () => {
+    const at: ServiceAddress = { statePath: "/Users/z/.wsp/state.json", home: "/Users/z", uid: 501 };
+    const odd = "/Users/z/O'Brien & Co/.wsp/bin/wsp";
+    for (const manager of Object.values(SERVICE_MANAGERS)) {
+      const text = manager.text({ ...at, argv: [odd, "up", "--state", at.statePath], cwd: "/Users/z", env: {}, logPath: "/Users/z/.wsp/host.log" });
+      expect(manager.runs(text, odd), manager.words).toBe(true);
+      expect(manager.runs(text, "/Users/z/O'Brien & Co/.wsp/bin"), manager.words).toBe(false);
+      expect(manager.runs(text, "up"), manager.words).toBe(false);
+      expect(manager.runs(manager.text({ ...at, argv: ["/usr/bin/node", odd, "up"], cwd: "/Users/z", env: {}, logPath: "/l" }), odd), manager.words).toBe(false);
+    }
+  });
+
   it("the unit standing is what says this computer is registered to serve a state file, whether or not the manager has it loaded", () => {
     const home = mkdtempSync(join(tmpdir(), "wsp-registered-"));
     try {
@@ -305,6 +318,7 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
       plans.push(plan);
       return `fake ${plan.argv.join(" ")}\n`;
     },
+    runs: (text, program) => text.startsWith(`fake ${program} `),
     load: a => [["fake", "load", unit(a).name]],
     unload: a => [["fake", "unload", unit(a).name]],
     holds: a => ["fake", "holds", unit(a).name],
@@ -553,6 +567,14 @@ describe("wsp up --service, wsp down and wsp status", () => {
       `log         ${join(home, ".wsp", "host.log")}`,
       "Stop it with wsp down.",
     ]);
+  });
+
+  it("behind the app's shim, the unit runs the shim: the app's binary is node only under the variable the shim sets", async () => {
+    keyInFile();
+    const fake = svc();
+    const shim = join(home, ".wsp", "bin", "wsp");
+    expect(await upServiceCommand(quietIO(), { ...opts, running: { ...runningWsp(), shim } }, fake.deps)).toBe(0);
+    expect(fake.plans[0]!.argv).toEqual([shim, "up", "--state", statePath, "--port", "4400", "--listen", "127.0.0.1"]);
   });
 
   it.runIf(CLOUD_ON)("refuses before writing anything when the key is only in this shell, since the service starts without it", async () => {

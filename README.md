@@ -60,7 +60,7 @@ wsp import api ~/code/api    # put a folder in it
 wsp run api "fix the flaky terminal test"
 ```
 
-The first line that needs a host starts one and says so; `wsp down` stops it. `wsp up` is for a host you want to watch in a terminal, and `wsp up --service` keeps one up across logins. The desktop app is the same host and app in one window; bundles for macOS and Linux are on the [releases page](https://github.com/Zingzy/wsp/releases).
+The first line that needs a host starts one and says so; `wsp down` stops it. `wsp up` is for a host you want to watch in a terminal, and `wsp up --service` keeps one up across logins. The desktop app installs the host as your computer's own service on its first launch; bundles for macOS and Linux are on the [releases page](https://github.com/Zingzy/wsp/releases).
 
 `wsp --help` is sixteen words on five nouns: image, place, workspace, thread, project. Every command is `wsp <verb> <workspace> ...`, the workspace first. `wsp --help agent` has the verbs your agents use and `wsp host --help` the roads to a host on another computer. The command line and the MCP tools are the same verbs; the app's palette runs them too.
 

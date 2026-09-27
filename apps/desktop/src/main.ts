@@ -1,29 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, assetDir, computerNameHere, daemonBinaryHere, installEach, mcpServerSpec, NO_PROJECT_YET, runningWsp, shimPath, wspHome, type CliIO, type HereAt } from "@wsp/host";
-import { DEFAULT_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
-import type { Runtime } from "@wsp/runtime";
+import { adoptLoginPath, agentsHere, computerNameHere, daemonBinaryHere, installEach, mcpServerSpec, runningWsp, shimPath, systemService, wspHome, type CliIO } from "@wsp/host";
+import { HOST_WORDS, OutsideLine, ThemePreference, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
 import { chooseFrom, contextMenuTemplate, parseContextMenuItems } from "./context-menu.js";
 import { deepLinks, linkInArgv } from "./deep-link.js";
 import { fontDirs, fontFamilies, indexFonts, localFontFaces, type FontFile } from "./fonts.js";
 import { bundleShell, type BundleShell } from "./get-bundle.js";
-import { appRestartRoad } from "./restart-road.js";
-import { locateHost, openHost, statePathIn, userDataIn, type HostSession, type Launch, type Located } from "./host-lifecycle.js";
+import { firstLaunch, homeOf, openHost, statePathIn, stopWsp, userDataIn, workingHere, type HostSession, type Launch } from "./host-lifecycle.js";
 import { hostSwitcher, type HostSwitcher } from "./host-switch.js";
 import { offerMove, type MoveGate } from "./move.js";
-import { sayNeedsYou, type Notifier } from "./needs-you.js";
+import { sayOutside, showBadge, type Notifier } from "./needs-you.js";
 import { allowed, fromAppPage, fromOnboardingPage, hostsViewFor, notForThisPage } from "./origin.js";
 import { guardWorkers, loadHostPage } from "./page-session.js";
 import { pagePreviews } from "./previews.js";
-import { checkSetup, openThisComputer } from "./setup.js";
+import { QUIT_WORD, quitChoice, quitPrompt } from "./quit.js";
 import { installShim, shimText } from "./shim.js";
 import { windowOptions } from "./window.js";
 import { isShellZoomChord, shellChordOf } from "./zoom.js";
 
 const here = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
-const WEB_DIR = assetDir("web");
 const PRELOAD = here("./preload.cjs");
 const ONBOARDING_PAGE = here("./onboarding.html");
 /** The wsp command the shim runs, bundled beside this main. */
@@ -31,11 +28,6 @@ const CLI_SCRIPT = here("./cli.mjs");
 
 const refuse = (q: string): Promise<string> => Promise.reject(new Error(`no terminal to ask: ${q}`));
 const io: CliIO = { log: l => console.log(l), error: l => console.error(l), ask: refuse, askSecret: refuse };
-
-function envPort(name: string, fallback: number): number {
-  const raw = process.env[name];
-  return raw === undefined || raw === "" ? fallback : Number(raw);
-}
 
 const newWindow = (preload?: string): BrowserWindow => new BrowserWindow(windowOptions(process.platform, app.getVersion(), preload));
 
@@ -52,7 +44,7 @@ if (!app.requestSingleInstanceLock()) app.exit(0);
 
 /** The host the window is on; every bridge call is gated on its origin and on what a page on it may ask for. */
 let session: HostSession | undefined;
-/** The app's own host, attached or started: the window opens on it, returns to it, and it is stopped on quit alone. */
+/** The host the window opened on: it returns to it, and a quit asks whether to stop it. */
 let local: HostSession | undefined;
 let switcher: HostSwitcher | undefined;
 let win: BrowserWindow | undefined;
@@ -160,15 +152,17 @@ function raiseWindow(win: BrowserWindow): void {
   win.focus();
 }
 
-// A build waiting on the person, or a machine that came up, said over the system while the window is not the one they
-// are looking at. Only the page of the host the window is on speaks here, and only its own sentence: what a
-// notification says is whatever the field holds.
-listen("needs-you:say", (event, need) => {
-  const parsed = InitNeedsYou.safeParse(need);
+// A line the page says outside the app, over the system while the window is not the one they are looking at. Only the
+// page of the host the window is on speaks here, and only its own sentence: what a notification says is whatever the
+// fields hold.
+listen("outside:say", (event, line) => {
+  const parsed = OutsideLine.safeParse(line);
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!parsed.success || win === null) return;
-  sayNeedsYou(parsed.data, { focused: () => win.isFocused(), raise: () => raiseWindow(win), open: () => win.webContents.send("needs-you:open") }, NOTIFIER);
+  sayOutside(parsed.data, { focused: () => win.isFocused(), raise: () => raiseWindow(win), open: () => win.webContents.send("needs-you:open") }, NOTIFIER);
 });
+
+listen("badge:set", (_event, count) => showBadge(count, app));
 
 // The one bridge call the preload answers itself, off the shell's own webUtils: it asks here first, so a page a
 // computer this one does not own serves is handed no path from this computer's desktop.
@@ -225,9 +219,16 @@ function refreshMenu(): void {
       refreshMenu();
     });
   });
+  // Quit is the one row drawn by hand: it asks whether to stop wsp too. Every other road out of the app, a signal, an
+  // update, the last window closing, quits with nothing asked and leaves wsp running.
+  const quit: Electron.MenuItemConstructorOptions = { label: QUIT_WORD, accelerator: "CmdOrCtrl+Q", click: () => void askQuit() };
   const template: Electron.MenuItemConstructorOptions[] = [
-    ...(process.platform === "darwin" ? [{ role: "appMenu" as const }] : []),
-    { role: "fileMenu" },
+    ...(process.platform === "darwin"
+      ? [
+          { label: app.name, submenu: [{ role: "about" as const }, { type: "separator" as const }, { role: "services" as const }, { type: "separator" as const }, { role: "hide" as const }, { role: "hideOthers" as const }, { role: "unhide" as const }, { type: "separator" as const }, quit] },
+          { role: "fileMenu" as const },
+        ]
+      : [{ label: "File", submenu: [quit] }]),
     { role: "editMenu" },
     { role: "viewMenu" },
     { label: HOST_WORDS.hosts, submenu: hosts },
@@ -236,51 +237,33 @@ function refreshMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-/** The loopback address a thread on this computer dials, filled by each host this window starts once it binds. */
-const loopback: HereAt = {};
-/** The wsp this window's agents run: the shim, as the first launch's install writes it. */
-const wspRunning = (): ReturnType<typeof runningWsp> => ({ ...runningWsp(), shim: shimPath(wspHome()) });
-
-function locate(): Promise<Located> {
-  return locateHost(launch());
+/** Where this launch's state lives: the home it names and the state file in it. */
+function where(): { home: string; statePath: string } {
+  const at = launch();
+  const home = homeOf(at);
+  return { home, statePath: statePathIn(home, at) };
 }
 
-/** A serving host is attached to with no gate; otherwise a host is started over the runtime the first launch just
- * recorded this computer on, or, with none, over the located home once the gate says it holds something to show. */
-async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
-  const statePath = statePathIn(located.home, launch());
-  if (located.session === undefined) {
-    let runtime = recorded;
-    if (runtime === undefined) {
-      const state = await checkSetup({ statePath, agents: { here: loopback, run: wspRunning() } });
-      if (!state.ready) return false;
-      runtime = state.runtime;
-    }
-    session = await openHost({
-      port: envPort("WSP_PORT", DEFAULT_PORT),
-      statePath,
-      webDir: WEB_DIR,
-      io,
-      runtime,
-      // When a sign-in page opens without a click, it goes to the default browser, not into this window.
-      openUrl: url => shell.openExternal(url).then(() => true, () => false),
-      // The wsp tools the cloud setup writes into an agent's config run the shim, as the first launch's install does.
-      running: wspRunning(),
-      restart: appRestartRoad(app),
-      here: loopback,
-    });
-  } else {
-    session = located.session;
-  }
-  local = session;
-  io.log(`${session.owned ? "serving" : "attached"} ${session.url} (home ${located.home})`);
+/** The host the window opens on: the one serving this launch's state file, the account's, or this computer's own
+ * service, installed and started first where it is not serving. */
+function attach(): Promise<HostSession> {
+  const { home, statePath } = where();
+  return openHost({ statePath, home, shim: shimPath(wspHome()), io, service: systemService() });
+}
+
+/** The window, on the host it was handed. */
+async function showApp(on: HostSession): Promise<void> {
+  const { statePath } = where();
+  session = on;
+  local = on;
+  io.log(`attached ${on.url} (state ${statePath})`);
   // Dark until the page says otherwise: the page opens on its dark side too, and tells the shell the preference once it has read it.
   nativeTheme.themeSource = "dark";
   win = newWindow(PRELOAD);
   const page = win;
   guardWorkers(page.webContents.session);
   switcher = hostSwitcher({
-    local,
+    local: on,
     home: wspHome(),
     statePath,
     here: computerNameHere(),
@@ -313,10 +296,9 @@ async function showApp(located: Located, recorded?: Runtime): Promise<boolean> {
     page.webContents.send("shell:chord", shellChordOf(input));
   });
   page.on("closed", () => terminalFocus.delete(contentsId));
-  await loadHostPage(page, `${session.url}${links.take()}`, { log: io.error });
+  await loadHostPage(page, `${on.url}${links.take()}`, { log: io.error });
   pageUp = true;
   links.ready();
-  return true;
 }
 
 const ONBOARDING_CHANNELS = ["onboarding:agents", "onboarding:install", "onboarding:finish"] as const;
@@ -326,12 +308,12 @@ function agentIds(raw: unknown): string[] {
   return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === "string") : [];
 }
 
-/** The first launch: one screen naming the agents the scan found on this computer, the wsp tools into them, then
- * this computer recorded as the workspace and the app opened on it. The onboarding page and the app window share the
- * one preload; only the onboarding page is answered here, and only while it is up. The host starts before the page's
- * window closes so the window count never hits zero. */
-async function showOnboarding(located: Located): Promise<void> {
-  const statePath = statePathIn(located.home, launch());
+/** The first launch: one screen naming the agents the scan found on this computer, the wsp tools into them, then the
+ * app opened on this computer's own host. The onboarding page and the app window share the one preload; only the
+ * onboarding page is answered here, and only while it is up. The app window opens before the page's window closes so
+ * the window count never hits zero. */
+async function showOnboarding(): Promise<void> {
+  const { statePath } = where();
   const shim = shimPath(wspHome());
   const page = newWindow(PRELOAD);
   const gate = (event: IpcMainInvokeEvent, channel: string): void => {
@@ -349,12 +331,11 @@ async function showOnboarding(located: Located): Promise<void> {
     return installEach(agentIds(raw), mcpServerSpec(statePath, { ...runningWsp(), shim }), homedir());
   });
   let finishing: Promise<void> | undefined;
-  // The one way out of the screen: this computer recorded and the app opened on it.
+  // The one way out of the screen: the app opened on this computer's own host, which the service may have
+  // restarted while the screen was up.
   const finish = (): Promise<void> =>
     (finishing ??= (async () => {
-      const { runtime, workspace } = await openThisComputer({ statePath, agents: { here: loopback, run: wspRunning() } });
-      io.log(workspace === null ? NO_PROJECT_YET : `${workspace.name} (${workspace.id}) is this computer`);
-      await showApp(located, runtime);
+      await showApp(await attach());
       for (const channel of ONBOARDING_CHANNELS) ipcMain.removeHandler(channel);
       page.close();
     })());
@@ -367,28 +348,38 @@ async function showOnboarding(located: Located): Promise<void> {
   await page.loadFile(ONBOARDING_PAGE);
 }
 
-let stopping: Promise<void> | undefined;
-// The app's own host is stopped only when this process started it, whichever host the window was on.
-app.on("before-quit", event => {
-  if (stopping !== undefined) return;
-  if (local === undefined || !local.owned) return;
-  event.preventDefault();
-  stopping = local
-    .close()
-    .catch((e: unknown) => io.error(`host close failed: ${e instanceof Error ? e.message : String(e)}`))
-    .then(() => app.quit());
-});
+/** The question the menu's Quit asks while the window is on this computer's own host: quit and leave wsp running, or
+ * stop it too. A window on a host somewhere else quits with nothing to ask. */
+async function askQuit(): Promise<void> {
+  if (local === undefined || local.remote) return app.quit();
+  const { home, statePath } = where();
+  const working = await workingHere(statePath, home).catch(() => 0);
+  const choice = quitChoice((await dialog.showMessageBox({ type: "question", ...quitPrompt(working) })).response);
+  if (choice === "cancel") return;
+  if (choice === "stop") {
+    try {
+      await stopWsp(statePath, home, systemService());
+    } catch (e) {
+      dialog.showErrorBox("wsp did not stop", e instanceof Error ? e.message : String(e));
+    }
+    // The page is on a host that just stopped, and a window left to close itself held the quit for minutes
+    // (measured 10 s to 336 s on a window loaded a moment before), so it is closed without asking the page.
+    for (const w of BrowserWindow.getAllWindows()) w.destroy();
+  }
+  app.quit();
+}
+
 app.on("window-all-closed", () => app.quit());
 
 /** The wsp command on this computer, rewritten whenever this app is not the one it names: an update or a move
- * changes the path inside the bundle, and the shim is what every agent's config runs. A home that cannot be
- * written costs the command, never the window. */
+ * changes the path inside the bundle, and the shim is what every agent's config and the service run. A home that
+ * cannot be written is the launch's refusal, since the service would start nothing. */
 function installCommand(): void {
   const shim = shimPath(wspHome());
   try {
     io.log(`wsp command ${installShim(shim, shimText({ execPath: process.execPath, script: CLI_SCRIPT, ...forwarderHere() }))} at ${shim}`);
   } catch (e) {
-    io.error(`wsp command not written at ${shim}: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`the wsp command could not be written at ${shim}: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -427,13 +418,18 @@ app
     // The command is written first and waits on nothing: it needs no PATH, and a launch is expected to have left it
     // in place by the time a window is up.
     installCommand();
-    // Then, before the setup gate that builds the runtime this window serves and before the first launch reads the
-    // agents on this computer: a window opened from Finder or the Dock was handed launchd's PATH.
+    // Then, before the service is written and before the first launch reads the agents on this computer: a window
+    // opened from Finder or the Dock was handed launchd's PATH, and the service runs with the PATH this launch holds.
     await adoptLoginPath(line => io.log(line));
-    const located = await locate();
-    if (!(await showApp(located))) await showOnboarding(located);
+    const on = await attach();
+    const { home, statePath } = where();
+    if (on.remote || !(await firstLaunch(statePath, home))) await showApp(on);
+    else await showOnboarding();
   })
   .catch((e: unknown) => {
-    dialog.showErrorBox("wsp could not start", e instanceof Error ? e.message : String(e));
+    const why = e instanceof Error ? e.message : String(e);
+    // A launch nobody watches has only its log to say why it quit.
+    io.error(`wsp could not start: ${why}`);
+    dialog.showErrorBox("wsp could not start", why);
     app.quit();
   });

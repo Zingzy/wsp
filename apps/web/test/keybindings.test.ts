@@ -76,6 +76,14 @@ describe("default shortcuts", () => {
     expect(DEFAULT_KEYBINDINGS.filter(rule => rule.command === "thread.settle")).toHaveLength(1);
   });
 
+  it("mod+alt+u jumps to the next thread that needs the person, Command on macOS and Control elsewhere, outside a terminal", () => {
+    expect(resolve(cmd("u", { altKey: true }), MAC)).toBe("thread.nextNeedsYou");
+    expect(resolve(ctrl("u", { altKey: true }), LINUX)).toBe("thread.nextNeedsYou");
+    expect(resolve(cmd("u", { altKey: true }), MAC, { terminalFocus: true })).toBeNull();
+    expect(DEFAULT_KEYBINDINGS.filter(rule => rule.command === "thread.nextNeedsYou")).toHaveLength(1);
+    expect(KEYBINDING_WORDS["thread.nextNeedsYou"]).toBe("Next thread that needs you");
+  });
+
   it("gates the terminal chords on terminalFocus and hands mod+n to chat otherwise", () => {
     expect(resolve(cmd("d"), MAC)).toBeNull();
     expect(resolve(cmd("d"), MAC, { terminalFocus: true })).toBe("terminal.split");
@@ -107,6 +115,38 @@ describe("default shortcuts", () => {
     expect(resolve(cmd("k"), MAC, { terminalFocus: true })).toBe("commandPalette.toggle");
     expect(resolve(ctrl("k"), LINUX, { terminalFocus: true })).toBeNull();
     expect(resolve(ctrl("k"), LINUX)).toBe("commandPalette.toggle");
+  });
+
+  it("finds a file on mod+p and searches the files on mod+shift+f, from a focused terminal on macOS and never over ctrl in a shell elsewhere", () => {
+    expect(resolve(cmd("p"), MAC)).toBe("files.quickOpen");
+    expect(resolve(ctrl("p"), LINUX)).toBe("files.quickOpen");
+    expect(resolve(cmd("f", { shiftKey: true }), MAC)).toBe("files.search");
+    expect(resolve(cmd("F", { shiftKey: true }), MAC)).toBe("files.search");
+    expect(resolve(ctrl("f", { shiftKey: true }), LINUX)).toBe("files.search");
+    expect(resolve(cmd("p"), MAC, { terminalFocus: true })).toBe("files.quickOpen");
+    expect(resolve(ctrl("p"), LINUX, { terminalFocus: true })).toBeNull();
+    expect(resolve(cmd("f"), MAC)).toBeNull();
+    for (const platform of [MAC, LINUX]) {
+      expect(browserTabClaimsShortcut(parseKeybindingShortcut("mod+p")!, platform)).toBe(false);
+      expect(browserTabClaimsShortcut(parseKeybindingShortcut("mod+shift+f")!, platform)).toBe(false);
+    }
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "files.quickOpen", MAC)).toBe("⌘P");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "files.search", LINUX)).toBe("Ctrl+Shift+F");
+  });
+
+  it("opens the finder in its mode for the open thread, and not over Settings or with no thread open", () => {
+    const opened: string[] = [];
+    const listen = (e: Event) => opened.push((e as CustomEvent<string>).detail);
+    window.addEventListener("wsp:open-file-finder", listen);
+    const target = { workspaceId: "ws_a", toggleSidebar: () => {} };
+    runShellCommand("files.quickOpen", target, []);
+    runShellCommand("files.search", target, []);
+    runShellCommand("files.search", { ...target, workspaceId: null }, []);
+    useStore.setState({ settingsOpen: true });
+    runShellCommand("files.quickOpen", target, []);
+    useStore.setState({ settingsOpen: false });
+    window.removeEventListener("wsp:open-file-finder", listen);
+    expect(opened).toEqual(["files", "text"]);
   });
 
   it("matches on the physical key for non-Latin layouts", () => {
@@ -318,6 +358,61 @@ describe("the settle chord's command", () => {
     put({ status: "running", endedAt: undefined });
     runShellCommand("thread.settle", { workspaceId: "ws_a", toggleSidebar: () => {} } as never, []);
     expect(settleThreads).not.toHaveBeenCalled();
+  });
+});
+
+describe("the jump to the next thread that needs the person", () => {
+  it("opens the first thread after the open one that asks or holds a finish nobody has seen, in the sidebar's order, wrapping, and nothing when none does", () => {
+    const now = Date.now();
+    const row = (id: string, over: Record<string, unknown> = {}) => ({ id: `s_${id}`, workspaceId: "ws_a", threadId: id, harness: "claude", status: "completed", startedAt: now - 60_000, endedAt: now - 30_000, readAt: now - 30_000, ...over });
+    const workspace = { id: "ws_a", name: "a", machineId: "m", phase: "running", golden: "", createdAt: "2026-09-27T00:00:00Z", project: { id: "pr", name: "pr", path: "/root", computer: "here" } };
+    const rows = [row("th_asks", { status: "running", endedAt: undefined, asking: "Permission for Bash: ls", startedAt: now - 10_000 }), row("th_unseen", { readAt: now - 40_000, startedAt: now - 20_000 }), row("th_read")];
+    useStore.setState({ workspaces: [workspace], statuses: {}, selectedId: "ws_a", selectedThreadId: "th_asks", sessions: { ws_a: rows } } as never);
+    const jump = () => runShellCommand("thread.nextNeedsYou", { workspaceId: "ws_a", toggleSidebar: () => {} } as never, []);
+    jump();
+    expect(useStore.getState().selectedThreadId).toBe("th_unseen");
+    jump();
+    expect(useStore.getState().selectedThreadId).toBe("th_asks");
+    useStore.setState({ selectedThreadId: "th_read", sessions: { ws_a: [row("th_read")] } } as never);
+    jump();
+    expect(useStore.getState().selectedThreadId).toBe("th_read");
+  });
+
+  it("walks only the threads the sidebar shows under its project and computer picks, never one the picks hide", () => {
+    const now = Date.now();
+    const row = (id: string, workspaceId: string, over: Record<string, unknown> = {}) => ({ id: `s_${id}`, workspaceId, threadId: id, harness: "claude", status: "completed", startedAt: now - 60_000, endedAt: now - 30_000, readAt: now - 40_000, ...over });
+    const workspace = (id: string, project: string, computer: string) => ({ id, name: id, machineId: `m_${id}`, phase: "running", golden: "", createdAt: "2026-09-27T00:00:00Z", project: { id: project, name: project, path: "/root", computer } });
+    const places = [
+      { id: "here", kind: "computer", name: "mac", label: "Mac", default: true },
+      { id: "p_box", kind: "computer", name: "box", label: "box" },
+    ];
+    useStore.setState({
+      places,
+      projects: [],
+      workspaces: [workspace("ws_a", "pr_a", "here"), workspace("ws_b", "pr_b", "here"), workspace("ws_c", "pr_a", "p_box")],
+      statuses: {},
+      selectedId: "ws_a",
+      selectedThreadId: "th_a",
+      sessions: { ws_a: [row("th_a", "ws_a", { readAt: now })], ws_b: [row("th_b", "ws_b", { startedAt: now - 10_000 })], ws_c: [row("th_c", "ws_c", { startedAt: now - 20_000 })] },
+    } as never);
+    const jump = () => runShellCommand("thread.nextNeedsYou", { workspaceId: "ws_a", toggleSidebar: () => {} } as never, []);
+    try {
+      // Every project and computer: the next one waiting is on the other project.
+      jump();
+      expect(useStore.getState().selectedThreadId).toBe("th_b");
+      // Under project pr_a the other project's thread is hidden, so the jump lands on the box's thread of pr_a.
+      useStore.setState({ selectedId: "ws_a", selectedThreadId: "th_a" } as never);
+      window.localStorage.setItem("wsp:sidebar-project", JSON.stringify("pr_a"));
+      jump();
+      expect(useStore.getState().selectedThreadId).toBe("th_c");
+      // And with the Mac picked as well, nothing the sidebar shows is waiting: the jump stays put.
+      useStore.setState({ selectedId: "ws_a", selectedThreadId: "th_a" } as never);
+      window.localStorage.setItem("wsp:sidebar-computer", JSON.stringify("here"));
+      jump();
+      expect(useStore.getState().selectedThreadId).toBe("th_a");
+    } finally {
+      window.localStorage.clear();
+    }
   });
 });
 

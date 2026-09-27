@@ -213,6 +213,13 @@ export const ACCOUNT_WORDS = {
 } as const;
 
 /** Settings > Privacy: what this wsp asks of a service outside the person's computers. */
+/** Settings > General. */
+export const GENERAL_WORDS = {
+  editor: "Editor",
+  editorDescription: "Where Open in editor opens a file or a thread's folder.",
+  noEditor: "No editor wsp opens files in is installed: VS Code, Cursor, Zed or a JetBrains IDE.",
+} as const;
+
 export const PRIVACY_WORDS = {
   title: "Privacy",
   serverIcons: "Server icons from Google",
@@ -220,6 +227,13 @@ export const PRIVACY_WORDS = {
   agentVersions: "Newest agent versions",
   agentVersionsDescription: "wsp asks npm, GitHub and each agent's maker for every agent's newest version, once a day.",
   agentVersionsHeld: "Off on the host: WSP_UPDATE_CHECK is 0.",
+} as const;
+
+/** Settings > Appearance's Notifications: the one switch over the sound a notification makes. */
+export const NOTIFY_WORDS = {
+  head: "Notifications",
+  sound: "Sound",
+  soundDescription: "A finished turn and a permission prompt make a sound while wsp is not in front.",
 } as const;
 
 /** Settings > Devices: every computer and browser paired with this wsp, and the one act on each. */

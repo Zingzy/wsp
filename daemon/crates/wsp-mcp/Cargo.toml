@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "wsp-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The wsp tools for an agent on this computer: an MCP server on stdio that dials the host as the command line does"
+
+[dependencies]
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+tokio = { workspace = true, features = ["io-std"] }
+tokio-tungstenite.workspace = true
+rustls.workspace = true
+futures-util.workspace = true
+libc = "0.2"
+
+[dev-dependencies]
+# A tool's input and output structs derive their JSON Schema in the test build alone, where it is held to the schema
+# the TypeScript server lists; the binary serves that recorded schema and carries none of this.
+schemars = "1"
+tempfile = "3"

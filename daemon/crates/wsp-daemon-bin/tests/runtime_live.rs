@@ -2539,6 +2539,14 @@ async fn the_computers_daemon_answers_a_workspaces_files_and_git_for_the_workspa
     // workspace's files: the person who asked knows the folder by the one and never by the other.
     assert_eq!(escaped["error"].as_str(), Some(format!("{at}/escape resolves outside the workspace root").as_str()), "{escaped}");
     assert!(!escaped["error"].as_str().unwrap_or_default().contains(&root().display().to_string()), "{escaped}");
+    // A search takes the same road: the checkout's own files are found, and the link out of the workspace is never
+    // walked, listed or read, though the file it names has the word searched for on its first line.
+    let found = client.request("fs.search", json!({ "path": at, "query": "one", "mode": "files", "machineId": &id })).await;
+    assert_eq!(found["ok"], true, "{found}");
+    let hits: Vec<&str> = found["hits"].as_array().unwrap().iter().map(|h| h["path"].as_str().unwrap()).collect();
+    assert!(hits.contains(&"one.txt") && !hits.contains(&"escape"), "{found}");
+    let read = client.request("fs.search", json!({ "path": at, "query": "root:", "mode": "text", "machineId": &id })).await;
+    assert_eq!((read["ok"].as_bool(), read["hits"].as_array().map(Vec::len)), (Some(true), Some(0)), "{read}");
     let nowhere = client.request("git.status", json!({ "cwd": at, "machineId": "wsp-nobody" })).await;
     assert_eq!((nowhere["ok"].as_bool(), nowhere["error"].as_str()), (Some(false), Some("no such workspace: wsp-nobody")), "{nowhere}");
 

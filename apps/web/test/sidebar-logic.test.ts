@@ -251,6 +251,10 @@ describe("the tree a thread's own threads make", () => {
     unread: false,
     readAt: null,
     settledAt: null,
+    needsYou: false,
+    pinnedAt: null,
+    snoozedUntil: null,
+    section: null,
   });
   /** A workspace row as the tree reads it: its own threads, and the record, which says whether an agent forked it. */
   const project = (id: string, threads: SidebarThreadSnapshot[], parentThreadId?: string): SidebarProjectSnapshot =>

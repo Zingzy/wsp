@@ -96,6 +96,16 @@ async fn a_wrong_flag_prints_the_usage_line_and_exits_2() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("--port"));
 }
 
+/// A verb missing a flag it requires says which, on the one line before the usage.
+#[cfg(feature = "mcp")]
+#[tokio::test]
+async fn a_verb_missing_its_required_flag_names_it_on_the_first_line() {
+    let out = Command::new(BIN).arg("mcp").output().await.unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(stderr.lines().next(), Some("error: the following required arguments were not provided: --state <file>"), "{stderr}");
+}
+
 #[tokio::test]
 async fn runtime_ask_names_its_root_on_purpose_or_not_at_all() {
     // A frame that is not JSON, so nothing past the flags could run whatever the root: the refusal is the flag's.
@@ -658,4 +668,101 @@ async fn the_copy_verb_removes_no_link_and_no_file_that_carries_a_copy_name() {
     assert!(from.join("README.md").is_file(), "the project a link pointed at went");
     assert!(elsewhere.path().join("kept").is_file(), "the folder a link pointed at went");
     assert!(to_project.is_symlink() && to_outside.is_symlink() && file.is_file());
+}
+
+/// What the tool server holds resident, off the kernel's own count: VmRSS on Linux, ps's rss column on the Mac.
+#[cfg(feature = "mcp")]
+fn resident_kb(pid: u32) -> u64 {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap();
+        let line = status.lines().find(|l| l.starts_with("VmRSS:")).expect("a VmRSS line");
+        line.split_whitespace().nth(1).unwrap().parse().unwrap()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let out = std::process::Command::new("ps").args(["-o", "rss=", "-p", &pid.to_string()]).output().unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().parse().unwrap()
+    }
+}
+
+/// The sockets a process holds that reach anywhere: TCP of either family, and a Unix socket bound or connected to a
+/// path. The unnamed pair tokio's own signal driver holds for the children it reaps reaches nothing, and is not one.
+#[cfg(all(feature = "mcp", target_os = "linux"))]
+fn reaching_sockets(pid: u32) -> Vec<String> {
+    let held: Vec<String> = std::fs::read_dir(format!("/proc/{pid}/fd"))
+        .unwrap()
+        .filter_map(|fd| std::fs::read_link(fd.ok()?.path()).ok())
+        .filter_map(|target| target.to_string_lossy().strip_prefix("socket:[")?.strip_suffix(']').map(str::to_owned))
+        .collect();
+    let mut reaching = Vec::new();
+    for table in ["tcp", "tcp6", "unix"] {
+        for row in std::fs::read_to_string(format!("/proc/{pid}/net/{table}")).unwrap().lines().skip(1) {
+            let cells: Vec<&str> = row.split_whitespace().collect();
+            let (inode, named) = if table == "unix" { (cells.get(6), cells.len() > 7) } else { (cells.get(9), true) };
+            if named && inode.is_some_and(|inode| held.iter().any(|h| h == inode)) {
+                reaching.push(format!("{table}: {row}"));
+            }
+        }
+    }
+    reaching
+}
+
+/// An agent starts `wsp mcp` at every session and lists its tools before the person has typed anything, so the
+/// greeting and the list are answered from what the binary carries: no host is dialled, started or even looked for,
+/// within 50 ms of the spawn, in under 10 MB resident. Measured on the shipped profile: a debug build maps the whole
+/// daemon unoptimized, 14 MB of it resident for the same two answers.
+#[cfg(feature = "mcp")]
+#[cfg_attr(debug_assertions, ignore = "the budget is the shipped profile's: cargo test --release --features mcp")]
+#[tokio::test]
+async fn the_tool_server_lists_its_tools_with_no_host_within_50_ms_and_10_mb() {
+    use tokio::io::AsyncWriteExt;
+    const LIST_WITHIN_MS: u128 = 50;
+    const RESIDENT_UNDER_KB: u64 = 10 * 1024;
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state").join("state.json");
+    let started = std::time::Instant::now();
+    let mut child = Command::new(BIN)
+        .arg("mcp")
+        .arg("--state")
+        .arg(&state)
+        .env_clear()
+        .env("HOME", dir.path())
+        .env("WSP_HOME", dir.path().join("home"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let asked = concat!(
+        r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"budget","version":"0"}}}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+        "\n"
+    );
+    stdin.write_all(asked.as_bytes()).await.unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+    let greeted: Value = serde_json::from_str(&stdout.next_line().await.unwrap().unwrap()).unwrap();
+    let listed: Value = serde_json::from_str(&stdout.next_line().await.unwrap().unwrap()).unwrap();
+    let took = started.elapsed().as_millis();
+    let pid = child.id().unwrap();
+    let resident = resident_kb(pid);
+    #[cfg(target_os = "linux")]
+    let dialled = reaching_sockets(pid);
+    drop(stdin);
+    let code = tokio::time::timeout(Duration::from_secs(5), child.wait()).await.unwrap().unwrap();
+    eprintln!("tools/list answered {took} ms after the spawn, {resident} kB resident");
+    assert_eq!(greeted["id"], 0);
+    assert_eq!(greeted["result"]["serverInfo"]["name"], "wsp");
+    assert_eq!(listed["id"], 1);
+    assert!(listed["result"]["tools"].as_array().is_some_and(|tools| tools.iter().any(|t| t["name"] == "computers")), "{listed}");
+    assert!(took < LIST_WITHIN_MS, "tools/list answered {took} ms after the spawn");
+    assert!(resident < RESIDENT_UNDER_KB, "{resident} kB resident");
+    #[cfg(target_os = "linux")]
+    assert_eq!(dialled, Vec::<String>::new(), "a host was reached for before any tool was called");
+    assert!(!state.parent().unwrap().exists(), "the state's folder was made before any tool was called");
+    assert_eq!(code.code(), Some(0));
 }

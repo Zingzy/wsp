@@ -341,6 +341,8 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("fsFilesCapEntries", Value::from(numbers::FS_FILES_CAP_ENTRIES));
     m.insert("gitPrListCap", Value::from(numbers::GIT_PR_LIST_CAP));
     m.insert("gitPrListBodyCap", Value::from(numbers::GIT_PR_LIST_BODY_CAP));
+    m.insert("fsSearchCapFiles", Value::from(numbers::FS_SEARCH_CAP_FILES));
+    m.insert("fsSearchCapHits", Value::from(numbers::FS_SEARCH_CAP_HITS));
     m.insert("gitDiffCapBytes", Value::from(numbers::GIT_DIFF_CAP_BYTES));
     m.insert("ptyScrollbackCapBytes", Value::from(numbers::SCROLLBACK_CAP_BYTES));
     m.insert("procCmdlineBytes", Value::from(numbers::CMDLINE_BYTES));

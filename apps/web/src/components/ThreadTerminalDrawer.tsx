@@ -194,14 +194,14 @@ export interface TerminalViewportConfig {
   chosenFont?: boolean;
   /** Where the text size starts and how far this workspace's zoom moved it; absent, the app's own size unmoved. */
   sizing?: TerminalSizing;
-  /** A modifier-click on a link in the output; by default URLs open in a new tab and paths do nothing. */
-  onLinkActivate?: (text: string) => void;
+  /** A modifier-click on a path in the output; a URL opens in a new tab whatever this is, and without it a path does nothing. */
+  onPathActivate?: (text: string) => void;
 }
 
 const EMPTY_CONFIG: TerminalViewportConfig = {};
 
 function openInNewTab(text: string): void {
-  if (isTerminalUrl(text)) window.open(text, "_blank", "noopener,noreferrer");
+  window.open(text, "_blank", "noopener,noreferrer");
 }
 
 interface TerminalViewportProps {
@@ -258,7 +258,7 @@ export function TerminalViewport({
   const [translucent, setTranslucent] = useState(false);
   const readHostConfig = useStore(s => s.api?.hostTerminalConfig);
   const live = useStore(s => s.conn === "live" && s.api !== null);
-  const activateLink = useEffectEvent((text: string) => (config.onLinkActivate ?? openInNewTab)(text));
+  const activateLink = useEffectEvent((text: string) => (isTerminalUrl(text) ? openInNewTab(text) : config.onPathActivate?.(text)));
   // The surface reads its options once, so the menu reads the pane verbs of the render it opens in.
   const contextMenu = useEffectEvent((event: MouseEvent) => {
     const terminal = terminalRef.current;

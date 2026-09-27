@@ -18,6 +18,8 @@ export const CHORD_WORDS = {
 
 export const KEYBINDING_WORDS: Record<KeybindingCommand, string> = {
   "commandPalette.toggle": "Search",
+  "files.quickOpen": "Find a file",
+  "files.search": "Search in files",
   "settings.toggle": "Settings",
   "sidebar.toggle": "Toggle the sidebar",
   "terminal.toggle": "Toggle the terminal drawer",
@@ -29,6 +31,7 @@ export const KEYBINDING_WORDS: Record<KeybindingCommand, string> = {
   "thread.next": "Next thread",
   "thread.previous": "Previous thread",
   "thread.settle": "Settle thread",
+  "thread.nextNeedsYou": "Next thread that needs you",
   "terminal.split": "Split the terminal",
   "terminal.new": "New terminal",
   "terminal.zoomIn": "Zoom in",

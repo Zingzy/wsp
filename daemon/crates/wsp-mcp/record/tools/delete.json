@@ -1,0 +1,102 @@
+{
+  "cloudOff": {
+    "name": "delete",
+    "description": "Deletes the workspace's machine at the provider and drops its record and its threads from this computer and the person's sidebar. Everything on that machine's disk that was not exported or pushed goes with it and no wake brings it back; a workspace whose machine is already gone takes forget instead. Called without confirm it deletes nothing and answers with what would go, which is the line to put to the person.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        },
+        "confirm": {
+          "type": "boolean",
+          "description": "true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first"
+        }
+      },
+      "required": [
+        "workspace"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        },
+        "threads": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "name",
+        "machineId",
+        "threads"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "delete",
+    "description": "Deletes the workspace's machine at the provider and drops its record and its threads from this computer and the person's sidebar. Everything on that machine's disk that was not exported or pushed goes with it and no wake brings it back; a workspace whose machine is already gone takes forget instead. Called without confirm it deletes nothing and answers with what would go, which is the line to put to the person.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        },
+        "confirm": {
+          "type": "boolean",
+          "description": "true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first"
+        }
+      },
+      "required": [
+        "workspace"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        },
+        "threads": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "name",
+        "machineId",
+        "threads"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

@@ -282,6 +282,7 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "fs.list"
             | "fs.files"
             | "fs.read"
+            | "fs.search"
             | "fs.folders"
             | "git.status"
             | "git.diff"
@@ -712,6 +713,13 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, read.await)
         }
+        DaemonOp::FsSearch { path, query, mode, machine_id } => {
+            let found = async {
+                let (_, under, _) = road(ctx, machine_id.as_deref(), &path, Reads).await?;
+                fs::search(under, query, mode).await
+            };
+            answer(id, found.await)
+        }
         DaemonOp::FsFolders { dir, hidden, repos, projects } => {
             let (home, projects) = (PathBuf::from(&ctx.root), projects.unwrap_or_default());
             if repos == Some(true) {
@@ -1006,6 +1014,7 @@ mod tests {
             "fs.list",
             "fs.files",
             "fs.read",
+            "fs.search",
             "git.status",
             "git.diff",
             "git.push",
@@ -1248,7 +1257,7 @@ mod tests {
 
     /// A files or git frame that names a workspace is answered for that workspace by the daemon of the computer
     /// holding it. This bench runs no workspaces at all, which is every computer that is not a place: each of the
-    /// seven answers the one missing refusal, and the same frame without a workspace named resolves under this
+    /// eight answers the one missing refusal, and the same frame without a workspace named resolves under this
     /// daemon's own roots as it always has.
     #[tokio::test]
     async fn a_frame_that_names_a_workspace_this_daemon_does_not_run_is_refused_as_missing() {
@@ -1262,6 +1271,13 @@ mod tests {
             let reply = reply(&b, &sock, json!({"id": 1, "op": op, "cwd": "/root/repo", "machineId": "wsp-x"})).await;
             assert_eq!(reply, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}), "{op}");
         }
+        let search = reply(
+            &b,
+            &sock,
+            json!({"id": 1, "op": "fs.search", "path": "/root/repo", "query": "x", "mode": "files", "machineId": "wsp-x"}),
+        )
+        .await;
+        assert_eq!(search, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}));
         let diff = reply(&b, &sock, json!({"id": 1, "op": "git.diff", "cwd": "/root/repo", "scope": "branch", "machineId": "wsp-x"})).await;
         assert_eq!(diff, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}));
         // The same refusal a machine op on the link answers for a workspace this computer does not run, so a

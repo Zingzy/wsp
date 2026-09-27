@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::validate::{bounded, bounded_opt, capped_list, exec_timeout, sha256_hex, upload_word};
-use crate::{FsReadEncoding, GitDiffScope, GuestKind, ProcSignal, RequestId};
+use crate::{FsReadEncoding, FsSearchMode, GitDiffScope, GuestKind, ProcSignal, RequestId};
 
 /// One request on an authed socket: the id the reply echoes and the op with its parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -161,6 +161,18 @@ pub enum DaemonOp {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         encoding: Option<FsReadEncoding>,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Every file under the folder whose path holds the query's letters in order (files), or every line of a text
+    /// file there that holds the query (text), walked with the folder's ignore rules and hidden names left out.
+    #[serde(rename = "fs.search", rename_all = "camelCase")]
+    FsSearch {
+        path: String,
+        query: String,
+        mode: FsSearchMode,
         /// The workspace this frame is for, as on fs.list above.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -329,7 +341,7 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 40] = [
+pub const DAEMON_OPS: [&str; 41] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -352,6 +364,7 @@ pub const DAEMON_OPS: [&str; 40] = [
     "fs.list",
     "fs.files",
     "fs.read",
+    "fs.search",
     "git.status",
     "git.diff",
     "git.push",

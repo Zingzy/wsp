@@ -26,6 +26,8 @@ export const KEYBINDING_COMMANDS = [
   "rightPanel.toggle",
   "preview.toggle",
   "commandPalette.toggle",
+  "files.quickOpen",
+  "files.search",
   "settings.toggle",
   "chat.new",
   "workspace.next",
@@ -33,6 +35,7 @@ export const KEYBINDING_COMMANDS = [
   "thread.next",
   "thread.previous",
   "thread.settle",
+  "thread.nextNeedsYou",
   ...WORKSPACE_SELECT_SLOTS.map(workspaceSelectCommand),
 ] as const;
 export type KeybindingCommand = (typeof KEYBINDING_COMMANDS)[number];

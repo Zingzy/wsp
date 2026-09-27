@@ -17,6 +17,7 @@ import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouE
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
+import type { FsSearchReply as WireFsSearchReply } from "./generated/FsSearchReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
@@ -849,6 +850,24 @@ export const ThreadWaitingOn = z.object({
 });
 export type ThreadWaitingOn = z.infer<typeof ThreadWaitingOn>;
 
+/** The sidebar's sections a thread's own state files it under; Pinned is a mark of its own and the Settled fold is
+ * the settle, so neither is a place a thread is dragged to by this. */
+export const ThreadSection = z.enum(["needs-you", "working", "done", "idle"]);
+export type ThreadSection = z.infer<typeof ThreadSection>;
+
+/** Where the person dragged a thread, and the state it was in then as the sidebar words it: the placement holds while
+ * the thread is still in that state and lapses the moment it moves, so the thread rejoins the section its state
+ * files it under. */
+export const ThreadPlacement = z.object({ name: ThreadSection, whileState: z.string() });
+export type ThreadPlacement = z.infer<typeof ThreadPlacement>;
+
+/** What sessions.mark moves on a thread: a pin set or taken off, a snooze set until a moment or taken off, a
+ * placement set or taken off. A field left out is left as it is. */
+export const ThreadMarks = z
+  .object({ pinned: z.boolean().optional(), snoozedUntil: z.number().nullable().optional(), section: ThreadPlacement.nullable().optional() })
+  .strict();
+export type ThreadMarks = z.infer<typeof ThreadMarks>;
+
 export const SessionView = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -918,6 +937,15 @@ export const SessionView = z.object({
   /** When the person settled this row's thread by hand, kept and stamped as readAt is; absent on a thread nobody
    * settled. Activity after it brings the thread back. */
   settledAt: z.number().optional(),
+  /** When the person pinned this row's thread to the top of the sidebar, kept and stamped as readAt is. */
+  pinnedAt: z.number().optional(),
+  /** When a snooze on this row's thread ends, while it has not: the sidebar leaves the thread out until then. Once
+   * the host's clock passes it the listing carries wokeAt instead, and every window is told at that moment. */
+  snoozedUntil: z.number().optional(),
+  /** When the thread's last snooze ended; the thread reads Done until a read at or after it. */
+  wokeAt: z.number().optional(),
+  /** The sidebar section the person dragged the thread into, held only while the thread is still as it was then. */
+  section: ThreadPlacement.optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -956,9 +984,13 @@ export const ThreadView = z.object({
   costUsd: z.number().optional(),
   /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
   pid: z.number().int().optional(),
-  /** The thread's read and settled stamps, as SessionView carries them; threadUnread reads the first. */
+  /** The thread's stamps and marks, as SessionView carries them; threadUnread reads readAt and wokeAt. */
   readAt: z.number().optional(),
   settledAt: z.number().optional(),
+  pinnedAt: z.number().optional(),
+  snoozedUntil: z.number().optional(),
+  wokeAt: z.number().optional(),
+  section: ThreadPlacement.optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -1009,6 +1041,10 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
       ...(latest.readAt !== undefined ? { readAt: latest.readAt } : {}),
       ...(latest.settledAt !== undefined ? { settledAt: latest.settledAt } : {}),
+      ...(latest.pinnedAt !== undefined ? { pinnedAt: latest.pinnedAt } : {}),
+      ...(latest.snoozedUntil !== undefined ? { snoozedUntil: latest.snoozedUntil } : {}),
+      ...(latest.wokeAt !== undefined ? { wokeAt: latest.wokeAt } : {}),
+      ...(latest.section !== undefined ? { section: latest.section } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
@@ -1885,6 +1921,20 @@ const FontFamily = z.string().max(128);
 /** Each side's theme before a person picks one. */
 const THEME_PICK_DEFAULTS = { lightTheme: "paper", darkTheme: "graphite" } as const;
 
+/** The editors a file on the computer running the host can open in, the one table the host's opener is keyed by:
+ * the host lists the ones installed there and runs its own command for each, never a command a client names.
+ * Finder is the Mac's own and reveals the file rather than opening it. */
+export const EditorId = z.enum(["vscode", "cursor", "vscode-insiders", "zed", "idea", "webstorm", "pycharm", "goland", "rustrover", "clion", "phpstorm", "rubymine", "rider", "finder"]);
+export type EditorId = z.infer<typeof EditorId>;
+export const EditorChoice = z.object({ id: EditorId, name: z.string() });
+export type EditorChoice = z.infer<typeof EditorChoice>;
+
+/** What Open in editor says for a workspace whose files are on another machine, named as the person reads it. */
+export const editorOpensHereLine = (name: string): string => `These files are on ${name}, so they open here.`;
+/** The refusal for editor.list and editor.open on a socket let in on a ticket: a program starts only for this computer's
+ * own window, and the list of what could start is read on the same terms. */
+export const EDITOR_TICKET_REFUSAL = "a socket let in on a ticket cannot list or open the editors on this computer; use the app on the computer the host runs on";
+
 export const Preferences = z.object({
   theme: ThemePreference,
   /** Each side's pick. Defaulted rather than required, so a record from a host older than the picks still parses on the
@@ -1916,6 +1966,12 @@ export const Preferences = z.object({
   /** Whether the host asks each agent's vendor for its newest version. On unless the person turns it off, and
    * WSP_UPDATE_CHECK=0 in the host's environment stops it whatever this says; defaulted as serverIcons is. */
   agentVersions: z.boolean().default(true),
+  /** The editor Open in editor opens a file in; absent opens the first one installed on the computer running the host. */
+  editor: EditorId.optional(),
+  /** Whether a system notification for a finished turn or a permission prompt makes a sound. */
+  notifySound: z.boolean(),
+  /** The order the person dragged the projects into, by id; a project it does not name follows in the host's order. */
+  projectOrder: z.array(z.string()),
   /** The person's own chord for a command, by command id, in the app's chord spelling (mod+shift+b): it replaces every
    * default chord that command has. Which commands and chords exist is the app's, so the shape alone is checked here. */
   keybindings: z.record(z.string(), ChordText).default({}),
@@ -1953,7 +2009,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, keybindings: {}, appFont: "", codeFont: "", labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1974,6 +2030,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     return next;
   };
   const target = patch.target === undefined ? current.target : patch.target;
+  const editor = patch.editor ?? current.editor;
   return {
     theme: patch.theme ?? current.theme,
     lightTheme: patch.lightTheme ?? current.lightTheme,
@@ -1986,12 +2043,15 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     computerLook: perWorkspace(current.computerLook, patch.computerLook),
     serverIcons: patch.serverIcons ?? current.serverIcons,
     agentVersions: patch.agentVersions ?? current.agentVersions,
+    notifySound: patch.notifySound ?? current.notifySound,
+    projectOrder: patch.projectOrder ?? current.projectOrder,
     keybindings: perWorkspace(current.keybindings, patch.keybindings),
     appFont: patch.appFont ?? current.appFont,
     codeFont: patch.codeFont ?? current.codeFont,
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
+    ...(editor === undefined ? {} : { editor }),
   };
 }
 
@@ -1999,7 +2059,8 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
 export const serverIconsLeftLine = (folder: string, reason: string): string =>
   `Server icons are off, but ${folder} could not be deleted: ${reason}. Delete it by hand.`;
 
-/** A thread's read or settled stamp moved, by any window: the workspace's rows are read again to pick it up. */
+/** A thread's read or settled stamp or one of its marks moved, by any window, or its snooze ended: the workspace's
+ * rows are read again to pick it up. */
 export const ThreadMarkedEvent = z.object({ type: z.literal("thread.marked"), workspaceId: z.string(), threadIds: z.array(z.string()) });
 export type ThreadMarkedEvent = z.infer<typeof ThreadMarkedEvent>;
 
@@ -2117,6 +2178,10 @@ export interface ShellChord {
   readonly altKey: boolean;
 }
 
+/** One notification said outside the app: its title, its line, and whether it makes a sound. */
+export const OutsideLine = z.object({ title: z.string(), body: z.string(), sound: z.boolean() });
+export type OutsideLine = z.infer<typeof OutsideLine>;
+
 /** What the desktop shell's preload puts on window.wsp; a browser tab has none of it. */
 export interface DesktopBridge {
   /** The release this shell is, so a page served by a host of another one can say which half is behind. Absent on
@@ -2146,12 +2211,15 @@ export interface DesktopBridge {
   onShellChord(handler: (chord: ShellChord) => void): () => void;
   /** The theme the page draws, so the window's frame, glass and traffic-light bar follow it. */
   setTheme(theme: ThemePreference): void;
-  /** A build waits on the person: the shell shows a system notification while its window has no focus, and nothing
-   * while it has, since the page already says it. The page decides nothing about focus; the shell owns that. */
-  needsYou(need: InitNeedsYou): void;
-  /** A click on that notification, after the shell has raised its window: the page opens the build screen. Returns
+  /** Something the person should hear about outside the app (a build waiting, a machine up, a prompt, a finished
+   * turn): the shell shows a system notification while its window has no focus, and nothing while it has, since the
+   * page already says it. The page decides nothing about focus; the shell owns that. */
+  sayOutside(line: OutsideLine): void;
+  /** A click on that notification, after the shell has raised its window: the page opens what it was about. Returns
    * the unsubscribe. */
   onNeedsYouOpen(handler: () => void): () => void;
+  /** How many threads wait on the person, for the dock's badge; zero clears it. */
+  setBadge(count: number): void;
   /** A wsp:// link the system handed the shell while the page was up, read down to what it names: the page opens it
    * and does nothing to it. Only the app's own host's page is told. Returns the unsubscribe. */
   onOpen(handler: (target: LinkTarget) => void): () => void;
@@ -2268,6 +2336,11 @@ export type GoldenManifest = z.infer<typeof GoldenManifest>;
 export function goldenHead(manifest: GoldenManifest | undefined): GoldenVersion | undefined {
   return manifest?.versions.find(v => v.version === manifest.head);
 }
+
+/** Whether a host holds nothing for the app to show: no sealed golden to fork from and no workspace record, this
+ * computer's included. One rule for wsp up, which says there is no project yet, and the app, which opens on its
+ * first launch screens. */
+export const holdsNothing = (golden: GoldenManifest | undefined, workspaces: readonly unknown[]): boolean => goldenHead(golden) === undefined && workspaces.length === 0;
 
 /** What a fork of a version boots from and the lineage's word for it: the durable template once one is recorded,
  * the snapshot until then. The one rule for every road that creates from a version and every row that says whether
@@ -3142,6 +3215,18 @@ export type FsReadEncoding = z.infer<typeof FsReadEncoding>;
 export const FsReadReply = z.object({ content: z.string(), size: z.number(), truncated: z.boolean() });
 export type FsReadReply = z.infer<typeof FsReadReply>;
 
+export const FsSearchMode = z.enum(["files", "text"]);
+export type FsSearchMode = z.infer<typeof FsSearchMode>;
+/** path is relative to the folder searched; a text hit adds its line, from 1, and that line's text. truncated means
+ * the walk stopped at FS_SEARCH_CAP_FILES or FS_SEARCH_CAP_HITS, or at its time or byte budget, before it had looked
+ * everywhere. */
+export const FsSearchReply = z.object({
+  hits: z.array(z.object({ path: z.string(), line: z.number().int().positive().optional(), text: z.string().optional() })),
+  truncated: z.boolean(),
+});
+export type FsSearchReply = WireFsSearchReply;
+type FsSearchReplyHeld = Held<Same<z.infer<typeof FsSearchReply>, FsSearchReply>>;
+
 /** Porcelain v2 branch header: head is "(detached)" off a branch, oid
  * "(initial)" before the first commit; without an upstream, or with one whose
  * tracking ref is gone, upstream is absent and ahead/behind count against the
@@ -3336,7 +3421,7 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * symlink, is refused with code outside-root. gitignore hides .git and the
    * entries git would ignore.
    *
-   * machineId, on these nine and on no other op of this road: the workspace the frame is for, on a daemon that
+   * machineId, on these ten and on no other op of this road: the workspace the frame is for, on a daemon that
    * runs workspaces. A workspace on a computer somebody owns runs no daemon of its own, so the daemon of the
    * computer holding it answers for it: the path then names the folder as that workspace sees it, a file is read
    * through the workspace's own rootfs and a git operation runs inside the workspace, in its namespaces and its
@@ -3353,6 +3438,12 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * to cwd, answered from `git ls-files` and kept until a folder holding one of them changes. */
   z.object({ id: reqId, op: z.literal("fs.files"), cwd: z.string(), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional(), machineId: z.string().optional() }),
+  /** Searches under one folder, resolved as fs.list resolves its path: files answers every file whose path below the
+   * folder holds the query's letters in order, text every line of a text file there that holds the query, both
+   * case-insensitive. The walk reads the folder's .gitignore and .ignore files, leaves hidden names out, never
+   * follows a symlink, and skips a file over FS_READ_CAP_BYTES or holding a NUL byte; it answers what it found when a
+   * cap or its time budget stops it, with truncated set. */
+  z.object({ id: reqId, op: z.literal("fs.search"), path: z.string(), query: z.string(), mode: FsSearchMode, machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string(), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional(), machineId: z.string().optional() }),
   /** Pushes the branch the checkout is on to its remote and answers a GitPushReply. The base branch itself is
@@ -4022,7 +4113,9 @@ const DAEMON_CONTENTS = [
   "be3d9077764035f8bf2b96ab6b50c018017046ec74a30827404f64752ef19bdf",
   "837e923920b718c42e372f7d84dd08d4d51add8e7b86de1ab4afb4a156afb8ae",
   "69559f24eb63363f130e96d07548df1e6cffed939d08d5df760e5ac9948f240e",
-  "d5de0914cf3087d4c05f6d04551cafe936c69eb908d2095e259a247a159b4184",
+  "4693a00a74c923f64a9062a65cac539d5ac7621da08fc623c63089a87b8231d7",
+  "6064295b774d39defb1ba58ef099812ee1e4662bac2a1525c6d0061128450f2f",
+  "12dc3a3741a25239969103531def3c28df0874e9233825d16f7063a84df345c6",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4239,7 +4332,9 @@ const DAEMON_CONTENTS = [
  * Version 81 reads no record another daemon wrote: a workspace record carries every field and a points file that does
  * not parse is refused by its path; the hello always names the version; the copy verb has no in-place road and the
  * daemon no ssh kind; exec and pty take the compose project off the workspace's own boot environment.
- * Version 82 adds fs.files, every file of a checkout git would show, from git ls-files and kept until a folder holding one
+ * Version 82 changes nothing a guest runs: the binary gains the mcp verb behind a feature the guest build leaves off.
+ * Version 83 answers fs.search: the files under a folder whose path holds a query's letters in order, or the lines of text there that hold it, walked with the folder's ignore rules and never through a link, under a cap and a time budget.
+ * Version 84 adds fs.files, every file of a checkout git would show, from git ls-files and kept until a folder holding one
  * of them changes, and git.prList, the repository's open pull requests and issues through the host's command line, an
  * empty list with a note where that command line is not there or nobody signed it in. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
@@ -4252,7 +4347,8 @@ export const DAEMON_VERSION = DAEMON_CONTENTS.length;
  * cannot reach nobody: a start script gained a PATH line under an unchanged version once and every machine already
  * running kept the old one. Left out: every file under a crate's tests/ folder, which is built for a test run
  * and no deploy installs, so test-only work cuts no version for a binary nobody's machine would read as new; an
- * inline #[cfg(test)] module stays hashed, since the file carrying it ships. Left out too: the rest of this file,
+ * inline #[cfg(test)] module stays hashed, since the file carrying it ships. Left out too: crates/wsp-mcp, the tool
+ * server a feature links into the host's own build and the guest build never does; the rest of this file,
  * which the binary reads only through the fixtures; hashing the protocol whole would turn every edit to it into a
  * redeploy of every machine. */
 export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
@@ -5461,6 +5557,17 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** The person settled these threads by hand, a root and every thread under it: each takes a settled stamp and a
    * read stamp of now, and every window hears thread.marked. Takes fold keys. */
   z.object({ id: reqId, op: z.literal("sessions.settle"), threadIds: z.array(z.string()).min(1) }),
+  /** The person pinned, snoozed or placed these threads, or took one of those back with false or null: each moves on
+   * the thread's record and every window hears thread.marked. A snooze stamps the thread read as well, since putting
+   * a finish away is looking at it. Takes fold keys. */
+  z.object({ id: reqId, op: z.literal("sessions.mark"), threadIds: z.array(z.string()).min(1), marks: ThreadMarks }),
+  /** The person took settled threads back out of the fold: the settled stamp goes and the read stamp moves to now, so
+   * the quiet the fold reads counts from the restore. Takes fold keys. */
+  z.object({ id: reqId, op: z.literal("sessions.restore"), threadIds: z.array(z.string()).min(1) }),
+  /** The words of every thread the caller reaches, the person's messages and the agent's replies, searched on the
+   * host for the query, case aside: one hit per thread with a snippet around the words. Reads only what the host
+   * still holds of each transcript. */
+  z.object({ id: reqId, op: z.literal("sessions.search"), query: z.string() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -5535,6 +5642,17 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * again on every ask so a saved change reaches the next terminal opened; `scheme` picks the theme of a
    * light:...,dark:... value and is dark when absent. */
   z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
+  /** Replies with { editors: EditorChoice[] }: the editors installed on the computer running the host, in the
+   * table's order. None where the host runs on a computer it keeps no table for. Only this computer's own window may
+   * ask, as with editor.open below. */
+  z.object({ id: reqId, op: z.literal("editor.list") }),
+  /** Opens a file or a folder of one workspace in the person's editor on the computer running the host and replies
+   * with { editor }, the one it opened in: the preference's, else the first installed. The path must resolve inside
+   * that workspace's copy or its project folder on this computer, a link included; a workspace whose files are on
+   * another machine is refused with editorOpensHereLine. `line`, from 1, lands the editor on that line where it
+   * takes one. The command is the host's own table's, run with the path as one argument and never through a shell.
+   * Only this computer's own window may ask. */
+  z.object({ id: reqId, op: z.literal("editor.open"), workspaceId: z.string(), path: z.string(), line: z.number().int().positive().optional() }),
   /** Replies with { report: AgentsReport }: the agents, skills and MCP servers standing on one computer or workspace,
    * read as the login the computer was added with and never as root. Nothing is started: no server is spawned and no
    * login file is read, only whether one is there. A napping workspace is not woken; it answers the last report read
@@ -5790,6 +5908,7 @@ export const THREAD_OPS: readonly string[] = [
   "sessions.steer",
   "sessions.rename",
   "sessions.read",
+  "sessions.search",
 ];
 
 /** The ops a computer the person paired may send with no role of its own, and the whole of them, for the reason
@@ -5849,6 +5968,9 @@ export const DEVICE_OPS: readonly string[] = [
   "sessions.forget",
   "sessions.read",
   "sessions.settle",
+  "sessions.mark",
+  "sessions.restore",
+  "sessions.search",
   "golden.get",
   "image.get",
   "snapshots.list",
@@ -5979,6 +6101,13 @@ export type SessionRenameOutcome = z.infer<typeof SessionRenameOutcome>;
 export const SessionRenameResult = z.object({ outcome: SessionRenameOutcome, error: z.string().optional() });
 export type SessionRenameResult = z.infer<typeof SessionRenameResult>;
 
+/** One thread whose words hold the query: the thread by the runtime's id and the workspace it runs on, and the words
+ * around the first place they hold it, on one line. */
+export const SessionSearchHit = z.object({ workspaceId: z.string(), threadId: z.string(), snippet: z.string() });
+export type SessionSearchHit = z.infer<typeof SessionSearchHit>;
+export const SessionSearchResult = z.object({ hits: z.array(SessionSearchHit) });
+export type SessionSearchResult = z.infer<typeof SessionSearchResult>;
+
 // --- session start (how the turn the caller asked for came to be) --------------
 
 /** started: a turn of its own began. steered: the thread's turn was running and took the message mid-way, so
@@ -6077,7 +6206,7 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { needsYouLine, threadState, threadStateWord, threadUnread, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
+export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeCapRefusal, placeFullLine, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";

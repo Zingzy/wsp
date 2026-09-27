@@ -1,0 +1,544 @@
+{
+  "cloudOff": {
+    "name": "recipe_scan",
+    "description": "Every option this computer offers for a machine, read once and written nowhere: the person's agents and the catalog's tools with the tick their own use reaches and what each adds to the machine, what else a package manager on this computer has that the image could take (alsoHere, by manager, with the line that installs each on the machine, each row's id being the one to hand recipe's set, which ticks that package as a row of its own), whose scanned says whether anything looked, the commands their agents ran that the catalog does not carry, and the sign-in each ticked row brings. Every row carries a recommended value and a one-line reason, so apply those and put only the rows whose reason says worth a question. Run this before recipe, and before asking the person anything. Only names and counts are read.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "tick": {
+          "type": "string",
+          "enum": [
+            "used",
+            "installed",
+            "default"
+          ]
+        },
+        "at": {
+          "type": "string"
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "agent",
+                  "tool",
+                  "custom"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "on": {
+                "type": "boolean"
+              },
+              "base": {
+                "type": "boolean"
+              },
+              "group": {
+                "type": "string",
+                "enum": [
+                  "Always on the image",
+                  "Your project needs",
+                  "You use these",
+                  "Installed here, never used",
+                  "Added by your agent",
+                  "Also in the catalog"
+                ]
+              },
+              "why": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "heavy": {
+                "type": "boolean"
+              },
+              "note": {
+                "type": "string"
+              },
+              "pin": {
+                "type": "object",
+                "properties": {
+                  "tag": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "latest": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "tag"
+                ],
+                "additionalProperties": false
+              },
+              "recommended": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  },
+                  "why": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value",
+                  "why"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "name",
+              "on",
+              "base",
+              "group",
+              "why",
+              "heavy",
+              "recommended"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/agents/items"
+          }
+        },
+        "totalBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "heavy": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/agents/items"
+          }
+        },
+        "alsoHere": {
+          "type": "object",
+          "properties": {
+            "scanned": {
+              "type": "boolean"
+            },
+            "managers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "manager": {
+                    "type": "string"
+                  },
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "install": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "install"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "manager",
+                  "rows"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "scanned",
+            "managers"
+          ],
+          "additionalProperties": false
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "calls": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sessions": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "name",
+              "calls",
+              "sessions"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "signIns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "signIn": {
+                "type": "string"
+              },
+              "recommended": {
+                "$ref": "#/properties/agents/items/properties/recommended"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "signIn",
+              "recommended"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "tick",
+        "at",
+        "agents",
+        "tools",
+        "totalBytes",
+        "heavy",
+        "alsoHere",
+        "commands",
+        "signIns"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "recipe_scan",
+    "description": "Every option this computer offers for a machine, read once and written nowhere: the person's agents and the catalog's tools with the tick their own use reaches and what each adds to the machine, what else a package manager on this computer has that the image could take (alsoHere, by manager, with the line that installs each on the machine, each row's id being the one to hand recipe's set, which ticks that package as a row of its own), whose scanned says whether anything looked, the commands their agents ran that the catalog does not carry, and the sign-in each ticked row brings. Every row carries a recommended value and a one-line reason, so apply those and put only the rows whose reason says worth a question. Run this before recipe, and before asking the person anything. Only names and counts are read.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count"
+        }
+      },
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "tick": {
+          "type": "string",
+          "enum": [
+            "used",
+            "installed",
+            "default"
+          ]
+        },
+        "at": {
+          "type": "string"
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "agent",
+                  "tool",
+                  "custom"
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "on": {
+                "type": "boolean"
+              },
+              "base": {
+                "type": "boolean"
+              },
+              "group": {
+                "type": "string",
+                "enum": [
+                  "Always on the image",
+                  "Your project needs",
+                  "You use these",
+                  "Installed here, never used",
+                  "Added by your agent",
+                  "Also in the catalog"
+                ]
+              },
+              "why": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "heavy": {
+                "type": "boolean"
+              },
+              "note": {
+                "type": "string"
+              },
+              "pin": {
+                "type": "object",
+                "properties": {
+                  "tag": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "latest": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "tag"
+                ],
+                "additionalProperties": false
+              },
+              "recommended": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  },
+                  "why": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value",
+                  "why"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "name",
+              "on",
+              "base",
+              "group",
+              "why",
+              "heavy",
+              "recommended"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/agents/items"
+          }
+        },
+        "totalBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "heavy": {
+          "type": "array",
+          "items": {
+            "$ref": "#/properties/agents/items"
+          }
+        },
+        "alsoHere": {
+          "type": "object",
+          "properties": {
+            "scanned": {
+              "type": "boolean"
+            },
+            "managers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "manager": {
+                    "type": "string"
+                  },
+                  "rows": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "install": {
+                          "type": "string"
+                        },
+                        "size": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "install"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "manager",
+                  "rows"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "scanned",
+            "managers"
+          ],
+          "additionalProperties": false
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "calls": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sessions": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "name",
+              "calls",
+              "sessions"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "signIns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "signIn": {
+                "type": "string"
+              },
+              "recommended": {
+                "$ref": "#/properties/agents/items/properties/recommended"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "signIn",
+              "recommended"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "tick",
+        "at",
+        "agents",
+        "tools",
+        "totalBytes",
+        "heavy",
+        "alsoHere",
+        "commands",
+        "signIns"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

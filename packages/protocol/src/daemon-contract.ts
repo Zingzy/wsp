@@ -86,6 +86,9 @@ export const FS_FILES_CAP_ENTRIES = 20_000;
 export const GIT_PR_LIST_CAP = 50;
 /** Characters of an item's body a git.prList carries. */
 export const GIT_PR_LIST_BODY_CAP = 4000;
+/** Paths one fs.search in files mode carries, and hits one in text mode carries; truncated says the walk stopped there. */
+export const FS_SEARCH_CAP_FILES = 5_000;
+export const FS_SEARCH_CAP_HITS = 500;
 /** Bytes of patch one git.diff carries across its files, cut at a line. */
 export const GIT_DIFF_CAP_BYTES = 2 * 1024 * 1024;
 /** Bytes of a pty's output kept for the next client to attach. */

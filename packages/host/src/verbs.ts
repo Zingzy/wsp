@@ -311,9 +311,9 @@ export interface HostClient {
 }
 
 /** The close code the runtime sends with every token refusal, the one fact an older host still carries. */
-const UNAUTHORIZED_CLOSE = 4401;
+export const UNAUTHORIZED_CLOSE = 4401;
 /** How long a refused auth waits for the close that follows its frame before the frame's own class stands. */
-const CLOSE_GRACE_MS = 500;
+export const CLOSE_GRACE_MS = 500;
 
 /** What a dial takes beside the state file: which host, how long to wait, and on a dial to a host on the account,
  * the key to prove instead of a token this computer does not have yet. */
@@ -340,6 +340,9 @@ export interface DialOpts extends HostPick {
  * serve is one rule and it lives where the state is picked, not in a second reading here. */
 export const noHostServingLine = (statePath: string): string => `no wsp host is serving ${statePath}; start one with wsp up --state ${statePath}`;
 
+/** A host holds this state file's lock and the token it writes beside it is not there. */
+export const hostTokenMissingLine = (path: string): string => `the host's token file is missing: ${path}`;
+
 /** Where a line dials and what it presents there: a host on this computer is the address its lock records (one
  * bound to a single address answers only there) and the token it wrote beside its state file, a host somewhere
  * else is its own address on the runtime's path and the device token this computer holds for it, and an address
@@ -351,7 +354,7 @@ export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim 
   const lock = servingHost(statePath);
   if (lock === undefined) throw new Error(noHostServingLine(statePath));
   const token = hostTokenFor(statePath);
-  if (token === undefined) throw authRefusal(`the host's token file is missing: ${hostTokenPath(statePath)}`);
+  if (token === undefined) throw authRefusal(hostTokenMissingLine(hostTokenPath(statePath)));
   return { url: wsUrlOf(`http://${authority(dialAddress(lock), lock.port)}`), token };
 }
 
@@ -2045,7 +2048,8 @@ async function waitThrough(deps: Pick<VerbDeps, "client" | "hostWaitMs">, named:
   let client = await deps.client();
   for (;;) {
     try {
-      return await firstEnded(client, named, left());
+      const waited = await firstEnded(client, named, left());
+      return "timedOutMs" in waited ? { timedOutMs: timeoutMs! } : waited;
     } catch (e) {
       if (!(await stoppedUnder(client))) throw e;
       redialed?.();
