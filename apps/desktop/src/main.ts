@@ -324,6 +324,9 @@ async function askQuit(): Promise<void> {
     } catch (e) {
       dialog.showErrorBox("wsp did not stop", e instanceof Error ? e.message : String(e));
     }
+    // The page is on a host that just stopped, and a window left to close itself held the quit for minutes
+    // (measured 10 s to 336 s on a window loaded a moment before), so it is closed without asking the page.
+    for (const w of BrowserWindow.getAllWindows()) w.destroy();
   }
   app.quit();
 }
