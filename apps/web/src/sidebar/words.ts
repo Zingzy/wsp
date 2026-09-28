@@ -87,13 +87,14 @@ export const ADD_PROJECT_WORDS = {
   providerSays: (name: string) => `${name} clones a project from its repository address. Paste one above.`,
 } as const;
 
-/** The live list's section heads, in the design's caps, and the Settled fold's. */
-export const SECTION_WORDS: Record<"pinned" | ThreadSection, string> = {
+/** The live list's section heads and the Settled fold's. */
+export const SECTION_WORDS: Record<"pinned" | ThreadSection | "settled", string> = {
   pinned: "Pinned",
   "needs-you": threadStateWord("waiting"),
   working: threadStateWord("running"),
   done: threadStateWord("done"),
   idle: threadStateWord("completed"),
+  settled: "Settled",
 };
 
 /** The snooze's pick of times. */

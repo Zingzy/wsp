@@ -16,7 +16,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, copiesFolder, type ProjectView, type SeedChoice, type SeedPlan,
+import { addedProjectLine, defaultSeedChoice, kindForComputer, ProjectAddEvent, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, copiesFolder, type ProjectView, type SeedChoice, type SeedPlan, type MacKind,
   ALREADY_JOINED_LINE,
   isHttpUrl,
   machineLacksLine,
@@ -214,6 +214,43 @@ export function placeLabelHere(): string | undefined {
   return labelHere;
 }
 
+/** Which Mac a product name ("MacBook Pro (14-inch, M5)") or a model identifier ("Macmini9,1") names. Apple
+ * silicon's identifiers since 2022 ("Mac17,2") name no family, which is why the product name is read first. */
+export function macKindOf(said: string): MacKind | undefined {
+  const word = said.replace(/\s+/g, "").toLowerCase();
+  if (word.startsWith("macbook")) return "macbook";
+  if (word.startsWith("imac")) return "imac";
+  if (word.startsWith("macmini")) return "mac-mini";
+  if (word.startsWith("macstudio")) return "mac-studio";
+  if (word.startsWith("macpro")) return "mac-pro";
+  return undefined;
+}
+
+/** The product name out of `ioreg -arc IOPlatformDevice -k product-name`, whose plist carries it as base64 bytes. */
+export function productNameOf(ioreg: string): string | undefined {
+  const data = /<key>product-name<\/key>\s*<data>\s*([A-Za-z0-9+/=\s]+?)\s*<\/data>/.exec(ioreg)?.[1];
+  if (data === undefined) return undefined;
+  const name = Buffer.from(data.replace(/\s+/g, ""), "base64").toString("utf8").replace(/\0+$/, "").trim();
+  return name === "" ? undefined : name;
+}
+
+/** Which Mac this is, read once: an Intel Mac's registry names no product, and its model identifier says it. */
+let macHere: MacKind | undefined | null = null;
+export function placeMacHere(): MacKind | undefined {
+  if (macHere !== null) return macHere;
+  macHere = undefined;
+  if (platform() !== "darwin") return macHere;
+  const read = (file: string, args: string[]): string => {
+    try {
+      return execFileSync(file, args, { encoding: "utf8", timeout: 2000 });
+    } catch {
+      return "";
+    }
+  };
+  macHere = macKindOf(productNameOf(read("ioreg", ["-arc", "IOPlatformDevice", "-k", "product-name"])) ?? "") ?? macKindOf(read("sysctl", ["-n", "hw.model"]).trim());
+  return macHere;
+}
+
 /** What a window names this computer by: the name its owner gave it, else its hostname, the one reading the host's
  * own row of the places list gives the app. */
 export const computerNameHere = (): string => placeLabelHere() ?? placeNameHere();
@@ -221,7 +258,8 @@ export const computerNameHere = (): string => placeLabelHere() ?? placeNameHere(
 export function placeHere(name: string = placeNameHere()): HerePlace {
   const report = placeFacts({ name });
   const label = placeLabelHere();
-  return { name: report.name, ...(label !== undefined ? { label } : {}), os: report.os, shape: report.shape, engine: report.engine, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
+  const mac = placeMacHere();
+  return { name: report.name, ...(label !== undefined ? { label } : {}), ...(mac !== undefined ? { mac } : {}), os: report.os, shape: report.shape, engine: report.engine, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
 }
 
 /** How long a join gets to open the socket and finish the handshake. A person is watching, and a host that is not

@@ -117,7 +117,10 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
   return { create, settleThreads, markThreads, restoreThreads, setPreferences };
 }
 
-const rowIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-sidebar-row]")].map(row => row.dataset["rowId"] ?? "");
+/** Every row the arrow keys walk, the section heads with the tiles. */
+const walkIds = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-sidebar-row]")].map(row => row.dataset["rowId"] ?? "");
+/** The tiles and the Settled row in their order, leaving out the live sections' heads. */
+const rowIds = (): string[] => walkIds().filter(id => !id.startsWith("section:"));
 const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
 const depthOf = (text: string): number => Number(rowOf(text).dataset["depth"]);
 const HOUR = 60 * 60_000;
@@ -357,7 +360,7 @@ describe("the sidebar's list of thread tiles", () => {
     expect(depthOf("write the migration")).toBe(0);
   });
 
-  it("folds every read root quiet two hours into Settled at the foot: its count shut and open, a hover fill, 12 px under the list, opened by its chevron and remembered", async () => {
+  it("folds every read root quiet two hours into Settled at the foot: 'Settled (2)' in muted sans, a hairline and a chevron, 12 px under the list, opened by its chevron and remembered", async () => {
     mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
     await act(async () => {
       useStore.setState({
@@ -372,20 +375,21 @@ describe("the sidebar's list of thread tiles", () => {
     expect(rowIds()).toEqual(["thread:th_live", "settled"]);
     const fold = document.querySelector<HTMLElement>("[data-row-id=settled]")!;
     expect(fold.getAttribute("aria-expanded")).toBe("false");
-    expect(fold.className).toContain("h-9");
-    expect(fold.className).toContain("hover:bg-sidebar-row-hover");
+    expect(fold.className).toContain("h-7");
+    expect(fold.className).not.toContain("hover:bg-");
     expect(fold.closest("li")!.className).toContain("mt-3");
-    expect(fold.querySelector("[data-group-word]")!.className).toContain("uppercase");
-    expect(fold.querySelector("[data-group-word]")!.className).toContain("font-mono");
-    expect(fold.querySelector("[data-group-count]")!.textContent).toBe("2");
-    expect(fold.textContent).not.toMatch(/[·•]/);
+    expect(fold.textContent).toBe("Settled (2)");
+    expect(fold.querySelector("[data-group-word]")!.className).not.toMatch(/uppercase|font-mono|tracking/);
+    expect(fold.querySelector("[data-group-count]")!.textContent).toBe("(2)");
+    expect(fold.querySelector("[data-section-rule]")!.className).toContain("flex-1");
     fireEvent.click(fold);
     await waitFor(() => expect(rowIds()).toEqual(["thread:th_live", "settled", "thread:th_quiet", "thread:th_quiet_child"]));
-    expect(fold.querySelector("[data-group-count]")!.textContent).toBe("2");
-    expect(window.localStorage.getItem("wsp:sidebar-settled-open")).toBe("true");
+    expect(fold.querySelector("[data-group-count]")!.textContent).toBe("(2)");
+    expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual([]);
+    expect(window.localStorage.getItem("wsp:sidebar-settled-open")).toBeNull();
     fireEvent.click(fold);
     await waitFor(() => expect(rowIds()).toEqual(["thread:th_live", "settled"]));
-    expect(window.localStorage.getItem("wsp:sidebar-settled-open")).toBe("false");
+    expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled"]);
   });
 
   it("a thread on a paused workspace reads Done until it is opened, then its age, and its tile says nothing about the machine", async () => {
@@ -419,7 +423,7 @@ describe("the sidebar's list of thread tiles", () => {
     await waitFor(() => expect(screen.getByText("the lead")).toBeDefined());
     // Nothing has settled yet, but there is a read tree to settle, so the row that settles it is there.
     const fold = document.querySelector<HTMLElement>("[data-row-id=settled]")!;
-    expect(fold.querySelector("[data-group-count]")!.textContent).toBe("0");
+    expect(fold.querySelector("[data-group-count]")!.textContent).toBe("(0)");
     const picked: string[][] = [];
     const choose = (id: string) => (window.wsp = { contextMenu: async (items: Array<{ id: string; enabled?: boolean }>) => (picked.push(items.map(item => item.id)), id) } as never);
     try {
@@ -506,10 +510,45 @@ describe("the sidebar's list of thread tiles", () => {
       await act(async () => useStore.setState({ sessions: sessions(all) } as never));
       await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
       expect(heads()).toEqual(["pinned", "needs-you", "working", "done", "idle"]);
-      expect([...document.querySelectorAll("[data-section-head]")].map(head => head.querySelector("[data-group-word]")!.textContent)).toEqual(["Pinned", "Needs you", "Working", "Done", "Idle"]);
+      expect([...document.querySelectorAll("[data-section-head]")].map(head => head.textContent)).toEqual(["Pinned (1)", "Needs you (1)", "Working (1)", "Done (1)", "Idle (1)"]);
       expect(rowIds()).toEqual(["thread:th_pinned", "thread:th_asks", "thread:th_works", "thread:th_done", "thread:th_idle", "settled"]);
+      expect(walkIds()).toEqual(["section:pinned", "thread:th_pinned", "section:needs-you", "thread:th_asks", "section:working", "thread:th_works", "section:done", "thread:th_done", "section:idle", "thread:th_idle", "settled"]);
       expect(screen.queryByText("snoozed away")).toBeNull();
       expect(rowOf("finished unseen").querySelector("[data-thread-status]")!.textContent).toBe("Done");
+    });
+
+    it("folds each section by its head, one at a time, and remembers the fold per section; the head keeps its count and its place", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions(all) } as never));
+      await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
+      const head = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-section-head=${id}]`)!;
+      for (const id of ["pinned", "needs-you", "working", "done", "idle", "settled"]) {
+        const at = id === "settled" ? document.querySelector<HTMLElement>("[data-row-id=settled]")! : head(id);
+        expect(at.tagName, id).toBe("BUTTON");
+        expect(at.className, id).toContain("h-7");
+        expect(at.querySelector("[data-section-rule]"), id).not.toBeNull();
+        expect(at.querySelector("svg.lucide-chevron-down"), id).not.toBeNull();
+      }
+      expect(head("working").getAttribute("aria-expanded")).toBe("true");
+      fireEvent.click(head("working"));
+      await waitFor(() => expect(screen.queryByText("still going")).toBeNull());
+      expect(head("working").getAttribute("aria-expanded")).toBe("false");
+      expect(head("working").textContent).toBe("Working (1)");
+      expect(screen.getByText("wants an answer")).toBeDefined();
+      expect(screen.getByText("finished unseen")).toBeDefined();
+      expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled", "working"]);
+      fireEvent.click(head("idle"));
+      await waitFor(() => expect(screen.queryByText("read already")).toBeNull());
+      expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled", "working", "idle"]);
+      cleanup();
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await act(async () => useStore.setState({ sessions: sessions(all) } as never));
+      await waitFor(() => expect(screen.getByText("kept on top")).toBeDefined());
+      expect(screen.queryByText("still going")).toBeNull();
+      expect(screen.queryByText("read already")).toBeNull();
+      fireEvent.click(head("working"));
+      await waitFor(() => expect(screen.getByText("still going")).toBeDefined());
+      expect(JSON.parse(window.localStorage.getItem("wsp:sidebar-folded") ?? "null")).toEqual(["settled", "idle"]);
     });
 
     it("a root's menu pins, unpins and snoozes it, and a folded root's menu restores its tree", async () => {

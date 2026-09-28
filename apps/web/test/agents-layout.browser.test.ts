@@ -8,8 +8,9 @@
 // the tabs, the search box, the first group label, the first row's mark and a
 // detail's first label share one left edge and the tabs and Add one right
 // edge, and on the computer page the page's own edges; labels and rows keep
-// one rhythm; the tabs, the line and the toolbar stay pinned while the list
-// scrolls, whose end keeps the rows' side gutter under it; a tab's tooltip
+// one rhythm; in the panel the tabs, the line and the toolbar stay pinned
+// while the list scrolls, and on the page they scroll with it on the page's
+// own ground; the list's end keeps the rows' side gutter under it; a tab's tooltip
 // opens only while its word is hidden; Tab reaches every row with its ring
 // drawn.
 // Photographs of every tab, a detail of each kind and an agent not installed,
@@ -208,19 +209,11 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     }
   });
 
-  it("pins the tabs, the line and the toolbar at the top while the list scrolls, in the panel and on the page", async () => {
+  it("pins the tabs, the line and the toolbar in the panel while the list scrolls; on the page they stand on the page's own ground and scroll with it", async () => {
     await open("screen=panel-agents&theme=dark", { width: 1280, height: 420 });
     await page!.waitForSelector("[data-k=agents-surface] [data-agents-row]");
     const surface = page!.locator("[data-k=agents-surface]");
     await surface.locator("[data-segment]").filter({ has: page!.locator('[aria-label="MCP servers"]') }).click();
-    // The pinned block wears the surface it stands on, so nothing under it shows and no seam is drawn.
-    const under = (el: Element): { color: string; image: string } => {
-      for (let at = el.parentElement; at !== null; at = at.parentElement) {
-        const style = getComputedStyle(at);
-        if (style.backgroundColor !== "rgba(0, 0, 0, 0)") return { color: style.backgroundColor, image: style.backgroundImage };
-      }
-      return { color: "", image: "" };
-    };
     // In the panel the list scrolls under a head that stands outside it, so nothing passes under the head.
     const panel = await surface.evaluate(el => {
       const body = el.querySelector<HTMLElement>("[data-agents-body]")!;
@@ -237,17 +230,12 @@ describe.skipIf(renderSkipped !== undefined)("the agents manager laid out in Chr
     await page!.waitForSelector("[data-settings-card='agents'] [data-agents-row]");
     const card = page!.locator("[data-settings-card='agents']");
     await card.locator("[data-segment]").filter({ has: page!.locator('[aria-label="MCP servers"]') }).click();
-    const onPage = await card.evaluate((el, underSrc) => {
-      const underOf = new Function(`return ${underSrc}`)() as typeof under;
-      let scroller = el.parentElement;
-      while (scroller !== null && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+    const onPage = await card.evaluate(el => {
       const top = el.querySelector<HTMLElement>("[data-agents-top]")!;
-      scroller!.scrollTop = el.getBoundingClientRect().top - scroller!.getBoundingClientRect().top + scroller!.scrollTop + 200;
       const style = getComputedStyle(top);
-      return { offset: Math.round(top.getBoundingClientRect().top - scroller!.getBoundingClientRect().top), bg: { color: style.backgroundColor, image: style.backgroundImage }, under: underOf(top) };
-    }, under.toString());
-    expect(onPage.offset).toBe(0);
-    expect(onPage.bg).toEqual(onPage.under);
+      return { position: style.position, color: style.backgroundColor, image: style.backgroundImage };
+    });
+    expect(onPage).toEqual({ position: "static", color: "rgba(0, 0, 0, 0)", image: "none" });
   });
 
   it("keeps the rows' side gutter under the list's end on every tab, once it is scrolled there", async () => {
