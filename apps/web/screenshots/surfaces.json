@@ -74,7 +74,10 @@
     {
       "name": "btw-asking",
       "at": "/",
-      "widths": [1440, 390],
+      "widths": [
+        1440,
+        390
+      ],
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -90,7 +93,10 @@
     {
       "name": "btw-answered",
       "at": "/",
-      "widths": [1440, 390],
+      "widths": [
+        1440,
+        390
+      ],
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -1389,6 +1395,184 @@
       ],
       "wait": "k=editor",
       "settleMs": 600
+    },
+    {
+      "name": "tiles-sections-folded",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "1440:row-id=thread:cart",
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "section-head=done",
+        "row-id=settled"
+      ],
+      "wait": "row-id=settled",
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
+      "name": "settings-computers-icons",
+      "at": "/",
+      "fixture": "both-providers",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-computers"
+      ],
+      "wait": "settings-at=computers",
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
+      "name": "agents-page-mac",
+      "at": "/",
+      "steps": [
+        "k=settings-row",
+        "k=settings-computers",
+        "place-row=here"
+      ],
+      "wait": "k=agents-line",
+      "settleMs": 1500,
+      "mac": true,
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "settings-image-recipe-mac",
+      "at": "/",
+      "fixture": "image-built",
+      "steps": [
+        "k=settings-row",
+        "k=settings-computers",
+        "place-row=p_hetzner",
+        "k=edit-recipe"
+      ],
+      "wait": "k=recipe",
+      "settleMs": 700,
+      "mac": true,
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "thread-open",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape"
+      ],
+      "wait": "k=open",
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
+      "name": "thread-open-menu",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "k=open-choose"
+      ],
+      "wait": "k=open-menu",
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
+      "name": "thread-open-menu-mac",
+      "at": "/",
+      "steps": [
+        "row-id=thread:redirect",
+        "k=open-choose"
+      ],
+      "wait": "k=open-menu",
+      "mac": true,
+      "widths": [
+        1440
+      ]
+    },
+    {
+      "name": "thread-open-fork",
+      "at": "/",
+      "fixture": "ascii-only",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=ws:ws_api",
+        "390:key:Escape"
+      ],
+      "wait": "testid=composer-editor",
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
+      "name": "agents-page",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-computers",
+        "place-row=here"
+      ],
+      "wait": "k=agents-line",
+      "settleMs": 1500,
+      "widths": [
+        1440,
+        390
+      ]
+    },
+    {
+      "name": "settings-image-recipe-rows-mac",
+      "at": "/",
+      "fixture": "image-built",
+      "steps": [
+        "k=settings-row",
+        "k=settings-computers",
+        "place-row=p_hetzner",
+        "k=edit-recipe",
+        "k=recipe-primary",
+        "slot=checkbox"
+      ],
+      "wait": "k=row",
+      "settleMs": 700,
+      "mac": true,
+      "widths": [
+        1440
+      ],
+      "fresh": true
+    },
+    {
+      "name": "settings-computers-boat",
+      "at": "/",
+      "fixture": "ascii-only",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=settings-row",
+        "k=settings-computers"
+      ],
+      "wait": "settings-at=computers",
+      "widths": [
+        1440,
+        390
+      ]
     }
   ]
 }

@@ -123,15 +123,16 @@ describe("ForwardsList", () => {
     await act(async () => useStore.getState().bind(api));
     render(<SidebarProvider defaultOpen><ForwardsList /></SidebarProvider>);
     const list = await screen.findByTestId("forwards-list");
-    expect(within(list).getByText("Forwarded ports")).toBeDefined();
-    // The one section row the sidebar has: a caps mono label on a row that shuts its group.
-    const header = within(list).getByRole("button", { name: "Forwarded ports" });
+    // The one section head the sidebar has: the name and its count in muted sans, a hairline, a chevron that folds the group.
+    const header = within(list).getByRole("button", { name: "Forwarded ports 2" });
     expect(header.getAttribute("aria-expanded")).toBe("true");
-    expect(within(header).getByText("Forwarded ports").className).toContain("font-mono");
+    expect(header.textContent).toBe("Forwarded ports (2)");
+    expect(header.querySelector("[data-group-word]")!.className).not.toMatch(/font-mono|uppercase/);
+    expect(header.querySelector("[data-section-rule]")).not.toBeNull();
     expect(header.querySelector("svg.lucide-chevron-down")).not.toBeNull();
     fireEvent.click(header);
     expect(within(list).queryByText("localhost:8123")).toBeNull();
-    expect(header.textContent).toBe("Forwarded ports2");
+    expect(header.textContent).toBe("Forwarded ports (2)");
     fireEvent.click(header);
 
     const rowA = within(list).getByText("localhost:8123").closest<HTMLElement>("[data-sidebar-row]")!;
@@ -192,6 +193,6 @@ describe("in the sidebar", () => {
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
     await screen.findByText("localhost:8123");
     const ids = Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-row]")).map(r => r.dataset["rowId"]);
-    expect(ids).toEqual(["ws:ws_a", "fwd:ws_a:8123"]);
+    expect(ids).toEqual(["section:idle", "ws:ws_a", "section:forwards", "fwd:ws_a:8123"]);
   });
 });

@@ -36,6 +36,7 @@ export const KEYBINDING_COMMANDS = [
   "thread.previous",
   "thread.settle",
   "thread.nextNeedsYou",
+  "editor.open",
   ...WORKSPACE_SELECT_SLOTS.map(workspaceSelectCommand),
 ] as const;
 export type KeybindingCommand = (typeof KEYBINDING_COMMANDS)[number];
