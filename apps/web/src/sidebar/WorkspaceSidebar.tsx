@@ -55,8 +55,7 @@ import { SearchRow } from "./SearchRow.js";
 import { resolveAdjacentThreadId, topSidebarThread } from "./Sidebar.logic.js";
 import { SIDEBAR_SECTIONS, dropMarks, settleableRoots, sidebarTiles, treeSettle, treeThreadIds, type ProjectGroup, type SidebarSection, type TileNode } from "./threadTree.js";
 import { SnoozeDialog } from "./SnoozeDialog.js";
-import { SettingsRow } from "./SettingsRow.js";
-import { HostFoot } from "../hosts/HostFoot.js";
+import { SidebarCorner } from "./SidebarCorner.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
 import { useLinkDowns } from "../terminal/paneWords.js";
@@ -625,8 +624,7 @@ export function WorkspaceSidebar() {
           <ForwardsList />
         </SidebarContent>
         <SidebarChromeFooter>
-          <SettingsRow />
-          <HostFoot />
+          <SidebarCorner />
         </SidebarChromeFooter>
       </div>
       {dialog ? (

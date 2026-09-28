@@ -18,7 +18,10 @@ import { AGENTS_REPORT } from "./fixtures/agents-report.js";
 import { IMAGE_WORDS } from "../src/settings/image.js";
 import { absentOf } from "../src/settings/places.js";
 import { useSettingsStore, type SettingsAt } from "../src/settings/settingsStore.js";
-import { SettingsRow } from "../src/sidebar/SettingsRow.js";
+import { SidebarCorner } from "../src/sidebar/SidebarCorner.js";
+import { shortcutLabelForCommand } from "../src/keybindings.js";
+import { currentKeybindings } from "../src/shell/useKeybindings.js";
+import { TooltipProvider } from "../src/components/ui/tooltip.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 import { descriptionOf, lineLabels, lineOf, mountSettings, pageAt, resetSettings, rowOf, settingsApi, settle, wordOf } from "./settings-harness.js";
 import { pickOption } from "./select.js";
@@ -1200,12 +1203,23 @@ describe("the road to the page", () => {
     expect(listIds()).toEqual(["here", "solari"]);
   });
 
-  it("stands in the sidebar's foot with its chord, so Settings is never reachable only by a chord", () => {
-    render(<SettingsRow />);
-    const row = screen.getByRole("button");
-    expect(row.textContent).toContain("Settings");
-    expect(row.textContent).toContain("⌘,");
-    fireEvent.click(row);
+  it("stands in the sidebar's bottom-left corner as an icon button named Settings, its chord on the tooltip, in a row that takes more buttons", async () => {
+    render(
+      <TooltipProvider>
+        <SidebarCorner />
+      </TooltipProvider>,
+    );
+    const button = screen.getByRole("button", { name: "Settings" });
+    expect(button.textContent).toBe("");
+    expect(button.querySelector("svg.lucide-settings")).not.toBeNull();
+    const corner = button.closest<HTMLElement>("[data-sidebar-corner]")!;
+    expect(corner.className).toMatch(/(^|\s)flex(\s|$)/);
+    expect(corner.className).toContain("items-center");
+    fireEvent.focus(button);
+    // The chord as this platform writes it, read off the same rules the tooltip reads.
+    const chord = shortcutLabelForCommand(currentKeybindings(), "settings.toggle")!;
+    await waitFor(() => expect(document.querySelector("[data-slot=tooltip-popup], [data-slot=tooltip-content]")?.textContent).toBe(`Settings${chord}`));
+    fireEvent.click(button);
     expect(useStore.getState().settingsOpen).toBe(true);
   });
 
