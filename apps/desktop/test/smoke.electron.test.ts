@@ -977,6 +977,37 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
   }, 120_000);
 
   it.runIf(process.platform === "darwin")(
+    "with no window open, the menu bar's Quit answered Quit ends the app and leaves wsp serving",
+    async () => {
+      launched = await launch({}, seedLocalWorkspace);
+      const { app, statePath } = launched;
+      const win = await windowAt(app, APP_URL);
+      await win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`).waitFor();
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(w => w.close()));
+      await vi.waitFor(() => expect(appWindows(app)).toHaveLength(0), { timeout: 10_000, interval: 100 });
+      const host = servingHost(statePath)!;
+      const exited = new Promise<"exited">(resolve => app.process().once("exit", () => resolve("exited")));
+      const picked = Date.now();
+      // The question is answered Quit as a person answers it, and the row is the menu bar's own, picked with no window.
+      await app.evaluate(({ dialog }, answer) => {
+        dialog.showMessageBox = (async (...args: unknown[]) => {
+          const options = args.at(-1) as { buttons?: string[] };
+          return { response: options.buttons?.indexOf(answer) ?? 0, checkboxChecked: false };
+        }) as typeof dialog.showMessageBox;
+        (globalThis as unknown as { wspTray: { pick(what: TrayAct): void } }).wspTray.pick({ kind: "quit" });
+      }, "Quit");
+      const ended = await Promise.race([exited, new Promise<"still running">(resolve => setTimeout(() => resolve("still running"), 15_000))]);
+      // How long the quit takes is what a check made the moment the row is picked would race.
+      console.error(ended === "exited" ? `the app quit ${Date.now() - picked} ms after the menu bar's Quit` : ["the app after the menu bar's Quit:", ...launched.said.slice(-20)].join("\n"));
+      expect(ended).toBe("exited");
+      expect(alive(host.pid)).toBe(true);
+      expect(servingHost(statePath)?.pid).toBe(host.pid);
+      await stopServiceOf(launched);
+    },
+    60_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
     "with the window closed, the menu bar counts a working thread and holds the computer awake, marks the prompt it raises, and its Allow lets the turn finish",
     async () => {
       const agents = mkdtempSync(join(tmpdir(), "wsp-desktop-smoke-agents-"));
