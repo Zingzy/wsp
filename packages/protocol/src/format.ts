@@ -1402,6 +1402,10 @@ export function snapshotListedRefusedLine(snapshotId: string, waitedMs: number):
  * the row settles only at the process exit, since a harness can keep working after it answers. */
 export const TURN_END_WORDS = "A turn ends when the agent process exits, not at its reply, and the thread reads running until then";
 
+/** How an agent starts work it wants to hear back from, quoted whole by the skill's rules and the machine's context:
+ * the harness tracks its own background road and wakes the agent when it ends, and nothing tracks a shell `&`. */
+export const BACKGROUND_WORK_WORDS = "Start long work with your harness's own background road (run_in_background in Claude Code), which wakes you when it ends, and never with a shell &, which nothing tracks and which wakes nobody when it ends";
+
 /** When the notify line goes, quoted the same way: with the reply, once, never again at the exit. A reply the agent
  * gave while work it started was still running is delivered when that work is done, and the line goes with it. */
 export const NOTIFY_WORDS = "The notify line goes once, at the reply, and a reply given with background tasks still running goes once they are done";
