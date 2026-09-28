@@ -289,6 +289,13 @@ function taskFinishedOf(event: Record<string, unknown>): { id: string; status: s
   return id === undefined || status === undefined ? undefined : { id, status };
 }
 
+/** The CLI's answer to a report on work an earlier process of the session started: on a resume after a run that died
+ * with a command in the background, it reports that command stopped and answers the report as a turn of its own,
+ * empty and in milliseconds, before the message the resume was sent with (measured on 2.1.284). */
+function drainedNotice(event: Record<string, unknown>): boolean {
+  return str(event.type) === "result" && str(rec(event.origin)?.kind) === "task-notification";
+}
+
 /** A reply whose process was cut while the agent's background tasks still ran: the CLI kills them with itself, so
  * the turn ended before the work it started did. The reply stays; the error says why. A reply given while they run
  * holds the turn open instead, so this is the word of a turn stopped from outside, the wall among the causes. */
@@ -598,6 +605,8 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             if (heldReply !== undefined) finishedAfter.push(taskFinishedLine(taskNames.get(over.id) ?? over.id, over.status, Date.now() - heldAt));
             continue;
           }
+          // A report's answer with no reply held is not this turn's: the person's message is answered after it.
+          if (heldReply === undefined && !sawResult && drainedNotice(event)) continue;
           const cause = apiErrorCause(event);
           if (cause !== undefined) {
             refusalCause = cause;

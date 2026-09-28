@@ -809,6 +809,30 @@ describe("result classification", () => {
     expect(result.error).toBe("claude answered with no output and no usage after 1.5s: line two\nline three\nline four\nline five\nline six");
   });
 
+  it("a resume after a run that died with work in the background answers the person's message, not the notice the CLI drains first", async () => {
+    // What Claude Code 2.1.284 printed on a resume of a session whose process was killed while a background command
+    // ran (measured 2026-09-29): the dead run's task is reported stopped and answered as a turn of its own, empty and
+    // in a few milliseconds, before the message the resume was sent with.
+    const init = `{"type":"system","subtype":"init","cwd":"/w","session_id":"${FIXTURE_SESSION_ID}","model":"claude-haiku-4-5"}`;
+    const lines = [
+      `{"type":"system","subtype":"task_notification","task_id":"b7oi2218c","tool_use_id":"toolu_1","status":"stopped","output_file":"","summary":"Background shell command didn't finish before the previous session ended","session_id":"${FIXTURE_SESSION_ID}"}`,
+      init,
+      `{"type":"result","subtype":"success","is_error":false,"num_turns":0,"duration_ms":22,"result":"","session_id":"${FIXTURE_SESSION_ID}","total_cost_usd":0.02,"origin":{"kind":"task-notification"},"usage":{"input_tokens":0,"output_tokens":0}}`,
+      init,
+      `{"type":"assistant","message":{"id":"msg_1","role":"assistant","content":[{"type":"text","text":"hi"}]},"parent_tool_use_id":null,"session_id":"${FIXTURE_SESSION_ID}"}`,
+      `{"type":"result","subtype":"success","is_error":false,"num_turns":1,"duration_ms":1237,"result":"hi","session_id":"${FIXTURE_SESSION_ID}","total_cost_usd":0.024,"usage":{"input_tokens":10,"output_tokens":42}}`,
+    ];
+    const exec = scriptedExec(lines);
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { events, onEvent } = collect();
+
+    const result = await adapter.start({ prompt: "Reply with the single word: hi", resume: FIXTURE_SESSION_ID, onEvent }).finished;
+
+    expect(result).toMatchObject({ status: "completed", text: "hi", durationMs: 1237 });
+    expect(events.filter((e) => e.type === "turn.done")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ type: "session.end", sawResult: true });
+  });
+
   it("the CLI's refusal for want of a sign-in is a failed turn carrying its sentence once: the line it wrote itself is no delta and no reply", async () => {
     // The three lines a home with no login gave on 2.1.257 (measured 2026-09-12), trimmed to the fields read here.
     const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}","model":"claude-opus-5[1m]"}`;
