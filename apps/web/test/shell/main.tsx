@@ -32,8 +32,8 @@
 // workspace under its header with an icon per workspace at the bottom;
 // ?look=1 gives the first two workspaces a theme and the first a glyph of its own,
 // ?many=<n> adds n more running forks so the space bar overflows;
-// ?archived=1 gives the first workspace two threads quiet for days, so the
-// Archived group nested in its idle shelf can be measured shut and opened;
+// ?archived=1 gives the first workspace two threads read and quiet for days, so
+// the Settled fold can be measured shut and opened;
 // ?images=<n> puts n images in the composer so the thumbnail row above the
 // text can be measured; ?size=file is the record saying the terminal's text size comes
 // from the Ghostty file; ?local=1 puts this computer in the list beside the
@@ -75,7 +75,7 @@ import { AppShell } from "../../src/shell/AppShell";
 import { useShellVersionEffect } from "../../src/shell/shellVersion";
 import { openPanelTerminal } from "../../src/shell/shellCommands";
 import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
-import { useComposerImagesStore } from "../../src/components/chat/composerImages";
+import { useComposerFilesStore } from "../../src/components/chat/composerFiles";
 import { requestProjectTrip } from "../../src/shell/shellRequests";
 import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
@@ -141,14 +141,14 @@ for (let i = 0; i < Number(params.get("many") ?? 0); i++) workspaces.push(view(`
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
 // one; ws_b has only idle ones, the shape that used to draw no Idle header at all, one of them on Codex so both a
 // coloured and a monochrome agent mark sit in the shots.
-// Two of the first workspace's threads quiet for days, added only with ?archived=1 so every other case keeps the
-// four rows it measures: past the protocol's threshold they fold into the Archived group under that workspace's
-// idle threads, which is what the group's own case reads.
+// Two of the first workspace's threads read and quiet for days, the interrupted one settled by hand, added only with
+// ?archived=1 so every other case keeps the four rows it measures: they fold into Settled at the foot of the list,
+// which is what the fold's own case reads.
 const archived: SessionView[] = params.get("archived") !== "1"
   ? []
   : [
-      { id: "s5", threadId: "s5", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Rotate the daemon token and restart the host.", startedBy: "person", startedAt: Date.now() - 3 * 24 * 60 * 60_000, endedAt: Date.now() - 2 * 24 * 60 * 60_000 },
-      { id: "s6", threadId: "s6", workspaceId: "ws_a", harness: "codex", status: "interrupted", prompt: "Drop the preview shim from the packing list.", startedBy: "cli", startedAt: Date.now() - 9 * 24 * 60 * 60_000, endedAt: Date.now() - 8 * 24 * 60 * 60_000 },
+      { id: "s5", threadId: "s5", workspaceId: "ws_a", harness: "claude", status: "completed", prompt: "Rotate the daemon token and restart the host.", startedBy: "person", startedAt: Date.now() - 3 * 24 * 60 * 60_000, endedAt: Date.now() - 2 * 24 * 60 * 60_000, readAt: Date.now() - 2 * 24 * 60 * 60_000 },
+      { id: "s6", threadId: "s6", workspaceId: "ws_a", harness: "codex", status: "interrupted", prompt: "Drop the preview shim from the packing list.", startedBy: "cli", startedAt: Date.now() - 9 * 24 * 60 * 60_000, endedAt: Date.now() - 8 * 24 * 60 * 60_000, readAt: Date.now() - 8 * 24 * 60 * 60_000, settledAt: Date.now() - 7 * 24 * 60 * 60_000 },
     ];
 const sessions: SessionView[] = [
   // With ?projects=1 the first thread works in spoo and the second deep inside wsp, so both rows carry a project word.
@@ -644,7 +644,7 @@ if (params.get("images") !== null) {
     return new File([bytes], `shot-${hue}.png`, { type: "image/png" });
   };
   const count = Number(params.get("images")) || 1;
-  void useComposerImagesStore.getState().add(shown ?? "ws_a", Array.from({ length: count }, (_, i) => swatch(i * 60)));
+  void useComposerFilesStore.getState().add(shown ?? "ws_a", Array.from({ length: count }, (_, i) => swatch(i * 60)));
 }
 if (params.get("oom") === "1") {
   const GiB = 1024 ** 3;

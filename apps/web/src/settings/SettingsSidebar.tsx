@@ -9,6 +9,7 @@
 // shutting the sheet. ArrowUp and ArrowDown walk the rows in visual order, as
 // the workspace sidebar's do.
 import { ProjectGlyph } from "../projects/look.js";
+import { ComputerGlyph } from "./ComputerGlyph.js";
 import { ArrowLeftIcon, SearchIcon } from "lucide-react";
 import { useRef, type KeyboardEvent } from "react";
 import { Input } from "../components/ui/input.js";
@@ -27,6 +28,12 @@ import { atId, groupOf, sameAt, useSettingsStore, type SettingsAt } from "./sett
 /** How far a row with no match for the typed text stands back. Opacity, not another ink: the sidebar's rest ink
  * is darker than its muted ink on the dark side, so dimming by ink read brighter there and did nothing on light. */
 const DIMMED = "opacity-50";
+
+/** A computer's own icon on its row, off the places list the row was made from. */
+function SubComputerGlyph({ id }: { id: string }) {
+  const place = useStore(s => s.places.find(p => p.id === id));
+  return place === undefined ? null : <ComputerGlyph place={place} />;
+}
 
 /** Brings the row a search result names into view once its page is drawn. */
 function revealItem(id: string): void {
@@ -163,6 +170,7 @@ export function SettingsSidebar() {
                 {/* A sub-row dims with its group: lit under a dimmed head it reads as the one thing that matched. */}
                 <SidebarMenuButton size="sm" isActive={lifting && sameAt(at, sub.at)} data-sidebar-row data-row-id={atId(sub.at)} data-depth={1} {...(dimmed ? { "data-dimmed": "" } : {})} onClick={() => go(sub.at)} className={cn(ONE_LINE_ROW_CLASS, dimmed && DIMMED)}>
                   {sub.at.kind === "project" ? <ProjectGlyph projectId={sub.at.id} /> : null}
+                  {sub.at.kind === "computer" ? <SubComputerGlyph id={sub.at.id} /> : null}
                   <span className="min-w-0 flex-1 truncate">{sub.name}</span>
                 </SidebarMenuButton>
               </li>

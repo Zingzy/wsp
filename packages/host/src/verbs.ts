@@ -48,7 +48,8 @@ import {
   agentSignInWord,
   InitSetup,
   initSetupLines,
-  IMAGES_MAX,
+  FILES_MAX,
+  FILE_MAX_WORDS,
   IMAGE_ALREADY_NEWEST,
   IMAGE_MAX_WORDS,
   IMAGE_MOVE_CONFIRM,
@@ -138,9 +139,9 @@ import {
   guestNamesWorkspaceLine,
   guestNoFileLine,
   imageKeptLine,
-  imageLine,
+  attachmentLine,
   imageTypeOf,
-  imagesRefusal,
+  filesRefusal,
   importConsented,
   importRequest,
   fmtSize,
@@ -162,7 +163,6 @@ import {
   SessionAnswerResult,
   type SessionPermissionEvent,
   notAFileLine,
-  notAnImageLine,
   type NotifyLength,
   notifyLine,
   notifyTail,
@@ -203,7 +203,9 @@ import {
   type ExecEvent,
   type GoldenManifest,
   type HarnessCatalog,
-  type ImageAttachment,
+  type Attachment,
+  type StartPicks,
+  UNTYPED_FILE,
   type ProjectExportEvent,
   type ProjectImportEvent,
   type ProjectImportRequest,
@@ -1272,7 +1274,7 @@ async function broughtBack(client: HostClient, workspaceId: string, title?: stri
 /** What a bring back reads as: where the branch went and how far it is over the base, git's own diffstat under it,
  * then the pull request or why there is none, and last what stayed behind in the workspace. The push's lines come
  * first whatever the pull request half said, since that half runs after the branch has landed on the remote. */
-function broughtBackLine(name: string, back: BringBackResult): string {
+export function broughtBackLine(name: string, back: BringBackResult): string {
   const commits = `${back.ahead} commit${back.ahead === 1 ? "" : "s"}`;
   const left = `${back.uncommitted} change${back.uncommitted === 1 ? "" : "s"}`;
   return [
@@ -1790,23 +1792,28 @@ export function absoluteFolder(cwd: string | undefined): string | undefined {
 
 /** The model, effort and access mode a start names, as the composer's pickers name them; the runtime checks each
  * against the harness's catalog and refuses with the list. access is the wire's permissionMode. */
-export type Picks = Partial<Record<(typeof PICK_FLAGS)[number], string>>;
+export type Picks = Partial<Record<(typeof PICK_FLAGS)[number], string>> & { fast?: boolean };
 
 /** The picks as sessions.start carries them: the fields the app's composer sends, absent ones left out. */
-export function picksOf(picks: Picks): Record<string, string> {
-  return { ...(picks.model !== undefined ? { model: picks.model } : {}), ...(picks.effort !== undefined ? { effort: picks.effort } : {}), ...(picks.access !== undefined ? { permissionMode: picks.access } : {}) };
+export function picksOf(picks: Picks): StartPicks {
+  return {
+    ...(picks.model !== undefined ? { model: picks.model } : {}),
+    ...(picks.effort !== undefined ? { effort: picks.effort } : {}),
+    ...(picks.access !== undefined ? { permissionMode: picks.access } : {}),
+    ...(picks.fast === true ? { fast: true } : {}),
+  };
 }
 
 /** The head every image type is told apart by; the longest of the four is twelve bytes. */
 const IMAGE_HEAD_BYTES = 12;
 
 /**
- * The images a `--image` flag or an MCP `images` list names, read off this computer's disk and carried as bytes, so
- * nothing on the machine ever reaches back for the person's filesystem. Each file's type comes off its own first
- * bytes, never off its name, and the caps are checked against what the files weigh before any of them is read whole,
- * so naming a video does not pull it into memory to refuse it.
+ * The files a `--file` flag or an MCP `files` list names, read off this computer's disk and carried as bytes, so
+ * nothing on the machine ever reaches back for the person's filesystem. An image is told by its own first bytes,
+ * never by its name, and travels as one; any other file travels under its own name. The caps are checked against
+ * what the files weigh before any of them is read whole, so naming a video does not pull it into memory to refuse it.
  */
-export function imagesFrom(paths: readonly string[], elsewhere = false): ImageAttachment[] {
+export function filesFrom(paths: readonly string[], elsewhere = false): Attachment[] {
   // Before a path is resolved, let alone opened: a caller on a machine would otherwise learn from the refusals
   // which paths exist on the person's disk, and a file that does exist would be read and sent.
   if (elsewhere && paths.length > 0) throw usageRefusal(guestNoFileLine, "Name a file on the machine the line runs on, or none.");
@@ -1823,18 +1830,16 @@ export function imagesFrom(paths: readonly string[], elsewhere = false): ImageAt
     } finally {
       closeSync(fd);
     }
-    const mediaType = imageTypeOf(head);
-    if (mediaType === null) throw usageRefusal(notAnImageLine(given), "Name one of those instead.");
-    return { path, mediaType, name: basename(path), bytes: stat.size };
+    return { path, mediaType: imageTypeOf(head) ?? UNTYPED_FILE, name: basename(path), bytes: stat.size };
   });
-  const refusal = imagesRefusal(files);
+  const refusal = filesRefusal(files);
   if (refusal !== null) throw usageRefusal(`${refusal}.`, "Drop that one and send the rest.");
   return files.map(f => ({ mediaType: f.mediaType, name: f.name, bytes: readFileSync(f.path).toString("base64") }));
 }
 
-/** The three pick flags as given on the command line. */
+/** The pick flags as given on the command line, --fast among them on the verbs that take it. */
 export function pickFlags(flags: Flags): Picks {
-  return Object.fromEntries(PICK_FLAGS.map(name => [name, flag(flags, name)]));
+  return { ...Object.fromEntries(PICK_FLAGS.map(name => [name, flag(flags, name)])), ...(flags["fast"] === true ? { fast: true } : {}) };
 }
 
 /** What a refusal adds when the list it quotes is wsp's own table rather than the machine's own answer: a person
@@ -1899,9 +1904,9 @@ function openedLine(target: Awaited<ReturnType<typeof threadTarget>>, workspace:
  * each a thread or NOTIFY_ME. The one place both doors, the command line and the MCP server, put the token of the
  * turn they are running inside on a start: it is what the host reads NOTIFY_ME against, and there is none when the
  * caller is not a turn; the environment it is read off is the caller's, handed in, never this process's. */
-export function openingOf(env: VerbDeps["env"], workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: readonly string[]; title?: string; images?: readonly string[]; elsewhere?: boolean } = {}): Record<string, unknown> {
+export function openingOf(env: VerbDeps["env"], workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; notify?: readonly string[]; title?: string; files?: readonly string[]; elsewhere?: boolean } = {}): Record<string, unknown> {
   const cwd = absoluteFolder(opts.cwd);
-  const attachments = imagesFrom(opts.images ?? [], opts.elsewhere);
+  const attachments = filesFrom(opts.files ?? [], opts.elsewhere);
   const turnToken = turnTokenOf(env);
   return {
     workspaceId: workspace.id,
@@ -1934,8 +1939,8 @@ export async function notifyOf(client: HostClient, refs: readonly string[]): Pro
 /** The start a message to an existing thread makes: the thread named to the runtime, which resumes its latest turn
  * or, on a thread whose harness never announced a session, runs the message as its first turn; under the thread's own
  * agent, with any pick named for this turn. */
-export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {}, images: readonly string[] = [], elsewhere = false): Record<string, unknown> {
-  const attachments = imagesFrom(images, elsewhere);
+export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {}, files: readonly string[] = [], elsewhere = false): Record<string, unknown> {
+  const attachments = filesFrom(files, elsewhere);
   return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, thread: thread.threadId ?? thread.id, ...(attachments.length > 0 ? { attachments } : {}), ...picksOf(picks) };
 }
 
@@ -2199,7 +2204,7 @@ export function turnRefusal(turn: Turn): Error | undefined {
 const WAITING = "waiting behind the running turn";
 const JOINED: Record<Exclude<SessionStartOutcome, "started">, (picks: Picks) => string> = {
   steered: picks => {
-    const dropped = PICK_FLAGS.filter(name => picks[name] !== undefined).map(name => `--${name}`);
+    const dropped = [...PICK_FLAGS.filter(name => picks[name] !== undefined), ...(picks.fast === true ? ["fast"] : [])].map(name => `--${name}`);
     return `joined the running turn${dropped.length === 0 ? "" : `; ${dropped.join(", ")} dropped, it keeps its own model, effort and access`}`;
   },
   queued: () => "queued behind the running turn; it has ended and this turn started",
@@ -2259,14 +2264,14 @@ function turnStream(ctx: VerbContext): { text(t: string, messageId?: string): vo
  * `answer` is the road another terminal takes: the verb, its help row and the line printed after that pick; absent
  * where no verb carries the road. One row per answer, so an answer added later is a row here and reaches the keys,
  * the verbs and every line at once. */
-interface AnswerRoad {
+export interface AnswerRoad {
   key: string;
   effect: PermissionEffect;
   does?: string;
   answer?: { verb: string; about: string; said: string };
 }
 
-const ANSWER_ROADS: readonly AnswerRoad[] = [
+export const ANSWER_ROADS: readonly AnswerRoad[] = [
   { key: "y", effect: "allow", does: "run it", answer: { verb: "allow", about: "answers the prompt the thread is stopped on and lets the call run", said: "allowed" } },
   { key: "n", effect: "deny", does: "refuse it", answer: { verb: "deny", about: "answers the prompt the thread is stopped on and refuses the call", said: "denied" } },
   { key: "a", effect: "mode" },
@@ -2319,7 +2324,7 @@ export function noSuchAnswerLine(threadId: string, verb: string): string {
 
 /** What a pick the host would not take came to, one line per outcome it can answer with; `answered` is the only one
  * that is not a failure and has no line here. */
-const ANSWER_WORDS: Readonly<Record<Exclude<SessionAnswerOutcome, "answered">, string>> = {
+export const ANSWER_WORDS: Readonly<Record<Exclude<SessionAnswerOutcome, "answered">, string>> = {
   gone: "the prompt closed before the answer reached it",
   unsupported: "this thread's agent raises no prompt this host can answer",
   "not-found": "this host holds no turn of that thread",
@@ -2393,7 +2398,7 @@ function answering(ctx: VerbContext, say: (line: string) => void): { opened(ask:
 export const THREAD_PREFIX_WORD = "wsp thread read, wsp send and wsp stop take its first characters";
 
 /** The first line a thread's opening prints: its id, and where it went when no workspace was named. */
-const openedThreadLine = (threadId: string, opened: ((threadId: string) => string) | undefined): string => (opened === undefined ? `thread ${threadId}` : opened(threadId));
+export const openedThreadLine = (threadId: string, opened: ((threadId: string) => string) | undefined): string => (opened === undefined ? `thread ${threadId}` : opened(threadId));
 
 /** The same line at a terminal, where a person has to retype the id to say anything else to the thread. The tool
  * door prints it without the clause: an agent holding the id passes it whole. */
@@ -2450,7 +2455,7 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
         } else ctx.out.emit(e);
         if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
         // The person's turn as the transcript keeps it: one bracket per image, since a terminal draws no pixels.
-        if (e.type === "session.start") for (const image of e.attachments ?? []) stream.line(imageLine(image));
+        if (e.type === "session.start") for (const file of e.attachments ?? []) stream.line(attachmentLine(file));
         if (e.type === "session.delta" && e.kind === "text") stream.text(e.text, e.messageId);
         // The harness's own note reads as the aside it is: the muted ink every line around the prose takes, and no
         // word of failure, which belongs to a call that failed and to the turn's own end.
@@ -2764,7 +2769,13 @@ const NotifyIn = z
 const CwdIn = z.string().optional().describe("the folder on the machine the thread works in or the command runs in, absolute. Absent means the workspace's own project, which is where a thread there starts unless it says otherwise");
 const DetachIn = z.boolean().optional().describe(`true answers with the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever notify named; for a turn that runs for minutes or an hour, so this call does not block for it. ${NOTIFY_CALLER}.`);
 const TitleIn = z.string().optional().describe("the thread's name, as a person's: it shows in the sidebar and in the agent's own list from the first second, and the title the host asks the agent for as the turn starts never replaces it; absent lets the thread be titled by its opening words until, seconds in, the agent names it");
-const ImagesIn = z.array(z.string()).optional().describe(`paths on this computer, absolute or relative to the folder wsp runs in, of images to send with the message: ${IMAGE_TYPE_WORDS}, at most ${IMAGES_MAX} and ${IMAGE_MAX_WORDS} each. The host reads each file and sends its bytes, so the machine never reaches back for this computer\u2019s files; a message to an agent that reads no image is refused naming that agent.`);
+const FilesIn = z
+  .array(z.string())
+  .optional()
+  .describe(
+    `paths on this computer, absolute or relative to the folder wsp runs in, of files to send with the message, at most ${FILES_MAX}. An image (${IMAGE_TYPE_WORDS}, up to ${IMAGE_MAX_WORDS}) goes to the agent as an image; any other file, up to ${FILE_MAX_WORDS}, lands in the folder the thread works in, under .wsp-files where git lists none of it, and the message names its path. The host reads each file and sends its bytes, so the machine never reaches back for this computer\u2019s files; an image to an agent that reads none is refused naming that agent.`,
+  );
+const FastIn = z.boolean().optional().describe("true runs the turn in the agent's fast mode, on a model that offers one, and is refused naming the model otherwise; absent runs at the agent's usual speed");
 const ConfirmIn = z.boolean().optional().describe("true deletes the machine; absent or false answers with what would go and deletes nothing, so a person can be asked first");
 /** The same three words the app's composer uses; the runtime refuses a value the agent's catalog does not list, naming the list. */
 const PICK_INPUTS = {
@@ -3797,9 +3808,9 @@ export const ALL_VERBS: readonly Verb[] = [
   {
     name: "recipe",
     readsHere: "the agents, package managers and history it reads are this computer's own",
-    usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--engine] [--project <folder>] [--out <path>]`,
+    usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--why <words>] [--engine] [--project <folder>] [--out <path>]`,
     about:
-      `write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=${LOGIN_CHOICES.join("|")} answers a sign-in by catalog id, later leaving it to the first time the tool is needed on the workspace and key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --engine marks the recipe so every workspace from its image gets the place's Docker or podman through a socket of its own (a project whose compose file needs one), and stays in the file until you edit it out; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe`,
+      `write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=${LOGIN_CHOICES.join("|")} answers a sign-in by catalog id, later leaving it to the first time the tool is needed on the workspace and key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there and --why <words> what the rows it adds are for; --engine marks the recipe so every workspace from its image gets the place's Docker or podman through a socket of its own (a project whose compose file needs one), and stays in the file until you edit it out; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe`,
     page: "agent",
     options: {
       out: { type: "string" },
@@ -3808,11 +3819,13 @@ export const ALL_VERBS: readonly Verb[] = [
       signin: { type: "string", multiple: true },
       add: { type: "string", multiple: true },
       "add-check": { type: "string", multiple: true },
+      why: { type: "string" },
       engine: { type: "boolean" },
       project: { type: "string", multiple: true },
     },
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp recipe takes no positional arguments; wsp recipe scan is its one subcommand.", usageIs(ctx));
+      const why = flag(ctx.flags, "why");
       const tick = flag(ctx.flags, "tick");
       if (tick !== undefined && !isRecipeTick(tick)) throw usageRefusal(`--tick takes one of ${RECIPE_TICKS.join(", ")}, and got ${JSON.stringify(tick)}.`, "Name one of those.");
       const out = resolve(flag(ctx.flags, "out") ?? smallRecipePath(ctx.statePath));
@@ -3827,6 +3840,7 @@ export const ALL_VERBS: readonly Verb[] = [
           signin: flagList(ctx.flags, "signin"),
           add: flagList(ctx.flags, "add"),
           addCheck: flagList(ctx.flags, "add-check"),
+          ...(why !== undefined ? { why } : {}),
           ...projectsFlag(ctx.flags),
           ...(ctx.alsoHere !== undefined ? { alsoHere: ctx.alsoHere } : {}),
         },
@@ -4333,10 +4347,10 @@ export const ALL_VERBS: readonly Verb[] = [
   },
   {
     name: "run",
-    usage: 'wsp run [<workspace>] [--agent <id>] [--model, --effort, --access <word>] [--cwd <path>] [--notify <thread|me>] [--title <title>] [--image <path>] [--detach] "<task>"',
+    usage: 'wsp run [<workspace>] [--agent <id>] [--model, --effort, --access <word>] [--fast] [--cwd <path>] [--notify <thread|me>] [--title <title>] [--file <path>] [--detach] "<task>"',
     about: "an agent works in the workspace and you read its reply: a thread with the agent, model, effort and access the app offers, in the workspace's project; with no workspace, run from inside one of your project folders, on that project's workspace; follows its first turn, or with --detach prints the id and returns",
     page: "front",
-    options: { agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string", multiple: true }, title: { type: "string" }, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
+    options: { agent: { type: "string" }, ...PICK_OPTIONS, fast: { type: "boolean" }, cwd: { type: "string" }, notify: { type: "string", multiple: true }, title: { type: "string" }, file: { type: "string", multiple: true }, detach: { type: "boolean" } },
     run: async ctx => {
       if (ctx.args.length === 0) throw usageRefusal("wsp run takes a task and got none.", 'Put the task in quotes: wsp run <workspace> "say hi".');
       if (ctx.args.length > 2) throw usageRefusal(`wsp run takes a workspace and a task; ${ctx.args[2]!} reads as a third word.`, usageIs(ctx));
@@ -4350,7 +4364,7 @@ export const ALL_VERBS: readonly Verb[] = [
       const cwd = flag(ctx.flags, "cwd");
       const opened = openedLine(target, found, cwd);
       const woken = await awake(client, found, "send", line => ctx.io.error(line));
-      const opening = openingOf(ctx.env, woken.workspace, task, { harness, ...picks, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image"), elsewhere: ctx.elsewhere });
+      const opening = openingOf(ctx.env, woken.workspace, task, { harness, ...picks, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), files: flagList(ctx.flags, "file"), elsewhere: ctx.elsewhere });
       let started: Turn | undefined;
       try {
         if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening, {}, opened);
@@ -4362,16 +4376,16 @@ export const ALL_VERBS: readonly Verb[] = [
     },
     tool: tool({
       description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names, else the workspace's own project, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. ${NOTIFY_WORDS}. ${NOTIFY_CALLER}.`,
-      input: { workspace: ThreadWorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn, title: TitleIn, images: ImagesIn, detach: DetachIn },
+      input: { workspace: ThreadWorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, fast: FastIn, cwd: CwdIn, notify: NotifyIn, title: TitleIn, files: FilesIn, detach: DetachIn },
       output: TurnOut.shape,
-      call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, title, images, detach, ...input }, deps) => {
+      call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, title, files, detach, ...input }, deps) => {
         const client = await deps.client();
         const target = await threadTarget(client, ref, deps.cwd, "workspace", deps.elsewhere);
         const found = target.workspace;
         await checkedStart(client, task, harness, input, found.id);
         const opened = openedLine(target, found, folder);
         const woken = await awake(client, found, "send", QUIET_LINE);
-        const opening = openingOf(deps.env, woken.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []), title, images, elsewhere: deps.elsewhere });
+        const opening = openingOf(deps.env, woken.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []), title, files, elsewhere: deps.elsewhere });
         let started: Turn | undefined;
         try {
           if (detach === true) return detachedOut(await startDetached(client, opening, "agent"), opened);
@@ -4475,10 +4489,10 @@ export const ALL_VERBS: readonly Verb[] = [
   ...ANSWER_VERBS,
   {
     name: "send",
-    usage: 'wsp send <thread> [--model, --effort <value>] [--image <path>] [--detach] "<message>"',
-    about: "a message to the thread, on a named model or effort, with images; the thread keeps its own access and a running turn its own picks; --detach prints the id and returns",
+    usage: 'wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"',
+    about: "a message to the thread, on a named model or effort, fast or not, with files; the thread keeps its own access and a running turn its own picks; --detach prints the id and returns",
     page: "front",
-    options: { ...SEND_OPTIONS, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
+    options: { ...SEND_OPTIONS, fast: { type: "boolean" }, file: { type: "string", multiple: true }, detach: { type: "boolean" } },
     run: async ctx => {
       const [ref, message] = ctx.args;
       if (ref === undefined || message === undefined || ctx.args.length !== 2) throw usageRefusal("wsp send takes a thread and one message.", usageIs(ctx));
@@ -4487,22 +4501,22 @@ export const ALL_VERBS: readonly Verb[] = [
       const thread = await threadOf(client, ref);
       await checkedStart(client, message, thread.harness, picks, thread.workspaceId);
       const { workspace } = await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
-      const images = flagList(ctx.flags, "image");
-      if (ctx.flags["detach"] === true) await detachVerb(ctx, client, messageTo(thread, message, picks, images, ctx.elsewhere), picks);
-      else ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks, images, ctx.elsewhere), false, picks, { spend: turnSpendWord(workspace) })));
+      const files = flagList(ctx.flags, "file");
+      if (ctx.flags["detach"] === true) await detachVerb(ctx, client, messageTo(thread, message, picks, files, ctx.elsewhere), picks);
+      else ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks, files, ctx.elsewhere), false, picks, { spend: turnSpendWord(workspace) })));
       return 0;
     },
     tool: tool({
       description: `Sends a message to an existing thread (by id, or a prefix of it) and returns the reply when it is complete; a person's message on the same thread lands in order with yours. With detach true it returns the thread id the moment the turn is started, without the reply, and the turn's end reaches whoever the thread's start named. A model or effort named here is the turn's; the thread runs on the agent and at the access its own turns ran at, which a message does not change; a turn that joins a running one keeps that one's. ${SEND_MEETS}`,
-      input: { thread: z.string(), message: z.string(), ...SEND_INPUTS, images: ImagesIn, detach: DetachIn },
+      input: { thread: z.string(), message: z.string(), ...SEND_INPUTS, fast: FastIn, files: FilesIn, detach: DetachIn },
       output: TurnOut.shape,
-      call: async ({ thread: ref, message, images, detach, ...input }, deps) => {
+      call: async ({ thread: ref, message, files, detach, ...input }, deps) => {
         const client = await deps.client();
         const thread = await threadOf(client, ref);
         await checkedStart(client, message, thread.harness, input, thread.workspaceId);
         await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
-        if (detach === true) return detachedOut(await startDetached(client, messageTo(thread, message, input, images, deps.elsewhere), "agent"));
-        const out = turnOut(await follow(client, messageTo(thread, message, input, images, deps.elsewhere), "agent", QUIET_TURN, () => hostBack(deps)));
+        if (detach === true) return detachedOut(await startDetached(client, messageTo(thread, message, input, files, deps.elsewhere), "agent"));
+        const out = turnOut(await follow(client, messageTo(thread, message, input, files, deps.elsewhere), "agent", QUIET_TURN, () => hostBack(deps)));
         return asText(turnText(out), out);
       },
     }),
@@ -4833,7 +4847,8 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "servers enable scope": "user, home or project, as wsp servers shows it; user without it",
   "servers enable project": "the project scope: alone for the workspace's own project, or the project's name with --on",
   repos: "every git repo under the home folder instead of one level, most recently used first",
-  image: "an image file on this computer to send with the message; repeats",
+  fast: "run the turn in the agent's fast mode, on a model that offers one; refused naming the model otherwise",
+  file: "a file on this computer to send with the message: an image goes as an image, any other file lands in the thread's folder and the message names its path; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",
   "max-depth": "how many levels of threads may stand under the root thread; needs --spawn on, and defaults to 1",
   "max-machines": "how many machines may stand at once under one root thread; needs --spawn on, and defaults to 3",
@@ -4859,6 +4874,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "bring back body": "the pull request's body, which needs a title beside it",
   tree: "indent the threads an agent opened under the one that opened them",
   watch: "draw the table again every second where it stands, until Ctrl-C; it needs a terminal to redraw on",
+  why: "what the rows this line adds are for, in your own words; the rows say an agent added them without it",
   yes: "go ahead without being asked",
 };
 

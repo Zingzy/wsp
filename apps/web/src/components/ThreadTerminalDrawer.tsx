@@ -576,7 +576,7 @@ function TerminalPaneOverlay({ pane, hints, refused, workspaceId, onWake, onLift
       tabIndex={-1}
       role="status"
       data-terminal-overlay={pane.kind}
-      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/70 px-4 text-center text-sm text-foreground outline-hidden backdrop-blur-[1px]"
+      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-(--terminal-background)/70 px-4 text-center text-sm text-foreground outline-hidden backdrop-blur-[1px]"
       onKeyDown={event => {
         if (event.target !== event.currentTarget || event.key === "Tab" || event.key === "Escape") return;
         event.preventDefault();
@@ -612,7 +612,7 @@ function ShellGoneOverlay({ onNewTerminal, label }: { onNewTerminal: () => void;
     <div
       role="status"
       data-terminal-overlay="shell-gone"
-      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/70 px-4 text-center text-sm text-foreground"
+      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-(--terminal-background)/70 px-4 text-center text-sm text-foreground"
     >
       <p>{SHELL_ENDED_LINE}</p>
       <Button size="xs" variant="outline" onClick={onNewTerminal}>
@@ -1036,7 +1036,7 @@ export default function ThreadTerminalDrawer({
 
       {!hasTerminalSidebar && (
         <div className="pointer-events-none absolute top-2 right-2 z-20 flex flex-col items-end gap-1.5">
-          <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background shadow-xs">
+          <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-(--app-chrome-background) shadow-xs">
             <TerminalActionButton
               className={`p-1 text-foreground/90 transition-colors ${
                 hasReachedSplitLimit

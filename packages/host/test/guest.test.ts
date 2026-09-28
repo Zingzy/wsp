@@ -189,21 +189,21 @@ describe("a guest session on the host", () => {
   });
 
   describe("a path or a folder the line names", () => {
-    it("refuses an image the line names before any path is resolved, and reads nothing of the person's", async () => {
+    it("refuses a file the line names before any path is resolved, and reads nothing of the person's", async () => {
       const token = await tokenOn(workspaceId);
-      door.event(link, opened({ token, argv: ["run", "alpha", "look", "--image", "/etc/hosts"] }));
+      door.event(link, opened({ token, argv: ["run", "alpha", "look", "--file", "/etc/hosts"] }));
       await settled(() => exitCode() !== undefined);
       expect(errText()).toContain(guestNoFileLine);
       expect(exitCode()).toBe(EXIT_CODES.usage);
     });
 
-    it("keeps the images input off the tool server, so a session cannot name one at all", async () => {
+    it("keeps the files input off the tool server, so a session cannot name one at all", async () => {
       const token = await tokenOn(workspaceId);
       door.event(link, opened({ token, kind: "mcp", argv: ["mcp"] }));
       const hello = await call(token, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } });
       expect(hello["result"]).toBeDefined();
       door.event(link, { type: "guest.message", session: "g0", message: { jsonrpc: "2.0", method: "notifications/initialized" } });
-      const called = await call(token, { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "run", arguments: { workspace: "alpha", task: "look", images: ["/etc/hosts"] } } });
+      const called = await call(token, { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "run", arguments: { workspace: "alpha", task: "look", files: ["/etc/hosts"] } } });
       expect(JSON.stringify(called)).toContain(guestNoFileLine);
     });
 

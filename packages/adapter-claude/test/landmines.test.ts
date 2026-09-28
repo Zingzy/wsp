@@ -86,6 +86,12 @@ describe("newSessionId", () => {
 });
 
 describe("buildCommand", () => {
+  it("a fast turn turns fast mode on through the settings the launch carries, and a turn that is not fast carries none", () => {
+    const fast = buildCommand({ sessionId: "11111111-2222-4333-8444-555555555555", fast: true });
+    expect(fast).toContain(`--settings '{"fastMode":true}'`);
+    expect(buildCommand({ sessionId: "11111111-2222-4333-8444-555555555555" })).not.toContain("--settings");
+  });
+
   const sessionId = "e16ed170-8257-4668-879e-fe836341633c";
 
   it("carries every required flag for a fresh session and reads its messages from stdin as stream-json", () => {

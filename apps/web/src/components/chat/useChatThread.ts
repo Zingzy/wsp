@@ -17,7 +17,7 @@
 import { isProjectHomeKey } from "../../protocol/store";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isSessionEvent } from "@wsp/protocol";
-import type { ImageRecord, SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
+import type { AttachmentRecord, SessionEvent, SessionHarness, SessionView } from "@wsp/protocol";
 import { useProtocolEvents, useStore } from "../../protocol/store";
 import type { ProtocolEvent } from "../../protocol/client";
 import { deriveSession, entryTurnId, type TimelineEntry, type TurnSummary } from "./adapt";
@@ -62,7 +62,7 @@ export interface ChatThreadHandle {
   /** The last send's start, once it landed: the key its rows waited under (the thread id the view held or was pinned to, or the workspace id before the thread had one) and the thread that start carried. Null while a send is in flight, after one that settled without a start, and before any. */
   readonly named: NamedStart | null;
   /** Optimistic user message for a send, with the request id the send carries; the session.start stamped with it replaces it. */
-  readonly appendUserTurn: (prompt: string, requestId: string, attachments?: ReadonlyArray<ImageRecord>) => void;
+  readonly appendUserTurn: (prompt: string, requestId: string, attachments?: ReadonlyArray<AttachmentRecord>) => void;
   /** A send that failed before the runtime emitted anything. */
   readonly appendLocalError: (message: string) => void;
   readonly setSending: (sending: boolean) => void;
@@ -85,7 +85,7 @@ export interface Sent {
 /** A send this view holds the words of: when it was made, what rode with it, and, once a turn refused it, which turn. */
 export interface Kept extends Sent {
   readonly at: string;
-  readonly attachments?: ReadonlyArray<ImageRecord>;
+  readonly attachments?: ReadonlyArray<AttachmentRecord>;
   readonly turnId?: string;
 }
 
@@ -166,6 +166,8 @@ function ownPlace(e: SessionEvent): string | undefined {
       return e.requestId === undefined ? undefined : `session.steer:${e.turnId}:${e.requestId}`;
     case "session.notify":
       return `session.notify:${e.turnId}:${e.notify}`;
+    case "session.checkpoint":
+      return `session.checkpoint:${e.turnId}`;
     default: {
       const _exhaustive: never = e;
       return undefined;
@@ -553,13 +555,18 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   const rowThread = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.threadId);
   const rowCwd = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.cwd);
   const viewKey = threadId === null ? workspaceId : `${workspaceId}/${threadId}`;
-  const [state, setState] = useState<ThreadState>(EMPTY);
+  // A view drawn for the workspace's next thread shows nothing from the first paint, as it does when the pin leaves
+  // for it later: a workspace that just finished being made takes the page with no loading line between.
+  const mountedFresh = fresh && threadId === null;
+  const [state, setState] = useState<ThreadState>(mountedFresh ? { ...EMPTY, fresh: true } : EMPTY);
   const [viewed, setViewed] = useState({ workspaceId, threadId });
-  const [hydratedFor, setHydratedFor] = useState<string | null>(null);
+  const [hydratedFor, setHydratedFor] = useState<string | null>(mountedFresh ? viewKey : null);
   const hydratedRef = useRef<string | null>(null);
+  /** Moves when a rewind on this workspace lands: its transcript lost turns, so the thread is read again. */
+  const [rewinds, setRewinds] = useState(0);
   /** The view key a pin named for the transcript already in hand: that reading needs no reply, and asking for one
    * would drop what the socket pushes between the ask and it. Taken once, so a gap still rebuilds. */
-  const carriedRef = useRef<string | null>(null);
+  const carriedRef = useRef<string | null>(mountedFresh ? viewKey : null);
   const previousEntries = useRef<ReadonlyArray<TimelineEntry>>([]);
 
   if (viewed.workspaceId !== workspaceId || viewed.threadId !== threadId) {
@@ -615,10 +622,14 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
       current = false;
       hydratedRef.current = null;
     };
-  }, [api, workspaceId, threadId, viewKey, gaps]);
+  }, [api, workspaceId, threadId, viewKey, gaps, rewinds]);
 
   const onEvent = useCallback(
     (e: ProtocolEvent) => {
+      if (e.type === "thread.rewound" && e.workspaceId === workspaceId) {
+        setRewinds(n => n + 1);
+        return;
+      }
       if (hydratedRef.current !== viewKey) return;
       if (!isSessionEvent(e) || e.workspaceId !== workspaceId) return;
       setState(s => reduceEvent(s, e, now(), threadId));
@@ -643,7 +654,7 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
     [],
   );
   const appendUserTurn = useCallback(
-    (text: string, requestId: string, attachments: ReadonlyArray<ImageRecord> = []) =>
+    (text: string, requestId: string, attachments: ReadonlyArray<AttachmentRecord> = []) =>
       setState(s => ({ ...s, pendingPrompt: { text, requestId, at: now(), ...(attachments.length > 0 ? { attachments } : {}) } })),
     [],
   );

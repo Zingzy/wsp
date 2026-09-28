@@ -1521,6 +1521,54 @@ export function asideWallLine(ms: number): string {
   return `the side question had no answer after ${fmtDuration(ms)} and was stopped`;
 }
 
+/** A rewind refused on a thread whose turn is running: the person stops it, never the rewind. */
+export const REWIND_WORKING_LINE = "this thread is working; stop its turn first, since a rewind never stops it for you";
+
+/** A rewind refused on a thread with threads under it that still run, named, so the person stops the ones they mean. */
+export function rewindChildrenLine(titles: readonly string[]): string {
+  return `stop the threads under this one first (${titles.join(", ")}); a rewind never stops them for you`;
+}
+
+/** A rewind of the files, or its undo, refused while another thread in the same copy runs: the files would go back
+ * under its agent mid-turn, and nobody chose to lose what it is writing. */
+export function rewindBesideLine(title: string): string {
+  return `another thread in this copy is working (${title}), and its files would go back too; let its turn end or stop it first`;
+}
+
+/** Files asked back to a turn whose end left no checkpoint of them. */
+export const REWIND_NO_CHECKPOINT_LINE = "that reply kept no checkpoint of the files, so only its conversation can be rewound";
+
+/** A conversation asked cut at a turn whose harness named no point to cut at. */
+export function rewindNoAnchorLine(agent: string): string {
+  return `${agent} left no point in that reply to cut its conversation at, so only the files can go back`;
+}
+
+/** A rewind to the thread's latest reply, after which nothing stands to cut. */
+export const REWIND_LATEST_LINE = "that is the thread's latest reply, so nothing comes after it to rewind";
+
+/** A rewind on a workspace that is the person's own folder, where wsp writes nothing. */
+export const REWIND_OWN_FOLDER_LINE = "this workspace is your own folder, and wsp keeps no checkpoints there; start the work in a copy to rewind it";
+
+/** An undo with no rewind to undo, or one a turn in the same copy has ended since. */
+export const REWIND_NO_UNDO_LINE = "this thread has no rewind to undo; undo lasts until the next turn in this copy ends";
+
+/** What Undo rewind puts back, said beside it: the files, and never the turns the rewind cut. */
+export const UNDO_REWIND_LINE = "Files come back; the cut conversation does not.";
+
+/** Said beside every rewind that moves files: they are the whole copy's, so another thread's work goes back too. */
+const WHOLE_COPY = "The whole copy's files go back, other threads' work included.";
+
+const turnsAfter = (turns: number): string => (turns === 1 ? "The turn after this reply leaves" : `The ${turns} turns after this reply leave`);
+
+/** What a rewind to a reply takes, said before the click: how many turns go, whether the files go back, and what
+ * Undo rewind brings back after. An agent that cuts no history of its own keeps every turn, and the note says so. */
+export function rewindNote(o: { turns: number; files: boolean; cutsConversation: boolean; agent: string }): string {
+  const undo = "Undo rewind puts them back until the next turn in this copy ends";
+  if (!o.cutsConversation) return `${o.agent} keeps its own history, so the conversation stays and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}.`;
+  if (!o.files) return `${turnsAfter(o.turns)} the conversation; the files stay as they are.`;
+  return `${turnsAfter(o.turns)} the conversation, and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}; the conversation does not come back.`;
+}
+
 /** The refusal of a send into a thread that names another agent. A thread's rows carry the agent its turns ran on
  * and the harness session those turns wrote, which another agent would open as a transcript of its own, at its own
  * access; the agent is picked where a thread is opened, so a second one is a second thread. */
@@ -3950,3 +3998,12 @@ export function fmtThemeVars(theme: WorkspaceTheme, appDark: boolean): ThemeVars
 /** What a system notification says when a thread's turn finished while nobody was looking: the page's own line and
  * the desktop's when its window is closed are this one. */
 export const threadFinishedLine = (title: string): string => `${title} finished`;
+
+/** The same for a turn that failed; the line under it is the error, in one line. */
+export const threadStoppedLine = (title: string): string => `${title} stopped`;
+
+/** What a thread's end says of a process that went without an error of its own: its exit code, when it had one. */
+export const exitLine = (exitCode: number | null): string | undefined => (exitCode === null ? undefined : `exit ${exitCode}`);
+
+/** Text a notification carries on one line: every run of whitespace, line breaks included, as one space. */
+export const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();

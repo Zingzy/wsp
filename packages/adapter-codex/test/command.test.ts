@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LAUNCH_ENV, TURN_TOKEN_ENV } from "@wsp/protocol";
+import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LAUNCH_ENV, TURN_TOKEN_ENV, WSP_TOOL_TIMEOUT_SEC } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { accessParams, buildCommand, buildEnv } from "../src/command.js";
+import { threadResumeLine, threadStartLine } from "../src/rpc.js";
 
 describe("buildEnv", () => {
   it("sets CODEX_HOME to the home named and keeps the base environment", () => {
@@ -54,6 +55,9 @@ describe("buildCommand", () => {
     expect([...LAUNCH_ENV].sort()).toEqual([HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV].sort());
     expect(command).toContain(`-c mcp_servers.docs.args='["-y","docs-mcp"]'`);
     expect(command).not.toContain("mcp_servers.docs.env_vars");
+    // Codex ends a tool call past its own limit, and a send can wait through a paused Boat's wake before its turn.
+    expect(command).toContain(`-c mcp_servers.wsp.tool_timeout_sec='${WSP_TOOL_TIMEOUT_SEC}'`);
+    expect(command).not.toContain("mcp_servers.docs.tool_timeout_sec");
     expect(command.startsWith("cd ~ && codex app-server -c ")).toBe(true);
   });
 
@@ -84,4 +88,20 @@ describe("accessParams", () => {
   it("refuses any other mode by the three it takes", () => {
     expect(() => accessParams("yolo")).toThrow("permissionMode must be one of read-only, workspace-write, danger-full-access");
   });
+
+  it("a fast thread asks the server for the fast service tier, and a thread that is not fast names no tier", () => {
+    const access = accessParams(undefined);
+    expect(JSON.parse(threadStartLine({ access, serviceTier: "fast" })).params.serviceTier).toBe("fast");
+    expect(JSON.parse(threadResumeLine({ access, serviceTier: "fast", threadId: "t1" })).params.serviceTier).toBe("fast");
+    expect(JSON.parse(threadStartLine({ access })).params).not.toHaveProperty("serviceTier");
+  });
+
+  it("plan reads in a sandbox that asks nobody, with the planning instructions as the thread's developer instructions", () => {
+    const plan = accessParams("plan");
+    expect(plan).toMatchObject({ sandbox: "read-only", approvalPolicy: "never" });
+    expect(plan.developerInstructions).toContain("Plan Mode");
+    expect(JSON.parse(threadStartLine({ access: plan })).params.developerInstructions).toContain("Plan Mode");
+    expect(accessParams("read-only")).not.toHaveProperty("developerInstructions");
+  });
 });
+

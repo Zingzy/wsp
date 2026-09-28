@@ -5,7 +5,9 @@
 import { useEffect, type ReactNode } from "react";
 import { ContextMenuHost } from "../actions/ContextMenuHost.js";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
+import { RewindDialogHost } from "../components/chat/RewindDialog.js";
 import { FileFinder } from "../files/FileFinder.js";
+import { OpenSplit } from "../files/OpenSplit.js";
 import { WorkspaceSwitcher } from "../components/switcher/WorkspaceSwitcher.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, type SidebarWidthStore } from "../components/ui/sidebar.js";
@@ -86,6 +88,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <CommandPalette />
       <FileFinder />
       <ContextMenuHost />
+      <RewindDialogHost />
       <WorkspaceSwitcher />
       <Sidebar
         side="left"
@@ -110,8 +113,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <div className="ml-auto mr-px">
                   <SettingsHeaderActions />
                 </div>
-              ) : panelInline ? null : (
-                <div className="ml-auto mr-px">{layoutControls}</div>
+              ) : (
+                <div className="ml-auto mr-px flex items-center gap-2">
+                  {workspaceId !== null ? <OpenSplit workspaceId={workspaceId} /> : null}
+                  {panelInline ? null : layoutControls}
+                </div>
               )}
             </WorkspacePageHeader>
             <div className="relative h-0">

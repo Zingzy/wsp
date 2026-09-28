@@ -890,7 +890,7 @@ describe("runtime wire types", () => {
     for (const op of wire.DEVICE_OPS) expect(wire.RUNTIME_OPS, op).toContain(op);
     expect(new Set(wire.DEVICE_OPS).size).toBe(wire.DEVICE_OPS.length);
     const held = [
-      "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.rename", "sessions.answer", "sessions.access", "sessions.aside", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
+      "sessions.start", "sessions.steer", "sessions.interrupt", "sessions.rename", "sessions.answer", "sessions.access", "sessions.aside", "sessions.rewind", "workspaces.exec", "workspaces.bringBack", "daemon.open", "daemon.send", "daemon.close",
       "places.add", "places.update", "places.remove", "places.dial", "places.cap", "places.loginLanded", "places.doctor", "places.door", "places.mint", "places.sshHosts", "projects.add",
       "init.keys", "init.start", "init.answer", "init.step", "init.draft", "init.retry", "init.build", "init.signInCode", "init.cancel", "image.build", "golden.prepare", "golden.seal",
       "image.export", "host.folders", "agents.read", "servers.tools", "servers.icon", "agents.signIn", "servers.signIn", "agents.signInCode", "agents.signInStop", "agents.signInLine", "agents.key", "agents.addTools", "skills.search", "skills.get", "skills.preview", "skills.add", "skills.remove", "skills.toggle", "servers.add", "servers.remove", "servers.toggle", "project.seed.plan", "project.plan", "project.import", "project.export",
@@ -1496,6 +1496,17 @@ describe("thread provenance", () => {
     ]);
     expect(spent!.costUsd).toBeCloseTo(1.14, 10);
     expect("costUsd" in said!).toBe(false);
+  });
+
+  it("foldThreads carries the access and the fast mode the latest turn ran at, so a listing shows a thread in plan or fast", () => {
+    const [thread, plain] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", permissionMode: "default" },
+      { ...row, id: "s2", threadId: "thr_a", permissionMode: "plan", fast: true },
+      { ...row, id: "s3", threadId: "thr_b" },
+    ]);
+    expect([thread!.permissionMode, thread!.fast]).toEqual(["plan", true]);
+    expect("permissionMode" in plain! || "fast" in plain!).toBe(false);
+    expect(ThreadView.parse(thread)).toEqual(thread);
   });
 
   it("a thread reads as run once a turn of it did work: announcing a session is not enough, since both CLIs announce before they learn they have no sign-in", () => {

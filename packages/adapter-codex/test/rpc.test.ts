@@ -9,6 +9,7 @@ import {
   refuseRequestLine,
   threadForkLine,
   threadResumeLine,
+  threadRevertLine,
   threadStartLine,
   turnInterruptLine,
   turnStartLine,
@@ -102,5 +103,11 @@ describe("readMessage", () => {
     expect(readMessage("{not json")).toBeUndefined();
     expect(readMessage('{"neither":true}')).toBeUndefined();
     expect(readMessage("")).toBeUndefined();
+  });
+});
+
+describe("the revert line", () => {
+  it("cuts a thread before one turn by the ids the server gave, as its schema spells the request", () => {
+    expect(parsed(threadRevertLine({ threadId: THREAD, beforeTurnId: TURN }))).toEqual({ id: REQUEST.revert, method: "thread/revert", params: { threadId: THREAD, beforeTurnId: TURN } });
   });
 });

@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, workspaceAccess, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, PLAN_ACCESS, workspaceAccess, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -135,7 +135,7 @@ const BARE: WorkspaceView = {
 };
 
 const CONTEXT = [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }];
-const MODES = [{ value: "plan", label: "Plan", description: "Read and plan only" }, { value: "bypassPermissions", label: "Bypass", description: "Run every tool without asking", isDefault: true }];
+const MODES = [{ value: "acceptEdits", label: "Accept edits", description: "Edit files without asking" }, { value: "bypassPermissions", label: "Bypass", description: "Run every tool without asking", isDefault: true }];
 
 /** What the machine's binary reported. */
 const CLAUDE: HarnessCatalog = {
@@ -331,17 +331,17 @@ describe("composer pickers", () => {
 
     // The access menu: an icon and a line per mode, the default marked.
     fireEvent.click(picker("access")!);
-    expect(screen.getByText("Read and plan only")).toBeTruthy();
+    expect(screen.getByText("Edit files without asking")).toBeTruthy();
     expect(option("bypassPermissions")?.getAttribute("aria-checked")).toBe("true");
     expect(option("bypassPermissions")?.querySelector("svg")).not.toBeNull();
-    fireEvent.click(option("plan")!);
-    await waitFor(() => expect(picked("access")).toBe("plan"));
+    fireEvent.click(option("acceptEdits")!);
+    await waitFor(() => expect(picked("access")).toBe("acceptEdits"));
 
     const editor = composerEditor();
     await typeInto(editor, "go");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ prompt: "go", model: "claude-opus-5", effort: "low", contextWindow: "200k", permissionMode: "plan" });
+    expect(started[0]).toMatchObject({ prompt: "go", model: "claude-opus-5", effort: "low", contextWindow: "200k", permissionMode: "acceptEdits" });
     expect(started[0]?.harness).toBeUndefined();
   });
 
@@ -555,10 +555,10 @@ describe("composer pickers", () => {
     fireEvent.click(option("low")!);
     await waitFor(() => expect(picked("effort")).toBe("low"));
     fireEvent.click(picker("access")!);
-    fireEvent.click(option("plan")!);
-    await waitFor(() => expect(picked("access")).toBe("plan"));
+    fireEvent.click(option("acceptEdits")!);
+    await waitFor(() => expect(picked("access")).toBe("acceptEdits"));
     // The access went through the access verb, the one road that changes a thread's access, and not into the send.
-    expect(moved).toEqual([{ sessionId: "s0", permissionMode: "plan" }]);
+    expect(moved).toEqual([{ sessionId: "s0", permissionMode: "acceptEdits" }]);
 
     const editor = composerEditor();
     await typeInto(editor, "go");
@@ -575,13 +575,13 @@ describe("composer pickers", () => {
     await setup(idle.api);
     await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
     fireEvent.click(picker("access")!);
-    fireEvent.click(option("plan")!);
-    await waitFor(() => expect(idle.moved).toEqual([{ sessionId: "s0", permissionMode: "plan" }]));
+    fireEvent.click(option("acceptEdits")!);
+    await waitFor(() => expect(idle.moved).toEqual([{ sessionId: "s0", permissionMode: "acceptEdits" }]));
     // The button says what the thread is now at, and nothing under the box: the verb answered set, the thread's
     // record has the mode, and the next thread in this workspace starts at it too.
-    await waitFor(() => expect(picked("access")).toBe("plan"));
+    await waitFor(() => expect(picked("access")).toBe("acceptEdits"));
     expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
-    expect(useStore.getState().preferences.access).toEqual({ [WS]: "plan" });
+    expect(useStore.getState().preferences.access).toEqual({ [WS]: "acceptEdits" });
 
     // A thread that has not run names no row: its pick decides what it opens at and the verb is not called.
     cleanup();
@@ -589,20 +589,20 @@ describe("composer pickers", () => {
     await setup(fresh.api);
     await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
     fireEvent.click(picker("access")!);
-    fireEvent.click(option("plan")!);
-    await waitFor(() => expect(picked("access")).toBe("plan"));
+    fireEvent.click(option("acceptEdits")!);
+    await waitFor(() => expect(picked("access")).toBe("acceptEdits"));
     expect(fresh.moved).toEqual([]);
   });
 
   it("shows the running session's values while a turn streams, the CLI's 1M suffix read as the context window", async () => {
-    const running: SessionView = { id: "s9", workspaceId: WS, harness: "claude", status: "running", model: "claude-opus-5[1m]", effort: "low", permissionMode: "plan" };
+    const running: SessionView = { id: "s9", workspaceId: WS, harness: "claude", status: "running", model: "claude-opus-5[1m]", effort: "low", permissionMode: "acceptEdits" };
     const { api } = fixtureApi({ table: [CLAUDE], history: CHAT_STREAM.slice(0, 2), sessions: [running] });
     await setup(api);
     await waitFor(() => expect(picker("reasoning")?.textContent).toBe("Low 1M"));
-    expect(picker("access")?.textContent).toBe("Plan");
+    expect(picker("access")?.textContent).toBe("Accept edits");
     expect(picked("contextWindow")).toBe("1m");
     expect(pickerValue("model")).toBe("claude-opus-5");
-    expect(picked("access")).toBe("plan");
+    expect(picked("access")).toBe("acceptEdits");
   });
 
   it("keeps the access pick on the host's record, where the next thread reads it, not in this browser's storage", async () => {
@@ -610,29 +610,29 @@ describe("composer pickers", () => {
     await setup(api);
     await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
     fireEvent.click(picker("access")!);
-    fireEvent.click(option("plan")!);
+    fireEvent.click(option("acceptEdits")!);
 
-    await waitFor(() => expect(picked("access")).toBe("plan"));
-    expect(useStore.getState().preferences.access).toEqual({ [WS]: "plan" });
-    expect(patches).toEqual([{ access: { [WS]: "plan" } }]);
+    await waitFor(() => expect(picked("access")).toBe("acceptEdits"));
+    expect(useStore.getState().preferences.access).toEqual({ [WS]: "acceptEdits" });
+    expect(patches).toEqual([{ access: { [WS]: "acceptEdits" } }]);
     // The record is the pick's one home: this browser's own store keeps the other picks and not this one.
     expect(useComposerOptionsStore.getState().byWorkspaceId[WS]).toBeUndefined();
-    expect(JSON.stringify(window.localStorage.getItem("wsp:composer-options:v1"))).not.toContain("plan");
+    expect(JSON.stringify(window.localStorage.getItem("wsp:composer-options:v1"))).not.toContain("acceptEdits");
 
     const editor = composerEditor();
     await typeInto(editor, "go");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]?.permissionMode).toBe("plan");
+    expect(started[0]?.permissionMode).toBe("acceptEdits");
   });
 
   it("shows the pick the record already carries for this workspace, over the mode the catalog marks", async () => {
     const { api } = fixtureApi({ table: [CLAUDE] });
     await setup(api);
     await waitFor(() => expect(picker("access")).not.toBeNull());
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, access: { [WS]: "plan" } } });
-    await waitFor(() => expect(picked("access")).toBe("plan"));
-    expect(picker("access")?.textContent).toBe("Plan");
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, access: { [WS]: "acceptEdits" } } });
+    await waitFor(() => expect(picked("access")).toBe("acceptEdits"));
+    expect(picker("access")?.textContent).toBe("Accept edits");
   });
 
   it("says what a pick does to the turn running now, over the list, while a turn runs and not before", async () => {
@@ -658,7 +658,7 @@ describe("composer pickers", () => {
     await setup(idle.api);
     await waitFor(() => expect(picker("access")).not.toBeNull());
     fireEvent.click(picker("access")!);
-    await waitFor(() => expect(option("plan")).not.toBeNull());
+    await waitFor(() => expect(option("acceptEdits")).not.toBeNull());
     expect(reachNote()).toBeNull();
   });
 
@@ -669,10 +669,10 @@ describe("composer pickers", () => {
     await setup(took.api);
     await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
     fireEvent.click(picker("access")!);
-    fireEvent.click(option("plan")!);
-    await waitFor(() => expect(took.moved).toEqual([{ sessionId: "s9", permissionMode: "plan" }]));
+    fireEvent.click(option("acceptEdits")!);
+    await waitFor(() => expect(took.moved).toEqual([{ sessionId: "s9", permissionMode: "acceptEdits" }]));
     // The harness took it, so there is nothing to say: the turn in front of the person is at the picked mode.
-    await waitFor(() => expect(picked("access")).toBe("plan"));
+    await waitFor(() => expect(picked("access")).toBe("acceptEdits"));
     expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
 
     // A harness whose row says it takes the change and then refuses it: that refusal is the person's news, in the
@@ -682,11 +682,11 @@ describe("composer pickers", () => {
     await setup(refused.api);
     await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
     fireEvent.click(picker("access")!);
-    fireEvent.click(option("plan")!);
+    fireEvent.click(option("acceptEdits")!);
     await waitFor(() => expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe(ACCESS_REFUSED_LINE));
     // The pick is kept either way: the refusal says where it lands instead, not that it was dropped.
-    expect(useStore.getState().preferences.access).toEqual({ [WS]: "plan" });
-    expect(picked("access")).toBe("plan");
+    expect(useStore.getState().preferences.access).toEqual({ [WS]: "acceptEdits" });
+    expect(picked("access")).toBe("acceptEdits");
 
     // A harness whose row says a pick waits for the thread's next turn said so over the list before the pick, so
     // nothing is said again under the box. The pick still goes through the access verb, which is where the thread's
@@ -696,9 +696,9 @@ describe("composer pickers", () => {
     await setup(waits.api);
     await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
     fireEvent.click(picker("access")!);
-    fireEvent.click(option("plan")!);
-    await waitFor(() => expect(waits.moved).toEqual([{ sessionId: "s9", permissionMode: "plan" }]));
-    await waitFor(() => expect(picked("access")).toBe("plan"));
+    fireEvent.click(option("acceptEdits")!);
+    await waitFor(() => expect(waits.moved).toEqual([{ sessionId: "s9", permissionMode: "acceptEdits" }]));
+    await waitFor(() => expect(picked("access")).toBe("acceptEdits"));
     expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
   });
 
@@ -744,7 +744,11 @@ describe("composer pickers", () => {
     fireEvent.click(picker("access")!);
     const modes = CLAUDE_TABLE.permissionModes;
     expect(modes).toHaveLength(7);
-    for (const mode of modes) expect(option(mode.value)?.textContent, mode.value).toContain(mode.description!);
+    // Plan is the composer's own toggle and no row of this menu.
+    for (const mode of modes) {
+      if (mode.value === PLAN_ACCESS) expect(option(mode.value), mode.value).toBeNull();
+      else expect(option(mode.value)?.textContent, mode.value).toContain(mode.description!);
+    }
     // The sentences have one home. A copy in the app would go on saying what the table no longer says, which is how
     // this menu came to explain itself in the binary's own words; the dev shell's fixture is pinned to them instead.
     const app = appSources(APPS);

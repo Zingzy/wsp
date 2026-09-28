@@ -1,0 +1,15 @@
+[
+  {
+    "id": 1,
+    "op": "git.restore",
+    "cwd": "/Users/dev/spoo-fix-login",
+    "checkpoint": "refs/wsp/checkpoints/spoo-fix-login/thr_01a0e365/turn_1"
+  },
+  {
+    "id": 2,
+    "op": "git.restore",
+    "cwd": "/root/wsp-boat",
+    "checkpoint": "refs/wsp/checkpoints/wsp-boat/thr_01a0e365/turn_1-before-1790521483000",
+    "machineId": "wsp-a"
+  }
+]

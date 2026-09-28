@@ -236,6 +236,7 @@ describe("ClaudeAdapter over the recorded fixture", () => {
       "turn.delta",
       "turn.delta",
       "turn.delta",
+      "turn.anchor",
       "turn.done",
       "session.end",
     ]);
@@ -1148,5 +1149,42 @@ describe("ClaudeAdapter follows the agent's tool shell", () => {
       ["tool_use", "Edit", undefined],
       ["tool_use", "Write", undefined],
     ]);
+  });
+});
+
+describe("what a rewind needs of a Claude Code turn", () => {
+  const adapterOver = (exec: ScriptedExec) => createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg", signInRefusal: signInRefusalLine({ kind: "cloud" }) });
+
+  it("names the turn's last message of the thread's own agent once, before the turn's reply, as the point a cut keeps", async () => {
+    const exec = scriptedExec(fixtureLines());
+    const events: AdapterEvent[] = [];
+    await adapterOver(exec).start({ prompt: "go", onEvent: e => events.push(e) }).finished;
+    const anchors = events.filter((e): e is Extract<AdapterEvent, { type: "turn.anchor" }> => e.type === "turn.anchor");
+    expect(anchors).toEqual([{ type: "turn.anchor", sessionId: FIXTURE_SESSION_ID, anchor: "1a2b3c4d-0006-4aaa-8bbb-000000000006" }]);
+    expect(events.findIndex(e => e.type === "turn.anchor")).toBeLessThan(events.findIndex(e => e.type === "turn.done"));
+  });
+
+  it("leaves a subagent's messages out of the anchor, since the cut is on the thread's own chain", async () => {
+    const lines = fixtureLines();
+    const at = lines.findIndex(l => l.includes('"subtype":"success"'));
+    const sub = JSON.stringify({ type: "assistant", uuid: "9f9f9f9f-0000-4000-8000-000000000099", parent_tool_use_id: "toolu_sub", session_id: FIXTURE_SESSION_ID, message: { id: "m_sub", role: "assistant", content: [{ type: "text", text: "sub" }] } });
+    const exec = scriptedExec([...lines.slice(0, at), sub, ...lines.slice(at)]);
+    const events: AdapterEvent[] = [];
+    await adapterOver(exec).start({ prompt: "go", onEvent: e => events.push(e) }).finished;
+    expect(events.find(e => e.type === "turn.anchor")).toMatchObject({ anchor: "1a2b3c4d-0006-4aaa-8bbb-000000000006" });
+  });
+
+  it("carries the cut on the next resume and never otherwise, by uuid alone", async () => {
+    const adapter = adapterOver(scriptedExec(fixtureLines()));
+    expect(adapter.resumesAt).toBe(true);
+    const exec = scriptedExec(fixtureLines());
+    const plain = adapterOver(exec);
+    await plain.start({ prompt: "next", resume: FIXTURE_SESSION_ID, onEvent: () => {} }).finished;
+    expect(exec.calls[0]!.command).not.toContain("--resume-session-at");
+    await plain.start({ prompt: "after the rewind", resume: FIXTURE_SESSION_ID, resumeAt: "1a2b3c4d-0002-4aaa-8bbb-000000000002", onEvent: () => {} }).finished;
+    expect(exec.calls[1]!.command).toContain(`--resume ${FIXTURE_SESSION_ID} --resume-session-at 1a2b3c4d-0002-4aaa-8bbb-000000000002`);
+    expect(exec.calls[1]!.command).not.toContain("--resume-drops-turn");
+    expect(() => plain.start({ prompt: "x", resume: FIXTURE_SESSION_ID, resumeAt: "$(rm -rf /)", onEvent: () => {} })).toThrow(/UUID/);
+    expect(() => plain.start({ prompt: "x", resumeAt: "1a2b3c4d-0002-4aaa-8bbb-000000000002", onEvent: () => {} })).toThrow(/resume/);
   });
 });

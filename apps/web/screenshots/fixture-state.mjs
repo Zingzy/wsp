@@ -821,6 +821,10 @@ const copyOn = (name, branch) => ({ road: "clonefile", path: join(HOME, "wsp-wor
  * out of the list, and the projects dragged into an order of their own. */
 const tilesMarked = () => tiles({ marked: true });
 
+/** The same sidebar with the lead's turn finished and the lead snoozed while two threads its agent opened still run:
+ * the tree keeps its root alone at the foot of Idle, saying quietly how many work. */
+const tilesSnoozed = () => tiles({ snoozedTree: true });
+
 /** The sidebar the locked tile screens draw: a root on this computer stopped on a question, with three threads its
  * agent opened under it, one working beside it here and two on a Solari fork of the same project, one working and one
  * resting; then a working thread on the joined computer spoo, a finished one nobody has opened yet on a
@@ -828,7 +832,7 @@ const tilesMarked = () => tiles({ marked: true });
  * three that were read and went quiet days ago, which fold into Settled. A fork carries no copy record and reads its branch off its own daemon, which no
  * stand-in machine answers for the project's folder, so its tiles show the agent's mark with no branch. One
  * workspace stands on this computer, for macInUse's reason, and each project wears a look, as a person picks one. */
-const tiles = ({ marked = false } = {}) => {
+const tiles = ({ marked = false, snoozedTree = false } = {}) => {
   const tree = { parent: "flaky", root: "flaky", startedBy: "agent" };
   const forkTree = { parentThreadId: threadId("flaky"), rootThreadId: threadId("flaky") };
   const spooPlace = place("p_spoo", "spoo", 1, { platform: "linux", os: "Ubuntu 24.04", runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, true);
@@ -854,7 +858,7 @@ const tiles = ({ marked = false } = {}) => {
     ],
     ...merge(
       threadsOn("ws_flaky", [
-        [tileThread("flaky", "Fix the three flaky checkout tests", { status: "running", asking: "Permission for Bash: pnpm test cart" }), 40],
+        [tileThread("flaky", "Fix the three flaky checkout tests", snoozedTree ? { seen: true, snoozed: true } : { status: "running", asking: "Permission for Bash: pnpm test cart" }), 40],
         [{ ...tileThread("address", "Address form race", { status: "running", agent: "codex" }), ...tree }, 6],
       ]),
       threadsOn("ws_solari", [
@@ -935,6 +939,50 @@ const longPrompt = () =>
     goldens: sealed(),
   });
 
+/** A thread of several turns on one session row, as a resumed turn keeps it: each turn's replay under its own id,
+ * closed by the checkpoint the runtime records at its end, and the row naming the latest. */
+const turnsOn = (workspaceId, thread, turns) => {
+  const idOf = n => turnId(`${thread.id}:${n}`);
+  const last = turns.length - 1;
+  const events = turns.flatMap((t, n) => {
+    const kept = n === last ? [] : [event(thread, { type: "session.checkpoint", at: ago(t.minutes - 3), ref: `refs/wsp/checkpoints/spoo-landing-rewind/${threadId(thread.id)}/${idOf(n)}`, anchor: uuidFor(`anchor:${thread.id}:${n}`) }, workspaceId)];
+    return [...replay({ ...thread, ...t }, t.minutes, workspaceId), ...kept].map(e => ({ ...e, turnId: idOf(n) }));
+  });
+  const newest = { ...thread, ...turns[last] };
+  return {
+    sessions: { [workspaceId]: { workspaceId, sessions: [{ ...turn(newest, newest.minutes, workspaceId), turnId: idOf(last) }], threads: {} } },
+    transcripts: { [workspaceId]: { workspaceId, events } },
+  };
+};
+
+/** Two threads of three and two turns on a copy of spoo-landing, each earlier turn closed on a checkpoint, so Rewind
+ * to here stands on their earlier replies: one on Claude, which cuts its own conversation and has a thread its agent
+ * opened still working under it, and one on Cursor, which keeps its own and is rewound in its files alone. */
+const rewind = () => {
+  const cart = tileThread("rounding", "Find why the cart total test is flaky");
+  const cursor = tileThread("tax", "Round the tax line once", { agent: "cursor", model: "auto" });
+  // A thread the lead's agent opened, still working: a rewind of the lead waits for it.
+  const child = tileThread("fixture", "Check the tax fixture", { status: "running", parent: "rounding", root: "rounding", startedBy: "agent" });
+  const children = threadsOn("ws_rewind", [[child, 5]]);
+  const claudeTurns = turnsOn("ws_rewind", cart, [
+    { minutes: 40, prompt: "Find why the cart total test is flaky", reply: "The total rounds per line instead of once at the end, so three lines at 0.335 land on 1.00 or 1.01 depending on the order the cart iterates." },
+    { minutes: 30, prompt: "Move the rounding to the end and pin it with a test", reply: "Moved the rounding to the end in cart/total.ts and added a fixture that pins the order. The test passes 200 times in a row." },
+    { minutes: 20, prompt: "Now round the tax line the same way", reply: "Tax rounds once at the end too, in cart/tax.ts. Two files changed." },
+  ]);
+  const cursorTurns = turnsOn("ws_rewind", cursor, [
+    { minutes: 15, prompt: "Round the tax line once", reply: "Tax now rounds once at the end, in cart/tax.ts." },
+    { minutes: 10, prompt: "Add a test for the tax rounding", reply: "Added cart/tax.test.ts with the three line fixture." },
+  ]);
+  return store({
+    projects: [project("spoo-landing", HERE, 60 * 30)],
+    workspaces: [workspace("ws_rewind", THIS_COMPUTER, { project: "pr_spoo-landing", copy: copyOn("spoo-landing-rewind", "fix/cart-rounding") })],
+    sessions: { ws_rewind: { workspaceId: "ws_rewind", sessions: [...cursorTurns.sessions.ws_rewind.sessions, ...children.sessions.ws_rewind.sessions, ...claudeTurns.sessions.ws_rewind.sessions], threads: {} } },
+    transcripts: { ws_rewind: { workspaceId: "ws_rewind", events: [...claudeTurns.transcripts.ws_rewind.events, ...cursorTurns.transcripts.ws_rewind.events, ...children.transcripts.ws_rewind.events] } },
+    readsSince: 60 * 24 * 7,
+    preferences: { projectLook: { "pr_spoo-landing": { icon: "folder", hue: "orange" } } },
+  });
+};
+
 /** Every setup a lab can serve, by the word `--fixture` takes. One row per kind of person: what builds its store,
  * the cloud its machines are meant to be at, which the stand-in provider then wears as its own word, and the
  * repositories that person already keeps at the top of their home, which wsp has imported nowhere. Without the
@@ -955,9 +1003,11 @@ const FIXTURES = {
   "thread-states": { build: threadStates, cloud: "box" },
   tiles: { build: tiles, cloud: "solari" },
   "tiles-marks": { build: tilesMarked, cloud: "solari" },
+  "tiles-snoozed": { build: tilesSnoozed, cloud: "solari" },
   "tiles-attempt": { build: tilesAttempt },
   "image-built": { build: imageBuilt },
   "long-prompt": { build: longPrompt },
+  rewind: { build: rewind },
 };
 
 export const FIXTURE_NAMES = Object.keys(FIXTURES);

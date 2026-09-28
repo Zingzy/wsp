@@ -117,7 +117,7 @@ afterEach(async () => {
  * them rather than reading them a second time. */
 const DOOR = ["http://192.168.1.20:4400"];
 
-const HERE = { name: "zingzys-mac", os: "macOS 15.0", shape: { cpu: 8, memMb: 16384 }, engine: "docker" as const };
+const HERE = { name: "zingzys-mac", os: "macOS 15.0", shape: { cpu: 8, memMb: 16384 }, engine: "docker" as const, mac: "mac-mini" as const };
 
 function wiring(hostKey: PlaceKeyPair, provider?: { id: string; rateUsdPerHour: number }, update?: PlaceUpdater): PlaceWiring {
   return { hostKey, provider: () => provider, here: () => HERE, hostName: () => "zingzys-mac", ...(update === undefined ? {} : { update }) };
@@ -900,7 +900,7 @@ describe("a place's cap and what runs there", () => {
     const joined = await join(hostKey, { code: await code(), report: report("spoo", { shape: { cpu: 2, memMb: 7885 } }) });
     sockets.push(joined.client.ws);
     const places = await placesOf();
-    expect(places.find(p => p.id === HERE_PLACE_ID)).toMatchObject({ cap: { threads: 6 }, running: 0 });
+    expect(places.find(p => p.id === HERE_PLACE_ID)).toMatchObject({ cap: { threads: 6 }, running: 0, mac: "mac-mini" });
     expect(places.find(p => p.id === joined.placeId)).toMatchObject({ cap: { threads: 2 }, running: 0 });
     expect(places.find(p => p.id === "solari")).toMatchObject({ cap: { machines: 3, spendPerDayUsd: 10 }, running: 0 });
   });
@@ -3210,6 +3210,8 @@ describe("a fork on a computer you joined", () => {
     "inbox.watch",
     "inbox.rescan",
     "fs.folders",
+    "git.checkpoint",
+    "git.restore",
     "tunnel.open",
     "tunnel.write",
     "tunnel.close",

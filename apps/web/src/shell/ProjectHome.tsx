@@ -13,7 +13,7 @@ import { EmptyThread } from "../components/chat/ChatView.js";
 import { HeroAtmosphere } from "../components/chat/EmptyHero.js";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { newId, useComposerDraftStore } from "../components/chat/composerDraftStore.js";
-import { attachmentOf, useComposerImagesStore } from "../components/chat/composerImages.js";
+import { attachmentOf, useComposerFilesStore } from "../components/chat/composerFiles.js";
 import { useMultiPickStore, type ModelPick } from "../components/chat/composerMultiPick.js";
 import { useComposerOptions, useComposerOptionsStore } from "../components/chat/composerOptionsStore.js";
 import { startOptionsFrom } from "../components/chat/composerPicks.js";
@@ -80,8 +80,8 @@ export function ProjectHome({ projectId }: { projectId: string }) {
     const refused = await roomRefusal(api, project, picks.length);
     if (refused !== null) return refused;
     const attempt = newId();
-    const attachments = (useComposerImagesStore.getState().pending[key] ?? []).map(attachmentOf);
-    useComposerImagesStore.getState().sendAs(key, attempt);
+    const attachments = (useComposerFilesStore.getState().pending[key] ?? []).map(attachmentOf);
+    useComposerFilesStore.getState().sendAs(key, attempt);
     useMultiPickStore.getState().set(key, []);
     const kind = kindForComputer(project.computer);
     await Promise.all(
