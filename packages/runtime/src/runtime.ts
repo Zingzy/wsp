@@ -1807,8 +1807,8 @@ interface TranscriptIndex {
   facts: Map<string, SessionFacts>;
 }
 
-/** A transcript file that is there and did not read: nothing is written over it, since what it holds is still in it. */
-const transcriptUnreadLine = (workspaceId: string, why: string): string => `the transcript of ${workspaceId} does not read (${why}), so nothing is written over it`;
+/** A transcript file that is there and did not read. Nothing is written over it, since what it holds is still in it. */
+const transcriptUnreadLine = (workspaceId: string, why: string): string => `the transcript of ${workspaceId} does not read (${why})`;
 
 /** What a resumed session's turns carry, read off its newest start that named each. */
 const SESSION_FACTS = ["cwd", "permissionMode", "model"] as const;
@@ -1872,12 +1872,17 @@ const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritt
 };
 
 /** An index as its file holds it, with the mark of the transcript file it was read off: an index whose transcript
- * has been written since (a crash between the two writes, a failed index write) is one boot reads again. */
+ * has been written since (a crash between the two writes, a failed index write) is one boot reads again, and so is
+ * one that does not parse. */
 const indexBytes = (index: TranscriptIndex, of: BlobMark | undefined): Buffer =>
   Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts] }));
-const indexRead = (bytes: Buffer): { index: TranscriptIndex; of?: BlobMark } => {
-  const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][] };
-  return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts) }, ...(held.of !== undefined ? { of: held.of } : {}) };
+const indexRead = (bytes: Buffer): { index: TranscriptIndex; of?: BlobMark } | undefined => {
+  try {
+    const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][] };
+    return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts) }, ...(held.of !== undefined ? { of: held.of } : {}) };
+  } catch {
+    return undefined;
+  }
 };
 
 /** The words around a hit, on one line: a little before it and more after, an ellipsis where the text goes on. */
@@ -3108,16 +3113,29 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * spent its loop on that for minutes. */
   const transcriptBlob = (record: TranscriptRecord): Buffer => Buffer.from(JSON.stringify(record));
   /** A transcript file's events, nothing where there is no file, and a refusal where there is a file that did not
-   * read: a caller that took the two for one wrote what it held over everything the file had. */
+   * read: a caller that took the two for one wrote what it held over everything the file had. A file that reads and
+   * does not parse never will, and refusing it would keep every later event unwritten, so its bytes are moved aside
+   * under a name of their own and it counts as no file. */
   const readTranscript = async (workspaceId: string, collection: string = TRANSCRIPTS): Promise<SessionEvent[] | undefined> => {
+    let bytes: Buffer | undefined;
     try {
-      const bytes = await store.getBlob(collection, workspaceId);
-      if (bytes !== undefined) return (JSON.parse(bytes.toString("utf8")) as TranscriptRecord).events;
-      if ((await store.statBlob(collection, workspaceId)) === undefined) return undefined;
+      bytes = await store.getBlob(collection, workspaceId);
+      if (bytes === undefined && (await store.statBlob(collection, workspaceId)) === undefined) return undefined;
     } catch (e) {
       throw new Error(transcriptUnreadLine(workspaceId, e instanceof Error ? e.message : String(e)));
     }
-    throw new Error(transcriptUnreadLine(workspaceId, "the file is there and could not be read"));
+    if (bytes === undefined) throw new Error(transcriptUnreadLine(workspaceId, "the file is there and could not be read"));
+    try {
+      const events = (JSON.parse(bytes.toString("utf8")) as Partial<TranscriptRecord>).events;
+      if (!Array.isArray(events)) throw new Error("it holds no events");
+      return events;
+    } catch (e) {
+      const aside = `${workspaceId}.${Date.now()}`;
+      await store.putBlob(`${collection}-unparsed`, aside, bytes);
+      await store.deleteBlob(collection, workspaceId);
+      console.warn(`the transcript of ${workspaceId} does not parse (${e instanceof Error ? e.message : String(e)}), so its bytes are kept as ${collection}-unparsed/${aside} and it starts again empty`);
+      return undefined;
+    }
   };
   /** The index written beside a transcript, marked with the transcript file as it stands now. */
   const writeIndex = async (workspaceId: string, index: TranscriptIndex): Promise<void> => {
@@ -3152,7 +3170,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * the transcript itself: an index older than its file answers search and a send from before the last turn. */
   const loadIndex = async (workspaceId: string): Promise<void> => {
     try {
-      const mark = await store.statBlob(TRANSCRIPTS, workspaceId);
+      const mark = await store.statBlob(TRANSCRIPTS, workspaceId).catch((e: unknown) => {
+        throw new Error(transcriptUnreadLine(workspaceId, e instanceof Error ? e.message : String(e)));
+      });
       if (mark === undefined) return;
       const bytes = await store.getBlob(TRANSCRIPT_INDEX, workspaceId);
       const kept = bytes === undefined ? undefined : indexRead(bytes);
@@ -3162,9 +3182,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       const index = indexOf((await readTranscript(workspaceId)) ?? []);
       transcriptIndex.set(workspaceId, index);
-      await writeIndex(workspaceId, index);
+      await writeIndex(workspaceId, index).catch((e: unknown) => console.warn(`the transcript index of ${workspaceId} was not written: ${e instanceof Error ? e.message : String(e)}`));
     } catch (e) {
-      console.warn(`the transcript index of ${workspaceId} was not read: ${e instanceof Error ? e.message : String(e)}`);
+      console.warn(`${e instanceof Error ? e.message : String(e)}, so search and a send leave it out until it reads`);
     }
   };
   // Every read and write of one workspace's transcript file takes its turn here, so the later snapshot always lands
@@ -3285,7 +3305,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         } catch (e) {
           // What was written since stays unwritten for the next flush, and the file keeps what it has. Said once
           // until a flush lands, since every event past the threshold asks again.
-          if (!unreadSaid.has(workspaceId)) console.warn(`${e instanceof Error ? e.message : String(e)}; its newest events wait for the next flush`);
+          if (!unreadSaid.has(workspaceId)) console.warn(`${e instanceof Error ? e.message : String(e)}, so nothing is written over it and its newest events wait for the next flush`);
           unreadSaid.add(workspaceId);
           return;
         }
@@ -5207,7 +5227,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await moveTranscript(t);
           moved.push(t.workspaceId);
         } catch (e) {
-          console.warn(`the transcript of ${t.workspaceId} stays in the state file: ${e instanceof Error ? e.message : String(e)}`);
+          console.warn(`${e instanceof Error ? e.message : String(e)}, so it stays in the state file for the next boot to move`);
         }
       }
       await Promise.all(moved.map(id => store.delete(TRANSCRIPTS, id)));
@@ -8089,6 +8109,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A record is written once a turn was handed over, so a thread with a record and no row left is one whose
       // turns ran and fell off the index cap; the rows alone would read it as a thread that never ran.
       if (threadRan(held.map(([, s]) => s.view)) || (held.length === 0 && record !== undefined)) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
+      // A transcript that does not read refuses here, before anything is changed.
+      await openTranscript(workspaceId);
       // A launch that never got going can still have landed the files its send carried.
       await dropThreadFiles(entry, [threadId]);
       for (const [id] of held) sessions.delete(id);

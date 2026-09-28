@@ -177,6 +177,30 @@ describe("sessions.forget", () => {
     expect(transcript.events.every(e => e.threadId === kept)).toBe(true);
   });
 
+  it("on a transcript that does not read is refused before anything changes, and goes once it reads", async () => {
+    const inner = memoryStore();
+    let unreadable = false;
+    const store: Store = { ...inner, getBlob: async (collection, id) => (unreadable && collection === "transcripts" ? undefined : inner.getBlob(collection, id)) };
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store, adapters: { claude: working, codex: dying } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "build it" })).finished;
+    const junk = await rt.sessions.start(ws.id, { prompt: "build it", harness: "codex" });
+    await junk.finished.catch(() => {});
+    const going = junk.view().threadId!;
+    await rt.close();
+
+    unreadable = true;
+    const after = createRuntime({ backend, store, adapters: { claude: working, codex: dying } });
+    await expect(after.sessions.forget(going)).rejects.toThrow(`the transcript of ${ws.id} does not read`);
+    expect(foldThreads(await after.sessions.list(ws.id)).map(t => t.id)).toContain(going);
+    unreadable = false;
+    await after.sessions.forget(going);
+    expect(foldThreads(await after.sessions.list(ws.id)).map(t => t.id)).not.toContain(going);
+    expect((await after.sessions.history(ws.id)).some(e => e.threadId === going)).toBe(false);
+    await after.close();
+  });
+
   it("drops a thread's rows for good when other transcripts open while it writes the thread's row away", async () => {
     // The forget took the thread out of the held copy, waited on its session index, and flushed: four opens in that
     // wait let the copy go, and the flush wrote the file back as it was, the thread's rows in it.

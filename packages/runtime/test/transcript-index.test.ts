@@ -4,7 +4,7 @@
 // its last flush. Opening one reads its file, the last few opened stay held,
 // and search and a resume read the index alone.
 import { randomUUID } from "node:crypto";
-import { lstatSync, mkdtempSync, renameSync, rmSync, symlinkSync } from "node:fs";
+import { lstatSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -242,6 +242,63 @@ describe("a transcript file that did not read", () => {
     expect(warned.filter(line => line.startsWith(`the transcript of ${ws.id} does not read`) && line.endsWith("its newest events wait for the next flush"))).toHaveLength(1);
     await third.close();
     rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe("a transcript file that reads and does not parse", () => {
+  it("is kept aside under a name of its own, and every turn after it is written and read again", async () => {
+    // A refusal on bad JSON kept each later turn's events unwritten, and each restart dropped them: it never parses.
+    const home = mkdtempSync(join(tmpdir(), "wsp-unparsed-"));
+    const statePath = join(home, "state.json");
+    const writer = { wsp: "test", daemon: DAEMON_VERSION, bin: "/usr/local/bin/wsp" };
+    const { adapter } = replying(p => `reply to ${p}`);
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
+    await rt.close();
+    const torn = '{"workspaceId":"x","events":[{"ty';
+    writeFileSync(join(home, "blobs", "transcripts", ws.id), torn);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const prompt of ["two", "three"]) {
+        const next = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
+        await (await next.sessions.start(ws.id, { prompt })).finished;
+        await next.close();
+      }
+    } finally {
+      warn.mockRestore();
+    }
+
+    const last = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: {} });
+    const replies = (await last.sessions.history(ws.id)).flatMap(e => (e.type === "session.delta" && e.kind === "text" ? [e.text] : []));
+    expect(replies.join("")).toBe("reply to tworeply to three");
+    expect((await last.sessions.search("reply to two")).hits).toHaveLength(1);
+    await last.close();
+    const aside = readdirSync(join(home, "blobs", "transcripts-unparsed"));
+    expect(aside.map(name => readFileSync(join(home, "blobs", "transcripts-unparsed", name), "utf8"))).toEqual([torn]);
+    rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe("an index file that does not parse", () => {
+  it("is made again from its transcript at boot, as a missing one is", async () => {
+    const store = memoryStore();
+    const { adapter } = replying(p => (p === "one" ? "a periwinkle answer" : "an ordinary answer"));
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
+    await rt.close();
+    await store.putBlob("transcript-index", ws.id, Buffer.from('{"of":{"by'));
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const after = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    try {
+      expect((await after.sessions.search("periwinkle")).hits).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+    await after.close();
   });
 });
 
