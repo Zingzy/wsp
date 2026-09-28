@@ -128,8 +128,8 @@ where
     let index = git_path(runner, top, &named).await?;
     let own = git_path(runner, top, "index").await?;
     // A checkout with no index yet has nothing to seed from; add -A then hashes every file, which is slower and
-    // the same tree.
-    let _ = runner.run(top, "cp", &["-f", &own.to_string_lossy(), &index.to_string_lossy()], None, None).await?;
+    // the same tree. The copy keeps the index's time, since git re-hashes only the entries as new as the index file.
+    let _ = runner.run(top, "cp", &["-pf", &own.to_string_lossy(), &index.to_string_lossy()], None, None).await?;
     let done = work(index.clone()).await;
     let _ = runner.run(top, "rm", &["-f", &index.to_string_lossy()], None, None).await;
     done
@@ -261,6 +261,28 @@ mod tests {
         assert_eq!(fs::read_to_string(at.join("one.txt")).unwrap(), "uno\n");
         assert_eq!(fs::read_to_string(at.join("two.txt")).unwrap(), "two\n");
         assert!(!at.join("src/keep.txt").exists());
+    }
+
+    /// Seconds since the epoch a file was last written.
+    fn written(path: &Path) -> u64 {
+        fs::metadata(path).unwrap().modified().unwrap().duration_since(UNIX_EPOCH).unwrap().as_secs()
+    }
+
+    #[tokio::test]
+    async fn a_checkpoint_sees_an_edit_at_the_same_size_in_the_same_second_as_the_last_index_write() {
+        // Git re-hashes an entry as new as the index file, since a stat check cannot tell a same-size edit in that
+        // second apart; the seeded copy keeps the index's time, so a checkpoint in a later second hashes it too.
+        let (_dir, at) = loop {
+            let (dir, at) = copy();
+            fs::write(at.join("one.txt"), "uno\n").unwrap();
+            if written(&at.join("one.txt")) == written(&at.join(".git/index")) {
+                break (dir, at);
+            }
+        };
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        tokio::time::sleep(std::time::Duration::from_nanos(u64::from(1_000_000_000 - now.subsec_nanos()) + 20_000_000)).await;
+        let taken = checkpoint(&Here::new(), &at, "thr_1", "turn_1").await.unwrap();
+        assert_eq!(git(&at, &["show", &format!("{}:one.txt", taken.commit)]), "uno");
     }
 
     #[tokio::test]

@@ -15,7 +15,10 @@ import { Button, NEUTRAL_RING } from "../ui/button.js";
 import { Radio, RadioGroup } from "../ui/radio-group.js";
 
 /** What a client that cannot rewind says in the slot instead of asking. */
-const CANNOT_REWIND = "this window cannot rewind a thread";
+const CANNOT_REWIND = "This window cannot rewind a thread.";
+
+/** The host's lines are lowercase for the terminal; in the app a refusal reads as a sentence. */
+export const asSentence = (line: string): string => `${line.charAt(0).toUpperCase()}${line.slice(1)}${/[.!?]$/.test(line) ? "" : "."}`;
 
 type Choice = "conversation" | "files";
 
@@ -59,7 +62,7 @@ export function RewindDialogHost() {
       await ask();
       close();
     } catch (e) {
-      setRefusal(errorText(e));
+      setRefusal(asSentence(errorText(e)));
     } finally {
       setBusy(false);
     }

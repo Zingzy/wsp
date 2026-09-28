@@ -46,6 +46,15 @@ mod tests {
     }
 
     #[test]
+    fn two_copies_of_one_folder_never_share_a_prefix() {
+        // Only copies of one repo share a git directory, and each is named `<its folder>-<the work's slug>`: the
+        // folder part folds the same for every copy, and a slug is letters, digits and dashes, which fold to
+        // themselves, so the prefixes differ wherever the slugs do.
+        let prefixes = ["fix-login", "fix-login-2", "pricing-page"].map(|slug| checkpoint_prefix(&format!("my project (v2)-{slug}")));
+        assert_eq!(prefixes.iter().collect::<std::collections::HashSet<_>>().len(), prefixes.len(), "{prefixes:?}");
+    }
+
+    #[test]
     fn an_id_is_one_plain_component_or_nothing() {
         assert!(checkpoint_id_ok("thr_01a0e365"));
         assert!(checkpoint_id_ok("turn-2"));

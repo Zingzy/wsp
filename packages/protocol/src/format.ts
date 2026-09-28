@@ -1529,6 +1529,12 @@ export function rewindChildrenLine(titles: readonly string[]): string {
   return `stop the threads under this one first (${titles.join(", ")}); a rewind never stops them for you`;
 }
 
+/** A rewind of the files, or its undo, refused while another thread in the same copy runs: the files would go back
+ * under its agent mid-turn, and nobody chose to lose what it is writing. */
+export function rewindBesideLine(title: string): string {
+  return `another thread in this copy is working (${title}), and its files would go back too; let its turn end or stop it first`;
+}
+
 /** Files asked back to a turn whose end left no checkpoint of them. */
 export const REWIND_NO_CHECKPOINT_LINE = "that reply kept no checkpoint of the files, so only its conversation can be rewound";
 
@@ -1543,21 +1549,24 @@ export const REWIND_LATEST_LINE = "that is the thread's latest reply, so nothing
 /** A rewind on a workspace that is the person's own folder, where wsp writes nothing. */
 export const REWIND_OWN_FOLDER_LINE = "this workspace is your own folder, and wsp keeps no checkpoints there; start the work in a copy to rewind it";
 
-/** An undo with no rewind to undo, or one whose next turn has already ended. */
-export const REWIND_NO_UNDO_LINE = "this thread has no rewind to undo; undo lasts until the turn after a rewind ends";
+/** An undo with no rewind to undo, or one a turn in the same copy has ended since. */
+export const REWIND_NO_UNDO_LINE = "this thread has no rewind to undo; undo lasts until the next turn in this copy ends";
 
 /** What Undo rewind puts back, said beside it: the files, and never the turns the rewind cut. */
 export const UNDO_REWIND_LINE = "Files come back; the cut conversation does not.";
+
+/** Said beside every rewind that moves files: they are the whole copy's, so another thread's work goes back too. */
+const WHOLE_COPY = "The whole copy's files go back, other threads' work included.";
 
 const turnsAfter = (turns: number): string => (turns === 1 ? "The turn after this reply leaves" : `The ${turns} turns after this reply leave`);
 
 /** What a rewind to a reply takes, said before the click: how many turns go, whether the files go back, and what
  * Undo rewind brings back after. An agent that cuts no history of its own keeps every turn, and the note says so. */
 export function rewindNote(o: { turns: number; files: boolean; cutsConversation: boolean; agent: string }): string {
-  const undo = "Undo rewind puts the files back until the next turn ends";
-  if (!o.cutsConversation) return `${o.agent} keeps its own history, so the conversation stays and the files go back to how they stood at this reply. ${undo}.`;
+  const undo = "Undo rewind puts them back until the next turn in this copy ends";
+  if (!o.cutsConversation) return `${o.agent} keeps its own history, so the conversation stays and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}.`;
   if (!o.files) return `${turnsAfter(o.turns)} the conversation; the files stay as they are.`;
-  return `${turnsAfter(o.turns)} the conversation, and the files go back to how they stood at this reply. ${undo}; the conversation does not come back.`;
+  return `${turnsAfter(o.turns)} the conversation, and the files go back to how they stood at this reply. ${WHOLE_COPY} ${undo}; the conversation does not come back.`;
 }
 
 /** The refusal of a send into a thread that names another agent. A thread's rows carry the agent its turns ran on

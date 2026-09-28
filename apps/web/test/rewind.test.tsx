@@ -13,7 +13,7 @@ import { noDaemonApi } from "./fake-daemon-api.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
-import { RewindDialogHost } from "../src/components/chat/RewindDialog.js";
+import { RewindDialogHost, asSentence } from "../src/components/chat/RewindDialog.js";
 import { requestUndoRewind } from "../src/shell/shellRequests.js";
 import { resolveActions } from "../src/actions/registry.js";
 import { threadActions, type ThreadTarget } from "../src/actions/threadActions.js";
@@ -160,7 +160,8 @@ describe("Rewind to here on a thread's replies", () => {
     fireEvent.click(rewindButtons()[0]!);
     const dialog = await screen.findByRole("alertdialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Rewind" }));
-    await waitFor(() => expect(dialog.querySelector("[data-k='rewind-refusal']")?.textContent).toContain(REWIND_WORKING_LINE));
+    await waitFor(() => expect(dialog.querySelector("[data-k='rewind-refusal']")?.textContent).toBe(asSentence(REWIND_WORKING_LINE)));
+    expect(asSentence(REWIND_WORKING_LINE)).toBe("This thread is working; stop its turn first, since a rewind never stops it for you.");
     expect(screen.getByRole("alertdialog")).toBeDefined();
   });
 

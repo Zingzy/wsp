@@ -13,6 +13,7 @@ import {
   REWIND_WORKING_LINE,
   THREAD_OPS,
   foldThreads,
+  rewindBesideLine,
   rewindChildrenLine,
   type AdapterEvent,
   type DaemonFrame,
@@ -290,6 +291,39 @@ describe("rewinding a thread to one of its replies", () => {
     await settle();
     // Stopped, it stands in the way of nothing.
     expect(await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: false })).toEqual({ turns: 2 });
+  });
+
+  it("will not move the files under another thread in the copy while it works, naming it; the conversation alone still goes", async () => {
+    const { ws, daemon } = await workspace(harness({ cuts: "next", hangFrom: 4 }));
+    const { threadId, turns } = await threeTurns(ws.id);
+    // A second thread of the person's on the same workspace, so in the same folder, mid-turn.
+    const beside = await rt!.sessions.start(ws.id, { prompt: "move the pricing table" });
+    await settle();
+    daemon.frames.length = 0;
+    await expect(rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).rejects.toThrow(rewindBesideLine("move the pricing table"));
+    expect(daemon.frames).toEqual([]);
+    expect(await rt!.sessions.rewind(threadId, { turnId: turns[1]!, files: false })).toEqual({ turns: 1 });
+    await beside.interrupt();
+    await settle();
+    expect(await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true })).toEqual({ turns: 1, files: 2 });
+  });
+
+  it("will not undo while another thread in the copy works, and any turn that ends in the copy closes every undo there", async () => {
+    const { ws, daemon, events } = await workspace(harness({ cuts: "next", hangFrom: 4 }));
+    const { threadId, turns } = await threeTurns(ws.id);
+    await rt!.sessions.rewind(threadId, { turnId: turns[0]!, files: true });
+    const beside = await rt!.sessions.start(ws.id, { prompt: "move the pricing table" });
+    await settle();
+    daemon.frames.length = 0;
+    await expect(rt!.sessions.rewind(threadId, { undo: true })).rejects.toThrow(rewindBesideLine("move the pricing table"));
+    expect(daemon.frames.filter(f => f["op"] === "git.restore")).toEqual([]);
+    // The other thread's turn ends with work the undo's checkpoint predates, so the undo is gone, and a window hears it.
+    await beside.interrupt();
+    await settle();
+    expect(foldThreads(await rt!.sessions.list(ws.id)).find(t => t.threadId === threadId)?.rewoundAt).toBeUndefined();
+    expect(events.filter(e => e.type === "thread.marked")).toContainEqual(expect.objectContaining({ workspaceId: ws.id, threadIds: [threadId] }));
+    await expect(rt!.sessions.rewind(threadId, { undo: true })).rejects.toThrow(REWIND_NO_UNDO_LINE);
+    expect(daemon.frames.filter(f => f["op"] === "git.restore")).toEqual([]);
   });
 
   it("is a person's act alone: no thread's token and no paired computer may ask it", () => {
