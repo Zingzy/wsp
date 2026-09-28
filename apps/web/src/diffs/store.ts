@@ -7,7 +7,8 @@ import type { GitDiffScope } from "@wsp/protocol";
 
 export type DiffRenderMode = "stacked" | "split";
 
-export const DEFAULT_SCOPE: GitDiffScope = "unstaged";
+/** What a commit could take, which is what the pane is first read for. */
+export const DEFAULT_SCOPE: GitDiffScope = "head";
 
 interface DiffStoreState {
   scopeByWorkspaceId: Record<string, GitDiffScope>;

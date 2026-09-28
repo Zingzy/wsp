@@ -1,0 +1,124 @@
+{
+  "cloudOff": {
+    "name": "commit",
+    "description": "Commits the files the workspace's copy changed against its last commit, untracked ones added, with the message given, running the copy's hooks as git does; files names some of them by path from the checkout's top and leaves the rest uncommitted. Without a message the workspace's own agent drafts one from the diff and the task its newest thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the copy (with the command that sets one), when a hook said no (with its last line), and when another git in the copy holds the index after one wait. Nothing reaches a remote: bring back is what pushes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        },
+        "message": {
+          "type": "string",
+          "description": "the commit message, a subject line then a blank line and the body; without one the workspace's agent drafts it"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the files to commit, by path from the checkout's top as git status names them; without it every changed file"
+        }
+      },
+      "required": [
+        "workspace"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "oid": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "filesChanged": {
+          "type": "integer"
+        },
+        "insertions": {
+          "type": "integer"
+        },
+        "deletions": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "oid",
+        "subject",
+        "filesChanged",
+        "insertions",
+        "deletions"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  },
+  "cloudOn": {
+    "name": "commit",
+    "description": "Commits the files the workspace's copy changed against its last commit, untracked ones added, with the message given, running the copy's hooks as git does; files names some of them by path from the checkout's top and leaves the rest uncommitted. Without a message the workspace's own agent drafts one from the diff and the task its newest thread was opened with, on its own command line with no thread and no tool, and the commit is made with that. Refused in one line when a file named has no change, when git knows no author in the copy (with the command that sets one), when a hook said no (with its last line), and when another git in the copy holds the index after one wait. Nothing reaches a remote: bring back is what pushes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "string",
+          "description": "the workspace's name, or its id when two share a name"
+        },
+        "message": {
+          "type": "string",
+          "description": "the commit message, a subject line then a blank line and the body; without one the workspace's agent drafts it"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "the files to commit, by path from the checkout's top as git status names them; without it every changed file"
+        }
+      },
+      "required": [
+        "workspace"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "outputSchema": {
+      "type": "object",
+      "properties": {
+        "oid": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "filesChanged": {
+          "type": "integer"
+        },
+        "insertions": {
+          "type": "integer"
+        },
+        "deletions": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "oid",
+        "subject",
+        "filesChanged",
+        "insertions",
+        "deletions"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    },
+    "execution": {
+      "taskSupport": "forbidden"
+    }
+  }
+}

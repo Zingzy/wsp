@@ -766,3 +766,10 @@ async fn the_tool_server_lists_its_tools_with_no_host_within_50_ms_and_10_mb() {
     assert!(!state.parent().unwrap().exists(), "the state's folder was made before any tool was called");
     assert_eq!(code.code(), Some(0));
 }
+
+#[test]
+fn version_prints_the_number_its_hello_carries_and_nothing_else() {
+    let out = std::process::Command::new(BIN).arg("version").output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), format!("{}\n", wsp_frames::numbers::DAEMON_VERSION));
+}

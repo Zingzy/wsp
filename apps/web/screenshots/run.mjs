@@ -22,9 +22,9 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { chromium } from "playwright";
-import { fixtureCloud, fixtureFleet, fixtureFolders, fixtureRepos, fixtureState, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
+import { fixtureChanges, fixtureCloud, fixtureFleet, fixtureFolders, fixtureRepos, fixtureState, HERE_AGENTS, HERE_HOST_ITEMS, HERE_PROJECT_FILES } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
-import { writeStandIn, writeWorkFolder } from "./lab-home.mjs";
+import { leaveMidWork, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
 import { APP_UP, failuresToCheck, STILL_LOADING } from "./ready.mjs";
 
@@ -207,8 +207,13 @@ function fixtureOn(home, fixture = "mac-in-use") {
       mkdirSync(dirname(join(project.path, file)), { recursive: true });
       writeFileSync(join(project.path, file), "");
     }
+    // The project's own files, committed, so the checkout starts clean: the Changes pane lists every untracked file.
+    const as = ["-c", "user.name=notes", "-c", "user.email=notes@example.com", "-c", "commit.gpgsign=false"];
+    execFileSync("git", [...as, "add", "-A"], { cwd: project.path, stdio: "ignore" });
+    execFileSync("git", [...as, "commit", "-q", "-m", "the project's files"], { cwd: project.path, stdio: "ignore" });
     execFileSync("git", ["remote", "add", "origin", project.remote], { cwd: project.path, stdio: "ignore" });
   }
+  for (const dest of fixtureChanges(fixture, state)) leaveMidWork(dest);
   return state;
 }
 

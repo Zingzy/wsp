@@ -77,6 +77,9 @@ pub enum GitDiffScope {
     Branch,
     Unstaged,
     Staged,
+    /// Everything a commit could take: the worktree against HEAD, staged and unstaged edits folded together, and
+    /// every untracked file as a new one.
+    Head,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

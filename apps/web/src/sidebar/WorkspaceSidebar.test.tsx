@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, createContext, useContext, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type Capabilities, type PlaceView, type ProjectView, type WorkspaceView , type WorkspaceLanding } from "@wsp/protocol";
+import { CHECKOUT_WORDS, DEFAULT_PREFERENCES, type Capabilities, type Checkout, type PlaceView, type ProjectView, type WorkspaceLanding, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { THREAD_TREE_WORKING } from "../actions/format.js";
 import { workspaceActions } from "../actions/workspaceActions.js";
 import { clearNotices, lastNotice } from "../../test/notice-text.js";
@@ -65,7 +65,7 @@ const SHARES = { copies: true, ownNetwork: false } as unknown as Capabilities;
 const landing: WorkspaceLanding = { name: "here", capabilities: SHARES };
 const MAC_ROW: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", label: "zingzy's MacBook Pro", default: true };
 
-function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: WorkspaceView[] }) {
+function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: WorkspaceView[] }, extra: Record<string, unknown> = {}) {
   const create = vi.fn(async (_project: string, name: string) => ({ ...workspace("ws_new", name, "pr_1") }));
   const settleThreads = vi.fn(async (_threadIds: readonly string[]) => {});
   const markThreads = vi.fn(async (_threadIds: readonly string[], _marks: unknown) => {});
@@ -89,6 +89,7 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
     workspacesLanding: async () => landing,
     createWorkspace: create,
     daemon: { open: () => () => {} },
+    ...extra,
   } as unknown as Api;
   useStore.setState({
     api,
@@ -193,92 +194,54 @@ describe("the sidebar's list of thread tiles", () => {
     expect(tile.textContent).not.toContain("zingzys-MacBook-Pro.local");
   });
 
-  describe("a fork's branch", () => {
+  describe("a workspace's checkout on row three", () => {
     const { copy: _copy, ...bare } = workspace("ws_f", "cart rounding", "pr_1");
     const fork: WorkspaceView = { ...bare, kind: "cloud", machineId: "fk_1", golden: "snap_g", project: { ...bare.project, path: "/root/spoo" } };
-    const asked: string[] = [];
-    const wireAnswering = (answer: () => Promise<Record<string, unknown>>): TerminalWire => ({
-      request: async (op, params) => {
-        if (op !== "git.status") throw new Error(`no ${op}`);
-        asked.push(String(params?.["cwd"]));
-        return answer();
-      },
-    });
-    const linked = (id: string, wire: TerminalWire): WorkspaceTerminals => {
-      const terms = new WorkspaceTerminals(wire);
-      provideDaemonWire(id, wire);
-      provideTerminals(id, terms);
-      return terms;
-    };
+    const statusOf = (w: WorkspaceView, checkout?: Checkout): WorkspaceStatus =>
+      ({ ...w, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0, ...(checkout !== undefined ? { checkout } : {}) }) as WorkspaceStatus;
     const three = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-row-id='ws:${id}']`)!.children[2] as HTMLElement;
-    afterEach(() => {
-      cleanup();
-      asked.length = 0;
-      for (const id of ["ws_f", "ws_a"]) {
-        provideDaemonWire(id, null);
-        provideTerminals(id, null);
-      }
-    });
+    const counts = (id: string): string[] => [...three(id).querySelectorAll("[data-tile-count]")].map(n => n.textContent ?? "");
+    const fact: Checkout = { branch: "fix/cart-rounding", ahead: 1, behind: 0, changed: 3, readAt: 1 };
 
-    it("shows the branch git.status names in its project's folder once its link is up, and keeps it while the link is down", async () => {
-      const terms = linked("ws_f", wireAnswering(async () => ({ branch: { oid: "abc", head: "fix/cart-rounding", ahead: 0, behind: 0 }, entries: [], root: "/root/spoo" })));
+    it("draws the branch and each count the host's fact carries, spaced and never joined, a zero left out", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
       await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
-      expect(three("ws_f").querySelector("[data-tile-branch]")).toBeNull();
-      await act(async () => terms.feedStatus("live"));
+      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, fact) } } as never));
       await waitFor(() => expect(three("ws_f").querySelector("[data-tile-branch]")?.textContent).toBe("fix/cart-rounding"));
+      expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]);
+      // The branch and each count stand 12 px apart on the 4 px grid: one gap, with no margin of their own.
+      const branch = three("ws_f").querySelector<HTMLElement>("[data-tile-branch]")!;
+      expect(branch.parentElement!.className).toContain("gap-3");
+      expect([...branch.parentElement!.querySelectorAll("*")].map(n => n.getAttribute("class") ?? "").join(" ")).not.toMatch(/\bm[se]?-\[/);
+      expect(three("ws_f").textContent).not.toContain("\u00b7");
       expect(three("ws_f").querySelector(".lucide-git-branch")).not.toBeNull();
-      expect(asked).toEqual(["/root/spoo"]);
-      act(() => terms.feedStatus("connecting"));
-      expect(three("ws_f").querySelector("[data-tile-branch]")?.textContent).toBe("fix/cart-rounding");
-      expect(asked).toEqual(["/root/spoo"]);
     });
 
-    it("reads a fork's branch once however many tiles it has, and every tile shows it", async () => {
-      const terms = linked("ws_f", wireAnswering(async () => ({ branch: { oid: "abc", head: "fix/cart-rounding", ahead: 0, behind: 0 }, entries: [], root: "/root/spoo" })));
-      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
-      // Two threads started together, built on a clock that moves a millisecond each time it is read, as a loaded
-      // run's clock does between two rows: their order is the sort's tie-break and nothing the clock decides.
-      const real = Date.now();
-      let reads = 0;
-      const clock = vi.spyOn(Date, "now").mockImplementation(() => real + reads++);
-      let rows: ReturnType<typeof sessions>;
-      try {
-        rows = sessions([{ ws: "ws_f", id: "th_one", prompt: "round the total once" }, { ws: "ws_f", id: "th_two", prompt: "pin the cart order" }]);
-      } finally {
-        clock.mockRestore();
-      }
-      await act(async () => {
-        useStore.setState({ sessions: rows } as never);
-      });
-      await waitFor(() => expect(rowIds()).toEqual(["thread:th_one", "thread:th_two"]));
-      await act(async () => terms.feedStatus("live"));
-      const branches = (): string[] => rowIds().map(id => document.querySelector(`[data-row-id='${id}'] [data-tile-branch]`)?.textContent ?? "");
-      await waitFor(() => expect(branches()).toEqual(["fix/cart-rounding", "fix/cart-rounding"]));
-      expect(asked).toEqual(["/root/spoo"]);
-    });
-
-    it("keeps the empty row three at the tile's height where git names no branch or nothing answers", async () => {
-      const terms = linked("ws_f", wireAnswering(async () => Promise.reject(Object.assign(new Error("not a git repository"), { code: "not-a-git-repo" }))));
+    it("says the changes were not read on a stopped copy whose edits git could not read", async () => {
       mount({ projects: [project("pr_1", "spoo")], workspaces: [fork] });
       await waitFor(() => expect(rowIds()).toEqual(["ws:ws_f"]));
-      await act(async () => terms.feedStatus("live"));
-      await waitFor(() => expect(asked).toEqual(["/root/spoo"]));
+      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, { ...fact, changed: 0, editsUnread: true }) } } as never));
+      await waitFor(() => expect(counts("ws_f")).toEqual(["1 ahead", CHECKOUT_WORDS.unread]));
+    });
+
+    it("asks the host for each workspace's fact once as the sidebar mounts, and reads no daemon of its own", async () => {
+      const asked: string[] = [];
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [fork, workspace("ws_a", "pricing page", "pr_1")] }, { workspaceCheckout: async (id: string) => (asked.push(id), {}) });
+      await waitFor(() => expect(asked.sort()).toEqual(["ws_a", "ws_f"]));
+      act(() => useStore.setState({ statuses: { ws_f: statusOf(fork, fact) } } as never));
+      await waitFor(() => expect(counts("ws_f")).toEqual(["1 ahead", "3 changed"]));
+      expect(asked).toHaveLength(2);
+    });
+
+    it("shows a copy's branch off its record until the host has read one, and keeps the empty row three where nothing is known", async () => {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1"), fork] });
+      await waitFor(() => expect(rowIds().sort()).toEqual(["ws:ws_a", "ws:ws_f"]));
+      expect(three("ws_a").querySelector("[data-tile-branch]")?.textContent).toBe("agent/pricing-page");
+      expect(counts("ws_a")).toEqual([]);
       const tile = document.querySelector<HTMLElement>("[data-row-id='ws:ws_f']")!;
       expect(tile.children).toHaveLength(3);
-      expect(tile.className).toContain("h-[68px]");
       expect(three("ws_f").className).toContain("h-3.5");
       expect(three("ws_f").querySelector("[data-tile-branch]")).toBeNull();
-      expect(three("ws_f").querySelector(".lucide-git-branch")).toBeNull();
-    });
-
-    it("shows a copy's branch off its record and asks its daemon nothing", async () => {
-      const terms = linked("ws_a", wireAnswering(async () => ({ branch: { oid: "abc", head: "somewhere-else", ahead: 0, behind: 0 }, entries: [], root: "/Users/dev/pr_1" })));
-      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
-      await waitFor(() => expect(rowIds()).toEqual(["ws:ws_a"]));
-      await act(async () => terms.feedStatus("live"));
-      expect(three("ws_a").querySelector("[data-tile-branch]")?.textContent).toBe("agent/pricing-page");
-      expect(asked).toEqual([]);
     });
   });
 

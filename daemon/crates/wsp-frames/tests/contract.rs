@@ -12,10 +12,10 @@ use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
     guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
-    DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitCheckpointReply, GitPrListReply, GitPrReply, GitPrStateReply,
-    GitPushReply, GitRestoreReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply,
-    MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply,
-    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitCheckpointReply, GitCommitReply, GitDiscardReply, GitPrListReply,
+    GitPrReply, GitPrStateReply, GitPushReply, GitRestoreReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply,
+    MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply,
+    MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -215,6 +215,12 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "GitPrListReply" => {
                     round_trip::<GitPrListReply>(&sample, &at);
                 }
+                "GitCommitReply" => {
+                    round_trip::<GitCommitReply>(&sample, &at);
+                }
+                "GitDiscardReply" => {
+                    round_trip::<GitDiscardReply>(&sample, &at);
+                }
                 "GitCheckpointReply" => {
                     round_trip::<GitCheckpointReply>(&sample, &at);
                 }
@@ -243,6 +249,8 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "CopyReport",
         "DaemonErrorResponse",
         "FsFilesReply",
+        "GitCommitReply",
+        "GitDiscardReply",
         "GitCheckpointReply",
         "GitPrListReply",
         "GitPrReply",
@@ -345,6 +353,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("authDeadlineMs", Value::from(numbers::AUTH_DEADLINE_MS));
     m.insert("tunnelCap", Value::from(numbers::TUNNEL_CAP));
     m.insert("fsReadCapBytes", Value::from(numbers::FS_READ_CAP_BYTES));
+    m.insert("fsWriteCapBytes", Value::from(numbers::FS_WRITE_CAP_BYTES));
     m.insert("fsListCapEntries", Value::from(numbers::FS_LIST_CAP_ENTRIES));
     m.insert("fsFilesCapEntries", Value::from(numbers::FS_FILES_CAP_ENTRIES));
     m.insert("gitPrListCap", Value::from(numbers::GIT_PR_LIST_CAP));

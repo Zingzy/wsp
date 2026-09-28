@@ -20,8 +20,13 @@ import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrList
 import type { GitCheckpointReply as WireGitCheckpointReply } from "./generated/GitCheckpointReply.js";
 import type { GitRestoreReply as WireGitRestoreReply } from "./generated/GitRestoreReply.js";
 import type { FsSearchReply as WireFsSearchReply } from "./generated/FsSearchReply.js";
+import type { GitCommitReply as WireGitCommitReply } from "./generated/GitCommitReply.js";
+import type { GitDiscardReply as WireGitDiscardReply } from "./generated/GitDiscardReply.js";
+import type { GitDiffFile as WireGitDiffFile } from "./generated/GitDiffFile.js";
+import type { FsWriteReply as WireFsWriteReply } from "./generated/FsWriteReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
+import { Checkout } from "./changes.js";
 import { placeAtLimitLine, placeFullLine } from "./place-state.js";
 import type { AbsentComputer } from "./workspace-state.js";
 import type { LinkTarget } from "./app-address.js";
@@ -743,6 +748,9 @@ export const WorkspaceStatus = WorkspaceView.extend({
   wakeAsk: z.object({ ask: z.number(), of: z.number() }).optional(),
   /** Epoch ms when the runtime's idle policy naps this workspace; absent while napping, held by a running session, or with auto-nap off. */
   idleAt: z.number().optional(),
+  /** The copy's checkout as the host last read it, at a turn's end, on view and after a write, never on a timer;
+   * absent until git has answered once. */
+  checkout: Checkout.optional(),
 });
 export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 
@@ -1710,6 +1718,10 @@ export const WorkspaceGoneEvent = z.object({
 });
 
 export const WorkspaceStatusEvent = z.object({ type: z.literal("workspace.status"), status: WorkspaceStatus });
+
+/** A person marked a file of the workspace viewed or took the mark off: every mark it now holds, by path, against the
+ * blob id the file's contents had when it was marked. */
+export const WorkspaceViewedEvent = z.object({ type: z.literal("workspace.viewed"), workspaceId: z.string(), viewed: z.record(z.string(), z.string()) });
 
 /** Awake-time cost tick. Computed locally from size and elapsed running time
  * (provider billing API integration is a later plan); zero rate while napping. */
@@ -3168,6 +3180,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceDeletedEvent.extend(sequenced),
   WorkspaceGoneEvent.extend(sequenced),
   WorkspaceStatusEvent.extend(sequenced),
+  WorkspaceViewedEvent.extend(sequenced),
   WorkspaceCostEvent.extend(sequenced),
   SessionStartEvent.extend(sequenced),
   SessionDeltaEvent.extend(sequenced),
@@ -3295,6 +3308,10 @@ type GitRestoreReplyHeld = Held<Same<z.infer<typeof GitRestoreReply>, GitRestore
 
 export const FsReadEncoding = z.enum(["utf8", "base64"]);
 export type FsReadEncoding = z.infer<typeof FsReadEncoding>;
+/** How many bytes an fs.write left in the file. */
+export const FsWriteReply = z.object({ bytes: z.number().int() });
+export type FsWriteReply = WireFsWriteReply;
+type FsWriteReplyHeld = Held<Same<z.infer<typeof FsWriteReply>, FsWriteReply>>;
 /** size is the whole file's byte length; content holds at most the first 2 MiB. */
 export const FsReadReply = z.object({ content: z.string(), size: z.number(), truncated: z.boolean() });
 export type FsReadReply = z.infer<typeof FsReadReply>;
@@ -3341,11 +3358,23 @@ export const GitStatusReply = z.object({
 export type GitStatusReply = z.infer<typeof GitStatusReply>;
 
 /** branch: working tree against the merge-base with the default branch;
- * unstaged: working tree against the index; staged: index against HEAD. */
-export const GitDiffScope = z.enum(["branch", "unstaged", "staged"]);
+ * unstaged: working tree against the index; staged: index against HEAD;
+ * head: working tree against HEAD with every untracked file as a new one, what a commit could take. */
+export const GitDiffScope = z.enum(["branch", "unstaged", "staged", "head"]);
 export type GitDiffScope = z.infer<typeof GitDiffScope>;
-export const GitDiffFile = z.object({ path: z.string(), patch: z.string() });
-export type GitDiffFile = z.infer<typeof GitDiffFile>;
+/** blob is the id git gives the file's worktree contents now, absent for a file that is gone: a viewed mark is kept
+ * against it, so a file that changes again reads unviewed with nothing compared anywhere. */
+export const GitDiffFile = z.object({ path: z.string(), patch: z.string(), blob: z.string().optional() });
+export type GitDiffFile = WireGitDiffFile;
+type GitDiffFileHeld = Held<Same<z.infer<typeof GitDiffFile>, GitDiffFile>>;
+/** The file a git.discard put back as HEAD has it. */
+export const GitDiscardReply = z.object({ path: z.string() });
+export type GitDiscardReply = WireGitDiscardReply;
+type GitDiscardReplyHeld = Held<Same<z.infer<typeof GitDiscardReply>, GitDiscardReply>>;
+/** The commit a git.commit made: its id, its subject, and what it changed as git's short stat counts it. */
+export const GitCommitReply = z.object({ oid: z.string(), subject: z.string(), filesChanged: z.number().int(), insertions: z.number().int(), deletions: z.number().int() });
+export type GitCommitReply = WireGitCommitReply;
+type GitCommitReplyHeld = Held<Same<z.infer<typeof GitCommitReply>, GitCommitReply>>;
 /** base is the ref the branch scope diffed against (null for other scopes);
  * truncated means the 2 MiB patch budget cut files or a patch short. */
 export const GitDiffReply = z.object({ base: z.string().nullable(), files: z.array(GitDiffFile), truncated: z.boolean() });
@@ -3522,6 +3551,10 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * to cwd, answered from `git ls-files` and kept until a folder holding one of them changes. */
   z.object({ id: reqId, op: z.literal("fs.files"), cwd: z.string(), machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional(), machineId: z.string().optional() }),
+  /** Replaces an existing regular file's contents whole and answers an FsWriteReply: written beside it and renamed
+   * over, its mode and owner kept, never through a link standing where the file should be, and refused over
+   * FS_WRITE_CAP_BYTES. The folder resolves inside a root as fs.read's path does. */
+  z.object({ id: reqId, op: z.literal("fs.write"), path: z.string(), contents: z.string(), machineId: z.string().optional() }),
   /** Searches under one folder, resolved as fs.list resolves its path: files answers every file whose path below the
    * folder holds the query's letters in order, text every line of a text file there that holds the query, both
    * case-insensitive. The walk reads the folder's .gitignore and .ignore files, leaves hidden names out, never
@@ -3529,7 +3562,25 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * cap or its time budget stops it, with truncated set. */
   z.object({ id: reqId, op: z.literal("fs.search"), path: z.string(), query: z.string(), mode: FsSearchMode, machineId: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string(), machineId: z.string().optional() }),
-  z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional(), machineId: z.string().optional() }),
+  /** paths names files from the checkout's top, each read as a letter-for-letter name; whole gives each patch its
+   * whole file in one hunk, which an editor over the new side needs. */
+  z.object({
+    id: reqId,
+    op: z.literal("git.diff"),
+    cwd: z.string(),
+    scope: GitDiffScope,
+    path: z.string().optional(),
+    paths: z.array(z.string()).optional(),
+    whole: z.boolean().optional(),
+    machineId: z.string().optional(),
+  }),
+  /** Puts one changed file back as HEAD has it, or removes it where HEAD has none, and answers a GitDiscardReply;
+   * a file with no change is refused by name. */
+  z.object({ id: reqId, op: z.literal("git.discard"), cwd: z.string(), path: z.string(), machineId: z.string().optional() }),
+  /** Commits the named files and no others, untracked ones added first, with the message on git's stdin, hooks
+   * and all, and answers a GitCommitReply. A held index is waited on once; git knowing no author, and a hook that
+   * says no, are refused in one sentence each. */
+  z.object({ id: reqId, op: z.literal("git.commit"), cwd: z.string(), message: z.string(), paths: z.array(z.string()), machineId: z.string().optional() }),
   /** Pushes the branch the checkout is on to its remote and answers a GitPushReply. The base branch itself is
    * refused: wsp makes no branch and pushes none of the branch the work started from. Without a base the
    * checkout's own default branch is read, which is what a project recorded without one was cloned at. */
@@ -4208,6 +4259,7 @@ const DAEMON_CONTENTS = [
   "6064295b774d39defb1ba58ef099812ee1e4662bac2a1525c6d0061128450f2f",
   "12dc3a3741a25239969103531def3c28df0874e9233825d16f7063a84df345c6",
   "ca0a7c835985a42469446d3efd1e622568ef0772725ddf4700efc631038f6c1f",
+  "11da9462eb0cc7aa26e3f05feed71e2e27774769026dfa6d7a4f3a08f6511ebb",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4431,7 +4483,11 @@ const DAEMON_CONTENTS = [
  * empty list with a note where that command line is not there or nobody signed it in.
  * Version 85 adds git.checkpoint, a turn's whole tree recorded as a commit outside every branch under
  * refs/wsp/checkpoints/<copy>/<thread>/<turn>, and git.restore, which puts the tree back to one of the copy's own
- * checkpoints after recording the tree as it stood; a worktree copy's removal deletes its checkpoint refs. */
+ * checkpoints after recording the tree as it stood; a worktree copy's removal deletes its checkpoint refs.
+ * Version 86 writes into a copy: git.commit commits the files named with the message on stdin, git.discard puts one
+ * file back as HEAD has it, and fs.write replaces a file's contents whole; git.diff gains the head scope with untracked
+ * files as new, paths, whole files in one hunk, and each file's blob id; a discard takes the folders it left empty, and
+ * the binary's version verb prints this number. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5522,6 +5578,19 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * after, and the project's own base otherwise; the base branch itself is refused, since work leaves a workspace
    * as a branch of its own. */
   z.object({ id: reqId, op: z.literal("workspaces.bringBack"), workspaceId: z.string(), title: z.string().optional(), body: z.string().optional() }),
+  /** The copy's checkout, read again unless the host read it moments ago, and answered as a CheckoutReply. */
+  z.object({ id: reqId, op: z.literal("workspaces.checkout"), workspaceId: z.string() }),
+  /** Puts one changed file of the copy back as HEAD has it and answers a GitDiscardReply. */
+  z.object({ id: reqId, op: z.literal("workspaces.discard"), workspaceId: z.string(), path: z.string() }),
+  /** Commits the files named in the copy with the message given, hooks and all, and answers a GitCommitReply; paths
+   * absent is every changed file, and an empty list is refused as nothing to commit. */
+  z.object({ id: reqId, op: z.literal("workspaces.commit"), workspaceId: z.string(), message: z.string(), paths: z.array(z.string()).optional() }),
+  /** A commit message for those files, or every changed file where paths is absent, drafted by the workspace's own
+   * agent with no thread and no tool, answered as a CommitDraft. */
+  z.object({ id: reqId, op: z.literal("workspaces.commitDraft"), workspaceId: z.string(), paths: z.array(z.string()).optional() }),
+  /** The workspace's viewed marks, answered as ViewedMarks; with a path, the mark on that file is set against the
+   * blob given, or taken off where the blob is null. */
+  z.object({ id: reqId, op: z.literal("workspaces.viewed"), workspaceId: z.string(), path: z.string().optional(), blob: z.string().nullable().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Turns the workspace's agents switch on or off and names its caps. Every key left out keeps what the record
    * holds, so the two flags a person gives on one line never clear the third. */
@@ -6009,6 +6078,11 @@ export const THREAD_OPS: readonly string[] = [
   // A thread's work leaves its workspace the one way any work does, as a branch on the project's remote: the tree
   // rule refuses every workspace but its own, and the guard reads the switch as it does for a fork.
   "workspaces.bringBack",
+  // The checkout a thread's own copy is on, and a commit of its files with a message drafted or its own, under the
+  // same tree rule and the same guard; a discard is not here, since an agent has git in its copy.
+  "workspaces.checkout",
+  "workspaces.commit",
+  "workspaces.commitDraft",
   "harnesses.list",
   "sessions.start",
   "sessions.list",
@@ -6065,6 +6139,8 @@ export const DEVICE_OPS: readonly string[] = [
   "workspaces.portReach",
   "workspaces.portProbe",
   "workspaces.rebuild",
+  "workspaces.checkout",
+  "workspaces.viewed",
   "projects.list",
   "projects.resolve",
   "projects.remove",
@@ -6379,6 +6455,7 @@ export {
 } from "./workspace-look.js";
 export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, probePath, rootsPathIn, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
+export * from "./changes.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedBytes, seedChoiceFrom, seedCommitsLandedLine, seedCommitsLostLine, seedConsentLines, seedingLine, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
@@ -6389,4 +6466,4 @@ export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
 export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
-export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionReverter, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";

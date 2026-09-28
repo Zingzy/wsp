@@ -5,8 +5,8 @@
 // and the persona lab both take this road, so the environment a fixture is
 // served under is written once rather than once per harness.
 import { CATALOG_AGENTS, skillsDirOf } from "@wsp/catalog";
-import { CLOUD_ENV, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, shellQuote, WEB_DIR_ENV, wsUrlOf } from "@wsp/protocol";
-import { spawn } from "node:child_process";
+import { CLOUD_ENV, DAEMON_VERSION, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, shellQuote, WEB_DIR_ENV, wsUrlOf } from "@wsp/protocol";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
@@ -52,7 +52,7 @@ const notBuilt = (what, path, how) => `${what} is not built: ${path} is missing.
  * print, or nothing when all three are there. A whole round of nine served a host whose daemon binary was never
  * built, and no tester on a Mac alone could type a message: the turn does not need it, but the terminal, the files,
  * the process list and the composer's own reading of the machine all do. */
-export async function whatIsNotBuilt({ exists = existsSync, daemon = daemonBinaryHere } = {}) {
+export async function whatIsNotBuilt({ exists = existsSync, daemon = daemonBinaryHere, version = daemonVersionOf } = {}) {
   for (const [what, path, how] of [
     ["the web app", APP_PAGE, "pnpm --filter @wsp/web build"],
     ["the wsp command", HOST_BIN, "pnpm --filter @wsp/host build"],
@@ -62,7 +62,19 @@ export async function whatIsNotBuilt({ exists = existsSync, daemon = daemonBinar
   // Asked after the command, since the path is read out of that command's own build.
   const bin = await daemon();
   if (bin === undefined) return `wsp builds no daemon for ${process.platform} ${process.arch}, so a host here cannot serve its own workspace and every tester would meet a computer that answers nothing.`;
-  return exists(bin) ? undefined : notBuilt("this computer's daemon", bin, DAEMON_BUILD);
+  if (!exists(bin)) return notBuilt("this computer's daemon", bin, DAEMON_BUILD);
+  // A binary a build left behind is there all the same, and every op it lacks misses on every shot that needs it.
+  const speaks = version(bin);
+  if (speaks === DAEMON_VERSION) return undefined;
+  const said = speaks === undefined ? "is too old to say its version" : `speaks version ${speaks}`;
+  return `this computer's daemon at ${bin} ${said}, and this checkout's protocol names version ${DAEMON_VERSION}. Run ${DAEMON_BUILD} first, or use the coordinator's screenshots.sh or lab.sh, which build.`;
+}
+
+/** The protocol version a daemon binary speaks, off its own version verb; nothing from one too old to have it. */
+export function daemonVersionOf(bin) {
+  const ran = spawnSync(bin, ["version"], { encoding: "utf8", timeout: 10_000 });
+  const speaks = Number(ran.stdout?.trim());
+  return ran.status === 0 && Number.isInteger(speaks) ? speaks : undefined;
 }
 
 /** What every browser this harness opens is started with. Chromium's shared memory files land on the root disk, and
@@ -207,6 +219,13 @@ const asideScript = aside =>
     ? ""
     : `case " $* " in\n  *" --fork-session "*) sleep ${aside.afterS}; printf '%s\\n' ${shellQuote(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: aside.text }))}; exit 0 ;;\nesac\n`;
 
+/** A stand-in's answer to a commit message asked of it: the question comes on stdin with the person's customizations
+ * off and no side question's fork, and the draft is the print-mode result after the fixture's wait. */
+const draftScript = draft =>
+  draft === undefined
+    ? ""
+    : `case " $* " in\n  *" --fork-session "*) ;;\n  *" --safe-mode "*) cat >/dev/null; sleep ${draft.afterS}; printf '%s\\n' ${shellQuote(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: draft.text }))}; exit 0 ;;\nesac\n`;
+
 /** This computer's agents as a fixture has them, all under the throwaway home: a stand-in for each agent's command that
  * says the fixture's version and sign-in and answers a side question where the fixture gives it one, a stand-in
  * command for each server with tools, and each agent's own MCP file written by the catalog's module for its format.
@@ -217,7 +236,7 @@ export function writeHereAgents(home, here) {
   for (const [id, said] of Object.entries(here.agents)) {
     const agent = CATALOG_AGENTS.find(a => a.id === id);
     if (agent === undefined) throw new Error(`the fixture names an agent the catalog does not have: ${id}`);
-    writeScript(join(bin, agent.bin), sh(`${asideScript(said.aside)}case "$1" in\n  --version) printf '%s\\n' ${shellQuote(said.version)} ;;\n  *) printf '%s\\n' ${shellQuote(said.status)} ;;\nesac`));
+    writeScript(join(bin, agent.bin), sh(`${asideScript(said.aside)}${draftScript(said.draft)}case "$1" in\n  --version) printf '%s\\n' ${shellQuote(said.version)} ;;\n  *) printf '%s\\n' ${shellQuote(said.status)} ;;\nesac`));
   }
   const transports = new Map(
     here.servers.map(s => {

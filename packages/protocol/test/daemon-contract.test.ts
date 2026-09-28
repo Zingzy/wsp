@@ -55,6 +55,7 @@ import {
   GIT_PR_LIST_CAP,
   GIT_PR_LIST_BODY_CAP,
   FS_READ_CAP_BYTES,
+  FS_WRITE_CAP_BYTES,
   FS_SEARCH_CAP_FILES,
   FS_SEARCH_CAP_HITS,
   GIT_DIFF_CAP_BYTES,
@@ -80,6 +81,8 @@ import {
   GitPrReply,
   GitPrStateReply,
   GitPrListReply,
+  GitCommitReply,
+  GitDiscardReply,
   GitCheckpointReply,
   GitRestoreReply,
   FsFilesReply,
@@ -310,6 +313,7 @@ const numbers = (): Record<string, number | string | readonly string[]> => ({
   authDeadlineMs: AUTH_DEADLINE_MS,
   tunnelCap: TUNNEL_CAP,
   fsReadCapBytes: FS_READ_CAP_BYTES,
+  fsWriteCapBytes: FS_WRITE_CAP_BYTES,
   fsListCapEntries: FS_LIST_CAP_ENTRIES,
   fsFilesCapEntries: FS_FILES_CAP_ENTRIES,
   gitPrListCap: GIT_PR_LIST_CAP,
@@ -524,6 +528,14 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
       { items: [], note: "no signed-in command line for github.com is on this computer, so its pull requests and issues are not listed" },
     ],
   },
+  GitCommitReply: {
+    schema: GitCommitReply,
+    samples: [
+      { oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", subject: "Round the cart total once", filesChanged: 2, insertions: 10, deletions: 4 },
+      { oid: "0123456789abcdef0123456789abcdef01234567", subject: "", filesChanged: 1, insertions: 0, deletions: 0 },
+    ],
+  },
+  GitDiscardReply: { schema: GitDiscardReply, samples: [{ path: "src/cart.ts" }, { path: "a*b.txt" }] },
   GitCheckpointReply: {
     schema: GitCheckpointReply,
     samples: [

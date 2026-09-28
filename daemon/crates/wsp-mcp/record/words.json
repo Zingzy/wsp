@@ -215,6 +215,8 @@
     "workspaces_agents": "wsp workspaces agents <workspace> --spawn on|off [--max-machines <n>] [--max-depth <n>]",
     "rename": "wsp rename <workspace> \"<name>\"",
     "bring_back": "wsp bring back <workspace> [--title \"<title>\"] [--body \"<body>\"]",
+    "commit": "wsp commit <workspace> [--message \"<message>\"] [--file <path>]...",
+    "discard": "wsp discard <workspace> <path>",
     "pause": "wsp pause <workspace>",
     "wake": "wsp wake <workspace>",
     "image": "wsp image",
