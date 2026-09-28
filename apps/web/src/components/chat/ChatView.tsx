@@ -30,6 +30,8 @@ import { TimelineRuleLine } from "./TimelineRuleLine";
 import { MessagesTimeline, type MachineWait } from "./MessagesTimeline";
 import { useNewThreadRequests } from "./newThreadRequests";
 import { useChatThread, type ChatThreadHandle } from "./useChatThread";
+import { rewindableReplies, type RewindableReply } from "./RewindDialog";
+import { requestRewind } from "../../shell/shellRequests";
 import { DEFAULT_HARNESS } from "./ComposerOptionPickers";
 import { TRANSCRIPT_LOADING } from "../../transcript-words";
 import { useAppDark } from "../../settings/theme";
@@ -156,6 +158,24 @@ export function ChatView({
     return () => observer.disconnect();
   }, []);
   const showTranscript = thread.hydrated && !empty;
+  // Rewind to here stands on each earlier reply that kept something to go back to, and opens the one dialog.
+  const cutsConversation = catalog?.rewindsConversation === true;
+  const rewindable = useMemo(() => (api?.rewindThread === undefined ? new Map<string, RewindableReply>() : rewindableReplies(view.turns, view.entries, cutsConversation)), [api, view.turns, view.entries, cutsConversation]);
+  // The set and the handler reach every row through the timeline's shared context, so they move only when which
+  // replies can be rewound moves, never on a streamed chunk: a settled reply would redraw on every one.
+  const rewindableKey = [...rewindable.keys()].join("\n");
+  const rewindableIds = useMemo(() => new Set(rewindableKey === "" ? [] : rewindableKey.split("\n")), [rewindableKey]);
+  const rewindRef = useRef({ rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? turnRows.at(-1)?.harness ?? DEFAULT_HARNESS, cutsConversation });
+  rewindRef.current = { rewindable, threadId: turnRows.at(-1)?.threadId ?? threadId, agent: catalog?.label ?? turnRows.at(-1)?.harness ?? DEFAULT_HARNESS, cutsConversation };
+  const onRewind = useCallback(
+    (messageId: string) => {
+      const now = rewindRef.current;
+      const reply = now.rewindable.get(messageId);
+      if (reply === undefined || now.threadId === null) return;
+      requestRewind({ workspaceId, threadId: now.threadId, ...reply, cutsConversation: now.cutsConversation, agent: now.agent });
+    },
+    [workspaceId],
+  );
   // A turn that completed says so by its reply standing, so its facts join that reply's row; any other ending keeps
   // its own line, since the state word is the news.
   const settledOnReply = view.settled?.state === "completed";
@@ -211,6 +231,8 @@ export function ChatView({
             resolvedTheme={appDark ? "dark" : "light"}
             timestampFormat={timestampFormat}
             onQuote={onQuote}
+            rewindableMessageIds={rewindableIds}
+            onRewind={onRewind}
           />
         )}
       </div>

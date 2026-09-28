@@ -23,7 +23,7 @@ import { NO_FINDER_CHOOSER, PASTE_THIS, homeOf, keptLog, labLines, launchDiesLin
 
 describe("the fixtures a lab serves", () => {
   it("has one per kind of person the testers play", () => {
-    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "mac-and-boxes", "orchestrator", "thread-states", "tiles", "tiles-marks", "tiles-snoozed", "tiles-attempt", "image-built", "long-prompt"]);
+    expect(FIXTURE_NAMES).toEqual(["mac-in-use", "mac-only", "mac-and-laptop", "mac-and-vps", "ascii-only", "solari-only", "both-providers", "no-sign-in", "mac-and-boxes", "orchestrator", "thread-states", "tiles", "tiles-marks", "tiles-snoozed", "tiles-attempt", "image-built", "long-prompt", "rewind"]);
   });
 
   it("gives the two personas who have this computer and nothing else the first run, with no project added", () => {
@@ -274,6 +274,7 @@ describe("the fixtures a lab serves", () => {
       "tiles-attempt": "no cloud",
       "image-built": "no cloud",
       "long-prompt": "no cloud",
+      rewind: "no cloud",
     });
     // Every fixture with a cloud machine names the cloud it is standing in for, and no fixture without one does.
     for (const name of FIXTURE_NAMES) {
@@ -415,6 +416,7 @@ describe("the provider a fixture's host runs under", () => {
       "tiles-attempt": "none",
       "image-built": "fake",
       "long-prompt": "fake",
+      rewind: "none",
     });
   });
 

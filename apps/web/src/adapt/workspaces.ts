@@ -124,6 +124,7 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     title: thread.title,
     status: thread.status,
     ran: thread.ran,
+    ...(thread.rewoundAt !== undefined ? { rewound: true } : {}),
     startedAt: thread.startedAt !== undefined ? new Date(thread.startedAt).toISOString() : null,
     endedAt: thread.endedAt !== undefined ? new Date(thread.endedAt).toISOString() : null,
     indicator: threadIndicator(thread),
