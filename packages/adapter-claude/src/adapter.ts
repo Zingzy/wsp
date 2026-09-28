@@ -16,6 +16,9 @@ export interface StartOptions {
   prompt: string;
   /** Session id of an earlier run; the CLI reloads its transcript. */
   resume?: string;
+  /** The uuid of the message a rewind kept, on the first resume after it: the CLI loads the session up to that
+   * message and the turn goes on from there, leaving what came after it behind. */
+  resumeAt?: string;
   cwd?: string;
   /** Catalog slugs for --model, --effort and the permission flags; each absent one leaves the CLI's default. */
   model?: string;
@@ -107,6 +110,8 @@ export interface ClaudeAdapter {
   readonly sessions: ReadonlyMap<string, ClaudeSession>;
   /** Sessions take a message mid-turn over the stdin channel. */
   readonly steers: true;
+  /** A rewind of a Claude Code thread is cut on its next resume, at the message the rewind kept. */
+  readonly resumesAt: true;
   /** The CLI's stream-json user message carries image blocks, so an image never lands on the machine. */
   readonly attachments: "inline";
   /** The CLI takes MCP servers on the launch itself (--mcp-config), so a turn gets one whatever the config dir holds. */
@@ -471,6 +476,16 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
      * after its result and EOF is what lets it exit; the channel is shut, so a request still unanswered will never
      * be and the caller is told now rather than waiting minutes on a CLI that lingers; a CLI that does not go on its
      * own is ended with its tree once the wait passes rather than left for the idle cut. */
+    /** The last message of the thread's own agent this turn wrote, by the uuid its session file keys it by: the
+     * point a rewind to this turn keeps. A subagent's messages sit on a chain of their own and are left out. */
+    let anchor: string | undefined;
+    let anchored = false;
+    const anchorOnce = (sessionId: string): void => {
+      if (anchored || anchor === undefined) return;
+      anchored = true;
+      onEvent({ type: "turn.anchor", sessionId, anchor });
+    };
+
     const deliver = (result: TurnResult, sessionId = claudeSessionId): void => {
       if (settleTimer !== undefined) clearTimeout(settleTimer);
       settleTimer = undefined;
@@ -485,6 +500,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
         return;
       }
       turnResult = result;
+      anchorOnce(sessionId);
       onEvent({ type: "turn.done", sessionId, result });
     };
 
@@ -526,6 +542,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             if (text.length > 0 && stderrTail.push(text) > STDERR_TAIL_LINES) stderrTail.shift();
             continue;
           }
+          if (event.type === "assistant" && typeof event.uuid === "string" && (event.parent_tool_use_id === undefined || event.parent_tool_use_id === null)) anchor = event.uuid;
           const control = controlLine(event);
           if (control !== undefined) {
             switch (control.kind) {
@@ -655,6 +672,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             : backgroundTasks > 0
               ? endedEarly(heldReply, backgroundTasks)
               : heldWithFinished(heldReply);
+        anchorOnce(claudeSessionId);
         onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }
       if (turnResult === undefined) {
@@ -664,6 +682,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
             : interruptRequested
               ? { status: "interrupted" }
               : { status: "failed", error: exitLine() };
+        anchorOnce(claudeSessionId);
         onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }
       onEvent({ type: "session.end", sessionId: claudeSessionId, exitCode, sawResult });
@@ -741,6 +760,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     const localId = options.resume ?? newSessionId();
     const command = buildCommand({
       ...(options.resume === undefined ? { sessionId: localId } : { resume: options.resume }),
+      ...(options.resumeAt !== undefined ? { resumeAt: options.resumeAt } : {}),
       cwd: options.cwd,
       model: options.model,
       effort: options.effort,
@@ -818,6 +838,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
       : {}),
     sessions,
     steers: true,
+    resumesAt: true,
     movesAccess: true,
     attachments: "inline",
     mcpServers: true,

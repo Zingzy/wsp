@@ -67,6 +67,40 @@ export function onNewThreadRequest(listener: (detail: NewThreadRequest) => void)
   return () => window.removeEventListener(NEW_THREAD_EVENT, handler);
 }
 
+const REWIND_EVENT = "wsp:rewind";
+
+/** What the rewind dialog is opened for: a rewind to one earlier reply, with what the dialog says about it, or an
+ * undo of the thread's last rewind. */
+export type RewindRequest =
+  | {
+      readonly kind: "rewind";
+      readonly workspaceId: string;
+      readonly threadId: string;
+      readonly turnId: string;
+      /** How many turns come after the reply, which a rewind cuts. */
+      readonly turnsAfter: number;
+      /** Whether that turn kept a checkpoint of the files. */
+      readonly files: boolean;
+      /** Whether the thread's agent cuts its own history too, and its name for the note. */
+      readonly cutsConversation: boolean;
+      readonly agent: string;
+    }
+  | { readonly kind: "undo"; readonly workspaceId: string; readonly threadId: string };
+
+export function requestRewind(detail: Omit<Extract<RewindRequest, { kind: "rewind" }>, "kind">): void {
+  window.dispatchEvent(new CustomEvent<RewindRequest>(REWIND_EVENT, { detail: { kind: "rewind", ...detail } }));
+}
+
+export function requestUndoRewind(detail: { workspaceId: string; threadId: string }): void {
+  window.dispatchEvent(new CustomEvent<RewindRequest>(REWIND_EVENT, { detail: { kind: "undo", ...detail } }));
+}
+
+export function onRewindRequest(listener: (detail: RewindRequest) => void): () => void {
+  const handler = (event: Event) => listener((event as CustomEvent<RewindRequest>).detail);
+  window.addEventListener(REWIND_EVENT, handler);
+  return () => window.removeEventListener(REWIND_EVENT, handler);
+}
+
 const FORGET_WORKSPACE_EVENT = "wsp:forget-workspace";
 
 export interface ForgetWorkspaceRequest {

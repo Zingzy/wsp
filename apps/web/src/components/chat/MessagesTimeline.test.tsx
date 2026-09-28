@@ -93,9 +93,8 @@ function buildProps() {
     turnDiffSummaryByAssistantMessageId: new Map(),
     threadKey: "thread-1",
     onOpenTurnDiff: () => {},
-    revertTurnCountByUserMessageId: new Map(),
-    onRevertUserMessage: () => {},
-    isRevertingCheckpoint: false,
+    rewindableMessageIds: new Set<string>(),
+    onRewind: () => {},
     onImageExpand: () => {},
     markdownCwd: undefined,
     resolvedTheme: "light" as const,
@@ -129,6 +128,7 @@ function buildTurn(
     error: null,
     startedAt,
     completedAt,
+    checkpoint: null,
   };
 }
 

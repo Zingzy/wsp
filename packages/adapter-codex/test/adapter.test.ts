@@ -210,6 +210,7 @@ describe("CodexAdapter over codex app-server", () => {
     expect(events.map(e => (e.type === "turn.delta" ? `delta:${e.kind}` : e.type))).toEqual([
       "session.start",
       "delta:note",
+      "turn.anchor",
       "delta:text",
       "delta:tool_use",
       "permission.ask",
@@ -451,7 +452,7 @@ describe("a Codex turn that does not complete", () => {
     const result = await adapterOver(launch).start({ prompt: "hi", onEvent }).finished;
     expect(NOT_SIGNED_IN).toBe("Codex is not signed in where this workspace runs; run codex login --device-auth there");
     expect(result).toMatchObject({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
-    expect(events.map(e => e.type)).toEqual(["session.start", "turn.delta", "turn.done", "session.end"]);
+    expect(events.map(e => e.type)).toEqual(["session.start", "turn.anchor", "turn.delta", "turn.done", "session.end"]);
     expect(events.at(-1)).toEqual({ type: "session.end", sessionId: NO_LOGIN_THREAD, exitCode: 0, sawResult: true });
     expect(launch.wires[0]!.closed).toBe(true);
   });
@@ -515,7 +516,7 @@ describe("a Codex turn that does not complete", () => {
     const { events, onEvent } = collect();
     const result = await adapterOver(launch).start({ prompt: "x", onEvent }).finished;
     expect(result).toEqual({ status: "failed", error: "codex exited with code 2 before its turn ended: 2026-09-27T00:51:50Z ERROR codex_core: sandbox unavailable" });
-    expect(events.map(e => [e.type, e.sessionId])).toEqual([["session.start", THREAD_ID], ["turn.done", THREAD_ID], ["session.end", THREAD_ID]]);
+    expect(events.map(e => [e.type, e.sessionId])).toEqual([["session.start", THREAD_ID], ["turn.anchor", THREAD_ID], ["turn.done", THREAD_ID], ["session.end", THREAD_ID]]);
   });
 
   it("a transport that ends the turn itself makes its message the turn's error", async () => {
@@ -726,5 +727,47 @@ describe("a side question on a Codex thread", () => {
     await expect(adapterOver(refused).aside!({ session: THREAD_ID, question: "x" })).rejects.toThrow("codex could not open the thread: no rollout found for thread id");
     const unsigned = forking(self => self.push(`{"method":"turn/completed","params":{"threadId":"${FORK}","turn":{"id":"t1","items":[],"status":"failed","error":{"message":"unexpected status 401 Unauthorized: Missing bearer"}}}}`));
     await expect(adapterOver(unsigned).aside!({ session: THREAD_ID, question: "x" })).rejects.toThrow(NOT_SIGNED_IN);
+  });
+});
+
+describe("what a rewind needs of a Codex turn", () => {
+  it("names the turn by the id the server gave it at turn/started, once", async () => {
+    const launch = launcher(scripted([agentMessage("msg_1", "done"), completed("completed")]));
+    const { events, onEvent } = collect();
+    await adapterOver(launch).start({ prompt: "x", onEvent }).finished;
+    expect(events.filter(e => e.type === "turn.anchor")).toEqual([{ type: "turn.anchor", sessionId: THREAD_ID, anchor: TURN_ID }]);
+  });
+
+  it("cuts the thread's history before a turn on its own short server run, resuming the thread and asking thread/revert", async () => {
+    const launch = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/resume") self.push('{"id":"wsp-initialize","result":{}}', `{"id":"wsp-thread","result":{"thread":{"id":"${THREAD_ID}"},"model":"gpt-5.6-sol"}}`);
+          if (message.method === "thread/revert") self.push(`{"id":"wsp-revert","result":{"thread":{"id":"${THREAD_ID}","turns":[]}}}`);
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    await adapterOver(launch).revert({ session: THREAD_ID, beforeTurn: TURN_ID, cwd: "/root/app" });
+    expect(launch.calls[0]!.command).toBe("cd '/root/app' && codex app-server");
+    expect(parse(launch.calls[0]!.input!.at(-1)!)).toMatchObject({ method: "thread/resume", params: { threadId: THREAD_ID } });
+    expect(launch.wires[0]!.written.find(m => m.method === "thread/revert")).toEqual({ id: "wsp-revert", method: "thread/revert", params: { threadId: THREAD_ID, beforeTurnId: TURN_ID } });
+    expect(launch.wires[0]!.written.some(m => m.method === "turn/start")).toBe(false);
+    expect(launch.wires[0]!.closed).toBe(true);
+  });
+
+  it("rejects in the server's words when it will not cut, so the rewind is refused whole", async () => {
+    const launch = launcher(seed => {
+      const w = wire({
+        onWrite: (message, self) => {
+          if (message.method === "thread/resume") self.push(`{"id":"wsp-thread","result":{"thread":{"id":"${THREAD_ID}"}}}`);
+          if (message.method === "thread/revert") self.push('{"error":{"code":-32600,"message":"thread history is not paginated"},"id":"wsp-revert"}');
+        },
+      });
+      for (const line of seed) void w.stream.write(line);
+      return w;
+    });
+    await expect(adapterOver(launch).revert({ session: THREAD_ID, beforeTurn: TURN_ID })).rejects.toThrow("codex would not cut the thread: thread history is not paginated");
   });
 });

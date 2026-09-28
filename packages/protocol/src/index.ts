@@ -17,6 +17,8 @@ import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouE
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
+import type { GitCheckpointReply as WireGitCheckpointReply } from "./generated/GitCheckpointReply.js";
+import type { GitRestoreReply as WireGitRestoreReply } from "./generated/GitRestoreReply.js";
 import type { FsSearchReply as WireFsSearchReply } from "./generated/FsSearchReply.js";
 import { HERE_PLACE_ID, namesPlace } from "./place-word.js";
 import { threadNeedsYou } from "./thread-state.js";
@@ -957,6 +959,9 @@ export const SessionView = z.object({
   wokeAt: z.number().optional(),
   /** The sidebar section the person dragged the thread into, held only while the thread is still as it was then. */
   section: ThreadPlacement.optional(),
+  /** When the thread was last rewound, while the files that rewind replaced can still be put back: until the
+   * thread's next turn ends. Kept and stamped as readAt is. */
+  rewoundAt: z.number().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -1004,6 +1009,8 @@ export const ThreadView = z.object({
   snoozedUntil: z.number().optional(),
   wokeAt: z.number().optional(),
   section: ThreadPlacement.optional(),
+  /** As SessionView.rewoundAt: set while Undo rewind can put the files back. */
+  rewoundAt: z.number().optional(),
   /** The access and the fast mode the latest turn ran at, as its row carries them. */
   permissionMode: z.string().optional(),
   fast: z.boolean().optional(),
@@ -1061,6 +1068,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.snoozedUntil !== undefined ? { snoozedUntil: latest.snoozedUntil } : {}),
       ...(latest.wokeAt !== undefined ? { wokeAt: latest.wokeAt } : {}),
       ...(latest.section !== undefined ? { section: latest.section } : {}),
+      ...(latest.rewoundAt !== undefined ? { rewoundAt: latest.rewoundAt } : {}),
       ...(latest.permissionMode !== undefined ? { permissionMode: latest.permissionMode } : {}),
       ...(latest.fast === true ? { fast: true } : {}),
       turns: turns.length,
@@ -1169,6 +1177,9 @@ export const HarnessCatalog = z.object({
   /** Whether a person may ask this harness a question beside a thread (sessions.aside), answered on a copy of the
    * thread's session that nothing keeps. The adapter in this host declares it, as with mcpServers; absent is a no. */
   asides: z.boolean().optional(),
+  /** Whether rewinding a thread of this harness cuts its conversation too, in the harness's own history; absent is a
+   * no, and a rewind there puts back the files alone while the harness keeps every turn it ran. */
+  rewindsConversation: z.boolean().optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -1595,6 +1606,18 @@ export const SessionPermissionClosedEvent = z.object({
 });
 export type SessionPermissionClosedEvent = z.infer<typeof SessionPermissionClosedEvent>;
 
+/** What a turn left to rewind to, written once the turn is over: the checkpoint of the copy's files at its end
+ * (absent where none could be taken, a folder that is not a checkout or a daemon that did not answer) and the
+ * harness's own name for the point its conversation ended at (absent where the harness names none). A rewind cuts
+ * the turns after it and puts these back. */
+export const SessionCheckpointEvent = z.object({
+  type: z.literal("session.checkpoint"),
+  ...sessionScope,
+  ref: z.string().optional(),
+  anchor: z.string().optional(),
+});
+export type SessionCheckpointEvent = z.infer<typeof SessionCheckpointEvent>;
+
 /** The events sessions.history replays: what a chat transcript folds. */
 export const SessionEvent = z.discriminatedUnion("type", [
   SessionStartEvent,
@@ -1605,6 +1628,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionNotifyEvent,
   SessionPermissionEvent,
   SessionPermissionClosedEvent,
+  SessionCheckpointEvent,
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
@@ -2105,6 +2129,11 @@ export const serverIconsLeftLine = (folder: string, reason: string): string =>
  * rows are read again to pick it up. */
 export const ThreadMarkedEvent = z.object({ type: z.literal("thread.marked"), workspaceId: z.string(), threadIds: z.array(z.string()) });
 export type ThreadMarkedEvent = z.infer<typeof ThreadMarkedEvent>;
+
+/** A thread was rewound, or a rewind undone: its transcript lost the turns after the one it kept, so every window
+ * holding the thread reads its history and its rows again. */
+export const ThreadRewoundEvent = z.object({ type: z.literal("thread.rewound"), workspaceId: z.string(), threadId: z.string() });
+export type ThreadRewoundEvent = z.infer<typeof ThreadRewoundEvent>;
 
 /** The host's record changed, by any client; every socket gets the whole record. */
 export const PreferencesChangedEvent = z.object({ type: z.literal("preferences.changed"), preferences: Preferences });
@@ -3146,8 +3175,10 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionNotifyEvent.extend(sequenced),
   SessionPermissionEvent.extend(sequenced),
   SessionPermissionClosedEvent.extend(sequenced),
+  SessionCheckpointEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
+  ThreadRewoundEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
   PortCloseEvent.extend(sequenced),
   InboxFileEvent.extend(sequenced),
@@ -3250,6 +3281,15 @@ export type HostItem = z.infer<typeof HostItem>;
 export const GitPrListReply = z.object({ items: z.array(HostItem), note: z.string().optional(), noCliFor: z.string().optional() });
 export type GitPrListReply = WireGitPrListReply;
 type GitPrListReplyHeld = Held<Same<z.infer<typeof GitPrListReply>, GitPrListReply>>;
+
+/** A checkpoint's ref, the commit it names, and whether its tree differs from the one that ref named before. */
+export const GitCheckpointReply = z.object({ ref: z.string(), commit: z.string(), changed: z.boolean() });
+export type GitCheckpointReply = WireGitCheckpointReply;
+type GitCheckpointReplyHeld = Held<Same<z.infer<typeof GitCheckpointReply>, GitCheckpointReply>>;
+/** The checkpoint of the tree as it stood before a restore, which restores it again, and how many files moved. */
+export const GitRestoreReply = z.object({ before: z.string(), files: z.number().int() });
+export type GitRestoreReply = WireGitRestoreReply;
+type GitRestoreReplyHeld = Held<Same<z.infer<typeof GitRestoreReply>, GitRestoreReply>>;
 
 export const FsReadEncoding = z.enum(["utf8", "base64"]);
 export type FsReadEncoding = z.infer<typeof FsReadEncoding>;
@@ -3500,6 +3540,13 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** The repository's open pull requests and issues through that same command line, answered as a GitPrListReply.
    * No command line for the host, or one nobody signed in, is an empty list with the note saying so. */
   z.object({ id: reqId, op: z.literal("git.prList"), cwd: z.string(), machineId: z.string().optional() }),
+  /** Records the checkout's whole tree at a turn's end as a commit outside every branch, under the ref the daemon
+   * names from the copy's folder, the thread and the turn, and answers a GitCheckpointReply. HEAD, the index and
+   * the branch never move. */
+  z.object({ id: reqId, op: z.literal("git.checkpoint"), cwd: z.string(), thread: z.string(), turn: z.string(), machineId: z.string().optional() }),
+  /** Puts the tree back to one of this copy's checkpoints, recording the tree as it stood first, and answers a
+   * GitRestoreReply whose before restores it again. */
+  z.object({ id: reqId, op: z.literal("git.restore"), cwd: z.string(), checkpoint: z.string(), machineId: z.string().optional() }),
   /** Replies with a HostFolderListing: one level of folders on the computer this daemon runs on, for the folder
    * picker of a computer somebody owns. The roots are the home of the login the daemon runs as and each of
    * `projects` the home does not hold; `dir` absent lists the home, and so does a folder inside the roots that is
@@ -4158,6 +4205,7 @@ const DAEMON_CONTENTS = [
   "4693a00a74c923f64a9062a65cac539d5ac7621da08fc623c63089a87b8231d7",
   "6064295b774d39defb1ba58ef099812ee1e4662bac2a1525c6d0061128450f2f",
   "12dc3a3741a25239969103531def3c28df0874e9233825d16f7063a84df345c6",
+  "ca0a7c835985a42469446d3efd1e622568ef0772725ddf4700efc631038f6c1f",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4378,7 +4426,10 @@ const DAEMON_CONTENTS = [
  * Version 83 answers fs.search: the files under a folder whose path holds a query's letters in order, or the lines of text there that hold it, walked with the folder's ignore rules and never through a link, under a cap and a time budget.
  * Version 84 adds fs.files, every file of a checkout git would show, from git ls-files and kept until a folder holding one
  * of them changes, and git.prList, the repository's open pull requests and issues through the host's command line, an
- * empty list with a note where that command line is not there or nobody signed it in. */
+ * empty list with a note where that command line is not there or nobody signed it in.
+ * Version 85 adds git.checkpoint, a turn's whole tree recorded as a commit outside every branch under
+ * refs/wsp/checkpoints/<copy>/<thread>/<turn>, and git.restore, which puts the tree back to one of the copy's own
+ * checkpoints after recording the tree as it stood; a worktree copy's removal deletes its checkpoint refs. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -5620,6 +5671,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * thread's latest row: its folder, its model and its agent. Replies with a SessionAsideResult. Nothing is recorded:
    * the transcript, the rows and the harness's own session are as they were. Takes any of the thread's session ids. */
   z.object({ id: reqId, op: z.literal("sessions.aside"), sessionId: z.string(), question: z.string() }),
+  /** Rewinds a thread to the end of one of its turns: the turns after it leave the transcript and, where the harness
+   * cuts its own history, the conversation, and with files the copy's tree goes back to that turn's checkpoint after
+   * the tree as it stands is checkpointed. undo instead puts back the files the thread's last rewind replaced. */
+  z.object({ id: reqId, op: z.literal("sessions.rewind"), threadId: z.string(), turnId: z.string().optional(), files: z.boolean().optional(), undo: z.boolean().optional() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -6163,6 +6218,10 @@ export type SessionSearchResult = z.infer<typeof SessionSearchResult>;
 /** The harness's answer to a side question, which the host keeps nowhere. */
 export const SessionAsideResult = z.object({ text: z.string() });
 export type SessionAsideResult = z.infer<typeof SessionAsideResult>;
+/** What a rewind did: how many turns left the conversation, and how many files the copy's tree wrote or removed
+ * where the files went back too. */
+export const SessionRewindResult = z.object({ turns: z.number().int(), files: z.number().int().optional() });
+export type SessionRewindResult = z.infer<typeof SessionRewindResult>;
 
 // --- session start (how the turn the caller asked for came to be) --------------
 
@@ -6328,4 +6387,4 @@ export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
 export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
-export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionReverter, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";

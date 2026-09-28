@@ -837,3 +837,34 @@ describe("subagents an agent launched inside its own turn", () => {
     expect(after.prompts[0]).toMatchObject({ outcome: "allowed", optionId: "allow" });
   });
 });
+
+describe("deriveSession: what a turn kept to rewind to", () => {
+  const turn = (id: string, n: number): SessionEvent[] => {
+    const s = { workspaceId: "ws_t", sessionId: "sess_t", turnId: id, threadId: "thread_1" };
+    return [
+      { type: "session.start", ...s, at: n * 1_000, prompt: `ask ${n}` },
+      { type: "session.delta", ...s, at: n * 1_000 + 1, kind: "text", text: `reply ${n}` },
+      { type: "session.done", ...s, at: n * 1_000 + 2, result: { status: "completed" } },
+      { type: "session.end", ...s, at: n * 1_000 + 3, exitCode: 0, sawResult: true },
+    ];
+  };
+
+  it("carries each turn's checkpoint and anchor onto its own summary, even once a later turn has opened, and none where it kept none", () => {
+    const events: SessionEvent[] = [
+      ...turn("t1", 1),
+      ...turn("t2", 2),
+      // The first turn's checkpoint lands after the second turn opened: it is asked once a turn is over, off its road.
+      { type: "session.checkpoint", workspaceId: "ws_t", sessionId: "sess_t", turnId: "t1", threadId: "thread_1", ref: "refs/wsp/checkpoints/c/thread_1/t1", anchor: "a1" },
+      ...turn("t3", 3),
+      { type: "session.checkpoint", workspaceId: "ws_t", sessionId: "sess_t", turnId: "t3", threadId: "thread_1", anchor: "a3" },
+    ];
+    const model = deriveSession(events);
+    expect(model.turns.map(t => [t.turnId, t.checkpoint])).toEqual([
+      ["t1", { ref: "refs/wsp/checkpoints/c/thread_1/t1", anchor: "a1" }],
+      ["t2", null],
+      ["t3", { ref: null, anchor: "a3" }],
+    ]);
+    // The checkpoint draws nothing of its own.
+    expect(model.timeline.filter(e => e.kind === "message").map(e => (e.kind === "message" ? e.message.text : ""))).toEqual(["ask 1", "reply 1", "ask 2", "reply 2", "ask 3", "reply 3"]);
+  });
+});

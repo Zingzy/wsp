@@ -161,6 +161,9 @@ export interface TurnSummary {
   readonly error: string | null;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
+  /** What the turn kept to rewind to once it was over: the checkpoint of the files (null where none was taken) and
+   * the harness's anchor for its end (null where it named none). Null until the turn's session.checkpoint lands. */
+  readonly checkpoint: { readonly ref: string | null; readonly anchor: string | null } | null;
 }
 
 export type ToolGroupAction = "read" | "edit" | "command" | "code-search" | "search" | "other" | "update";
@@ -312,6 +315,8 @@ export interface SidebarThreadSnapshot {
   readonly status: SessionStatus;
   /** Whether a turn of this thread ever did work, as the protocol's fold reads the rows. */
   readonly ran: boolean;
+  /** Set while Undo rewind can still put back the files the thread's last rewind replaced. */
+  readonly rewound?: boolean;
   readonly startedAt: string | null;
   readonly endedAt: string | null;
   readonly indicator: StatusIndicator | null;
