@@ -1,0 +1,109 @@
+{
+  "tool": "folders",
+  "cases": [
+    {
+      "case": "home",
+      "arguments": {},
+      "replies": {
+        "host.folders": "{\"id\":1,\"ok\":true,\"listing\":{\"dir\":\"/Users/zingzy\",\"folders\":[{\"path\":\"/Users/zingzy/code\",\"repo\":false},{\"path\":\"/Users/zingzy/wsp 🧪\",\"repo\":true,\"branch\":\"main\",\"touchedAt\":1727431200000.5},{\"path\":\"/Users/zingzy/x\u0085y\",\"repo\":true}],\"hidden\":3,\"roots\":[\"/Users/zingzy\",\"/Users/zingzy/wsp 🧪\"],\"extra\":\"kept\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"FOLDER                GIT\\n/Users/zingzy/code\\n/Users/zingzy/wsp 🧪  main\\n/Users/zingzy/x\\u0085y     git\\n3 folders in /Users/zingzy, 3 hidden. Browsable: /Users/zingzy, /Users/zingzy/wsp 🧪.\"}],\"structuredContent\":{\"dir\":\"/Users/zingzy\",\"folders\":[{\"path\":\"/Users/zingzy/code\",\"repo\":false},{\"path\":\"/Users/zingzy/wsp 🧪\",\"repo\":true,\"branch\":\"main\",\"touchedAt\":1727431200000.5},{\"path\":\"/Users/zingzy/x\\u0085y\",\"repo\":true}],\"hidden\":3,\"roots\":[\"/Users/zingzy\",\"/Users/zingzy/wsp 🧪\"],\"extra\":\"kept\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "host.folders"
+        }
+      ]
+    },
+    {
+      "case": "a folder on another computer",
+      "arguments": {
+        "folder": "/srv/x",
+        "hidden": true,
+        "repos": false,
+        "on": "attic"
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"here\",\"kind\":\"computer\",\"name\":\"this mac\",\"default\":true},{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"default\":false}]}",
+        "host.folders": "{\"id\":1,\"ok\":true,\"listing\":{\"dir\":\"/Users/zingzy\",\"folders\":[],\"hidden\":0,\"roots\":[\"/Users/zingzy\",\"/Users/zingzy/wsp 🧪\"],\"extra\":\"kept\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"FOLDER  GIT\\nNo folders in /Users/zingzy. Browsable: /Users/zingzy, /Users/zingzy/wsp 🧪.\"}],\"structuredContent\":{\"dir\":\"/Users/zingzy\",\"folders\":[],\"hidden\":0,\"roots\":[\"/Users/zingzy\",\"/Users/zingzy/wsp 🧪\"],\"extra\":\"kept\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "host.folders",
+          "dir": "/srv/x",
+          "hidden": true,
+          "on": "place-9"
+        }
+      ]
+    },
+    {
+      "case": "a relative folder here",
+      "arguments": {
+        "folder": "code/é \"x\"",
+        "on": "this mac"
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"here\",\"kind\":\"computer\",\"name\":\"this mac\",\"default\":true},{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"default\":false}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"folder is a path on this computer, absolute, and got \\\"code/é \\\\\\\"x\\\\\\\"\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\"}],\"structuredContent\":{\"error\":\"folder is a path on this computer, absolute, and got \\\"code/é \\\\\\\"x\\\\\\\"\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        }
+      ]
+    },
+    {
+      "case": "a relative folder there",
+      "arguments": {
+        "folder": "srv",
+        "on": "attic"
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"here\",\"kind\":\"computer\",\"name\":\"this mac\",\"default\":true},{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"default\":false}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"folder is a path on attic, absolute, and got \\\"srv\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\"}],\"structuredContent\":{\"error\":\"folder is a path on attic, absolute, and got \\\"srv\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        }
+      ]
+    },
+    {
+      "case": "no folders",
+      "arguments": {
+        "folder": "/empty",
+        "repos": true
+      },
+      "replies": {
+        "host.folders": "{\"id\":1,\"ok\":true,\"listing\":{\"dir\":\"/empty\",\"folders\":[],\"hidden\":2,\"roots\":[\"/Users/zingzy\"]}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"FOLDER  GIT\\nNo folders in /empty, 2 hidden. Browsable: /Users/zingzy.\"}],\"structuredContent\":{\"dir\":\"/empty\",\"folders\":[],\"hidden\":2,\"roots\":[\"/Users/zingzy\"]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "host.folders",
+          "dir": "/empty",
+          "repos": true
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "folder": "/etc"
+      },
+      "replies": {
+        "host.folders": "{\"id\":1,\"ok\":false,\"error\":\"/etc is outside the folders this computer lets the host read\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"/etc is outside the folders this computer lets the host read\"}],\"structuredContent\":{\"error\":\"/etc is outside the folders this computer lets the host read\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "host.folders",
+          "dir": "/etc"
+        }
+      ]
+    }
+  ]
+}

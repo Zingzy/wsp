@@ -424,6 +424,50 @@ describe("status.watch cost events", () => {
   });
 });
 
+describe("the status poll and a machine's uptime", () => {
+  it("does not send a row again when only the machine's uptime moved", async () => {
+    let reads = 0;
+    const box: StatusRecord = {
+      id: "ws_up",
+      name: "box",
+      machineId: "m_up",
+      kind: "local",
+      phase: "running",
+      golden: "",
+      project: { id: "pr_1a2b3c4d", name: "box", path: "/home/dev/box", computer: "pl_here" },
+      createdAt: new Date().toISOString(),
+      size: { cpu: 2, memMb: 2048 },
+      rateUsdPerHour: 0,
+      generation: 1,
+      providerState: async () => "running",
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      facts: async () => ({ os: "macOS", uptimeMs: 1_000 * ++reads, folder: "/home/dev/box" }),
+    };
+    const sent: WorkspaceStatus[] = [];
+    // One bus, as the runtime wires it: what the poll emits comes back to the tracker's own listener.
+    const listeners: ((e: EventUnion) => void)[] = [];
+    const tracker = createStatusTracker({
+      records: async () => [box],
+      store: memoryStore(),
+      emit: e => {
+        if (e.type === "workspace.status") sent.push(e.status);
+        for (const l of listeners) l(e);
+      },
+      on: (_type, listener) => {
+        listeners.push(listener);
+        return () => {};
+      },
+    });
+    const stop = tracker.watch({ pollIntervalMs: 5 });
+    try {
+      await until(() => reads >= 6);
+    } finally {
+      stop();
+    }
+    expect(sent.length).toBe(1);
+  });
+});
+
 describe("the status ticks", () => {
   it("an answer the guest did not send sends the poll to the provider once, and leaves the row running", async () => {
     const { rt, backend } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 });

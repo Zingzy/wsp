@@ -10,11 +10,15 @@ mod checked;
 mod client;
 mod failure;
 mod host;
+mod js;
 mod json;
 mod record;
 mod start;
 mod stdio;
 mod tools;
+mod transcript;
+mod words;
+mod zod;
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -36,7 +40,8 @@ pub struct Args {
     pub scoped: bool,
     /// A refusal before the server runs is the failure object rather than its sentence.
     pub json: bool,
-    /// The wsp that brings a host up when none serves the state file; nothing starts one when it is empty.
+    /// The wsp that brings a host up when none serves the state file, and that the recipe tools run; nothing starts
+    /// one when it is empty.
     pub wsp: Vec<String>,
 }
 
@@ -59,7 +64,8 @@ pub fn run(args: &Args) -> i32 {
             return 1;
         }
     };
-    runtime.block_on(serve(args, &env, BufReader::new(tokio::io::stdin()), tokio::io::stdout()))
+    let host = host::Host::new(args, &env, std::env::current_dir().ok());
+    runtime.block_on(stdio::pump(Arc::new(host), BufReader::new(tokio::io::stdin()), tokio::io::stdout()))
 }
 
 /// A scoped server missing its pair refuses before anything else is read: it would otherwise dial this computer's
@@ -69,5 +75,5 @@ fn refused_before(args: &Args, env: &Env) -> Option<Failure> {
 }
 
 pub async fn serve<R: AsyncBufRead + Unpin, W: AsyncWrite + Unpin>(args: &Args, env: &Env, input: R, output: W) -> i32 {
-    stdio::pump(Arc::new(host::Host::new(args, env)), input, output).await
+    stdio::pump(Arc::new(host::Host::new(args, env, None)), input, output).await
 }

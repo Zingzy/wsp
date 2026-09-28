@@ -171,6 +171,16 @@ describe("place", () => {
     expect(CODEX_TOML.place(rerun, "wsp", stdio("/new/node", ["a"])).text).toBe(rerun);
   });
 
+  it("Codex's TOML carries a server's tool timeout, which Codex reads as tool_timeout_sec, and the other formats hold none", async () => {
+    const { parse } = await import("smol-toml");
+    const timed = { ...SERVER, toolTimeoutSec: 3600 } satisfies McpTransport;
+    const placed = CODEX_TOML.place(undefined, "wsp", timed).text;
+    expect(placed).toBe(`[mcp_servers.wsp]\ncommand = "/usr/local/bin/node"\nargs = ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"]\ntool_timeout_sec = 3600\n`);
+    expect((parse(placed) as { mcp_servers: { wsp: { tool_timeout_sec: number } } }).mcp_servers.wsp.tool_timeout_sec).toBe(3600);
+    expect(CODEX_TOML.read(placed, "/home/u").map(s => s.name)).toEqual(["wsp"]);
+    expect(MCP_SERVERS_JSON.place(undefined, "wsp", timed).text).not.toMatch(/timeout/i);
+  });
+
   it("Codex's TOML quotes a path with a quote or a backslash in it as a basic string", () => {
     const placed = CODEX_TOML.place(undefined, "wsp", stdio('C:\\node "x".exe', [])).text;
     expect(placed).toContain('command = "C:\\\\node \\"x\\".exe"');

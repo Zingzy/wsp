@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! One socket to the host, as the command line's dial holds it: the token rides in the first frame and never in the
-//! address, then each request carries an id its reply comes back under; a frame that answers no request is dropped,
-//! since no tool here follows events. The socket opening and the answer to the token share one deadline, so a
-//! port that accepts and never answers fails in one line. When the socket goes, every request still waiting fails
-//! with the words for how it went: the host letting it go as it stopped, or the host gone.
-//! packages/host/src/verbs.ts `dialOnce` is the rule; this is its road with no seal, which a host on this computer
-//! or on its loopback takes.
+//! address, then each request carries an id its reply comes back under; a frame that answers no request goes to every
+//! listener open at the time, the events a turn or an exec pushes. The socket opening and the answer to the token
+//! share one deadline, so a port that accepts and never answers fails in one line. When the socket goes, every
+//! request still waiting fails with the words for how it went: the host letting it go as it stopped, or the host
+//! gone. packages/host/src/verbs.ts `dialOnce` is the rule; this is its road with no seal, which a host on this
+//! computer or on its loopback takes.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,6 +40,9 @@ struct Head {
 
 struct Shared {
     waiting: Mutex<Waiting>,
+    /// Each open `Frames` by the number it was handed, taken out when it is dropped.
+    listeners: Mutex<Vec<(u64, mpsc::UnboundedSender<String>)>>,
+    heard: AtomicU64,
     /// Empty while the socket is open; the close code the host sent, or none, once it is gone.
     gone: watch::Sender<Option<Option<u16>>>,
 }
@@ -48,7 +51,33 @@ pub struct Client {
     send: mpsc::UnboundedSender<Message>,
     shared: Arc<Shared>,
     next: AtomicU64,
+    subscribed: tokio::sync::OnceCell<Result<(), Failure>>,
     tasks: [JoinHandle<()>; 2],
+}
+
+/// The frames the host pushes from the moment this was opened, held until read: a reply that names what to follow
+/// may land with the first of its frames right behind it. None once the socket is gone.
+pub struct Frames {
+    told: mpsc::UnboundedReceiver<String>,
+    id: u64,
+    shared: Arc<Shared>,
+}
+
+impl Frames {
+    pub async fn next(&mut self) -> Option<String> {
+        self.told.recv().await
+    }
+
+    /// The next frame already here, without waiting for one.
+    pub fn try_next(&mut self) -> Option<String> {
+        self.told.try_recv().ok()
+    }
+}
+
+impl Drop for Frames {
+    fn drop(&mut self) {
+        self.shared.listeners.lock().unwrap().retain(|(id, _)| *id != self.id);
+    }
 }
 
 impl Drop for Client {
@@ -90,7 +119,12 @@ impl Client {
     {
         let (mut sink, mut stream) = ws.split();
         let (send, mut outgoing) = mpsc::unbounded_channel::<Message>();
-        let shared = Arc::new(Shared { waiting: Mutex::new(HashMap::new()), gone: watch::channel(None).0 });
+        let shared = Arc::new(Shared {
+            waiting: Mutex::new(HashMap::new()),
+            listeners: Mutex::new(Vec::new()),
+            heard: AtomicU64::new(0),
+            gone: watch::channel(None).0,
+        });
         let writer = tokio::spawn(async move {
             while let Some(message) = outgoing.recv().await {
                 if sink.send(message).await.is_err() {
@@ -114,7 +148,34 @@ impl Client {
             }
             reading.went(code);
         });
-        Client { send, shared, next: AtomicU64::new(1), tasks: [writer, reader] }
+        Client { send, shared, next: AtomicU64::new(1), subscribed: tokio::sync::OnceCell::new(), tasks: [writer, reader] }
+    }
+
+    /// Every frame that answers no request from now on.
+    pub fn frames(&self) -> Frames {
+        let (tell, told) = mpsc::unbounded_channel();
+        let id = self.shared.heard.fetch_add(1, Ordering::Relaxed);
+        let mut listeners = self.shared.listeners.lock().unwrap();
+        if self.shared.gone.borrow().is_none() {
+            listeners.push((id, tell));
+        }
+        Frames { told, id, shared: self.shared.clone() }
+    }
+
+    /// The host's events on this socket, asked for once however many calls follow them.
+    pub async fn events(&self) -> Result<(), Failure> {
+        self.subscribed.get_or_init(|| async { self.request::<Value>("events.subscribe", Map::new()).await.map(|_| ()) }).await.clone()
+    }
+
+    /// Whether the host let this socket go as it stopped, which a wait dials through; read once the socket is gone.
+    pub fn stopped_under(&self) -> bool {
+        self.shared.gone.borrow().flatten() == Some(record::host().stopping_close)
+    }
+
+    /// Once the socket is gone, however it went.
+    pub async fn closed(&self) {
+        let mut gone = self.shared.gone.subscribe();
+        let _ = gone.wait_for(Option::is_some).await;
     }
 
     /// One op and its reply, the reply's body read as `T`. A reply that is not ok is its own sentence, or the op's
@@ -186,14 +247,41 @@ impl Shared {
         let id = serde_json::from_str::<Head>(text).ok().and_then(|head| head.id).and_then(|id| id.as_u64());
         if let Some(waiter) = id.and_then(|id| self.waiting.lock().unwrap().remove(&id)) {
             let _ = waiter.send(Ok(text.to_owned()));
+            return;
+        }
+        for (_, listener) in self.listeners.lock().unwrap().iter() {
+            let _ = listener.send(text.to_owned());
         }
     }
 
     fn went(&self, code: Option<u16>) {
-        self.gone.send_replace(Some(code));
+        {
+            let mut listeners = self.listeners.lock().unwrap();
+            self.gone.send_replace(Some(code));
+            listeners.clear();
+        }
         let words = close_words(code);
         for (_, waiter) in self.waiting.lock().unwrap().drain() {
             let _ = waiter.send(Err(Failure::new(words.clone())));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_listener_goes_when_its_frames_is_dropped() {
+        let (near, far) = tokio::io::duplex(1024);
+        let serving = tokio::spawn(async move { tokio_tungstenite::accept_async(far).await.unwrap() });
+        let (ws, _) = tokio_tungstenite::client_async("ws://host/ws", near).await.unwrap();
+        let _server = serving.await.unwrap();
+        let client = Client::over(ws);
+        let (kept, dropped) = (client.frames(), client.frames());
+        assert_eq!(client.shared.listeners.lock().unwrap().len(), 2);
+        drop(dropped);
+        let left: Vec<u64> = client.shared.listeners.lock().unwrap().iter().map(|(id, _)| *id).collect();
+        assert_eq!(left, [kept.id]);
     }
 }
