@@ -27,9 +27,6 @@ export const WORKSPACE_WORDS = {
   startDaemon: "Start the daemon",
 } as const;
 
-/** What the creation log and the sidebar's creation row say before the runtime's first stage line lands; one
- * sentence in one place, since both surfaces stand in for the same silence. */
-export const CREATION_ASKED = "Asking wsp to start it.";
 /** The word a creation row's slot carries once the create was refused: the state table's own, so a thread that
  * failed and a create that failed read as one word. */
 export const CREATION_FAILED = threadStateWord("failed");
@@ -46,6 +43,7 @@ export const THREAD_WORDS = {
   unpin: "Unpin thread",
   snooze: "Snooze thread",
   keep: "Keep this one",
+  undoRewind: "Undo rewind",
 } as const;
 
 export const FILE_WORDS = {
@@ -145,6 +143,7 @@ export const NO_WORKSPACE_FORK = "Running a copy of a task is not in the runtime
  * person cannot undo. The dialog says the same half and the record and the threads with it. */
 export const DELETE_HINT = (kind: WorkspaceKind, copy?: Pick<ProjectCopy, "path">): string => `Its ${onDeleteOf(kind, copy).asked}`;
 export const CLIENT_CANNOT_DELETE = "This client cannot delete tasks";
+export const CLIENT_CANNOT_REWIND = "This client cannot rewind threads";
 
 /** What a terminal the workspace refused says, wherever it was asked from: the link is up, so no pane stands in
  * for this, and the link's reason is what a person can act on. Named where the app holds a record for the

@@ -217,6 +217,9 @@
                 ],
                 "additionalProperties": false
               },
+              "rewoundAt": {
+                "type": "number"
+              },
               "permissionMode": {
                 "type": "string"
               },
@@ -478,6 +481,9 @@
                   "whileState"
                 ],
                 "additionalProperties": false
+              },
+              "rewoundAt": {
+                "type": "number"
               },
               "permissionMode": {
                 "type": "string"

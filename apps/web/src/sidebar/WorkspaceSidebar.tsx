@@ -21,9 +21,10 @@
 import { openProjectSettings } from "../settings/openAt.js";
 import { ChevronDownIcon, CopyIcon, PlusIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode } from "react";
-import { HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, computerOffline, creationAwaits, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, MACHINE_UNREACHED_LINE, computerOffline, modelOf, workspaceState, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
-import { CREATION_ASKED, THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
+import { THREAD_TREE_WORKING, rebuildRefusedLine } from "../actions/format.js";
+import { CREATE_ASKED, CREATE_STEP_WORDS, currentStep, stepWords, stoppedStep } from "../shell/creationLog.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { projectActions, type ProjectVerbs } from "../actions/projectActions.js";
 import { settledFoldActions, threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
@@ -381,7 +382,9 @@ export function WorkspaceSidebar() {
     const project = recorded.find(p => p.id === creation.project);
     const where = creation.where ?? project?.computer;
     const failed = creation.failed !== null;
-    const line = failed ? creation.failed.title : creation.lines.findLast(l => creationAwaits(l.stage))?.message ?? CREATION_ASKED;
+    // A refused create names the step it stopped on, the name being the row above; one refused before any step says so.
+    const step = failed ? stoppedStep(creation) : currentStep(creation);
+    const line = step !== undefined ? stepWords(step) : failed ? CREATE_STEP_WORDS.failed : CREATE_ASKED;
     return (
       <li key={creation.key}>
         <CreationTile
@@ -409,6 +412,8 @@ export function WorkspaceSidebar() {
     ];
   });
   const made = creations.filter(creation => picked === null || creation.project === picked.project.id);
+  /** A workspace being made files where a thread in its state does: Working while it is made, Needs you once refused. */
+  const madeIn = (id: SidebarSection): Creation[] => made.filter(creation => (creation.failed === null ? "working" : "needs-you") === id);
   /** A root dropped on a section or on the fold: the marks the drop writes, or the settle of its tree. */
   const drop = (rootId: string, place: SidebarSection | "settled"): void => {
     const node = tiles.live.find(root => root.thread.id === rootId);
@@ -440,7 +445,10 @@ export function WorkspaceSidebar() {
     },
   });
   // While a root is dragged every section stands, the empty ones too, so any of them can take it.
-  const sections = dragging === null ? tiles.sections : SIDEBAR_SECTIONS.map(id => tiles.sections.find(section => section.id === id) ?? { id, roots: [] });
+  const sections = SIDEBAR_SECTIONS.flatMap(id => {
+    const found = tiles.sections.find(section => section.id === id);
+    return found !== undefined ? [found] : dragging !== null || madeIn(id).length > 0 ? [{ id, roots: [] }] : [];
+  });
   const settledCount = tiles.settled.reduce((sum, node) => sum + tileCount(node), 0);
   const settleable = settleableRoots(tiles.live);
   const settledRowActions = resolveActions(settledFoldActions, { threadIds: settleable.flatMap(treeThreadIds) }, threadVerbs);
@@ -556,13 +564,15 @@ export function WorkspaceSidebar() {
                     {SECTION_WORDS[section.id]}
                   </span>
                   <span data-group-count className={cn(ROW_META_CLASS, "shrink-0")}>
-                    {section.roots.reduce((sum, node) => sum + tileCount(node), 0)}
+                    {section.roots.reduce((sum, node) => sum + tileCount(node), 0) + madeIn(section.id).length}
                   </span>
                 </div>
-                <ul className="flex min-w-0 flex-col">{section.roots.map(node => tileItem(node, 0, null))}</ul>
+                <ul className="flex min-w-0 flex-col">
+                  {section.roots.map(node => tileItem(node, 0, null))}
+                  {madeIn(section.id).map(creationItem)}
+                </ul>
               </li>
             ))}
-            {made.map(creationItem)}
             {tiles.settled.length > 0 || settleable.length > 0 || dragging !== null ? (
               <li data-thread-selection-safe className={cn("mt-3 rounded-[var(--control-radius)] transition-colors duration-150", over === "settled" && "bg-sidebar-row-hover")} {...dropZone("settled")}>
                 <button

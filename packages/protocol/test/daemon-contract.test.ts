@@ -80,6 +80,8 @@ import {
   GitPrReply,
   GitPrStateReply,
   GitPrListReply,
+  GitCheckpointReply,
+  GitRestoreReply,
   FsFilesReply,
   GitPushReply,
   GuestCliMessage,
@@ -522,6 +524,14 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
       { items: [], note: "no signed-in command line for github.com is on this computer, so its pull requests and issues are not listed" },
     ],
   },
+  GitCheckpointReply: {
+    schema: GitCheckpointReply,
+    samples: [
+      { ref: "refs/wsp/checkpoints/spoo-fix-login/thr_01a0e365/turn_3", commit: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", changed: true },
+      { ref: "refs/wsp/checkpoints/wsp-boat/thr_01a0e365/turn_4", commit: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", changed: false },
+    ],
+  },
+  GitRestoreReply: { schema: GitRestoreReply, samples: [{ before: "refs/wsp/checkpoints/spoo-fix-login/thr_01a0e365/turn_1-before-1790521483000", files: 3 }] },
   FsFilesReply: { schema: FsFilesReply, samples: [{ files: ["README.md", "src/ChatView.tsx"], truncated: false }, { files: [], truncated: true }] },
   GuestOpenReply: { schema: GuestOpenReply, samples: [{ session: "g1" }] },
   HostFolderListing: {

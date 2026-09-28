@@ -55,6 +55,10 @@ describe("a click or wait word", () => {
     expect(stepFor("menu:row-id=thread:redirect", [1440, 390])).toEqual({ menu: `[data-row-id="thread:${threadId("redirect")}"]` });
   });
 
+  it("reads a hover: word as the pointer resting on a data attribute, for a control that only shows under it", () => {
+    expect(stepFor("hover:k=rewind-to-here", [1440, 390])).toEqual({ hover: '[data-k="rewind-to-here"]' });
+  });
+
   it("reads a type: word as typing into whatever the step before it focused", () => {
     expect(stepFor("type:/does/not/exist", [1440, 390])).toEqual({ type: "/does/not/exist" });
     expect(stepFor("390:type:/tmp", [1440, 390])).toEqual({ width: 390, type: "/tmp" });

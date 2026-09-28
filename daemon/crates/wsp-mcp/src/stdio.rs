@@ -138,9 +138,10 @@ async fn called(host: Arc<Host>, asked: CallParams) -> String {
     };
     match (tool.call)(host, arguments).await {
         Ok(answered) => format!(
-            r#"{{"content":[{{"type":"text","text":{}}}],"structuredContent":{}}}"#,
+            r#"{{"content":[{{"type":"text","text":{}}}],"structuredContent":{}{}}}"#,
             json_string(&answered.text),
-            answered.structured
+            answered.structured,
+            if answered.error { r#","isError":true"# } else { "" }
         ),
         Err(Refused::Input(said)) => refused_text(&said),
         Err(Refused::Failed(failure)) => {
@@ -153,16 +154,17 @@ async fn called(host: Arc<Host>, asked: CallParams) -> String {
     }
 }
 
-/// The arguments a tool is called with, or the words the SDK refuses them in before the tool runs: anything but an
-/// object, then every issue the recorded input schema finds.
+/// The arguments a tool is called with, less any key its input does not list, or the words the SDK refuses them in
+/// before the tool runs: anything but an object, then every issue the recorded input schema finds.
 fn refused_before_call(tool: &str, listed: &str, arguments: Option<Value>) -> Result<Value, String> {
     let arguments = match arguments {
         Some(object @ Value::Object(_)) => object,
         other => return Err(input_refusal(tool, &format!("Invalid input: expected object, received {}", type_word(other.as_ref())))),
     };
-    let issues = checked::issues(&checked::input_schema(listed), &arguments);
+    let schema = checked::input_schema(listed);
+    let issues = checked::issues(&schema, &arguments);
     if issues.is_empty() {
-        Ok(arguments)
+        Ok(checked::known(&schema, arguments))
     } else {
         Err(input_refusal(tool, &issues.join("\n")))
     }
@@ -217,5 +219,15 @@ mod tests {
         );
         let taken = json!({ "workspace": "w", "argv": ["ls"] });
         assert_eq!(refused_before_call("exec", listed, Some(taken.clone())), Ok(taken));
+    }
+
+    #[test]
+    fn a_key_the_entry_does_not_list_reaches_no_tool() {
+        let new = include_str!("../record/tools/new.json");
+        let asked = json!({ "name": "n", "from": "alpha", "nothing": 1 });
+        let off = refused_before_call("new", tools::entry_in(new, false).unwrap(), Some(asked.clone()));
+        assert_eq!(off, Ok(json!({ "name": "n" })));
+        let on = refused_before_call("new", tools::entry_in(new, true).unwrap(), Some(asked));
+        assert_eq!(on, Ok(json!({ "name": "n", "from": "alpha" })));
     }
 }

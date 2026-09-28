@@ -12,10 +12,10 @@ use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
     guest_wsp_shim, landed_files_script, numbers, place_owned_paths, probe_path, words, BackendFacts, CopyReport, DaemonAuthRequest,
-    DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitPrListReply, GitPrReply, GitPrStateReply, GitPushReply,
-    GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest,
-    MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity,
-    PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    DaemonErrorResponse, DaemonEvent, DaemonRequest, FsFilesReply, GitCheckpointReply, GitPrListReply, GitPrReply, GitPrStateReply,
+    GitPushReply, GitRestoreReply, GuestCliMessage, GuestOpenReply, HostFolderListing, MachineAnswersReply, MachineExecReply,
+    MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply,
+    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -215,6 +215,12 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "GitPrListReply" => {
                     round_trip::<GitPrListReply>(&sample, &at);
                 }
+                "GitCheckpointReply" => {
+                    round_trip::<GitCheckpointReply>(&sample, &at);
+                }
+                "GitRestoreReply" => {
+                    round_trip::<GitRestoreReply>(&sample, &at);
+                }
                 "FsFilesReply" => {
                     round_trip::<FsFilesReply>(&sample, &at);
                 }
@@ -237,10 +243,12 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "CopyReport",
         "DaemonErrorResponse",
         "FsFilesReply",
+        "GitCheckpointReply",
         "GitPrListReply",
         "GitPrReply",
         "GitPrStateReply",
         "GitPushReply",
+        "GitRestoreReply",
         "GuestCliMessage",
         "GuestOpenReply",
         "HostFolderListing",

@@ -1,0 +1,82 @@
+{
+  "tool": "image_build",
+  "cases": [
+    {
+      "case": "built",
+      "arguments": {
+        "place": "attic \u0085"
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic \u0085\",\"default\":false}]}",
+        "image.build": "{\"id\":1,\"ok\":true,\"build\":{\"built\":true,\"copy\":{\"builtAt\":\"2026-09-27T00:00:00.000Z\",\"snapshotId\":\"snap-c3\",\"place\":\"place-9\",\"version\":1,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sizeBytes\":2147483648}}}",
+        "image.get": "{\"id\":1,\"ok\":true,\"view\":{\"image\":{\"name\":\"default\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"recipeHash\":\"r-1\",\"pins\":[{\"id\":\"node\",\"tag\":\"22.9.0\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},{\"id\":\"brew/core/some/formula\",\"tag\":\"1.0\",\"latest\":true,\"road\":\"brew\"},{\"id\":\"unknown-road-row\",\"tag\":\"2\",\"latest\":true,\"road\":\"nowhere\"}],\"logins\":[{\"name\":\"claude\",\"state\":\"signed-in\"},{\"name\":\"gh\",\"state\":\"copied\"},{\"name\":\"codex\",\"state\":\"skipped\"}],\"sealedAt\":\"2026-09-20T00:00:00.000Z\",\"sealedFrom\":\"zingzy's Mac \u0085\",\"vault\":{\"sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"bytes\":4096,\"paths\":1,\"takenAt\":\"2026-09-20T00:00:00.000Z\"},\"usedBytes\":5637144576},\"copies\":[{\"place\":\"solari\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"snapshotId\":\"snap-c1\",\"builtAt\":\"2026-09-20T00:00:00.000Z\",\"sizeBytes\":1288490188},{\"snapshotId\":\"snap-c2\",\"place\":\"attic\",\"version\":1,\"builtAt\":\"2026-09-19T00:00:00.000Z\",\"unknown\":1}],\"projects\":[]}}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"place-9  v1  2 GB  current\"}],\"structuredContent\":{\"copy\":{\"place\":\"place-9\",\"version\":1,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"snapshotId\":\"snap-c3\",\"builtAt\":\"2026-09-27T00:00:00.000Z\",\"sizeBytes\":2147483648},\"built\":true}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "image.build",
+          "place": "place-9"
+        },
+        {
+          "op": "image.get"
+        }
+      ]
+    },
+    {
+      "case": "already",
+      "arguments": {
+        "place": "solari",
+        "force": true
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic \u0085\",\"default\":false}]}",
+        "image.build": "{\"id\":1,\"ok\":true,\"build\":{\"copy\":{\"place\":\"solari\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"snapshotId\":\"snap-c1\",\"builtAt\":\"2026-09-20T00:00:00.000Z\",\"sizeBytes\":1288490188},\"built\":false}}",
+        "image.get": "{\"id\":1,\"ok\":true,\"view\":{\"image\":{\"name\":\"default\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"recipeHash\":\"r-1\",\"pins\":[{\"id\":\"node\",\"tag\":\"22.9.0\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},{\"id\":\"brew/core/some/formula\",\"tag\":\"1.0\",\"latest\":true,\"road\":\"brew\"},{\"id\":\"unknown-road-row\",\"tag\":\"2\",\"latest\":true,\"road\":\"nowhere\"}],\"logins\":[{\"name\":\"claude\",\"state\":\"signed-in\"},{\"name\":\"gh\",\"state\":\"copied\"},{\"name\":\"codex\",\"state\":\"skipped\"}],\"sealedAt\":\"2026-09-20T00:00:00.000Z\",\"sealedFrom\":\"zingzy's Mac \u0085\",\"usedBytes\":5637144576},\"copies\":[{\"place\":\"solari\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"snapshotId\":\"snap-c1\",\"builtAt\":\"2026-09-20T00:00:00.000Z\",\"sizeBytes\":1288490188},{\"snapshotId\":\"snap-c2\",\"place\":\"attic\",\"version\":1,\"builtAt\":\"2026-09-19T00:00:00.000Z\",\"unknown\":1}],\"projects\":[]}}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"solari  v2  1.2 GB  already built from this image; nothing was built\"}],\"structuredContent\":{\"copy\":{\"place\":\"solari\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"snapshotId\":\"snap-c1\",\"builtAt\":\"2026-09-20T00:00:00.000Z\",\"sizeBytes\":1288490188},\"built\":false}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "image.build",
+          "place": "solari",
+          "force": true
+        },
+        {
+          "op": "image.get"
+        }
+      ]
+    },
+    {
+      "case": "no image",
+      "arguments": {
+        "place": "solari"
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic \u0085\",\"default\":false}]}",
+        "image.build": "{\"id\":1,\"ok\":true,\"build\":{\"copy\":{\"place\":\"solari\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"snapshotId\":\"snap-c1\",\"builtAt\":\"2026-09-20T00:00:00.000Z\",\"sizeBytes\":1288490188},\"built\":false}}",
+        "image.get": "{\"id\":1,\"ok\":true,\"view\":{\"image\":null,\"copies\":[],\"projects\":[]}}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no image yet; run wsp init to build one\"}],\"structuredContent\":{\"error\":\"no image yet; run wsp init to build one\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "image.build",
+          "place": "solari"
+        },
+        {
+          "op": "image.get"
+        }
+      ]
+    }
+  ]
+}

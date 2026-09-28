@@ -10,11 +10,15 @@ mod checked;
 mod client;
 mod failure;
 mod host;
+mod js;
 mod json;
 mod record;
 mod start;
 mod stdio;
 mod tools;
+mod transcript;
+mod words;
+mod zod;
 
 use std::collections::HashMap;
 use std::io::Write;

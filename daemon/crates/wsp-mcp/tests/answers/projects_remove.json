@@ -1,0 +1,26 @@
+{
+  "tool": "projects_remove",
+  "cases": [
+    {
+      "case": "removed",
+      "arguments": {
+        "project": "alpha"
+      },
+      "replies": {
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "projects.remove": "{\"id\":1,\"ok\":true,\"said\":\"alpha 'quoted' is no longer a project here \u0085\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha 'quoted' is no longer a project here \\u0085\"}],\"structuredContent\":{\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \\u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"},\"said\":\"alpha 'quoted' is no longer a project here \\u0085\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "projects.remove",
+          "projectId": "proj-1"
+        }
+      ]
+    }
+  ]
+}

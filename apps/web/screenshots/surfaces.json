@@ -649,16 +649,68 @@
       "at": "/",
       "fixture": "mac-and-boxes",
       "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
         "k=project-switcher",
         "switcher-option=pr_spoo",
-        "k=new-workspace",
+        "menu:k=project-switcher",
+        "menu-item=new-workspace",
         "type:pricing page",
-        "k=create"
+        "k=create",
+        "390:key:Escape"
       ],
-      "wait": "testid=creation-log",
+      "wait": "testid=workspace-creation",
       "settleMs": 700,
       "widths": [
-        1440
+        1440,
+        390
+      ],
+      "fresh": true
+    },
+    {
+      "name": "creating-refused",
+      "at": "/",
+      "fixture": "ascii-only",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=project-switcher",
+        "switcher-option=pr_api",
+        "menu:k=project-switcher",
+        "menu-item=new-workspace",
+        "type:pricing page",
+        "k=create",
+        "390:key:Escape"
+      ],
+      "wait": "creation-refused",
+      "settleMs": 700,
+      "widths": [
+        1440,
+        390
+      ],
+      "fresh": true
+    },
+    {
+      "name": "creating-refused-steps",
+      "at": "/",
+      "fixture": "ascii-only",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=project-switcher",
+        "switcher-option=pr_api",
+        "menu:k=project-switcher",
+        "menu-item=new-workspace",
+        "type:pricing page",
+        "k=create",
+        "390:key:Escape",
+        "k=setting-up"
+      ],
+      "wait": "creation-refused",
+      "settleMs": 700,
+      "widths": [
+        1440,
+        390
       ],
       "fresh": true
     },
@@ -1007,6 +1059,71 @@
         1440,
         390
       ],
+      "settleMs": 700
+    },
+    {
+      "name": "timeline-rewind-hover",
+      "at": "/",
+      "fixture": "rewind",
+      "steps": [
+        "row-id=thread:rounding",
+        "hover:message-role=assistant"
+      ],
+      "wait": "k=rewind-to-here",
+      "widths": [1440],
+      "settleMs": 700
+    },
+    {
+      "name": "rewind-dialog",
+      "at": "/",
+      "fixture": "rewind",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:rounding",
+        "390:key:Escape",
+        "390:key:Escape",
+        "hover:message-role=assistant",
+        "k=rewind-to-here"
+      ],
+      "wait": "k=rewind-refusal",
+      "widths": [1440, 390],
+      "settleMs": 700
+    },
+    {
+      "name": "rewind-dialog-refused",
+      "at": "/",
+      "fixture": "rewind",
+      "fresh": true,
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:rounding",
+        "390:key:Escape",
+        "390:key:Escape",
+        "hover:message-role=assistant",
+        "k=rewind-to-here",
+        "k=rewind-confirm"
+      ],
+      "wait": "k=rewind-refusal",
+      "widths": [1440, 390],
+      "settleMs": 1200
+    },
+    {
+      "name": "rewind-dialog-files-only",
+      "at": "/",
+      "fixture": "rewind",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:tax",
+        "390:key:Escape",
+        "390:key:Escape",
+        "hover:message-role=assistant",
+        "k=rewind-to-here"
+      ],
+      "wait": "k=rewind-refusal",
+      "widths": [1440, 390],
       "settleMs": 700
     },
     {

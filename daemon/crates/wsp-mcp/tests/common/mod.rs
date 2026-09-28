@@ -16,8 +16,8 @@ use tokio_tungstenite::tungstenite::Message;
 /// The close a host sends as it stops, which a wait dials through.
 const STOPPING_CLOSE: u16 = 4001;
 
-/// What a host answers: each op with its recorded frame, the frames it pushes right behind each reply to an op, and
-/// the op after whose reply it lets the socket go as it stops. An op with no recorded frame is refused as the
+/// What a host answers: each op with its recorded frame, the frames it pushes while an op is under way, before its
+/// reply, and the op after whose reply it lets the socket go as it stops. An op with no recorded frame is refused as the
 /// recorded host refused it, and the events are subscribed to without one.
 #[derive(Default, Clone)]
 pub struct Script {
@@ -76,10 +76,11 @@ pub async fn scripted(token: &'static str, script: Script) -> (u16, Arc<Mutex<Ve
                     } else {
                         json!({ "id": id, "ok": false, "error": format!("{op} is not in this record") }).to_string()
                     };
-                    let mut sent = ws.send(Message::text(reply)).await.is_ok();
+                    let mut sent = true;
                     for frame in script.pushed.get(op).into_iter().flatten() {
                         sent = sent && ws.send(Message::text(frame.clone())).await.is_ok();
                     }
+                    sent = sent && ws.send(Message::text(reply)).await.is_ok();
                     if !sent {
                         break;
                     }
