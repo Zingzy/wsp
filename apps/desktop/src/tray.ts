@@ -9,7 +9,10 @@ import {
   askingLine,
   foldThreads,
   needsYouCount,
+  oneLine,
   threadFinishedLine,
+  threadNeedsYou,
+  threadStoppedLine,
   threadState,
   threadStateWord,
   workspaceComputerName,
@@ -85,7 +88,13 @@ export interface TrayModel {
 
 const LIVE = new Set(["waiting", "running"]);
 
+/** A thread the menu lists: one that asks or works, and one that failed and nobody has opened since, which waits on
+ * the person as a question does. */
+const listed = (thread: ThreadView, state: string): boolean => LIVE.has(state) || (state === "failed" && threadNeedsYou(thread));
+
 function threadActions(thread: ThreadView, asks: ReadonlyMap<string, OpenAsk>): { label: string; act: TrayAct }[] {
+  // A failure has nothing left to answer or stop: it is opened, and read there.
+  if (thread.status === "failed") return [{ label: TRAY_WORDS.open, act: { kind: "open", threadId: thread.id } }];
   const ask = thread.asking === undefined ? undefined : asks.get(thread.sessionId);
   const pick = (effect: PermissionOption["effect"]) => ask?.options.find(o => o.effect === effect);
   const allow = pick("allow");
@@ -113,8 +122,8 @@ export function trayModel(input: TrayInput): TrayModel {
   }
   const live = foldThreads(input.sessions)
     .map(thread => ({ thread, state: threadState(thread) }))
-    .filter(t => LIVE.has(t.state))
-    .sort((a, b) => Number(b.state === "waiting") - Number(a.state === "waiting") || (b.thread.startedAt ?? 0) - (a.thread.startedAt ?? 0));
+    .filter(t => listed(t.thread, t.state))
+    .sort((a, b) => Number(b.state !== "running") - Number(a.state !== "running") || (b.thread.startedAt ?? 0) - (a.thread.startedAt ?? 0));
   const working = live.filter(t => t.state === "running").length;
   const waiting = live.length - working;
   const count = working > 0 ? String(working) : "";
@@ -138,10 +147,16 @@ export function trayModel(input: TrayInput): TrayModel {
 }
 
 /** What the menu bar says over the system while no window is open to say it: a thread a person or a line opened
- * that finished, and a prompt. An agent's own thread reports to that agent. Nothing for anything else. */
-export function trayNotice(event: Extract<SessionEvent, { type: "session.done" | "session.permission" }>, rows: Pick<TrayInput, "sessions" | "workspaces" | "places">, sound: boolean): OutsideLine | undefined {
+ * that finished or failed, and a prompt. An agent's own thread reports to that agent. Nothing for anything else. */
+export function trayNotice(event: Extract<SessionEvent, { type: "session.done" | "session.permission" | "session.end" }>, rows: Pick<TrayInput, "sessions" | "workspaces" | "places">, sound: boolean): OutsideLine | undefined {
   const thread = foldThreads(rows.sessions).find(t => t.id === (event.threadId ?? event.sessionId));
   if (event.type === "session.permission") return { title: NEEDS_YOU, body: askingLine(event), sound };
-  if (event.result.status !== "completed" || thread === undefined || thread.startedBy === "agent") return undefined;
+  if (thread === undefined || thread.startedBy === "agent") return undefined;
+  const stopped = (error: string | undefined): OutsideLine => ({ title: threadStoppedLine(thread.title), body: error === undefined ? computerOf(rows, event.workspaceId) : oneLine(error), sound });
+  // An end with no result is a process that went before replying, unless the runtime ended it for a reason of its own,
+  // which is its own notice; an end after a result says nothing past what the result already said.
+  if (event.type === "session.end") return event.sawResult || event.reason !== undefined || event.exitCode === 0 ? undefined : stopped(event.exitCode === null ? undefined : `exit ${event.exitCode}`);
+  if (event.result.status === "failed") return stopped(event.result.error);
+  if (event.result.status !== "completed") return undefined;
   return { title: threadFinishedLine(thread.title), body: computerOf(rows, event.workspaceId), sound };
 }

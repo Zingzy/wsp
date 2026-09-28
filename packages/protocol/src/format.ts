@@ -3950,3 +3950,9 @@ export function fmtThemeVars(theme: WorkspaceTheme, appDark: boolean): ThemeVars
 /** What a system notification says when a thread's turn finished while nobody was looking: the page's own line and
  * the desktop's when its window is closed are this one. */
 export const threadFinishedLine = (title: string): string => `${title} finished`;
+
+/** The same for a turn that failed; the line under it is the error, in one line. */
+export const threadStoppedLine = (title: string): string => `${title} stopped`;
+
+/** Text a notification carries on one line: every run of whitespace, line breaks included, as one space. */
+export const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();

@@ -95,6 +95,18 @@ describe("the menu bar's model", () => {
     expect(model.badge).toBe(2);
   });
 
+  it("a failure nobody has opened marks the icon as waiting on the person and stands as a row that opens it; once opened it goes", () => {
+    const failed = row({ id: "s1", threadId: "t_failed", status: "failed", endedAt: 5 });
+    const model = trayModel(input({ sessions: [failed] }));
+    expect(model.needsYou).toBe(true);
+    const [only] = threadRows(model.rows);
+    expect(only).toMatchObject({ threadId: "t_failed", sublabel: TRAY_WORDS.where("Failed", "zingzy's MacBook Pro") });
+    expect(only!.actions).toEqual([{ label: TRAY_WORDS.open, act: { kind: "open", threadId: "t_failed" } }]);
+    const seen = trayModel(input({ sessions: [{ ...failed, readAt: 6 }] }));
+    expect(seen.needsYou).toBe(false);
+    expect(threadRows(seen.rows)).toEqual([]);
+  });
+
   it("never names the parts of wsp a person does not see", () => {
     const every = [TRAY_WORDS.nothing, TRAY_WORDS.working(3, 2), TRAY_WORDS.notRunning, TRAY_WORDS.start, TRAY_WORDS.unreached("spoo"), TRAY_WORDS.on("spoo"), TRAY_WORDS.openApp, TRAY_WORDS.open, TRAY_WORDS.allow, TRAY_WORDS.deny, TRAY_WORDS.stop];
     for (const word of every) expect(word).not.toMatch(/host|daemon|service|session/i);
@@ -113,6 +125,21 @@ describe("what the menu bar says over the system while no window is open", () =>
   it("an agent's own thread reports to it, and a turn that did not complete says nothing", () => {
     expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s2", threadId: "t_agent", result: { status: "completed" } }, { sessions, workspaces, places }, true)).toBeUndefined();
     expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "interrupted" } }, { sessions, workspaces, places }, true)).toBeUndefined();
+  });
+
+  it("a turn that failed says the thread stopped with its error in one line, and one that died without a result its exit, with the same sound", () => {
+    const done = { type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "failed", error: "API Error: 529\n overloaded" } } as const;
+    expect(trayNotice(done, { sessions, workspaces, places }, true)).toEqual({ title: "fix login stopped", body: "API Error: 529 overloaded", sound: true });
+    const died = { type: "session.end", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", exitCode: 137, sawResult: false } as const;
+    expect(trayNotice(died, { sessions, workspaces, places }, false)).toEqual({ title: "fix login stopped", body: "exit 137", sound: false });
+  });
+
+  it("an end the runtime gave its own reason, one that saw a result, an agent's thread and a turn somebody stopped say nothing", () => {
+    const rows = { sessions, workspaces, places };
+    expect(trayNotice({ type: "session.end", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", exitCode: null, sawResult: false, reason: "paused" }, rows, true)).toBeUndefined();
+    expect(trayNotice({ type: "session.end", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", exitCode: 0, sawResult: true }, rows, true)).toBeUndefined();
+    expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s2", threadId: "t_agent", result: { status: "failed", error: "x" } }, rows, true)).toBeUndefined();
+    expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "interrupted" } }, rows, true)).toBeUndefined();
   });
 
   it("a prompt says what the thread asks", () => {

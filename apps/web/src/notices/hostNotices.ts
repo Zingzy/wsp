@@ -9,7 +9,7 @@
 // on the shell's own road, which speaks only while the app is not in front of
 // the person; the prompt and the finish make a sound unless the person turned
 // it off. The dock's badge counts the threads waiting on the person.
-import { GET_THE_APP_WORD, NEEDS_YOU, NOTIFY_ME, askingLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, threadFinishedLine, threadKeyOf, titleWithNeed, workspaceAwakeLine, type OutsideLine, type ReleaseView, type TurnResult } from "@wsp/protocol";
+import { GET_THE_APP_WORD, NEEDS_YOU, NOTIFY_ME, askingLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, oneLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, workspaceAwakeLine, type OutsideLine, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
@@ -247,8 +247,15 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
       const { workspaceId, threadId } = e;
       sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), threadLine(HOST_NOTICE_WORDS.threadFinished(thread.title), workspaceNamed(workspaceId) ?? ""));
     }
-    // A reason means the runtime ended it (a pause, a delete, the machine gone, which is its own notice), and an
-    // interrupted turn is one somebody stopped: neither is a failure to say.
+    // A failure is said the same way, with its error on the line under it: a result that failed, or a process that
+    // went with no result. A reason means the runtime ended it (a pause, a delete, the machine gone, which is its own
+    // notice), and an interrupted turn is one somebody stopped: neither is a failure to say.
+    const failed = e.reason === undefined && (result?.status === "failed" || (result === undefined && !e.sawResult && e.exitCode !== 0));
+    if (failed && thread !== undefined && thread.startedBy !== "agent") {
+      const { workspaceId, threadId } = e;
+      const error = result?.error ?? (e.exitCode === null ? undefined : `exit ${e.exitCode}`);
+      sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), threadLine(threadStoppedLine(thread.title), error === undefined ? (workspaceNamed(workspaceId) ?? "") : oneLine(error)));
+    }
     if (e.exitCode === 0 || e.sawResult || e.reason !== undefined || result?.status === "interrupted" || threadOnScreen(e)) return;
     const where = workspaceNamed(e.workspaceId);
     const said = result?.error ?? (e.exitCode === null ? undefined : `exit ${e.exitCode}`);

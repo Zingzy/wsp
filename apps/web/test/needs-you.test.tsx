@@ -317,6 +317,38 @@ describe("a turn that finished while the person looked away", () => {
     expect(FakeNotification.built).toEqual([]);
   });
 
+  const fail = (emit: (e: ProtocolEvent) => void, o: { error?: string; reason?: string; threadId?: string; result?: boolean } = {}) => {
+    const threadId = o.threadId ?? "thr_1";
+    if (o.result !== false) emit({ type: "session.done", workspaceId: "ws_1", sessionId: "s1", turnId: `turn_${threadId}`, threadId, result: { status: "failed", ...(o.error !== undefined ? { error: o.error } : {}) } });
+    emit({ type: "session.end", workspaceId: "ws_1", sessionId: "s1", turnId: `turn_${threadId}`, threadId, exitCode: 1, sawResult: o.result !== false, ...(o.reason !== undefined ? { reason: o.reason } : {}) });
+  };
+
+  it("says a thread that failed stopped, with its error in one line and the same sound switch, and a click opens that thread", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn({ status: "failed" })] } }));
+    const focus = vi.spyOn(window, "focus").mockImplementation(() => {});
+    act(() => fail(emit, { error: "API Error: 529 overloaded\n  retry later" }));
+    expect(FakeNotification.built).toEqual([{ title: "Fix the redirect stopped", body: "API Error: 529 overloaded retry later", silent: false }]);
+    FakeNotification.last!.onclick!();
+    expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_1", "thr_1"]);
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifySound: false } }));
+    act(() => fail(emit, { result: false }));
+    expect(FakeNotification.built.at(-1)).toEqual({ title: "Fix the redirect stopped", body: "exit 1", silent: true });
+    focus.mockRestore();
+  });
+
+  it("says nothing for a failure the runtime ended itself, for a thread an agent opened, or while the app is in front", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn({ status: "failed" }), turn({ id: "s2", threadId: "thr_child", startedBy: "agent", parentThreadId: "thr_1", status: "failed" })] } }));
+    act(() => fail(emit, { result: false, reason: "the machine went away" }));
+    act(() => fail(emit, { threadId: "thr_child" }));
+    hidden = false;
+    act(() => fail(emit));
+    expect(FakeNotification.built).toEqual([]);
+  });
+
   it("puts the count of threads waiting on the person on the dock, and it drops as one is opened", () => {
     const badge: number[] = [];
     // A bridge whose call answers something is still only told: nothing the page does waits on it or keeps it.

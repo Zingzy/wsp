@@ -521,9 +521,9 @@ function holdAwake(): void {
   }
 }
 
-/** A finish or a prompt said over the system while no window is open to say it; the page says them while it is up. */
+/** A finish, a failure or a prompt said over the system while no window is open to say it; the page says them while it is up. */
 function sayWhileClosed(e: FeedEvent): void {
-  if (win !== undefined || fed === undefined || (e.type !== "session.done" && e.type !== "session.permission")) return;
+  if (win !== undefined || fed === undefined || (e.type !== "session.done" && e.type !== "session.permission" && e.type !== "session.end")) return;
   const line = trayNotice(e as Parameters<typeof trayNotice>[0], fed, fed.notifySound);
   if (line === undefined) return;
   const threadId = typeof e["threadId"] === "string" ? e["threadId"] : undefined;
