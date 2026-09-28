@@ -84,7 +84,7 @@ export const WHERE_WORDS = {
   portsDescription: "What a task there has for a network.",
   workspaceThere: "A task there",
   connection: "Connection",
-  workspaces: "Tasks",
+  threadsHere: "Threads running here",
   /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
    * dimmed while it runs: a label that changed to Updating moved the button's own width. */
   update: "Update",

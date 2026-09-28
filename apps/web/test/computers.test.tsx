@@ -283,7 +283,41 @@ describe("a computer's own page", () => {
     });
   };
 
-  it("says its facts as lines, the login it dials and how long the last dial took as rows, and the workspaces on it as lines", async () => {
+  it("lists the threads running or asking on a computer as the THREADS list does: the agent's mark, the title, the project, and the one status slot, a working one's time in the working ink with the crab", async () => {
+    const running: SessionView = { ...session("s_run", "ws_b"), prompt: "move the relay", status: "running", startedAt: Date.now() - 22 * 60_000 };
+    const asking: SessionView = { ...session("s_ask", "ws_b"), prompt: "fix the checkout", status: "running", startedAt: Date.now() - 30 * 60_000, asking: "Permission for Bash: ls" };
+    const failed: SessionView = { ...session("s_fail", "ws_b"), prompt: "release notes", status: "failed", startedAt: Date.now() - 90 * 60_000, endedAt: Date.now() - 80 * 60_000 };
+    const resting: SessionView = { ...session("s_rest", "ws_b"), prompt: "old refactor" };
+    useStore.setState({ places: [here, laptop], workspaces: [{ ...onLaptop, name: "spoo-fix" }], sessions: { ws_b: [running, asking, failed, resting] } });
+    await mountComputers(computersApi().api, { kind: "computer", id: "p_1" });
+    const card = document.querySelector<HTMLElement>("[data-settings-page] [data-settings-card='threads']")!;
+    expect(card.querySelector("[data-settings-head]")?.textContent).toBe(WHERE_WORDS.threadsHere);
+    const rows = [...card.querySelectorAll<HTMLElement>("[data-thread-row]")];
+    // Running here is what the head says: a failed or a resting thread is no longer running anywhere.
+    expect(rows.map(row => row.textContent?.replace(/(Needs you|\d+m).*$/, ""))).toEqual(["move the relay", "fix the checkout"].map(t => expect.stringMatching(new RegExp(`^${t}`))));
+    expect(card.textContent).not.toMatch(/release notes|old refactor/);
+    for (const row of rows) {
+      // The mark keeps its own ink, as the tiles draw it, never the row's muted one over it.
+      expect(row.querySelector("[data-harness-mark=claude]")?.getAttribute("class")).not.toContain("text-muted-foreground");
+      expect(row.querySelector("[data-thread-place]")?.textContent).toBe("the-project");
+    }
+    const slot = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>("[data-thread-status]")!;
+    expect(slot(rows[0]!).dataset["tone"]).toBe("working");
+    expect(slot(rows[0]!).textContent).toContain("22m");
+    expect(slot(rows[0]!).querySelector("[data-crab]")).not.toBeNull();
+    expect(slot(rows[1]!).textContent).toBe("Needs you");
+    expect(card.textContent).not.toMatch(/Running|\d+ threads?/);
+    expect(card.querySelector("[data-thread-rows-head]")).toBeNull();
+  });
+
+  it("draws no threads card for a computer where nothing is running or asking", async () => {
+    const resting: SessionView = { ...session("s_rest", "ws_b"), prompt: "old refactor" };
+    useStore.setState({ places: [here, laptop], workspaces: [{ ...onLaptop, name: "spoo-fix" }], sessions: { ws_b: [resting] } });
+    await mountComputers(computersApi().api, { kind: "computer", id: "p_1" });
+    expect(document.querySelector("[data-settings-page] [data-settings-card='threads']")).toBeNull();
+  });
+
+  it("says its facts as lines, the login it dials and how long the last dial took as rows", async () => {
     // Stamps against the clock the page reads, so the words hold whatever day the suite runs.
     // A minute past the hour, since the page reads a clock quantised to the minute.
     const seen = new Date(Date.now() - 2 * 3_600_000 - 60_000).toISOString();
@@ -291,7 +325,7 @@ describe("a computer's own page", () => {
     useStore.setState({ places: [here, vps], workspaces: [{ ...onLaptop, place: "p_3", name: "spoo-fix" }], sessions: { ws_b: [session("s1", "ws_b"), session("s2", "ws_b")] } });
     await mountComputers(computersApi(dialling()).api, { kind: "computer", id: "p_3" });
     // The facts are lines with the value at the right and no sentence under them; the whole is on hover.
-    expect(lineLabels()).toEqual([WHERE_WORDS.system, WHERE_WORDS.size, WHERE_WORDS.diskFree, WHERE_WORDS.joined, "spoo-fix"]);
+    expect(lineLabels()).toEqual([WHERE_WORDS.system, WHERE_WORDS.size, WHERE_WORDS.diskFree, WHERE_WORDS.joined]);
     expect(lineValue("system")).toBe("Ubuntu 24.04, last seen 2 h ago");
     expect(lineOf("system")?.getAttribute("title")).toBe(WHERE_WORDS.systemHover);
     expect(lineValue("size")).toBe(fmtSize(vps.shape!, "cores"));
@@ -302,7 +336,6 @@ describe("a computer's own page", () => {
     expect(wordOf("address")).toBe("root@65.21.4.12 over ssh");
     expect(wordOf("answered")).toBe(`${absentRoad({ name: "vps", awayMs: 2 * 3_600_000 + 60_000 }).answered}, 14 ms`);
     expect(descriptionOf("answered")).toBe(WHERE_WORDS.answeredDescription);
-    expect(document.querySelector("[data-settings-page] [data-k='workspace-line'] [data-settings-word]")?.textContent).toBe("Running 2 threads");
     // The rows and the lines stand at their own two heights.
     expect(rowOf("address")?.className).toContain("h-16");
     expect(lineOf("system")?.className).toContain("h-11");
