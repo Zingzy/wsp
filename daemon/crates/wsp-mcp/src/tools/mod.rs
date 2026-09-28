@@ -3,9 +3,16 @@
 //! call that answers it through the host. CONTRIBUTING.md in this crate says how one is added.
 
 mod computers;
+mod exec;
+mod named;
+mod recipe;
+mod said;
 mod servers;
 mod skills;
 mod target;
+mod thread;
+mod turn;
+mod wait;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -44,6 +51,18 @@ pub const TOOLS: &[Tool] = &[
     servers::DISABLE,
     servers::ENABLE,
     servers::ADD_TOOLS,
+    turn::RUN,
+    turn::SEND,
+    thread::RENAME,
+    thread::FORGET,
+    thread::ALLOW,
+    thread::DENY,
+    wait::WAIT,
+    wait::RESTART,
+    thread::STOP,
+    exec::TOOL,
+    recipe::RECIPE,
+    recipe::SCAN,
 ];
 
 /// The tool of that name the state lists, with its entry there; none where that state lists no such tool, which the
@@ -139,24 +158,32 @@ pub(crate) mod held {
         required
     }
 
+    /// An `Option` field's type less the null schemars adds: a field the input may leave out is zod's optional,
+    /// which takes no null.
+    fn unnulled(typed: &Value, optional: bool) -> Value {
+        match typed.as_array() {
+            Some(types) if optional => {
+                let kept: Vec<&Value> = types.iter().filter(|t| *t != "null").collect();
+                if kept.len() == 1 {
+                    kept[0].clone()
+                } else {
+                    Value::from(kept.into_iter().cloned().collect::<Vec<_>>())
+                }
+            }
+            _ => typed.clone(),
+        }
+    }
+
     fn same_shape(side: &str, derived: &Value, listed: &Value) {
         let (ours, theirs) = (fields(derived), fields(listed));
         let names = |f: &[(String, Value)]| f.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>();
         assert_eq!(names(&ours), names(&theirs), "{side}: the fields");
         assert_eq!(required(derived), required(listed), "{side}: the fields required");
+        let optional = |name: &str| !required(derived).iter().any(|r| r == name);
         for ((name, ours), (_, theirs)) in ours.iter().zip(&theirs) {
-            if let Some(kind) = ours.get("type") {
-                assert_eq!(optional_as_zod(kind), theirs["type"], "{side}.{name}: the type");
+            if let Some(typed) = ours.get("type") {
+                assert_eq!(&unnulled(typed, optional(name)), &theirs["type"], "{side}.{name}: the type");
             }
-        }
-    }
-
-    /// An `Option` field derives as its type or null; zod's optional field is its type, left out when absent, which
-    /// is what `skip_serializing_if` writes.
-    fn optional_as_zod(kind: &Value) -> Value {
-        match kind.as_array().map(|kinds| kinds.iter().filter(|k| *k != "null").collect::<Vec<_>>()) {
-            Some(kinds) if kinds.len() == 1 => kinds[0].clone(),
-            _ => kind.clone(),
         }
     }
 

@@ -105,24 +105,25 @@ pub fn words() -> Words {
     read("words.json", WORDS)
 }
 
-/// A recorded sentence with each `{name}` in it filled, in one pass, so a value that reads like a placeholder is
-/// said as it is.
+/// A recorded sentence with each `{name}` in it filled, in one pass over the template: a value is never read again,
+/// so one that holds a placeholder's name stands as given. A `{name}` no fill names stays as it is.
 pub fn fill(template: &str, fills: &[(&str, &str)]) -> String {
     let mut said = String::with_capacity(template.len());
     let mut rest = template;
     while let Some(open) = rest.find('{') {
         said.push_str(&rest[..open]);
-        let after = &rest[open + 1..];
-        let named =
-            after.find('}').and_then(|close| fills.iter().find(|(name, _)| *name == &after[..close]).map(|(_, value)| (close, value)));
+        let named = rest[open + 1..].find('}').and_then(|close| {
+            let name = &rest[open + 1..open + 1 + close];
+            fills.iter().find(|(n, _)| *n == name).map(|(_, value)| (*value, open + close + 2))
+        });
         match named {
-            Some((close, value)) => {
+            Some((value, past)) => {
                 said.push_str(value);
-                rest = &after[close + 1..];
+                rest = &rest[past..];
             }
             None => {
                 said.push('{');
-                rest = after;
+                rest = &rest[open + 1..];
             }
         }
     }
@@ -219,6 +220,8 @@ mod tests {
         let words = words();
         let noted = fill(&words.no_host_serving, &[("state", "/s/state.json")]);
         assert!(noted.contains("/s/state.json") && !noted.contains('{'), "{noted}");
+        assert_eq!(fill("{a} and {b}, {c} {a}", &[("a", "{b}"), ("b", "x}")]), "{b} and x}, {c} {b}");
+        assert_eq!(fill("{ {a}", &[("a", "1")]), "{ 1");
     }
 
     #[test]
