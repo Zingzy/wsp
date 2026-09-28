@@ -35,7 +35,7 @@ export interface BridgeSession {
 /** What a page served by a host somewhere else may ask the shell for: the device token the shell holds for that
  * host, the hosts list, a move back to this computer, and the shell's own presentation. Everything that reads this
  * computer or writes its host records is the app's own host's page alone. */
-const REMOTE_CHANNELS: ReadonlySet<string> = new Set(["hosts:token", "hosts:list", "hosts:switch", "menu:context", "terminal:focus", "theme:set", "outside:say", "badge:set"]);
+const REMOTE_CHANNELS: ReadonlySet<string> = new Set(["hosts:token", "hosts:list", "hosts:switch", "menu:context", "terminal:focus", "theme:set", "glass:set", "outside:say", "badge:set"]);
 
 /** Whether a page on this session may call this channel: every one on the app's own host, the narrow set above on
  * a host somewhere else. */

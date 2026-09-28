@@ -2370,6 +2370,8 @@ export interface DesktopBridge {
   onShellChord(handler: (chord: ShellChord) => void): () => void;
   /** The theme the page draws, so the window's frame, glass and traffic-light bar follow it. */
   setTheme(theme: ThemePreference): void;
+  /** Whether the page draws glass, so the window's own glass is on under it and off under a page drawn solid. */
+  setGlass(glass: boolean): void;
   /** Something the person should hear about outside the app (a build waiting, a machine up, a prompt, a finished
    * turn): the shell shows a system notification while its window has no focus, and nothing while it has, since the
    * page already says it. The page decides nothing about focus; the shell owns that. */

@@ -81,7 +81,7 @@ import { useComposerFilesStore } from "../../src/components/chat/composerFiles";
 import { requestProjectTrip } from "../../src/shell/shellRequests";
 import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
-import { applyTheme } from "../../src/settings/theme";
+import { applyTheme, useTransparencyEffect } from "../../src/settings/theme";
 import "../../src/index.css";
 import { caps } from "../caps.js";
 import { noDaemonApi } from "../fake-daemon-api.js";
@@ -756,12 +756,18 @@ function HostRule() {
   }, []);
   return null;
 }
+/** The app's own glass rule, so the computer's Reduce transparency reaches the page as it does in the app. */
+function GlassRule() {
+  useTransparencyEffect();
+  return null;
+}
 function LineRule() {
   useWorkspaceLineNotices();
   return null;
 }
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
+    <GlassRule />
     {params.get("silent") === "1" ? <LineRule /> : null}
     {params.get("version") === "behind" ? <VersionRule /> : null}
     {params.get("host") === "1" ? <HostRule /> : null}
