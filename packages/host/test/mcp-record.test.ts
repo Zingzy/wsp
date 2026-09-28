@@ -18,11 +18,12 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { LATEST_PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, agentName } from "@wsp/catalog";
-import { CLOUD_ENV, cloudFromEnv, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, noSuchPlaceRefusal, unclosedQuoteRefusal, validatorRefusal, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
+import { SEAL_REFUSAL } from "@wsp/keys";
+import { CLOUD_ENV, cloudFromEnv, EXIT_CODES, HERE_PLACE_ID, HOST_CLOSED_LINE, HOST_KEY_ENV, HOST_STOPPING_CLOSE, HOST_STOPPING_LINE, HOST_TOKEN_ENV, HOST_URL_ENV, KIND_CLASS, LAUNCHED_WITH, LOOPBACK, SKILL_PREVIEW_BYTES, WS_PATH, isLoopback, isUrl, isWildcard, servedHostname, wsUrlOf, hostNoKeyLine, jsonLine, NEWER_TURN_LINE, noMessagesLine, noReplyLine, NO_TERMINAL_CONFIG_LINE, refusalLine, scopedNoPairLine, commandWords, authRefusal, deviceAuthOldHostLine, noSuchPlaceRefusal, pairKeyRefusal, SEAL_CLIENT, unclosedQuoteRefusal, validatorRefusal, type PlaceSpend, type PlaceView, type ServerToolsAnswer } from "@wsp/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { hostExitedLine, noHostAnsweredLine, startingHostLine } from "../src/host-start.js";
 import { hostLogPath, hostTokenPath, lockPathFor, POLL_MS, SERVICE_WAIT_MS, STARTED_BY_ENV } from "../src/host-lock.js";
-import { relayRecordPath } from "../src/account.js";
+import { deviceKeyPath, relayRecordPath } from "../src/account.js";
 import { PROBE_MS } from "../src/service.js";
 import { defaultHomeIn } from "../src/serving-home.js";
 import { addressNotPairedLine, aliasOk, deviceRefusedLine, dialWindowMs, hostsDir, NAME_ONE_HOST, noAnswerRefusal, noAnswerWithin, noSuchHostAmong, READ_THE_HOSTS, severalAccountHostsLine } from "../src/hosts.js";
@@ -175,6 +176,8 @@ async function words(): Promise<Record<string, unknown>> {
     hostNoKey: hostNoKeyLine("{where}"),
     launchedWith: LAUNCHED_WITH,
     deviceRefused: deviceRefusedLine("{alias}"),
+    pairKey: pairKeyRefusal("{url}"),
+    deviceAuthOldHost: deviceAuthOldHostLine("{where}"),
     scopedNoPair: scopedNoPairLine,
     startingHost: startingHostLine("{state}", "{log}"),
     noHostAnswered: noHostAnsweredLine("{state}", SERVICE_WAIT_MS),
@@ -233,7 +236,7 @@ async function words(): Promise<Record<string, unknown>> {
 function host(): Record<string, unknown> {
   const beside = (path: string): string => relative("/state", path);
   return {
-    files: { lock: beside(lockPathFor("/state/state.json")), token: beside(hostTokenPath("/state/state.json")), log: beside(hostLogPath("/state/state.json")), relay: beside(relayRecordPath("/state/state.json")), hosts: relative("/home", hostsDir("/home")), home: relative("/user", defaultHomeIn("/user")) },
+    files: { lock: beside(lockPathFor("/state/state.json")), token: beside(hostTokenPath("/state/state.json")), log: beside(hostLogPath("/state/state.json")), relay: beside(relayRecordPath("/state/state.json")), hosts: relative("/home", hostsDir("/home")), home: relative("/user", defaultHomeIn("/user")), deviceKey: relative("/home", deviceKeyPath("/home")) },
     env: { host: "WSP_HOST", home: "WSP_HOME", url: HOST_URL_ENV, token: HOST_TOKEN_ENV, key: HOST_KEY_ENV, startedBy: STARTED_BY_ENV, cloud: CLOUD_ENV },
     clouds: Object.fromEntries(["1", "", "0", "true", " 1"].map(word => [word, cloudFromEnv({ [CLOUD_ENV]: word })])),
     startedBy: "verb",
@@ -247,6 +250,8 @@ function host(): Record<string, unknown> {
     pollMs: POLL_MS,
     probeMs: PROBE_MS,
     loopback: LOOPBACK,
+    sealClient: SEAL_CLIENT,
+    sealRefusal: SEAL_REFUSAL,
     loopbacks: Object.fromEntries(["localhost", "::1", "[::1]", "127.0.0.1", "127.1.2.3", "127.0.0.1.2", "10.0.0.1", "example.com", "0.0.0.0"].map(word => [word, isLoopback(word)])),
     wildcards: Object.fromEntries(["0.0.0.0", "::", "127.0.0.1", "::1", ""].map(word => [word, isWildcard(word)])),
     urls: Object.fromEntries(
@@ -319,12 +324,18 @@ function modulesIn(cloud: boolean): Promise<{ mcpServer: typeof mcpServer; c1Esc
  * went is dialled again as a fresh one. With
  * `result`, the tool answers that and asks nothing, for a tool whose answer is read off this computer rather than off
  * a host. */
-async function answeredLine(tool: string, args: Record<string, unknown>, replies: Record<string, string>, extra: Pick<TurnCase, "pushed" | "closes" | "env" | "cloud"> & { result?: Record<string, unknown> } = {}): Promise<{ line: string; asked: Record<string, unknown>[] }> {
+async function answeredLine(
+  tool: string,
+  args: Record<string, unknown>,
+  replies: Record<string, string>,
+  extra: Pick<TurnCase, "pushed" | "closes" | "env" | "cloud"> & { result?: Record<string, unknown>; refused?: Error } = {},
+): Promise<{ line: string; asked: Record<string, unknown>[] }> {
   const { mcpServer, c1Escaped } = await modulesIn(extra.cloud === true);
   const asked: Record<string, unknown>[] = [];
   let host = answeringHost(replies, asked, extra.pushed, extra.closes);
   const dial = Object.assign(
     async () => {
+      if (extra.refused !== undefined) throw extra.refused;
       if (host.gone()) host = answeringHost(replies, asked, extra.pushed, extra.closes);
       return host;
     },
@@ -525,6 +536,9 @@ async function regeneratedHere(): Promise<Files> {
   files.set("record/words.json", fileText({ ...(await words()), workspaces: await workspaceWords(answeredLine, replies => answeringHost(replies, [])) }));
   files.set("record/host.json", fileText(host()));
   files.set("tests/refusals.json", fileText(await refusals()));
+  // A host that did not prove the pinned key, refused where the dial refuses it: the whole line the tool answers.
+  const sealedUrl = "http://127.0.0.1:{port}";
+  files.set("tests/sealed.json", fileText({ tool: "computers", url: sealedUrl, line: (await answeredLine("computers", {}, {}, { refused: authRefusal(pairKeyRefusal(sealedUrl)) })).line }));
   // Each tool as it is listed with the cloud off and on, and null in the state that lists no such tool.
   const entry = (tools: Record<string, unknown>[], name: string): Record<string, unknown> | null => tools.find(t => t["name"] === name) ?? null;
   for (const name of new Set([...off.tools, ...on.tools].map(t => String(t["name"])))) files.set(`record/tools/${name}.json`, fileText({ cloudOff: entry(off.tools, name), cloudOn: entry(on.tools, name) }));
@@ -561,8 +575,8 @@ describe("the record the daemon binary's tool server serves from", () => {
       mkdirSync(join(out, rel, ".."), { recursive: true });
       writeFileSync(join(out, rel), text);
     }
-    const ask = `daemon/crates/wsp-mcp is behind this package. The regenerated files are under ${out}: rm -rf daemon/crates/wsp-mcp/record daemon/crates/wsp-mcp/tests/answers daemon/crates/wsp-mcp/tests/refusals.json && cp -R ${out}/. daemon/crates/wsp-mcp/ and commit them`;
-    expect([...committedUnder(RECORD, "record/"), ...committedUnder(ANSWERS, "tests/answers/"), ...(existsSync(join(CRATE, "tests", "refusals.json")) ? ["tests/refusals.json"] : [])].sort(), ask).toEqual([...files.keys()].sort());
+    const ask = `daemon/crates/wsp-mcp is behind this package. The regenerated files are under ${out}: rm -rf daemon/crates/wsp-mcp/record daemon/crates/wsp-mcp/tests/answers daemon/crates/wsp-mcp/tests/refusals.json daemon/crates/wsp-mcp/tests/sealed.json && cp -R ${out}/. daemon/crates/wsp-mcp/ and commit them`;
+    expect([...committedUnder(RECORD, "record/"), ...committedUnder(ANSWERS, "tests/answers/"), ...["refusals.json", "sealed.json"].filter(name => existsSync(join(CRATE, "tests", name))).map(name => `tests/${name}`)].sort(), ask).toEqual([...files.keys()].sort());
     for (const [rel, text] of files) expect(readFileSync(join(CRATE, rel), "utf8"), `${rel}: ${ask}`).toBe(text);
   });
 

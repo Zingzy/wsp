@@ -4264,6 +4264,7 @@ const DAEMON_CONTENTS = [
   "12dc3a3741a25239969103531def3c28df0874e9233825d16f7063a84df345c6",
   "ca0a7c835985a42469446d3efd1e622568ef0772725ddf4700efc631038f6c1f",
   "11da9462eb0cc7aa26e3f05feed71e2e27774769026dfa6d7a4f3a08f6511ebb",
+  "16e43173fadb40a741a588b14470f652528a4202fd434c2b9dc2702c7d78fc7c",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4491,7 +4492,9 @@ const DAEMON_CONTENTS = [
  * Version 86 writes into a copy: git.commit commits the files named with the message on stdin, git.discard puts one
  * file back as HEAD has it, and fs.write replaces a file's contents whole; git.diff gains the head scope with untracked
  * files as new, paths, whole files in one hunk, and each file's blob id; a discard takes the folders it left empty, and
- * the binary's version verb prints this number. */
+ * the binary's version verb prints this number.
+ * Version 87 changes no behaviour: the place link's seal moved into a crate of its own, which the tool server's dial
+ * to a host somewhere else links too, so the crate's sources and the lock moved. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

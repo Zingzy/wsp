@@ -12,6 +12,8 @@
   "hostNoKey": "{where} names a host and no key for it, so this computer cannot tell which host it would be sending its token to; run wsp hosts to read the account's hosts again",
   "launchedWith": "the launch this turn started with",
   "deviceRefused": "the host {alias} refused this computer's token, which it has taken away; run wsp logout, wsp login and wsp hosts to sign this computer in again.",
+  "pairKey": "the host at {url} did not prove the key this computer holds for it, so it is not that host; nothing was sent to it",
+  "deviceAuthOldHost": "the host at {where} runs an older wsp, whose door does not know how a computer on the account comes in; update wsp on that computer and run wsp up there again",
   "scopedNoPair": "this thread's tools were launched without its own host token, so they refuse rather than act as the person; the agent did not pass WSP_HOST_URL and WSP_HOST_TOKEN to its MCP server",
   "startingHost": "starting the host for {state}; its log is {log}, and wsp down stops it",
   "noHostAnswered": "no host answered for {state} within 20s",

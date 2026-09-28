@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "wsp-seal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The keys and the seal of a wsp link: ed25519 proofs, key fingerprints and the AEAD every frame after a handshake travels inside"
+
+[dependencies]
+# The link's own key agreement and cipher; the same build rustls already pins, so the two never disagree.
+ring = "0.17"
+ed25519-dalek = { version = "3", features = ["pem"] }
+base64.workspace = true
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json.workspace = true

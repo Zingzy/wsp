@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The host the tools speak to: one socket kept across calls, dropped when it closes so the next call dials again,
-//! and the aim read afresh at every dial, as packages/host/src/mcp.ts `dialer` keeps it.
+//! and the aim read afresh at every dial, as packages/host/src/mcp.ts `dialer` keeps it. A host on the account that
+//! holds no token of this computer's yet, or no longer takes the one it holds, admits it on its device key once, and
+//! the token it answers is written into the record, as packages/host/src/verbs.ts `dialHost` does.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -8,17 +10,12 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
 
-use crate::aim::{self, Aim, Pick};
-use crate::client::{self, Client};
+use crate::aim::{self, Aim, HostRecord, Pick};
+use crate::client::{self, Admit, Client, Dial, Presents};
 use crate::failure::Failure;
 use crate::record::{self, fill};
 use crate::start;
 use crate::{Args, Env};
-
-/// What a call aimed at a host that pins a key gets from this server, which opens no seal: the command line's own
-/// server opens one, so the line that reaches that host is the same words typed to the wsp command.
-const SEALED_ROAD: &str =
-    "the host at {where} pins the key it proves, and this tool server opens no sealed road; run wsp mcp from the wsp command to reach it";
 
 /// Whether the cloud is on, read off the variable as the protocol's cloudFromEnv reads it: the greeting and the list
 /// are the TypeScript server's for that state.
@@ -102,25 +99,63 @@ impl Host {
                     start::started(state, &self.args.wsp, &self.env, &mut |line| eprintln!("{line}")).await?;
                 }
                 let (url, token, at) = aim::here_door(state)?;
-                client::dial(&url, &token, &at, window, None).await
+                let to = Dial { url: &url, at: &at, window, pinned: None, alias: None };
+                Ok(client::dial(&to, Presents::Token(&token)).await.map_err(|r| r.failure)?.0)
             }
             Aim::Url { url, token, host_key } => {
                 let Some(token) = token else {
                     return Err(Failure::usage(fill(&record::words().address_not_paired, &[("url", url)])));
                 };
-                if host_key.is_some() {
-                    return Err(Failure::new(fill(SEALED_ROAD, &[("where", url)])));
-                }
-                client::dial(&ws_url(url)?, token, url, window, None).await
+                let to = Dial { url: &ws_url(url)?, at: url, window, pinned: host_key.as_deref(), alias: None };
+                Ok(client::dial(&to, Presents::Token(token)).await.map_err(|r| r.failure)?.0)
             }
-            Aim::Alias { alias, record } => {
-                if record.host_key.is_some() || record.device_token.is_empty() {
-                    return Err(Failure::new(fill(SEALED_ROAD, &[("where", &record.url)])));
-                }
-                client::dial(&ws_url(&record.url)?, &record.device_token, &record.url, window, Some(alias)).await
-            }
+            Aim::Alias { alias, record } => self.dial_account(alias, record, window).await,
         }
     }
+
+    /// A host on the account. A record written off the listing holds no token until its first dial, which is
+    /// admitted on the key this computer signs with; a token that host took away while the account still names this
+    /// computer is one more dial, proving the key. Either way the token it answers is written into the record.
+    async fn dial_account(&self, alias: &str, record: &HostRecord, window: Duration) -> Result<Client, Failure> {
+        let admitting = || -> Option<Admit> {
+            record.host_key.as_ref()?;
+            let key = aim::device_key(&self.home)?;
+            Some(Admit { name: hostname(), public_key: key.public_key, private_key_pem: key.private_key_pem })
+        };
+        let admit = if record.device_token.is_empty() { admitting() } else { None };
+        let url = ws_url(&record.url)?;
+        let to = Dial { url: &url, at: &record.url, window, pinned: record.host_key.as_deref(), alias: Some(alias) };
+        let first = match &admit {
+            Some(key) => Presents::Admit(key),
+            None => Presents::Token(&record.device_token),
+        };
+        let (client, paired) = match client::dial(&to, first).await {
+            Ok(dialled) => dialled,
+            Err(refused) if admit.is_none() && refused.token && refused.failure.kind.as_deref() == Some("auth") => {
+                let Some(key) = admitting() else { return Err(refused.failure) };
+                client::dial(&to, Presents::Admit(&key)).await.map_err(|r| r.failure)?
+            }
+            Err(refused) => return Err(refused.failure),
+        };
+        if let Some(paired) = paired {
+            let mut kept = record.clone();
+            (kept.device_id, kept.device_token) = (paired.device_id, paired.device_token);
+            aim::write_host(&self.home, alias, &kept).map_err(|e| Failure::new(e.to_string()))?;
+        }
+        Ok(client)
+    }
+}
+
+/// What this computer calls itself, as node's os.hostname reads it: the name an admission gives the host's listing.
+fn hostname() -> String {
+    let mut name = [0u8; 256];
+    // SAFETY: the buffer is ours and its length is the one handed in.
+    let read = unsafe { libc::gethostname(name.as_mut_ptr().cast(), name.len()) };
+    if read != 0 {
+        return String::new();
+    }
+    let end = name.iter().position(|b| *b == 0).unwrap_or(name.len());
+    String::from_utf8_lossy(&name[..end]).into_owned()
 }
 
 fn ws_url(url: &str) -> Result<String, Failure> {
