@@ -1,0 +1,31 @@
+{
+  "tool": "projects",
+  "cases": [
+    {
+      "case": "rows",
+      "arguments": {},
+      "replies": {
+        "projects.list": "{\"id\":1,\"ok\":true,\"projects\":[{\"10\":1,\"id\":\"proj-1\",\"name\":\"zingzy's \u0085box\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/w\"},\"path\":\"/w\",\"remote\":\"\",\"defaultBranch\":\"main\",\"memoryKey\":\"-w\",\"memoryDir\":\"/m/-w\",\"createdAt\":\"2026-09-27T00:00:00.000Z\"}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"projects\\\": [\\n    {\\n      \\\"10\\\": 1,\\n      \\\"id\\\": \\\"proj-1\\\",\\n      \\\"name\\\": \\\"zingzy's \\\\u0085box\\\\u007f \\\\\\\"one\\\\\\\" \\\\\\\\ two\\\\nthree 🧪\\\",\\n      \\\"computer\\\": \\\"here\\\",\\n      \\\"source\\\": {\\n        \\\"kind\\\": \\\"folder\\\",\\n        \\\"path\\\": \\\"/w\\\"\\n      },\\n      \\\"path\\\": \\\"/w\\\",\\n      \\\"remote\\\": \\\"\\\",\\n      \\\"defaultBranch\\\": \\\"main\\\",\\n      \\\"memoryKey\\\": \\\"-w\\\",\\n      \\\"memoryDir\\\": \\\"/m/-w\\\",\\n      \\\"createdAt\\\": \\\"2026-09-27T00:00:00.000Z\\\"\\n    }\\n  ]\\n}\"}],\"structuredContent\":{\"projects\":[{\"10\":1,\"id\":\"proj-1\",\"name\":\"zingzy's \\u0085box\\u007f \\\"one\\\" \\\\ two\\nthree 🧪\",\"computer\":\"here\",\"source\":{\"kind\":\"folder\",\"path\":\"/w\"},\"path\":\"/w\",\"remote\":\"\",\"defaultBranch\":\"main\",\"memoryKey\":\"-w\",\"memoryDir\":\"/m/-w\",\"createdAt\":\"2026-09-27T00:00:00.000Z\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.list"
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {},
+      "replies": {
+        "projects.list": "{\"id\":1,\"ok\":false,\"error\":\"projects.list failed\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"projects.list failed\"}],\"structuredContent\":{\"error\":\"projects.list failed\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.list"
+        }
+      ]
+    }
+  ]
+}

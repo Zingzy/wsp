@@ -282,6 +282,21 @@ describe("the sections the live list is drawn in", () => {
     expect(sections(asked)).toEqual([["needs-you", [["away", ["child"]]]]]);
   });
 
+  it("keeps a snoozed tree reachable while a thread in it runs: its root alone at the foot of Idle, folded, carrying how many work", () => {
+    const snoozedUntil = new Date(NOW + 3_600_000).toISOString();
+    const running = [row("ws_a", "pr_1", [done("away", "ws_a", 30, null, { snoozedUntil }), thread("child", "ws_a", "away"), thread("grandchild", "ws_a", "child"), done("here", "ws_a", 0.1)])];
+    const tiles = sidebarTiles(running, { picked: null, nowMs: NOW });
+    expect(sections(running)).toEqual([["idle", ["here", "away"]]]);
+    const away = tiles.live.find(node => node.thread.id === "away")!;
+    expect(away.children).toEqual([]);
+    expect(away.thread.snoozedWorking).toBe(2);
+    // What it holds, so the root reads as selected while one of its hidden threads is open in the centre.
+    expect(away.thread.holds).toEqual(["away", "child", "grandchild"]);
+    // A tree that is not snoozed carries no count, and one whose threads all rest stays out, as before.
+    expect(tiles.live.find(node => node.thread.id === "here")!.thread.snoozedWorking).toBeUndefined();
+    expect(shape(sidebarTiles([row("ws_a", "pr_1", [done("away", "ws_a", 30, null, { snoozedUntil }), done("child", "ws_a", 30, "away")])], { picked: null, nowMs: NOW }).live)).toEqual([]);
+  });
+
   it("the next thread that needs the person is the first after the open one in the drawn order, children included, wrapping to the top", () => {
     const rows = [
       row("ws_a", "pr_1", [

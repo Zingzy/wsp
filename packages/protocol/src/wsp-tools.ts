@@ -10,6 +10,13 @@ import { serverTool } from "./format.js";
  * config on this computer and the launch a turn on a machine gets name one server and not two. */
 export const MCP_SERVER_NAME = "wsp";
 
+/** How long an agent that holds its own limit on a tool call lets a wsp call run, which Codex reads as the server
+ * entry's tool_timeout_sec: 300 s by default since openai/codex#28234, 60 s before it. A send or a run waits through
+ * a wake before its turn starts, and a paused Boat's wake is its resume and then its daemon's budget to answer, which
+ * together run past that default; the reply comes after. No limit covers every reply, since a turn has no bound; an
+ * hour holds the slowest wake with a long first turn behind it, and work past that is what detach and notify are for. */
+export const WSP_TOOL_TIMEOUT_SEC = 3600;
+
 /** Where each wsp call that does not answer until another thread's turn is over names the thread it is behind: the
  * input field holding the references, or `opened` for the call that follows the thread it starts, which has no id
  * until the call has made one. Adding a verb that blocks is a row here and nothing else. */

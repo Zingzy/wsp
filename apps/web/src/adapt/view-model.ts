@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { ImageRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadPlacement, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadPlacement, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -21,7 +21,7 @@ export interface ChatMessage {
   readonly steered?: boolean;
   /** The images the person's message carried, as the runtime kept them: their type, weight and name, never their
    * pixels. Present on the message that opened the turn and only when it carried one. */
-  readonly attachments?: ReadonlyArray<ImageRecord>;
+  readonly attachments?: ReadonlyArray<AttachmentRecord>;
   /** The id the client minted for the send this message opened, echoed by the runtime; the client that made the send
    * still holds those images and draws them from it. */
   readonly requestId?: string;

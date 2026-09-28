@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { landBytes } from "../src/land-bytes.js";
 import { LOCAL_MACHINE_ID, LocalBackend, localShape } from "../src/local-backend.js";
 
 describe("local backend", () => {
@@ -120,5 +121,13 @@ describe("local backend", () => {
     // Deleting a local workspace drops its record only: kill is a no-op, never a stop.
     await expect(machine.kill()).resolves.toBeUndefined();
     expect(await machine.state()).toBe("running");
+  });
+
+  it("puts bytes on this computer by its own road, the folder made first and the file its owner's alone", async () => {
+    const machine = await new LocalBackend({ root }).get();
+    const path = join(root, "copy", ".wsp-files", "req_a", "report.pdf");
+    await landBytes(machine, path, new Uint8Array([0x25, 0x50, 0x44, 0x46]));
+    expect(readFileSync(path, "latin1")).toBe("%PDF");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 });

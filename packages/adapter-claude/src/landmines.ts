@@ -104,6 +104,9 @@ export interface BuildCommandOptions {
   name?: string;
   /** MCP servers this turn gets on top of the config dir's own, by the name each takes in a config. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** The model's faster output. The CLI takes it as the fastMode setting, which --settings carries for this launch
+   * alone; the result's fast_mode_state says whether the account served it (2.1.283, 2026-09-27). */
+  fast?: boolean;
 }
 
 // Model names carry a context suffix like "claude-opus-5[1m]"; nothing else a catalog value needs is outside this set.
@@ -153,7 +156,7 @@ function mcpConfigFlag(servers: Readonly<Record<string, McpServerSpec>> | undefi
  * on that channel, and EOF ends the process after its current turn.
  */
 export function buildCommand(options: BuildCommandOptions): string {
-  const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow, name, mcpServers } = options;
+  const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow, name, mcpServers, fast } = options;
   if ((sessionId === undefined) === (resume === undefined)) {
     throw new Error("buildCommand needs exactly one of sessionId or resume");
   }
@@ -174,6 +177,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     ...slugFlag("--effort", "effort", effort),
     ...(name === undefined ? [] : [`--name ${shellQuote(name)}`]),
     ...mcpConfigFlag(mcpServers),
+    ...(fast === true ? [`--settings ${shellQuote(JSON.stringify({ fastMode: true }))}`] : []),
     idFlag,
   ].join(" ");
   return inFolder(cwd, claude);

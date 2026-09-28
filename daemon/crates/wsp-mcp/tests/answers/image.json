@@ -1,0 +1,44 @@
+{
+  "tool": "image",
+  "cases": [
+    {
+      "case": "record",
+      "arguments": {},
+      "replies": {
+        "image.get": "{\"id\":1,\"ok\":true,\"view\":{\"projects\":[{\"snapshotId\":\"snap-p1\",\"projects\":[{\"name\":\"alpha\",\"dest\":\"/root/alpha\",\"importedAt\":\"2026-09-20T00:00:00.000Z\",\"size\":1234}],\"golden\":\"snap-g1\",\"version\":3,\"workspaceId\":\"ws-1\",\"workspaceName\":\"alpha \u0085\",\"createdAt\":\"2026-09-21T10:00:00.000Z\",\"sizeBytes\":900},{\"createdAt\":\"2026-09-21T10:00:00.000Z\",\"workspaceName\":\"alpha \u0085\",\"extra\":true,\"workspaceId\":\"ws-1\",\"version\":3,\"golden\":\"snap-g1\",\"projects\":[{\"importedAt\":\"2026-09-20T00:00:00.000Z\",\"dest\":\"/root/alpha\",\"name\":\"alpha\"}],\"snapshotId\":\"snap-p1\"}],\"copies\":[{\"place\":\"solari\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"snapshotId\":\"snap-c1\",\"builtAt\":\"2026-09-20T00:00:00.000Z\",\"sizeBytes\":1288490188},{\"snapshotId\":\"snap-c2\",\"place\":\"attic\",\"version\":1,\"builtAt\":\"2026-09-19T00:00:00.000Z\",\"unknown\":1}],\"image\":{\"name\":\"default\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"recipeHash\":\"r-1\",\"pins\":[{\"id\":\"node\",\"tag\":\"22.9.0\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},{\"id\":\"brew/core/some/formula\",\"tag\":\"1.0\",\"latest\":true,\"road\":\"brew\"},{\"id\":\"unknown-road-row\",\"tag\":\"2\",\"latest\":true,\"road\":\"nowhere\"}],\"logins\":[{\"name\":\"claude\",\"state\":\"signed-in\"},{\"name\":\"gh\",\"state\":\"copied\"},{\"name\":\"codex\",\"state\":\"skipped\"}],\"sealedAt\":\"2026-09-20T00:00:00.000Z\",\"sealedFrom\":\"zingzy's Mac \u0085\",\"vault\":{\"sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"bytes\":4096,\"paths\":1,\"takenAt\":\"2026-09-20T00:00:00.000Z\"},\"usedBytes\":5637144576}}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"default v2  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  2 sign-ins held, 1 path  5.3 GB  sealed on zingzy's Mac \\u0085\\nsolari  v2  1.2 GB  current\\nattic  v1  stale\\n  Node 22 with npm  22.9.0  checksum bbbbbbbbbbbb\\n  some/formula  1.0  installs latest with Homebrew\\n    2  installs latest\\nsnap-p1  project alpha \\u0085  alpha  900 B  2026-09-21T10:00:00.000Z\\nsnap-p1  project alpha \\u0085  alpha  2026-09-21T10:00:00.000Z\"}],\"structuredContent\":{\"image\":{\"name\":\"default\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"recipeHash\":\"r-1\",\"pins\":[{\"tag\":\"22.9.0\",\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"id\":\"node\"},{\"tag\":\"1.0\",\"latest\":true,\"id\":\"brew/core/some/formula\",\"road\":\"brew\"},{\"tag\":\"2\",\"latest\":true,\"id\":\"unknown-road-row\",\"road\":\"nowhere\"}],\"logins\":[{\"name\":\"claude\",\"state\":\"signed-in\"},{\"name\":\"gh\",\"state\":\"copied\"},{\"name\":\"codex\",\"state\":\"skipped\"}],\"sealedAt\":\"2026-09-20T00:00:00.000Z\",\"sealedFrom\":\"zingzy's Mac \\u0085\",\"vault\":{\"sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"bytes\":4096,\"paths\":1,\"takenAt\":\"2026-09-20T00:00:00.000Z\"},\"usedBytes\":5637144576},\"copies\":[{\"place\":\"solari\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"snapshotId\":\"snap-c1\",\"builtAt\":\"2026-09-20T00:00:00.000Z\",\"sizeBytes\":1288490188},{\"place\":\"attic\",\"version\":1,\"snapshotId\":\"snap-c2\",\"builtAt\":\"2026-09-19T00:00:00.000Z\"}],\"projects\":[{\"snapshotId\":\"snap-p1\",\"projects\":[{\"name\":\"alpha\",\"dest\":\"/root/alpha\",\"importedAt\":\"2026-09-20T00:00:00.000Z\",\"size\":1234}],\"golden\":\"snap-g1\",\"version\":3,\"workspaceId\":\"ws-1\",\"workspaceName\":\"alpha \\u0085\",\"createdAt\":\"2026-09-21T10:00:00.000Z\",\"sizeBytes\":900},{\"snapshotId\":\"snap-p1\",\"projects\":[{\"name\":\"alpha\",\"dest\":\"/root/alpha\",\"importedAt\":\"2026-09-20T00:00:00.000Z\"}],\"golden\":\"snap-g1\",\"version\":3,\"workspaceId\":\"ws-1\",\"workspaceName\":\"alpha \\u0085\",\"createdAt\":\"2026-09-21T10:00:00.000Z\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "image.get"
+        }
+      ]
+    },
+    {
+      "case": "no vault",
+      "arguments": {},
+      "replies": {
+        "image.get": "{\"id\":1,\"ok\":true,\"view\":{\"image\":{\"name\":\"default\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"recipeHash\":\"r-1\",\"logins\":[],\"sealedAt\":\"2026-09-20T00:00:00.000Z\",\"sealedFrom\":\"zingzy's Mac \u0085\"},\"copies\":[{\"snapshotId\":\"snap-c2\",\"place\":\"attic\",\"version\":1,\"builtAt\":\"2026-09-19T00:00:00.000Z\",\"unknown\":1}],\"projects\":[]}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"default v2  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  no sign-ins held; cut the next version to hold them  sealed on zingzy's Mac \\u0085\\nattic  v1\"}],\"structuredContent\":{\"image\":{\"name\":\"default\",\"version\":2,\"hash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"recipeHash\":\"r-1\",\"logins\":[],\"sealedAt\":\"2026-09-20T00:00:00.000Z\",\"sealedFrom\":\"zingzy's Mac \\u0085\"},\"copies\":[{\"place\":\"attic\",\"version\":1,\"snapshotId\":\"snap-c2\",\"builtAt\":\"2026-09-19T00:00:00.000Z\"}],\"projects\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "image.get"
+        }
+      ]
+    },
+    {
+      "case": "none",
+      "arguments": {},
+      "replies": {
+        "image.get": "{\"id\":1,\"ok\":true,\"view\":{\"image\":null,\"copies\":[],\"projects\":[]}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no image yet; run wsp init to build one\"}],\"structuredContent\":{\"image\":null,\"copies\":[],\"projects\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "image.get"
+        }
+      ]
+    }
+  ]
+}

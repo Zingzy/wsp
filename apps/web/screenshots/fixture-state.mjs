@@ -590,7 +590,7 @@ const macAndVps = () =>
     },
   });
 
-/** One fork on Box by ASCII, asleep: no workspace on this computer at all, and no thread on it, since this person
+/** One fork on Boat, asleep: no workspace on this computer at all, and no thread on it, since this person
  * has run nothing yet. This is the persona who comes to paste a key, so nothing of theirs may be awake and
  * spending while they type one: two running forks and $2.44 read to a tester as money already gone on a cloud
  * nobody had given a key to, and the meter moving a cent while the screen said "naps to $0" read as the product
@@ -821,6 +821,10 @@ const copyOn = (name, branch) => ({ road: "clonefile", path: join(HOME, "wsp-wor
  * out of the list, and the projects dragged into an order of their own. */
 const tilesMarked = () => tiles({ marked: true });
 
+/** The same sidebar with the lead's turn finished and the lead snoozed while two threads its agent opened still run:
+ * the tree keeps its root alone at the foot of Idle, saying quietly how many work. */
+const tilesSnoozed = () => tiles({ snoozedTree: true });
+
 /** The sidebar the locked tile screens draw: a root on this computer stopped on a question, with three threads its
  * agent opened under it, one working beside it here and two on a Solari fork of the same project, one working and one
  * resting; then a working thread on the joined computer spoo, a finished one nobody has opened yet on a
@@ -828,7 +832,7 @@ const tilesMarked = () => tiles({ marked: true });
  * three that were read and went quiet days ago, which fold into Settled. A fork carries no copy record and reads its branch off its own daemon, which no
  * stand-in machine answers for the project's folder, so its tiles show the agent's mark with no branch. One
  * workspace stands on this computer, for macInUse's reason, and each project wears a look, as a person picks one. */
-const tiles = ({ marked = false } = {}) => {
+const tiles = ({ marked = false, snoozedTree = false } = {}) => {
   const tree = { parent: "flaky", root: "flaky", startedBy: "agent" };
   const forkTree = { parentThreadId: threadId("flaky"), rootThreadId: threadId("flaky") };
   const spooPlace = place("p_spoo", "spoo", 1, { platform: "linux", os: "Ubuntu 24.04", runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, true);
@@ -854,7 +858,7 @@ const tiles = ({ marked = false } = {}) => {
     ],
     ...merge(
       threadsOn("ws_flaky", [
-        [tileThread("flaky", "Fix the three flaky checkout tests", { status: "running", asking: "Permission for Bash: pnpm test cart" }), 40],
+        [tileThread("flaky", "Fix the three flaky checkout tests", snoozedTree ? { seen: true, snoozed: true } : { status: "running", asking: "Permission for Bash: pnpm test cart" }), 40],
         [{ ...tileThread("address", "Address form race", { status: "running", agent: "codex" }), ...tree }, 6],
       ]),
       threadsOn("ws_solari", [
@@ -999,6 +1003,7 @@ const FIXTURES = {
   "thread-states": { build: threadStates, cloud: "box" },
   tiles: { build: tiles, cloud: "solari" },
   "tiles-marks": { build: tilesMarked, cloud: "solari" },
+  "tiles-snoozed": { build: tilesSnoozed, cloud: "solari" },
   "tiles-attempt": { build: tilesAttempt },
   "image-built": { build: imageBuilt },
   "long-prompt": { build: longPrompt },

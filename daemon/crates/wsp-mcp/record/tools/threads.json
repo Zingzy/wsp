@@ -220,6 +220,12 @@
               "rewoundAt": {
                 "type": "number"
               },
+              "permissionMode": {
+                "type": "string"
+              },
+              "fast": {
+                "type": "boolean"
+              },
               "projectName": {
                 "type": "string"
               },
@@ -478,6 +484,12 @@
               },
               "rewoundAt": {
                 "type": "number"
+              },
+              "permissionMode": {
+                "type": "string"
+              },
+              "fast": {
+                "type": "boolean"
               },
               "projectName": {
                 "type": "string"

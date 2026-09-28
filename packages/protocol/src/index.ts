@@ -11,7 +11,7 @@ import { z } from "zod";
 import { AgentSignInState, AgentsChangedEvent, AgentsTarget, ServerAdd, ServerAsk } from "./agents-report.js";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { CLOUD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
-import { ImageAttachment, ImageRecord } from "./attachments.js";
+import { Attachment, AttachmentRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
@@ -926,6 +926,8 @@ export const SessionView = z.object({
   effort: z.string().optional(),
   permissionMode: z.string().optional(),
   contextWindow: z.string().optional(),
+  /** The latest turn asked for the model's faster output; absent on a turn that did not. */
+  fast: z.boolean().optional(),
   /** The lead of the permission prompt this turn has open and nobody has answered, as askingLine writes it;
    * absent on a turn waiting on nobody. The harness is stopped on the question while it stands, so this is the one
    * fact that says a thread is waiting on the person rather than working. */
@@ -1009,6 +1011,9 @@ export const ThreadView = z.object({
   section: ThreadPlacement.optional(),
   /** As SessionView.rewoundAt: set while Undo rewind can put the files back. */
   rewoundAt: z.number().optional(),
+  /** The access and the fast mode the latest turn ran at, as its row carries them. */
+  permissionMode: z.string().optional(),
+  fast: z.boolean().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -1064,6 +1069,8 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.wokeAt !== undefined ? { wokeAt: latest.wokeAt } : {}),
       ...(latest.section !== undefined ? { section: latest.section } : {}),
       ...(latest.rewoundAt !== undefined ? { rewoundAt: latest.rewoundAt } : {}),
+      ...(latest.permissionMode !== undefined ? { permissionMode: latest.permissionMode } : {}),
+      ...(latest.fast === true ? { fast: true } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
@@ -1107,6 +1114,8 @@ export const HarnessModel = HarnessOption.extend({
    * for the harness; read through effortsFor, which falls back to the catalog's own mark. */
   defaultEffort: z.string().optional(),
   contextWindows: z.array(z.string()).optional(),
+  /** The model has a faster output the CLI turns on per turn; the composer offers Fast only on a model marked so. */
+  fast: z.boolean().optional(),
 });
 export type HarnessModel = z.infer<typeof HarnessModel>;
 
@@ -1306,7 +1315,15 @@ export interface StartPicks {
   model?: string;
   effort?: string;
   permissionMode?: string;
+  fast?: boolean;
 }
+
+/** The access mode that reads and plans and changes nothing, under the one word every agent's list carries it by:
+ * Claude Code's own mode, and on Codex a read-only run told to plan. The composer's plan toggle picks it. */
+export const PLAN_ACCESS = "plan";
+
+/** Why a start asked for fast on a model that has no faster output. */
+export const noFastLine = (model: string): string => `${model} has no fast mode; pick a model that offers it, or send without it`;
 
 /**
  * A remembered pick read against the list in front of us: the value where that list carries it, nothing where it
@@ -1329,11 +1346,13 @@ function listed(subject: string, word: string, options: ReadonlyArray<HarnessOpt
   throw Object.assign(new Error(said), { offered: options.length });
 }
 
-function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined): void {
+function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined, runsOn: string | undefined): void {
   if (catalog.models.length > 0) listed(catalog.harness, "model", catalog.models, picks.model, catalog.legacyModels);
   const chosen = modelOf(catalog, model);
   if (catalog.efforts.length > 0) listed(chosen?.efforts !== undefined ? chosen.label : catalog.harness, "effort", effortsFor(catalog, chosen), picks.effort);
   if (catalog.permissionModes.length > 0) listed(catalog.harness, "access mode", catalog.permissionModes, picks.permissionMode);
+  const fastOn = modelOf(catalog, model ?? runsOn);
+  if (picks.fast === true && fastOn !== null && fastOn.fast !== true) throw Object.assign(new Error(noFastLine(fastOn.label)), { kind: "invalid" });
 }
 
 /** The picks a start runs with, checked against the catalog: a value a list does not carry is refused naming the
@@ -1341,10 +1360,11 @@ function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: strin
  * start that opens a thread without a model runs the one the catalog marks default, and without an effort the one
  * effortsFor marks for that model, so every door runs what the composer shows; a resume keeps the thread's own.
  * Without a catalog (a harness the runtime has no table row for) every value passes and no default is filled. Only
- * the three picks come out, whatever else rides in. */
-export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPicks, opensThread: boolean): StartPicks {
+ * the three picks and fast come out, whatever else rides in; fast only where it was asked for. `runsOn` is the model a
+ * resumed thread already runs on, which a fast asked for with no model named is checked against. */
+export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPicks, opensThread: boolean, runsOn?: string): StartPicks {
   const model = picks.model ?? (opensThread && catalog !== undefined ? markedDefault(catalog.models)?.value : undefined);
-  if (catalog !== undefined) checkedAgainst(catalog, picks, model);
+  if (catalog !== undefined) checkedAgainst(catalog, picks, model, runsOn);
   const effort = picks.effort ?? (opensThread && catalog !== undefined ? markedDefault(effortsFor(catalog, modelOf(catalog, model)))?.value : undefined);
   // The access is filled in like the other two, so what the picker shows is what the CLI is told: an unnamed access
   // used to reach the adapter as nothing, which every adapter here reads as its own skip-everything flag. On a
@@ -1355,6 +1375,7 @@ export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPick
     ...(model !== undefined ? { model } : {}),
     ...(effort !== undefined ? { effort } : {}),
     ...(permissionMode !== undefined ? { permissionMode } : {}),
+    ...(picks.fast === true ? { fast: true } : {}),
   };
 }
 
@@ -1411,9 +1432,9 @@ export const SessionStartEvent = z.object({
   ...sessionScope,
   /** The user's turn; set by the runtime (the adapter never sees it) so a replayed transcript shows it. */
   prompt: z.string().optional(),
-  /** The images the person's message carried, as records: their type, their weight and their name, never their
-   * pixels, which reach the harness and nothing else. Absent on a turn that carried none. */
-  attachments: z.array(ImageRecord).optional(),
+  /** The files the person's message carried, as records: their type, their weight and their name, never their
+   * bytes, which reach the machine and nothing else. Absent on a turn that carried none. */
+  attachments: z.array(AttachmentRecord).optional(),
   /** The id the client minted for the sessions.start that opened this turn, stamped by the runtime; absent when the
    * client sent none. Two clients sending the same text at the same moment are told apart by this, not the prompt. */
   requestId: z.string().optional(),
@@ -5580,6 +5601,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
     effort: z.string().optional(),
     permissionMode: z.string().optional(),
     contextWindow: z.string().optional(),
+    /** The model's faster output for this turn; refused naming the model where its catalog row offers none. */
+    fast: z.boolean().optional(),
     /** Absent reads as person: the app never sends it, the command line sends cli, the MCP server sends agent. */
     startedBy: SessionOrigin.optional(),
     /** Minted by the client per send and echoed on the turn's session.start, so the client knows which start is its own. */
@@ -5598,9 +5621,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
     /** The name the thread is opened under, as a person's: it stands in every client at once, the harness is told it
      * too so its own UI says the same, and no generated title ever replaces it. Refused when it is blank. */
     title: z.string().optional(),
-    /** The images the message carries, in the order the person added them; refused with imagesRefusal's line over the
-     * caps, and refused naming the agent before the machine is asked when that agent's adapter reads no image. */
-    attachments: z.array(ImageAttachment).optional(),
+    /** The files the message carries, in the order the person added them; refused with filesRefusal's line over the
+     * caps, and refused naming the agent before the machine is asked when an image goes to an agent that reads none.
+     * An image rides its harness's road; any other file lands in the thread's folder and the prompt names it. */
+    attachments: z.array(Attachment).optional(),
   }),
   /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. With a workspace, the lists come
    * from the binaries on its machine where they answer; without one, from the runtime's table. */
@@ -6300,14 +6324,14 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceComputerName } from "./place-name.js";
 export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeCapRefusal, placeFullLine, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
-export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
+export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, type CopyToDelete, deleteCopiesNotice, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
 export { compareVersions } from "./semver.mjs";
-export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";
+export { attachedFilesPrompt, Attachment, attachmentBytes, attachmentLine, AttachmentRecord, attachmentRecord, FILE_MAX_BYTES, FILE_MAX_WORDS, FILES_AFTER_TURN, FILES_DIR, FILES_MAX, filePathIn, filesBlocked, filesNotLandedLine, filesRefusal, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, imagePathIn, imageTypeOf, isImage, dropFilesLine, landFilesLine, noImagesLine, notAFileLine, safeFileName, sendFilesDir, threadFilesDir, threadImagesDir, turnImagesDir, UNTYPED_FILE } from "./attachments.js";
 export * from "./oom.js";
 export { accruedAt, accruedPast, appendCostPoint, COST_HISTORY_CAP, dayStart, monthStart, rateAt, spentSince } from "./cost-history.js";
 export { leadAsk, openAsk, ThreadMessage, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";

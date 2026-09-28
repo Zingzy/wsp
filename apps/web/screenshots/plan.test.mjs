@@ -100,6 +100,7 @@ describe("a surfaces list", () => {
 
   it("refuses a route that is not one", () => {
     expect(() => list([{ name: "sidebar", at: "sidebar" }])).toThrow(/starting with \//);
+    expect(() => list([{ name: "sidebar", at: "/", widths: [] }])).toThrow(/one or more/);
   });
 
   it("refuses a width with no height, which the browser could not be sized to", () => {
@@ -164,6 +165,20 @@ describe("every row the surfaces list aims at", () => {
   });
 });
 
+describe("a surface that presses New workspace", () => {
+  it("picks one of its fixture's projects first, since the sidebar draws the control only while a project is picked", () => {
+    const SURFACES = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")).surfaces;
+    const pressing = SURFACES.filter(s => (s.steps ?? []).includes("k=new-workspace"));
+    expect(pressing.length).toBeGreaterThan(0);
+    for (const surface of pressing) {
+      const steps = surface.steps;
+      const projects = Object.keys(fixtureState(surface.fixture ?? "mac-in-use").projects ?? {});
+      const picked = steps.slice(0, steps.indexOf("k=new-workspace")).find(word => word.startsWith("switcher-option="));
+      expect([surface.name, projects.includes(picked?.slice("switcher-option=".length))]).toEqual([surface.name, true]);
+    }
+  });
+});
+
 describe("a surface taller than its width's window", () => {
   it("takes the height it names, and every other surface its width's own", () => {
     const read = list([{ name: "tall", at: "/", height: 1100 }, { name: "plain", at: "/" }], { widths: [1440] });
@@ -192,122 +207,18 @@ describe("a surface that names its own fixture", () => {
 });
 
 describe("the surfaces list this repo ships", () => {
+  // Every rule here is read off surfaces.json, so a surface added there is the whole of adding it: no list of names,
+  // fixtures or widths is kept in this file for two branches to both edit.
   it("reads, and asks for one file per surface, width and theme", () => {
-    const read = readSurfaces(JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")));
-    expect(read.surfaces.map(s => s.name)).toEqual([
-      "sidebar",
-      "workspace",
-      "composer-thread",
-      "composer-slash-menu",
-      "composer-slash-filtered",
-      "btw-asking",
-      "btw-answered",
-      "composer-slash-skills",
-      "composer-mention-menu",
-      "composer-hash-menu",
-      "composer-chips",
-      "machine",
-      "agents-here",
-      "mcp-servers-here",
-      "spawned-thread",
-      "threads-across-workspaces",
-      "opener-transcript",
-      "spawned-thread-header",
-      "host-asleep",
-      "composer-folder",
-      "composer-folder-refused",
-      "settings-computers",
-      "settings-computers-mac",
-      "settings-account",
-      "add-computer",
-      "add-cloud",
-      "agents-add",
-      "agents-add-server",
-      "settings-image-fresh",
-      "settings-image-built",
-      "settings-image-built-mac",
-      "settings-image-recipe",
-      "settings-computer-open",
-      "remove-computer",
-      "settings-general",
-      "settings-appearance",
-      "settings-projects",
-      "settings-devices",
-      "settings-keybindings",
-      "settings-keybindings-capture",
-      "settings-keybindings-refused",
-      "settings-about",
-      "new-workspace",
-      "first-run",
-      "creating-workspace",
-      "thread-status",
-      "threads-computers",
-      "threads-computers-shut",
-      "threads-computer-picked",
-      "threads-picker",
-      "thread-list",
-      "palette-threads",
-      "palette-search-messages",
-      "palette-open",
-      "panel-launcher",
-      "panel-launcher-mac",
-      "tiles",
-      "tiles-root",
-      "tiles-picker",
-      "tiles-settled-open",
-      "tiles-scrolled",
-      "tiles-paused-done",
-      "tiles-sections",
-      "tiles-marks",
-      "tiles-picker-ordered",
-      "tiles-snooze",
-      "tiles-attempt-group",
-      "tiles-attempt-keep",
-      "composer-multi-pick",
-      "timeline-rewind-hover",
-      "rewind-dialog",
-      "rewind-dialog-refused",
-      "rewind-dialog-files-only",
-      "new-thread-dialog",
-      "new-thread-held",
-      "add-project",
-      "add-project-clone-here",
-      "export-dialog",
-      "delete-dialog",
-      "browser-empty",
-      "diff-empty",
-      "long-prompt",
-      "composer-rest",
-      "composer-running",
-      "files-tree",
-      "files-file",
-      "file-finder",
-      "file-search",
-      "files-stopped",
-      "settings-editor",
-    ]);
-    // The one surface shot as a window on another computer, which is the only state the asleep line is drawn in.
-    expect(read.surfaces.filter(s => s.remote).map(s => s.name)).toEqual(["host-asleep"]);
-    // The surfaces that change what their host holds, a workspace made or a thread stamped read by opening it, which
-    // take a host of their own for every shot.
-    expect(read.surfaces.filter(s => s.fresh).map(s => s.name)).toEqual(["creating-workspace", "tiles-paused-done", "rewind-dialog-refused"]);
-    // Those served from a state of their own: an image that is built cannot stand in the same state file as one
-    // that never was, a thread whose agent opened threads elsewhere needs the workspaces those threads run on, and
-    // a person on the first run has no project added.
-    // Read off the list itself, so a surface added there is not a second edit here, and held to the rule a fixture
-    // keeps: a surface that opens the cloud road is served from one that names a cloud, since every other fixture's
-    // host runs with the cloud off.
-    const listed = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")).surfaces;
-    expect(read.surfaces.map(s => s.fixture)).toEqual(listed.map(s => s.fixture));
-    const clouded = listed.filter(s => (s.steps ?? []).some(word => word.endsWith("add-cloud-button")));
-    expect(clouded.map(s => [s.name, fixtureCloud(s.fixture)])).toEqual([["add-cloud", "box"]]);
-    // The side question, the first run, the Add surfaces and the keybinding and clone states are shot at the two widths a design reading is held to, New workspace at the
-    // one width whose sidebar carries its control, and the thread status, the two switchers, the threads list, the
-    // palette, the panel launcher and the tiles at the widest alone, as is a reply under the pointer, since a phone has
-    // no pointer to rest; the rest take every width the list shoots.
-    const narrowed = read.surfaces.filter(s => s.widths.length < read.widths.length);
-    expect(narrowed.map(s => [s.name, s.widths])).toEqual([["btw-asking", [1440, 390]], ["btw-answered", [1440, 390]], ["settings-computers-mac", [1440]], ["add-cloud", [1440, 390]], ["agents-add", [1440, 390]], ["agents-add-server", [1440, 390]], ["settings-image-built-mac", [1440]], ["settings-keybindings-capture", [1440, 390]], ["settings-keybindings-refused", [1440, 390]], ["new-workspace", [1440]], ["first-run", [1440, 390]], ["creating-workspace", [1440]], ["thread-status", [1440]], ["threads-computers", [1440]], ["threads-computers-shut", [1440]], ["threads-computer-picked", [1440]], ["threads-picker", [1440]], ["thread-list", [1440]], ["palette-threads", [1440]], ["palette-search-messages", [1440]], ["palette-open", [1440]], ["panel-launcher", [1440]], ["panel-launcher-mac", [1440]], ["tiles", [1440]], ["tiles-root", [1440]], ["tiles-picker", [1440]], ["tiles-settled-open", [1440]], ["tiles-scrolled", [1440]], ["tiles-paused-done", [1440]], ["tiles-sections", [1440, 390]], ["tiles-marks", [1440, 390]], ["tiles-picker-ordered", [1440, 390]], ["tiles-snooze", [1440, 390]], ["tiles-attempt-group", [1440, 390]], ["tiles-attempt-keep", [1440, 390]], ["composer-multi-pick", [1440, 390]], ["timeline-rewind-hover", [1440]], ...["rewind-dialog", "rewind-dialog-refused", "rewind-dialog-files-only"].map(name => [name, [1440, 390]]), ...["new-thread-dialog", "new-thread-held", "add-project"].map(name => [name, [1440]]), ["add-project-clone-here", [1440, 390]], ...["export-dialog", "delete-dialog", "browser-empty", "diff-empty", "long-prompt", "composer-rest", "composer-running"].map(name => [name, [1440]]), ...["files-tree", "files-file", "file-finder", "file-search", "files-stopped", "settings-editor"].map(name => [name, [1440, 390]])]);
+    const listed = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8"));
+    // Reading it holds each surface to a name no other takes and to widths the list shoots.
+    const read = readSurfaces(listed);
     expect(shotPlan(read)).toHaveLength(read.surfaces.reduce((n, s) => n + s.widths.length, 0) * 2);
+    // Each fixture a surface names is one the state file serves.
+    for (const s of read.surfaces) expect(() => fixtureState(s.fixture ?? "mac-in-use"), s.name).not.toThrow();
+    // A surface that opens the cloud road is served from a fixture that names a cloud, since every other fixture's host
+    // runs with the cloud off.
+    for (const s of listed.surfaces.filter(s => (s.steps ?? []).some(word => word.endsWith("add-cloud-button")))) expect([s.name, fixtureCloud(s.fixture) !== undefined]).toEqual([s.name, true]);
     // The app's own default window is one of them, so a row that only breaks at 1280 is photographed.
     expect(read.widths).toContain(1280);
     expect(read.heights[1280]).toBe(800);

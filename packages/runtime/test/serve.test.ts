@@ -437,9 +437,9 @@ describe("serveRuntime harness catalog", () => {
     expect((scoped["harnesses"] as { harness: string; source: string }[]).find(x => x.harness === "claude")?.source).toBe("table");
     const missing = await c.request("harnesses.list", { workspaceId: "ws_nope" });
     expect(missing.ok).toBe(false);
-    const started = await c.request("sessions.start", { workspaceId, prompt: "go", model: "claude-opus-5-5", effort: "high", permissionMode: "plan", contextWindow: "1m", requestId: "req_9" });
-    expect(started["session"]).toMatchObject({ model: "claude-sonnet-4-5", effort: "high", permissionMode: "plan", contextWindow: "1m" });
-    expect(h.lastStart).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "plan", contextWindow: "1m" });
+    const started = await c.request("sessions.start", { workspaceId, prompt: "go", model: "claude-opus-5-5", effort: "high", permissionMode: "plan", contextWindow: "1m", fast: true, requestId: "req_9" });
+    expect(started["session"]).toMatchObject({ model: "claude-sonnet-4-5", effort: "high", permissionMode: "plan", contextWindow: "1m", fast: true });
+    expect(h.lastStart).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "plan", contextWindow: "1m", fast: true });
     expect(h.lastStart).not.toHaveProperty("requestId");
     h.complete();
     const history = (await c.request("sessions.history", { workspaceId }))["events"] as { type: string; requestId?: string }[];
@@ -519,6 +519,31 @@ describe("serveRuntime session interrupt", () => {
     expect((await c.request("sessions.steer", { sessionId: "nope", prompt: "x" }))["outcome"]).toBe("not-found");
     expect((await c.request("sessions.steer", { sessionId: h.sessionId })).ok).toBe(false);
     c.close();
+  });
+
+  it("a thread the command line starts reaches a window already open: the window hears its start, and the rows it reads then hold it", async () => {
+    const h = stoppableHarness();
+    const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
+    const window = await WsClient.connect(srv.port, { token: "secret" });
+    await window.request("events.subscribe");
+    const created = await createOverWire(window, "x", { golden: "snap_g" });
+    const workspaceId = (created["workspace"] as { id: string }).id;
+    // What the window's store does on a start: it reads the workspace's rows again, at once.
+    let read: { id: string }[] | undefined;
+    window.ws.on("message", raw => {
+      const m = JSON.parse(String(raw)) as { type?: string; workspaceId?: string };
+      if (m.type === "session.start" && m.workspaceId === workspaceId) void window.request("sessions.list", { workspaceId }).then(r => (read = r["sessions"] as { id: string }[]));
+    });
+    const cli = await WsClient.connect(srv.port, { token: "secret" });
+    await cli.request("events.subscribe");
+    const started = await cli.request("sessions.start", { workspaceId, prompt: "go", startedBy: "cli", requestId: "req_cli" });
+    const sessionId = (started["session"] as { id: string }).id;
+    await until(() => read !== undefined);
+    expect(read!.map(row => row.id)).toContain(sessionId);
+    h.complete();
+    window.close();
+    cli.close();
   });
 
   it("sessions.start replies with how the start went: started on a fresh thread, steered when the thread's turn runs and the harness steers, with the running turn as the session", async () => {

@@ -122,7 +122,7 @@ async fn place_id(client: &Client, words: &Words, word: &str) -> Result<String, 
 }
 
 /// `refusalLine`: what happened, closed with a full stop where it does not close itself, then the fix.
-fn refusal_line(happened: &str, fix: &str) -> String {
+pub fn refusal_line(happened: &str, fix: &str) -> String {
     let said = happened.trim_end_matches(js_space);
     let stop = if said.ends_with(['.', '!', '?', ':']) { "" } else { "." };
     format!("{said}{stop} {fix}")

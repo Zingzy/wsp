@@ -16,7 +16,7 @@
 // twice, id 3 and id 4 either way round), so the reader counts answers rather
 // than watching for the last id it sent.
 
-import { codexNotSignedInLine, shellQuote } from "@wsp/protocol";
+import { PLAN_ACCESS, codexNotSignedInLine, shellQuote } from "@wsp/protocol";
 import type { HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe } from "@wsp/protocol";
 import { buildEnv } from "./command.js";
 
@@ -129,6 +129,7 @@ function modelsOf(listed: Record<string, unknown> | undefined, configured: strin
       ...(defaultEffort !== undefined ? { defaultEffort } : {}),
       contextWindows: [],
       isDefault: configured === undefined ? entry.isDefault === true : slug === configured,
+      ...(Array.isArray(entry.additionalSpeedTiers) && entry.additionalSpeedTiers.includes("fast") ? { fast: true } : {}),
     });
   }
   // A config that routes to another provider names a model codex's own catalog does not carry; it is what a turn
@@ -169,7 +170,8 @@ export function parseCatalogProbe(stdout: string, login: string): HarnessCatalog
     version: /(\d+\.\d+\.\d+)/.exec(versionPart)?.[1] ?? null,
     models,
     efforts: effortsOf(models),
-    permissionModes: possibleValues(help, "--sandbox <SANDBOX_MODE>"),
+    // Plan is this adapter's own mode on top of the read-only sandbox, so it is offered wherever the sandboxes are.
+    permissionModes: ((modes: string[]) => (modes.length > 0 ? [...modes, PLAN_ACCESS] : modes))(possibleValues(help, "--sandbox <SANDBOX_MODE>")),
   };
   return probe;
 }

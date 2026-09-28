@@ -79,7 +79,7 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     // The cheapest of the four at $1/$5 per Mtok, as the CLI's own handshake prices them (read 2026-09-23).
     smallModel: "claude-haiku-4-5-20251001",
     models: [
-      { ...option("claude-opus-5-5", "Opus 5.5"), isDefault: true, efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: ["200k", "1m"] },
+      { ...option("claude-opus-5-5", "Opus 5.5"), isDefault: true, fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: ["200k", "1m"] },
       { ...option("claude-fable-5-1", "Fable 5.1"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: ["200k", "1m"] },
       { ...option("claude-sonnet-5", "Sonnet 5"), efforts: ["low", "medium", "high", "xhigh", "max"], contextWindows: [] },
       { ...option("claude-haiku-4-5-20251001", "Haiku 4.5"), efforts: [], contextWindows: [] },
@@ -87,11 +87,11 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     // The pinned binary's own model catalog, which harness-catalog.test.ts holds these to: each is run as named, with
     // the levels, default and 1M suffix it lists. Opus 4.0 and 4.1 are run as the latest Opus and Sonnet 4.0 is retired.
     legacyModels: [
-      { ...option("claude-opus-5", "Opus 5"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: ["200k", "1m"] },
-      { ...option("claude-opus-4-8", "Opus 4.8"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: ["200k", "1m"] },
-      { ...option("claude-opus-4-7", "Opus 4.7"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "xhigh", contextWindows: ["200k", "1m"] },
-      { ...option("claude-opus-4-6", "Opus 4.6"), efforts: ["low", "medium", "high", "max"], contextWindows: ["200k", "1m"] },
-      { ...option("claude-opus-4-5", "Opus 4.5"), efforts: [], contextWindows: ["200k", "1m"] },
+      { ...option("claude-opus-5", "Opus 5"), fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: ["200k", "1m"] },
+      { ...option("claude-opus-4-8", "Opus 4.8"), fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: ["200k", "1m"] },
+      { ...option("claude-opus-4-7", "Opus 4.7"), fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "xhigh", contextWindows: ["200k", "1m"] },
+      { ...option("claude-opus-4-6", "Opus 4.6"), fast: true, efforts: ["low", "medium", "high", "max"], contextWindows: ["200k", "1m"] },
+      { ...option("claude-opus-4-5", "Opus 4.5"), fast: true, efforts: [], contextWindows: ["200k", "1m"] },
       { ...option("claude-fable-5", "Fable 5"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high", contextWindows: [] },
       { ...option("claude-sonnet-4-6", "Sonnet 4.6"), efforts: ["low", "medium", "high", "max"], contextWindows: ["200k", "1m"] },
       { ...option("claude-sonnet-4-5", "Sonnet 4.5"), efforts: [], contextWindows: ["200k", "1m"] },
@@ -127,14 +127,14 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     // The oldest generation model/list still offers, and the cheapest of them.
     smallModel: "gpt-5.2",
     models: [
-      { ...option("gpt-5.6-sol", "GPT-5.6-Sol"), isDefault: true, efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "low" },
-      { ...option("gpt-5.6-terra", "GPT-5.6-Terra"), efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "medium" },
-      { ...option("gpt-5.6-luna", "GPT-5.6-Luna"), efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "medium" },
+      { ...option("gpt-5.6-sol", "GPT-5.6-Sol"), isDefault: true, fast: true, efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "low" },
+      { ...option("gpt-5.6-terra", "GPT-5.6-Terra"), fast: true, efforts: ["low", "medium", "high", "xhigh", "max", "ultra"], defaultEffort: "medium" },
+      { ...option("gpt-5.6-luna", "GPT-5.6-Luna"), fast: true, efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "medium" },
     ],
     // A generation behind 5.6; model/list names every model the binary runs, these two among them.
     legacyListed: true,
     legacyModels: [
-      { ...option("gpt-5.5", "GPT-5.5"), efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" },
+      { ...option("gpt-5.5", "GPT-5.5"), fast: true, efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" },
       { ...option("gpt-5.2", "GPT-5.2"), efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "medium" },
     ],
     efforts: levels(["low", "medium", "high", "xhigh", "max", "ultra"], "low"),
@@ -146,6 +146,7 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
       option("read-only", "Read only", "Reads only; edits no files and runs no command that writes"),
       option("workspace-write", "Workspace write", "Edits files and runs commands inside the working folder"),
       option("danger-full-access", "Full access", "Runs every action without asking, with no folder off limits"),
+      option("plan", "Plan", "Reads and plans only; changes nothing, planning because it is asked to"),
     ],
   }),
   fromTable({
@@ -232,6 +233,7 @@ export function catalogFromProbe(table: HarnessCatalog, probe: HarnessCatalogPro
     ...(m.efforts !== undefined ? { efforts: [...m.efforts] } : {}),
     ...(m.defaultEffort !== undefined ? { defaultEffort: m.defaultEffort } : {}),
     contextWindows: [...m.contextWindows],
+    ...((m.fast ?? everyModel(table).find(t => t.value === m.slug)?.fast) === true ? { fast: true } : {}),
   }));
   const listsLegacy = table.legacyListed === true;
   const folded = (m: HarnessModel): boolean => listsLegacy && m.isDefault !== true && table.legacyModels?.some(l => l.value === m.value) === true;

@@ -1,0 +1,115 @@
+{
+  "tool": "stop",
+  "cases": [
+    {
+      "case": "stopped with the tree",
+      "arguments": {
+        "thread": "thread-7f"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
+        "sessions.interrupt": "{\"id\":1,\"ok\":true,\"outcome\":\"accepted\",\"under\":[\"thread-1111aaaa2222\",\"thread-3333bbbb4444\"]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-7f3a9c21e4b5 stopped, and with it 2 threads its agents spawned: thread-1, thread-3\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"outcome\":\"accepted\",\"under\":[\"thread-1111aaaa2222\",\"thread-3333bbbb4444\"]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.interrupt",
+          "sessionId": "sess-2"
+        }
+      ]
+    },
+    {
+      "case": "stopped with one under",
+      "arguments": {
+        "thread": "thread-7f3a9c21e4b5"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
+        "sessions.interrupt": "{\"id\":1,\"ok\":true,\"outcome\":\"accepted\",\"under\":[\"thread-1111aaaa2222\"]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-7f3a9c21e4b5 stopped, and with it 1 thread its agents spawned: thread-1\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"outcome\":\"accepted\",\"under\":[\"thread-1111aaaa2222\"]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.interrupt",
+          "sessionId": "sess-2"
+        }
+      ]
+    },
+    {
+      "case": "not running",
+      "arguments": {
+        "thread": "thread-7f3a9c21e4b5"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
+        "sessions.interrupt": "{\"id\":1,\"ok\":true,\"outcome\":\"not-running\",\"under\":[]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-7f3a9c21e4b5 not running\"}],\"structuredContent\":{\"threadId\":\"thread-7f3a9c21e4b5\",\"outcome\":\"not-running\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.interrupt",
+          "sessionId": "sess-2"
+        }
+      ]
+    },
+    {
+      "case": "not found by the host",
+      "arguments": {
+        "thread": "thread-b0b0b0b0c1c1"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}",
+        "sessions.interrupt": "{\"id\":1,\"ok\":true,\"outcome\":\"not-found\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread thread-b0b0b0b0c1c1 not found by the host\"}],\"structuredContent\":{\"threadId\":\"thread-b0b0b0b0c1c1\",\"outcome\":\"not-found\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.interrupt",
+          "sessionId": "sess-3"
+        }
+      ]
+    },
+    {
+      "case": "a prefix of two",
+      "arguments": {
+        "thread": "thread-"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"2 threads start with thread-; give more of the id\"}],\"structuredContent\":{\"error\":\"2 threads start with thread-; give more of the id\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        }
+      ]
+    },
+    {
+      "case": "no such thread",
+      "arguments": {
+        "thread": "nope"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"id\":\"sess-1\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"prompt\":\"fix the \u0085 build\",\"costUsd\":0.1},{\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"id\":\"sess-2\",\"threadId\":\"thread-7f3a9c21e4b5\",\"claudeSessionId\":\"cs-1\",\"costUsd\":0.2},{\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"completed\",\"id\":\"sess-3\",\"threadId\":\"thread-b0b0b0b0c1c1\"}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no thread nope\"}],\"structuredContent\":{\"error\":\"no thread nope\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        }
+      ]
+    }
+  ]
+}

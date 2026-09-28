@@ -1498,6 +1498,17 @@ describe("thread provenance", () => {
     expect("costUsd" in said!).toBe(false);
   });
 
+  it("foldThreads carries the access and the fast mode the latest turn ran at, so a listing shows a thread in plan or fast", () => {
+    const [thread, plain] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", permissionMode: "default" },
+      { ...row, id: "s2", threadId: "thr_a", permissionMode: "plan", fast: true },
+      { ...row, id: "s3", threadId: "thr_b" },
+    ]);
+    expect([thread!.permissionMode, thread!.fast]).toEqual(["plan", true]);
+    expect("permissionMode" in plain! || "fast" in plain!).toBe(false);
+    expect(ThreadView.parse(thread)).toEqual(thread);
+  });
+
   it("a thread reads as run once a turn of it did work: announcing a session is not enough, since both CLIs announce before they learn they have no sign-in", () => {
     const [worked, neverAnnounced, working, refused] = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", status: "failed", claudeSessionId: "c1" },

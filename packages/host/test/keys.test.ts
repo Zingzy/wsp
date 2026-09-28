@@ -400,9 +400,9 @@ describe("loadKeys", () => {
   it.runIf(CLOUD_ON)("a saved Box key the provider refused is said as Box's refusal, not Solari's", async () => {
     setup();
     mkdirSync(home);
-    writeFileSync(join(home, ".env"), `WSP_PROVIDER=box\nBOX_API_KEY=box_live_x\n`);
+    writeFileSync(join(home, ".env"), `WSP_PROVIDER=box\nBOAT_API_KEY=box_live_x\n`);
     const sources = { env: {}, cwd, statePath: state, checkKey: async () => ({ state: "refused" as const, said: "401 Unauthorized" }) };
-    await expect(loadKeys(fakeIO([]), sources, { anthropic: false, noProviderKey: "offer", checkSaved: true })).rejects.toThrow("Box by ASCII refused the saved key: 401 Unauthorized");
+    await expect(loadKeys(fakeIO([]), sources, { anthropic: false, noProviderKey: "offer", checkSaved: true })).rejects.toThrow("Boat refused the saved key: 401 Unauthorized");
   });
 
   it.runIf(CLOUD_ON)("every other verb takes the saved key as it stands: nothing is asked of the provider and nothing of the person", async () => {
@@ -529,7 +529,7 @@ describe("the key a run is asked for is the one its own provider reads", () => {
     const screen = stripVTControlCharacters(asked.output[0]!);
     // The title is the row's own words for its key, and the variable is said once, where the line says where to put
     // it so this screen is not drawn again.
-    expect(screen.split("\n")[0]).toBe("Box API key");
+    expect(screen.split("\n")[0]).toBe("Boat API key");
     expect(screen.match(new RegExp(BOX_KEY_ENV, "g"))).toHaveLength(1);
     expect(screen).toContain(`No ${BOX_KEY_ENV} in the environment, ./.env, or the .env beside your state file (~/.wsp/.env unless you named a state).`);
     expect(screen.toLowerCase()).not.toContain("solari");
@@ -671,7 +671,7 @@ describe("terminalIO", () => {
     // The variable is the wired provider's own, so a run under a service says what to put in a file rather than
     // leaving a reader of that log to guess which key the words are about.
     await expect(loadKeys(screen(false).io, { env: { WSP_PROVIDER: "box" }, cwd, statePath: state })).rejects.toThrow(
-      `Box API key: no terminal to ask on; set ${BOX_KEY_ENV} in the environment, ./.env, or the .env beside your state file (~/.wsp/.env unless you named a state).`,
+      `Boat API key: no terminal to ask on; set ${BOX_KEY_ENV} in the environment, ./.env, or the .env beside your state file (~/.wsp/.env unless you named a state).`,
     );
     await expect(loadKeys(s.io, { env: {}, cwd, statePath: state }).then(() => "ok", exitClassOf)).resolves.toBe("auth");
     await expect(s.io.ask("Save the key so wsp stops asking?").then(() => "ok", exitClassOf)).resolves.toBe("provider");

@@ -341,9 +341,9 @@ describe("one copy of the image caps", () => {
   const HOME = join("packages", "protocol", "src", "attachments.ts");
   // The caps as a person reads them and as the code counts them: what a message may carry, and what one image may
   // weigh. A second spelling anywhere drifts from the constant the code enforces, which is how "10 MB each" came to
-  // sit beside a rule that says 10 MB. attachments.ts exports IMAGES_MAX, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS and
+  // sit beside a rule that says 10 MB. attachments.ts exports FILES_MAX, IMAGE_MAX_BYTES, FILE_MAX_BYTES, their words and
   // IMAGE_TYPE_WORDS for every sentence to read.
-  const RULE = /\b10(\.0)? ?MB\b|10 \* 1024 \* 1024|\b(five|5) images\b|PNG, JPEG, GIF or WebP|image\/png,\s*image\/jpeg/;
+  const RULE = /\b10(\.0)? ?MB\b|10 \* 1024 \* 1024|\b(five|5) (images|files)\b|PNG, JPEG, GIF or WebP|image\/png,\s*image\/jpeg/;
 
   it("no source file outside attachments.ts spells an image cap or the type list out again", () => {
     const copies = sourceFiles().filter(rel => rel !== HOME && RULE.test(readFileSync(join(ROOT, rel), "utf8")));
@@ -960,8 +960,8 @@ describe("loginPathLine", () => {
 
 describe("guestUnusableLine", () => {
   it("names the provider, the machine it left running and what the guest said when nothing on it would run", () => {
-    expect(guestUnusableLine("Box by ASCII", "bx_tumrjngm", "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24"))
-      .toBe("Box by ASCII left bx_tumrjngm running but nothing on it can run: bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24");
+    expect(guestUnusableLine("Boat", "bx_tumrjngm", "bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24"))
+      .toBe("Boat left bx_tumrjngm running but nothing on it can run: bash: error while loading shared libraries: libtinfo.so.6: cannot open shared object file: Error 24");
   });
 });
 

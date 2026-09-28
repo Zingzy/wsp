@@ -221,6 +221,8 @@ export interface HarnessCatalogModelProbe {
   defaultEffort?: string;
   contextWindows: readonly string[];
   isDefault: boolean;
+  /** The binary lists a faster output tier for this model; absent where it says nothing about speed. */
+  fast?: boolean;
 }
 
 /** What an adapter reads off its binary on the workspace's machine: the lists the CLI itself reports. */

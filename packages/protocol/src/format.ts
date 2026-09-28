@@ -4,7 +4,7 @@
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
 import type { AgentSignInState, Capabilities, ContextMenuItem, CopyRoad, GoldenMissingTool, GoldenStage, GoldenStageEvent, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SealedProjectImage, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
-import { namesPlace } from "./place-word.js";
+import { namesPlace, PROVIDER_KEY_WORDS, providerKeyName } from "./place-word.js";
 import { LOGIN_CHOICES, type LoginChoice } from "./init-job.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { compareVersions } from "./semver.mjs";
@@ -1866,20 +1866,7 @@ export const imageBuiltOnLine = (place: string): string => `your image is built 
 export const imageHomeKeptLine = (on: string | undefined, home: { id: string; name: string }): string | undefined =>
   on === undefined || namesPlace(home, on) ? undefined : `your image lives on ${home.name}, so it is built there and not on ${on}`;
 
-/** Where a Solari key comes from, spelled once for the terminal's ask and the provider's key row. */
-export const SOLARI_CONSOLE = "console.getsolari.com";
-
-/** What a person calls a provider, its key and where they get one, keyed by the word WSP_PROVIDER holds. The host's
- * provider registry reads its keyName and keyConsole from here and the app's provider rows read the same, so the
- * screen that asks for a key and the terminal that asks for it say one thing. A provider that takes no key has no
- * row. */
-export const PROVIDER_KEY_WORDS: Record<string, { name: string; keyName: string; keyConsole?: string }> = {
-  box: { name: "Box by ASCII", keyName: "Box API key", keyConsole: "ascii.dev" },
-  solari: { name: "Solari", keyName: "Solari API key", keyConsole: SOLARI_CONSOLE },
-};
-
-/** A provider's name as its key rows say it, by its id; an id with no row reads as itself. */
-export const providerKeyName = (provider: string): string => PROVIDER_KEY_WORDS[provider]?.name ?? provider;
+export { PROVIDER_KEY_WORDS, providerKeyName, SOLARI_CONSOLE } from "./place-word.js";
 
 /** Every word of the steps that choose and build the image, drawn under a computer's Image card and, where a word is
  * the host's, in the terminal too. Headlines are a step's title, tops the one sentence under it, keycaps the one

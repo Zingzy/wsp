@@ -56,7 +56,7 @@ import {
   PlaceView,
   ProjectView,
   type InitScreenId,
-  type ImageAttachment,
+  type Attachment,
   TerminalConfig,
   type TerminalScheme,
   type PortProbeView,
@@ -701,9 +701,11 @@ export interface StartSessionOptions {
   effort?: string;
   permissionMode?: string;
   contextWindow?: string;
-  /** The images the message carries. The host refuses over the caps and refuses naming the agent when that agent
-   * reads no image, both before its machine is asked for anything. */
-  attachments?: readonly ImageAttachment[];
+  /** The agent's fast mode for this turn, on a model that offers one; refused naming the model otherwise. */
+  fast?: boolean;
+  /** The files the message carries. The host refuses over the caps, and refuses an image naming the agent when that
+   * agent reads none, both before its machine is asked for anything. */
+  attachments?: readonly Attachment[];
 }
 
 export interface ExportProjectOptions {
