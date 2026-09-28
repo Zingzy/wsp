@@ -1846,6 +1846,31 @@ const indexOf = (events: readonly SessionEvent[]): TranscriptIndex => {
   for (const e of events) foldEvent(index, e);
   return index;
 };
+/** How much of itself a turn has written, read off its workspace's transcript, where a live turn's rows are at the
+ * tail. Only these are kept, since a turn holding the transcript would hold it whole for as long as it runs. */
+interface TurnWritten {
+  lines: number;
+  reply?: TurnResult["status"];
+  started: boolean;
+}
+const turnWritten = (events: readonly SessionEvent[], turnId: string): TurnWritten => {
+  const lastOf = <T extends SessionEvent["type"]>(type: T): Extract<SessionEvent, { type: T }> | undefined => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]!;
+      if (e.type === type && e.turnId === turnId) return e as Extract<SessionEvent, { type: T }>;
+    }
+    return undefined;
+  };
+  // From the stamp the last surviving line carries rather than from how many survive: the transcript is capped per
+  // workspace and drops its oldest rows, so counting them would read a turn whose head has been evicted as shorter
+  // than it was and write its tail a second time.
+  const lines = lastOf("session.delta")?.line ?? 0;
+  const reply = lastOf("session.done")?.result.status;
+  // A turn with a line or a reply already written had its start written too, whether or not the cap still holds it:
+  // a second start row at the tail of the transcript would sit after the work it opened.
+  return { lines, ...(reply !== undefined ? { reply } : {}), started: lines > 0 || reply !== undefined || lastOf("session.start") !== undefined };
+};
+
 /** An index as its file holds it, with the mark of the transcript file it was read off: an index whose transcript
  * has been written since (a crash between the two writes, a failed index write) is one boot reads again. */
 const indexBytes = (index: TranscriptIndex, of: BlobMark | undefined): Buffer =>
@@ -3085,16 +3110,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** A transcript file's events, nothing where there is no file, and a refusal where there is a file that did not
    * read: a caller that took the two for one wrote what it held over everything the file had. */
   const readTranscript = async (workspaceId: string, collection: string = TRANSCRIPTS): Promise<SessionEvent[] | undefined> => {
-    const bytes = await store.getBlob(collection, workspaceId);
-    if (bytes === undefined) {
-      if ((await store.statBlob(collection, workspaceId)) === undefined) return undefined;
-      throw new Error(transcriptUnreadLine(workspaceId, "the file is there and could not be read"));
-    }
     try {
-      return (JSON.parse(bytes.toString("utf8")) as TranscriptRecord).events;
+      const bytes = await store.getBlob(collection, workspaceId);
+      if (bytes !== undefined) return (JSON.parse(bytes.toString("utf8")) as TranscriptRecord).events;
+      if ((await store.statBlob(collection, workspaceId)) === undefined) return undefined;
     } catch (e) {
       throw new Error(transcriptUnreadLine(workspaceId, e instanceof Error ? e.message : String(e)));
     }
+    throw new Error(transcriptUnreadLine(workspaceId, "the file is there and could not be read"));
   };
   /** The index written beside a transcript, marked with the transcript file as it stands now. */
   const writeIndex = async (workspaceId: string, index: TranscriptIndex): Promise<void> => {
@@ -6861,9 +6884,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const runTurn = (t: {
     entry: LiveWorkspace;
     view: SessionView;
-    /** The workspace's transcript as its open answered it, for a turn re-opened after a restart: how much of itself
-     * that turn has written is read off it. A new turn has written nothing. */
-    written?: readonly SessionEvent[];
+    /** How much of itself a turn re-opened after a restart has written. A new turn has written nothing. */
+    written?: TurnWritten;
     /** The thread this turn runs on, which every row the runtime writes carries. */
     threadId: string;
     turnId: string;
@@ -6902,26 +6924,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   }): SessionHandle => {
     const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
-    const written = t.written ?? [];
-    /** The last row this turn wrote of a kind: the transcript holds every workspace's rows in the order they were
-     * written, so a live turn's are at its tail. */
-    const lastOf = <T extends SessionEvent["type"]>(type: T): Extract<SessionEvent, { type: T }> | undefined => {
-      for (let i = written.length - 1; i >= 0; i--) {
-        const e = written[i]!;
-        if (e.type === type && e.turnId === turnId) return e as Extract<SessionEvent, { type: T }>;
-      }
-      return undefined;
-    };
-    // How many of this turn's lines are written, from the stamp the last surviving one carries rather than from how
-    // many survive: the transcript is capped per workspace and drops its oldest rows, so counting them would read a
-    // turn whose head has been evicted as shorter than it was and write its tail a second time.
-    const deltasWritten = lastOf("session.delta")?.line ?? 0;
+    const { lines: deltasWritten, reply: recordedReply, started: startWritten } = t.written ?? { lines: 0, started: false };
     // The reply and its line to the parent go together, so one gate stands for both.
-    const recordedReply = lastOf("session.done")?.result.status;
     let replyRecorded = recordedReply !== undefined;
-    // A turn with a line or a reply already written had its start written too, whether or not the cap still holds it:
-    // a second start row at the tail of the transcript would sit after the work it opened.
-    let startRecorded = deltasWritten > 0 || replyRecorded || lastOf("session.start") !== undefined;
+    let startRecorded = startWritten;
     let deltas = deltasWritten;
     let replaying = deltasWritten;
     let ended = false;
@@ -7383,7 +7389,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       runTurn({
         entry,
         view,
-        written,
+        written: turnWritten(written, s.turnId),
         threadId,
         turnId: s.turnId,
         ...(s.notify !== undefined ? { notify: s.notify } : {}),

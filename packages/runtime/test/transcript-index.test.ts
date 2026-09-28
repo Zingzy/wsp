@@ -4,7 +4,7 @@
 // its last flush. Opening one reads its file, the last few opened stay held,
 // and search and a resume read the index alone.
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { lstatSync, mkdtempSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -215,10 +215,11 @@ describe("a transcript file that did not read", () => {
     await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
     await rt.close();
 
-    // A file there that no read answers: a directory where the file was reads as EISDIR, for root as for anybody.
+    // The file is there and no read answers it: root reads a file at mode 000, so a link to itself stands in, which
+    // fails the read with ELOOP for anybody. Put back only if nothing wrote over it, as a chmod put back would be.
     const file = join(home, "blobs", "transcripts", ws.id);
     renameSync(file, `${file}.aside`);
-    mkdirSync(file);
+    symlinkSync(file, file);
     const warned: string[] = [];
     const warn = vi.spyOn(console, "warn").mockImplementation(line => void warned.push(String(line)));
     const after = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
@@ -226,17 +227,19 @@ describe("a transcript file that did not read", () => {
       await (await after.sessions.start(ws.id, { prompt: "two" })).finished;
       await (await after.sessions.start(ws.id, { prompt: "three" })).finished;
       await new Promise(r => setTimeout(r, 50));
-      expect(warned.filter(line => line.startsWith(`the transcript of ${ws.id} does not read`) && line.endsWith("its newest events wait for the next flush"))).toHaveLength(1);
     } finally {
       warn.mockRestore();
     }
-    rmSync(file, { recursive: true });
-    renameSync(`${file}.aside`, file);
+    if (lstatSync(file).isSymbolicLink()) {
+      rmSync(file);
+      renameSync(`${file}.aside`, file);
+    }
     await after.close();
 
     const third = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: {} });
     const replies = (await third.sessions.history(ws.id)).flatMap(e => (e.type === "session.delta" && e.kind === "text" ? [e.text] : []));
     expect(replies.join("")).toBe("reply to onereply to tworeply to three");
+    expect(warned.filter(line => line.startsWith(`the transcript of ${ws.id} does not read`) && line.endsWith("its newest events wait for the next flush"))).toHaveLength(1);
     await third.close();
     rmSync(home, { recursive: true, force: true });
   });
