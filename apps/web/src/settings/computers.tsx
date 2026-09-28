@@ -23,6 +23,12 @@ import { useAgentActs } from "../components/agents/useAgentActs.js";
 import { useServerActs } from "../components/agents/useServerActs.js";
 import { useSkillActs } from "../components/agents/useSkillActs.js";
 import { useStore } from "../protocol/store.js";
+import { deriveSidebarProjects } from "../adapt/index.js";
+import { NEEDS_YOU } from "../components/status/kinds/needs-you.js";
+import { WORKING } from "../components/status/kinds/working.js";
+import { threadStatusOf } from "../components/status/threadStatusOf.js";
+import { ThreadRows, type ThreadRowItem } from "../components/threads/ThreadRows.js";
+import { cn } from "../lib/utils.js";
 import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { ADD_COMPUTER_WORDS, WHERE_WORDS } from "./format.js";
 import { AddComputer } from "./AddComputer.js";
@@ -30,13 +36,25 @@ import { ComputerGlyph, ComputerIconSelect } from "./ComputerGlyph.js";
 import { builtWhen, copyOn, IMAGE_WORDS } from "./image.js";
 import { useImageCard } from "./ImageCard.js";
 import { openImageRecipe } from "./openAt.js";
-import { NOTHING_HELD, absenceOf, hereName, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, projectOn, threadWord, type PlaceHolding } from "./places.js";
+import { NOTHING_HELD, absenceOf, hereName, absentOf, copiesWord, isProviderPlace, placeCpuWord, placeName, placeOf, placeStateWord, placeWorkspaceCounts, projectOn, type PlaceHolding } from "./places.js";
 import { cloudsOffered, keyHeld } from "./providers.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 import { RefusalSlot } from "./sheetParts.js";
-import { Card, cardDrops, Cards, Row, type SettingsCardData, type SettingsItem, type SettingsRowData } from "./rows.js";
+import { Card, CARD_SURFACE, cardDrops, Cards, Row, type SettingsCardData, type SettingsItem, type SettingsRowData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import type { SettingsAt } from "./settingsStore.js";
+
+/** The threads running or asking on a computer's tasks, read off the sidebar's own snapshot, each named by its
+ * project: running here is what the card's head says, so a finished thread leaves it. */
+function threadsHere(ctx: SettingsContext, place: PlaceView): ThreadRowItem[] {
+  const pauseModes = Object.fromEntries(Object.entries(ctx.landings).map(([project, landing]) => [project, landing?.capabilities.pauseMode]));
+  return deriveSidebarProjects({ workspaces: ctx.workspaces, statuses: ctx.statuses, sessions: ctx.sessions, pauseModes })
+    .filter(snapshot => placeOf(ctx.places, snapshot.workspace)?.id === place.id)
+    .flatMap(snapshot => snapshot.threads.map(thread => ({ thread, place: snapshot.workspace.project.name })))
+    .filter(({ thread }) => RUNNING_HERE.has(threadStatusOf(thread).id));
+}
+
+const RUNNING_HERE = new Set([WORKING.id, NEEDS_YOU.id]);
 
 /** What stands on each computer, folded from the workspaces the store already has, each workspace going to
  * exactly one computer by placeOf, the one reading of which computer a workspace stands on. */
@@ -356,7 +374,7 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
     ...(copies === "" ? [] : [{ kind: "row" as const, id: "copies", title: WHERE_WORDS.copies, description: WHERE_WORDS.copiesDescription, word: copies, attrs: { "data-k": "copies" } }]),
     ...(ports === "" ? [] : [{ kind: "row" as const, id: "ports", title: WHERE_WORDS.ports, description: WHERE_WORDS.portsDescription, word: ports, attrs: { "data-k": "ports" } }]),
   ];
-  const workspaces = holding.workspaces.map((w, at) => ({ kind: "line" as const, id: `workspace-${at}`, label: w.name, value: [w.state, threadWord(w.threads)], valueClass: "fact" as const, attrs: { "data-k": "workspace-line" } }));
+  const running = threadsHere(ctx, place);
   const imageBytes = ctx.reads.image === null ? undefined : copyOn(ctx.reads.image.copies, place)?.sizeBytes;
   const cards: SettingsCardData[] = [
     { id: "look", items: [{ kind: "row", id: "icon", title: WHERE_WORDS.icon, description: WHERE_WORDS.iconDescription, control: <ComputerIconSelect place={place} onChange={icon => ctx.setPreferences({ computerLook: { [place.id]: { icon } } })} /> }] },
@@ -367,7 +385,20 @@ export function ComputerPage({ place, ctx }: { place: PlaceView; ctx: SettingsCo
       : [{ id: "connection", head: WHERE_WORDS.connection, items: connection, ...(refused === null ? {} : { under: <RefusalSlot k="dial-refusal" said={refused.said} {...(refused.fix === undefined ? {} : { fix: refused.fix })} /> }) }]),
     ...(workspaceThere.length === 0 ? [] : [{ id: "workspace-there", head: WHERE_WORDS.workspaceThere, items: workspaceThere }]),
     { id: "agents", items: [], body: <ComputerAgents place={place} here={here} ctx={ctx} /> },
-    ...(workspaces.length === 0 ? [] : [{ id: "workspaces", head: WHERE_WORDS.workspaces, items: workspaces }]),
+    ...(running.length === 0
+      ? []
+      : [
+          {
+            id: "threads",
+            head: WHERE_WORDS.threadsHere,
+            items: [],
+            body: (
+              <div className={cn(CARD_SURFACE, "p-1.5")}>
+                <ThreadRows rows={running} />
+              </div>
+            ),
+          },
+        ]),
     // This computer is the one nothing can be done to: it is the computer the host runs on.
     ...(here
       ? []
