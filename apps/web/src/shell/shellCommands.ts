@@ -17,6 +17,7 @@ import { terminalRefusedLine } from "../actions/format.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
 import { openFileFinder } from "../files/finderBus.js";
+import { openCopyInEditor } from "../files/openCopy.js";
 import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, type WorkspaceSelectSlot } from "../keybindingTypes.js";
 import { threadFolderOf } from "../files/root.js";
 import { getTerminalFocusOwner } from "../lib/terminalFocus.js";
@@ -338,6 +339,9 @@ export function runShellCommand(command: KeybindingCommand, target: ShellCommand
       return;
     case "thread.nextNeedsYou":
       openNextNeedsYou();
+      return;
+    case "editor.open":
+      if (workspaceId && !useStore.getState().settingsOpen) void openCopyInEditor(workspaceId);
       return;
     default: {
       const _exhaustive: never = command;

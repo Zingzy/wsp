@@ -51,6 +51,7 @@ import {
   placeNoDialLine,
   BackendFacts,
   type AgentSignInState,
+  type MacKind,
   type DaemonEvent,
   type DaemonResponse,
   type MachineSizeOffer,
@@ -154,6 +155,7 @@ export type { PlaceEvent };
 export interface HerePlace {
   name: string;
   label?: string;
+  mac?: MacKind;
   os?: string;
   shape?: WorkspaceSize;
   engine?: "none" | "docker" | "podman";
@@ -1431,6 +1433,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       kind: "computer",
       name: here.name,
       ...(here.label !== undefined ? { label: here.label } : {}),
+      ...(here.mac !== undefined ? { mac: here.mac } : {}),
       default: marked === HERE_PLACE_ID,
       ...(here.os !== undefined ? { os: here.os } : {}),
       ...(here.shape !== undefined ? { shape: here.shape } : {}),

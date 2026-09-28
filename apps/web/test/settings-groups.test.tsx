@@ -398,6 +398,7 @@ describe("Keybindings", () => {
   it("draws one line per default rule with the chord's keycaps per platform, both where a command has two, the nine jumps as one line, and drops in a tab what the tab keeps", () => {
     expect(label("commandPalette.toggle")).toEqual([["⌘K"]]);
     expect(label("settings.toggle")).toEqual([["⌘,"]]);
+    expect(label("editor.open")).toEqual([["⌘O"]]);
     expect(label("chat.new")).toEqual([["⌘N"], ["⌘T"]]);
     expect(label("workspace.next")).toEqual([["⌥⌘Right"], ["⌃Tab"]]);
     expect(label("terminal.zoomIn")).toEqual([["⌘="], ["⇧⌘="]]);
@@ -414,7 +415,7 @@ describe("Keybindings", () => {
     const cards = keybindingCards(DEFAULT_KEYBINDINGS, mac);
     expect(cards.map(card => card.head)).toEqual([undefined, KEYBINDINGS_WORDS.workspacesAndThreads, KEYBINDINGS_WORDS.terminal, KEYBINDINGS_WORDS.fixed]);
     expect(cards[0]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["Search", "Find a file", "Search in files", "Settings", "Toggle the sidebar", "Toggle the terminal drawer", "Toggle the right panel", "Toggle the preview"]);
-    expect(cards[1]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["New thread", "Next task", "Previous task", "Next thread", "Previous thread", "Settle thread", "Next thread that needs you", JUMP_WORD]);
+    expect(cards[1]!.items.map(item => (item.kind === "line" ? item.label : ""))).toEqual(["New thread", "Next task", "Previous task", "Next thread", "Previous thread", "Settle thread", "Next thread that needs you", "Open in editor", JUMP_WORD]);
     expect(cards[3]!.items.map(item => (item.kind === "line" ? [item.label, item.keys] : []))).toEqual([
       [KEYBINDINGS_WORDS.sendMessage, [["Enter"]]],
       [KEYBINDINGS_WORDS.submitComment, [["⌘Enter"]]],

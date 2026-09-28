@@ -1,10 +1,16 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { DAEMON_VERSION, STATE_SHAPE, type StateShape } from "@wsp/protocol";
 import { writeOwn } from "@wsp/own-file";
 import { jsonFileStore, memoryStore, STATE_SHAPE_KEY, stateNotAnObjectLine, stateShapeUnreadableLine, stateUnreadableLine, stateWrittenByNewerLine, stateWrittenByOlderLine, type Store } from "../src/store.js";
+
+// Counted, so a test can say how often the state file itself was read and written.
+vi.mock("node:fs", async importOriginal => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return { ...fs, readFileSync: vi.fn(fs.readFileSync), renameSync: vi.fn(fs.renameSync) };
+});
 
 const dir = mkdtempSync(join(tmpdir(), "wsp-store-"));
 /** Who a store in this file says wrote its file: every caller names a build, and this one is the suite. */
@@ -56,6 +62,68 @@ describe("jsonFileStore persistence", () => {
     expect(readFileSync(join(dir, "blobs-home", "blobs", "vaults", "ws_2"), "utf8")).toBe("tgz");
     expect(existsSync(path) ? readFileSync(path, "utf8") : "").not.toContain("tgz");
     expect(await jsonFileStore(path, WRITER).getBlob("vaults", "ws_2")).toEqual(Buffer.from("tgz"));
+  });
+});
+
+describe("jsonFileStore reads the file once", () => {
+  const reads = (path: string): number => vi.mocked(readFileSync).mock.calls.filter(([at]) => at === path).length;
+  const writes = (path: string): number => vi.mocked(renameSync).mock.calls.filter(([, to]) => to === path).length;
+
+  it("and answers every read and write after from what it holds, until another process writes the file", async () => {
+    // Every read parsed the whole file and every write rewrote it: at a few hundred megabytes of transcripts that
+    // held a host's loop for seconds per call.
+    const path = join(dir, "read-once.json");
+    const store = jsonFileStore(path, WRITER);
+    await store.put("workspaces", "a", { id: "a" });
+    const before = reads(path);
+    for (let i = 0; i < 5; i++) {
+      await store.get("workspaces", "a");
+      await store.list("workspaces");
+      await store.put("workspaces", `b${i}`, { id: `b${i}` });
+    }
+    expect(reads(path) - before).toBe(0);
+    await jsonFileStore(path, WRITER).put("projects", "p", { id: "p" });
+    expect(await store.get("projects", "p")).toEqual({ id: "p" });
+    expect(await store.keys("workspaces")).toHaveLength(6);
+  });
+
+  it("and a burst of writes made before the loop turns lands as one", async () => {
+    const path = join(dir, "burst.json");
+    const store = jsonFileStore(path, WRITER);
+    await store.put("workspaces", "a", { id: "a" });
+    const before = writes(path);
+    await Promise.all(Array.from({ length: 20 }, (_, i) => store.put("workspaces", `w${i}`, { id: `w${i}` })));
+    expect(writes(path) - before).toBe(1);
+    expect(Object.keys((JSON.parse(readFileSync(path, "utf8")) as { workspaces: object }).workspaces)).toHaveLength(21);
+  });
+
+  it("and a write another process made while a save waited keeps its records beside this one's", async () => {
+    const path = join(dir, "two-writers.json");
+    const mine = jsonFileStore(path, WRITER);
+    const theirs = jsonFileStore(path, WRITER);
+    await mine.put("workspaces", "a", { id: "a" });
+    await theirs.get("workspaces", "a");
+    await Promise.all([mine.put("workspaces", "p", { id: "p" }), theirs.put("workspaces", "q", { id: "q" })]);
+    expect((await jsonFileStore(path, WRITER).keys("workspaces")).sort()).toEqual(["a", "p", "q"]);
+  });
+
+  it("and hands out copies, so a caller changing what it read changes nothing the next save writes", async () => {
+    const path = join(dir, "read-copies.json");
+    const store = jsonFileStore(path, WRITER);
+    await store.put("workspaces", "a", { id: "a", phase: "running" });
+    ((await store.get("workspaces", "a")) as { phase: string }).phase = "paused";
+    ((await store.list("workspaces"))[0] as { phase: string }).phase = "gone";
+    await store.put("workspaces", "b", { id: "b" });
+    expect(await jsonFileStore(path, WRITER).get("workspaces", "a")).toEqual({ id: "a", phase: "running" });
+  });
+
+  it("and keeps what was put, not the object the caller goes on changing", async () => {
+    const path = join(dir, "copied.json");
+    const store = jsonFileStore(path, WRITER);
+    const record = { id: "a", phase: "running" };
+    await store.put("workspaces", "a", record);
+    record.phase = "paused";
+    expect(await store.get("workspaces", "a")).toEqual({ id: "a", phase: "running" });
   });
 });
 

@@ -379,8 +379,9 @@ describe("the failures a shot must not show", () => {
   it("checks every failure mark on every shot but the one its surface waits for", () => {
     expect(failuresToCheck({ wait: "[data-shell-center]" })).toEqual(FAILED_ON_THE_PAGE);
     expect(failuresToCheck({ wait: "[data-refused]" })).toEqual(FAILED_ON_THE_PAGE.filter(s => s !== "[data-refused]"));
-    // A create that stopped is a failure however the log it waits for reads.
-    expect(failuresToCheck({ wait: '[data-testid="creation-log"]' })).toContain('[data-testid="workspace-creation"][aria-busy="false"]');
+    // A create that stopped is a failure on the page it waits for, unless its refusal is what the shot is of.
+    expect(failuresToCheck({ wait: '[data-testid="workspace-creation"]' })).toContain("[data-creation-refused]");
+    expect(failuresToCheck({ wait: "[data-creation-refused]" })).not.toContain("[data-creation-refused]");
   });
 
   it("knows a read still on its way by the marks the app's own parts wear, so a shot still loading fails the run", () => {

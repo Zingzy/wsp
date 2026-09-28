@@ -230,7 +230,7 @@ describe("a tile's menu for the copy it runs on", () => {
   it("a failed create's tile offers Delete, which asks the runtime to delete the id its stages carried and drops the row", async () => {
     const api = fakeApi([API], [statusOf(API)]);
     await mountSidebar(api, "api");
-    act(() => useStore.setState({ creations: [{ key: "creating:ws_f", name: "fleet check", askedAt: Date.now(), workspaceId: "ws_f", lines: [], failed: { title: "Couldn't start fleet check", detail: "Snapshot not found" } }] }));
+    act(() => useStore.setState({ creations: [{ key: "creating:ws_f", name: "fleet check", askedAt: Date.now(), workspaceId: "ws_f", lines: [], failed: { title: "Could not start fleet check", detail: "Snapshot not found" } }] }));
     rightClick(rowOf("fleet check"));
     await screen.findByRole("menu");
     expect(labels()).toEqual(["Delete"]);

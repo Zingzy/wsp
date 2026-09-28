@@ -478,7 +478,8 @@ describe("host close flushes transcripts", () => {
     m.done("t0");
     await handle.close();
 
-    const stored = (await store.get("transcripts", ws.id)) as { events: { type: string }[] } | undefined;
+    const bytes = await store.getBlob("transcripts", ws.id);
+    const stored = bytes === undefined ? undefined : (JSON.parse(bytes.toString("utf8")) as { events: { type: string }[] });
     expect(stored?.events.map(e => e.type)).toEqual(["session.start", "session.done"]);
   });
 });

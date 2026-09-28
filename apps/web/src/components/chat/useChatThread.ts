@@ -555,15 +555,18 @@ export function useChatThread(workspaceId: string, threadId: string | null = nul
   const rowThread = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.threadId);
   const rowCwd = useStore(s => resumedRow(s.sessions[workspaceId], threadId, remembered)?.cwd);
   const viewKey = threadId === null ? workspaceId : `${workspaceId}/${threadId}`;
-  const [state, setState] = useState<ThreadState>(EMPTY);
+  // A view drawn for the workspace's next thread shows nothing from the first paint, as it does when the pin leaves
+  // for it later: a workspace that just finished being made takes the page with no loading line between.
+  const mountedFresh = fresh && threadId === null;
+  const [state, setState] = useState<ThreadState>(mountedFresh ? { ...EMPTY, fresh: true } : EMPTY);
   const [viewed, setViewed] = useState({ workspaceId, threadId });
-  const [hydratedFor, setHydratedFor] = useState<string | null>(null);
+  const [hydratedFor, setHydratedFor] = useState<string | null>(mountedFresh ? viewKey : null);
   const hydratedRef = useRef<string | null>(null);
   /** Moves when a rewind on this workspace lands: its transcript lost turns, so the thread is read again. */
   const [rewinds, setRewinds] = useState(0);
   /** The view key a pin named for the transcript already in hand: that reading needs no reply, and asking for one
    * would drop what the socket pushes between the ask and it. Taken once, so a gap still rebuilds. */
-  const carriedRef = useRef<string | null>(null);
+  const carriedRef = useRef<string | null>(mountedFresh ? viewKey : null);
   const previousEntries = useRef<ReadonlyArray<TimelineEntry>>([]);
 
   if (viewed.workspaceId !== workspaceId || viewed.threadId !== threadId) {

@@ -582,6 +582,35 @@ describe("a computer's own page", () => {
 });
 
 describe("a computer's icon", () => {
+  it("draws each computer's own icon on its Settings sidebar row, the size and edge of the group's glyph: this Mac the model it is, a joined computer a server, a cloud its provider's mark", async () => {
+    useStore.setState({ places: [{ ...here, mac: "mac-mini" }, box, solari, ascii], workspaces: [] });
+    await mountComputers(computersApi().api);
+    const glyph = (id: string): Element | null => document.querySelector(`[data-slot=sidebar] [data-row-id="computer:${id}"] [data-computer-glyph]`);
+    expect(glyph("here")?.getAttribute("data-computer-glyph")).toBe("mac-mini");
+    expect(glyph("p_2")?.classList.contains("lucide-server")).toBe(true);
+    expect(glyph("solari")?.getAttribute("data-brand-mark")).toBe("solari");
+    expect(glyph("box")?.getAttribute("data-brand-mark")).toBe("boat");
+    for (const id of ["here", "p_2", "solari", "box"]) expect(glyph(id)?.getAttribute("class"), id).toMatch(/(^|\s)size-4(\s|$)/);
+    // The Computers list draws the same icon, so the row and the page cannot disagree about what a computer is.
+    expect(listRow("here").querySelector("[data-computer-glyph]")?.getAttribute("data-computer-glyph")).toBe("mac-mini");
+    expect(listRow("solari").querySelector("[data-computer-glyph]")?.getAttribute("data-brand-mark")).toBe("solari");
+  });
+
+  it("an iMac reads as a monitor and a MacBook as a laptop whatever it is named, and a pick still wins over the model", async () => {
+    useStore.setState({ places: [{ ...here, label: "the studio", mac: "macbook" }], workspaces: [] });
+    await mountComputers(computersApi().api);
+    expect(listRow("here").querySelector("[data-computer-glyph]")?.classList.contains("lucide-laptop")).toBe(true);
+    cleanup();
+    useStore.setState({ places: [{ ...here, mac: "imac" }], workspaces: [] });
+    await mountComputers(computersApi().api);
+    expect(listRow("here").querySelector("[data-computer-glyph]")?.classList.contains("lucide-monitor")).toBe(true);
+    cleanup();
+    useStore.setState({ places: [{ ...here, mac: "imac" }, solari], workspaces: [], preferences: { ...DEFAULT_PREFERENCES, labs: false, computerLook: { here: { icon: "home" }, solari: { icon: "server" } } } });
+    await mountComputers(computersApi().api);
+    expect(listRow("here").querySelector("[data-computer-glyph]")?.classList.contains("lucide-house")).toBe(true);
+    expect(listRow("solari").querySelector("[data-computer-glyph]")?.classList.contains("lucide-server")).toBe(true);
+  });
+
   it("reads the default off what the computer is, writes a pick as that computer's look, and the row draws the pick", async () => {
     useStore.setState({ places: [here, box], workspaces: [] });
     const { api, sets } = computersApi();
@@ -594,7 +623,8 @@ describe("a computer's icon", () => {
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false, computerLook: { p_2: { icon: "home" } } } });
     await mountComputers(computersApi().api);
     expect(listRow("p_2").querySelector("[data-computer-glyph]")?.classList.contains("lucide-house")).toBe(true);
-    expect(listRow("here").querySelector("[data-computer-glyph]")?.classList.contains("lucide-laptop")).toBe(true);
+    // Named a MacBook but with no model read, this computer is a desktop: its name is not what it is.
+    expect(listRow("here").querySelector("[data-computer-glyph]")?.classList.contains("lucide-monitor")).toBe(true);
   });
 });
 
