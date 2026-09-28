@@ -30,6 +30,7 @@ import type { SkillsFetch } from "../src/skills-sh.js";
 import type { HostHandle } from "../src/server.js";
 import { c1Escaped } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
+import { WORKSPACE_CALLED } from "./mcp-binary-workspaces.js";
 import { ownEnv, served } from "./stdio-session.js";
 import { stubBackend } from "./stub-backend.js";
 import { captured, copyingFake, fakeDaemonStart, PAGE } from "./verbs-fixture.js";
@@ -81,13 +82,62 @@ async function answeredHere(statePath: string, lines: readonly Record<string, un
   return written.split("\n").slice(0, -1);
 }
 
-/** Every tool the binary serves, called against the host as the command line runs its verb: the verb's words, and
- * the arguments the tool is called with. A tool the binary takes on adds its row here. Files under the home and
- * lines run first set up what the call acts on. The text is the object as jsonLine(obj, 2) writes it, or with
- * `prose` the line the verb prints without --json. A call that changes something acts on a twin of what the verb
- * changed, named where `twin` names the verb's one, and its answer is the verb's with that name for the other; its
- * text is held to the recorded answers alone. */
-const CALLED: readonly { tool: string; argv: string[]; arguments: Record<string, unknown>; files?: Record<string, string>; setup?: string[][]; text?: "prose"; twin?: [string, string] }[] = [
+type Runtime = ReturnType<typeof createRuntime>;
+
+/** One tool called against the host as the command line runs its verb. */
+export interface Called {
+  tool: string;
+  /** The verb's words. */
+  argv: string[];
+  /** Words behind the verb line's own flags. */
+  after?: string[];
+  /** The arguments the tool is called with. */
+  arguments: Record<string, unknown>;
+  /** Files written under the home before anything runs. */
+  files?: Record<string, string>;
+  /** Command lines run before anything else. */
+  setup?: string[][];
+  /** What the host holds before anything runs, made through the runtime and the command line. */
+  given?: (rt: Runtime, line: (argv: string[]) => Promise<void>) => Promise<void>;
+  /** The text is the line the verb prints without --json, rather than the object as jsonLine(obj, 2) writes it. */
+  text?: "prose";
+  /** The tool answers in a line of its own rather than its value as JSON: its whole answer is held to what this
+   * package's server answers for the same call on the same host, byte for byte, after the verb ran. */
+  heldHere?: true;
+  /** The call acts on a twin of what the verb changed, named where the second names the verb's one: its answer is the
+   * verb's with that name for the other, and its text is held to the recorded answers alone. */
+  twin?: [string, string];
+  /** The call changes nothing on the host and runs before the verb, which does: a delete not yet confirmed. */
+  first?: true;
+  /** The tool marks its answer an error while it still carries the value the verb prints. */
+  error?: true;
+  /** The verb is refused, and the tool with the same failure object. */
+  refused?: true;
+  /** Served with the cloud on alone: the verb, this package's server and the binary all run with it on. */
+  cloud?: true;
+}
+
+/** The command line and this package's server as a process loads them in one state of WSP_CLOUD: the flag is read
+ * once as each module loads, so with it on they are loaded afresh under it, once. */
+let cloudDoors: Promise<{ cli: typeof cli; mcpServer: typeof mcpServer; c1Escaped: typeof c1Escaped }> | undefined;
+function doorsIn(cloud: boolean): Promise<{ cli: typeof cli; mcpServer: typeof mcpServer; c1Escaped: typeof c1Escaped }> {
+  if (!cloud) return Promise.resolve({ cli, mcpServer, c1Escaped });
+  cloudDoors ??= (async () => {
+    vi.resetModules();
+    vi.stubEnv(CLOUD_ENV, "1");
+    try {
+      const [{ cli: fresh }, { mcpServer: server }, { c1Escaped: escaped }] = [await import("../src/cli.js"), await import("../src/mcp.js"), await import("../src/verbs.js")];
+      return { cli: fresh, mcpServer: server, c1Escaped: escaped };
+    } finally {
+      vi.stubEnv(CLOUD_ENV, "");
+    }
+  })();
+  return cloudDoors;
+}
+
+/** Every tool the binary serves, called against the host as the command line runs its verb. A tool the binary takes
+ * on adds its row here; a refused row is called with nothing on the host to act on. */
+const CALLED: readonly Called[] = [
   { tool: "computers", argv: ["computers"], arguments: {} },
   { tool: "skills_search", argv: ["skills", "search", "memo"], arguments: { query: "memo" }, text: "prose" },
   { tool: "skills_show", argv: ["skills", "show", "acme/skills/memo"], arguments: { skill: "acme/skills/memo" }, text: "prose" },
@@ -155,6 +205,16 @@ const CALLED: readonly { tool: string; argv: string[]; arguments: Record<string,
     twin: ["one", "two"],
   },
   { tool: "agents_addtools", argv: ["agents", "addtools", "claude"], arguments: { agent: "claude" }, text: "prose" },
+  { tool: "stop", argv: ["stop", "nope"], arguments: { thread: "nope" }, refused: true },
+  { tool: "thread_rename", argv: ["thread", "rename", "nope", "t"], arguments: { thread: "nope", title: "t" }, refused: true },
+  { tool: "thread_forget", argv: ["thread", "forget", "nope"], arguments: { thread: "nope" }, refused: true },
+  { tool: "thread_allow", argv: ["thread", "allow", "nope"], arguments: { thread: "nope" }, refused: true },
+  { tool: "thread_deny", argv: ["thread", "deny", "nope"], arguments: { thread: "nope" }, refused: true },
+  { tool: "threads_wait", argv: ["threads", "wait", "nope"], arguments: { threads: ["nope"] }, refused: true },
+  { tool: "send", argv: ["send", "nope", "m"], arguments: { thread: "nope", message: "m" }, refused: true },
+  { tool: "run", argv: ["run", "nope", "t"], arguments: { workspace: "nope", task: "t" }, refused: true },
+  { tool: "exec", argv: ["exec", "nope"], after: ["--", "true"], arguments: { workspace: "nope", argv: ["true"] }, refused: true },
+  ...WORKSPACE_CALLED,
 ];
 
 /** skills.sh as far as these calls ask it: a search, and two skills to read or download. */
@@ -167,19 +227,6 @@ const SKILLS_SH: SkillsFetch = async url => {
   return new Response("{}", { status: 404 });
 };
 
-/** Tools called with nothing on the host to act on, each refused as its verb is refused: the failure object the verb
- * prints on stderr under --json, and its sentence as the text. `after` goes behind the line's own flags. */
-const REFUSED_CALLED: readonly { tool: string; argv: string[]; after?: string[]; arguments: Record<string, unknown> }[] = [
-  { tool: "stop", argv: ["stop", "nope"], arguments: { thread: "nope" } },
-  { tool: "thread_rename", argv: ["thread", "rename", "nope", "t"], arguments: { thread: "nope", title: "t" } },
-  { tool: "thread_forget", argv: ["thread", "forget", "nope"], arguments: { thread: "nope" } },
-  { tool: "thread_allow", argv: ["thread", "allow", "nope"], arguments: { thread: "nope" } },
-  { tool: "thread_deny", argv: ["thread", "deny", "nope"], arguments: { thread: "nope" } },
-  { tool: "threads_wait", argv: ["threads", "wait", "nope"], arguments: { threads: ["nope"] } },
-  { tool: "send", argv: ["send", "nope", "m"], arguments: { thread: "nope", message: "m" } },
-  { tool: "run", argv: ["run", "nope", "t"], arguments: { workspace: "nope", task: "t" } },
-  { tool: "exec", argv: ["exec", "nope"], after: ["--", "true"], arguments: { workspace: "nope", argv: ["true"] } },
-];
 
 const suite = MCP_BIN !== undefined ? describe : describe.skip;
 
@@ -236,6 +283,7 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
 
   describe("against a host over the fake runtime", () => {
     let handle: HostHandle | undefined;
+    let runtime: Runtime;
 
     beforeEach(async () => {
       const webDir = join(dir, "web");
@@ -252,7 +300,7 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
         const live = nodeHost();
         return { ...live, home: join(dir, "user"), exec: { ...live.exec, run: (cmd, args, o) => live.exec.run(cmd, args, { ...o, env: { PATH: "/usr/bin:/bin", HOME: join(dir, "user"), ...o?.env } }) } };
       };
-      const runtime = createRuntime({
+      runtime = createRuntime({
         backend: stubBackend(),
         store,
         adapters: {},
@@ -271,44 +319,51 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       vi.unstubAllEnvs();
     });
 
-    it.each(CALLED)("answers $tool with the object its verb prints under --json, its text that object as jsonLine(obj, 2) byte for byte", async ({ tool, argv, arguments: args, files, setup, text, twin }) => {
-      for (const [rel, body] of Object.entries(files ?? {})) {
+    it.each(CALLED)("answers $tool with the object its verb prints under --json, its text that object as jsonLine(obj, 2) or this package's line byte for byte", async row => {
+      const { tool, argv, arguments: args } = row;
+      const doors = await doorsIn(row.cloud === true);
+      const servedEnv = { ...env, [CLOUD_ENV]: row.cloud === true ? "1" : "" };
+      for (const [rel, body] of Object.entries(row.files ?? {})) {
         mkdirSync(dirname(join(env["HOME"]!, rel)), { recursive: true });
         writeFileSync(join(env["HOME"]!, rel), body);
       }
-      for (const line of setup ?? []) {
-        const set = captured();
-        expect(await cli([...line, "--state", statePath], set, undefined, env, false), set.errors.join("\n")).toBe(0);
-      }
+      const line = async (words: string[]): Promise<void> => {
+        const io = captured();
+        expect(await doors.cli([...words, "--state", statePath], io, undefined, servedEnv, false), io.errors.join("\n")).toBe(0);
+      };
+      for (const words of row.setup ?? []) await line(words);
+      await row.given?.(runtime, line);
+      const call = async (): Promise<{ answered: string; here: string }> => {
+        const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], servedEnv, [callOf(1, tool, args)]);
+        expect(code).toBe(0);
+        const held = row.heldHere === true || row.refused === true || row.first === true;
+        return { answered: out[0]!, here: held ? (await answeredHere(statePath, [callOf(1, tool, args)], doors.mcpServer, doors.c1Escaped))[0]! : "" };
+      };
+      const before = row.first === true ? await call() : undefined;
       const io = captured();
-      expect(await cli([...argv, "--json", "--state", statePath], io, undefined, env, false), io.errors.join("\n")).toBe(0);
-      const printed = JSON.parse(io.lines.at(-1)!) as Record<string, unknown>;
-      const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], env, [callOf(1, tool, args)]);
-      expect(code).toBe(0);
-      const { result } = JSON.parse(out[0]!) as { result: { content: { type: string; text: string }[]; structuredContent: unknown; isError?: boolean } };
-      expect(result.isError).toBeUndefined();
-      if (twin !== undefined) {
-        expect(result.structuredContent).toEqual(JSON.parse(JSON.stringify(printed).replaceAll(twin[0], twin[1])));
-        return;
+      const exit = await doors.cli([...argv, "--json", "--state", statePath, ...(row.after ?? [])], io, undefined, servedEnv, false);
+      const { answered, here } = before ?? (await call());
+      const { result } = JSON.parse(answered) as { result: { content: { type: string; text: string }[]; structuredContent: unknown; isError?: boolean } };
+      if (row.refused === true) {
+        expect(exit).not.toBe(0);
+        const failure = JSON.parse(io.errors.at(-1)!) as { error: string };
+        expect(result).toEqual({ content: [{ type: "text", text: failure.error }], structuredContent: failure, isError: true });
+      } else {
+        expect(exit, io.errors.join("\n")).toBe(0);
+        const printed = JSON.parse(io.lines.at(-1)!) as Record<string, unknown>;
+        expect(result.isError).toBe(row.error === true ? true : undefined);
+        if (row.twin !== undefined) {
+          expect(result.structuredContent).toEqual(JSON.parse(JSON.stringify(printed).replaceAll(row.twin[0], row.twin[1])));
+          return;
+        }
+        expect(result.structuredContent).toEqual(printed);
+        if (row.text === "prose") {
+          const said = captured();
+          expect(await doors.cli([...argv, "--state", statePath], said, undefined, servedEnv, false), said.errors.join("\n")).toBe(0);
+          expect(result.content).toEqual([{ type: "text", text: said.lines.join("\n") }]);
+        } else if (row.heldHere !== true && row.error !== true) expect(result.content).toEqual([{ type: "text", text: jsonLine(printed, 2) }]);
       }
-      expect(result.structuredContent).toEqual(printed);
-      if (text === "prose") {
-        const said = captured();
-        expect(await cli([...argv, "--state", statePath], said, undefined, env, false), said.errors.join("\n")).toBe(0);
-        expect(result.content).toEqual([{ type: "text", text: said.lines.join("\n") }]);
-        return;
-      }
-      expect(result.content).toEqual([{ type: "text", text: jsonLine(printed, 2) }]);
-    });
-
-    it.each(REFUSED_CALLED)("refuses $tool as its verb refuses it, the failure object and its sentence", async ({ tool, argv, after, arguments: args }) => {
-      const io = captured();
-      expect(await cli([...argv, "--json", "--state", statePath, ...(after ?? [])], io, undefined, env, false)).not.toBe(0);
-      const printed = JSON.parse(io.errors.at(-1)!) as { error: string };
-      const { out, code } = await served([MCP_BIN!, "mcp", "--state", statePath], env, [callOf(1, tool, args)]);
-      expect(code).toBe(0);
-      const { result } = JSON.parse(out[0]!) as { result: { content: { type: string; text: string }[]; structuredContent: unknown; isError?: boolean } };
-      expect(result).toEqual({ content: [{ type: "text", text: printed.error }], structuredContent: printed, isError: true });
+      if (here !== "") expect(answered).toBe(here);
     });
   });
 });
