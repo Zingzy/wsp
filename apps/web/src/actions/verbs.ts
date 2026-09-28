@@ -6,7 +6,7 @@ import { useMemo } from "react";
 import { useStore } from "../protocol/store.js";
 import { useRightPanelStore } from "../rightPanelStore.js";
 import { showTerminal } from "../shell/shellCommands.js";
-import { requestDeleteWorkspace, requestForgetWorkspace, requestProjectTrip, requestRenameWorkspace, requestWorkspaceLook } from "../shell/shellRequests.js";
+import { requestDeleteWorkspace, requestForgetWorkspace, requestProjectTrip, requestRenameWorkspace, requestWorkspaceLook, requestUndoRewind } from "../shell/shellRequests.js";
 import { copyText } from "./clipboard.js";
 import type { ThreadVerbs } from "./threadActions.js";
 import type { WorkspaceVerbs } from "./workspaceActions.js";
@@ -61,6 +61,7 @@ export function useThreadVerbs(): ThreadVerbs {
   const canSettle = api?.settleThreads !== undefined;
   const canRestore = api?.restoreThreads !== undefined;
   const canMark = api?.markThreads !== undefined;
+  const canUndoRewind = api?.undoRewind !== undefined;
   return useMemo<ThreadVerbs>(
     () => ({
       stop:
@@ -73,8 +74,9 @@ export function useThreadVerbs(): ThreadVerbs {
       settle: canSettle ? settleThreads : undefined,
       restore: canRestore ? restoreThreads : undefined,
       mark: canMark ? markThreads : undefined,
+      undoRewind: canUndoRewind ? requestUndoRewind : undefined,
       copyText,
     }),
-    [canForget, canMark, canRestore, canSettle, forgetThread, markThreads, restoreThreads, settleThreads, stop],
+    [canForget, canMark, canRestore, canSettle, canUndoRewind, forgetThread, markThreads, restoreThreads, settleThreads, stop],
   );
 }

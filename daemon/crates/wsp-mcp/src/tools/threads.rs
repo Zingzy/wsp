@@ -81,6 +81,8 @@ struct Session {
     #[serde(default)]
     section: Option<Box<RawValue>>,
     #[serde(default)]
+    rewound_at: Option<Box<RawValue>>,
+    #[serde(default)]
     permission_mode: Option<String>,
     #[serde(default)]
     fast: Option<bool>,
@@ -136,6 +138,9 @@ pub struct Thread {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, schemars(with = "Option<serde_json::Map<String, serde_json::Value>>"))]
     pub section: Option<Box<RawValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, schemars(with = "Option<f64>"))]
+    pub rewound_at: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -254,6 +259,7 @@ fn fold(sessions: Vec<Session>) -> Vec<Thread> {
                 snoozed_until: latest.snoozed_until,
                 woke_at: latest.woke_at,
                 section: latest.section,
+                rewound_at: latest.rewound_at,
                 permission_mode: latest.permission_mode,
                 fast: latest.fast.filter(|fast| *fast),
                 turns: count,

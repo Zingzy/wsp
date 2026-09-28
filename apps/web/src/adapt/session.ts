@@ -242,6 +242,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       error: null,
       startedAt: at || null,
       completedAt: null,
+      checkpoint: null,
     };
     turns.push(summary);
     return { summary, startCount: count, ordinal: 0, openMessage: null, openMessageId: null, sawText: false, tools: new Map(), childCalls: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null };
@@ -369,6 +370,15 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
             : `session exited without a result (exit code ${event.exitCode ?? "unknown"})`);
           finishTurn(t, { status: "failed", error }, at);
         }
+        continue;
+      }
+      case "session.checkpoint": {
+        // Taken once the turn is over, so a later turn may already be open: the row goes on its own turn's summary.
+        const at = turns.findIndex(t => t.turnId === event.turnId);
+        if (at < 0) continue;
+        const kept = { ...turns[at]!, checkpoint: { ref: event.ref ?? null, anchor: event.anchor ?? null } };
+        turns[at] = kept;
+        if (turn !== null && turn.summary.turnId === event.turnId) turn.summary = kept;
         continue;
       }
       default: {
