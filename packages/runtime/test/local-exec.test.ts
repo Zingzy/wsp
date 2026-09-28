@@ -99,7 +99,7 @@ describe("local exec stream", () => {
       writeFileSync(`${base}.pid`, `${pid}\n`);
       writeFileSync(`${base}.log`, "");
       writeFileSync(`${base}.exit`, "");
-      const attached = await localExecStream({ root, runDir, pollMs: 10 }).attach!(base, { input: false });
+      const attached = await localExecStream({ root, runDir, pollMs: 10 }).attach!(base, { input: false, startedAt: Date.now() });
       expect(attached).not.toBe("gone");
       const stream = attached as ExecStream;
       // Longer than the reap's 200 ms group poll, so a poll that settled on the empty file would be seen here.
@@ -156,6 +156,22 @@ describe("local exec stream", () => {
     await expect(collect(stream.lines)).rejects.toThrow(/at the 0m cap on one turn$/);
     expect(await stream.exited).toBeNull();
   });
+
+  it("a turn re-opened after a restart is cut at its first start plus the wall, not at the re-open plus the wall", async () => {
+    const WALL_MS = 3_000;
+    const reading = new Set<() => void>();
+    const startedAt = Date.now();
+    const launched = localExecStream({ root, runDir, idleMs: 60_000, deadlineMs: WALL_MS, pollMs: 20, reading })("while true; do echo tick; sleep 0.05; done", { env: {} });
+    await new Promise(resolve => setTimeout(resolve, WALL_MS / 2));
+    // The host goes: its reader lets go of the run, which keeps running, and the next host re-opens it by handle.
+    for (const drop of [...reading]) drop();
+    const attachedAt = Date.now();
+    const attached = (await localExecStream({ root, runDir, idleMs: 60_000, deadlineMs: WALL_MS, pollMs: 20 }).attach!(launched.run!, { input: false, startedAt })) as ExecStream;
+    await expect(collect(attached.lines)).rejects.toThrow(/cap on one turn$/);
+    // Half the wall was left when it was re-opened, and that half is all it got.
+    expect(Date.now() - attachedAt).toBeLessThan(WALL_MS * 0.9);
+    expect(await attached.exited).toBeNull();
+  }, 15_000);
 
   it("the defaults are the turn's own limits, so a quick command is never cut", async () => {
     const stream = localExecStream({ root, runDir })("printf ok", { env: {} });
@@ -284,7 +300,7 @@ describe("a real turn's process group", () => {
 
     // A second factory, standing for the host that comes next: it never launched this run and re-opens it by handle.
     const next = localExecStream({ root, runDir });
-    const attached = await next.attach!(run, { input: false });
+    const attached = await next.attach!(run, { input: false, startedAt: Date.now() });
     expect(attached).not.toBe("gone");
     const reader = (attached as ExecStream).lines[Symbol.asyncIterator]();
     // The line printed before this reader existed reaches it, which is what reading the log from byte zero is for.
@@ -304,7 +320,7 @@ describe("a real turn's process group", () => {
     const run = launched.run!;
     await vi.waitUntil(() => existsSync(`${run}.log`) && statSync(`${run}.log`).size > bytes, { timeout: 60_000, interval: 50 });
     const next = localExecStream({ root, runDir });
-    const attached = (await next.attach!(run, { input: false })) as ExecStream;
+    const attached = (await next.attach!(run, { input: false, startedAt: Date.now() })) as ExecStream;
     let last = performance.now();
     let held = 0;
     const tick = setInterval(() => {
@@ -329,9 +345,9 @@ describe("a real turn's process group", () => {
     expect(await collect(stream.lines)).toEqual(["hi"]);
     expect(await stream.exited).toBe(0);
     // The reap took the claim with the rest of the run when the stream ended.
-    expect(await factory.attach!(run, { input: false })).toBe("gone");
-    await expect(factory.attach!(join(runDir, "../elsewhere"), { input: false })).rejects.toThrow("not a run this host could have launched");
-    await expect(factory.attach!(join(runDir, "not-a-run-id"), { input: false })).rejects.toThrow("not a run this host could have launched");
+    expect(await factory.attach!(run, { input: false, startedAt: Date.now() })).toBe("gone");
+    await expect(factory.attach!(join(runDir, "../elsewhere"), { input: false, startedAt: Date.now() })).rejects.toThrow("not a run this host could have launched");
+    await expect(factory.attach!(join(runDir, "not-a-run-id"), { input: false, startedAt: Date.now() })).rejects.toThrow("not a run this host could have launched");
   }, 15_000);
 
   it("the sweep ends every run this computer holds that the caller did not name, and leaves the named one running", async () => {
@@ -347,8 +363,8 @@ describe("a real turn's process group", () => {
     await gone(sweptPid);
     expect(alive(keptPid)).toBe(true);
     // The run that was named is still there to attach to; the one the sweep took is gone.
-    expect(await factory.attach!(swept.run!, { input: false })).toBe("gone");
-    expect(await factory.attach!(kept.run!, { input: false })).not.toBe("gone");
+    expect(await factory.attach!(swept.run!, { input: false, startedAt: Date.now() })).toBe("gone");
+    expect(await factory.attach!(kept.run!, { input: false, startedAt: Date.now() })).not.toBe("gone");
     kept.kill();
     await kept.exited;
     await gone(keptPid);

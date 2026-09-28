@@ -301,11 +301,12 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
   /** The one reader both roads share: a launch that has just started its child, and an attach to a run an earlier
    * host process left behind. The log is read from its first byte either way, so a run that printed while no host
    * was listening is replayed to whoever attaches. */
-  const open = (base: string, hasInput: boolean, launch?: { failed?: Error }): ExecStream => {
-    // Both limits run from this reader's first second: nothing on disk records when the run's last byte landed, so
-    // an attach cannot inherit an idle clock and starts the turn's cap again.
-    const startedAt = now();
-    const activity = turnActivity(startedAt);
+  const open = (base: string, hasInput: boolean, o: { launch?: { failed?: Error }; startedAt?: number } = {}): ExecStream => {
+    const { launch } = o;
+    // The idle clock runs from this reader's first second, since nothing on disk records when the run's last byte
+    // landed; the wall runs from the turn's own start, which an attach is handed.
+    const startedAt = o.startedAt ?? now();
+    const activity = turnActivity(now());
     let killed = false;
     let inputClosed = false;
     let finishCode: number | null | undefined;
@@ -523,15 +524,15 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     } finally {
       closeSync(log);
     }
-    return open(base, input !== undefined, launch);
+    return open(base, input !== undefined, { launch });
   };
 
-  factory.attach = async (run, { input }) => {
+  factory.attach = async (run, { input, startedAt }) => {
     if (!minted(run)) throw new Error(`${run} is not a run this host could have launched`);
     // The claim is what says the run is still here, and this computer's own answer is the only one there is: a
     // folder that is gone is a run that is gone, and nothing else may end one.
     if (!existsSync(`${run}.d`)) return "gone";
-    return open(run, input);
+    return open(run, input, { startedAt });
   };
 
   factory.sweep = async keep => {

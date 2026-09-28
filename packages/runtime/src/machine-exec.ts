@@ -228,7 +228,7 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
    * host process left behind. `opened` settles once the run is known to be on the machine and rejects with the words
    * the turn fails on when it is not. The log is read from its first byte either way, so a run that printed while no
    * host was listening is replayed to whoever attaches. */
-  const open = (base: string, hasInput: boolean, opened: Promise<void>): ExecStream => {
+  const open = (base: string, hasInput: boolean, opened: Promise<void>, turnStartedAt?: number): ExecStream => {
     const sentinel = `__WSP_EOF_${randomBytes(6).toString("hex")}__`;
 
     let killed = false;
@@ -243,10 +243,10 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
       wake();
     };
     opts.reading?.add(drop);
-    // Both limits run from this reader's first second: nothing on the machine records when the run's last byte
-    // landed, so an attach cannot inherit an idle clock and starts the turn's cap again.
-    const startedAt = now();
-    const activity = turnActivity(startedAt);
+    // The idle clock runs from this reader's first second, since nothing on the machine records when the run's last
+    // byte landed; the wall runs from the turn's own start, which an attach is handed.
+    const startedAt = turnStartedAt ?? now();
+    const activity = turnActivity(now());
     let finishCode: number | null | undefined;
     let resolveExit: (code: number | null) => void = () => {};
     const exited = new Promise<number | null>(resolve => {
@@ -459,13 +459,13 @@ export function machineExecStream(machine: Machine, opts: MachineExecOptions = {
     return open(base, input !== undefined, opened);
   };
 
-  factory.attach = async (run, { input }) => {
+  factory.attach = async (run, { input, startedAt }) => {
     if (!minted(run)) throw new Error(`${run} is not a run this host could have launched`);
     const res = await untilReached(() => machine.exec(`[ -d ${q(claim(run))} ] && echo ${HANDSHAKE.run} || echo ${HANDSHAKE.gone}`, { timeoutMs: execTimeoutMs }), { now, sleep });
     // Only these two answers say anything about the run. Anything else is the machine failing to answer the
     // question, which is the unreached road, not a run to end: the reader is built and the run swept on WSP_GONE
     // alone, so nothing here can take a live turn's process group with it.
-    if (res.stdout.includes(HANDSHAKE.run)) return open(run, input, Promise.resolve());
+    if (res.stdout.includes(HANDSHAKE.run)) return open(run, input, Promise.resolve(), startedAt);
     if (res.stdout.includes(HANDSHAKE.gone)) return "gone";
     throw new Error(`the machine did not answer whether it still holds ${run}; ${machineAnswer(res)}`);
   };

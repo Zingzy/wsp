@@ -840,7 +840,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
     ...(attach !== undefined
       ? {
           attach: async (options: AdapterAttachOptions) => {
-            const stream = await attach(options.run, { input: true });
+            const stream = await attach(options.run, { input: true, startedAt: options.startedAt });
             return stream === "gone" ? "gone" : follow({ stream, localId: options.sessionId, announced: true, onEvent: options.onEvent });
           },
         }

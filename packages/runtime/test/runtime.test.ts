@@ -8431,7 +8431,7 @@ describe("a host that comes back to a turn still running on a machine", () => {
       steers: false,
       start: o => session(ctx.execStream("claude -p hi", { env: {} }), "66666666-6666-4666-8666-666666666666", o.onEvent),
       attach: async o => {
-        const opened = await ctx.execStream.attach!(o.run, { input: false });
+        const opened = await ctx.execStream.attach!(o.run, { input: false, startedAt: o.startedAt });
         return opened === "gone" ? "gone" : session(opened, o.sessionId, o.onEvent);
       },
     };

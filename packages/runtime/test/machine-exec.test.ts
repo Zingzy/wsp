@@ -419,6 +419,24 @@ describe("machineExecStream", () => {
     expect(guest.files()).toEqual([]);
   });
 
+  it("a run re-opened after a restart is cut at its first start plus the wall, not at the re-open plus the wall", async () => {
+    const { backend, machine } = await makeMachine();
+    const { guest, clock } = minuteGuest(backend, Number.POSITIVE_INFINITY);
+    const reading = new Set<() => void>();
+    const launched = machineExecStream(machine, { pollMs: 1, deadlineMs: 30 * 60_000, now: () => clock.now, reading })("claude", { env: {} });
+    await vi.waitFor(() => expect(guest.getLaunch()).not.toBe(""));
+    // The host goes and comes back twenty minutes into the turn; the next one re-opens the run by handle.
+    for (const drop of [...reading]) drop();
+    clock.now = 20 * 60_000;
+    const attached = (await machineExecStream(machine, { pollMs: 1, deadlineMs: 30 * 60_000, now: () => clock.now }).attach!(launched.run!, { input: false, startedAt: 0 })) as ExecStream;
+    await expect(
+      (async () => {
+        for await (const line of attached.lines) void line;
+      })(),
+    ).rejects.toThrow(/^stopped after 30m 00s at the 30m cap on one turn$/);
+    expect(clock.now).toBe(30 * 60_000);
+  });
+
   it("a run that prints nothing while its process group works runs past the idle limit, and only the wall ends it", async () => {
     const { backend, machine } = await makeMachine();
     const { guest, clock } = minuteGuest(backend, 0, Number.POSITIVE_INFINITY, CORE_MINUTE);
@@ -751,7 +769,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
       { append: '{"type":"system","subtype":"init"}\n{"type":"assistant"}\n' },
       { append: '{"type":"result"}\n', exit: 0 },
     ]);
-    const stream = await factory.attach!(run, { input: true });
+    const stream = await factory.attach!(run, { input: true, startedAt: Date.now() });
     expect(stream).not.toBe("gone");
     const lines: string[] = [];
     for await (const line of (stream as ExecStream).lines) lines.push(line);
@@ -761,7 +779,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
 
   it("takes a message into the run over the channel the launch left open", async () => {
     const { factory, guest, run } = await abandoned([{ append: "one\n" }, { append: "two\n", exit: 0 }]);
-    const stream = (await factory.attach!(run, { input: true })) as ExecStream;
+    const stream = (await factory.attach!(run, { input: true, startedAt: Date.now() })) as ExecStream;
     expect(await stream.write('{"type":"user"}')).toBe("written");
     expect(guest.getInput()).toBe('go\n{"type":"user"}\n');
     for await (const line of stream.lines) void line;
@@ -771,14 +789,14 @@ describe("machineExecStream attaching to a run its process did not launch", () =
   it("a machine that answers and no longer holds the run says gone, with no reader and no poll of its own", async () => {
     const { factory, guest, run } = await abandoned([{ append: "never read\n", exit: 0 }]);
     guest.sweep();
-    expect(await factory.attach!(run, { input: true })).toBe("gone");
+    expect(await factory.attach!(run, { input: true, startedAt: Date.now() })).toBe("gone");
     expect(guest.calls.filter(c => c.includes("__WSP_EOF_"))).toEqual([]);
   });
 
   it("a probe nothing answers leaves the run alone: no kill, no rm, and the reach window is what it waits out", async () => {
     const { factory, guest, run } = await abandoned([{ append: "still working\n" }]);
     guest.refuseProbes(new Error("gateway said 502"));
-    const failure = await factory.attach!(run, { input: true }).then(
+    const failure = await factory.attach!(run, { input: true, startedAt: Date.now() }).then(
       () => new Error("the probe answered where it should have failed"),
       (e: unknown) => e as Error,
     );
@@ -797,7 +815,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
     const launched = factory("claude -p hi", { env: {}, input: ["go"] });
     await vi.waitFor(() => expect(guest.getLaunch()).not.toBe(""));
     guest.refuseProbes(Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } }));
-    const failure = await factory.attach!(launched.run!, { input: true }).then(
+    const failure = await factory.attach!(launched.run!, { input: true, startedAt: Date.now() }).then(
       () => new Error("the probe answered where it should have failed"),
       (e: unknown) => e as Error,
     );
@@ -810,7 +828,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
   it("a machine that answers neither way is not a run to end", async () => {
     const { factory, guest, run } = await abandoned([{ append: "still working\n" }]);
     guest.garbleProbes();
-    const failure = await factory.attach!(run, { input: true }).then(
+    const failure = await factory.attach!(run, { input: true, startedAt: Date.now() }).then(
       () => new Error("the probe answered where it should have failed"),
       (e: unknown) => e as Error,
     );
@@ -823,7 +841,7 @@ describe("machineExecStream attaching to a run its process did not launch", () =
     const { factory, guest } = await abandoned([{ append: "still working\n" }]);
     const before = guest.calls.length;
     for (const bad of ["/tmp/wsp-run/../../etc/x", "/tmp/wsp-run/$(id)", "/etc/wsp-run/aabbccddeeff", "/tmp/wsp-run/nothex000000", "/tmp/wsp-run/aabbccddeef"]) {
-      await expect(factory.attach!(bad, { input: true })).rejects.toThrow("is not a run this host could have launched");
+      await expect(factory.attach!(bad, { input: true, startedAt: Date.now() })).rejects.toThrow("is not a run this host could have launched");
     }
     expect(guest.calls.length).toBe(before);
   });

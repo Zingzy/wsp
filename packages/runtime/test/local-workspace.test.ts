@@ -1063,7 +1063,7 @@ describe("a local turn and a host restart", () => {
         ? {}
         : {
             attach: async (o: AdapterAttachOptions) => {
-              const stream = await attach(o.run, { input: false });
+              const stream = await attach(o.run, { input: false, startedAt: o.startedAt });
               return stream === "gone" ? "gone" : read(stream, o.onEvent, o.sessionId);
             },
           }),
