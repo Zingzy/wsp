@@ -1007,6 +1007,60 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     60_000,
   );
 
+  /** Answers the quit's question with `answer` from here on, as a person would, and runs `then` inside the app once
+   * it has answered: what the case needs to land while the answer is being acted on. */
+  const answerQuit = (app: ElectronApplication, answer: string, then: "activate" | "nothing" = "nothing"): Promise<void> =>
+    app.evaluate(({ app: electronApp, dialog }, [label, after]) => {
+      electronApp.on("browser-window-created", () => console.error("smoke: a window opened"));
+      dialog.showMessageBox = (async (...args: unknown[]) => {
+        const options = args.at(-1) as { buttons?: string[] };
+        // The activate a Dock click or macOS hands the app, landing while the answer is still being carried out.
+        if (after === "activate") setTimeout(() => electronApp.emit("activate"), 50);
+        return { response: options.buttons?.indexOf(label) ?? 0, checkboxChecked: false };
+      }) as typeof dialog.showMessageBox;
+    }, [answer, then] as const);
+
+  it.runIf(process.platform === "darwin")(
+    "with no window open, the menu bar's Quit and stop wsp stops wsp and ends the app, and an activate during the stop opens nothing",
+    async () => {
+      launched = await launch({}, seedLocalWorkspace);
+      const { app, statePath } = launched;
+      const win = await windowAt(app, APP_URL);
+      await win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`).waitFor();
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(w => w.close()));
+      await vi.waitFor(() => expect(appWindows(app)).toHaveLength(0), { timeout: 10_000, interval: 100 });
+      const host = servingHost(statePath)!;
+      const exited = new Promise<"exited">(resolve => app.process().once("exit", () => resolve("exited")));
+      await answerQuit(app, "Quit and stop wsp", "activate");
+      await app.evaluate(() => (globalThis as unknown as { wspTray: { pick(what: TrayAct): void } }).wspTray.pick({ kind: "quit" }));
+      const ended = await Promise.race([exited, new Promise<"still running">(resolve => setTimeout(() => resolve("still running"), 40_000))]);
+      expect(ended, launched.said.slice(-20).join("\n")).toBe("exited");
+      expect(launched.said.filter(line => line.includes("smoke: a window opened")), "a window opened while wsp was stopping").toEqual([]);
+      await vi.waitFor(() => expect(alive(host.pid)).toBe(false), { timeout: 30_000, interval: 200 });
+      expect(servingHost(statePath), "the stop was undone: something serves the state file again").toBeUndefined();
+    },
+    120_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "a quit whose question is cancelled leaves the app as it was: Open from the menu bar opens a window again",
+    async () => {
+      launched = await launch({}, seedLocalWorkspace);
+      const { app } = launched;
+      const win = await windowAt(app, APP_URL);
+      await win.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`).waitFor();
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach(w => w.close()));
+      await vi.waitFor(() => expect(appWindows(app)).toHaveLength(0), { timeout: 10_000, interval: 100 });
+      await answerQuit(app, "Cancel");
+      await app.evaluate(() => (globalThis as unknown as { wspTray: { pick(what: TrayAct): void } }).wspTray.pick({ kind: "quit" }));
+      await app.evaluate(() => (globalThis as unknown as { wspTray: { pick(what: TrayAct): void } }).wspTray.pick({ kind: "openApp" }));
+      const again = await windowAt(app, APP_URL);
+      await again.locator(`[data-row-id='${workspaceRowId(LOCAL_WORKSPACE.id)}']`).waitFor();
+      expect(app.process().exitCode).toBeNull();
+    },
+    60_000,
+  );
+
   it.runIf(process.platform === "darwin")(
     "with the window closed, the menu bar counts a working thread and holds the computer awake, marks the prompt it raises, and its Allow lets the turn finish",
     async () => {

@@ -413,8 +413,8 @@ async function openWindow(): Promise<void> {
 let reopening: Promise<void> | undefined;
 /** The window brought back, from the menu bar or the Dock: the one standing is raised, and a closed one opened again. */
 function reopen(): Promise<void> {
-  // A quit under way opens nothing: macOS can hand the app an activate as the quit's question closes, and a window
-  // opened then keeps the app from quitting.
+  // A quit under way opens nothing: a window opened then outlives the quit, and on Quit and stop wsp the open would
+  // attach to the host again, or start the service after the stop.
   if (quitting) return Promise.resolve();
   if (win !== undefined) {
     raiseWindow(win);
