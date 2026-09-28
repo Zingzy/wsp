@@ -409,6 +409,11 @@ export function getTerminals(workspaceId: string): WorkspaceTerminals | null {
   return registry.get(workspaceId) ?? null;
 }
 
+/** Every workspace a link is provided for, with its link: a workspace missing here has none open. */
+export function everyTerminals(): IterableIterator<[string, WorkspaceTerminals]> {
+  return registry.entries();
+}
+
 export function onTerminals(fn: () => void): () => void {
   registryFns.add(fn);
   return () => registryFns.delete(fn);

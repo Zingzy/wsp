@@ -14,6 +14,7 @@ import { pinnedDroppingPort } from "../../../packages/runtime/test/held-port.js"
 import { startRefusingDoor, type RefusingDoor } from "../../../packages/runtime/test/refusing-door.js";
 import { startTcpProxy, type TcpProxy } from "../../../packages/runtime/test/tcp-proxy.js";
 import { startRelayHarness, type RelayHarness } from "./relay-harness.js";
+import { LINK_DOWN_WORDS, linkDownWord } from "../src/adapt/index.js";
 
 async function until(cond: () => boolean, ms = 5000): Promise<void> {
   const deadline = Date.now() + ms;
@@ -157,4 +158,15 @@ describe("the words a link gets", () => {
     await until(() => link!.status() === "live", 10_000);
     expect(linkDownLine(paneOf(link))).toBeNull();
   }, 20_000);
+});
+
+describe("the word a resting tile wears while its workspace's link is down", () => {
+  it("is one capitalised word per down kind, and nothing while the link is not down", () => {
+    const at = (kind: string) => linkDownWord({ kind } as TerminalPaneState);
+    expect(at("reconnecting")).toBe(LINK_DOWN_WORDS.reconnecting);
+    expect(at("unanswered")).toBe(LINK_DOWN_WORDS.unanswered);
+    expect(at("refused")).toBe(LINK_DOWN_WORDS.refused);
+    expect(at("reauth")).toBe(LINK_DOWN_WORDS.refused);
+    for (const kind of ["live", "starting", "not-answering", "no-daemon", "absent", "paused", "waking", "gone"]) expect(at(kind), kind).toBeNull();
+  });
 });

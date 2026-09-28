@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Messages entered while a turn runs: Enter queues instead of failing, the
-// rows stack above the composer and go one per turn end in order, each is
-// edited in place or removed, send-now stops the turn and puts its row first,
-// and the queue lives in local storage so a reload still holds it: restored
-// rows wait for the person's next send. Same fixture api shape as chat.test.tsx; no live daemon.
+// Messages entered while a turn runs: Enter queues instead of failing, each
+// message a card above the composer with the files it goes with, going one per
+// turn end in order; a card's edit puts it back in the box and its remove drops
+// it; Ctrl+Enter sends now, into the turn where the harness steers and by
+// stopping the turn otherwise; and the queue lives in local storage so a reload
+// still holds it: restored rows wait for the person's next send. Same fixture
+// api shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
@@ -11,11 +13,12 @@ import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
-import type { Api, ProtocolEvent } from "../src/protocol/client.js";
+import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { requestNewThread } from "../src/shell/shellRequests.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
-import { STEER_NOTICE } from "../src/components/chat/ComposerQueue.js";
+import { COMPOSER_WORDS } from "../src/components/chat/composerWords.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 import { CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
@@ -48,7 +51,7 @@ const catalog = (steers: boolean): HarnessCatalog => ({ harness: "claude", label
 
 function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionView[] = [], harnesses?: HarnessCatalog[]) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
-  const started: Array<{ workspaceId: string; prompt: string; thread?: string }> = [];
+  const started: StartSessionOptions[] = [];
   const interrupted: string[] = [];
   const steered: Array<{ sessionId: string; prompt: string; requestId: string }> = [];
   const emit = (e: EventUnion) => act(() => { for (const fn of [...listeners]) fn(e); });
@@ -97,8 +100,14 @@ async function setup(api: Api) {
 }
 
 const draft = () => useComposerDraftStore.getState().drafts[WS]?.prompt ?? "";
-const queued = () => (screen.queryAllByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement[]).map(t => t.value);
-const rowFor = (text: string) => (screen.getAllByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement[]).find(t => t.value === text)!.closest("li")!;
+const cards = () => [...document.querySelectorAll<HTMLElement>("[data-queued-id]")];
+const queued = () => cards().map(li => li.querySelector("[data-queued-text]")?.textContent ?? "");
+const rowFor = (text: string) => cards().find(li => li.querySelector("[data-queued-text]")?.textContent === text)!;
+/** The composer has no line above its box, in any state. */
+const noLineAbove = () => {
+  expect(document.querySelector("[data-composer-refusal]")).toBeNull();
+  expect(document.querySelector("[data-chat-composer] span[role='status']")).toBeNull();
+};
 const within = (li: HTMLElement, name: string) => li.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`);
 const done = (status: "completed" | "interrupted", turnId = CHAT_TURN): EventUnion => ({ type: "session.done", ...scope, turnId, result: { status, durationMs: 900, costUsd: 0.001 } });
 const end = (turnId = CHAT_TURN): EventUnion => ({ type: "session.end", ...scope, turnId, exitCode: 0, sawResult: true });
@@ -116,8 +125,21 @@ async function enter(text: string) {
   await press(composerEditor(), "Enter");
 }
 
+/** Ctrl+Enter: the message goes into the running turn now rather than waiting behind it. */
+async function ctrlEnter(text: string) {
+  await typeInto(composerEditor(), text);
+  await press(composerEditor(), "Enter", { ctrlKey: true });
+}
+
+/** A held card sent: its Edit puts it back in the box and the person's Enter sends it. */
+async function editThenSend(text: string) {
+  fireEvent.click(within(rowFor(text), "Edit queued message")!);
+  await waitFor(() => expect(draft()).toBe(text));
+  await press(composerEditor(), "Enter");
+}
+
 describe("composer queue", () => {
-  it("enter during a turn queues the message, clears the composer and shows no banner; the turn's end sends it", async () => {
+  it("enter during a turn queues the message as a card above the box, with no line, and the turn's end sends it", async () => {
     const { api, started, emit } = fixtureApi();
     const turn = { ...scope, threadId: "thr_0001" };
     await setup(api);
@@ -130,8 +152,12 @@ describe("composer queue", () => {
     expect(draft()).toBe("");
     expect(composerEditor().textContent).toBe("");
     expect(queued()).toEqual(["what model are you?"]);
-    expect(screen.getByText("queued")).toBeDefined();
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(rowFor("what model are you?").textContent).toContain("Queued");
+    expect(within(rowFor("what model are you?"), "Edit queued message")).not.toBeNull();
+    expect(within(rowFor("what model are you?"), "Remove queued message")).not.toBeNull();
+    // A card is content in the column, not an overlay: a flat fill with a hairline at a row's radius, never a menu's glass.
+    expect([...rowFor("what model are you?").classList].filter(c => /^(rounded|border|bg-|shadow|dropdown-glass)/.test(c)).sort()).toEqual(["bg-card", "border", "border-border", "rounded-md"]);
+    noLineAbove();
     expect(screen.queryByText(/Turn in flight/)).toBeNull();
 
     emit({ type: "session.done", ...turn, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
@@ -164,15 +190,18 @@ describe("composer queue", () => {
     expect(queued()).toEqual([]);
   });
 
-  it("a row is edited in place and removed by its button; what sends is the edited text", async () => {
+  it("a card's Edit puts its words back in the box and takes it off the queue; Remove drops a card", async () => {
     const { api, started, emit } = fixtureApi();
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
     await enter("one");
     await enter("two");
-    fireEvent.change(rowFor("two").querySelector("textarea")!, { target: { value: "two, in tokens" } });
-    expect(queued()).toEqual(["one", "two, in tokens"]);
-    expect(useComposerDraftStore.getState().queues[WS]?.map(r => r.prompt)).toEqual(["one", "two, in tokens"]);
+    fireEvent.click(within(rowFor("two"), "Edit queued message")!);
+    await waitFor(() => expect(draft()).toBe("two"));
+    expect(queued()).toEqual(["one"]);
+    await typeInto(composerEditor(), ", in tokens");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(queued()).toEqual(["one", "two, in tokens"]));
     fireEvent.click(within(rowFor("one"), "Remove queued message")!);
     expect(queued()).toEqual(["two, in tokens"]);
     emit(done("completed"));
@@ -180,44 +209,62 @@ describe("composer queue", () => {
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["two, in tokens"]));
   });
 
-  it("send-now stops the turn through the runtime's session id and that row goes first once the turn ends", async () => {
-    const { api, started, interrupted, emit, hooks } = fixtureApi({}, [runningRow]);
+  it("a queued message keeps its file on its card and sends it with the words at the turn's end", async () => {
+    const { api, started, emit } = fixtureApi();
+    await setup(api);
+    emit({ type: "session.start", ...scope, prompt: "go" });
+    act(() => {
+      fireEvent.paste(composerEditor(), { clipboardData: { files: [new File(["# notes"], "notes.md", { type: "text/markdown" })], getData: () => "" } });
+    });
+    await waitFor(() => expect(document.querySelector('[data-composer-files] [data-chat-file="notes.md"]')).not.toBeNull());
+    await enter("read the notes");
+    await waitFor(() => expect(queued()).toEqual(["read the notes"]));
+    expect(rowFor("read the notes").querySelector('[data-queued-file="notes.md"]')).not.toBeNull();
+    expect(document.querySelector('[data-composer-files] [data-chat-file="notes.md"]')).toBeNull();
+    emit(done("completed"));
+    emit(end());
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ prompt: "read the notes" });
+    expect(started[0]!.attachments?.map(a => a.name)).toEqual(["notes.md"]);
+  });
+
+  it("Ctrl+Enter sends the draft now with a harness that does not steer: the turn stops through the runtime's session id and the message goes first", async () => {
+    const { api, started, interrupted, emit, hooks } = fixtureApi({}, [runningRow], [catalog(false)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
     emit({ type: "session.delta", ...scope, kind: "text", text: "on it" });
     await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
+    await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
     await enter("one");
-    await enter("two");
     // The runtime pushes the interrupted done and end before it answers accepted.
     hooks.onInterrupt = () => { emit(done("interrupted")); emit(end()); };
-    fireEvent.click(within(rowFor("two"), "Stop the turn and send now")!);
+    await ctrlEnter("two");
     expect(interrupted).toEqual([runningRow.id]);
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["two"]));
     expect(queued()).toEqual(["one"]);
-    expect(screen.queryByText(STEER_NOTICE)).toBeNull();
+    noLineAbove();
     expect(screen.getByTestId("settled-footer").textContent).toContain("interrupted");
   });
 
-  it("send-now shows its notice and marks the row next while the stop is pending; a refused stop drops the notice and keeps the row", async () => {
-    const { api, started, interrupted, emit } = fixtureApi();
-    api.interruptSession = async id => { interrupted.push(id); throw new Error("runtime is busy"); };
+  it("while that stop is out the message's card reads next; a refused stop raises a flyout and the card stays first", async () => {
+    const { api, started, interrupted, emit } = fixtureApi({}, [runningRow], [catalog(false)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
     emit({ type: "session.delta", ...scope, kind: "text", text: "on it" });
+    await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
+    await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
     await enter("one");
-    await enter("two");
+    clearNotices();
     let release: () => void = () => {};
     const held = new Promise<void>(resolve => { release = resolve; });
     api.interruptSession = async id => { interrupted.push(id); await held; throw new Error("runtime is busy"); };
-    fireEvent.click(within(rowFor("two"), "Stop the turn and send now")!);
-    expect(queued()).toEqual(["two", "one"]);
-    expect(screen.getByRole("status").textContent).toBe(STEER_NOTICE);
-    expect(screen.getByText("next")).toBeDefined();
-    expect(within(rowFor("two"), "Stop the turn and send now")!.disabled).toBe(true);
+    await ctrlEnter("two");
+    await waitFor(() => expect(queued()).toEqual(["two", "one"]));
+    expect(rowFor("two").textContent).toContain("Next");
+    noLineAbove();
     await act(async () => { release(); await held.catch(() => {}); });
-    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Could not stop: runtime is busy"));
-    expect(screen.queryByText(STEER_NOTICE)).toBeNull();
-    expect(screen.queryByText("next")).toBeNull();
+    await waitFor(() => expect(lastNotice()).toBe(COMPOSER_WORDS.stopRefused("runtime is busy")));
+    expect(rowFor("two").textContent).not.toContain("Next");
     expect(queued()).toEqual(["two", "one"]);
     expect(started).toHaveLength(0);
     emit(done("completed"));
@@ -225,7 +272,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["two"]));
   });
 
-  it("with a harness that steers, send-now sends the row into the running turn: one steer under the runtime's session id, no interrupt, no notice, the row leaves on accepted and shows in the thread once the runtime records it", async () => {
+  it("with a harness that steers, Ctrl+Enter sends the draft into the running turn: one steer, no stop, no card, and it shows in the thread once recorded", async () => {
     const { api, started, interrupted, steered, emit } = fixtureApi({}, [runningRow], [catalog(true)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
@@ -233,32 +280,24 @@ describe("composer queue", () => {
     await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
     await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
     await enter("one");
-    await enter("two");
-    const li = rowFor("two");
-    const shape = li.children.length;
-    expect(within(li, "Send now")).not.toBeNull();
-    expect(within(li, "Stop the turn and send now")).toBeNull();
-    fireEvent.click(within(li, "Send now")!);
+    await ctrlEnter("two");
     await waitFor(() => expect(steered).toHaveLength(1));
     expect(steered[0]).toMatchObject({ sessionId: runningRow.id, prompt: "two" });
     expect(steered[0]!.requestId).toMatch(/\S/);
     expect(interrupted).toEqual([]);
     await waitFor(() => expect(queued()).toEqual(["one"]));
-    expect(screen.queryByText(STEER_NOTICE)).toBeNull();
-    expect(screen.queryByRole("status")).toBeNull();
-    expect(rowFor("one").children.length).toBe(shape);
+    expect(draft()).toBe("");
+    noLineAbove();
     expect(started).toHaveLength(0);
     emit({ type: "session.steer", ...scope, prompt: "two", requestId: steered[0]!.requestId });
     expect(screen.getByText("two")).toBeDefined();
-    expect(screen.getByText("steered")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
-    emit({ type: "session.delta", ...scope, kind: "text", text: " done both" });
+    expect(screen.queryByText("steered")).toBeNull();
     emit(done("completed"));
     emit(end());
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
   });
 
-  it("with a harness that steers, a steer the turn beat (not-running) leaves the row at the head, and the turn's end sends it as a start", async () => {
+  it("with a harness that steers, a steer the turn beat (not-running) leaves the message first, and the turn's end sends it as a start", async () => {
     const { api, started, interrupted, steered, emit, hooks } = fixtureApi({}, [runningRow], [catalog(true)]);
     hooks.onSteer = () => "not-running";
     await setup(api);
@@ -266,12 +305,9 @@ describe("composer queue", () => {
     await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
     await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
     await enter("one");
-    await enter("two");
-    fireEvent.click(within(rowFor("two"), "Send now")!);
+    await ctrlEnter("two");
     await waitFor(() => expect(steered).toHaveLength(1));
-    await waitFor(() => expect(within(rowFor("two"), "Send now")!.disabled).toBe(false));
-    expect(queued()).toEqual(["two", "one"]);
-    expect(screen.queryByText("next")).toBeNull();
+    await waitFor(() => expect(queued()).toEqual(["two", "one"]));
     expect(interrupted).toEqual([]);
     expect(started).toHaveLength(0);
     emit(done("completed"));
@@ -280,62 +316,52 @@ describe("composer queue", () => {
     expect(queued()).toEqual(["one"]);
   });
 
-  it("with a harness that steers, a steer the runtime refuses shows why and keeps the row; a held row is released by the steer", async () => {
+  it("with a harness that steers, a steer the runtime refuses raises a flyout and keeps the message as the first card", async () => {
     const { api, started, steered, emit } = fixtureApi({}, [runningRow], [catalog(true)]);
     api.steerSession = async (sessionId, prompt, requestId) => { steered.push({ sessionId, prompt, requestId }); throw new Error("Workspace is pausing; wake it to send"); };
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
     await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
     await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
-    await enter("one");
-    useComposerDraftStore.getState().hold(WS);
-    expect(useComposerDraftStore.getState().held[WS]).toBe(true);
-    fireEvent.click(within(rowFor("one"), "Send now")!);
-    expect(useComposerDraftStore.getState().held[WS]).toBeFalsy();
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Could not send now: Workspace is pausing; wake it to send"));
+    clearNotices();
+    await ctrlEnter("one");
+    await waitFor(() => expect(lastNotice()).toBe(COMPOSER_WORDS.sendNowFailed("Workspace is pausing; wake it to send")));
     expect(queued()).toEqual(["one"]);
-    expect(screen.queryByText("next")).toBeNull();
+    noLineAbove();
     expect(started).toHaveLength(0);
     emit(done("completed"));
     emit(end());
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
   });
 
-  it("with a harness that does not steer, send-now keeps the stop road and its notice", async () => {
-    const { api, started, interrupted, steered, emit, hooks } = fixtureApi({}, [runningRow], [catalog(false)]);
+  it("Ctrl+Enter with a file goes by the stop road even where the harness steers, since a steer carries words alone", async () => {
+    const { api, started, interrupted, steered, emit, hooks } = fixtureApi({}, [runningRow], [catalog(true)]);
     await setup(api);
     emit({ type: "session.start", ...scope, prompt: "go" });
     await waitFor(() => expect(useStore.getState().sessions[WS]).toHaveLength(1));
     await waitFor(() => expect(useStore.getState().harnessesByWorkspace[WS]).toHaveLength(1));
-    await enter("one");
-    expect(within(rowFor("one"), "Send now")).toBeNull();
-    let release: () => void = () => {};
-    const held = new Promise<void>(resolve => { release = resolve; });
-    api.interruptSession = async id => { interrupted.push(id); await held; hooks.onInterrupt(); return "accepted"; };
-    fireEvent.click(within(rowFor("one"), "Stop the turn and send now")!);
-    expect(screen.getByRole("status").textContent).toBe(STEER_NOTICE);
-    expect(steered).toEqual([]);
+    act(() => {
+      fireEvent.paste(composerEditor(), { clipboardData: { files: [new File(["# notes"], "notes.md", { type: "text/markdown" })], getData: () => "" } });
+    });
+    await waitFor(() => expect(document.querySelector('[data-composer-files] [data-chat-file="notes.md"]')).not.toBeNull());
     hooks.onInterrupt = () => { emit(done("interrupted")); emit(end()); };
-    await act(async () => { release(); await held; });
-    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one"]));
+    await ctrlEnter("read the notes now");
+    expect(steered).toEqual([]);
     expect(interrupted).toEqual([runningRow.id]);
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]).toMatchObject({ prompt: "read the notes now" });
+    expect(started[0]!.attachments?.map(a => a.name)).toEqual(["notes.md"]);
   });
 
-  it("send-now is disabled before the turn's start arrives, since nothing can be stopped yet, and the row does not shift when it can", async () => {
-    const { api, started, emit } = fixtureApi();
+  it("Ctrl+Enter before the turn's start arrives queues the message as Enter does, since nothing can be stopped yet", async () => {
+    const { api, started, interrupted } = fixtureApi();
     await setup(api);
     await enter("first");
     await waitFor(() => expect(started).toHaveLength(1));
-    await enter("second");
+    await ctrlEnter("second");
     expect(started).toHaveLength(1);
+    expect(interrupted).toEqual([]);
     expect(queued()).toEqual(["second"]);
-    const li = rowFor("second");
-    const before = li.querySelectorAll("button").length;
-    expect(within(li, "Send now")!.disabled).toBe(true);
-    expect(screen.getByRole("button", { name: "Remove queued message" })).toBeDefined();
-    emit({ type: "session.start", ...scope, prompt: "first" });
-    expect(within(rowFor("second"), "Stop the turn and send now")!.disabled).toBe(false);
-    expect(rowFor("second").querySelectorAll("button").length).toBe(before);
   });
 
   it("a first send whose harness dies before its start frees the composer at that turn's end and holds the rows that rode it; the next Enter goes first, naming the dead thread, and its start there takes the rows", async () => {
@@ -390,18 +416,16 @@ describe("composer queue", () => {
     expect(queued()).toEqual(["second", "third"]);
     expect(screen.getByText("go on")).toBeDefined();
     expect(screen.getByText(/claude: command not found/i)).toBeDefined();
-    fireEvent.change(rowFor("third").querySelector("textarea")!, { target: { value: "third, edited" } });
-    expect(queued()).toEqual(["second", "third, edited"]);
-    fireEvent.click(within(rowFor("second"), "Send now")!);
+    await editThenSend("second");
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["go on", "second"]));
     expect(started[1]?.thread).toBe("thr_a");
-    expect(queued()).toEqual(["third, edited"]);
+    expect(queued()).toEqual(["third"]);
     const A3 = { ...A2, turnId: "turn_a3" };
     emit({ type: "session.start", ...A3, prompt: "second" });
     expect(started).toHaveLength(2);
     emit({ type: "session.done", ...A3, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...A3, exitCode: 0, sawResult: true });
-    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["go on", "second", "third, edited"]));
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["go on", "second", "third"]));
     expect(queued()).toEqual([]);
   });
 
@@ -426,7 +450,7 @@ describe("composer queue", () => {
     expect(started).toHaveLength(1);
     expect(queued()).toEqual(["two", "three"]);
     expect(screen.getByText("one")).toBeDefined();
-    fireEvent.click(within(rowFor("two"), "Send now")!);
+    await editThenSend("two");
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one", "two"]));
     expect(queued()).toEqual(["three"]);
   });
@@ -488,18 +512,16 @@ describe("composer queue", () => {
     expect(screen.getByTestId("settled-footer").textContent).toContain("failed");
     expect(started).toHaveLength(1);
     expect(queued()).toEqual(["second"]);
-    fireEvent.change(rowFor("second").querySelector("textarea")!, { target: { value: "second, edited" } });
-    expect(queued()).toEqual(["second, edited"]);
     await enter("third");
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third"]));
     expect(started[1]?.thread).toBe("thr_x");
-    expect(queued()).toEqual(["second, edited"]);
+    expect(queued()).toEqual(["second"]);
     const Y = { workspaceId: WS, sessionId: "sess_y", turnId: "turn_y1", threadId: "thr_x" };
     emit({ type: "session.start", ...Y, prompt: "third" });
-    expect(useComposerDraftStore.getState().queues["thr_x"]?.map(r => r.prompt)).toEqual(["second, edited"]);
+    expect(useComposerDraftStore.getState().queues["thr_x"]?.map(r => r.prompt)).toEqual(["second"]);
     emit({ type: "session.done", ...Y, result: { status: "completed", durationMs: 500 } });
     emit({ type: "session.end", ...Y, exitCode: 0, sawResult: true });
-    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third", "second, edited"]));
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "third", "second"]));
     expect(started[2]?.thread).toBe("thr_x");
     expect(queued()).toEqual([]);
   });
@@ -525,8 +547,11 @@ describe("composer queue", () => {
     expect(started.map(s => s.prompt)).toEqual(["four"]);
     expect(queued()).toEqual(["one", "two"]);
     refuse = false;
-    fireEvent.click(within(rowFor("one"), "Send now")!);
-    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["four", "one"]));
+    // The refused draft is still in the box; an edit keeps it and puts the card's words under it.
+    fireEvent.click(within(rowFor("one"), "Edit queued message")!);
+    await waitFor(() => expect(draft()).toBe("four\none"));
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["four", "four\none"]));
     expect(queued()).toEqual(["two"]);
   });
 
@@ -551,7 +576,7 @@ describe("composer queue", () => {
     expect(queued()).toEqual(["one", "two", "three"]);
     expect(draft()).toBe("");
     refuse = false;
-    fireEvent.click(within(rowFor("one"), "Send now")!);
+    await editThenSend("one");
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["one", "one"]));
     expect(queued()).toEqual(["two", "three"]);
   });
@@ -664,7 +689,7 @@ describe("composer queue", () => {
     await waitFor(() => expect(queued()).toEqual(["second", "third"]));
     await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
     expect(started).toHaveLength(1);
-    fireEvent.click(within(rowFor("second"), "Send now")!);
+    await editThenSend("second");
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["first", "second"]));
     expect(started[1]?.thread).toBeUndefined();
     expect(queued()).toEqual(["third"]);

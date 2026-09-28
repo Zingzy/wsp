@@ -4,9 +4,9 @@
 // long paste landing as a file, the caps in words in the one line the composer
 // keeps for a refusal, and the bytes on the send. The same
 // fixture shape as chat-composer.test.tsx; no live daemon and no host.
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { FILES_AFTER_TURN, noImagesLine, sendRefusal, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { noImagesLine, sendRefusal, type EventUnion, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
@@ -16,6 +16,8 @@ import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { useComposerFilesStore } from "../src/components/chat/composerFiles.js";
 import { usePromptStashStore } from "../src/components/chat/promptStashStore.js";
+import { COMPOSER_WORDS } from "../src/components/chat/composerWords.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 import { CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
@@ -38,7 +40,7 @@ beforeEach(() => {
   urls.length = 0;
   revoked.length = 0;
   useComposerDraftStore.setState({ drafts: {}, queues: {}, held: {} });
-  useComposerFilesStore.setState({ pending: {}, sent: {} });
+  useComposerFilesStore.setState({ pending: {}, refused: {}, queued: {}, sent: {} });
   localStorage.clear();
   usePromptStashStore.getState().reload();
 });
@@ -110,7 +112,14 @@ async function setup(api: Api) {
 const surface = (): HTMLElement => document.querySelector<HTMLElement>("[data-chat-composer-surface]")!;
 const thumbs = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-composer-files] [data-chat-image]")];
 const tiles = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-composer-files] [data-chat-file]")];
-const refusalLine = (): string => document.querySelector("[data-composer-refusal]")?.textContent ?? "";
+/** A file the composer turned away: its chip, with the sentence why on its hover. */
+const refused = (name: string) => document.querySelector<HTMLElement>(`[data-composer-files] [data-composer-refused-file="${CSS.escape(name)}"]`);
+const refusedWhy = (name: string): string | null => refused(name)?.getAttribute("title") ?? null;
+/** The composer has no line above its box, in any state. */
+const noLineAbove = () => {
+  expect(document.querySelector("[data-composer-refusal]")).toBeNull();
+  expect(document.querySelector("[data-chat-composer] span[role='status']")).toBeNull();
+};
 
 const paste = (files: File[]) => fireEvent.paste(surface(), { clipboardData: { files, items: [], getData: () => "" } });
 const pasteText = (text: string) => fireEvent.paste(surface(), { clipboardData: { files: [], items: [], getData: (type: string) => (type === "text/plain" ? text : "") } });
@@ -125,7 +134,7 @@ describe("an image into the composer", () => {
     await waitFor(() => expect(thumbs()).toHaveLength(1));
     expect(thumbs()[0]!.dataset["chatImage"]).toBe("shot.png");
     expect(composerEditor().textContent).toBe("what does this show?");
-    expect(refusalLine()).toBe("");
+    noLineAbove();
   });
 
   it("a dropped image lands the same way, and the drop is taken from the page rather than opening the file", async () => {
@@ -210,7 +219,7 @@ describe("a file that is not an image", () => {
     );
     act(() => void paste([pdf()]));
     await waitFor(() => expect(tiles()).toHaveLength(1));
-    expect(refusalLine()).toBe("");
+    noLineAbove();
   });
 });
 
@@ -312,6 +321,28 @@ describe("the prompt stash", () => {
   });
 });
 
+describe("a stash this browser cannot write", () => {
+  it("leaves the draft and its files where they were and says so in a flyout, not above the box", async () => {
+    const { api } = fixtureApi();
+    await setup(api);
+    const stash = usePromptStashStore.getState().stash;
+    usePromptStashStore.setState({ stash: () => false });
+    try {
+      clearNotices();
+      await typeInto(composerEditor(), "keep me");
+      act(() => void paste([new File([new TextEncoder().encode("%PDF-1.7 spec")], "spec.pdf", { type: "application/pdf" })]));
+      await waitFor(() => expect(tiles()).toHaveLength(1));
+      await press(composerEditor(), "s", { ctrlKey: true });
+      await waitFor(() => expect(lastNotice()).toBe(COMPOSER_WORDS.stashNotWritten));
+      expect(useComposerDraftStore.getState().drafts[WS]?.prompt).toBe("keep me");
+      expect(tiles()).toHaveLength(1);
+      noLineAbove();
+    } finally {
+      usePromptStashStore.setState({ stash });
+    }
+  });
+});
+
 describe("a restore over a full stash", () => {
   it("takes the entry before the draft goes onto the stash, so the one restored is never the one dropped", async () => {
     const { api } = fixtureApi();
@@ -337,8 +368,9 @@ describe("what the composer will not take at all", () => {
     act(() => void drop([pngFile("dropped.png")]));
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(thumbs()).toHaveLength(0);
-    // The line stays the one that says why a send is blocked; nothing about the image is added to it.
-    expect(refusalLine()).toBe(sendRefusal("closed"));
+    // The held send says why; nothing about the image is added anywhere.
+    expect(document.querySelector("[data-send-held]")?.getAttribute("data-send-held")).toBe(sendRefusal("closed"));
+    expect(document.querySelector("[data-composer-refused-file]")).toBeNull();
   });
 });
 
@@ -347,15 +379,17 @@ describe("what the composer refuses, in words, before anything leaves", () => {
     const { api } = fixtureApi();
     await setup(api);
     act(() => void paste([new File([new Uint8Array(12 * 1024 * 1024)], "manual.pdf", { type: "application/pdf" })]));
-    await waitFor(() => expect(refusalLine()).toBe("manual.pdf is 12 MB, over the 10 MB a file may be"));
+    await waitFor(() => expect(refusedWhy("manual.pdf")).toBe("manual.pdf is 12 MB, over the 10 MB a file may be"));
+    expect(refused("manual.pdf")!.textContent).toContain(COMPOSER_WORDS.fileRefused);
     expect(tiles()).toHaveLength(0);
+    noLineAbove();
   });
 
   it("a 12 MB image is refused with the cap in the sentence, and it is never read whole to refuse it", async () => {
     const { api } = fixtureApi();
     await setup(api);
     act(() => void paste([pngFile("huge.png", 12 * 1024 * 1024)]));
-    await waitFor(() => expect(refusalLine()).toBe("huge.png is 12 MB, over the 10 MB an image may be"));
+    await waitFor(() => expect(refusedWhy("huge.png")).toBe("huge.png is 12 MB, over the 10 MB an image may be"));
     expect(thumbs()).toHaveLength(0);
     // The bytes go to an object URL only once the caps have passed, so no url means the file was never read whole.
     expect(urls).toEqual([]);
@@ -367,13 +401,49 @@ describe("what the composer refuses, in words, before anything leaves", () => {
     act(() => void paste(Array.from({ length: 5 }, (_, i) => pngFile(`n${i}.png`))));
     await waitFor(() => expect(thumbs()).toHaveLength(5));
     act(() => void paste([pngFile("sixth.png")]));
-    await waitFor(() => expect(refusalLine()).toBe("only 5 files fit one message; this one carries 6"));
+    await waitFor(() => expect(refusedWhy("sixth.png")).toBe("only 5 files fit one message; this one carries 6"));
     expect(thumbs()).toHaveLength(5);
+  });
+
+  it("a file over its own cap in a batch is refused alone, under its own sentence, and the rest of the batch is taken", async () => {
+    const { api } = fixtureApi();
+    await setup(api);
+    act(() => void paste([new File(["# notes"], "notes.md", { type: "text/markdown" }), new File([new Uint8Array(12 * 1024 * 1024)], "manual.pdf", { type: "application/pdf" })]));
+    await waitFor(() => expect(refusedWhy("manual.pdf")).toBe("manual.pdf is 12 MB, over the 10 MB a file may be"));
+    await waitFor(() => expect(tiles().map(t => t.dataset["chatFile"])).toEqual(["notes.md"]));
+    expect(refused("notes.md")).toBeNull();
+  });
+
+  it("the count cap turns the whole batch away, each file under the count's sentence", async () => {
+    const { api } = fixtureApi();
+    await setup(api);
+    act(() => void paste(Array.from({ length: 4 }, (_, i) => pngFile(`n${i}.png`))));
+    await waitFor(() => expect(thumbs()).toHaveLength(4));
+    act(() => void paste([pngFile("fifth.png"), pngFile("sixth.png")]));
+    await waitFor(() => expect(refusedWhy("sixth.png")).toBe("only 5 files fit one message; this one carries 6"));
+    expect(refusedWhy("fifth.png")).toBe("only 5 files fit one message; this one carries 6");
+    expect(thumbs()).toHaveLength(4);
+  });
+
+  it("a refused chip goes on its own remove, and a send carries none of it and clears it", async () => {
+    const { api, started } = fixtureApi();
+    await setup(api);
+    act(() => void paste([new File([new Uint8Array(12 * 1024 * 1024)], "manual.pdf", { type: "application/pdf" })]));
+    await waitFor(() => expect(refused("manual.pdf")).not.toBeNull());
+    fireEvent.click(within(refused("manual.pdf")!).getByRole("button", { name: "Remove manual.pdf" }));
+    expect(refused("manual.pdf")).toBeNull();
+    act(() => void paste([new File([new Uint8Array(12 * 1024 * 1024)], "big.zip", { type: "application/zip" })]));
+    await waitFor(() => expect(refused("big.zip")).not.toBeNull());
+    await typeInto(composerEditor(), "go");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]!.attachments).toBeUndefined();
+    expect(refused("big.zip")).toBeNull();
   });
 });
 
 describe("an agent that reads no image", () => {
-  it("is named in the composer's one line, and the person's file is never read", async () => {
+  it("is named on the image's refused chip, and the person's file is never read", async () => {
     const { api, started } = fixtureApi();
     await setup(api);
     act(() =>
@@ -384,7 +454,7 @@ describe("an agent that reads no image", () => {
       }),
     );
     act(() => void paste([pngFile("shot.png")]));
-    await waitFor(() => expect(refusalLine()).toBe(noImagesLine("claude")));
+    await waitFor(() => expect(refusedWhy("shot.png")).toBe(noImagesLine("claude")));
     expect(thumbs()).toHaveLength(0);
     expect(started).toHaveLength(0);
   });
@@ -456,7 +526,7 @@ describe("the images on the send", () => {
     expect(started[0]!.attachments).toBeUndefined();
   });
 
-  it("a message with an image waits for a running turn rather than queueing without its images", async () => {
+  it("a message with an image sent during a running turn queues with its image on its card, and the image rides its start", async () => {
     const { api, started, emit } = fixtureApi();
     await setup(api);
     const editor = composerEditor();
@@ -469,11 +539,20 @@ describe("the images on the send", () => {
     act(() => void paste([pngFile("shot.png")]));
     await waitFor(() => expect(thumbs()).toHaveLength(1));
     await press(editor, "Enter");
-    await waitFor(() => expect(refusalLine()).toBe(FILES_AFTER_TURN));
-    // Nothing was queued and nothing was sent: the words and the images are both still in the composer.
+    const card = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-queued-id]");
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(card.querySelector('[data-queued-file="shot.png"]')).not.toBeNull();
+    expect(thumbs()).toHaveLength(0);
     expect(started).toHaveLength(1);
-    expect(thumbs()).toHaveLength(1);
-    expect(composerEditor().textContent).toBe("and this?");
+    noLineAbove();
+    emit({ type: "session.done", workspaceId: WS, sessionId: "sess_0001", turnId: "turn_0001", result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
+    emit({ type: "session.end", workspaceId: WS, sessionId: "sess_0001", turnId: "turn_0001", exitCode: 0, sawResult: true });
+    await waitFor(() => expect(started).toHaveLength(2));
+    expect(started[1]).toMatchObject({ prompt: "and this?" });
+    expect(started[1]!.attachments?.map(a => a.name)).toEqual(["shot.png"]);
   });
 
   it("a refused send hands the images back rather than losing them", async () => {

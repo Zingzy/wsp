@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, PLAN_ACCESS, workspaceAccess, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, workspaceAccess, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -247,6 +247,8 @@ const picked = (key: "effort" | "contextWindow" | "access") => picker(key === "a
 const option = (value: string) => document.querySelector<HTMLElement>(`[data-composer-option="${value}"]`);
 /** What the access menu says about the turn running now, over its list. */
 const reachNote = () => document.querySelector<HTMLElement>("[data-composer-access-reach]");
+/** The refusal the running turn gave an access pick, which stands on the picker; null while there is none. */
+const accessRefusal = () => picker("access")?.getAttribute("data-access-refused") ?? null;
 const modelMenu = () => document.querySelector<HTMLElement>("[data-composer-model-menu]");
 const openModelMenu = async () => {
   fireEvent.click(picker("model")!);
@@ -580,7 +582,7 @@ describe("composer pickers", () => {
     // The button says what the thread is now at, and nothing under the box: the verb answered set, the thread's
     // record has the mode, and the next thread in this workspace starts at it too.
     await waitFor(() => expect(picked("access")).toBe("acceptEdits"));
-    expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
+    expect(accessRefusal()).toBeNull();
     expect(useStore.getState().preferences.access).toEqual({ [WS]: "acceptEdits" });
 
     // A thread that has not run names no row: its pick decides what it opens at and the verb is not called.
@@ -662,7 +664,7 @@ describe("composer pickers", () => {
     expect(reachNote()).toBeNull();
   });
 
-  it("a pick made while a turn runs reaches that turn, and a refusal the harness answered with is the only line under the box", async () => {
+  it("a pick made while a turn runs reaches that turn, and a refusal the harness answered with stands on the picker", async () => {
     const running: SessionView = { id: "s9", workspaceId: WS, harness: "claude", status: "running", claudeSessionId: "sess_0001", model: "claude-opus-5", permissionMode: "bypassPermissions" };
     const moves = [{ ...CLAUDE, movesAccess: true }];
     const took = fixtureApi({ table: moves, history: CHAT_STREAM.slice(0, 2), sessions: [running], access: "set" });
@@ -673,7 +675,7 @@ describe("composer pickers", () => {
     await waitFor(() => expect(took.moved).toEqual([{ sessionId: "s9", permissionMode: "acceptEdits" }]));
     // The harness took it, so there is nothing to say: the turn in front of the person is at the picked mode.
     await waitFor(() => expect(picked("access")).toBe("acceptEdits"));
-    expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
+    expect(accessRefusal()).toBeNull();
 
     // A harness whose row says it takes the change and then refuses it: that refusal is the person's news, in the
     // two halves every refusal here has.
@@ -683,7 +685,11 @@ describe("composer pickers", () => {
     await waitFor(() => expect(picked("access")).toBe("bypassPermissions"));
     fireEvent.click(picker("access")!);
     fireEvent.click(option("acceptEdits")!);
-    await waitFor(() => expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe(ACCESS_REFUSED_LINE));
+    // On the picker itself, in the refusal's ink with the sentence on its hover, and nothing above the box.
+    await waitFor(() => expect(accessRefusal()).toBe(ACCESS_REFUSED_LINE));
+    expect(picker("access")!.getAttribute("title")).toBe(ACCESS_REFUSED_LINE);
+    expect(picker("access")!.className).toContain("text-error-foreground");
+    expect(document.querySelector("[data-composer-refusal]")).toBeNull();
     // The pick is kept either way: the refusal says where it lands instead, not that it was dropped.
     expect(useStore.getState().preferences.access).toEqual({ [WS]: "acceptEdits" });
     expect(picked("access")).toBe("acceptEdits");
@@ -699,7 +705,7 @@ describe("composer pickers", () => {
     fireEvent.click(option("acceptEdits")!);
     await waitFor(() => expect(waits.moved).toEqual([{ sessionId: "s9", permissionMode: "acceptEdits" }]));
     await waitFor(() => expect(picked("access")).toBe("acceptEdits"));
-    expect(document.querySelector("[data-composer-refusal]")?.textContent).toBe("");
+    expect(accessRefusal()).toBeNull();
   });
 
   const SPOO = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" };
@@ -743,12 +749,10 @@ describe("composer pickers", () => {
     await waitFor(() => expect(picker("access")).not.toBeNull());
     fireEvent.click(picker("access")!);
     const modes = CLAUDE_TABLE.permissionModes;
-    expect(modes).toHaveLength(7);
-    // Plan is the composer's own toggle and no row of this menu.
-    for (const mode of modes) {
-      if (mode.value === PLAN_ACCESS) expect(option(mode.value), mode.value).toBeNull();
-      else expect(option(mode.value)?.textContent, mode.value).toContain(mode.description!);
-    }
+    // Plan mode is gone: the table offers none, and every mode it does offer is a row here.
+    expect(modes.map(mode => mode.value)).not.toContain("plan");
+    expect(modes.length).toBeGreaterThan(3);
+    for (const mode of modes) expect(option(mode.value)?.textContent, mode.value).toContain(mode.description!);
     // The sentences have one home. A copy in the app would go on saying what the table no longer says, which is how
     // this menu came to explain itself in the binary's own words; the dev shell's fixture is pinned to them instead.
     const app = appSources(APPS);
@@ -756,8 +760,12 @@ describe("composer pickers", () => {
     for (const mode of modes) {
       expect(app.filter(([, body]) => body.includes(mode.description!)).map(([f]) => f), mode.value).toEqual([]);
     }
+    // Every row the dev shell's fixture lists is a mode the table offers, in the table's own sentence: a fixture row
+    // the table dropped would draw a mode the product no longer has.
     const shell = readFileSync(SHELL_FIXTURE, "utf8");
-    for (const mode of modes.filter(o => shell.includes(`value: "${o.value}"`))) expect(shell, mode.value).toContain(mode.description!);
+    const rows = [...shell.matchAll(/\{ value: "([^"]+)", label: "[^"]*", description: "([^"]*)" \}/g)].map(m => [m[1], m[2]]);
+    expect(rows.length).toBeGreaterThan(2);
+    for (const [value, description] of rows) expect(modes.find(o => o.value === value)?.description, value).toBe(description);
   });
 
   it("on a project's home a shift-click adds a model beside the one shown: chips with each agent's mark over the box, the send reads Send to N, and a plain click goes back to one model", async () => {

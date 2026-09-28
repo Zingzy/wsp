@@ -77,7 +77,8 @@ describe("parseCatalogProbe", () => {
     expect(probe!.models[1]!.description).toContain("Most capable");
     expect(probe!.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
     // "default" is accepted though the help does not list it (verified 2026-09-05), so it leads.
-    expect(probe!.permissionModes).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
+    // The help lists plan too, which is not offered.
+    expect(probe!.permissionModes).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk"]);
   });
 
   it("reads the pinned version's recording: its four models in the handshake's order, the default it resolves and its effort list", () => {

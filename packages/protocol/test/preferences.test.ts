@@ -62,10 +62,10 @@ describe("the preferences record", () => {
     const one = applyPreferencesPatch(DEFAULT_PREFERENCES, { access: { ws_a: "bypassPermissions" } });
     expect(one.access).toEqual({ ws_a: "bypassPermissions" });
     // A pick in one workspace leaves another's alone, and a patch that names none leaves every pick standing.
-    const two = applyPreferencesPatch(one, { access: { ws_b: "plan" } });
-    expect(two.access).toEqual({ ws_a: "bypassPermissions", ws_b: "plan" });
+    const two = applyPreferencesPatch(one, { access: { ws_b: "acceptEdits" } });
+    expect(two.access).toEqual({ ws_a: "bypassPermissions", ws_b: "acceptEdits" });
     expect(applyPreferencesPatch(two, { theme: "dark" }).access).toEqual(two.access);
-    expect(applyPreferencesPatch(two, { access: { ws_a: null } }).access).toEqual({ ws_b: "plan" });
+    expect(applyPreferencesPatch(two, { access: { ws_a: null } }).access).toEqual({ ws_b: "acceptEdits" });
     // A record from a host that kept no picks reads as none, not as undefined a caller has to guard.
     expect(preferencesFrom({ theme: "light" }).access).toEqual({});
   });
@@ -150,7 +150,7 @@ describe("the preferences record", () => {
     expect(PreferencesPatch.safeParse({ theme: "sepia" }).success).toBe(false);
     expect(PreferencesPatch.safeParse({ sidebarWidth: -4 }).success).toBe(false);
     expect(PreferencesPatch.safeParse({ terminalZoom: { ws_a: 1.5 } }).success).toBe(false);
-    expect(PreferencesPatch.safeParse({ access: { ws_a: "plan" } }).success).toBe(true);
+    expect(PreferencesPatch.safeParse({ access: { ws_a: "acceptEdits" } }).success).toBe(true);
     expect(PreferencesPatch.safeParse({ access: { ws_a: null } }).success).toBe(true);
     expect(PreferencesPatch.safeParse({ access: { ws_a: 3 } }).success).toBe(false);
   });

@@ -59,6 +59,7 @@ import { SettingsRow } from "./SettingsRow.js";
 import { HostFoot } from "../hosts/HostFoot.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
 import { CreationTile, ThreadLaunchTile, ThreadTile, WorkspaceTile, type TilePlace } from "./ThreadTile.js";
+import { useLinkDowns } from "../terminal/paneWords.js";
 import { newThreadTitle, computerName, copyName, placeNames } from "./workspaceRows.js";
 import { BranchReader, readsBranch, workspaceBranch } from "./WorkspaceBranch.js";
 import { restingAge } from "../components/status/restingAge.js";
@@ -298,6 +299,7 @@ export function WorkspaceSidebar() {
   };
 
   /** Where a copy runs, as row one names it. */
+  const linksDown = useLinkDowns();
   const placeOf = (runs: SidebarProjectSnapshot): TilePlace => ({ projectId: runs.workspace.project.id, project: runs.workspace.project.name, computer: computerName(places, runs) });
 
   /** One tile's item with the tiles its agents opened under it. The first tile of a copy in the tree, a root or a
@@ -345,6 +347,7 @@ export function WorkspaceSidebar() {
       tile = (
         <ThreadTile
           thread={thread}
+          {...(linksDown[thread.workspaceId] !== undefined ? { linkDown: linksDown[thread.workspaceId] } : {})}
           place={place}
           branch={branch}
           time={restingAge(thread)}
@@ -662,3 +665,4 @@ export function WorkspaceSidebar() {
     </>
   );
 }
+

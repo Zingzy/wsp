@@ -63,17 +63,17 @@ describe("preferences over the wire", () => {
       preferences: { access: { ws_a: "bypassPermissions" } },
     });
     // Per workspace: a pick in one leaves the others alone, and a null drops that workspace's alone.
-    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { access: { ws_b: "plan" } } })).toMatchObject({
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { access: { ws_b: "acceptEdits" } } })).toMatchObject({
       ok: true,
-      preferences: { access: { ws_a: "bypassPermissions", ws_b: "plan" } },
+      preferences: { access: { ws_a: "bypassPermissions", ws_b: "acceptEdits" } },
     });
-    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { access: { ws_a: null } } })).toMatchObject({ ok: true, preferences: { access: { ws_b: "plan" } } });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { access: { ws_a: null } } })).toMatchObject({ ok: true, preferences: { access: { ws_b: "acceptEdits" } } });
     expect(await wsRequest(srv.port, "t", { op: "preferences.set", patch: { access: { ws_b: 3 } } })).toMatchObject({ ok: false });
 
     // It is the host's record, not one browser's: a runtime started later on the same store still has the pick.
     await srv.close();
     srv = await serveRuntime(createRuntime({ backend: stubBackend(), store, adapters: {}, env: NO_LABS }), { port: 0, authToken: "t" });
-    expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: { access: { ws_b: "plan" } } });
+    expect(await wsRequest(srv.port, "t", { op: "preferences.get" })).toMatchObject({ ok: true, preferences: { access: { ws_b: "acceptEdits" } } });
   });
 
   it("a computer's icon lands on the record, a null clears it, and the next runtime on the store reads it", async () => {
