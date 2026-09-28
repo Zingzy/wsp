@@ -12,7 +12,7 @@ import type { McpCheck } from "./mcp-check.js";
 import type { McpLogin } from "./mcp-login.js";
 
 export type McpTransport =
-  | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string }
+  | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string; toolTimeoutSec?: number }
   | { kind: "http"; url: string; headers: Record<string, string> };
 
 export interface McpServer {
@@ -1379,7 +1379,12 @@ const tomlInline = (d: Record<string, string>): string => `{ ${Object.entries(d)
  * headers. */
 function codexLines(server: McpTransport): string[] {
   if (server.kind === "http") return [`url = ${tomlString(server.url)}`, ...(Object.keys(server.headers).length === 0 ? [] : [`http_headers = ${tomlInline(server.headers)}`])];
-  return [`command = ${tomlString(server.command)}`, `args = [${server.args.map(tomlString).join(", ")}]`, ...(Object.keys(server.env).length === 0 ? [] : [`env = ${tomlInline(server.env)}`])];
+  return [
+    `command = ${tomlString(server.command)}`,
+    `args = [${server.args.map(tomlString).join(", ")}]`,
+    ...(Object.keys(server.env).length === 0 ? [] : [`env = ${tomlInline(server.env)}`]),
+    ...(server.toolTimeoutSec === undefined ? [] : [`tool_timeout_sec = ${server.toolTimeoutSec}`]),
+  ];
 }
 
 /** `[mcp_servers.<name>]` with its lines. The table is replaced in place when it is there (up to the next table

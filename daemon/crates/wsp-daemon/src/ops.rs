@@ -290,6 +290,8 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "git.pr"
             | "git.prState"
             | "git.prList"
+            | "git.checkpoint"
+            | "git.restore"
             | "ports.watch"
             | "manifest.get"
             | "manifest.record"
@@ -744,6 +746,21 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             };
             answer(id, diff.await)
         }
+        DaemonOp::GitCheckpoint { cwd, thread, turn, machine_id } => {
+            // A read: a turn's end records its tree and must not start the workspace's quiet clock over.
+            let taken = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Reads).await?;
+                git::checkpoint::checkpoint(&runner, &at, &thread, &turn).await
+            };
+            answer(id, taken.await)
+        }
+        DaemonOp::GitRestore { cwd, checkpoint, machine_id } => {
+            let restored = async {
+                let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
+                git::checkpoint::restore(&runner, &at, &checkpoint).await
+            };
+            answer(id, restored.await)
+        }
         DaemonOp::GitPush { cwd, base, machine_id } => {
             let pushed = async {
                 let (runner, _, at) = road(ctx, machine_id.as_deref(), &cwd, Works).await?;
@@ -1021,6 +1038,8 @@ mod tests {
             "git.pr",
             "git.prState",
             "git.prList",
+            "git.checkpoint",
+            "git.restore",
             "fs.folders",
             "ports.watch",
             "manifest.get",

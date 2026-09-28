@@ -36,6 +36,8 @@ const SCROLL = /^scroll:(\d+):(.+)$/;
 const FOCUS = /^focus:(.+)$/;
 /** A step that opens a row's own menu, a right-click on a data attribute, as a person reaches a thread's Snooze. */
 const MENU = /^menu:(.+)$/;
+/** A step that rests the pointer on a data attribute, for a control drawn only under it: a reply's Rewind to here. */
+const HOVER = /^hover:(.+)$/;
 /** The one step that is none of those: the network under the window goes, which is what a window on another computer
  * sees the moment the computer running wsp falls asleep. The rows stay as they were last known. */
 const OFFLINE = "offline";
@@ -74,12 +76,14 @@ export function stepFor(word, widths) {
   const scrolled = SCROLL.exec(typeof bare === "string" ? bare : "");
   const focused = FOCUS.exec(typeof bare === "string" ? bare : "");
   const menu = MENU.exec(typeof bare === "string" ? bare : "");
+  const hovered = HOVER.exec(typeof bare === "string" ? bare : "");
   const step =
     bare === OFFLINE ? { offline: true }
     : scrolled !== null ? { scroll: { by: Number(scrolled[1]), within: selectorFor(scrolled[2]) } }
     : typed !== null ? { type: typed[1] }
     : focused !== null ? { focus: selectorFor(withThreadId(focused[1])) }
     : menu !== null ? { menu: selectorFor(withThreadId(menu[1])) }
+    : hovered !== null ? { hover: selectorFor(withThreadId(hovered[1])) }
     : key === null ? { click: selectorFor(withThreadId(bare)) }
     : { key: key[1] };
   return width === undefined ? step : { width, ...step };
@@ -92,6 +96,7 @@ const stepWords = step =>
   : step.type !== undefined ? `typing \`${step.type}\``
   : step.focus !== undefined ? `focus on \`${step.focus}\``
   : step.menu !== undefined ? `the menu of \`${step.menu}\``
+  : step.hover !== undefined ? `the pointer on \`${step.hover}\``
   : step.key !== undefined ? `the ${step.key} key`
   : `\`${step.click}\``;
 

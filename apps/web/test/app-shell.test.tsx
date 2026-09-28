@@ -305,7 +305,7 @@ class ScriptedSocket {
 }
 
 describe("the sign-in banner over the centre", () => {
-  it("stands above whatever the centre holds, which while a workspace is being created is its log", async () => {
+  it("stands above whatever the centre holds, which while a workspace is being made is that page", async () => {
     useSignInStore.setState({ pages: { "ws_a:8976": { workspaceId: "ws_a", url: "https://github.com/login/device", port: 8976 } } });
     useStore.getState().bind(fakeApi([view("ws_a", "api")]));
     render(
@@ -314,7 +314,7 @@ describe("the sign-in banner over the centre", () => {
       </AppShell>,
     );
     const bar = await screen.findByTestId("sign-in-banner");
-    const log = screen.getByTestId("creation-log");
+    const log = screen.getByTestId("workspace-creation");
     expect(bar.textContent).toContain("A sign-in page for github.com is ready on api");
     expect(bar.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(bar.contains(log)).toBe(false);

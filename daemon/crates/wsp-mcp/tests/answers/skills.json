@@ -1,0 +1,139 @@
+{
+  "tool": "skills",
+  "cases": [
+    {
+      "case": "here",
+      "arguments": {},
+      "replies": {
+        "agents.read": "{\"id\":1,\"ok\":true,\"report\":{\"readAt\":\"2026-09-27T10:00:00.000Z\",\"user\":\"zingzy\",\"home\":\"/Users/zingzy\",\"target\":{\"placeId\":\"here\"},\"unknownTop\":{\"anything\":1},\"stale\":\"napping\",\"agents\":[{\"name\":\"Claude Code\",\"id\":\"claude\",\"installed\":true,\"version\":\"2.1.0\",\"latest\":\"2.2.0\",\"pinned\":\"2.1.0\",\"road\":\"wsp\",\"path\":\"/usr/local/bin/claude\",\"signIn\":\"signed-in\",\"signInRoad\":\"device\",\"wspTools\":true,\"notInSchema\":1},{\"id\":\"codex\",\"name\":\"Codex \u0085\",\"installed\":false,\"road\":\"none\",\"signIn\":\"none\",\"signInRoad\":\"code\",\"wspTools\":false},{\"id\":\"gemini\",\"name\":\"Gemini\",\"installed\":true,\"version\":\"1.0\",\"road\":\"own\",\"path\":\"/opt/🧪/gemini\",\"signIn\":\"unknown\",\"signInRoad\":\"terminal\",\"wspTools\":false},{\"id\":\"amp\",\"name\":\"Amp\",\"installed\":true,\"road\":\"shim\",\"signIn\":\"vault-key\",\"signInRoad\":\"key\",\"wspTools\":true}],\"skills\":[{\"scope\":\"user\",\"name\":\"unslop\",\"description\":\"cut the tells\",\"paths\":[{\"path\":\"~/.claude/skills/unslop\",\"agent\":\"claude\",\"linkTo\":\"~/.agents/skills/unslop\"},{\"path\":\"~/.agents/skills/unslop\"}]},{\"name\":\"tab\\there\\nnew \u0085line\",\"paths\":[{\"path\":\"~/p/.claude/skills/x\",\"off\":true}],\"scope\":\"project\",\"project\":{\"path\":\"~/p\",\"name\":\"wsp \\u0007bell\",\"id\":\"proj-1\"}},{\"name\":\"plug\",\"paths\":[{\"path\":\"~/.claude/plugins/p/skills/plug\"}],\"scope\":\"plugin\"}],\"servers\":[{\"name\":\"linear\",\"agent\":\"claude\",\"scope\":\"user\",\"file\":\"~/.claude.json\",\"transport\":{\"kind\":\"http\",\"host\":\"mcp.linear.app\"},\"envNames\":[],\"auth\":\"unknown\",\"enabled\":true,\"inRecipe\":false},{\"agent\":\"codex\",\"name\":\"wsp\",\"scope\":\"project\",\"file\":\"~/p/.codex/config.toml\",\"transport\":{\"line\":\"wsp mcp --scoped\",\"kind\":\"stdio\"},\"envNames\":[\"WSP_HOST_URL\",\"WSP_HOST_TOKEN\"],\"auth\":\"open\",\"enabled\":false,\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"~/p\"}},{\"agent\":\"not-in-catalog\",\"name\":\"odd\",\"scope\":\"home\",\"file\":\"~/.x\",\"transport\":{\"kind\":\"stdio\",\"line\":\"odd é\"},\"envNames\":[],\"auth\":\"open\",\"enabled\":true,\"tools\":[{\"name\":\"t\"}]}],\"refused\":[\"codex: config.toml did not \u0085parse\\nat line 3\"],\"projects\":[{\"name\":\"wsp\",\"id\":\"proj-1\",\"path\":\"~/p\",\"extra\":true}],\"reach\":\"here\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"SKILL              KIND              WHERE\\nunslop             user              ~/.claude/skills/unslop -> ~/.agents/skills/unslop, ~/.agents/skills/unslop\\ntab here new line  project wsp bell  ~/p/.claude/skills/x\\nplug               plugin            ~/.claude/plugins/p/skills/plug\\nnapping: this is what stood there when it last ran\\nrefused: codex: config.toml did not parse at line 3\"}],\"structuredContent\":{\"target\":{\"placeId\":\"here\"},\"home\":\"/Users/zingzy\",\"user\":\"zingzy\",\"readAt\":\"2026-09-27T10:00:00.000Z\",\"stale\":\"napping\",\"refused\":[\"codex: config.toml did not \\u0085parse\\nat line 3\"],\"projects\":[{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"~/p\"}],\"skills\":[{\"name\":\"unslop\",\"description\":\"cut the tells\",\"paths\":[{\"path\":\"~/.claude/skills/unslop\",\"agent\":\"claude\",\"linkTo\":\"~/.agents/skills/unslop\"},{\"path\":\"~/.agents/skills/unslop\"}],\"scope\":\"user\"},{\"name\":\"tab\\there\\nnew \\u0085line\",\"paths\":[{\"path\":\"~/p/.claude/skills/x\",\"off\":true}],\"scope\":\"project\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp \\u0007bell\",\"path\":\"~/p\"}},{\"name\":\"plug\",\"paths\":[{\"path\":\"~/.claude/plugins/p/skills/plug\"}],\"scope\":\"plugin\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "agents.read",
+          "target": {
+            "placeId": "here"
+          }
+        }
+      ]
+    },
+    {
+      "case": "a workspace",
+      "arguments": {
+        "workspace": "ws one"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\",\"name\":\"parser\",\"machineId\":\"m-1\",\"phase\":\"running\",\"golden\":\"golden-1\",\"createdAt\":\"2026-09-27T00:00:00.000Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"/w\",\"computer\":\"place-9\"}}}",
+        "agents.read": "{\"id\":1,\"ok\":true,\"report\":{\"target\":{\"workspaceId\":\"ws-1\"},\"home\":\"/root\",\"user\":\"root\",\"readAt\":\"2026-09-27T10:00:00.000Z\",\"agents\":[],\"skills\":[],\"servers\":[],\"refused\":[]}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no skills\"}],\"structuredContent\":{\"target\":{\"workspaceId\":\"ws-1\"},\"home\":\"/root\",\"user\":\"root\",\"readAt\":\"2026-09-27T10:00:00.000Z\",\"refused\":[],\"skills\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "ws one"
+        },
+        {
+          "op": "agents.read",
+          "target": {
+            "workspaceId": "ws-1"
+          }
+        }
+      ]
+    },
+    {
+      "case": "a computer",
+      "arguments": {
+        "on": "attic"
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"here\",\"kind\":\"computer\",\"name\":\"this mac\",\"default\":true},{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"default\":false}]}",
+        "agents.read": "{\"id\":1,\"ok\":true,\"report\":{\"readAt\":\"2026-09-27T10:00:00.000Z\",\"user\":\"zingzy\",\"home\":\"/Users/zingzy\",\"target\":{\"placeId\":\"place-9\",\"project\":\"wsp\"},\"unknownTop\":{\"anything\":1},\"agents\":[{\"name\":\"Claude Code\",\"id\":\"claude\",\"installed\":true,\"version\":\"2.1.0\",\"latest\":\"2.2.0\",\"pinned\":\"2.1.0\",\"road\":\"wsp\",\"path\":\"/usr/local/bin/claude\",\"signIn\":\"signed-in\",\"signInRoad\":\"device\",\"wspTools\":true,\"notInSchema\":1},{\"id\":\"codex\",\"name\":\"Codex \u0085\",\"installed\":false,\"road\":\"none\",\"signIn\":\"none\",\"signInRoad\":\"code\",\"wspTools\":false},{\"id\":\"gemini\",\"name\":\"Gemini\",\"installed\":true,\"version\":\"1.0\",\"road\":\"own\",\"path\":\"/opt/🧪/gemini\",\"signIn\":\"unknown\",\"signInRoad\":\"terminal\",\"wspTools\":false},{\"id\":\"amp\",\"name\":\"Amp\",\"installed\":true,\"road\":\"shim\",\"signIn\":\"vault-key\",\"signInRoad\":\"key\",\"wspTools\":true}],\"skills\":[{\"scope\":\"user\",\"name\":\"unslop\",\"description\":\"cut the tells\",\"paths\":[{\"path\":\"~/.claude/skills/unslop\",\"agent\":\"claude\",\"linkTo\":\"~/.agents/skills/unslop\"},{\"path\":\"~/.agents/skills/unslop\"}]},{\"name\":\"tab\\there\\nnew \u0085line\",\"paths\":[{\"path\":\"~/p/.claude/skills/x\",\"off\":true}],\"scope\":\"project\",\"project\":{\"path\":\"~/p\",\"name\":\"wsp \\u0007bell\",\"id\":\"proj-1\"}},{\"name\":\"plug\",\"paths\":[{\"path\":\"~/.claude/plugins/p/skills/plug\"}],\"scope\":\"plugin\"}],\"servers\":[{\"name\":\"linear\",\"agent\":\"claude\",\"scope\":\"user\",\"file\":\"~/.claude.json\",\"transport\":{\"kind\":\"http\",\"host\":\"mcp.linear.app\"},\"envNames\":[],\"auth\":\"unknown\",\"enabled\":true,\"inRecipe\":false},{\"agent\":\"codex\",\"name\":\"wsp\",\"scope\":\"project\",\"file\":\"~/p/.codex/config.toml\",\"transport\":{\"line\":\"wsp mcp --scoped\",\"kind\":\"stdio\"},\"envNames\":[\"WSP_HOST_URL\",\"WSP_HOST_TOKEN\"],\"auth\":\"open\",\"enabled\":false,\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"~/p\"}},{\"agent\":\"not-in-catalog\",\"name\":\"odd\",\"scope\":\"home\",\"file\":\"~/.x\",\"transport\":{\"kind\":\"stdio\",\"line\":\"odd é\"},\"envNames\":[],\"auth\":\"open\",\"enabled\":true,\"tools\":[{\"name\":\"t\"}]}],\"refused\":[\"codex: config.toml did not \u0085parse\\nat line 3\"],\"projects\":[{\"name\":\"wsp\",\"id\":\"proj-1\",\"path\":\"~/p\",\"extra\":true}],\"reach\":\"here\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"SKILL              KIND              WHERE\\nunslop             user              ~/.claude/skills/unslop -> ~/.agents/skills/unslop, ~/.agents/skills/unslop\\ntab here new line  project wsp bell  ~/p/.claude/skills/x\\nplug               plugin            ~/.claude/plugins/p/skills/plug\\nrefused: codex: config.toml did not parse at line 3\"}],\"structuredContent\":{\"target\":{\"placeId\":\"place-9\",\"project\":\"wsp\"},\"home\":\"/Users/zingzy\",\"user\":\"zingzy\",\"readAt\":\"2026-09-27T10:00:00.000Z\",\"refused\":[\"codex: config.toml did not \\u0085parse\\nat line 3\"],\"projects\":[{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"~/p\"}],\"skills\":[{\"name\":\"unslop\",\"description\":\"cut the tells\",\"paths\":[{\"path\":\"~/.claude/skills/unslop\",\"agent\":\"claude\",\"linkTo\":\"~/.agents/skills/unslop\"},{\"path\":\"~/.agents/skills/unslop\"}],\"scope\":\"user\"},{\"name\":\"tab\\there\\nnew \\u0085line\",\"paths\":[{\"path\":\"~/p/.claude/skills/x\",\"off\":true}],\"scope\":\"project\",\"project\":{\"id\":\"proj-1\",\"name\":\"wsp \\u0007bell\",\"path\":\"~/p\"}},{\"name\":\"plug\",\"paths\":[{\"path\":\"~/.claude/plugins/p/skills/plug\"}],\"scope\":\"plugin\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        },
+        {
+          "op": "agents.read",
+          "target": {
+            "placeId": "place-9"
+          }
+        }
+      ]
+    },
+    {
+      "case": "both",
+      "arguments": {
+        "workspace": "w",
+        "on": "attic"
+      },
+      "replies": {},
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"A workspace already names its computer; give the workspace or --on <computer>, not both. skills takes a workspace or on, not both\"}],\"structuredContent\":{\"error\":\"A workspace already names its computer; give the workspace or --on <computer>, not both. skills takes a workspace or on, not both\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "no such computer",
+      "arguments": {
+        "on": "cellar"
+      },
+      "replies": {
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"here\",\"kind\":\"computer\",\"name\":\"this mac\",\"default\":true},{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic\",\"default\":false}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no place named cellar; you have this mac, attic. Run wsp places.\"}],\"structuredContent\":{\"error\":\"no place named cellar; you have this mac, attic. Run wsp places.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "places.list"
+        }
+      ]
+    },
+    {
+      "case": "a report this build cannot read",
+      "arguments": {},
+      "replies": {
+        "agents.read": "{\"id\":1,\"ok\":true,\"report\":{\"readAt\":\"2026-09-27T10:00:00.000Z\",\"user\":\"zingzy\",\"home\":\"/Users/zingzy\",\"target\":{\"placeId\":\"here\"},\"unknownTop\":{\"anything\":1},\"stale\":\"napping\",\"agents\":[{\"name\":\"Claude Code\",\"id\":\"claude\",\"installed\":true,\"version\":\"2.1.0\",\"latest\":\"2.2.0\",\"pinned\":\"2.1.0\",\"road\":\"wsp\",\"path\":\"/usr/local/bin/claude\",\"signIn\":\"signed-in\",\"signInRoad\":\"device\",\"wspTools\":true,\"notInSchema\":1},{\"id\":\"codex\",\"name\":\"Codex \u0085\",\"installed\":false,\"road\":\"none\",\"signIn\":\"none\",\"signInRoad\":\"code\",\"wspTools\":false},{\"id\":\"gemini\",\"name\":\"Gemini\",\"installed\":true,\"version\":\"1.0\",\"road\":\"own\",\"path\":\"/opt/🧪/gemini\",\"signIn\":\"unknown\",\"signInRoad\":\"terminal\",\"wspTools\":false},{\"id\":\"amp\",\"name\":\"Amp\",\"installed\":true,\"road\":\"shim\",\"signIn\":\"vault-key\",\"signInRoad\":\"key\",\"wspTools\":true}],\"skills\":[{\"name\":5}],\"servers\":[{\"name\":\"linear\",\"agent\":\"claude\",\"scope\":\"user\",\"file\":\"~/.claude.json\",\"transport\":{\"kind\":\"http\",\"host\":\"mcp.linear.app\"},\"envNames\":[],\"auth\":\"unknown\",\"enabled\":true,\"inRecipe\":false},{\"agent\":\"codex\",\"name\":\"wsp\",\"scope\":\"project\",\"file\":\"~/p/.codex/config.toml\",\"transport\":{\"line\":\"wsp mcp --scoped\",\"kind\":\"stdio\"},\"envNames\":[\"WSP_HOST_URL\",\"WSP_HOST_TOKEN\"],\"auth\":\"open\",\"enabled\":false,\"project\":{\"id\":\"proj-1\",\"name\":\"wsp\",\"path\":\"~/p\"}},{\"agent\":\"not-in-catalog\",\"name\":\"odd\",\"scope\":\"home\",\"file\":\"~/.x\",\"transport\":{\"kind\":\"stdio\",\"line\":\"odd é\"},\"envNames\":[],\"auth\":\"open\",\"enabled\":true,\"tools\":[{\"name\":\"t\"}]}],\"refused\":[\"codex: config.toml did not \u0085parse\\nat line 3\"],\"projects\":[{\"name\":\"wsp\",\"id\":\"proj-1\",\"path\":\"~/p\",\"extra\":true}],\"reach\":\"here\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the host would not read this line. usage: wsp skills [<workspace>] [--on <computer>]\"}],\"structuredContent\":{\"error\":\"the host would not read this line. usage: wsp skills [<workspace>] [--on <computer>]\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "agents.read",
+          "target": {
+            "placeId": "here"
+          }
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "workspace": "gone"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":false,\"error\":\"no workspace gone\",\"kind\":\"not-found\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no workspace gone\"}],\"structuredContent\":{\"error\":\"no workspace gone\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "gone"
+        }
+      ]
+    },
+    {
+      "case": "no skills",
+      "arguments": {},
+      "replies": {
+        "agents.read": "{\"id\":1,\"ok\":true,\"report\":{\"target\":{\"workspaceId\":\"ws-1\"},\"home\":\"/root\",\"user\":\"root\",\"readAt\":\"2026-09-27T10:00:00.000Z\",\"agents\":[],\"skills\":[],\"servers\":[],\"refused\":[]}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no skills\"}],\"structuredContent\":{\"target\":{\"workspaceId\":\"ws-1\"},\"home\":\"/root\",\"user\":\"root\",\"readAt\":\"2026-09-27T10:00:00.000Z\",\"refused\":[],\"skills\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "agents.read",
+          "target": {
+            "placeId": "here"
+          }
+        }
+      ]
+    }
+  ]
+}

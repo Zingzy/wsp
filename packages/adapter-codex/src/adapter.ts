@@ -34,6 +34,7 @@ import type {
   PermissionOutcome,
   SessionAsker,
   SessionRenamer,
+  SessionReverter,
   SessionTitleMaker,
   SessionTitleReader,
   TurnImage,
@@ -51,6 +52,7 @@ import {
   refuseRequestLine,
   threadForkLine,
   threadResumeLine,
+  threadRevertLine,
   threadStartLine,
   turnInterruptLine,
   turnStartLine,
@@ -144,6 +146,8 @@ export interface CodexAdapter {
   titleFor: SessionTitleMaker;
   /** Answers a question about a thread on an ephemeral fork of it, leaving the thread as it was. */
   aside: SessionAsker;
+  /** Cuts the thread's own history before one of its turns; files are the checkpoint's business, not the server's. */
+  revert: SessionReverter;
   readonly env: Readonly<Record<string, string>>;
 }
 
@@ -289,8 +293,10 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     model?: string;
     cwd?: string;
     turnLine?: (threadId: string) => string;
-    /** A side question's own run: every approval it raises is declined here and it joins no registry. */
+    /** A side question's own run: every approval it raises is declined here, it joins no registry, and it has a wall. */
     aside?: true;
+    /** A run that asks the thread one thing and no turn (a revert): declined and unregistered as a side question is. */
+    sideRun?: true;
     onEvent: (event: AdapterEvent) => void;
   }): CodexSession => {
     const { stream, localId, startedAt } = o;
@@ -384,7 +390,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         void stream.write(refuseRequestLine(id, method));
         return;
       }
-      if (o.aside === true) {
+      if (o.aside === true || o.sideRun === true) {
         void stream.write(decisionLine(id, "decline"));
         return;
       }
@@ -417,6 +423,10 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         if (o.turnLine !== undefined) void stream.write(o.turnLine(threadId));
         return;
       }
+      if (id === REQUEST.revert) {
+        finish({ status: "completed", durationMs: Date.now() - startedAt });
+        return;
+      }
       const settle = typeof id === "string" ? steers.get(id) : undefined;
       if (settle !== undefined) {
         steers.delete(id as string);
@@ -431,7 +441,8 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         settle(false);
         return;
       }
-      if (id === REQUEST.thread) finish({ status: "failed", error: `codex could not open the thread: ${message}` });
+      if (id === REQUEST.revert) finish({ status: "failed", error: `codex would not cut the thread: ${message}` });
+      else if (id === REQUEST.thread) finish({ status: "failed", error: `codex could not open the thread: ${message}` });
       else if (id === REQUEST.turn || id === REQUEST.initialize) finish({ status: "failed", error: `codex could not start the turn: ${message}` });
     };
 
@@ -443,9 +454,12 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           announce(str(thread?.id), str(thread?.model), str(thread?.cwd));
           break;
         }
-        case "turn/started":
+        case "turn/started": {
+          const first = turnId === undefined;
           turnId = str(rec(params.turn)?.id) ?? turnId;
+          if (first && turnId !== undefined) emit({ type: "turn.anchor", sessionId: threadId, anchor: turnId });
           break;
+        }
         case "item/started":
         case "item/completed": {
           const item = itemOf(params);
@@ -598,7 +612,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
         await endAfterResult(stream, graceMs, graceMs);
       },
     };
-    if (o.aside !== true) sessions.set(localId, session);
+    if (o.aside !== true && o.sideRun !== true) sessions.set(localId, session);
     return session;
   };
 
@@ -647,6 +661,23 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     return { text: result.text ?? "", ...(result.usage !== undefined ? { usage: result.usage } : {}) };
   };
 
+  /** The thread's own history cut before one of its turns, on a server run of its own that runs no turn: the
+   * thread resumed, then thread/revert, then EOF. */
+  const revert: SessionReverter = async o => {
+    const command = buildCommand({ ...(o.cwd !== undefined ? { cwd: o.cwd } : {}) });
+    const resume = threadResumeLine({ threadId: o.session, ...(o.cwd !== undefined ? { cwd: o.cwd } : {}), access: accessParams("read-only") });
+    const result = await follow({
+      stream: deps.exec(command, { env: { ...env }, input: [initializeLine(), INITIALIZED_LINE, resume] }),
+      localId: randomUUID(),
+      startedAt: Date.now(),
+      command,
+      turnLine: threadId => threadRevertLine({ threadId, beforeTurnId: o.beforeTurn }),
+      sideRun: true,
+      onEvent: () => {},
+    }).finished;
+    if (result.status !== "completed") throw new Error(result.error ?? "codex did not cut the thread");
+  };
+
   const attach = deps.exec.attach?.bind(deps.exec);
 
   const probeCatalog = (exec: (command: string) => Promise<string>): Promise<HarnessCatalogAnswer> =>
@@ -676,6 +707,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
     steers: true,
     mcpServers: true,
     aside,
+    revert,
     probeCatalog,
     sessionTitle: (threadId, exec) => exec(sessionTitleCommand({ home: deps.home, threadId })).then(parseSessionTitle),
     renameSession: (threadId, title, exec) => exec(renameCommand({ home: deps.home, threadId, title })).then(parseRename),

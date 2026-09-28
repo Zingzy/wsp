@@ -9,7 +9,7 @@ import { delimiter, dirname, join, sep } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, configSum, skillsDirOf, type AgentEntry, type McpAgent, type Placed } from "@wsp/catalog";
 import { writeConfigHere } from "@wsp/engine";
 import { tilde } from "@wsp/collect";
-import { MCP_SERVER_NAME, mcpServerCommandLine, nextInsideAgentLine, type McpServerSpec } from "@wsp/protocol";
+import { MCP_SERVER_NAME, mcpServerCommandLine, nextInsideAgentLine, WSP_TOOL_TIMEOUT_SEC, type McpServerSpec } from "@wsp/protocol";
 import { placeSections, removeSections } from "./agents-md.js";
 import { SKILL_NAME, WSP_SKILL } from "./skill.js";
 import { VERSION } from "./version.js";
@@ -183,7 +183,7 @@ export function installMcp(agentId: string, server: McpServerSpec, home: string,
   const was = existsSync(file.abs) ? readFileSync(file.abs) : undefined;
   let placed: Placed;
   try {
-    placed = agent.mcp.format.place(was?.toString("utf8"), MCP_SERVER_NAME, { kind: "stdio", command: server.command, args: [...server.args], env: {} });
+    placed = agent.mcp.format.place(was?.toString("utf8"), MCP_SERVER_NAME, { kind: "stdio", command: server.command, args: [...server.args], env: {}, toolTimeoutSec: WSP_TOOL_TIMEOUT_SEC });
   } catch (e) {
     throw new Error(`${file.tilde}: ${e instanceof Error ? e.message : String(e)}`);
   }

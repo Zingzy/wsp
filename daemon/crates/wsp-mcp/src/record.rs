@@ -99,6 +99,19 @@ pub struct Words {
     /// Command lines, each with the words the TypeScript split gives it, or none where a quote is never closed.
     #[cfg(test)]
     pub command_words: HashMap<String, Option<Vec<String>>>,
+    pub workspaces: crate::tools::workspace::Words,
+    pub host_would_not_read: String,
+    pub both_targets: HashMap<String, String>,
+    pub folder_here: String,
+    pub folder_on: String,
+    pub no_thread: String,
+    pub threads_start_with: String,
+    pub no_messages: String,
+    pub no_reply: String,
+    pub newer_turn: String,
+    pub no_terminal_config: String,
+    /// Each verb's usage line by the name of its tool, which a refusal of a reply this build cannot read ends with.
+    pub usages: HashMap<String, String>,
 }
 
 pub fn words() -> Words {

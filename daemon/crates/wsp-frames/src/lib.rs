@@ -7,6 +7,7 @@
 //! protocol's own test reads too, so the two halves cannot drift quietly.
 
 mod auth;
+mod checkpoint;
 mod copy;
 mod enums;
 mod event;
@@ -25,6 +26,7 @@ mod validate;
 pub mod words;
 
 pub use auth::DaemonAuthRequest;
+pub use checkpoint::{checkpoint_copy_part, checkpoint_id_ok, checkpoint_prefix, CHECKPOINT_REFS};
 pub use copy::{Carried, CopyAsk, CopyReport, CopyRoadName};
 pub use enums::{
     DaemonErrorCode, FsEntryType, FsReadEncoding, FsSearchMode, GitDiffScope, HostItemKind, ProcSignal, PtyMode, PullRequestState,
@@ -50,10 +52,10 @@ pub use place::{
 pub use place_paths::{place_daemon_paths, place_owned_paths, place_provision_paths, probe_path, PlaceDaemonPaths, PlaceProvisionPaths};
 pub use reply::{
     DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsFilesReply, FsListReply, FsReadReply, FsSearchHit, FsSearchReply,
-    GitBranch, GitDiffFile, GitDiffReply, GitPrListReply, GitPrReply, GitPrStateReply, GitPushReply, GitStatusEntry, GitStatusReply,
-    HostFolder, HostFolderListing, HostItem, InboxRescanReply, ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply,
-    ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply,
-    PtyListEntry, PtyListReply, PullRequest, Reply, True,
+    GitBranch, GitCheckpointReply, GitDiffFile, GitDiffReply, GitPrListReply, GitPrReply, GitPrStateReply, GitPushReply, GitRestoreReply,
+    GitStatusEntry, GitStatusReply, HostFolder, HostFolderListing, HostItem, InboxRescanReply, ListeningPort, ManifestEntry,
+    ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply,
+    ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, Reply, True,
 };
 pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS, GUEST_OPS};
 pub use shell::shell_quote;
