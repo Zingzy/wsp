@@ -65,10 +65,11 @@ export const BOX_BUDGETS: LifecycleBudgets = Object.freeze({
   // A second attempt would be a stop that snapshots the disk for minutes and a resume that counts as a billed start
   // against 5 a minute and 75 a day on the trial; a wake that fails its check fails on the machine it has.
   wakeAttempts: 1,
-  // The daemon's unit came back 14 to 85 s after the box read ready on every fork, template create and resume
-  // measured (2026-09-11): the restored disk streams in behind the box and systemd starts the unit once its files
-  // are there. The empty journal in between is normal.
-  daemonAnswersMs: 120_000,
+  // The daemon's unit came back 14 to 85 s after the box read ready on a small golden (2026-09-11), and five wakes
+  // of a 17.5 GB image had not answered 120 s after ready (2026-09-27), the one kept after its failure serving on the
+  // next send: the restored disk streams in behind the box, which the provider says can take minutes, and systemd
+  // starts the unit once its files are there. The empty journal in between is normal.
+  daemonAnswersMs: 5 * 60_000,
 });
 
 /** A stop reads archived 0.6 to 39 s after the call on a small golden and the vendor's own probe puts the p99 near

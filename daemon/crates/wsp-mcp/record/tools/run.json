@@ -26,7 +26,7 @@
         },
         "access": {
           "type": "string",
-          "description": "the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"
+          "description": "the access mode, by the agent's own word (Claude Code's acceptEdits or bypassPermissions, Codex's read-only or workspace-write); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"
         },
         "fast": {
           "type": "boolean",
@@ -135,7 +135,7 @@
         },
         "access": {
           "type": "string",
-          "description": "the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"
+          "description": "the access mode, by the agent's own word (Claude Code's acceptEdits or bypassPermissions, Codex's read-only or workspace-write); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"
         },
         "fast": {
           "type": "boolean",

@@ -19,6 +19,7 @@ import { COMPUTER_SWITCHER_WORDS, NEW_WORKSPACE, PROJECT_WORDS, SWITCHER_WORDS }
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 import { WorkspaceTerminals, provideTerminals } from "../src/terminal/link.js";
+import { LINK_DOWN_WORDS } from "../src/adapt/index.js";
 import { clearNotices, lastNotice } from "./notice-text.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
 import { CREATE_STEP_WORDS } from "../src/shell/creationLog.js";
@@ -500,6 +501,24 @@ describe("Solari out of reach from this computer", () => {
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "reachable", offline: true } }) }));
     expect((await screen.findByText(MACHINE_UNREACHED_LINE)).closest("[data-sidebar-search]")).not.toBeNull();
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
+  });
+});
+
+describe("a workspace's link that is down, on its tiles", () => {
+  it("a resting tile says the link is down in its slot with the pane's sentence on its hover, and its age once the link is up", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "fix the port list", status: "completed", startedAt: iso(-60 * 60_000), endedAt: iso(-50 * 60_000), readAt: iso(-50 * 60_000) }), session("s2", "ws_b", { prompt: "upgrade node", status: "completed", startedAt: iso(-60 * 60_000), endedAt: iso(-50 * 60_000), readAt: iso(-50 * 60_000) })]), "fix the port list");
+    const wt = new WorkspaceTerminals({ request: async () => ({ ok: true }) });
+    act(() => {
+      wt.feedStatus("connecting");
+      provideTerminals(API.id, wt);
+    });
+    await waitFor(() => expect(statusSlot(rowOf("fix the port list"))?.textContent).toBe(LINK_DOWN_WORDS.reconnecting));
+    expect(statusSlot(rowOf("fix the port list"))!.getAttribute("title")).toBe("Reconnecting to the task");
+    // A workspace with no link open is not down.
+    expect(statusSlot(rowOf("upgrade node"))?.textContent).not.toBe(LINK_DOWN_WORDS.reconnecting);
+    act(() => wt.feedStatus("live"));
+    await waitFor(() => expect(statusSlot(rowOf("fix the port list"))?.textContent).not.toBe(LINK_DOWN_WORDS.reconnecting));
+    act(() => provideTerminals(API.id, null));
   });
 });
 

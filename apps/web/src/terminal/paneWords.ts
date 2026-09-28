@@ -1,18 +1,41 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The workspace-level words for a daemon link, read from the one state table:
-// what a pane says over its frame, and the one line the main screen carries
-// while the link is down. Both come from the same pane state, so the sidebar
+// what a pane says over its frame, and the word and sentence a resting tile
+// carries while the link is down. Both come from the same pane state, so the sidebar
 // and a pane can never say two things about one link. Beside them, the one
 // read of a folder's branch over the link, keyed on the link's word.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { isLocalWorkspace, type DaemonLinkStatus, type RepoStateWord } from "@wsp/protocol";
-import { linkDownLine, terminalPaneHints, terminalPaneState, type TerminalPaneState } from "../adapt/index.js";
+import { isLocalWorkspace, workspaceStateOf, type DaemonLinkStatus, type PlaceView, type RepoStateWord, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { linkDownLine, linkDownWord, terminalPaneHints, terminalPaneState, type TerminalPaneState } from "../adapt/index.js";
 import { repoAbsence } from "../adapt/git.js";
 import { useOutOfMemoryReading } from "../machine/live.js";
-import { useAbsentComputer, useCapabilities, useStatus, useStore, useWorkspace, useWorkspaceState } from "../protocol/store.js";
-import { useComputerName } from "../sidebar/workspaceRows.js";
+import { useCapabilities, usePlaces, useStatus, useStore, useWorkspace } from "../protocol/store.js";
+import { absenceOf } from "../settings/places.js";
+import { computerName } from "../sidebar/workspaceRows.js";
 import { gitStatus } from "./daemon-fs.js";
-import { getTerminals, NOT_OPENED_YET, onTerminals, type TerminalWire } from "./link.js";
+import { everyTerminals, getTerminals, NOT_OPENED_YET, onTerminals, type TerminalWire } from "./link.js";
+
+/** A link's pane state off the store's record of its workspace: the one reading useTerminalPane and the sidebar's
+ * link words both take, so a tile and a pane cannot say two things about one link. */
+function paneOf(input: { workspace: WorkspaceView | null; status: WorkspaceStatus | null; places: readonly PlaceView[]; socket: DaemonLinkStatus; refusal: string | null; outOfMemory?: Parameters<typeof terminalPaneState>[0]["outOfMemory"] }): TerminalPaneState {
+  const { workspace, status } = input;
+  const view = status ?? workspace;
+  const local = workspace !== null && isLocalWorkspace(workspace);
+  // What this link's sentences name: the person's own computer by its name once the places list holds it, else the
+  // workspace, which on a machine wsp forked is that machine's own name.
+  const computer = workspace === null ? "" : computerName(input.places, { workspace, status });
+  const where = local && computer !== "" ? computer : (workspace?.name ?? "");
+  return terminalPaneState({
+    state: view === null ? "running" : workspaceStateOf(view, status),
+    reach: status?.reach.state ?? null,
+    socket: input.socket,
+    outOfMemory: input.outOfMemory ?? null,
+    refusal: input.refusal,
+    local,
+    absent: absenceOf(input.places, workspace, status, null),
+    ...(where === "" ? {} : { where }),
+  });
+}
 
 /** The pane's state from the workspace's one vocabulary plus this link's socket and its last memory reading, the
  * lines under it, and the wake every pane offers. */
@@ -21,17 +44,10 @@ export function useTerminalPane(workspaceId: string, socket: DaemonLinkStatus, r
   const status = useStatus(workspaceId);
   const capabilities = useCapabilities();
   const wake = useStore(s => s.wake);
+  const places = usePlaces();
   const phase = status?.phase ?? workspace?.phase ?? "running";
-  const reach = status?.reach.state ?? null;
-  const state = useWorkspaceState(workspaceId) ?? "running";
   const outOfMemory = useOutOfMemoryReading(workspaceId, phase);
-  const local = workspace !== null && isLocalWorkspace(workspace);
-  const absent = useAbsentComputer(workspaceId);
-  // What this link's sentences name: the person's own computer by its name once the places list holds it, else the
-  // workspace, which on a machine wsp forked is that machine's own name.
-  const computer = useComputerName(workspaceId);
-  const where = local && computer !== "" ? computer : (workspace?.name ?? "");
-  const pane = useMemo(() => terminalPaneState({ state, reach, socket, outOfMemory, refusal, local, absent, ...(where === "" ? {} : { where }) }), [state, reach, socket, outOfMemory, refusal, local, absent, where]);
+  const pane = useMemo(() => paneOf({ workspace, status, places, socket, refusal, outOfMemory }), [workspace, status, places, socket, refusal, outOfMemory]);
   const size = status?.size ?? null;
   const sizes = capabilities?.sizes ?? null;
   const hints = useMemo(() => terminalPaneHints(pane, size, sizes), [pane, size, sizes]);
@@ -111,9 +127,56 @@ export function useBranch(wire: TerminalWire | null, folder: string | null, ask:
   return state.folder === folder ? state.branch : UNKNOWN;
 }
 
-/** The one line the main screen shows while this workspace's link is down, else null. */
-export function useLinkDownLine(workspaceId: string | null): string | null {
-  const { socket, refusal } = useLinkSocket(workspaceId);
-  const { pane } = useTerminalPane(workspaceId ?? "", socket, refusal);
-  return workspaceId === null ? null : linkDownLine(pane);
+/** A workspace's link being down, as a resting tile shows it: one word in its slot and the pane's sentence on its
+ * hover. */
+export interface LinkDown {
+  readonly word: string;
+  readonly sentence: string;
+}
+
+const NO_LINKS_DOWN: Readonly<Record<string, LinkDown>> = {};
+
+const sameDowns = (a: Readonly<Record<string, LinkDown>>, b: Readonly<Record<string, LinkDown>>): boolean => {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every(k => a[k]!.word === b[k]?.word && a[k]!.sentence === b[k]?.sentence);
+};
+
+/** Every workspace whose link is down, for the sidebar's tiles: one subscription over the links there are, and the
+ * same object while nothing changes. A workspace with no link open is not down. */
+export function useLinkDowns(): Readonly<Record<string, LinkDown>> {
+  const workspaces = useStore(s => s.workspaces);
+  const statuses = useStore(s => s.statuses);
+  const places = usePlaces();
+  const last = useRef(NO_LINKS_DOWN);
+  const subscribe = useCallback((fn: () => void) => {
+    let offs: Array<() => void> = [];
+    const watch = () => {
+      offs.forEach(off => off());
+      offs = [...everyTerminals()].map(([, terms]) => terms.onStatus(fn));
+    };
+    watch();
+    const offRegistry = onTerminals(() => {
+      watch();
+      fn();
+    });
+    return () => {
+      offRegistry();
+      offs.forEach(off => off());
+    };
+  }, []);
+  const snapshot = useCallback(() => {
+    const next: Record<string, LinkDown> = {};
+    for (const [id, terms] of everyTerminals()) {
+      const workspace = workspaces.find(w => w.id === id) ?? null;
+      const status = statuses[id] ?? null;
+      if (workspace === null && status === null) continue;
+      const pane = paneOf({ workspace, status, places, socket: terms.status(), refusal: terms.refusal() });
+      const sentence = linkDownLine(pane);
+      const word = linkDownWord(pane);
+      if (sentence !== null && word !== null) next[id] = { word, sentence };
+    }
+    if (!sameDowns(last.current, next)) last.current = Object.keys(next).length === 0 ? NO_LINKS_DOWN : next;
+    return last.current;
+  }, [places, statuses, workspaces]);
+  return useSyncExternalStore(subscribe, snapshot);
 }

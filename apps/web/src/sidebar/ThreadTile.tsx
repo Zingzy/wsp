@@ -24,6 +24,7 @@ import { ProjectGlyph } from "../projects/look.js";
 import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { SNOOZE_WORDS } from "./words.js";
+import type { LinkDown } from "../terminal/paneWords.js";
 import { TILE_CLASS, TILE_ROW_ONE_CLASS, TILE_ROW_THREE_CLASS, TILE_TITLE_CLASS, threadRowId } from "./rowGrammar.js";
 
 /** Where a tile's thread runs, as row one names it: the project and the computer by the names a person reads, either
@@ -119,6 +120,7 @@ export function ThreadTile({
   active,
   settled = false,
   snoozedWorking,
+  linkDown,
   renaming,
   saving,
   onSelect,
@@ -145,6 +147,8 @@ export function ThreadTile({
   settled?: boolean;
   /** The tile stands for a snoozed tree while threads of it run: how many, said quietly in place of the status. */
   snoozedWorking?: number | undefined;
+  /** The workspace's link is down: a resting tile says so in its slot in place of its age. */
+  linkDown?: LinkDown | undefined;
   /** The name is being typed on this tile: row two holds the input instead of the title. */
   renaming: boolean;
   /** That name is on its way to the machine: the field stays exactly as it is and takes no second Enter. */
@@ -182,7 +186,17 @@ export function ThreadTile({
     >
       <TileRows
         place={place}
-        status={snoozed ? <SnoozedWorking count={snoozedWorking} /> : <ThreadStatus thread={thread} age={time} settled={settled} />}
+        status={
+          snoozed ? (
+            <SnoozedWorking count={snoozedWorking} />
+          ) : idle && linkDown !== undefined ? (
+            <span data-thread-status="link-down" title={linkDown.sentence} className="inline-flex shrink-0 items-center whitespace-nowrap">
+              {linkDown.word}
+            </span>
+          ) : (
+            <ThreadStatus thread={thread} age={time} settled={settled} />
+          )
+        }
         title={
           renaming ? (
             <span className="flex h-[18px] min-w-0">

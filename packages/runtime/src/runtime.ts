@@ -3806,6 +3806,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const pingDaemon = async (entry: LiveWorkspace): Promise<string | undefined> => {
     const machine = entry.machine;
     const answersMs = lifecycleOf(entry).budgets.daemonAnswersMs;
+    // The person's stop on a wake ends the wait here too: the budget runs to minutes, and the row's toggle waits for
+    // the wake to let go.
+    const stop = entry.wakeStop?.signal;
+    const orStopped = <T>(p: Promise<T>): Promise<T> =>
+      stop === undefined
+        ? p
+        : Promise.race([p, new Promise<never>((_, reject) => (stop.aborted ? reject(new Error(WAKE_STOPPED)) : stop.addEventListener("abort", () => reject(new Error(WAKE_STOPPED)), { once: true })))]);
     if (machine.daemonAnswers !== undefined) {
       const deadline = clock.now() + answersMs;
       try {
@@ -3813,10 +3820,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // its nap rather than frozen comes back with its boot still running, and the budget is what the daemon is
         // given to answer in. A machine that answers at once costs one ask, as it always did.
         for (;;) {
-          const up = await until(machine.daemonAnswers({ timeoutMs: Math.min(answersMs, ASK_DAEMON_MS) }), deadline, "daemon answer");
+          const up = await orStopped(until(machine.daemonAnswers({ timeoutMs: Math.min(answersMs, ASK_DAEMON_MS) }), deadline, "daemon answer"));
           if (up) return undefined;
           if (clock.now() >= deadline) return `nothing listens on the daemon's port inside ${machine.id}`;
-          await new Promise<void>(done => clock.schedule(done, ASK_AGAIN_MS, { unref: true }));
+          await orStopped(new Promise<void>(done => clock.schedule(done, ASK_AGAIN_MS, { unref: true })));
         }
       } catch (e) {
         // The error is in hand here, so it is what the row says: only the edge road, which learns nothing but that
@@ -3825,17 +3832,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     }
     if (!machine.previewUrl) return undefined;
-    const deadline = Date.now() + answersMs;
+    const deadline = clock.now() + answersMs;
     let link: DaemonReach | null = null;
     try {
-      link = await dialDaemon(entry, deadline, { heartbeatMs: answersMs });
+      const dialled = dialDaemon(entry, deadline, { heartbeatMs: answersMs });
+      // A dial the stop walked away from still lets go of its link once it lands.
+      dialled.then(l => (stop?.aborted === true ? l?.close() : undefined), () => {});
+      link = await orStopped(dialled);
       if (link === null) {
         // No daemon to ask; an exec that returns is the guest's own answer.
-        await until(machine.exec("true"), deadline, "guest exec");
+        await orStopped(until(machine.exec("true"), deadline, "guest exec", clock));
         return undefined;
       }
-      await until(link.ready, deadline, "daemon link");
-      await until(link.request("ping"), deadline, "daemon ping");
+      await orStopped(until(link.ready, deadline, "daemon link", clock));
+      await orStopped(until(link.request("ping"), deadline, "daemon ping", clock));
       return undefined;
     } catch (e) {
       return `daemon on ${machine.id} did not answer within ${answersMs} ms (${e instanceof Error ? e.message : String(e)})`;

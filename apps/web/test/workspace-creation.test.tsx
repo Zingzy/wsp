@@ -241,7 +241,11 @@ describe("the creation page", () => {
     await press(editor, "Enter");
     expect(useComposerDraftStore.getState().queues["creating:beta"]?.map(r => r.prompt)).toEqual(["add a LICENSE file"]);
     const queued = within(view).getByRole("list", { name: "Queued messages" });
-    expect(within(queued).getByRole("button", { name: "Send now" }).hasAttribute("disabled")).toBe(true);
-    expect(view.querySelector("[data-composer-refusal]")!.textContent).toBe("Sends once beta is up");
+    // Nothing stands above the box: the card's own word carries why it waits.
+    expect(queued.querySelector("[data-queued-word]")!.getAttribute("title")).toBe("Sends once beta is up");
+    expect(view.querySelector("[data-composer-refusal]")).toBeNull();
+    await typeInto(editor, "and a README");
+    await press(editor, "Enter", { ctrlKey: true });
+    expect(useComposerDraftStore.getState().queues["creating:beta"]?.map(r => r.prompt)).toEqual(["add a LICENSE file", "and a README"]);
   });
 });

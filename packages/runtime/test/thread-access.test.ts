@@ -89,7 +89,7 @@ describe("the access a thread starts at, on each kind of workspace", () => {
   it("a thread on this computer that names an access runs at that one, so every other mode stays a choice", async () => {
     const rt = runtime();
     const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
-    expect((await ran(mac.id, "claude", "plan")).start).toBe("plan");
+    expect((await ran(mac.id, "claude", "acceptEdits")).start).toBe("acceptEdits");
     expect((await ran(mac.id, "claude", "default")).start).toBe("default");
     expect((await ran(mac.id, "codex", "read-only")).start).toBe("read-only");
     // Named or not, a mode the agent does not take is refused with its list; the pick is not silently dropped.
@@ -126,7 +126,6 @@ describe("the access a thread starts at, on each kind of workspace", () => {
     expect(here).toEqual([
       "Asks in the chat about each action that needs permission",
       "Edits files without asking; asks about commands that need permission",
-      "Reads and plans only; changes nothing",
       "Runs every action without asking",
       "The agent decides which actions to ask about; where the account has no such mode it asks as Default does",
       "Asks before every action",

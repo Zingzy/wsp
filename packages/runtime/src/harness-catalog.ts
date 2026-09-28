@@ -107,7 +107,6 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     permissionModes: [
       option("default", "Default", "Asks in the chat about each action that needs permission"),
       option("acceptEdits", "Accept edits", "Edits files without asking; asks about commands that need permission"),
-      option("plan", "Plan", "Reads and plans only; changes nothing"),
       option("bypassPermissions", "Bypass", "Runs every action without asking"),
       option("auto", "Auto", "The agent decides which actions to ask about; where the account has no such mode it asks as Default does"),
       // A turn launched in manual comes back naming default as the mode it ran in, so its own report is no proof of it.
@@ -146,7 +145,6 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
       option("read-only", "Read only", "Reads only; edits no files and runs no command that writes"),
       option("workspace-write", "Workspace write", "Edits files and runs commands inside the working folder"),
       option("danger-full-access", "Full access", "Runs every action without asking, with no folder off limits"),
-      option("plan", "Plan", "Reads and plans only; changes nothing, planning because it is asked to"),
     ],
   }),
   fromTable({

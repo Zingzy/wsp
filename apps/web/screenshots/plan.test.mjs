@@ -59,6 +59,11 @@ describe("a click or wait word", () => {
     expect(stepFor("hover:k=rewind-to-here", [1440, 390])).toEqual({ hover: '[data-k="rewind-to-here"]' });
   });
 
+  it("reads a file: word as a file of that name and size attached through the composer's picker", () => {
+    expect(stepFor("file:manual.pdf:12582912", [1440, 390])).toEqual({ file: { name: "manual.pdf", bytes: 12582912 } });
+    expect(stepFor("390:file:notes.md:40", [1440, 390])).toEqual({ width: 390, file: { name: "notes.md", bytes: 40 } });
+  });
+
   it("reads a type: word as typing into whatever the step before it focused", () => {
     expect(stepFor("type:/does/not/exist", [1440, 390])).toEqual({ type: "/does/not/exist" });
     expect(stepFor("390:type:/tmp", [1440, 390])).toEqual({ width: 390, type: "/tmp" });

@@ -131,17 +131,16 @@ describe("parseCatalogProbe", () => {
     // No codex model runs at two context windows, so no model offers one.
     expect(probe.models.every(m => m.contextWindows.length === 0)).toBe(true);
     expect(probe.efforts).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
-    expect(probe.permissionModes).toEqual(["read-only", "workspace-write", "danger-full-access", "plan"]);
+    expect(probe.permissionModes).toEqual(["read-only", "workspace-write", "danger-full-access"]);
   });
 
-  it("marks a model fast where model/list names a fast speed tier for it, and offers plan beside the sandboxes", () => {
+  it("marks a model fast where model/list names a fast speed tier for it", () => {
     const models = { id: 2, result: { data: [
       { id: "gpt-6-astra", displayName: "GPT-6-Astra", isDefault: true, hidden: false, supportedReasoningEfforts: [], additionalSpeedTiers: ["fast"] },
       { id: "gpt-5.2", displayName: "GPT-5.2", isDefault: false, hidden: false, supportedReasoningEfforts: [], additionalSpeedTiers: [] },
     ] } };
     const probe = lists(probeOutput([...serverLines(REAL).filter(line => !line.startsWith('{"id":2')), JSON.stringify(models)]));
     expect(probe.models.map(m => [m.slug, m.fast])).toEqual([["gpt-6-astra", true], ["gpt-5.2", undefined]]);
-    expect(probe.permissionModes.at(-1)).toBe("plan");
   });
 
   it("a route to another provider leads with the model config names, since that is what a turn without -m runs", () => {
