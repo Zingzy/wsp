@@ -22,7 +22,7 @@ function Checkbox({ className, tone = "accent", ...props }: CheckboxPrimitive.Ro
       <CheckboxPrimitive.Indicator
         className={cn(
           "-inset-px absolute flex items-center justify-center rounded-[.25rem] data-unchecked:hidden data-indeterminate:text-foreground",
-          tone === "accent" ? "text-primary-foreground data-checked:bg-primary" : "text-background data-checked:bg-foreground",
+          tone === "accent" ? "text-primary-foreground data-checked:bg-primary" : "text-(--app-chrome-background) data-checked:bg-foreground",
         )}
         data-slot="checkbox-indicator"
         render={(props, state) => (
