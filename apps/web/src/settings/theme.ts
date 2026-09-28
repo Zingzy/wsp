@@ -52,6 +52,17 @@ export function useThemeEffect(): void {
   }, [theme, lightTheme, darkTheme, systemDark]);
 }
 
+/** The root's class while the record's transparency is off: the stylesheet takes every glass to its solid ground. */
+export const SOLID_CLASS = "solid";
+
+/** Mounted once beside the theme: the root carries the solid class while the record's transparency is off. */
+export function useTransparencyEffect(): void {
+  const transparency = useStore(s => s.preferences.transparency);
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle(SOLID_CLASS, !transparency);
+  }, [transparency]);
+}
+
 /** Mounted once beside the theme: the root's app and code font tokens follow the record's picks. */
 export function useFontEffect(): void {
   const appFont = useStore(s => s.preferences.appFont);

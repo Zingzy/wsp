@@ -419,6 +419,67 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 60_000);
 
+  it("on the Mac's dark glass the centre and the sidebar let the glass through, and turn solid with Transparency off or the computer's Reduce transparency on", async () => {
+    await page!.goto(`${base}?theme=dark`);
+    await page!.waitForSelector("[data-shell-center]");
+    const read = () =>
+      page!.evaluate(() => {
+        const alpha = (sel: string): number => {
+          const bg = getComputedStyle(document.querySelector<HTMLElement>(sel)!).backgroundColor;
+          // rgba(r, g, b, a), or color(srgb r g b / a) for a mix; no alpha written is opaque.
+          const slash = /\/\s*([\d.]+)\s*\)$/.exec(bg);
+          const rgba = /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)$/.exec(bg);
+          return Number(slash?.[1] ?? rgba?.[1] ?? 1);
+        };
+        return { centre: alpha("[data-shell-center]"), sidebar: alpha("[data-slot=sidebar-inner]") };
+      });
+    await page!.evaluate(() => document.documentElement.classList.add("desktop-mac", "dark"));
+    const glass = await read();
+    await page!.evaluate(() => document.documentElement.classList.add("solid"));
+    const off = await read();
+    await page!.evaluate(() => document.documentElement.classList.remove("solid"));
+    const cdp = await page!.context().newCDPSession(page!);
+    await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "reduce" }] });
+    const reduced = await read();
+    await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+    await cdp.detach();
+    await page!.evaluate(() => document.documentElement.classList.remove("desktop-mac"));
+    console.info(`glass alphas: ${JSON.stringify({ glass, off, reduced })}`);
+    expect(glass.centre).toBeLessThan(1);
+    expect(glass.sidebar).toBeLessThan(1);
+    expect(off).toEqual({ centre: 1, sidebar: 1 });
+    expect(reduced).toEqual({ centre: 1, sidebar: 1 });
+  });
+
+  it("the composer's glass lets the page through in both themes, and turns solid with Transparency off or the computer's Reduce transparency on", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      await page!.goto(`${base}?theme=${theme}&ws=ws_a`);
+      await page!.waitForSelector("[data-slot=composer-shell]");
+      // The tint fades its colour in 200 ms; read it once no animation is left on the page.
+      const read = async () => {
+        await page!.waitForFunction(() => document.getAnimations().length === 0);
+        return page!.evaluate(() => {
+          const bg = getComputedStyle(document.querySelector<HTMLElement>("[data-slot=composer-shell]")!, "::before").backgroundColor;
+          const slash = /\/\s*([\d.]+)\s*\)$/.exec(bg);
+          const rgba = /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\)$/.exec(bg);
+          return Number(slash?.[1] ?? rgba?.[1] ?? 1);
+        });
+      };
+      const glass = await read();
+      await page!.evaluate(() => document.documentElement.classList.add("solid"));
+      const off = await read();
+      await page!.evaluate(() => document.documentElement.classList.remove("solid"));
+      const cdp = await page!.context().newCDPSession(page!);
+      await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-transparency", value: "reduce" }] });
+      const reduced = await read();
+      await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+      await cdp.detach();
+      console.info(`composer glass alpha ${theme}: ${JSON.stringify({ glass, off, reduced })}`);
+      expect(glass, theme).toBeLessThan(1);
+      expect({ off, reduced }, theme).toEqual({ off: 1, reduced: 1 });
+    }
+  });
+
   it("a toast with a 200-character token stands top right of the centre pane, inside its box and off the sidebar, its where one line and no clock, at every width, in both themes", async () => {
     const token = "ZGVza3RvcC1wb29s".repeat(13).slice(0, 200);
     const toast = `${encodeURIComponent(`Stopped the builder ${token} to make room at the machine cap.`)}&where=${"spoo-".repeat(40)}`;

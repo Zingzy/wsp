@@ -266,21 +266,32 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of thread tiles laid o
     }
   }, 60_000);
 
-  it("a desktop window names the computer it is on in the foot, one 36 px row under Settings in the rows' sans, in both themes", async () => {
+  it("a desktop window's foot is the corner row: Settings as a 28 px icon button at the sidebar's bottom left, and no computer picker, in both themes", async () => {
     for (const theme of THEMES) {
-      await open("sidebar-hosts", theme, "", "[data-host-foot] button");
-      const foot = await page!.locator("[data-host-foot] button").evaluate(el => ({ text: el.textContent, height: el.getBoundingClientRect().height, family: getComputedStyle(el).fontFamily }));
-      expect(foot.text).toBe("This Mac");
-      expect(foot.height).toBe(ONE_LINE);
-      expect(foot.family).not.toMatch(/mono/i);
-      await shot(`sidebar-hosts-1280-${theme}`);
-      await shot(`sidebar-hosts-256-${theme}`, "[data-slot=sidebar]");
+      await open("sidebar-hosts", theme, "", "[data-sidebar-corner] button");
+      const foot = await page!.evaluate(() => {
+        const button = document.querySelector<HTMLElement>("[data-sidebar-corner] button")!.getBoundingClientRect();
+        const sidebar = document.querySelector<HTMLElement>("[data-slot=sidebar-container], [data-slot=sidebar]")!.getBoundingClientRect();
+        const glyph = document.querySelector<HTMLElement>("[data-sidebar-search] svg")!.getBoundingClientRect();
+        const icon = document.querySelector<HTMLElement>("[data-sidebar-corner] button svg")!.getBoundingClientRect();
+        return { width: button.width, height: button.height, fromBottom: Math.round(sidebar.bottom - button.bottom), iconLeft: Math.round(icon.left), glyphLeft: Math.round(glyph.left), label: document.querySelector("[data-sidebar-corner] button")!.getAttribute("aria-label"), hosts: document.querySelectorAll("[data-host-foot]").length, words: document.querySelector("[data-slot=sidebar-footer]")!.textContent };
+      });
+      console.info(`sidebar corner ${theme}: ${JSON.stringify(foot)}`);
+      expect([foot.width, foot.height]).toEqual([28, 28]);
+      expect(foot.label).toBe("Settings");
+      expect(foot.hosts).toBe(0);
+      expect(foot.words).toBe("");
+      // The gear stands on the same left edge as the search row's glyph above it.
+      expect(foot.iconLeft).toBe(foot.glyphLeft);
+      expect(foot.fromBottom).toBeLessThanOrEqual(12);
+      await shot(`sidebar-corner-1280-${theme}`);
+      await shot(`sidebar-corner-256-${theme}`, "[data-slot=sidebar]");
     }
   }, 60_000);
 
-  it("nothing in the sidebar wears caps or letter-spacing, and the head sits in the fixed header outside the scrolling list", async () => {
+  it("nothing anywhere in the sidebar wears caps or letter-spacing, its foot included, and the head sits in the fixed header outside the scrolling list", async () => {
     await open("sidebar", "dark");
-    const dressed = await page!.locator("[data-sidebar-search] *, [data-sidebar-tree] *").evaluateAll(els =>
+    const dressed = await page!.locator("[data-slot=sidebar] *").evaluateAll(els =>
       els
         .filter(el => el.children.length === 0)
         .map(el => ({ text: (el.textContent ?? "").trim().slice(0, 20), transform: getComputedStyle(el).textTransform, spacing: getComputedStyle(el).letterSpacing }))
