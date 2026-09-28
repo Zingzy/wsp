@@ -138,7 +138,7 @@ describe("harness catalogs", () => {
     // The effort the app-server reports for the default model, so the tab shows a default with no probe at all.
     expect(codex.efforts.find(o => o.isDefault)?.value).toBe("low");
     expect(codex.contextWindows).toEqual([]);
-    expect(codex.permissionModes.map(o => o.value)).toEqual(["read-only", "workspace-write", "danger-full-access", "plan"]);
+    expect(codex.permissionModes.map(o => o.value)).toEqual(["read-only", "workspace-write", "danger-full-access"]);
   });
 
   it("Claude Code offers the models, effort levels, context windows and permission modes its CLI takes", () => {
@@ -154,7 +154,7 @@ describe("harness catalogs", () => {
     // The handshake names no default effort; the CLI documents high on every model that takes one.
     expect(claude.efforts.find(o => o.isDefault)?.value).toBe("high");
     expect(claude.contextWindows).toEqual([{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }]);
-    expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "plan", "bypassPermissions", "auto", "manual", "dontAsk"]);
+    expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "bypassPermissions", "auto", "manual", "dontAsk"]);
     expect(claude.permissionModes.every(o => o.description !== undefined)).toBe(true);
   });
 
@@ -297,7 +297,7 @@ describe("startPicks", () => {
     // On this computer the same start runs bypass too.
     expect(startPicks(claude, {}, true)).toEqual({ model: "claude-opus-5-5", effort: "high", permissionMode: "bypassPermissions" });
     expect(startPicks(claude, {}, false)).toEqual({});
-    expect(startPicks(claude, { model: "claude-sonnet-5", effort: "low", permissionMode: "plan" }, true)).toEqual({ model: "claude-sonnet-5", effort: "low", permissionMode: "plan" });
+    expect(startPicks(claude, { model: "claude-sonnet-5", effort: "low", permissionMode: "acceptEdits" }, true)).toEqual({ model: "claude-sonnet-5", effort: "low", permissionMode: "acceptEdits" });
     expect(startPicks(claude, { effort: "max" }, false)).toEqual({ effort: "max" });
     const noDefault = { ...claude, models: claude.models.map(({ isDefault: _d, ...m }) => m) };
     expect(startPicks(noDefault, {}, true)).toEqual({ effort: "high", permissionMode: "bypassPermissions" });
@@ -317,10 +317,10 @@ describe("startPicks", () => {
     // The one rule every reader of a remembered pick uses: the composer's pickers, its start options and the
     // runtime's own read of the record. A pick belongs to a harness and is kept per workspace, so the reader in
     // front of it may be another harness's list.
-    expect(listedPick(claude.permissionModes, "plan")).toBe("plan");
+    expect(listedPick(claude.permissionModes, "acceptEdits")).toBe("acceptEdits");
     expect(listedPick(claude.permissionModes, "read-only")).toBeUndefined();
     expect(listedPick(claude.permissionModes, undefined)).toBeUndefined();
-    expect(listedPick(harnessCatalog("pi")!.permissionModes, "plan")).toBeUndefined();
+    expect(listedPick(harnessCatalog("pi")!.permissionModes, "acceptEdits")).toBeUndefined();
     // Dropped, the start runs that list's own default, and never the value a caller named: that one still refuses.
     expect(startPicks(claude, { permissionMode: listedPick(claude.permissionModes, "read-only") }, true).permissionMode).toBe("bypassPermissions");
     expect(() => startPicks(claude, { permissionMode: "read-only" }, true)).toThrow(/not one claude takes/);
@@ -330,7 +330,7 @@ describe("startPicks", () => {
     expect(() => startPicks(claude, { model: "claude-opus-4-1" }, true)).toThrow(`model "claude-opus-4-1" is not one claude takes; one of: ${MODELS}`);
     expect(() => startPicks(claude, { effort: "ultra" }, false)).toThrow('effort "ultra" is not one claude takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max)');
     expect(() => startPicks(claude, { permissionMode: "yolo" }, true)).toThrow(
-      'access mode "yolo" is not one claude takes; one of: Default (default), Accept edits (acceptEdits), Plan (plan), Bypass (bypassPermissions), Auto (auto), Manual (manual), Don\'t ask (dontAsk)',
+      'access mode "yolo" is not one claude takes; one of: Default (default), Accept edits (acceptEdits), Bypass (bypassPermissions), Auto (auto), Manual (manual), Don\'t ask (dontAsk)',
     );
   });
 
@@ -396,15 +396,11 @@ describe("fast and plan in the tables", () => {
     expect(claude.models.filter(m => m.fast === true).map(m => m.value)).toEqual(["claude-opus-5-5"]);
     expect(modelOf(claude, "claude-opus-4-6")?.fast).toBe(true);
     expect(modelOf(claude, "claude-sonnet-5")?.fast).toBeUndefined();
-    const probe: HarnessCatalogProbe = { version: "0.155.1", models: [{ slug: "gpt-6-astra", label: "GPT-6-Astra", contextWindows: [], isDefault: true, fast: true }, { slug: "gpt-5.2", label: "GPT-5.2", contextWindows: [], isDefault: false }], efforts: [], permissionModes: ["read-only", "workspace-write", "danger-full-access", "plan"] };
+    const probe: HarnessCatalogProbe = { version: "0.155.1", models: [{ slug: "gpt-6-astra", label: "GPT-6-Astra", contextWindows: [], isDefault: true, fast: true }, { slug: "gpt-5.2", label: "GPT-5.2", contextWindows: [], isDefault: false }], efforts: [], permissionModes: ["read-only", "workspace-write", "danger-full-access"] };
     const heard = catalogFromProbe(harnessCatalog("codex")!, probe);
     expect(everyModel(heard).map(m => [m.value, m.fast])).toEqual([["gpt-6-astra", true], ["gpt-5.2", undefined]]);
     // A binary that says nothing about speed keeps what the table knows of the model.
     expect(catalogFromProbe(claude, { version: "2.1.283", models: [{ slug: "claude-opus-5-5", label: "Opus 5.5", contextWindows: [], isDefault: true }], efforts: [], permissionModes: [] }).models[0]?.fast).toBe(true);
-  });
-
-  it("gives Codex a plan access mode beside its three sandboxes", () => {
-    expect(harnessCatalog("codex")!.permissionModes.map(o => o.value)).toContain("plan");
   });
 });
 
@@ -417,7 +413,7 @@ describe("catalogFromProbe", () => {
       { slug: "claude-next-6", label: "Next", efforts: ["low", "turbo"], contextWindows: [], isDefault: false },
     ],
     efforts: ["low", "high", "turbo"],
-    permissionModes: ["default", "plan", "yolo"],
+    permissionModes: ["default", "acceptEdits", "yolo"],
   };
 
   it("takes the binary's values and defaults, borrows the table's labels and descriptions, and says the binary answered", () => {
@@ -433,8 +429,8 @@ describe("catalogFromProbe", () => {
     // A binary that no longer lists the table's default effort leaves none marked.
     expect(catalogFromProbe(harnessCatalog("claude")!, { ...probe, efforts: ["low", "turbo"] }).efforts.some(o => o.isDefault)).toBe(false);
     expect(catalog.contextWindows).toEqual(harnessCatalog("claude")!.contextWindows);
-    expect(catalog.permissionModes.map(o => o.value)).toEqual(["default", "plan", "yolo"]);
-    expect(catalog.permissionModes[1]?.description).toBe("Reads and plans only; changes nothing");
+    expect(catalog.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "yolo"]);
+    expect(catalog.permissionModes[1]?.description).toBe("Edits files without asking; asks about commands that need permission");
     // A mode the table has no words for still shows, named as the CLI spells it.
     expect(catalog.permissionModes[2]).toEqual({ value: "yolo", label: "yolo" });
     // The table's bypass default is not among the binary's modes here, so nothing is default.

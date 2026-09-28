@@ -16,7 +16,7 @@
 // twice, id 3 and id 4 either way round), so the reader counts answers rather
 // than watching for the last id it sent.
 
-import { PLAN_ACCESS, codexNotSignedInLine, shellQuote } from "@wsp/protocol";
+import { codexNotSignedInLine, shellQuote } from "@wsp/protocol";
 import type { HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe } from "@wsp/protocol";
 import { buildEnv } from "./command.js";
 
@@ -170,8 +170,7 @@ export function parseCatalogProbe(stdout: string, login: string): HarnessCatalog
     version: /(\d+\.\d+\.\d+)/.exec(versionPart)?.[1] ?? null,
     models,
     efforts: effortsOf(models),
-    // Plan is this adapter's own mode on top of the read-only sandbox, so it is offered wherever the sandboxes are.
-    permissionModes: ((modes: string[]) => (modes.length > 0 ? [...modes, PLAN_ACCESS] : modes))(possibleValues(help, "--sandbox <SANDBOX_MODE>")),
+    permissionModes: possibleValues(help, "--sandbox <SANDBOX_MODE>"),
   };
   return probe;
 }

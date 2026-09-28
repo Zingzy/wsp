@@ -17,6 +17,7 @@ import { composerEditor, press, typeInto } from "./composer-harness.js";
 import { installFakeLayout } from "./fake-layout.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 
 const PROJECT: ProjectView = { id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder", path: "/root" }, path: "/root", remote: "https://github.com/dev/the-project.git", defaultBranch: "main", memoryKey: "-root", memoryDir: "/root/.claude-cfg/projects/-root/memory", createdAt: "t" };
 const HOME = projectHomeKey(PROJECT.id);
@@ -92,7 +93,7 @@ beforeEach(() => {
   window.localStorage.clear();
   useComposerDraftStore.setState({ drafts: {}, queues: {}, held: {} });
   useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {} });
-  useComposerFilesStore.setState({ pending: {}, sent: {} });
+  useComposerFilesStore.setState({ pending: {}, refused: {}, queued: {}, sent: {} });
   useMultiPickStore.setState({ byKey: { [HOME]: PICKS } });
 });
 afterEach(cleanup);
@@ -135,14 +136,17 @@ describe("a project's home sending to several models", () => {
     expect(useComposerFilesStore.getState().pending[HOME]).toBeUndefined();
   });
 
-  it("refuses in one sentence before any copy is made when the computer has room for fewer threads than the picks, and keeps the draft and the picks", async () => {
+  it("refuses in one flyout before any copy is made when the computer has room for fewer threads than the picks, and keeps the draft and the picks", async () => {
     const { api, created, started } = fakeApi(4);
     await mount(api);
+    clearNotices();
     const editor = composerEditor();
     await typeInto(editor, "fix the flaky login test");
     await press(editor, "Enter");
     const line = noRoomLine(HERE_NAME, 2, "thread", 3);
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(line));
+    // A flyout, since the composer has no line above its box.
+    await waitFor(() => expect(lastNotice()).toBe(line));
+    expect(document.querySelector("[data-composer-refusal]")).toBeNull();
     expect(created).toEqual([]);
     expect(started).toEqual([]);
     expect(useStore.getState().creations).toEqual([]);

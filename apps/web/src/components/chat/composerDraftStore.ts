@@ -32,8 +32,8 @@ interface DraftState {
   held: Record<string, true>;
   setDraft(workspaceId: string, draft: ComposerDraft): void;
   /** Behind the rows already waiting, or ahead of them when the person's new row must go before held ones. */
-  enqueue(threadKey: string, prompt: string, at?: "head" | "tail"): void;
-  editQueued(threadKey: string, id: string, prompt: string): void;
+  /** Queues a message and answers with its id, which its files are kept under. */
+  enqueue(threadKey: string, prompt: string, at?: "head" | "tail"): string;
   removeQueued(threadKey: string, id: string): void;
   /** Moves one row to the head, so it is the next to send. */
   promoteQueued(threadKey: string, id: string): void;
@@ -102,14 +102,9 @@ export const useComposerDraftStore = create<DraftState>()(
           });
         },
         enqueue(threadKey, prompt, at = "tail") {
-          patchQueue(threadKey, rows => (at === "head" ? [{ id: newId(), prompt }, ...rows] : [...rows, { id: newId(), prompt }]));
-        },
-        editQueued(threadKey, id, prompt) {
-          patchQueue(threadKey, rows => {
-            const index = rows.findIndex(r => r.id === id);
-            if (index === -1 || rows[index]?.prompt === prompt) return rows;
-            return rows.map(r => (r.id === id ? { id, prompt } : r));
-          });
+          const id = newId();
+          patchQueue(threadKey, rows => (at === "head" ? [{ id, prompt }, ...rows] : [...rows, { id, prompt }]));
+          return id;
         },
         removeQueued(threadKey, id) {
           patchQueue(threadKey, rows => (rows.some(r => r.id === id) ? rows.filter(r => r.id !== id) : rows));

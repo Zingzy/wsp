@@ -74,7 +74,10 @@
     {
       "name": "btw-asking",
       "at": "/",
-      "widths": [1440, 390],
+      "widths": [
+        1440,
+        390
+      ],
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -90,7 +93,10 @@
     {
       "name": "btw-answered",
       "at": "/",
-      "widths": [1440, 390],
+      "widths": [
+        1440,
+        390
+      ],
       "steps": [
         "390:key:Escape",
         "390:sidebar=trigger",
@@ -202,12 +208,129 @@
         "390:key:Escape",
         "390:key:Escape",
         "composer-mode=fast",
-        "composer-mode=plan",
         "testid=composer-editor",
-        "type:plan the move to the new billing api"
+        "type:move the billing api over"
       ],
-      "wait": "composer-mode=plan",
+      "wait": "composer-mode=fast",
       "settleMs": 700
+    },
+    {
+      "name": "composer-held-hover",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:/",
+        "key:Escape",
+        "hover:send-held"
+      ],
+      "wait": "slot=tooltip-positioner",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-held-flyout",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:/",
+        "key:Escape",
+        "key:Enter"
+      ],
+      "wait": "notice",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-refused-chip",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:read the manual and sum it up",
+        "file:manual.pdf:12582912"
+      ],
+      "wait": "composer-refused-file=manual.pdf",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-menu-empty",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:#zzzz"
+      ],
+      "wait": "composer-menu-note",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-queue-one",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:cart",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:and check the rounding on refunds",
+        "file:refund-cases.md:640",
+        "key:Enter"
+      ],
+      "wait": "queued-id",
+      "settleMs": 800
+    },
+    {
+      "name": "composer-queue-several",
+      "at": "/",
+      "fixture": "tiles",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:cart",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:and check the rounding on refunds",
+        "file:refund-cases.md:640",
+        "key:Enter",
+        "type:then run the cart tests",
+        "key:Enter",
+        "type:open a pull request once they pass",
+        "key:Enter"
+      ],
+      "wait": "queued-id",
+      "settleMs": 800
+    },
+    {
+      "name": "composer-glass",
+      "at": "/",
+      "mac": true,
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape"
+      ],
+      "wait": "testid=composer-editor",
+      "settleMs": 800
     },
     {
       "name": "machine",

@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { installFakeLayout } from "./fake-layout.js";
 import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
-import { stillWorkingLine, type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { useSelectedThreadId, useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
@@ -129,33 +129,27 @@ describe("chat tab rendering", () => {
 
 describe("chat tab: a turn whose process lives past its reply", () => {
   const thread = { ...scope, threadId: "thr_linger" };
-  const noteText = () => document.querySelector("[data-composer-refusal]")?.textContent ?? null;
 
-  it("holds the composer with the runtime's words from the reply until the process exits, naming the thread by its title, then opens", async () => {
+  it("keeps stop on offer from the reply until the process exits, with no line above the box, then opens", async () => {
     const { api, emit } = fixtureApi([workspace], {}, [
       { id: "sess_linger", workspaceId: WS, harness: "claude", status: "running", threadId: "thr_linger", harnessTitle: "Serve the port list" },
     ]);
     await setup(api);
     emit({ type: "session.start", ...thread });
     emit({ type: "session.delta", ...thread, kind: "text", text: "Server is live at :3000." });
-    // Working, no reply yet: the slot is reserved but silent, so the line lands without a shift.
     expect(stopButton()).toBeDefined();
-    expect(noteText()).toBe("");
+    expect(document.querySelector("[data-composer-refusal]")).toBeNull();
 
     emit({ type: "session.done", ...thread, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
-    // The reply renders at once, but the process still runs: the row stays working, says so, and offers no send.
+    // The reply renders at once, but the process still runs: stop stays, and a message sent now is a queued card.
     expect(screen.getByText("Server is live at :3000.")).toBeDefined();
-    expect(noteText()).toBe(stillWorkingLine("Serve the port list"));
-    // The slot is centred with the queue and the box, not laid across the page.
-    expect(document.querySelector("[data-composer-refusal]")?.className).toContain("max-w-3xl");
+    expect(document.querySelector("[data-composer-refusal]")).toBeNull();
     expect(stopButton()).toBeDefined();
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
     expect(screen.queryByTestId("settled-footer")).toBeNull();
 
     emit({ type: "session.end", ...thread, exitCode: 0, sawResult: true });
-    // The process exited: the turn is over, the slot is empty again, and the composer opens.
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
-    expect(noteText()).toBe("");
     expect(screen.getByTestId("settled-footer")).toBeDefined();
   });
 });
@@ -281,7 +275,7 @@ describe("chat tab composer", () => {
     await press(editor, "Enter");
     expect(started.length).toBe(1);
     expect(editor.textContent).toBe("");
-    expect((screen.getByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement).value).toBe("again");
+    expect(document.querySelector("[data-queued-id] [data-queued-text]")?.textContent).toBe("again");
 
     emit({ type: "session.start", ...turn, prompt: "fix the flaky test" });
     expect(stopButton()).toBeDefined();
@@ -289,7 +283,7 @@ describe("chat tab composer", () => {
     emit({ type: "session.end", ...turn, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.length).toBe(2));
     expect(started[1]).toEqual({ workspaceId: WS, requestId: expect.any(String), prompt: "again", thread: "thr_a" });
-    expect(screen.queryByRole("textbox", { name: "Queued message" })).toBeNull();
+    expect(document.querySelector("[data-queued-id]")).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Turn in flight");
   });
 
@@ -400,7 +394,7 @@ describe("chat tab send after a harness died before its init", () => {
     const { api, started, emit } = fixtureApi([workspace], history, [deadRow]);
     // The runtime records an event before it pushes it, so a reload finds the retry in the reply.
     const record = (e: SessionEvent) => { history[WS] = [...history[WS]!, e]; emit(e); };
-    const queued = () => (screen.getByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement).value;
+    const queued = () => document.querySelector("[data-queued-id] [data-queued-text]")?.textContent;
     await setup(api, "thr_dead");
     await screen.findByText(/exited before init/);
     expect(screen.queryByText(/Server is live at :3000\./)).toBeNull();

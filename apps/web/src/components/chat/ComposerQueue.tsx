@@ -1,73 +1,68 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The messages entered while a turn ran, stacked above the composer oldest
-// first: each is a textarea edited in place, a remove button, and a send-now
-// button. With a harness that steers, send-now puts the row into the running
-// turn; with one that does not, it stops the turn first and says so in one
-// line. The head row goes when the turn ends; the row a send-now promoted
-// reads next while its request is in flight. Every row keeps the same three
-// controls in every state, so nothing shifts as the turn starts or ends.
-import { ArrowUpIcon, XIcon } from "lucide-react";
+// first, one card each: the words, the files the message goes with, the word
+// Queued or Next, an edit that puts the message back in the box, and a remove.
+// The head card goes when the turn ends; Ctrl+Enter in the box is what sends
+// a message now, so no card carries a send of its own. Every card keeps the
+// same controls in every state, so nothing shifts as the turn starts or ends.
+import { FileTextIcon, PencilIcon, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
+import type { ComposerFile } from "./composerFiles";
 import type { QueuedMessage } from "./composerDraftStore";
 
-export const STEER_NOTICE = "Stopping the turn, then this message sends.";
+function QueuedFile({ file }: { file: ComposerFile }) {
+  return (
+    <li data-queued-file={file.name} title={file.name} className="flex h-6 max-w-40 items-center gap-1.5 rounded-md bg-[color-mix(in_srgb,var(--foreground)_5%,transparent)] pe-2 ps-1 text-xs text-muted-foreground">
+      {file.url !== undefined ? <img src={file.url} alt="" className="size-4 shrink-0 rounded-sm object-cover" /> : <FileTextIcon aria-hidden className="size-3.5 shrink-0" />}
+      <span className="truncate">{file.name}</span>
+    </li>
+  );
+}
 
 export function ComposerQueue({
   rows,
-  steering,
-  steer,
+  files,
+  next,
   onEdit,
   onRemove,
-  onSteer,
 }: {
   rows: ReadonlyArray<QueuedMessage>;
-  /** The row a send-now put at the head while its request is in flight; null when none. */
-  steering: string | null;
-  /** What send-now does: sends the row now (into the turn, or as the next start), stops the turn first, or nothing can go yet. */
-  steer: "now" | "stop" | null;
-  onEdit: (id: string, prompt: string) => void;
+  /** Each queued message's files, keyed by its id. */
+  files: Readonly<Record<string, ReadonlyArray<ComposerFile>>>;
+  /** The card a send-now put at the head while its request is out; null when none. */
+  next: string | null;
+  onEdit: (id: string) => void;
   onRemove: (id: string) => void;
-  onSteer: (id: string) => void;
 }) {
   if (rows.length === 0) return null;
   return (
-    <div className="mx-auto mb-2 flex w-full max-w-3xl flex-col gap-1.5" data-composer-queue="true">
-      <ul aria-label="Queued messages" className="flex flex-col gap-1">
-        {rows.map(row => {
-          const next = row.id === steering;
-          return (
-            <li key={row.id} className="flex items-start gap-1 rounded-xl border border-border/60 bg-card/50 py-1 ps-3 pe-1.5" data-queued-id={row.id}>
-              <textarea
-                aria-label="Queued message"
-                rows={1}
-                value={row.prompt}
-                onChange={event => onEdit(row.id, event.target.value)}
-                onBlur={event => {
-                  if (event.target.value.trim() === "") onRemove(row.id);
-                }}
-                className="field-sizing-content min-h-6 w-full min-w-0 flex-1 resize-none bg-transparent py-0.5 text-sm leading-5 text-foreground outline-none"
-              />
-              <span className="w-[6ch] shrink-0 select-none py-0.5 text-end font-mono text-[11px] leading-5 text-muted-foreground">{next ? "next" : "queued"}</span>
-              <Button
-                size="icon-xs"
-                variant="ghost-muted"
-                aria-label={steer === "stop" ? "Stop the turn and send now" : "Send now"}
-                title={steer === "stop" ? "Stop the turn and send now" : "Send now"}
-                onClick={() => onSteer(row.id)}
-                disabled={steer === null || next}
-              >
-                <ArrowUpIcon />
-              </Button>
-              <Button size="icon-xs" variant="ghost-muted" aria-label="Remove queued message" title="Remove queued message" onClick={() => onRemove(row.id)}>
-                <XIcon />
-              </Button>
-            </li>
-          );
-        })}
-      </ul>
-      {steer === "stop" && steering !== null && rows.some(row => row.id === steering) ? (
-        <p role="status" className="px-3 font-mono text-[11px] text-muted-foreground">{STEER_NOTICE}</p>
-      ) : null}
-    </div>
+    <ul aria-label="Queued messages" className="mx-auto mb-2 flex w-full max-w-3xl flex-col gap-1" data-composer-queue="true">
+      {rows.map(row => {
+        const held = files[row.id] ?? [];
+        return (
+          <li key={row.id} data-queued-id={row.id} className="flex items-start gap-2 rounded-md border border-border bg-card py-1.5 ps-3 pe-1.5">
+            <div className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
+              <p data-queued-text className="line-clamp-3 whitespace-pre-wrap break-words text-sm leading-5 text-foreground">
+                {row.prompt}
+              </p>
+              {held.length > 0 ? (
+                <ul aria-label="Files it goes with" className="flex flex-wrap gap-1">
+                  {held.map(file => (
+                    <QueuedFile key={file.id} file={file} />
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+            <span className="w-[6ch] shrink-0 select-none py-0.5 text-end text-xs leading-5 text-muted-foreground">{row.id === next ? "Next" : "Queued"}</span>
+            <Button size="icon-xs" variant="ghost-muted" aria-label="Edit queued message" title="Edit queued message" onClick={() => onEdit(row.id)}>
+              <PencilIcon />
+            </Button>
+            <Button size="icon-xs" variant="ghost-muted" aria-label="Remove queued message" title="Remove queued message" onClick={() => onRemove(row.id)}>
+              <XIcon />
+            </Button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

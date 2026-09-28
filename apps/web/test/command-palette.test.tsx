@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, PLACES_WORDS, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { RECENT_THREAD_LIMIT } from "../src/components/palette/CommandPalette.logic.js";
-import { MICRO_LABEL } from "../src/lib/microLabel.js";
+import { MENU_GROUP_LABEL } from "../src/lib/microLabel.js";
 import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
 import { compileResolvedKeybindingsConfig } from "../src/keybindingDefaults.js";
 import type { Api } from "../src/protocol/client.js";
@@ -186,13 +186,16 @@ describe("command palette", () => {
     await waitFor(() => expect(palette()).toBeNull());
   });
 
-  it("heads its groups in the one caps dress and draws every key in mono", async () => {
+  it("heads its groups in sentence case sans, never the caps mono of a section, and draws every key in mono", async () => {
     await mountShell([session("s1", "ws_b", "fix the flaky test")]);
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
     const labels = [...palette()!.querySelectorAll<HTMLElement>("[data-slot=command-group-label]")];
     expect(labels.map(label => label.textContent)).toEqual(["Actions", "Tasks", "Recent threads"]);
-    for (const label of labels) expect(label.className).toContain(MICRO_LABEL);
+    for (const label of labels) {
+      expect(label.className).toContain(MENU_GROUP_LABEL);
+      expect(label.className).not.toMatch(/\buppercase\b|\bfont-mono\b|tracking-/);
+    }
     const chords = [...palette()!.querySelectorAll<HTMLElement>("[data-slot=command-shortcut]")];
     expect(chords.length).toBeGreaterThan(0);
     for (const chord of chords) expect(chord.className).toMatch(/\bfont-mono\b.*\btabular-nums\b|\btabular-nums\b.*\bfont-mono\b/);

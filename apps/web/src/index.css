@@ -1447,11 +1447,6 @@ code {
   background: color-mix(in srgb, var(--material-ground) var(--material-centre), transparent);
 }
 
-/* The composer floats over the chat column: a lifted pane of the same material, the text behind it blurred away. */
-.desktop-mac.dark [data-shell-center] .group\/composer-surface {
-  --chat-composer-glass-surface: var(--material-raised);
-}
-
 /* A translucent terminal shows the window's glass through its canvas, so with one open the centre's share moves off
    the whole column onto the thread and the header, and the drawer's own ground stays clear. */
 html.desktop-mac.dark:has([data-terminal-translucent]) [data-shell-center] {

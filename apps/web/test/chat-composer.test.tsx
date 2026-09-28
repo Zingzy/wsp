@@ -4,13 +4,16 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, type EventUnion, type HarnessCatalog, type HostItem, type SessionEvent, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { clickIntoEditor, composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src/protocol/client.js";
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
-import { composerSendBlock, FILES_CUT_LINE, menuListUnserved, noHostListLine } from "../src/components/chat/ChatComposer.js";
+import { RightPanel } from "../src/shell/RightPanel.js";
+import { selectWorkspaceRightPanelState, useRightPanelStore } from "../src/rightPanelStore.js";
+import { composerSendBlock } from "../src/components/chat/ChatComposer.js";
+import { COMPOSER_WORDS } from "../src/components/chat/composerWords.js";
 import { provideDaemonWire } from "../src/files/wire.js";
 import { SEND_LABEL, WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions.js";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
@@ -22,7 +25,7 @@ import { requestComposerFocus, requestNewThread } from "../src/shell/shellReques
 import { CHAT_HARNESS, CHAT_STREAM, CHAT_T0, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
-import { lastNotice } from "./notice-text.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 
 let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
@@ -104,6 +107,15 @@ const draft = () => useComposerDraftStore.getState().drafts[WS]?.prompt ?? "";
 const sendButton = () => screen.getByRole("button", { name: /Send message|Wake and send|Turn in flight|wsp|Workspace|This workspace|Loading|Connecting/ }) as HTMLButtonElement;
 const menuItem = (name: string) => document.querySelector<HTMLElement>(`[data-composer-item-id="provider-slash-command:claude:${name}"]`);
 const menuDrawer = () => document.querySelector<HTMLElement>("[data-composer-command-drawer]");
+/** The composer has no line above its box, in any state: each sentence is said where its thing stands. */
+const noLineAbove = () => {
+  expect(document.querySelector("[data-composer-refusal]")).toBeNull();
+  expect(document.querySelector("[data-chat-composer] span[role='status']")).toBeNull();
+};
+/** What the held send button says on hover, or null while nothing holds it. */
+const heldHover = () => document.querySelector<HTMLElement>("[data-send-held]")?.getAttribute("data-send-held") ?? null;
+/** The menu's own empty state or foot line, or null while it says nothing of the kind. */
+const menuNote = () => document.querySelector<HTMLElement>("[data-composer-menu-note]")?.textContent ?? null;
 
 describe("composer keys", () => {
   it("shift+enter inserts a newline instead of sending", async () => {
@@ -205,6 +217,12 @@ const STREAM_WITH_SCREENS: SessionEvent[] = CHAT_STREAM.map(e => (e.type === "se
 const listed = () => [...document.querySelectorAll("[data-composer-item-id]")].map(el => el.getAttribute("data-composer-item-id")?.split(":").pop());
 /** The menu's headings and its rows in the order they are drawn; a command's own name may hold a colon, so the id is
  * read past the two fields in front of it rather than split to the last one. */
+/** The right panel as the shell mounts it for the workspace on screen, open or shut by its own record. */
+function PanelHost() {
+  const state = useRightPanelStore(s => selectWorkspaceRightPanelState(s.byWorkspaceId, WS));
+  return <div data-panel-host>{state.isOpen ? <RightPanel workspaceId={WS} state={state} mode="inline" /> : null}</div>;
+}
+const panelOpen = () => selectWorkspaceRightPanelState(useRightPanelStore.getState().byWorkspaceId, WS).isOpen;
 const groupLabels = () => [...document.querySelectorAll("[data-composer-command-drawer] [data-slot=command-group-label]")].map(el => el.textContent);
 const namesInMenu = () => [...document.querySelectorAll("[data-composer-item-id]")].map(el => (el.getAttribute("data-composer-item-id") ?? "").split(":").slice(2).join(":"));
 
@@ -259,7 +277,20 @@ describe("composer slash menu", () => {
     await typeInto(editor, "log");
     await waitFor(() => expect(listed()).toEqual([]));
     expect(menuDrawer()).toBeNull();
-    expect(screen.getByRole("status").textContent).toBe("no command here is called /log");
+    noLineAbove();
+    expect(heldHover()).toBe("no command here is called /log");
+  });
+
+  it("heads each group in sentence case sans, never the caps mono of a section header", async () => {
+    const { api } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    await typeInto(composerEditor(), "/");
+    await waitFor(() => expect(groupLabels().length).toBeGreaterThan(0));
+    for (const label of document.querySelectorAll<HTMLElement>("[data-composer-command-drawer] [data-slot=command-group-label]")) {
+      expect(label.className, label.textContent ?? "").not.toMatch(/\buppercase\b|\bfont-mono\b|tracking-/);
+      expect(label.className).toContain("text-muted-foreground");
+    }
   });
 
   it("lists the commands the session announced, filters as you type, arrows move the highlight, tab picks", async () => {
@@ -289,45 +320,47 @@ describe("composer slash menu", () => {
     expect(started[0]?.prompt).toBe("/compact");
   });
 
-  it("typing a screen command and Enter sends nothing: the draft stays and the line names wsp's own road for it", async () => {
+  it("typing a screen command and Enter sends nothing: the draft stays and a flyout names wsp's own road for it", async () => {
     const { api, started } = fixtureApi([workspace], { [WS]: STREAM_WITH_SCREENS });
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
-    const editor = composerEditor();
-    await typeInto(editor, "/login");
-    await press(editor, "Enter");
-    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
-    expectPlainLine(screenCommandLine(SCREEN_COMMANDS[0]!, CLAUDE_CATALOG, workspace));
-    expect(screen.getByRole("status").textContent).toContain("Workspace panel");
-    expect(started).toHaveLength(0);
-    expect(draft()).toBe("/login");
-    expect(isEditable(editor)).toBe(true);
-    // The pickers' commands name the row under the box; a command with words after it is still the command.
-    await typeInto(editor, " opus");
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
-    expect(draft()).toBe("/login opus");
-    await press(editor, "Enter");
-    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
-    expect(started).toHaveLength(0);
-  });
-
-  it("a block on the send outranks the screen command's line, and the line is back once the block lifts", async () => {
-    const { api, started } = fixtureApi([workspace], { [WS]: STREAM_WITH_SCREENS });
-    await setup(api);
-    await screen.findByText(/Server is live at :3000\./);
+    clearNotices();
     const editor = composerEditor();
     await typeInto(editor, "/login");
     await press(editor, "Enter");
     const line = screenCommandLine(SCREEN_COMMANDS[0]!, CLAUDE_CATALOG, workspace);
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(line));
-    // The socket drops with the draft still in the box: the box is disabled and the slot says so, not the command.
+    await waitFor(() => expect(lastNotice()).toBe(line));
+    expect(line).toContain("Workspace panel");
+    noLineAbove();
+    expect(started).toHaveLength(0);
+    expect(draft()).toBe("/login");
+    expect(isEditable(editor)).toBe(true);
+    // A command with words after it is still the command, and each Enter says so again.
+    clearNotices();
+    await typeInto(editor, " opus");
+    await press(editor, "Enter");
+    await waitFor(() => expect(lastNotice()).toBe(line));
+    expect(draft()).toBe("/login opus");
+    expect(started).toHaveLength(0);
+  });
+
+  it("a block on the send holds the button in its words while it lasts, and the screen command's flyout comes back once it lifts", async () => {
+    const { api, started } = fixtureApi([workspace], { [WS]: STREAM_WITH_SCREENS });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/login");
+    // The socket drops with the draft still in the box: the box is shut and the held button says why.
     act(() => useStore.getState().setConn("reconnecting"));
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(sendRefusal("reconnecting")));
+    await waitFor(() => expect(heldHover()).toBe(sendRefusal("reconnecting")));
     expect(isEditable(editor)).toBe(false);
+    noLineAbove();
     act(() => useStore.getState().setConn("live"));
     await waitFor(() => expect(isEditable(editor)).toBe(true));
-    // The draft still reads /login, so the line that explains it is still true.
-    expect(screen.getByRole("status").textContent).toBe(line);
+    expect(heldHover()).toBeNull();
+    clearNotices();
+    await press(editor, "Enter");
+    await waitFor(() => expect(lastNotice()).toBe(screenCommandLine(SCREEN_COMMANDS[0]!, CLAUDE_CATALOG, workspace)));
     expect(draft()).toBe("/login");
     expect(started).toHaveLength(0);
   });
@@ -337,11 +370,13 @@ describe("composer slash menu", () => {
     const { api, started } = fixtureApi([local]);
     await setup(api);
     const editor = composerEditor();
+    clearNotices();
     await typeInto(editor, "/logout");
     await press(editor, "Enter");
-    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
-    expectPlainLine(screenCommandLine(SCREEN_COMMANDS[1]!, CLAUDE_CATALOG, local));
-    expect(screen.getByRole("status").textContent).toContain("this computer");
+    const line = screenCommandLine(SCREEN_COMMANDS[1]!, CLAUDE_CATALOG, local);
+    await waitFor(() => expect(lastNotice()).toBe(line));
+    expect(line).toContain("this computer");
+    noLineAbove();
     expect(started).toHaveLength(0);
   });
 
@@ -354,7 +389,7 @@ describe("composer slash menu", () => {
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]?.prompt).toBe("/frobnicate now");
-    expect(screen.queryByRole("status")).toBeNull();
+    noLineAbove();
   });
 
   it("stays closed for a slash after the prompt start", async () => {
@@ -395,7 +430,7 @@ describe("composer slash menu", () => {
     expect(namesInMenu()).toEqual(["code-review:apply", "code-review:code-review"]);
   });
 
-  it("holds a lone slash instead of sending it: the slot says why, the send button is held and wears the same words", async () => {
+  it("holds a lone slash instead of sending it: the send button is held with the reason on its hover, and Enter raises it as a flyout", async () => {
     const { api, started } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
     await setup(api);
     await screen.findByText(/Server is live at :3000\./);
@@ -403,18 +438,20 @@ describe("composer slash menu", () => {
     await typeInto(editor, "/");
     await waitFor(() => expect(menuDrawer()).not.toBeNull());
     const line = "a slash on its own is not a command";
-    expect(screen.getByRole("status").textContent).toBe(line);
+    noLineAbove();
     const button = screen.getByRole("button", { name: line }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-    // The menu dismissed, the slot holds the same line in the composer's own grammar and nothing else is drawn.
+    expect(heldHover()).toBe(line);
     await press(editor, "Escape");
     await waitFor(() => expect(menuDrawer()).toBeNull());
-    expectPlainLine(line);
+    clearNotices();
     await press(editor, "Enter");
+    await waitFor(() => expect(lastNotice()).toBe(line));
     await act(async () => { fireEvent.click(button); });
     expect(started).toHaveLength(0);
     expect(draft()).toBe("/");
     expect(isEditable(editor)).toBe(true);
+    noLineAbove();
   });
 
   it("holds a slash and a name nothing announced, and lets the same name go once words follow it", async () => {
@@ -424,15 +461,15 @@ describe("composer slash menu", () => {
     const editor = composerEditor();
     await typeInto(editor, "/heapdump");
     const line = "no command here is called /heapdump";
-    await waitFor(() => expect(screen.queryByRole("status")?.textContent).toBe(line));
-    expectPlainLine(line);
+    await waitFor(() => expect(heldHover()).toBe(line));
+    noLineAbove();
     expect((screen.getByRole("button", { name: line }) as HTMLButtonElement).disabled).toBe(true);
     await press(editor, "Enter");
     expect(started).toHaveLength(0);
     expect(draft()).toBe("/heapdump");
     // Words after the name are words that may be meant, so the hold lifts and Enter sends them.
     await typeInto(editor, " of the daemon");
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    await waitFor(() => expect(heldHover()).toBeNull());
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
     expect(started[0]?.prompt).toBe("/heapdump of the daemon");
@@ -445,7 +482,7 @@ describe("composer slash menu", () => {
     const editor = composerEditor();
     await typeInto(editor, "/compact");
     await waitFor(() => expect(menuItem("compact")).not.toBeNull());
-    expect(screen.queryByRole("status")).toBeNull();
+    noLineAbove();
     await press(editor, "Escape");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
@@ -471,7 +508,7 @@ describe("composer slash menu", () => {
   });
 });
 
-describe("fast and plan", () => {
+describe("fast", () => {
   const option = (value: string, label: string, extra: object = {}) => ({ value, label, ...extra });
   const MODES_CATALOG: HarnessCatalog = {
     ...CLAUDE_CATALOG,
@@ -485,7 +522,7 @@ describe("fast and plan", () => {
   const toggle = (mode: string) => document.querySelector<HTMLButtonElement>(`[data-composer-mode='${mode}']`);
 
   beforeEach(() => {
-    useComposerModesStore.setState({ fast: {}, plan: {}, planFrom: {} });
+    useComposerModesStore.setState({ fast: {} });
     useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {} });
   });
 
@@ -519,45 +556,14 @@ describe("fast and plan", () => {
     expect(started[0]!.fast).toBeUndefined();
   });
 
-  it("plan is this thread's alone: the send carries plan, the workspace's default access stays, and the access picker offers no plan", async () => {
-    const { api, started } = fixtureApi([workspace]);
+  it("has no plan toggle: the footer holds fast alone, and a plan an agent lists is one more access in the picker", async () => {
+    const { api } = fixtureApi([workspace]);
     await setup(withModes(api));
-    act(() => void useStore.getState().setPreferences({ access: { [WS]: "acceptEdits" } }));
-    await waitFor(() => expect(toggle("plan")).not.toBeNull());
-    act(() => toggle("plan")!.click());
-    await waitFor(() => expect(toggle("plan")!.getAttribute("aria-pressed")).toBe("true"));
-    expect(useStore.getState().preferences.access[WS]).toBe("acceptEdits");
-    // The picker keeps the other modes and shows the one the thread goes back to.
+    await waitFor(() => expect(toggle("fast")).not.toBeNull());
+    expect(toggle("plan")).toBeNull();
     const picker = document.querySelector<HTMLElement>("[data-composer-picker='access']")!;
-    expect(picker.dataset["access"]).toBe("acceptEdits");
     act(() => picker.click());
-    await waitFor(() => expect(document.querySelector("[data-composer-option='acceptEdits']")).not.toBeNull());
-    expect(document.querySelector("[data-composer-option='plan']")).toBeNull();
-    await press(document.activeElement as HTMLElement, "Escape");
-    await typeInto(composerEditor(), "plan it");
-    await press(composerEditor(), "Enter");
-    await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]!.permissionMode).toBe("plan");
-    expect(useStore.getState().preferences.access[WS]).toBe("acceptEdits");
-  });
-
-  it("on a thread that has run, plan moves that thread's access and turning it off puts back the mode it came from", async () => {
-    const moved: Array<[string, string]> = [];
-    const { api } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
-    const row = { id: "sess_0001", workspaceId: WS, harness: "claude", status: "completed" as const, startedBy: "person" as const, permissionMode: "acceptEdits", claudeSessionId: "sess_0001", startedAt: CHAT_T0 };
-    await setup({ ...withModes(api), listSessions: async () => [row], setSessionAccess: async (id, mode) => (moved.push([id, mode]), "set") });
-    await screen.findByText(/Server is live at :3000\./);
-    await waitFor(() => expect(toggle("plan")).not.toBeNull());
-    const before = useStore.getState().preferences.access[WS];
-    act(() => toggle("plan")!.click());
-    await waitFor(() => expect(toggle("plan")!.getAttribute("aria-pressed")).toBe("true"));
-    act(() => toggle("plan")!.click());
-    await waitFor(() => expect(toggle("plan")!.getAttribute("aria-pressed")).toBe("false"));
-    expect(moved).toEqual([
-      ["sess_0001", "plan"],
-      ["sess_0001", "acceptEdits"],
-    ]);
-    expect(useStore.getState().preferences.access[WS]).toBe(before);
+    await waitFor(() => expect(document.querySelector("[data-composer-option='plan']")).not.toBeNull());
   });
 });
 
@@ -664,7 +670,8 @@ describe("composer @ menu", () => {
     provideDaemonWire(WS, { request: async () => Promise.reject(Object.assign(new Error("fs.files is not served by this daemon yet"), { code: "unsupported" })) });
     await onComputer();
     await typeInto(composerEditor(), "@c");
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(menuListUnserved(COMPUTER)));
+    await waitFor(() => expect(menuNote()).toBe(COMPOSER_WORDS.menuListUnserved(COMPUTER)));
+    noLineAbove();
     expect(document.body.textContent).not.toContain("daemon");
     expect(document.body.textContent).not.toContain("this computer");
   });
@@ -673,16 +680,83 @@ describe("composer @ menu", () => {
     provideDaemonWire(WS, { request: async () => ({ items: [], noCliFor: "github.com" }) });
     await onComputer();
     await typeInto(composerEditor(), "#4");
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(noHostListLine("github.com", COMPUTER)));
+    await waitFor(() => expect(menuNote()).toBe(COMPOSER_WORDS.noHostList("github.com", COMPUTER)));
+    noLineAbove();
     expect(document.body.textContent).not.toContain("this computer");
   });
 
-  it("says in the slot that a checkout past the cap is listed only as far as the cap", async () => {
+  const PR: HostItem = { kind: "pull-request", number: 880, title: "Sidebar section heads", body: "", url: "https://github.com/Zingzy/wsp/pull/880" };
+  const prRows = () => document.querySelectorAll("[data-composer-item-id^='reference:']");
+
+  it("# opens the menu the moment it is typed, saying the list is on its way, and fills it when the list answers", async () => {
+    let answer: (reply: Record<string, unknown>) => void = () => {};
+    provideDaemonWire(WS, {
+      request: (op, params) => {
+        asked.push({ op, params });
+        return new Promise<Record<string, unknown>>(resolve => (answer = resolve));
+      },
+    });
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    await typeInto(composerEditor(), "#");
+    // The drawer stands before anything answered.
+    expect(menuDrawer()).not.toBeNull();
+    expect(menuNote()).toBe(COMPOSER_WORDS.menuLoading["pull-request"]);
+    noLineAbove();
+    await act(async () => answer({ items: [PR] }));
+    await waitFor(() => expect(prRows()).toHaveLength(1));
+    expect(menuNote()).toBeNull();
+  });
+
+  it("asks for the pull requests and issues when the thread opens, so the first # draws them at once, and every # reads again and replaces them", async () => {
+    const LATER: HostItem = { kind: "pull-request", number: 881, title: "Queue cards", body: "", url: "https://github.com/Zingzy/wsp/pull/881" };
+    let lists = 0;
+    provideDaemonWire(WS, {
+      request: async (op, params) => {
+        asked.push({ op, params });
+        if (op !== "git.prList") return { files: [], truncated: false };
+        lists += 1;
+        if (lists === 1) return { items: [PR] };
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return { items: [LATER, PR] };
+      },
+    });
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    await waitFor(() => expect(asked.filter(call => call.op === "git.prList")).toEqual([{ op: "git.prList", params: { cwd: "/root" } }]));
+    await typeInto(composerEditor(), "#");
+    // What was read ahead draws with the keystroke, and the token's own read replaces it.
+    expect(prRows()).toHaveLength(1);
+    await waitFor(() => expect(prRows()).toHaveLength(2));
+    expect(asked.filter(call => call.op === "git.prList")).toHaveLength(2);
+  });
+
+  it("a repository with nothing open says so in the menu, and a # matching nothing says that", async () => {
+    provideDaemonWire(WS, { request: async op => (op === "git.prList" ? { items: [PR] } : { files: [], truncated: false }) });
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    await typeInto(composerEditor(), "#zzzz");
+    await waitFor(() => expect(menuNote()).toBe(COMPOSER_WORDS.menuNoMatch["pull-request"]));
+    expect(prRows()).toHaveLength(0);
+    noLineAbove();
+  });
+
+  it("a list read that failed says why in the menu, not above the box", async () => {
+    provideDaemonWire(WS, { request: async () => Promise.reject(new Error("gh answered 502")) });
+    const { api } = fixtureApi([workspace]);
+    await setup(api);
+    await typeInto(composerEditor(), "#");
+    await waitFor(() => expect(menuNote()).toBe("gh answered 502"));
+    noLineAbove();
+  });
+
+  it("says at the menu's foot that a checkout past the cap is listed only as far as the cap", async () => {
     provideDaemonWire(WS, { request: async () => ({ files: ["src/components/ChatView.tsx"], truncated: true }) });
     const { api } = fixtureApi([workspace]);
     await setup(api);
     await typeInto(composerEditor(), "@chatv");
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(FILES_CUT_LINE));
+    await waitFor(() => expect(menuNote()).toBe(COMPOSER_WORDS.filesCut));
+    noLineAbove();
     expect(document.querySelector("[data-composer-item-id='path:src/components/ChatView.tsx']")).not.toBeNull();
   });
 });
@@ -716,20 +790,6 @@ describe("composer chips", () => {
     expect(started[0]?.prompt).toBe("summarise @apps/web/src/composer-logic.ts please");
   });
 });
-
-/** The reserved slot above the composer's box: laid out at one height whether or not a line is in it. */
-const slot = () => document.querySelector<HTMLElement>("[data-composer-refusal]");
-/** The refusal is one muted mono line in the slot: no panel, no border, no fill, no icon, no caution colour. */
-function expectPlainLine(words: string): void {
-  const line = screen.getByRole("status");
-  expect(line.textContent).toBe(words);
-  expect(slot()?.contains(line)).toBe(true);
-  expect(line.className).toContain("font-mono");
-  expect(line.className).toContain("text-muted-foreground");
-  expect(line.className).not.toMatch(/border|bg-|warning|destructive|error/);
-  expect(line.querySelector("svg")).toBeNull();
-  expect(document.querySelector("[data-composer-banner-surface]")).toBeNull();
-}
 
 describe("a side question from the composer", () => {
   /** The thread's row as the runtime lists it: the id a side question names the thread by. */
@@ -767,41 +827,76 @@ describe("a side question from the composer", () => {
     expect(groupLabels()).toEqual(["Commands", "wsp"]);
   });
 
-  it("a /btw send asks the host, starts no turn, and the strip above the box goes from asking to the answer and away on Esc", async () => {
+  it("a /btw send asks the host, starts no turn, and opens the right panel on the side question, which goes from asking to the answer and away on Esc", async () => {
     const { api, started, asked, answer } = asking(true);
     await setup(api);
+    render(<PanelHost />);
     await screen.findByText(/Server is live at :3000\./);
+    act(() => useRightPanelStore.getState().close(WS));
+    expect(panelOpen()).toBe(false);
     const editor = composerEditor();
     await typeInto(editor, "/btw");
-    await waitFor(() => expect(screen.queryByRole("status")?.textContent).toBe("/btw takes a question after it"));
+    await waitFor(() => expect(heldHover()).toBe("/btw takes a question after it"));
     await press(editor, "Escape");
     await press(editor, "Enter");
     expect(asked).toEqual([]);
     await typeInto(editor, " what did I last ask?");
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    await waitFor(() => expect(heldHover()).toBeNull());
     await press(editor, "Escape");
     await press(editor, "Enter");
     await waitFor(() => expect(asked).toEqual([{ sessionId: "sess_local_1", question: "what did I last ask?" }]));
     expect(started).toHaveLength(0);
     expect(draft()).toBe("");
-    // No dialog: the strip grows above the box inside the composer, out of the flow the thread's inset reads, so
-    // nothing else moves.
-    const strip = await waitFor(() => {
-      const found = document.querySelector<HTMLElement>('[data-chat-composer] [data-k="aside-strip"]');
+    // Not a dialog and not a strip over the box: the right panel opens on it.
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.querySelector('[data-chat-composer] [data-k^="aside"]')).toBeNull();
+    await waitFor(() => expect(panelOpen()).toBe(true));
+    const surface = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-panel-host] [data-k="aside-surface"]');
       expect(found).not.toBeNull();
       return found!;
     });
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(strip.className).toContain("absolute");
-    expect(strip.className).toContain("bottom-full");
-    expect(strip.querySelector('[data-k="aside-asking"]')).not.toBeNull();
+    expect(surface.querySelector('[data-k="aside-question"]')?.textContent).toBe("what did I last ask?");
+    expect(surface.querySelector('[data-k="aside-asking"]')).not.toBeNull();
     answer("You asked for a hello world server on :3000.");
-    await waitFor(() => expect(strip.querySelector('[data-k="aside-answer"]')?.textContent).toContain("You asked for a hello world server on :3000."));
+    await waitFor(() => expect(surface.querySelector('[data-k="aside-answer"]')?.textContent).toContain("You asked for a hello world server on :3000."));
     await act(async () => { fireEvent.keyDown(window, { key: "Escape" }); });
-    await waitFor(() => expect(document.querySelector('[data-k="aside-strip"]')).toBeNull());
+    await waitFor(() => expect(document.querySelector('[data-k="aside-surface"]')).toBeNull());
+    // The panel was shut before the question, so it shuts again with it.
+    expect(panelOpen()).toBe(false);
     // Nothing of it reached the thread: no row in the transcript, no turn.
-    expect(screen.queryByText(/hello world server/)).toBeNull();
+    expect(screen.queryAllByText(/hello world server/)).toHaveLength(0);
     expect(started).toHaveLength(0);
+  });
+
+  it("a side question goes when the composer leaves the thread it was asked from", async () => {
+    const { api } = asking(true);
+    await setup(api);
+    render(<PanelHost />);
+    await screen.findByText(/Server is live at :3000\./);
+    await typeInto(composerEditor(), "/btw which folder?");
+    await press(composerEditor(), "Escape");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(document.querySelector('[data-panel-host] [data-k="aside-surface"]')).not.toBeNull());
+    act(() => requestNewThread({ workspaceId: WS }));
+    await waitFor(() => expect(document.querySelector('[data-k="aside-surface"]')).toBeNull());
+  });
+
+  it("a side question asked with the panel open takes the panel's place while it stands, and closing it gives the panel back as it was", async () => {
+    const { api, answer } = asking(true);
+    await setup(api);
+    render(<PanelHost />);
+    await screen.findByText(/Server is live at :3000\./);
+    act(() => useRightPanelStore.getState().open(WS, "machine"));
+    await typeInto(composerEditor(), "/btw which folder?");
+    await press(composerEditor(), "Escape");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(document.querySelector('[data-panel-host] [data-k="aside-surface"]')).not.toBeNull());
+    answer("/root");
+    fireEvent.click(screen.getByRole("button", { name: "Close side question" }));
+    await waitFor(() => expect(document.querySelector('[data-k="aside-surface"]')).toBeNull());
+    expect(panelOpen()).toBe(true);
+    expect(useRightPanelStore.getState().byWorkspaceId[WS]?.activeSurfaceId).toBe("machine");
   });
 });
 
@@ -810,8 +905,7 @@ describe("composer while the workspace is not live", () => {
     const { api } = fixtureApi([{ ...workspace, phase: "napping" }]);
     await setup(api);
     expect(isEditable(composerEditor())).toBe(true);
-    expect(screen.queryByRole("status")).toBeNull();
-    expect(slot()!.textContent).toBe("");
+    noLineAbove();
     expect(composerEditor().closest("[data-chat-composer]")!.textContent).not.toContain("paused");
     expect(sendButton().getAttribute("aria-label")).toBe(WAKE_AND_SEND_LABEL);
     expect(sendButton().getAttribute("title")).toBe(WAKE_AND_SEND_LABEL);
@@ -853,7 +947,7 @@ describe("composer while the workspace is not live", () => {
     emit({ type: "workspace.status", status: { ...workspace, phase: "running", machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 } });
     await waitFor(() => expect(sendButton().getAttribute("aria-label")).toBe(SEND_LABEL));
     // A send that can be pressed is the accent again, which is how a person sees the wait is over.
-    expect(sendButton().className).toContain("bg-message-action");
+    expect(sendButton().className).toContain("bg-foreground");
     expect(started).toHaveLength(0);
     expect(draft()).toBe("run the tests");
     await press(composerEditor(), "Enter");
@@ -922,15 +1016,15 @@ describe("composer while the workspace is not live", () => {
       const { api } = fixtureApi([workspace]);
       await setup(api);
       act(() => useStore.getState().setConn("reconnecting"));
-      await waitFor(() => expect(screen.getByRole("status").textContent).toBe(HOST_ASLEEP_SEND));
-      expect(screen.getByRole("status").textContent).not.toBe(sendRefusal("reconnecting"));
+      await waitFor(() => expect(heldHover()).toBe(HOST_ASLEEP_SEND));
+      expect(heldHover()).not.toBe(sendRefusal("reconnecting"));
       const send = screen.getByRole("button", { name: HOST_ASLEEP_SEND }) as HTMLButtonElement;
       expect(send.disabled).toBe(true);
       expect(isEditable(composerEditor())).toBe(false);
       // A page the host served on this computer says what it has always said: wsp itself is not running here.
       (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPath: "/ws", paired: true, version: "0.0.0", tokenHash: "a".repeat(64) };
       act(() => useStore.getState().setConn("closed"));
-      await waitFor(() => expect(screen.getByRole("status").textContent).toBe(sendRefusal("closed")));
+      await waitFor(() => expect(heldHover()).toBe(sendRefusal("closed")));
     } finally {
       delete (window as unknown as { __WSP__?: unknown }).__WSP__;
     }
@@ -946,8 +1040,8 @@ describe("composer while the workspace is not live", () => {
       // of it used to take the slot and read as though the daemon were the reason nothing could be sent.
       act(() => useStore.setState({ statuses: { [WS]: { ...here, machineState: "running", reach: { state: "unreachable" }, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0 } as never } }));
       act(() => useStore.getState().setConn("reconnecting"));
-      await waitFor(() => expect(screen.getByRole("status").textContent).toBe(HOST_ASLEEP_SEND));
-      expect(screen.getByRole("status").textContent).not.toContain("daemon is not running");
+      await waitFor(() => expect(heldHover()).toBe(HOST_ASLEEP_SEND));
+      expect(heldHover() ?? "").not.toContain("daemon is not running");
     } finally {
       delete (window as unknown as { __WSP__?: unknown }).__WSP__;
     }
@@ -957,7 +1051,7 @@ describe("composer while the workspace is not live", () => {
     const { api } = fixtureApi([{ ...workspace, phase: "gone" }]);
     await setup(api);
     expect(isEditable(composerEditor())).toBe(false);
-    expectPlainLine(sendRefusal("gone")!);
+    expectHeld(sendRefusal("gone")!);
     expect(sendButton().getAttribute("aria-label")).toBe("This workspace's machine is gone with its disk, so work that was not pushed is lost; rebuild it to send, which brings back its home folder from the last saved nap");
     expect(sendButton().disabled).toBe(true);
   });
@@ -983,7 +1077,7 @@ describe("composer while the workspace is not live", () => {
     const { started } = await onSilentComputer();
     const held = composerHeldLine("old-laptop");
     // The standing refusal slot, not a toast: the person reads it where they are typing, and it stays there.
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(held));
+    await waitFor(() => expect(heldHover()).toBe(held));
     expect(held).toBe("held until old-laptop answers");
     // The box takes the words the wait is for. The line above it promises the send goes when the machine answers,
     // and a box that ate every keystroke made that promise a lie for five testers.
@@ -995,32 +1089,23 @@ describe("composer while the workspace is not live", () => {
     expect(send.disabled).toBe(true);
     expect(send.className).toContain("border-input");
     expect(send.className).toContain("bg-popover");
-    expect(send.className).not.toContain("bg-message-action");
-    expect(send.getAttribute("title")).toBe(held);
+    expect(send.className).not.toContain("bg-foreground");
+    expect(heldHover()).toBe(held);
     // Not the state table's words, and no machine id where a person reads.
     expect(screen.queryByText(sendRefusal("unreachable")!)).toBeNull();
-    expect(screen.getByRole("status").textContent).not.toContain("place:");
-    // Enter leaves the words where they were typed and starts nothing, so no refusal comes back from the runtime.
+    expect(heldHover() ?? "").not.toContain("place:");
+    noLineAbove();
+    // Enter leaves the words where they were typed and starts nothing; the flyout it raises says why, in the same words.
+    clearNotices();
     await press(composerEditor(), "Enter");
     expect(started).toHaveLength(0);
     expect(draft()).toBe("list the files in this repo");
-    expect(lastNotice()).toBeNull();
-    // The slot stands at two lines and the sentence wraps in it. At the smallest window with the right panel open
-    // the slot is 296 px, so a slot that cut would drop the half that says what happens next, which is the half the
-    // person needs. Measured at 1024 by 700 with the panel open: the slot's own class is what holds, since jsdom
-    // lays nothing out.
-    const box = slot()!;
-    expect(box.className).toContain("h-9");
-    expect(box.className).not.toContain("h-5");
-    const said = screen.getByRole("status");
-    expect(said.className).not.toContain("truncate");
-    expect(said.className).toContain("text-pretty");
-    expect(said.textContent).toBe(held);
+    await waitFor(() => expect(lastNotice()).toBe(held));
   });
 
   it("the message a held composer holds goes on the person's own send once the computer answers, never before", async () => {
     const { started } = await onSilentComputer();
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(composerHeldLine("old-laptop")));
+    await waitFor(() => expect(heldHover()).toBe(composerHeldLine("old-laptop")));
     await typeInto(composerEditor(), "run the tests");
     act(() =>
       useStore.setState({
@@ -1046,30 +1131,23 @@ describe("composer while the workspace is not live", () => {
     // No places row for a fork at a provider, so the sentence names the fork's own where word rather than falling
     // back to the machine id, which names nothing to the person reading it.
     emit({ type: "workspace.status", status: { ...workspace, phase: "running", machineState: "running", reach: { state: "unreachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 } });
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(composerHeldLine("a provider")));
+    await waitFor(() => expect(heldHover()).toBe(composerHeldLine("a provider")));
     expect(isEditable(composerEditor())).toBe(true);
     await typeInto(composerEditor(), "check the disk");
     await press(composerEditor(), "Enter");
     expect(started).toHaveLength(0);
     expect(draft()).toBe("check the disk");
-    expect(screen.getByRole("status").textContent).not.toContain("m1");
+    expect(heldHover() ?? "").not.toContain("m1");
   });
 
-  it("the slot takes no room while it holds no line, and room for two once a refusal lands", async () => {
+  it("nothing above the box takes room, and a waking workspace holds the send button in its words instead", async () => {
     const { api, emit } = fixtureApi([workspace]);
     await setup(api);
     await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
-    const empty = slot();
-    expect(empty).not.toBeNull();
-    expect(empty!.className).not.toMatch(/(^|\s)(min-)?h-/);
-    expect(empty!.className).toContain("max-w-3xl");
-    // The slot is the live region, present before any words land, so a screen reader hears the line when it does.
-    expect(empty!.getAttribute("aria-live")).toBe("polite");
-    expect(screen.queryByRole("status")).toBeNull();
+    noLineAbove();
     emit({ type: "workspace.status", status: { ...workspace, phase: "waking", machineState: "starting", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 } });
-    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
-    expectPlainLine(sendRefusal("waking")!);
-    expect(slot()!.className).toContain("min-h-9");
+    await waitFor(() => expect(heldHover()).toBe(sendRefusal("waking")));
+    noLineAbove();
   });
 
   it("a pushed pausing status disables the send while the view still says running", async () => {
@@ -1077,7 +1155,7 @@ describe("composer while the workspace is not live", () => {
     await setup(api);
     await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
     emit({ type: "workspace.status", status: { ...workspace, phase: "pausing", machineState: "running", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 } });
-    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Workspace is pausing; wake it to send"));
+    await waitFor(() => expect(heldHover() ?? "").toContain("Workspace is pausing; wake it to send"));
     expect(isEditable(composerEditor())).toBe(false);
   });
 
@@ -1085,10 +1163,10 @@ describe("composer while the workspace is not live", () => {
     const { api } = fixtureApi([workspace]);
     await setup(api, "reconnecting");
     expect(isEditable(composerEditor())).toBe(false);
-    expect(screen.getByRole("status").textContent).toContain("wsp is not running, reconnecting");
+    expect(heldHover() ?? "").toContain("wsp is not running, reconnecting");
     act(() => useStore.getState().setConn("live"));
     await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
-    expect(screen.queryByRole("status")).toBeNull();
+    noLineAbove();
   });
 
   it("offers stop while a turn streams, with no banner; Enter then queues the message above the box", async () => {
@@ -1099,17 +1177,17 @@ describe("composer while the workspace is not live", () => {
     expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
     expect(interrupted).toEqual([]);
     expect(screen.queryByRole("button", { name: /Send message|Turn in flight/ })).toBeNull();
-    expect(screen.queryByRole("status")).toBeNull();
+    noLineAbove();
     expect(isEditable(composerEditor())).toBe(true);
     await typeInto(composerEditor(), "follow up");
     await press(composerEditor(), "Enter");
     expect(draft()).toBe("");
-    expect((screen.getByRole("textbox", { name: "Queued message" }) as HTMLTextAreaElement).value).toBe("follow up");
+    expect(document.querySelector("[data-queued-id] [data-queued-text]")?.textContent).toBe("follow up");
     expect(started).toHaveLength(0);
     emit({ type: "session.done", ...scope, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
     emit({ type: "session.end", ...scope, exitCode: 0, sawResult: true });
     await waitFor(() => expect(started.map(s => s.prompt)).toEqual(["follow up"]));
-    expect(screen.queryByRole("textbox", { name: "Queued message" })).toBeNull();
+    expect(document.querySelector("[data-queued-id]")).toBeNull();
   });
 });
 
@@ -1129,7 +1207,7 @@ describe("a new thread while another thread of the workspace works", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("What should we build in api?");
     const editor = composerEditor();
     expect(isEditable(editor)).toBe(true);
-    expect(screen.queryByRole("status")).toBeNull();
+    noLineAbove();
     expect(screen.queryByRole("button", { name: "Stop generation" })).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
     await typeInto(editor, "second thread");
@@ -1148,18 +1226,22 @@ describe("a new thread while another thread of the workspace works", () => {
     expect(screen.getByRole("button", { name: "Stop generation" })).toBeDefined();
   });
 
-  it("the working thread's own composer still says so: its turn replied and runs on, and the line names that thread", async () => {
-    const { api, emit } = fixtureApi([workspace], { [WS]: WORKING });
+  it("a thread whose turn replied and runs on says nothing above the box: a message sent now is a queued card", async () => {
+    const { api, emit, started } = fixtureApi([workspace], { [WS]: WORKING });
     await setup(api);
     await screen.findByText("On it.");
-    expect(screen.queryByRole("status")).toBeNull();
     emit({ type: "session.done", ...a, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
-    // No title has landed for this thread yet, so the line names it as the person looking at it would.
-    expectPlainLine(stillWorkingLine());
+    noLineAbove();
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+    await typeInto(composerEditor(), "then run the tests");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(document.querySelectorAll("[data-queued-id]")).toHaveLength(1));
+    expect(document.querySelector("[data-queued-id]")!.textContent).toContain("then run the tests");
+    expect(started).toHaveLength(0);
+    noLineAbove();
     // A new thread asked for now owes that turn nothing.
     act(() => requestNewThread({ workspaceId: WS }));
-    expect(screen.queryByRole("status")).toBeNull();
+    noLineAbove();
     expect(isEditable(composerEditor())).toBe(true);
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
   });
@@ -1169,18 +1251,18 @@ describe("a new thread while another thread of the workspace works", () => {
  * wears the reason it is held, which is not a name any list of send words can be written from. */
 const sendControl = () => document.querySelector<HTMLButtonElement>('[data-chat-composer-actions="right"] button[type="submit"]')!;
 
-/** The block reads the same in all three places a person meets it: the slot above the box, the name a screen
- * reader hears on the send, and the tooltip the held send carries. */
+/** The block reads the same wherever a person meets it: the held send's hover, the name a screen reader hears on it,
+ * and its native title; nothing is said above the box. */
 function expectHeld(words: string): void {
-  expectPlainLine(words);
+  noLineAbove();
+  expect(heldHover()).toBe(words);
   expect(sendControl().getAttribute("aria-label")).toBe(words);
-  expect(sendControl().getAttribute("title")).toBe(words);
   expect(sendControl().disabled).toBe(true);
   // Held is the tier ui/button.tsx gives a primary that cannot be pressed, not a fainter blue: five testers read a
   // lit arrow over a box that refused them as a screen saying it was ready to send.
   expect(sendControl().className).toContain("border-input");
   expect(sendControl().className).toContain("bg-popover");
-  expect(sendControl().className).not.toContain("bg-message-action");
+  expect(sendControl().className).not.toContain("bg-foreground");
   expect(sendControl().className).not.toContain("disabled:opacity-30");
 }
 
@@ -1209,8 +1291,8 @@ describe("a composer that cannot send yet", () => {
     await press(editor, "Enter");
     act(() => useStore.getState().setConn("live"));
     await waitFor(() => expect(isEditable(editor)).toBe(true));
-    expect(screen.queryByRole("status")).toBeNull();
-    expect(slot()!.textContent).toBe("");
+    noLineAbove();
+    expect(heldHover()).toBeNull();
     expect(sendControl().getAttribute("title")).toBeNull();
     // The link coming back is not a send: the draft is still the person's to change or to throw away.
     expect(started).toHaveLength(0);
@@ -1233,7 +1315,8 @@ describe("a composer that cannot send yet", () => {
     answered = [CLAUDE_CATALOG];
     await act(async () => { await useStore.getState().loadHarnesses(WS); });
     await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
-    expect(screen.queryByRole("status")).toBeNull();
+    noLineAbove();
+    expect(heldHover()).toBeNull();
     expect(started).toHaveLength(0);
     await typeInto(composerEditor(), "check the redirect chain");
     await press(composerEditor(), "Enter");
@@ -1249,11 +1332,17 @@ describe("a composer that cannot send yet", () => {
     act(() => {
       fireEvent.paste(editor, { clipboardData: { files: [new File([new Uint8Array(11 * 1024 * 1024)], "huge.bin")], getData: () => "" } });
     });
-    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
-    expect(screen.getByRole("status").textContent).not.toBe(SEND_BLOCK_WORDS.closed);
+    // The refusal stands on the file's own chip, and the block, landing after, holds the send in its own words.
+    const chip = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-composer-refused-file="huge.bin"]');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(chip.textContent).toContain(COMPOSER_WORDS.fileRefused);
     act(() => useStore.getState().setConn("closed"));
     await waitFor(() => expect(isEditable(editor)).toBe(false));
     expectHeld(SEND_BLOCK_WORDS.closed);
+    expect(document.querySelector('[data-composer-refused-file="huge.bin"]')).not.toBeNull();
   });
 });
 

@@ -7,6 +7,7 @@ import { cn } from "../../lib/utils";
 import { Button, HELD_SURFACE } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 interface PendingActionState {
   questionIndex: number;
@@ -245,7 +246,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         // and stays the fainter accent it has always been.
         isSendDisabled
           ? `${HELD_SURFACE} text-muted-foreground`
-          : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover disabled:opacity-30",
+          : "bg-foreground text-background hover:bg-foreground/90 disabled:opacity-30",
       )}
       {...pointerFocusProps}
       disabled={
@@ -270,7 +271,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                     ? WAKE_AND_SEND_LABEL
                     : (sendLabel ?? SEND_LABEL)
       }
-      title={sendDisabledReason ?? (wakesFirst ? WAKE_AND_SEND_LABEL : undefined)}
+      title={sendDisabledReason === null && wakesFirst ? WAKE_AND_SEND_LABEL : undefined}
     >
       {isConnecting || isSendBusy ? (
         <Spinner className="size-3.5" aria-hidden="true" />
@@ -290,14 +291,27 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     </button>
   );
 
+  // A disabled button takes no pointer, so the reason it is held rides a tooltip on the span around it.
+  const send =
+    sendDisabledReason !== null ? (
+      <Tooltip>
+        <TooltipTrigger render={<span data-send-held={sendDisabledReason} className="inline-flex" />}>{sendButton}</TooltipTrigger>
+        <TooltipPopup side="top" className="max-w-72 text-pretty">
+          {sendDisabledReason}
+        </TooltipPopup>
+      </Tooltip>
+    ) : (
+      sendButton
+    );
+
   if (!isRunning) {
-    return sendButton;
+    return send;
   }
 
   return (
     <>
       {renderStopGenerationButton(false)}
-      {showSendWhileRunning && hasSendableContent ? sendButton : null}
+      {showSendWhileRunning && hasSendableContent ? send : null}
     </>
   );
 });

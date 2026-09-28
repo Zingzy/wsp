@@ -5,8 +5,9 @@
 // surfaces mount the Ghostty drawer in panel mode over the workspace's daemon
 // link. The diff and the files run in their own worker pool, themed for the
 // side the page is drawing. With no workspace selected the panel is this
-// computer's own.
-import { useEffect, useMemo, type ReactNode } from "react";
+// computer's own. A side question asked with /btw takes the panel while it
+// stands, opening it if it was shut.
+import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { useWorkspacePorts } from "../browser/model.js";
 import { previewTabSnapshots, useBrowserTabs, useWorkspaceBrowserTabs } from "../browser/tabs.js";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider.js";
@@ -16,7 +17,7 @@ import { MachineSurface } from "../components/machine/MachineSurface.js";
 import { ProcessesSurface } from "../components/procs/ProcessesSurface.js";
 import { AgentsSurface } from "../components/agents/AgentsSurface.js";
 import { BrowserSurface } from "../components/preview/BrowserSurface.js";
-import type { PreviewPanelMode } from "../components/preview/PreviewPanelShell.js";
+import { PreviewPanelShell, type PreviewPanelMode } from "../components/preview/PreviewPanelShell.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty.js";
 import { DiffSurface } from "../diffs/DiffSurface.js";
 import { FilePreviewSurface } from "../files/FilePreviewSurface.js";
@@ -28,6 +29,8 @@ import { isOpenable, useRightPanelStore, type RightPanelSurface, type WorkspaceR
 import { HERE_KEY } from "../terminal/computer.js";
 import { openPanelTerminal } from "./shellCommands.js";
 import { useTerminalSurfaces, WorkspaceTerminalPanel } from "../components/WorkspaceTerminalPanel.js";
+import { AsideSurface } from "../components/chat/AsideSurface.js";
+import { useAside, useAsideStore } from "../components/chat/asideStore.js";
 
 interface PaneView<K extends RightPanelKind> {
   Surface(props: { workspaceId: string; surface: Extract<RightPanelSurface, { kind: K }>; theme: "light" | "dark" }): ReactNode;
@@ -108,8 +111,14 @@ export function RightPanel({
   ) as Partial<Record<RightPanelKind, string>>;
 
   const ActiveSurface = active === null ? null : viewOf(active.kind).Surface;
+  const aside = useAside(workspaceId);
+  const closeAside = useCallback(() => useAsideStore.getState().close(workspaceId), [workspaceId]);
 
-  const tabs = (
+  const tabs = aside !== null ? (
+    <PreviewPanelShell mode={mode}>
+      <AsideSurface question={aside.question} answer={aside.answer} error={aside.error} onClose={closeAside} controls={layoutControls} />
+    </PreviewPanelShell>
+  ) : (
     <RightPanelTabs
       mode={mode}
       {...(layoutControls !== undefined ? { layoutControls } : {})}

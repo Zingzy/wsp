@@ -446,7 +446,7 @@ describe("the access a thread starts at", () => {
     expect(picks).toEqual(["bypassPermissions", "bypassPermissions"]);
     // A mode named on a send is dropped: a thread's access is the thread's own, and sessions.access is the one
     // road that changes what it may touch.
-    await (await rt.sessions.start(local.id, { prompt: "three", thread: first.view().threadId, permissionMode: "plan" })).finished;
+    await (await rt.sessions.start(local.id, { prompt: "three", thread: first.view().threadId, permissionMode: "dontAsk" })).finished;
     expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "bypassPermissions"]);
   });
 
@@ -466,9 +466,9 @@ describe("the access a thread starts at", () => {
     const other = await createOn(rt, { golden: "snap_g", name: "b1" });
     await (await rt.sessions.start(other.id, { prompt: "three" })).finished;
     expect(picks).toEqual(["bypassPermissions", "default", "bypassPermissions"]);
-    await rt.preferences.set({ access: { [local.id]: "plan" } });
+    await rt.preferences.set({ access: { [local.id]: "dontAsk" } });
     await (await rt.sessions.start(local.id, { prompt: "four" })).finished;
-    expect(picks).toEqual(["bypassPermissions", "default", "bypassPermissions", "plan"]);
+    expect(picks).toEqual(["bypassPermissions", "default", "bypassPermissions", "dontAsk"]);
   });
 
   it("a pick this harness does not take is dropped, not a refusal: the send runs the harness's own default", async () => {
@@ -498,8 +498,8 @@ describe("the access a thread starts at", () => {
     // The thread opened before the pick keeps the access its own turns ran at; the pick is what a new thread reads.
     await (await rt.sessions.start(local.id, { prompt: "two", thread: first.view().threadId })).finished;
     // A start that names one wins over both.
-    await (await rt.sessions.start(local.id, { prompt: "three", permissionMode: "plan" })).finished;
-    expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "plan"]);
+    await (await rt.sessions.start(local.id, { prompt: "three", permissionMode: "dontAsk" })).finished;
+    expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "dontAsk"]);
   });
 
   it("a throwaway machine's list and its threads are unchanged: bypass is the default and carries no machine's name", async () => {
@@ -605,7 +605,7 @@ describe("an access picked while a turn runs", () => {
   it("a harness that takes no mode change mid-turn answers unsupported and the turn keeps the access it started at; the thread's next turn runs at the pick", async () => {
     const { rt, turns, picks } = held(null);
     const { handle, workspaceId } = await running(rt, turns);
-    expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "unsupported" });
+    expect(await rt.sessions.access(handle.id, "dontAsk")).toEqual({ outcome: "unsupported" });
     expect(handle.view().permissionMode).toBe("bypassPermissions");
     turns[0]!.reply();
     await handle.finished;
@@ -614,25 +614,25 @@ describe("an access picked while a turn runs", () => {
     await vi.waitFor(() => expect(turns).toHaveLength(2));
     turns[1]!.reply();
     await next.finished;
-    expect(picks).toEqual(["bypassPermissions", "plan"]);
+    expect(picks).toEqual(["bypassPermissions", "dontAsk"]);
   });
 
   it("a CLI that refuses the mode reads as unsupported too, rather than as a change that landed", async () => {
     const { rt, turns } = held("refused");
     const { handle } = await running(rt, turns);
-    expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "unsupported" });
-    expect(turns[0]!.modes).toEqual(["plan"]);
+    expect(await rt.sessions.access(handle.id, "dontAsk")).toEqual({ outcome: "unsupported" });
+    expect(turns[0]!.modes).toEqual(["dontAsk"]);
     expect(handle.view().permissionMode).toBe("bypassPermissions");
     turns[0]!.reply();
     await handle.finished;
     // The turn kept its mode to its end; over, its row says the pick its thread's next turn runs at.
-    expect(handle.view().permissionMode).toBe("plan");
+    expect(handle.view().permissionMode).toBe("dontAsk");
   });
 
   it("a pick the running turn did not take reaches its row as the turn ends, so no row says a mode the next turn will not run at", async () => {
     const { rt, turns, picks } = held(null);
     const { handle, workspaceId } = await running(rt, turns);
-    expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "unsupported" });
+    expect(await rt.sessions.access(handle.id, "dontAsk")).toEqual({ outcome: "unsupported" });
     // While the turn runs, its row says what it is running at: the harness took no change.
     expect(handle.view().permissionMode).toBe("bypassPermissions");
     expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["bypassPermissions"]);
@@ -640,13 +640,13 @@ describe("an access picked while a turn runs", () => {
     await handle.finished;
     // Between turns every client folds the thread's access off this row, and the composer reads the row over the
     // transcript's start stamp, so the row says the mode the record holds and the next turn runs at.
-    expect(handle.view().permissionMode).toBe("plan");
-    expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["plan"]);
+    expect(handle.view().permissionMode).toBe("dontAsk");
+    expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["dontAsk"]);
     const next = await rt.sessions.start(workspaceId, { prompt: "again", thread: handle.view().threadId });
     await vi.waitFor(() => expect(turns).toHaveLength(2));
     turns[1]!.reply();
     await next.finished;
-    expect(picks).toEqual(["bypassPermissions", "plan"]);
+    expect(picks).toEqual(["bypassPermissions", "dontAsk"]);
   });
 
   it("a thread of another tree on the workspace is told not-found, as the interrupt tells it, and moves nothing", async () => {
@@ -664,10 +664,10 @@ describe("an access picked while a turn runs", () => {
     // The same absence the sibling verbs answer, before the workspace is read, so a thread learns nothing of a row
     // it may not drive; and the one road that changes a thread's access is shut to it.
     expect(await rt.sessions.interrupt(handle.id, scoped)).toEqual({ outcome: "not-found" });
-    expect(await rt.sessions.access(handle.id, "plan", scoped)).toEqual({ outcome: "not-found" });
+    expect(await rt.sessions.access(handle.id, "dontAsk", scoped)).toEqual({ outcome: "not-found" });
     expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["bypassPermissions", "bypassPermissions"]);
     // A thread's own row is still its own to move.
-    expect(await rt.sessions.access(beside.id, "plan", scoped)).toEqual({ outcome: "set" });
+    expect(await rt.sessions.access(beside.id, "dontAsk", scoped)).toEqual({ outcome: "set" });
     // The first thread's next turn runs at what it ran at.
     const next = await rt.sessions.start(workspaceId, { prompt: "again", thread: handle.view().threadId });
     await vi.waitFor(() => expect(turns).toHaveLength(3));
@@ -688,19 +688,19 @@ describe("an access picked while a turn runs", () => {
   it("answers rather than throwing: an unknown session is not found, and a pick on a thread between turns is set on its record", async () => {
     const { rt, turns, picks } = held("set");
     const { handle, workspaceId } = await running(rt, turns);
-    expect(await rt.sessions.access("s_nope", "plan")).toEqual({ outcome: "not-found" });
+    expect(await rt.sessions.access("s_nope", "dontAsk")).toEqual({ outcome: "not-found" });
     turns[0]!.reply();
     await handle.finished;
     // No process is touched: the thread's record takes the mode, the row every client folds the access off says
     // it too, and the thread's next turn runs at it. This is the one road that changes a thread's access, since a
     // send into a thread names none.
-    expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "set" });
+    expect(await rt.sessions.access(handle.id, "dontAsk")).toEqual({ outcome: "set" });
     expect(turns[0]!.modes).toEqual([]);
-    expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["plan"]);
+    expect((await rt.sessions.list(workspaceId)).map(s => s.permissionMode)).toEqual(["dontAsk"]);
     const next = await rt.sessions.start(workspaceId, { prompt: "again", thread: handle.view().threadId, permissionMode: "acceptEdits" });
     await vi.waitFor(() => expect(turns).toHaveLength(2));
     turns[1]!.reply();
     await next.finished;
-    expect(picks).toEqual(["bypassPermissions", "plan"]);
+    expect(picks).toEqual(["bypassPermissions", "dontAsk"]);
   });
 });

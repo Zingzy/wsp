@@ -8,31 +8,34 @@
 // sends one sessions.interrupt for the turn on screen and waits, disabled,
 // for the turn's end; the runtime pushes the interrupted done before it
 // answers, and the composer opens when the process exits. not-running means
-// the turn beat the click and is no error; not-found and a refused request
-// show in the line above the box. The editor is disabled with the reason
-// while the runtime is not live or the agents here have not answered yet, and
-// one reading of that reason serves the slot above the box, the send button's
-// name and tooltip and the Enter path alike: the block heads the slot as one
-// muted mono sentence, the button is held at the weight every held primary
-// wears, and an Enter leaves the draft where it was typed with that line still
-// standing, so Enter never fails silently. A workspace whose machine is not
+// the turn beat the click and is no error; not-found, a refused request and a
+// stop whose process outlives STOP_WAIT each raise a flyout. The composer has
+// no line above its box. The editor is disabled with the reason while the
+// runtime is not live or the agents here have not answered yet, and one
+// reading of that reason serves the send button's name and hover and the
+// Enter path alike: the button is held at the weight every held primary wears
+// with the reason on its hover, and an Enter leaves the draft where it was
+// typed and raises the reason as a flyout, so Enter never fails silently. A workspace whose machine is not
 // answering keeps its editor open and holds the send alone, so the wait can be
 // spent writing the message that goes when the machine answers. A running turn
 // blocks nothing: Enter then queues the message under the thread's key in the
-// draft store, the rows stack above the box, and when the turn ends the head
+// draft store, a card stacks above the box with the files it goes with, and
+// when the turn ends the head
 // row starts the next turn; a fresh thread's rows wait under the workspace id
 // until its own first start names it, then move under that id, whichever
 // thread is on screen when that start lands. Every send holds the thread's
 // rows until its start lands, so a start the runtime refuses or a harness
 // that dies before init drains nothing behind it. Rows read back from storage
-// are held too. Held rows go only after the person's next Enter or send-now
+// are held too. Held rows go only after the person's next Enter or Ctrl+Enter
 // here, never on their own, and a row typed during a turn goes ahead of the
-// held ones it releases. Send-now on a row puts it at the head; when the
-// harness's catalog says it steers, the row goes into the running turn
-// through sessions.steer and leaves the queue once the runtime took it (the
-// thread shows it from the session.steer event), while not-running leaves it
-// at the head for the turn's end. A harness that does not steer gets the turn
-// stopped first, with the one-line notice. A new thread owes nothing to the
+// held ones it releases. Ctrl+Enter sends the draft now: it goes to the head,
+// and when the harness's catalog says it steers and the draft carries no file,
+// into the running turn through sessions.steer, leaving the queue once the
+// runtime took it (the thread shows it from the session.steer event), while
+// not-running leaves it at the head for the turn's end. A harness that does
+// not steer, or a draft with files, which a steer cannot carry, gets the turn
+// stopped first and the message goes as the next start. A card's edit puts
+// its words and files back in the box. A new thread owes nothing to the
 // turn it left behind: the runtime runs a workspace's threads side by side
 // and holds each to one turn, so the fresh composer opens at once. The slash
 // menu offers what the session's harness announced less the commands the
@@ -41,19 +44,23 @@
 // commands, since a menu that answers a typed slash with an empty state
 // promises what it cannot keep. What it offers is grouped by the source the
 // announcement named, in the order it named them. Enter on a screen command
-// sends nothing: the line names the wsp control that serves it and goes with
-// the next edit, and a block on the send outranks it. A draft that is a slash
-// alone, or a slash and a name nothing announced, is held the way every other
-// held send is held, in the same slot and on the same button, with the box
+// sends nothing and raises a flyout naming the wsp control that serves it. A
+// draft that is a slash alone, or a slash and a name nothing announced, is
+// held the way every other held send is held, on the same button, with the box
 // still open since the next keystroke is what lifts it: sent, it would reach
 // the agent as a command it does not have, and come back as a question about
 // a stray slash with a turn's price on it. A slash command nobody announced
 // with words after it still goes as text, since the words may be meant.
 // Typing @, # or $ opens the thread's folder's files, the repository's open
 // pull requests and issues, or the person's skills the thread's agent loads,
-// and a pick lands as a chip whose text is what the agent reads.
+// and a pick lands as a chip whose text is what the agent reads. The @ and #
+// menus open the moment their token is typed, saying the list is on its way;
+// the pull requests and issues are asked for when the thread opens, so the
+// first # draws at once, and a list that failed, came back empty or matches
+// nothing says so in the menu. A file the caps turn away stands as a refused
+// chip beside the ones held, the sentence why on its hover.
 // Where the agent takes a side question, /btw and a question goes to the host
-// instead, starts no turn and opens the sheet its answer lands in.
+// instead, starts no turn and opens the right panel on its answer.
 // The checkout row under the composer picks the folder a fresh thread starts
 // in; a resumed one is started where its harness last said it was. The
 // model, effort, context window and access picks in the box's footer ride a
@@ -64,7 +71,7 @@
 import { cn } from "../../lib/utils";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PaperclipIcon } from "lucide-react";
-import { composerHeldLine, foldThreads, markedDefault, PLAN_ACCESS, FS_FILES_CAP_ENTRIES, HOST_ASLEEP_SEND, FILES_AFTER_TURN, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { composerHeldLine, HOST_ASLEEP_SEND, FILES_MAX, FILE_MAX_WORDS, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendRefusal, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { projectHomeKey, useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
@@ -74,28 +81,30 @@ import { useThreadFolder, useThreadStart } from "../../files/root";
 import { useDaemonWire } from "../../files/wire";
 import { DaemonOpError, fsFiles, gitPrList } from "../../terminal/daemon-fs";
 import { useAgentsReport } from "../agents/useAgentsReport";
-import { useLinkDownLine } from "../../terminal/paneWords";
+import { addNotice } from "../../notices/store";
+import { useRightPanelStore, selectWorkspaceRightPanelState } from "../../rightPanelStore";
 import { collapseExpandedComposerCursor, composerSubmissionIntentForEnter, detectComposerTrigger, expandCollapsedComposerCursor, insertComposerBlock, isCollapsedCursorAdjacentToInlineToken, replaceTextRange } from "../../composer-logic";
 import { hostItemText, serializeComposerMention, splitPromptIntoComposerSegments } from "../../composer-editor-mentions";
 import { ComposerPromptEditor, type ComposerCommandKey, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { asideQuestion, catalogFromHarness, composerPlaceholder, offersSlashCommands, slashHoldLine } from "./adapt";
-import { AsideStrip } from "./AsideStrip";
+import { useAsideStore } from "./asideStore";
 import { canPickFolder, ComposerCheckoutRow, HomeCheckoutRow } from "./ComposerCheckoutRow";
 import { ComposerCommandMenu, type ComposerCommandItem } from "./ComposerCommandMenu";
 import type { ComposerCommandGroup } from "./composerCommandGroups";
 import { fileGroups, referenceGroups, skillGroups, slashGroups } from "./composerMenuItems";
-import { useComposerList } from "./useComposerList";
+import { prefetchComposerList, useComposerList } from "./useComposerList";
 import { useComposerTriggerState } from "./useComposerTriggerState";
 import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
-import { ChatFileTile, ChatImageThumb } from "./ChatFiles";
-import { attachmentOf, fileFromStash, recordOf, releaseFiles, stashedOf, useComposerFiles, useComposerFilesStore } from "./composerFiles";
+import { ChatFileTile, ChatImageThumb, ChatRefusedFile } from "./ChatFiles";
+import { attachmentOf, fileFromStash, recordOf, releaseFiles, stashedOf, useComposerFiles, useComposerFilesStore, useQueuedFiles, useRefusedFiles } from "./composerFiles";
+import { COMPOSER_WORDS } from "./composerWords";
 import { partitionStashFiles, usePromptStashStore, type PromptStashEntry } from "./promptStashStore";
 import { ComposerStashMenu, stashedWord } from "./ComposerStashMenu";
 import { ComposerModeToggles } from "./ComposerModeToggles";
 import { useComposerModesStore } from "./composerModesStore";
 import { nextPastedTextName, pastesAsFile } from "./pastedText";
 import { buildComposerPromptHistoryEntries, stepComposerPromptHistory, type ComposerPromptHistoryPosition } from "./composerPromptHistory";
-import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld } from "./composerDraftStore";
+import { EMPTY_DRAFT, newId, useComposerDraft, useComposerDraftStore, useComposerQueue, useComposerQueueHeld, type QueuedMessage } from "./composerDraftStore";
 import { ComposerAccessPicker, ComposerOptionPickers, useAccessPick, useComposerPicks, type AccessTarget } from "./ComposerOptionPickers";
 import type { ComposerStart } from "./composerPicks";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
@@ -110,23 +119,21 @@ import type { ChatThreadHandle } from "./useChatThread";
 
 const noop = () => {};
 
-/** What the @ and # menus say where the wsp on the computer the copy is on predates the lists they read. */
-export const menuListUnserved = (computer: string): string => `${computer}'s wsp is older than this app, so the list is not there yet; it arrives with its next update`;
-
-/** What an empty # menu says where no signed-in command line for the project's git host is on that computer. */
-export const noHostListLine = (host: string, computer: string): string => `no signed-in command line for ${host} is on ${computer}, so its pull requests and issues are not listed`;
-
-/** What the @ menu says under a checkout with more files than one list carries. */
-export const FILES_CUT_LINE = `this checkout has more than ${FS_FILES_CAP_ENTRIES.toLocaleString("en-US")} files; the menu lists the first ${FS_FILES_CAP_ENTRIES.toLocaleString("en-US")}`;
-
-/** What the slot says when the stash could not be written, the draft staying where it was. */
-export const STASH_NOT_WRITTEN = "the stash could not be saved in this browser, so the draft stays here";
-
 /** A list read whose refusal is the computer's wsp not knowing the read yet reads as that, in the person's words. */
 const inPersonsWords = <T,>(read: Promise<T>, computer: string): Promise<T> =>
   read.catch((e: unknown) => {
-    throw e instanceof DaemonOpError && e.code === "unsupported" ? new Error(menuListUnserved(computer)) : e;
+    throw e instanceof DaemonOpError && e.code === "unsupported" ? new Error(COMPOSER_WORDS.menuListUnserved(computer)) : e;
   });
+
+/** How long a stop waits for the turn's process to end before saying it has not; a test shortens it. */
+export const STOP_WAIT = { ms: 8_000 };
+
+/** What a stop the runtime refused says: the computer by name when it is the one not answering, else the runtime's words. */
+export function stopFailureWords({ error, unreachable, computer }: { error: string; unreachable: boolean; computer: string }): string {
+  return unreachable ? COMPOSER_WORDS.stopUnreachable(computer) : COMPOSER_WORDS.stopRefused(error);
+}
+
+const flyout = (text: string): void => void addNotice({ kind: "error", text });
 
 /** The draft as the height mirror measures it: a chip draws on one line whatever its text holds, so each one stands
  * as a short run of characters rather than the block it sends. */
@@ -182,22 +189,13 @@ export function sendPicks(pinned: boolean, picks: ComposerStart): ComposerStart 
   return kept;
 }
 
-/** What one stop click left behind for the turn it targeted; the turn id keeps it from leaking onto the next turn. */
+/** A stop click still out for the turn it targeted; the turn id keeps it from leaking onto the next turn. */
 interface StopAttempt {
   readonly turnId: string;
-  readonly pending: boolean;
-  readonly error: string | null;
-}
-
-/** What the last send-now into a running turn left behind: the row while it is in flight, the runtime's refusal after. */
-interface SteerAttempt {
-  readonly turnId: string;
-  readonly rowId: string | null;
-  readonly error: string | null;
 }
 
 /** `onStart` takes the first send instead of the runtime: a project's home has no workspace yet, and its send is what
- * makes one. A sentence it answers is why nothing was made: the draft goes back and the sentence stands above the box. */
+ * makes one. A sentence it answers is why nothing was made: the draft goes back and the sentence is raised as a flyout. */
 export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: string; thread: ChatThreadHandle; onStart?: (prompt: string) => Promise<string | null> }) {
   const api = useStore(s => s.api);
   const wake = useStore(s => s.wake);
@@ -206,11 +204,10 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const state = useWorkspaceState(workspaceId);
   const workspace = useWorkspace(workspaceId);
   const [stop, setStop] = useState<StopAttempt | null>(null);
-  const [screenLine, setScreenLine] = useState<string | null>(null);
-  const [startRefusal, setStartRefusal] = useState<string | null>(null);
+  const stops = useRef(0);
   const multiPicks = useMultiPicks(workspaceId);
-  const [steering, setSteering] = useState<string | null>(null);
-  const [steered, setSteered] = useState<SteerAttempt | null>(null);
+  // The message a Ctrl+Enter put at the head while its steer or its stop is out.
+  const [next, setNext] = useState<string | null>(null);
   const draft = useComposerDraft(workspaceId);
   const { threadKey, named } = thread;
   const queue = useComposerQueue(threadKey);
@@ -230,9 +227,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const harnessCatalogs = useHarnessCatalogs(workspaceId);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const enqueue = useComposerDraftStore(s => s.enqueue);
-  const editQueued = useComposerDraftStore(s => s.editQueued);
   const removeQueued = useComposerDraftStore(s => s.removeQueued);
-  const promoteQueued = useComposerDraftStore(s => s.promoteQueued);
   const hold = useComposerDraftStore(s => s.hold);
   const requeue = useComposerDraftStore(s => s.requeue);
   const release = useComposerDraftStore(s => s.release);
@@ -247,11 +242,16 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     release(named.thread);
   }, [named, rekeyModes, rekeyQueue, release]);
   const files = useComposerFiles(workspaceId);
+  const refusedFiles = useRefusedFiles(workspaceId);
+  const queuedFiles = useQueuedFiles();
   const addFiles = useComposerFilesStore(s => s.add);
   const removeFile = useComposerFilesStore(s => s.remove);
+  const dismissRefused = useComposerFilesStore(s => s.dismiss);
   const sendFilesAs = useComposerFilesStore(s => s.sendAs);
   const restoreFiles = useComposerFilesStore(s => s.restore);
-  const [fileRefusal, setFileRefusal] = useState<string | null>(null);
+  const queueFiles = useComposerFilesStore(s => s.queue);
+  const unqueueFiles = useComposerFilesStore(s => s.unqueue);
+  const dropFiles = useComposerFilesStore(s => s.drop);
   const putFiles = useComposerFilesStore(s => s.put);
   const takeFiles = useComposerFilesStore(s => s.take);
   const stashed = usePromptStashStore(s => s.entries);
@@ -264,12 +264,12 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
 
   const absent = useAbsentComputer(workspaceId);
   const computer = useComputerName(workspaceId);
-  const linkDown = useLinkDownLine(workspaceId);
   const { harness } = thread.view;
   // A side question copies the thread's own session, so it is offered only on a thread that has a row to name it by.
   const asides = harnessCatalog?.asides === true && latestRow !== null && api?.askAside !== undefined;
-  const [aside, setAside] = useState<{ question: string; answer?: string; error?: string } | null>(null);
-  const asked = useRef(0);
+  // A side question is about the thread it was asked from, so it goes when the composer leaves that thread.
+  const fresh = thread.fresh;
+  useEffect(() => () => useAsideStore.getState().close(workspaceId), [fresh, threadKey, workspaceId]);
   const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog), asides }), [asides, harness, harnessCatalog, harnessId]);
   // A daemon this host started is not the road a turn takes, so its absence leaves the box open on this computer.
   const daemonOnly = absent?.start !== undefined;
@@ -307,8 +307,6 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const readsImage = readsImages(harnessCatalog);
 
   const runningTurn = thread.view.running ? thread.view.latestTurn : null;
-  // What the still-working line calls the thread: its own title, never the key wsp holds it under.
-  const workingTitle = useMemo(() => foldThreads(sessions ?? []).find(row => row.id === threadKey)?.title, [sessions, threadKey]);
   // The runtime keys sessions.interrupt by its own session id; the events carry the harness id, which differs after a
   // resume, so the row from sessions.list maps one to the other. Without a row the events' id goes, and the runtime answers.
   const stopTarget = useMemo(() => {
@@ -331,47 +329,9 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   // model in front of the person offers it, which is also the only place the toggle shows.
   const fastPicked = useComposerModesStore(s => s.fast[threadKey]);
   const setFast = useComposerModesStore(s => s.setFast);
-  const planFrom = useComposerModesStore(s => s.planFrom[threadKey]);
-  const setPlanFrom = useComposerModesStore(s => s.setPlanFrom);
-  const planPicked = useComposerModesStore(s => s.plan[threadKey]);
-  const setPlan = useComposerModesStore(s => s.setPlan);
   const fastOffered = pickedModel?.fast === true;
   const fastOn = fastOffered && (fastPicked ?? latestRow?.fast === true);
-  const planOffered = harnessCatalog?.permissionModes.some(mode => mode.value === PLAN_ACCESS) === true;
-  // Plan is the thread's alone: a hand toggle on this thread, else what its latest row runs at, which sessions.access
-  // moves. It never goes through the access pick, which is what writes the workspace's default for the next thread.
-  const planOn = planOffered && (planPicked ?? latestRow?.permissionMode === PLAN_ACCESS);
-  const moveThreadAccess = useCallback(
-    (mode: string) => {
-      if (pickTarget !== null) void api?.setSessionAccess?.(pickTarget.sessionId, mode).catch(() => {});
-    },
-    [api, pickTarget],
-  );
-  const togglePlan = useCallback(() => {
-    if (planOn) {
-      const back = planFrom ?? markedDefault(harnessCatalog?.permissionModes ?? [])?.value;
-      setPlan(threadKey, false);
-      setPlanFrom(threadKey, null);
-      if (back !== undefined) moveThreadAccess(back);
-      return;
-    }
-    if (picks?.permissionMode != null && picks.permissionMode !== PLAN_ACCESS) setPlanFrom(threadKey, picks.permissionMode);
-    setPlan(threadKey, true);
-    moveThreadAccess(PLAN_ACCESS);
-  }, [harnessCatalog, moveThreadAccess, picks, planFrom, planOn, setPlan, setPlanFrom, threadKey]);
-  // An access picked while plan is on is the thread leaving plan for it.
-  const pickAccess = useCallback(
-    (mode: string) => {
-      if (planOn) {
-        setPlan(threadKey, false);
-        setPlanFrom(threadKey, null);
-      }
-      accessPick.pick(mode);
-    },
-    [accessPick, planOn, setPlan, setPlanFrom, threadKey],
-  );
-  const stopAttempt = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId ? stop : null;
-  const steerAttempt = steered !== null && runningTurn !== null && steered.turnId === runningTurn.turnId ? steered : null;
+  const stopPending = stop !== null && runningTurn !== null && stop.turnId === runningTurn.turnId;
   const canStop = runningTurn !== null && api?.interruptSession !== undefined;
   // The catalog answers before the click: a harness that steers takes the row into the turn, any other gets the turn stopped.
   const canSteer = canStop && harnessCatalog?.steers === true && api?.steerSession !== undefined;
@@ -390,8 +350,14 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const folder = pickable ? startFolder : (viewCwd ?? startFolder);
   const listed = onStart === undefined && unavailable === null && wire !== null && folder !== null;
   const session = trigger === null ? "" : `${trigger.kind}:${trigger.rangeStart}`;
-  const checkout = useComposerList(listed && trigger?.kind === "path" ? `${workspaceId}\0files\0${folder}` : null, session, () => inPersonsWords(fsFiles(wire!, folder!), computer));
-  const references = useComposerList(listed && trigger?.kind === "pull-request" ? `${workspaceId}\0items\0${folder}` : null, session, () => inPersonsWords(gitPrList(wire!, folder!), computer));
+  const itemsKey = listed ? `${workspaceId}\0items\0${folder}` : null;
+  const readItems = useCallback(() => inPersonsWords(gitPrList(wire!, folder!), computer), [computer, folder, wire]);
+  // The pull requests and issues are asked for as the thread opens, so the first # draws from an answer in hand.
+  useEffect(() => {
+    if (itemsKey !== null && wire !== null) prefetchComposerList(wire, itemsKey, readItems);
+  }, [itemsKey, readItems, wire]);
+  const checkout = useComposerList(wire, listed && trigger?.kind === "path" ? `${workspaceId}\0files\0${folder}` : null, session, () => inPersonsWords(fsFiles(wire!, folder!), computer));
+  const references = useComposerList(wire, trigger?.kind === "pull-request" ? itemsKey : null, session, readItems);
   const skillsWanted = onStart === undefined && (trigger?.kind === "slash-command" || trigger?.kind === "skill");
   const skills = useAgentsReport(skillsWanted ? { workspaceId } : null).report?.skills;
   const groups = useMemo<ComposerCommandGroup[]>(() => {
@@ -408,44 +374,30 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
         return references.data === null ? [] : referenceGroups(references.data.items, trigger.query);
     }
   }, [catalog, checkout.data, references.data, skills, trigger, unavailable]);
-  // A list the menu could not read, or one its host could not answer, says why in the slot while its token stands.
+  // The @ and # menus say in their own last row what their list is doing: on its way, failed, cut at the cap, not
+  // served by the host, or answered with nothing that matches.
+  const list = trigger?.kind === "path" ? checkout : trigger?.kind === "pull-request" ? references : null;
+  const listKind = trigger?.kind === "path" || trigger?.kind === "pull-request" ? trigger.kind : null;
   const unlisted = references.data?.noCliFor;
-  const menuLine =
-    trigger?.kind === "path"
-      ? (checkout.error ?? (checkout.data?.truncated === true ? FILES_CUT_LINE : null))
-      : trigger?.kind === "pull-request"
-        ? (references.error ?? (groups.length === 0 ? (unlisted !== undefined ? noHostListLine(unlisted, computer) : (references.data?.note ?? null)) : null))
-        : null;
+  const menuNote =
+    list === null || listKind === null || unavailable !== null || onStart !== undefined || !listed
+      ? null
+      : list.error !== null
+        ? list.error
+        : list.data === null
+          ? COMPOSER_WORDS.menuLoading[listKind]
+          : listKind === "path" && checkout.data?.truncated === true
+            ? COMPOSER_WORDS.filesCut
+            : groups.length > 0
+              ? null
+              : listKind === "pull-request" && unlisted !== undefined
+                ? COMPOSER_WORDS.noHostList(unlisted, computer)
+                : listKind === "pull-request" && references.data?.note !== undefined
+                  ? references.data.note
+                  : COMPOSER_WORDS.menuNoMatch[listKind];
   // The keyboard walks the menu as it is drawn, so the groups decide the order the arrows take and not the other way round.
   const items = useMemo<ComposerCommandItem[]>(() => groups.flatMap(group => group.items), [groups]);
-  // A token that matched nothing draws no menu: the slot above the box already holds the one line that says so, and
-  // an empty drawer under it would say it a second time in other words.
-  const menuOpen = groups.length > 0;
-  // One line in the slot above the box, and what blocks a send heads it: every other line here is about a send this
-  // composer could make, so while it can make none the block is the one true thing to say and the slot, the button's
-  // name and an Enter all read it. Under it: the newest failure, then the screen command Enter refused, then the turn
-  // that replied but still runs, in the runtime's own words, since a message sent now waits for that process and runs
-  // as the next turn, then an access pick the running turn refused after its harness said it takes one, then the workspace's
-  // link being down, which blocks no send and so comes after everything a person is being stopped by.
-  const line =
-    sendHeld !== null
-      ? sendHeld
-      : fileRefusal !== null
-        ? fileRefusal
-        : stopAttempt !== null && stopAttempt.error !== null
-          ? stopFailedLine(stopAttempt.error)
-          : steerAttempt !== null && steerAttempt.error !== null
-            ? sendNowFailedLine(steerAttempt.error)
-            : screenLine !== null
-              ? screenLine
-              : startRefusal !== null
-                ? startRefusal
-                : menuLine !== null
-                  ? menuLine
-                  : runningTurn?.replied === true
-                    ? stillWorkingLine(workingTitle)
-                    : (accessPick.line ?? linkDown);
-
+  const menuOpen = groups.length > 0 || menuNote !== null;
   const activeItemId = resolveComposerMenuActiveItemId({ items, highlightedItemId, currentSearchKey: searchKey, highlightedSearchKey });
 
   useEffect(() => {
@@ -454,14 +406,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
 
   useEffect(() => onComposerFocusRequest(workspaceId, () => editorRef.current?.focus()), [workspaceId]);
 
-  const onChange = useCallback(
-    (value: string, cursor: number) => {
-      setScreenLine(null);
-      setStartRefusal(null);
-      setDraft(workspaceId, { prompt: value, cursor });
-    },
-    [setDraft, workspaceId],
-  );
+  const onChange = useCallback((value: string, cursor: number) => setDraft(workspaceId, { prompt: value, cursor }), [setDraft, workspaceId]);
 
   /** The one road every file takes into the composer: the paste, the drop and the picker all end here, so the caps
    * and the refusal words are said once. An image for an agent that reads none is turned away before it is read
@@ -471,7 +416,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
       // Paste and drop answer to the same state the picker button does: one door open and two shut would take a
       // file the send could not carry.
       if (given.length === 0 || shut) return;
-      void addFiles(workspaceId, given, readsImage ? undefined : noImagesLine(harnessId)).then(setFileRefusal);
+      void addFiles(workspaceId, given, readsImage ? undefined : noImagesLine(harnessId));
     },
     [addFiles, harnessId, readsImage, shut, workspaceId],
   );
@@ -520,21 +465,23 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   );
 
   const { setSending, appendUserTurn, appendLocalError, thread: into, busy, sending } = thread;
+  /** Starts a turn with the box's files, or with a queued message's own when `rowId` names the card it came off. */
   const start = useCallback(
-    (prompt: string, onRefused: () => void) => {
+    (prompt: string, onRefused: () => void, rowId?: string) => {
       if (!api) return;
       const requestId = newId();
-      const attachments = files.map(attachmentOf);
+      const carried = rowId === undefined ? files : (useComposerFilesStore.getState().queued[rowId] ?? []);
+      const attachments = carried.map(attachmentOf);
       setSending(true);
       hold(threadKey);
-      appendUserTurn(prompt, requestId, files.map(recordOf));
+      appendUserTurn(prompt, requestId, carried.map(recordOf));
       // A send that names no thread opens one the runtime has written no row for, so the sidebar is handed the same
       // thread the transcript has until that row arrives.
       if (into === undefined) launching(workspaceId, { requestId, title: prompt, harness: harnessId });
       // The files leave the composer with the send and are kept under its request id, which is what the person's
       // row in the transcript is drawn from; a refused send hands them back rather than losing them.
-      sendFilesAs(workspaceId, requestId);
-      setFileRefusal(null);
+      sendFilesAs(workspaceId, requestId, rowId);
+      if (rowId === undefined) dismissRefused(workspaceId);
       // The wake settles or fails before the start is asked; a wake that failed leaves the runtime to refuse the
       // start in its own words, which land in the transcript like any other refusal.
       void (wakesFirst ? wake(workspaceId) : Promise.resolve())
@@ -547,7 +494,6 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
             ...folderStart,
             ...(attachments.length > 0 ? { attachments } : {}),
             ...sendPicks(pinned, startOptions),
-            ...(planOn && !pinned ? { permissionMode: PLAN_ACCESS } : {}),
             ...(fastOn ? { fast: true } : {}),
           }),
         )
@@ -555,86 +501,155 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
           setSending(false);
           launched(workspaceId, requestId);
           onRefused();
-          restoreFiles(workspaceId, requestId);
+          restoreFiles(workspaceId, requestId, rowId);
           appendLocalError(err instanceof Error ? err.message : String(err));
         });
     },
-    [api, appendLocalError, appendUserTurn, fastOn, planOn, files, folderStart, harnessId, hold, into, launched, launching, pinned, restoreFiles, sendFilesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
+    [api, appendLocalError, appendUserTurn, dismissRefused, fastOn, files, folderStart, harnessId, hold, into, launched, launching, pinned, restoreFiles, sendFilesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
-  /** Asks the host beside the thread and draws the answer in the sheet; an answer landing after the sheet closed is dropped. */
+  /** Asks the host beside the thread and opens the right panel on the answer, putting the panel back as it was once
+   * the side question closes. */
   const askAside = useCallback(
     (question: string) => {
       const method = api?.askAside;
       if (method === undefined || latestRow === null) return;
-      const id = ++asked.current;
-      setAside({ question });
+      const panel = useRightPanelStore.getState();
+      const wasOpen = selectWorkspaceRightPanelState(panel.byWorkspaceId, workspaceId).isOpen;
+      const id = useAsideStore.getState().ask(workspaceId, question, wasOpen);
+      if (!wasOpen) panel.show(workspaceId);
       void method(latestRow.id, question).then(
-        result => asked.current === id && setAside({ question, answer: result.text }),
-        (err: unknown) => asked.current === id && setAside({ question, error: err instanceof Error ? err.message : String(err) }),
+        result => useAsideStore.getState().answer(workspaceId, id, { answer: result.text }),
+        (err: unknown) => useAsideStore.getState().answer(workspaceId, id, { error: err instanceof Error ? err.message : String(err) }),
       );
     },
-    [api, latestRow],
+    [api, latestRow, workspaceId],
   );
 
-  /** The strip goes, and an answer still on its way lands nowhere. */
-  const closeAside = useCallback(() => {
-    asked.current += 1;
-    setAside(null);
-  }, []);
+  const restoreDraft = useCallback(
+    (prompt: string) => {
+      const current = useComposerDraftStore.getState().drafts[workspaceId];
+      if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
+    },
+    [setDraft, workspaceId],
+  );
 
-  const send = useCallback(() => {
-    // The same reading the slot and the send button are already wearing: an Enter that lands here leaves the draft
-    // where it was typed and that line standing.
-    if (sendHeld !== null) return;
-    const prompt = (editorRef.current?.readSnapshot().value ?? draft.prompt).trim();
-    if (prompt === "") return;
-    // A side question is the host's to answer and never a turn, so it goes whether or not the thread is working.
-    const question = asides ? asideQuestion(prompt) : null;
-    if (question !== null) {
+  /** Stops the running turn. A stop wsp no longer knows, one the runtime refused, and one whose process has not ended
+   * by STOP_WAIT each raise a flyout and offer stop again; `onSettled` hears the stop settle either way, so a send-now's
+   * card stops reading Next. */
+  const interrupt = useCallback(
+    (onSettled?: () => void) => {
+      const method = api?.interruptSession;
+      if (!method || runningTurn === null || stopTarget === null || stopPending) return;
+      const { turnId } = runningTurn;
+      const attempt = ++stops.current;
+      const settle = (words: string | null) => {
+        if (stops.current !== attempt) return;
+        stops.current += 1;
+        setStop(null);
+        onSettled?.();
+        if (words !== null) flyout(words);
+      };
+      setStop({ turnId });
+      const waited = window.setTimeout(() => settle(COMPOSER_WORDS.stopDidNotEnd), STOP_WAIT.ms);
+      void method(stopTarget).then(
+        outcome => {
+          window.clearTimeout(waited);
+          settle(outcome === "not-found" ? COMPOSER_WORDS.stopUnknown : null);
+        },
+        (err: unknown) => {
+          window.clearTimeout(waited);
+          settle(stopFailureWords({ error: err instanceof Error ? err.message : String(err), unreachable: blocked === "unreachable" || absent !== null, computer }));
+        },
+      );
+    },
+    [absent, api, blocked, computer, runningTurn, stopPending, stopTarget],
+  );
+
+  /** Ctrl+Enter during a turn: the message goes to the head, then into the running turn where the harness steers and
+   * the message carries words alone, else the turn is stopped and the message goes as the next start. */
+  const sendNow = useCallback(
+    (row: QueuedMessage) => {
+      release(threadKey);
+      if (!canStop || runningTurn === null || stopTarget === null) return;
+      const words = row.prompt.trim();
+      const withFiles = (useComposerFilesStore.getState().queued[row.id]?.length ?? 0) > 0;
+      const method = api?.steerSession;
+      if (!canSteer || withFiles || method === undefined) {
+        setNext(row.id);
+        interrupt(() => setNext(null));
+        return;
+      }
+      setNext(row.id);
+      void method(stopTarget, words, newId()).then(
+        outcome => {
+          setNext(null);
+          if (outcome === "accepted") return removeQueued(threadKey, row.id);
+          // not-running: the turn beat the message, so it stays at the head and the head effect starts it once the turn ends.
+          if (outcome === "not-found") flyout(COMPOSER_WORDS.sendNowFailed(COMPOSER_WORDS.sendNowUnknown));
+          if (outcome === "unsupported") flyout(COMPOSER_WORDS.sendNowFailed(COMPOSER_WORDS.sendNowUnsupported));
+        },
+        (err: unknown) => {
+          setNext(null);
+          flyout(COMPOSER_WORDS.sendNowFailed(err instanceof Error ? err.message : String(err)));
+        },
+      );
+    },
+    [api, canSteer, canStop, interrupt, release, removeQueued, runningTurn, stopTarget, threadKey],
+  );
+
+  /** Enter sends the draft, or queues it behind a running turn; with `now` (Ctrl+Enter) a queued message goes at once. */
+  const send = useCallback(
+    (now = false) => {
+      // The same reading the send button's hover is already wearing: an Enter that lands here leaves the draft where
+      // it was typed and says why.
+      if (sendHeld !== null) {
+        addNotice({ kind: "note", text: sendHeld });
+        return;
+      }
+      const prompt = (editorRef.current?.readSnapshot().value ?? draft.prompt).trim();
+      if (prompt === "") return;
+      // A side question is the host's to answer and never a turn, so it goes whether or not the thread is working.
+      const question = asides ? asideQuestion(prompt) : null;
+      if (question !== null) {
+        setDraft(workspaceId, EMPTY_DRAFT);
+        askAside(question);
+        return;
+      }
+      // A command the CLI runs only in its own terminal would come back as not available, so the draft stays for
+      // editing and a flyout names the wsp control that serves it instead.
+      const screen = screenCommandTyped(harnessCatalog, prompt);
+      if (screen !== null && harnessCatalog !== null) {
+        addNotice({ kind: "note", text: screenCommandLine(screen, harnessCatalog, workspace ?? {}) });
+        dismissTrigger(trigger);
+        return;
+      }
       setDraft(workspaceId, EMPTY_DRAFT);
-      askAside(question);
-      return;
-    }
-    // A command the CLI runs only in its own terminal would come back as not available, so the draft stays for
-    // editing and the line names the wsp control that serves it instead.
-    const screen = screenCommandTyped(harnessCatalog, prompt);
-    if (screen !== null && harnessCatalog !== null) {
-      setScreenLine(screenCommandLine(screen, harnessCatalog, workspace ?? {}));
-      setFileRefusal(null);
-      dismissTrigger(trigger);
-      return;
-    }
-    // A queued row keeps only its words, so a message with files waits for the turn rather than losing them.
-    if (busy && files.length > 0) {
-      setFileRefusal(FILES_AFTER_TURN);
-      return;
-    }
-    setDraft(workspaceId, EMPTY_DRAFT);
-    if (onStart !== undefined) {
-      void onStart(prompt).then(refusal => {
-        if (refusal === null) return;
-        setStartRefusal(refusal);
-        const current = useComposerDraftStore.getState().drafts[workspaceId];
-        if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
-      });
-      return;
-    }
-    if (!busy) {
-      start(prompt, () => {
-        const current = useComposerDraftStore.getState().drafts[workspaceId];
-        if (current === undefined || current.prompt === "") setDraft(workspaceId, { prompt, cursor: prompt.length });
-      });
-      return;
-    }
-    // Behind a pending send the row waits with the rest, held since that send began; its start releases them.
-    if (sending) {
-      enqueue(threadKey, prompt);
-      return;
-    }
-    enqueue(threadKey, prompt, held ? "head" : "tail");
-    release(threadKey);
-  }, [askAside, asides, busy, dismissTrigger, draft, enqueue, files, harnessCatalog, held, onStart, release, sendHeld, sending, setDraft, start, threadKey, trigger, workspace, workspaceId]);
+      if (onStart !== undefined) {
+        void onStart(prompt).then(refusal => {
+          if (refusal === null) return;
+          flyout(refusal);
+          restoreDraft(prompt);
+        });
+        return;
+      }
+      if (!busy) {
+        start(prompt, () => restoreDraft(prompt));
+        return;
+      }
+      dismissRefused(workspaceId);
+      // Behind a pending send the card waits with the rest, held since that send began; its start releases them.
+      if (sending || runningTurn === null) {
+        queueFiles(workspaceId, enqueue(threadKey, prompt, now && !sending ? "head" : "tail"));
+        return;
+      }
+      const id = enqueue(threadKey, prompt, now || held ? "head" : "tail");
+      queueFiles(workspaceId, id);
+      if (now) sendNow({ id, prompt });
+      else release(threadKey);
+    },
+    [askAside, asides, busy, dismissRefused, dismissTrigger, draft, enqueue, harnessCatalog, held, onStart, queueFiles, release, restoreDraft, runningTurn, sendHeld, sendNow, sending, setDraft, start, threadKey, trigger, workspace, workspaceId],
+  );
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];
@@ -642,51 +657,31 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     if (head === undefined || held || unavailable !== null || busy) return;
     removeQueued(threadKey, head.id);
     const prompt = head.prompt.trim();
-    if (prompt !== "") start(prompt, () => requeue(threadKey, head));
-  }, [busy, head, held, removeQueued, requeue, start, threadKey, unavailable]);
+    if (prompt !== "") start(prompt, () => requeue(threadKey, head), head.id);
+    else dropFiles(head.id);
+  }, [busy, dropFiles, head, held, removeQueued, requeue, start, threadKey, unavailable]);
 
-  const interrupt = useCallback(() => {
-    const method = api?.interruptSession;
-    if (!method || runningTurn === null || stopTarget === null || stopAttempt?.pending) return;
-    const { turnId } = runningTurn;
-    setStop({ turnId, pending: true, error: null });
-    void method(stopTarget).then(
-      outcome => setStop({ turnId, pending: false, error: outcome === "not-found" ? "the runtime does not know this session" : null }),
-      (err: unknown) => setStop({ turnId, pending: false, error: err instanceof Error ? err.message : String(err) }),
-    );
-  }, [api, runningTurn, stopAttempt?.pending, stopTarget]);
-
-  const steer = useCallback(
+  /** A card's edit: its words and files go back in the box, a draft already there kept in front of them. */
+  const editCard = useCallback(
     (id: string) => {
-      release(threadKey);
-      promoteQueued(threadKey, id);
-      if (!canStop) return;
-      if (!canSteer) {
-        setSteering(id);
-        interrupt();
-        return;
-      }
-      const method = api?.steerSession;
       const row = queue.find(r => r.id === id);
-      if (method === undefined || runningTurn === null || stopTarget === null || row === undefined || steerAttempt?.rowId != null) return;
-      const { turnId } = runningTurn;
-      setSteering(id);
-      setSteered({ turnId, rowId: id, error: null });
-      void method(stopTarget, row.prompt.trim(), newId()).then(
-        outcome => {
-          setSteering(null);
-          if (outcome === "accepted") removeQueued(threadKey, id);
-          // not-running: the turn beat the message, so the row stays at the head and the head effect starts it once the turn ends.
-          const error = outcome === "not-found" ? "the runtime does not know this session" : outcome === "unsupported" ? "this harness takes no message mid-turn" : null;
-          setSteered(error === null ? null : { turnId, rowId: null, error });
-        },
-        (err: unknown) => {
-          setSteering(null);
-          setSteered({ turnId, rowId: null, error: err instanceof Error ? err.message : String(err) });
-        },
-      );
+      if (row === undefined) return;
+      removeQueued(threadKey, id);
+      putFiles(workspaceId, unqueueFiles(id));
+      const typed = (editorRef.current?.readSnapshot().value ?? draft.prompt).trim();
+      const prompt = typed === "" ? row.prompt : `${typed}\n${row.prompt}`;
+      setDraft(workspaceId, { prompt, cursor: collapseExpandedComposerCursor(prompt, prompt.length) });
+      window.requestAnimationFrame(() => editorRef.current?.focus());
     },
-    [api, canSteer, canStop, interrupt, promoteQueued, queue, release, removeQueued, runningTurn, steerAttempt, stopTarget, threadKey],
+    [draft.prompt, putFiles, queue, removeQueued, setDraft, threadKey, unqueueFiles, workspaceId],
+  );
+
+  const removeCard = useCallback(
+    (id: string) => {
+      removeQueued(threadKey, id);
+      dropFiles(id);
+    },
+    [dropFiles, removeQueued, threadKey],
   );
 
   const selectItem = useCallback(
@@ -722,12 +717,11 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
     const written = usePromptStashStore.getState().stash({ id: newId(), createdAt: new Date().toISOString(), prompt, files: kept, dropped });
     if (!written) {
       putFiles(workspaceId, held);
-      setFileRefusal(STASH_NOT_WRITTEN);
+      flyout(COMPOSER_WORDS.stashNotWritten);
       return false;
     }
     releaseFiles(held);
     setDraft(workspaceId, EMPTY_DRAFT);
-    setFileRefusal(null);
     return true;
   }, [draft.prompt, putFiles, setDraft, takeFiles, workspaceId]);
 
@@ -820,7 +814,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
           isDraftThread: false,
         });
         if (intent !== null) {
-          send();
+          send(event.ctrlKey && !event.metaKey);
           return true;
         }
       }
@@ -831,13 +825,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
 
   // A home's thread carries a history-unavailable row and no message, so the count is of messages alone.
   const compact = thread.view.running || thread.view.entries.some(entry => entry.kind === "message");
-  const modes = (
-    <ComposerModeToggles
-      fast={fastOffered ? { on: fastOn, toggle: () => setFast(threadKey, !fastOn) } : null}
-      plan={planOffered && onStart === undefined ? { on: planOn, toggle: togglePlan } : null}
-      tight={compact}
-    />
-  );
+  const modes = <ComposerModeToggles fast={fastOffered ? { on: fastOn, toggle: () => setFast(threadKey, !fastOn) } : null} tight={compact} />;
   const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
   const heightRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -847,7 +835,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   useFlip(surfaceRef, compact ? (tall ? "tall" : "line") : "full");
   const commandMenu = menuOpen ? (
     <ComposerCommandMenuLayer anchor={menuAnchor}>
-      <ComposerCommandMenu groups={groups} triggerKind={trigger?.kind ?? null} activeItemId={activeItemId} onHighlightedItemChange={highlight} onSelect={selectItem} />
+      <ComposerCommandMenu groups={groups} note={menuNote} triggerKind={trigger?.kind ?? null} activeItemId={activeItemId} onHighlightedItemChange={highlight} onSelect={selectItem} />
     </ComposerCommandMenuLayer>
   ) : stashOpen && stashed.length > 0 ? (
     <ComposerCommandMenuLayer anchor={menuAnchor}>
@@ -897,7 +885,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
         compact={false}
         pendingAction={null}
         isRunning={canStop}
-        isInterruptPending={stopAttempt?.pending ?? false}
+        isInterruptPending={stopPending}
         showPlanFollowUpPrompt={false}
         promptHasText={hasText}
         isSendBusy={thread.busy}
@@ -909,7 +897,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
         isPreparingWorktree={false}
         hasSendableContent={hasText}
         onPreviousPendingQuestion={noop}
-        onInterrupt={interrupt}
+        onInterrupt={() => interrupt()}
         onImplementPlanInNewThread={noop}
       />
     </div>
@@ -917,24 +905,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
 
   return (
     <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
-      {aside !== null ? <AsideStrip {...aside} onClose={closeAside} /> : null}
-      {/* The refusal takes room only while it holds a sentence, which wraps to two lines at most: at the smallest
-          window with the right panel open a cut would drop the half that says what happens next. */}
-      <div className={cn("mx-auto flex w-full max-w-3xl items-center px-3", line !== null && "min-h-9 pb-1")} aria-live="polite" data-composer-refusal>
-        {line !== null ? (
-          <span role="status" className="min-w-0 text-pretty font-mono text-[11px] leading-[18px] text-muted-foreground line-clamp-2" title={line}>
-            {line}
-          </span>
-        ) : null}
-      </div>
-      <ComposerQueue
-        rows={queue}
-        steering={stopAttempt?.error ? null : steering}
-        steer={unavailable !== null ? null : canSteer ? "now" : canStop ? "stop" : busy ? null : "now"}
-        onEdit={(id, prompt) => editQueued(threadKey, id, prompt)}
-        onRemove={id => removeQueued(threadKey, id)}
-        onSteer={steer}
-      />
+      <ComposerQueue rows={queue} files={queuedFiles} next={next} onEdit={editCard} onRemove={removeCard} />
       <ComposerSurface.Shell contextStrip>
         <ComposerSurface.Host>
           <form
@@ -964,19 +935,21 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                     onDragOver={event => event.preventDefault()}
                   >
                     {onStart !== undefined ? <ComposerModelChips workspaceId={workspaceId} /> : null}
-                    {files.length > 0 ? (
+                    {files.length > 0 || refusedFiles.length > 0 ? (
                       <ul aria-label="Files to send" data-composer-files="true" className="flex flex-wrap gap-1.5 px-3 pt-3 sm:px-4">
                         {files.map((file, at) => {
-                          const remove = () => {
-                            removeFile(workspaceId, file.id);
-                            setFileRefusal(null);
-                          };
+                          const remove = () => removeFile(workspaceId, file.id);
                           return (
                             <li key={file.id}>
                               {file.url !== undefined ? <ChatImageThumb image={file} at={at + 1} onRemove={remove} /> : <ChatFileTile name={file.name} size={file.size} at={at + 1} onRemove={remove} />}
                             </li>
                           );
                         })}
+                        {refusedFiles.map(file => (
+                          <li key={file.id}>
+                            <ChatRefusedFile name={file.name} why={file.why} onRemove={() => dismissRefused(workspaceId, file.id)} />
+                          </li>
+                        ))}
                       </ul>
                     ) : null}
                     <div
@@ -1017,7 +990,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                           compact && !tall ? "row-start-1" : "row-start-2",
                         )}
                       >
-                        <ComposerOptionPickers compact={compact} workspaceId={workspaceId} thread={thread} onPickAccess={pickAccess} onOtherFolder={openFolderPicker} />
+                        <ComposerOptionPickers compact={compact} workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} accessRefused={accessPick.line} onOtherFolder={openFolderPicker} />
                         {compact ? null : modes}
                       </div>
                       <div data-chat-composer-actions="right" className={cn("col-start-3 flex shrink-0 items-center justify-self-end", compact && !tall ? "row-start-1" : "row-start-2 self-end")}>
@@ -1041,7 +1014,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
           access={
             compact ? (
               <>
-                <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={pickAccess} />
+                <ComposerAccessPicker workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} refused={accessPick.line} />
                 {modes}
               </>
             ) : null

@@ -168,7 +168,6 @@ const sessions: SessionView[] = [
 const ACCESS_MODES = [
   { value: "default", label: "Default", description: "Asks in the chat about each action that needs permission" },
   { value: "acceptEdits", label: "Accept edits", description: "Edits files without asking; asks about commands that need permission" },
-  { value: "plan", label: "Plan", description: "Reads and plans only; changes nothing" },
   { value: "bypassPermissions", label: "Bypass", description: "Runs every action without asking" },
 ];
 // ?efforts=1 gives the claude row the effort levels and context windows the runtime's table lists for it, so the

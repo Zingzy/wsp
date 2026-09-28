@@ -25,7 +25,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, ConsoleMessage, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ACCESS_REFUSED_LINE, accessReachLine, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, MACHINE_UNREACHED_LINE, sendRefusal, SIDE_INK, stillWorkingLine, THEME_PRESETS, themeInk, themeScheme, type Rgb } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, MACHINE_UNREACHED_LINE, sendRefusal, SIDE_INK, THEME_PRESETS, themeInk, themeScheme, type Rgb } from "@wsp/protocol";
 import { WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { textContrast } from "./contrast";
@@ -503,39 +503,37 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     }
   }, 30_000);
 
-  it("a send refusal is one muted mono line, no panel, in a slot that takes room only while it holds one; a paused workspace has no line, its box takes words, and its send button reads Wake and send, in both themes", async () => {
+  it("the composer has no line above its box: a gone workspace holds its send in the held tier with the reason on its hover, a lingering turn says nothing, a paused one reads Wake and send, and the box is glass the page shows through, in both themes", async () => {
     interface Composer {
       box: Box;
-      text: string;
-      /** The line's paint, or null when the slot is empty. */
-      line: { mono: boolean; background: string; border: string; icons: number; ink: string } | null;
+      lines: number;
       panels: number;
-      send: { label: string | null; title: string | null; box: Box | null; fill: string; ink: string; border: string; opacity: string };
+      held: string | null;
+      glass: { fill: string; blur: string };
+      send: { label: string | null; box: Box | null; fill: string; ink: string; border: string; opacity: string };
       editable: boolean;
       placeholder: string;
     }
     const composerAt = async (query: string, theme: string, name: string): Promise<Composer> => {
       await page!.goto(`${base}?theme=${theme}&${query}`);
-      await page!.waitForSelector("[data-composer-refusal]", { state: "attached" });
-      // The transcript is fetched after mount; the line for a lingering turn exists only once it is in.
+      await page!.waitForSelector("[data-chat-composer]");
       await page!.waitForSelector("text=loading transcript", { state: "detached" });
-      // The send fades between its held tier and its accent over 150 ms, so a computed style read at mount catches
-      // the fade rather than either tier.
+      // The send fades between its held tier and its disc over 150 ms, so a computed style read at mount catches the
+      // fade rather than either tier.
       await page!.waitForTimeout(400);
       const read = await page!.locator("[data-chat-composer]").evaluate(el => {
-        const line = el.querySelector<HTMLElement>("[data-composer-refusal] [role=status]");
-        const s = line === null ? null : getComputedStyle(line);
         const send = el.querySelector<HTMLButtonElement>("[data-chat-composer-actions] button[type=submit]");
         const sendStyle = send === null ? null : getComputedStyle(send);
         const editor = el.querySelector<HTMLElement>("[data-testid=composer-editor]");
+        const shell = getComputedStyle(el.querySelector<HTMLElement>("[data-slot=composer-shell]")!, "::before");
         const b = send?.getBoundingClientRect();
         return {
-          text: el.querySelector("[data-composer-refusal]")?.textContent ?? "",
-          line: s === null || line === null ? null : { mono: /mono/i.test(s.fontFamily), background: s.backgroundColor, border: `${s.borderTopWidth} ${s.borderLeftWidth}`, icons: line.getElementsByTagName("svg").length, ink: s.color },
+          lines: el.querySelectorAll("[data-composer-refusal], span[role=status]").length,
           panels: el.querySelectorAll("[data-composer-banner-surface]").length,
+          held: el.querySelector("[data-send-held]")?.getAttribute("data-send-held") ?? null,
+          glass: { fill: shell.backgroundColor, blur: shell.backdropFilter || shell.getPropertyValue("-webkit-backdrop-filter") },
           send: {
             label: send?.getAttribute("aria-label") ?? null,
-            title: send?.getAttribute("title") ?? null,
             box: b === undefined ? null : { x: b.x, y: b.y, width: b.width, height: b.height },
             fill: sendStyle?.backgroundColor ?? "",
             ink: sendStyle?.color ?? "",
@@ -548,54 +546,49 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       });
       const path = join(SHOTS_DIR, `composer-${name}-${theme}.png`);
       await page!.locator("[data-chat-composer]").screenshot({ path });
-      console.info(`composer ${name} screenshot: ${path}`);
+      console.info(`composer ${name} screenshot: ${path} (glass ${read.glass.fill}, ${read.glass.blur})`);
       return { box: await box("[data-slot=composer-shell]"), ...read };
+    };
+    /** A computed colour's alpha, whichever syntax the engine serialises it in. */
+    const alpha = (colour: string): number => {
+      const parts = (/\(([^)]+)\)/.exec(colour)?.[1] ?? "").replace(/^srgb\s+/, "").split(/[\s,/]+/).filter(Boolean);
+      return parts.length === 4 ? Number(parts[3]) : 1;
     };
     const sendInBox = (c: Composer) => ({ x: c.send.box!.x - c.box.x, y: c.send.box!.y - c.box.y, width: c.send.box!.width, height: c.send.box!.height });
     // A paused workspace's row carries fewer picks; wide enough that no row wraps, the boxes compare as boxes.
     await page!.setViewportSize({ width: 1600, height: 800 });
     for (const theme of ["dark", "light"] as const) {
       const idle = await composerAt("ws=ws_a", theme, "idle");
-      expect(idle.text).toBe("");
-      expect(idle.line).toBeNull();
+      expect(idle.held).toBeNull();
       expect(idle.send.label).toBe("Send message");
       expect(idle.editable).toBe(true);
+      // Glass: a faint tint over a blur, so what is behind the box shows through it.
+      expect(alpha(idle.glass.fill)).toBeLessThan(theme === "dark" ? 0.1 : 0.6);
+      expect(idle.glass.blur).toMatch(/blur/);
       const paused = await composerAt("ws=ws_b", theme, "paused");
       const gone = await composerAt("ws=ws_c", theme, "gone");
       const working = await composerAt("ws=ws_a&linger=1", theme, "working");
+      for (const state of [idle, paused, gone, working]) {
+        expect(state.lines).toBe(0);
+        expect(state.panels).toBe(0);
+      }
       // A paused workspace: no sentence anywhere, the box takes words, the same button in the same place says it wakes first.
-      expect(paused.text).toBe("");
-      expect(paused.line).toBeNull();
       expect(paused.editable).toBe(true);
       expect(paused.placeholder).toBe(idle.placeholder);
       expect(paused.placeholder).not.toMatch(/paus|wake/i);
       expect(paused.send.label).toBe(WAKE_AND_SEND_LABEL);
-      expect(paused.send.title).toBe(WAKE_AND_SEND_LABEL);
-      // The empty view centres its composer under a heading of the workspace's own words, so boxes are read in the box.
       expect(sendInBox(paused)).toEqual(sendInBox(idle));
       expect([paused.box.width, paused.box.height]).toEqual([idle.box.width, idle.box.height]);
-      expect(gone.text).toBe(sendRefusal("gone"));
-      expect(working.text).toBe(stillWorkingLine());
-      // A send held for a reason is not the accent faded: it wears the held tier, a hairline and the popover fill
-      // with the arrow in the ink the line above the box is written in, in the slot the live send stands in. Five
-      // testers read a lit arrow over a box that refused them as a screen saying it was ready to send.
+      // A gone workspace says why on the held send's hover and nowhere else, in the held tier where the live send stands.
+      expect(gone.held).toBe(sendRefusal("gone"));
       expect(sendInBox(gone)).toEqual(sendInBox(idle));
       expect(gone.send.fill).not.toBe(idle.send.fill);
-      expect(gone.send.ink).toBe(gone.line!.ink);
       expect(gone.send.border.startsWith("1px ")).toBe(true);
       expect(gone.send.border).not.toBe(idle.send.border);
-      // Not a third of itself and not two thirds: the tier changed, the paint did not thin.
       expect(gone.send.opacity).toBe("1");
-      // The live send keeps the accent, which is how a person sees the wait is over: one loud thing, and it is this.
-      expect(idle.send.fill).not.toBe("rgba(0, 0, 0, 0)");
+      // The live send is a solid disc, and a send that wakes first is a send that can be pressed.
+      expect(alpha(idle.send.fill)).toBe(1);
       expect(paused.send.fill).toBe(idle.send.fill);
-      for (const state of [gone, working]) {
-        // The words in mono, painted on nothing: no fill, no border, no icon, no panel anywhere in the composer.
-        expect(state.line).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0, ink: expect.any(String) });
-        expect(state.panels).toBe(0);
-      }
-      // The line takes room over the box and leaves the box itself as it is. A running turn's composer is the one
-      // line over its transcript, so only the empty view's box is held to the idle one.
       expect([gone.box.width, gone.box.height]).toEqual([idle.box.width, idle.box.height]);
     }
     await page!.setViewportSize({ width: 1200, height: 800 });
@@ -636,62 +629,49 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
     // The prompt the turn was stopped on is answered by the pick itself: the person clicks nothing.
     await page!.waitForSelector("[data-permission-prompt='ask_open'][data-permission-open='false']");
     await page!.waitForSelector(`[data-composer-picker='access'][data-access='bypassPermissions']`);
-    expect(await page!.locator("[data-composer-refusal]").textContent()).toBe("");
+    expect(await page!.locator("[data-composer-picker='access']").getAttribute("data-access-refused")).toBeNull();
+    expect(await page!.locator("[data-composer-refusal]").count()).toBe(0);
   }, 60_000);
 
-  it("an access picked while a turn runs reads back on the picker, and a refusal the harness answered with is one uncut muted mono line, in both themes", async () => {
+  it("an access picked while a turn runs reads back on the picker, and a refusal the harness answered with stands on the picker in the refusal's ink with the sentence on its hover, in both themes", async () => {
     for (const theme of ["dark", "light"] as const) {
-      // A turn running on this computer whose harness takes the change back after its row said it takes it, which is
-      // the one thing the composer says in that slot.
       await page!.goto(`${base}?theme=${theme}&local=1&ws=ws_m&perm=1&access=refused`);
       await page!.waitForSelector("[data-composer-picker='access']");
       await page!.waitForSelector("text=loading transcript", { state: "detached" });
       const trigger = "[data-composer-picker='access']";
-      // The picker opens on bypass, which is what a thread on this computer starts at.
       expect(await page!.locator(trigger).getAttribute("data-access")).toBe("bypassPermissions");
       const before = await box("[data-slot=composer-shell]");
       await page!.locator(trigger).click();
       await page!.waitForSelector("[data-composer-option='acceptEdits']");
-      // The menu says what the pick does before it is made; the refusal below is the harness taking that back.
       expect(await page!.locator("[data-composer-access-reach]").textContent()).toBe(accessReachLine(true));
       const menu = join(SHOTS_DIR, `composer-access-menu-${theme}.png`);
       await page!.locator("[role=menu]").first().screenshot({ path: menu });
       console.info(`composer access menu screenshot: ${menu}`);
       await page!.locator("[data-composer-option='acceptEdits']").click();
-
-      // The pick reads back on the trigger whatever the running turn did with it, and the line says when it lands.
       await page!.waitForSelector(`${trigger}[data-access='acceptEdits']`);
-      // The pick closes the menu, so the line is photographed with nothing over it.
       await page!.waitForSelector("[role=menu]", { state: "detached" });
-      await page!.waitForSelector("[data-composer-refusal] [role=status]");
+      await page!.waitForSelector(`${trigger}[data-access-refused]`);
       const read = await page!.locator("[data-chat-composer]").evaluate(el => {
-        const line = el.querySelector<HTMLElement>("[data-composer-refusal] [role=status]")!;
-        const s = getComputedStyle(line);
         const label = el.querySelector<HTMLElement>("[data-composer-picker='access']")!;
+        const quiet = el.querySelector<HTMLElement>("[data-composer-picker='reasoning']") ?? el.querySelector<HTMLElement>("[data-composer-picker='model']")!;
         return {
-          text: line.textContent ?? "",
-          skin: { mono: /mono/i.test(s.fontFamily), background: s.backgroundColor, border: `${s.borderTopWidth} ${s.borderLeftWidth}`, icons: line.getElementsByTagName("svg").length },
-          // The slot truncates from the right; a line wider than its box loses its own tail.
-          cut: line.scrollWidth > line.clientWidth,
-          width: line.scrollWidth,
-          slot: (line.parentElement as HTMLElement).clientWidth,
+          refused: label.getAttribute("data-access-refused"),
+          hover: label.getAttribute("title"),
+          ink: getComputedStyle(label).color,
+          quiet: getComputedStyle(quiet).color,
           trigger: label.textContent ?? "",
-          panels: el.querySelectorAll("[data-composer-banner-surface]").length,
+          lines: el.querySelectorAll("[data-composer-refusal], span[role=status]").length,
         };
       });
       const shot = join(SHOTS_DIR, `composer-access-${theme}.png`);
       await page!.locator("[data-chat-composer]").screenshot({ path: shot });
-      console.info(`composer access line screenshot: ${shot} (${read.width} px of line in ${read.slot} px of slot)`);
-
-      expect(read.text).toBe(ACCESS_REFUSED_LINE);
+      console.info(`composer access refusal screenshot: ${shot}`);
+      expect(read.refused).toBe(ACCESS_REFUSED_LINE);
+      expect(read.hover).toBe(ACCESS_REFUSED_LINE);
       expect(read.trigger).toBe("Accept edits");
-      // Whole at the width this app is smallest in: the clause that says when the pick lands is the point of it.
-      expect(read.cut).toBe(false);
-      expect(read.width).toBeLessThan(read.slot);
-      // Drawn like every other line in that slot: mono words on nothing, no fill, no border, no icon, no panel.
-      expect(read.skin).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0 });
-      expect(read.panels).toBe(0);
-      // The line moves nothing: the slot is there whether or not a line is in it.
+      expect(read.ink).not.toBe(read.quiet);
+      expect(read.lines).toBe(0);
+      // Nothing moves: the refusal takes no room of its own.
       expect(await box("[data-slot=composer-shell]")).toEqual(before);
     }
   }, 60_000);
@@ -847,8 +827,8 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(picked.label).toBe("Medium");
       expect(picked.marked).toEqual(["medium"]);
       expect(picked.checked).toEqual(["medium"]);
-      // The word is muted mono on nothing, the same caption the model menu marks its default with.
-      expect(picked.badge).toEqual({ mono: true, bare: true, muted: true });
+      // The word is a quiet sans tag on nothing, as the model menu marks its default: a word a person reads, never mono.
+      expect(picked.badge).toEqual({ mono: false, bare: true, muted: true });
       const path = join(SHOTS_DIR, `composer-effort-${theme}.png`);
       await page!.screenshot({ path });
       console.info(`composer effort screenshot: ${path}`);

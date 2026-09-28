@@ -847,9 +847,9 @@ describe("runtime session history", () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
     const ws = await createOn(rt, { golden: "snap_g", name: "a" });
-    const handle = await rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
-    expect(m.lastStart()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
-    expect(handle.view()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "plan" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-5-5", effort: "high", permissionMode: "acceptEdits" });
+    expect(m.lastStart()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "acceptEdits" });
+    expect(handle.view()).toMatchObject({ model: "claude-opus-5-5", effort: "high", permissionMode: "acceptEdits" });
     // The CLI announces the model it resolved; that name replaces the request's on the view.
     m.start();
     expect((await rt.sessions.list(ws.id))[0]!.model).toBe("claude-sonnet-4-5");
@@ -922,7 +922,7 @@ describe("runtime session history", () => {
       // A binary that still offers Opus 5 keeps it among its current models, under the table's name for it.
       expect(claude.models[0]).toMatchObject({ label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] });
       expect(claude.legacyModels?.map(m => m.value)).not.toContain("claude-opus-5");
-      expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"]);
+      expect(claude.permissionModes.map(o => o.value)).toEqual(["default", "acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk"]);
       expect(probes(backend)).toHaveLength(1);
       // The probe is the adapter's line under the guest's login, so it runs under the guest's config dir, never HOME.
       expect(probes(backend)[0]).toContain("CLAUDE_CONFIG_DIR='/root/.claude-cfg'");
@@ -1109,8 +1109,8 @@ describe("runtime session history", () => {
       await expect(rt.sessions.start(ws.id, { prompt: "go", permissionMode: "yolo" })).rejects.toThrow(/^access mode "yolo" is not one claude takes; one of: Default \(default\), /);
       expect(m.lastStart()).toBeUndefined();
       expect(await rt.sessions.list(ws.id)).toEqual([]);
-      const handle = await rt.sessions.start(ws.id, { prompt: "go", effort: "high", permissionMode: "plan" });
-      expect(m.lastStart()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
+      const handle = await rt.sessions.start(ws.id, { prompt: "go", effort: "high", permissionMode: "acceptEdits" });
+      expect(m.lastStart()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "acceptEdits" });
       m.start();
       m.done("ok");
       m.end();
