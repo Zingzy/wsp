@@ -1,0 +1,57 @@
+{
+  "tool": "setup",
+  "cases": [
+    {
+      "case": "a job",
+      "arguments": {},
+      "replies": {
+        "init.get": "{\"id\":1,\"ok\":true,\"setup\":{\"job\":{\"stoppable\":true,\"step\":2,\"road\":\"manual\",\"id\":\"job-1\",\"phase\":\"signing-in\",\"keys\":{\"2\":false,\"solari\":true},\"screens\":[{\"id\":\"agents\",\"title\":\"Agents \u0085\",\"top\":\"pick\",\"items\":[{\"label\":\"Claude\",\"id\":\"claude\",\"detail\":[\"a\",\"b\"],\"size\":1.5,\"lock\":\"on\",\"extra\":1}],\"ticks\":[\"claude\"],\"answers\":{\"q\":\"a\"},\"footer\":[{\"tone\":\"red\",\"text\":\"careful\"}]}],\"rows\":[{\"state\":\"waiting\",\"label\":\"GitHub 🧪\",\"kind\":\"sign-in\",\"id\":\"gh\",\"page\":\"https://github.com/login/device\",\"code\":\"ABCD-1234\",\"since\":1727431200000.5}],\"progress\":{\"total\":9,\"done\":4},\"log\":[\"line \\\"one\\\"\"],\"golden\":{\"version\":3}},\"agents\":[{\"takesTools\":true,\"name\":\"Claude Code\",\"configured\":true,\"id\":\"claude\",\"extra\":\"x\"}],\"pricing\":{\"rateUsdPerHour\":0.30000000000000004,\"size\":{\"memMb\":16384,\"cpu\":8}},\"home\":\"/Users/zingzy\",\"keyProvider\":\"solari\",\"keys\":{\"solari\":true,\"anthropic\":false},\"place\":{\"name\":\"solari\",\"id\":\"place-solari\"},\"unknownTop\":1}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"setup\\\": {\\n    \\\"keys\\\": {\\n      \\\"solari\\\": true,\\n      \\\"anthropic\\\": false\\n    },\\n    \\\"keyProvider\\\": \\\"solari\\\",\\n    \\\"home\\\": \\\"/Users/zingzy\\\",\\n    \\\"agents\\\": [\\n      {\\n        \\\"id\\\": \\\"claude\\\",\\n        \\\"name\\\": \\\"Claude Code\\\",\\n        \\\"configured\\\": true,\\n        \\\"takesTools\\\": true\\n      }\\n    ],\\n    \\\"pricing\\\": {\\n      \\\"size\\\": {\\n        \\\"cpu\\\": 8,\\n        \\\"memMb\\\": 16384\\n      },\\n      \\\"rateUsdPerHour\\\": 0.30000000000000004\\n    },\\n    \\\"place\\\": {\\n      \\\"id\\\": \\\"place-solari\\\",\\n      \\\"name\\\": \\\"solari\\\"\\n    },\\n    \\\"job\\\": {\\n      \\\"id\\\": \\\"job-1\\\",\\n      \\\"road\\\": \\\"manual\\\",\\n      \\\"phase\\\": \\\"signing-in\\\",\\n      \\\"keys\\\": {\\n        \\\"2\\\": false,\\n        \\\"solari\\\": true\\n      },\\n      \\\"step\\\": 2,\\n      \\\"stoppable\\\": true,\\n      \\\"screens\\\": [\\n        {\\n          \\\"id\\\": \\\"agents\\\",\\n          \\\"title\\\": \\\"Agents \\\\u0085\\\",\\n          \\\"top\\\": \\\"pick\\\",\\n          \\\"items\\\": [\\n            {\\n              \\\"id\\\": \\\"claude\\\",\\n              \\\"label\\\": \\\"Claude\\\",\\n              \\\"size\\\": 1.5,\\n              \\\"detail\\\": [\\n                \\\"a\\\",\\n                \\\"b\\\"\\n              ],\\n              \\\"lock\\\": \\\"on\\\"\\n            }\\n          ],\\n          \\\"ticks\\\": [\\n            \\\"claude\\\"\\n          ],\\n          \\\"answers\\\": {\\n            \\\"q\\\": \\\"a\\\"\\n          },\\n          \\\"footer\\\": [\\n            {\\n              \\\"text\\\": \\\"careful\\\",\\n              \\\"tone\\\": \\\"red\\\"\\n            }\\n          ]\\n        }\\n      ],\\n      \\\"rows\\\": [\\n        {\\n          \\\"id\\\": \\\"gh\\\",\\n          \\\"kind\\\": \\\"sign-in\\\",\\n          \\\"label\\\": \\\"GitHub 🧪\\\",\\n          \\\"state\\\": \\\"waiting\\\",\\n          \\\"page\\\": \\\"https://github.com/login/device\\\",\\n          \\\"code\\\": \\\"ABCD-1234\\\",\\n          \\\"since\\\": 1727431200000.5\\n        }\\n      ],\\n      \\\"progress\\\": {\\n        \\\"done\\\": 4,\\n        \\\"total\\\": 9\\n      },\\n      \\\"log\\\": [\\n        \\\"line \\\\\\\"one\\\\\\\"\\\"\\n      ],\\n      \\\"golden\\\": {\\n        \\\"version\\\": 3\\n      }\\n    }\\n  }\\n}\"}],\"structuredContent\":{\"setup\":{\"keys\":{\"solari\":true,\"anthropic\":false},\"keyProvider\":\"solari\",\"home\":\"/Users/zingzy\",\"agents\":[{\"id\":\"claude\",\"name\":\"Claude Code\",\"configured\":true,\"takesTools\":true}],\"pricing\":{\"size\":{\"cpu\":8,\"memMb\":16384},\"rateUsdPerHour\":0.30000000000000004},\"place\":{\"id\":\"place-solari\",\"name\":\"solari\"},\"job\":{\"id\":\"job-1\",\"road\":\"manual\",\"phase\":\"signing-in\",\"keys\":{\"2\":false,\"solari\":true},\"step\":2,\"stoppable\":true,\"screens\":[{\"id\":\"agents\",\"title\":\"Agents \\u0085\",\"top\":\"pick\",\"items\":[{\"id\":\"claude\",\"label\":\"Claude\",\"size\":1.5,\"detail\":[\"a\",\"b\"],\"lock\":\"on\"}],\"ticks\":[\"claude\"],\"answers\":{\"q\":\"a\"},\"footer\":[{\"text\":\"careful\",\"tone\":\"red\"}]}],\"rows\":[{\"id\":\"gh\",\"kind\":\"sign-in\",\"label\":\"GitHub 🧪\",\"state\":\"waiting\",\"page\":\"https://github.com/login/device\",\"code\":\"ABCD-1234\",\"since\":1727431200000.5}],\"progress\":{\"done\":4,\"total\":9},\"log\":[\"line \\\"one\\\"\"],\"golden\":{\"version\":3}}}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "init.get"
+        }
+      ]
+    },
+    {
+      "case": "no job",
+      "arguments": {},
+      "replies": {
+        "init.get": "{\"id\":1,\"ok\":true,\"setup\":{\"keys\":{},\"home\":\"/root\",\"agents\":[],\"pricing\":null,\"job\":null,\"buildRefusal\":\"no key\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"setup\\\": {\\n    \\\"keys\\\": {},\\n    \\\"home\\\": \\\"/root\\\",\\n    \\\"agents\\\": [],\\n    \\\"pricing\\\": null,\\n    \\\"buildRefusal\\\": \\\"no key\\\",\\n    \\\"job\\\": null\\n  }\\n}\"}],\"structuredContent\":{\"setup\":{\"keys\":{},\"home\":\"/root\",\"agents\":[],\"pricing\":null,\"buildRefusal\":\"no key\",\"job\":null}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "init.get"
+        }
+      ]
+    },
+    {
+      "case": "a setup this build cannot read",
+      "arguments": {},
+      "replies": {
+        "init.get": "{\"id\":1,\"ok\":true,\"setup\":{\"job\":{\"stoppable\":true,\"step\":1.5,\"road\":\"manual\",\"id\":\"job-1\",\"phase\":\"signing-in\",\"keys\":{\"2\":false,\"solari\":true},\"screens\":[{\"id\":\"agents\",\"title\":\"Agents \u0085\",\"top\":\"pick\",\"items\":[{\"label\":\"Claude\",\"id\":\"claude\",\"detail\":[\"a\",\"b\"],\"size\":1.5,\"lock\":\"on\",\"extra\":1}],\"ticks\":[\"claude\"],\"answers\":{\"q\":\"a\"},\"footer\":[{\"tone\":\"red\",\"text\":\"careful\"}]}],\"rows\":[{\"state\":\"waiting\",\"label\":\"GitHub 🧪\",\"kind\":\"sign-in\",\"id\":\"gh\",\"page\":\"https://github.com/login/device\",\"code\":\"ABCD-1234\",\"since\":1727431200000.5}],\"progress\":{\"total\":9,\"done\":4},\"log\":[\"line \\\"one\\\"\"],\"golden\":{\"version\":3}},\"agents\":[{\"takesTools\":true,\"name\":\"Claude Code\",\"configured\":true,\"id\":\"claude\",\"extra\":\"x\"}],\"pricing\":{\"rateUsdPerHour\":0.30000000000000004,\"size\":{\"memMb\":16384,\"cpu\":8}},\"home\":\"/Users/zingzy\",\"keyProvider\":\"solari\",\"keys\":{\"solari\":true,\"anthropic\":false},\"place\":{\"name\":\"solari\",\"id\":\"place-solari\"},\"unknownTop\":1}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the host would not read this line. usage: wsp setup\"}],\"structuredContent\":{\"error\":\"the host would not read this line. usage: wsp setup\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "init.get"
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {},
+      "replies": {
+        "init.get": "{\"id\":1,\"ok\":false,\"error\":\"init.get failed\",\"kind\":\"auth\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"init.get failed\"}],\"structuredContent\":{\"error\":\"init.get failed\",\"class\":\"auth\",\"exit\":2},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "init.get"
+        }
+      ]
+    }
+  ]
+}

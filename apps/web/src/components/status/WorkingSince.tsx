@@ -4,7 +4,7 @@ import { formatWorkingDurationLabel, parseTimestampMs } from "../../sidebar/Side
 
 /** How long the latest turn has run, ticking each second. A turn with no start on its row yet, a send the runtime
  * has not answered, counts from the moment it was drawn. */
-export function WorkingSince({ since }: { since: string | null }) {
+export function WorkingSince({ since, format = formatWorkingDurationLabel }: { since: string | null; format?: (ms: number) => string }) {
   const [drawnAt] = useState(Date.now);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -14,7 +14,7 @@ export function WorkingSince({ since }: { since: string | null }) {
   const from = since === null ? drawnAt : parseTimestampMs(since);
   return (
     <span aria-hidden className="tabular-nums">
-      {formatWorkingDurationLabel(now - from)}
+      {format(now - from)}
     </span>
   );
 }

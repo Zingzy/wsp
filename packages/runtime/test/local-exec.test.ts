@@ -295,6 +295,33 @@ describe("a real turn's process group", () => {
     await launched.exited;
   }, 20_000);
 
+  it("an attach reading a long log from the first byte lets the loop turn between its chunks", async () => {
+    // A host re-opening a turn reads its whole log, and read in one go 200 MB held the loop 3.7 s (measured
+    // 2026-09-28), which is a host answering nothing to every window and every line at a terminal.
+    const bytes = 200_000_000;
+    const factory = localExecStream({ root, runDir });
+    const launched = factory(`head -c ${bytes} /dev/zero | tr '\\0' x | fold -w 999; sleep 30`, { env: {} });
+    const run = launched.run!;
+    await vi.waitUntil(() => existsSync(`${run}.log`) && statSync(`${run}.log`).size > bytes, { timeout: 60_000, interval: 50 });
+    const next = localExecStream({ root, runDir });
+    const attached = (await next.attach!(run, { input: false })) as ExecStream;
+    let last = performance.now();
+    let held = 0;
+    const tick = setInterval(() => {
+      const now = performance.now();
+      held = Math.max(held, now - last);
+      last = now;
+    }, 10);
+    let read = 0;
+    for await (const _ of attached.lines) if (++read === 200_000) break;
+    held = Math.max(held, performance.now() - last);
+    clearInterval(tick);
+    expect(read).toBe(200_000);
+    expect(held).toBeLessThan(500);
+    launched.kill();
+    await launched.exited;
+  }, 90_000);
+
   it("an attach answers gone for a run this computer no longer holds, and refuses a handle it could not have minted", async () => {
     const factory = localExecStream({ root, runDir });
     const stream = factory("echo hi", { env: {} });

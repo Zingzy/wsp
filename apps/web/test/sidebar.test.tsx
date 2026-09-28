@@ -21,6 +21,7 @@ import { noDaemonApi } from "./fake-daemon-api.js";
 import { WorkspaceTerminals, provideTerminals } from "../src/terminal/link.js";
 import { clearNotices, lastNotice } from "./notice-text.js";
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
+import { CREATE_STEP_WORDS } from "../src/shell/creationLog.js";
 
 // The triggers keep their elements, and no popup mounts: this file focuses and
 // clicks the search row, and Base UI's positioning against jsdom's zero-size
@@ -961,33 +962,60 @@ describe("one lifted tile", () => {
 });
 
 describe("the creation tile", () => {
-  it("is a tile at the thread tile's height: where it will run, the name, the stage line cut with the whole on hover; a refused create says Failed in the slot", async () => {
+  it("is a tile at the thread tile's height: where it will run, Starting with the crab, the name, the step in plain words; a refused create says Failed in the slot", async () => {
     await mount(fakeApi([COPIED], [status(COPIED)]), "api");
     const long = "Forking the image, which takes a moment on a computer that has never made a copy of this project before.";
     act(() =>
       useStore.setState({
         creations: [
           { key: "creating:1", name: "beta", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [{ stage: "fork-requested", message: long, at: "t", elapsedMs: 0 }], failed: null },
-          { key: "creating:2", name: "gamma", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [], failed: { title: "Couldn't start gamma", detail: "the disk is full" } },
+          { key: "creating:2", name: "gamma", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [], failed: { title: "Could not start gamma", detail: "the disk is full" } },
+          {
+            key: "creating:3",
+            name: "delta",
+            askedAt: Date.now(),
+            project: "pr_1",
+            workspaceId: null,
+            lines: [{ stage: "fork-requested", message: long, at: "t", elapsedMs: 0 }, { stage: "failed", message: "the disk is full", at: "t", elapsedMs: 900 }],
+            failed: { title: "Could not start delta", detail: "the disk is full" },
+          },
         ],
       } as never),
     );
     const beta = rowOf("beta");
     const gamma = rowOf("gamma");
-    expect(rowIds()).toEqual(["ws:ws_a", "creating:1", "creating:2"]);
+    // Each files where a thread in its state does, counted there: Working while it is made, Needs you once refused.
+    expect(rowIds()).toEqual(["creating:2", "creating:3", "creating:1", "ws:ws_a"]);
+    const sectionOf = (row: HTMLElement) => row.closest<HTMLElement>("[data-section]")!;
+    expect(sectionOf(beta).dataset["section"]).toBe("working");
+    expect(sectionOf(gamma).dataset["section"]).toBe("needs-you");
+    expect(sectionOf(beta).querySelector("[data-group-count]")!.textContent).toBe("(1)");
+    expect(sectionOf(gamma).querySelector("[data-group-count]")!.textContent).toBe("(2)");
     for (const row of [beta, gamma]) {
       expect(row.className).toBe(rowOf("api").className);
       expect(row.querySelector("[data-tile-where]")!.textContent).toBe(`spoo-landing @ ${BOX_NAME}`);
       expect(row.querySelector(".rounded-full, .bg-destructive")).toBeNull();
     }
     expect(beta.getAttribute("aria-busy")).toBe("true");
-    expect(beta.querySelector("[data-thread-status]")).toBeNull();
+    const starting = beta.querySelector<HTMLElement>("[data-thread-status]")!;
+    expect([starting.dataset.threadStatus, starting.textContent, starting.dataset.tone]).toEqual(["starting", "Starting", "working"]);
+    expect(starting.className).toContain("text-status-working");
+    expect(starting.className).toContain("font-medium");
+    // The step takes the branch's place on row three in the step words' table, the runtime's sentence left out, and
+    // the crab walks at that row's end as it does on a working thread's tile.
     const line = beta.querySelector<HTMLElement>("[data-creation-line]")!;
-    expect(line.textContent).toBe(long);
-    expect(beta.getAttribute("title")).toContain(long);
+    expect(line.textContent).toBe(CREATE_STEP_WORDS["fork-requested"]);
+    expect(beta.textContent).not.toContain(long);
     expect(line.className).toContain("truncate");
+    expect(line.parentElement!.querySelector("[data-crab]")).not.toBeNull();
+    expect(beta.getAttribute("title")).toContain(CREATE_STEP_WORDS["fork-requested"]);
+    expect(gamma.querySelector("[data-crab]")).toBeNull();
     expect(gamma.getAttribute("aria-busy")).toBeNull();
     expect(threadState(gamma)).toBe("Failed");
-    expect(gamma.querySelector("[data-creation-line]")!.textContent).toBe("Couldn't start gamma");
+    // Refused before any step, row three says so alone, in the status red, and never the name the row above holds.
+    expect(gamma.querySelector("[data-creation-line]")!.textContent).toBe(CREATE_STEP_WORDS.failed);
+    expect(gamma.querySelector("[data-creation-line]")!.className).toContain("text-status-failed");
+    // Refused on a step, row three names that step.
+    expect(rowOf("delta").querySelector("[data-creation-line]")!.textContent).toBe(CREATE_STEP_WORDS["fork-requested"]);
   });
 });

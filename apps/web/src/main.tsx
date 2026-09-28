@@ -8,6 +8,10 @@ import "./themes/index.js";
 
 const cfg = bootPayload();
 if (cfg === undefined) throw new Error("the page has no window.__WSP__ boot object");
+// React's dev build writes a performance measure per component render and nothing clears them; a window left open
+// for hours held millions.
+if (import.meta.env.DEV) setInterval(() => performance.clearMeasures(), 60_000);
+
 createRoot(document.getElementById("root")!).render(
   <>
     <GlassGround />
