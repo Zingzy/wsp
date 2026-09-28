@@ -25,8 +25,46 @@ struct Case {
     replies: BTreeMap<String, String>,
     #[serde(default)]
     env: BTreeMap<String, String>,
+    #[serde(default)]
+    pushed: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    closes: Option<String>,
+    /// The command line a recipe tool runs and what it printed; the case holds the words it must be run with.
+    #[serde(default)]
+    wsp: Option<Wsp>,
+    /// The platform the answer names this computer by; another platform's answer is not this computer's to print.
+    #[serde(default)]
+    platform: Option<String>,
     line: String,
     asked: Vec<Value>,
+}
+
+#[derive(Deserialize)]
+struct Wsp {
+    argv: Vec<String>,
+    stdout: String,
+    stderr: String,
+    exit: i32,
+}
+
+/// A wsp that writes the words it was run with beside itself and prints what the recorded one printed.
+fn fake_wsp(dir: &Path, wsp: &Wsp) -> std::path::PathBuf {
+    let script = dir.join("wsp");
+    std::fs::write(dir.join("stdout"), &wsp.stdout).unwrap();
+    std::fs::write(dir.join("stderr"), &wsp.stderr).unwrap();
+    let at = dir.display();
+    let body = format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{at}/argv'\ncat '{at}/stdout'\ncat '{at}/stderr' >&2\nexit {}\n", wsp.exit);
+    std::fs::write(&script, body).unwrap();
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    script
+}
+
+fn this_platform() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "darwin"
+    } else {
+        "linux"
+    }
 }
 
 /// A state folder a host on this port serves: the lock naming this process, which is alive, and the token beside it.
@@ -45,15 +83,20 @@ async fn every_recorded_answer_is_printed_byte_for_byte() {
     for file in std::fs::read_dir(&answers).unwrap() {
         let recorded: Answers = serde_json::from_str(&std::fs::read_to_string(file.unwrap().path()).unwrap()).unwrap();
         for case in recorded.cases {
+            if case.platform.as_deref().is_some_and(|p| p != this_platform()) {
+                continue;
+            }
             let dir = tempfile::tempdir().unwrap();
-            let (port, frames) = common::host_asked("contract-token", case.replies).await;
+            let script = common::Script { replies: case.replies, pushed: case.pushed, closes: case.closes };
+            let (port, frames) = common::scripted("contract-token", script).await;
             let state = served_state(dir.path(), port, "contract-token");
+            let wsp = case.wsp.as_ref().map(|wsp| vec![fake_wsp(dir.path(), wsp).to_string_lossy().into_owned()]).unwrap_or_default();
             let asked = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": recorded.tool, "arguments": case.arguments } });
             let input = format!("{asked}\n");
             let mut out = Vec::new();
             let mut env: wsp_mcp::Env = case.env.into_iter().collect();
             env.insert("WSP_HOME".to_owned(), dir.path().join("home").to_string_lossy().into_owned());
-            let code = wsp_mcp::serve(&Args { state, ..Args::default() }, &env, input.as_bytes(), &mut out).await;
+            let code = wsp_mcp::serve(&Args { state: state.clone(), wsp, ..Args::default() }, &env, input.as_bytes(), &mut out).await;
             assert_eq!(code, 0);
             let printed = String::from_utf8(out).unwrap();
             assert_eq!(printed, format!("{}\n", case.line), "{} {}", recorded.tool, case.case);
@@ -68,6 +111,11 @@ async fn every_recorded_answer_is_printed_byte_for_byte() {
                 recorded.tool,
                 case.case
             );
+            if let Some(wsp) = &case.wsp {
+                let ran = std::fs::read_to_string(dir.path().join("argv")).unwrap();
+                let asked: Vec<String> = wsp.argv.iter().map(|w| w.replace("{state}", &state.to_string_lossy())).collect();
+                assert_eq!(ran.lines().collect::<Vec<_>>(), asked, "{} {}: the words wsp was run with", recorded.tool, case.case);
+            }
             replayed += 1;
         }
     }
