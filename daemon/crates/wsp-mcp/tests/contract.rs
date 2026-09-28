@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Every answer the TypeScript server recorded, replayed: a host that answers each op with the frame it answered
-//! there, and the one line this server prints for the same call, which must be the recorded line byte for byte.
+//! there, and the one line this server prints for the same call, which must be the recorded line byte for byte, and
+//! the ops it asked the host on the way, which must be the ones recorded with the same fields.
 //! The recording is packages/host/test/mcp-record.test.ts; a tool with no answers file has nothing held here.
 
 mod common;
@@ -35,6 +36,9 @@ struct Case {
     /// The platform the answer names this computer by; another platform's answer is not this computer's to print.
     #[serde(default)]
     platform: Option<String>,
+    /// Recorded with the cloud on, which is the only state some tools are served in.
+    #[serde(default)]
+    cloud: bool,
     line: String,
     asked: Vec<Value>,
 }
@@ -96,6 +100,9 @@ async fn every_recorded_answer_is_printed_byte_for_byte() {
             let mut out = Vec::new();
             let mut env: wsp_mcp::Env = case.env.into_iter().collect();
             env.insert("WSP_HOME".to_owned(), dir.path().join("home").to_string_lossy().into_owned());
+            if case.cloud {
+                env.insert("WSP_CLOUD".to_owned(), "1".to_owned());
+            }
             let code = wsp_mcp::serve(&Args { state: state.clone(), wsp, ..Args::default() }, &env, input.as_bytes(), &mut out).await;
             assert_eq!(code, 0);
             let printed = String::from_utf8(out).unwrap();

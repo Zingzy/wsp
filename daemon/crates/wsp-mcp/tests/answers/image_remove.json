@@ -1,0 +1,82 @@
+{
+  "tool": "image_remove",
+  "cases": [
+    {
+      "case": "unconfirmed",
+      "arguments": {
+        "image": "snap-p1"
+      },
+      "replies": {
+        "projectGoldens.list": "{\"id\":1,\"ok\":true,\"projectGoldens\":[{\"createdAt\":\"2026-09-21T10:00:00.000Z\",\"workspaceName\":\"alpha \u0085\",\"extra\":true,\"workspaceId\":\"ws-1\",\"version\":3,\"golden\":\"snap-g1\",\"projects\":[{\"importedAt\":\"2026-09-20T00:00:00.000Z\",\"dest\":\"/root/alpha\",\"name\":\"alpha\"}],\"snapshotId\":\"snap-p1\"}]}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"snap-p1 kept. Its snapshot, taken from alpha \\u0085 on 2026-09-21, is deleted at the provider, and no workspace starts from it again. Ask the person, then call image_remove again with confirm true.\"}],\"structuredContent\":{\"projectGolden\":{\"createdAt\":\"2026-09-21T10:00:00.000Z\",\"workspaceName\":\"alpha \\u0085\",\"extra\":true,\"workspaceId\":\"ws-1\",\"version\":3,\"golden\":\"snap-g1\",\"projects\":[{\"importedAt\":\"2026-09-20T00:00:00.000Z\",\"dest\":\"/root/alpha\",\"name\":\"alpha\"}],\"snapshotId\":\"snap-p1\"},\"alreadyGone\":false},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projectGoldens.list"
+        }
+      ]
+    },
+    {
+      "case": "removed",
+      "arguments": {
+        "image": "snap-p1",
+        "confirm": true
+      },
+      "replies": {
+        "projectGoldens.list": "{\"id\":1,\"ok\":true,\"projectGoldens\":[{\"snapshotId\":\"snap-p1\",\"projects\":[{\"name\":\"alpha\",\"dest\":\"/root/alpha\",\"importedAt\":\"2026-09-20T00:00:00.000Z\",\"size\":1234}],\"golden\":\"snap-g1\",\"version\":3,\"workspaceId\":\"ws-1\",\"workspaceName\":\"alpha \u0085\",\"createdAt\":\"2026-09-21T10:00:00.000Z\"}]}",
+        "projectGoldens.remove": "{\"id\":1,\"ok\":true,\"alreadyGone\":false,\"projectGolden\":{\"createdAt\":\"2026-09-21T10:00:00.000Z\",\"workspaceName\":\"alpha \u0085\",\"extra\":true,\"workspaceId\":\"ws-1\",\"version\":3,\"golden\":\"snap-g1\",\"projects\":[{\"importedAt\":\"2026-09-20T00:00:00.000Z\",\"dest\":\"/root/alpha\",\"name\":\"alpha\"}],\"snapshotId\":\"snap-p1\"}}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"removed project image snap-p1: its snapshot is gone at the provider, and its record with it\"}],\"structuredContent\":{\"projectGolden\":{\"snapshotId\":\"snap-p1\",\"projects\":[{\"name\":\"alpha\",\"dest\":\"/root/alpha\",\"importedAt\":\"2026-09-20T00:00:00.000Z\"}],\"golden\":\"snap-g1\",\"version\":3,\"workspaceId\":\"ws-1\",\"workspaceName\":\"alpha \\u0085\",\"createdAt\":\"2026-09-21T10:00:00.000Z\"},\"alreadyGone\":false}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projectGoldens.list"
+        },
+        {
+          "op": "projectGoldens.remove",
+          "snapshotId": "snap-p1"
+        }
+      ]
+    },
+    {
+      "case": "already gone",
+      "arguments": {
+        "image": "snap-p1",
+        "confirm": true
+      },
+      "replies": {
+        "projectGoldens.list": "{\"id\":1,\"ok\":true,\"projectGoldens\":[{\"snapshotId\":\"snap-p1\",\"projects\":[{\"name\":\"alpha\",\"dest\":\"/root/alpha\",\"importedAt\":\"2026-09-20T00:00:00.000Z\",\"size\":1234}],\"golden\":\"snap-g1\",\"version\":3,\"workspaceId\":\"ws-1\",\"workspaceName\":\"alpha \u0085\",\"createdAt\":\"2026-09-21T10:00:00.000Z\"}]}",
+        "projectGoldens.remove": "{\"id\":1,\"ok\":true,\"projectGolden\":{\"snapshotId\":\"snap-p1\",\"projects\":[{\"name\":\"alpha\",\"dest\":\"/root/alpha\",\"importedAt\":\"2026-09-20T00:00:00.000Z\",\"size\":1234}],\"golden\":\"snap-g1\",\"version\":3,\"workspaceId\":\"ws-1\",\"workspaceName\":\"alpha \u0085\",\"createdAt\":\"2026-09-21T10:00:00.000Z\"},\"alreadyGone\":true}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"project image snap-p1 was already gone at the provider; its record is removed\"}],\"structuredContent\":{\"projectGolden\":{\"snapshotId\":\"snap-p1\",\"projects\":[{\"name\":\"alpha\",\"dest\":\"/root/alpha\",\"importedAt\":\"2026-09-20T00:00:00.000Z\",\"size\":1234}],\"golden\":\"snap-g1\",\"version\":3,\"workspaceId\":\"ws-1\",\"workspaceName\":\"alpha \\u0085\",\"createdAt\":\"2026-09-21T10:00:00.000Z\"},\"alreadyGone\":true}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projectGoldens.list"
+        },
+        {
+          "op": "projectGoldens.remove",
+          "snapshotId": "snap-p1"
+        }
+      ]
+    },
+    {
+      "case": "no such",
+      "arguments": {
+        "image": "snap-x",
+        "confirm": true
+      },
+      "replies": {
+        "projectGoldens.list": "{\"id\":1,\"ok\":true,\"projectGoldens\":[{\"snapshotId\":\"snap-p1\",\"projects\":[{\"name\":\"alpha\",\"dest\":\"/root/alpha\",\"importedAt\":\"2026-09-20T00:00:00.000Z\",\"size\":1234}],\"golden\":\"snap-g1\",\"version\":3,\"workspaceId\":\"ws-1\",\"workspaceName\":\"alpha \u0085\",\"createdAt\":\"2026-09-21T10:00:00.000Z\"}]}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no project image snap-x; wsp image lists them with their ids\"}],\"structuredContent\":{\"error\":\"no project image snap-x; wsp image lists them with their ids\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projectGoldens.list"
+        }
+      ]
+    }
+  ]
+}
