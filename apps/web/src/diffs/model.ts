@@ -16,18 +16,31 @@ import {
 } from "../lib/diffRendering.js";
 
 export const SCOPE_LABELS: Record<GitDiffScope, string> = {
+  head: "Uncommitted",
   unstaged: "Working tree",
   staged: "Staged",
   branch: "Branch changes",
 };
 
-export const SCOPES: readonly GitDiffScope[] = ["unstaged", "staged", "branch"];
+/** What each scope holds, as a sentence names it: "No uncommitted changes at /root/app." */
+export const SCOPE_NOUNS: Record<GitDiffScope, string> = {
+  head: "uncommitted changes",
+  unstaged: "working tree changes",
+  staged: "staged changes",
+  branch: "branch changes",
+};
+
+export const SCOPES: readonly GitDiffScope[] = ["head", "unstaged", "staged", "branch"];
 
 export interface DiffFile {
   readonly fileDiff: FileDiffMetadata;
   readonly filePath: string;
   readonly fileKey: string;
   readonly fileVersion: number;
+  /** The id git gives the file's worktree contents, which a viewed mark is kept against; absent for a file that is gone. */
+  readonly blob?: string;
+  /** The daemon's patch for the file, whole, which is what says whether it can be edited here. */
+  readonly patch: string;
 }
 
 export interface DiffModel {
@@ -36,6 +49,13 @@ export interface DiffModel {
   readonly changedFiles: readonly TurnDiffFileChange[];
   /** Set when the patch text could not be parsed into files. */
   readonly raw: { readonly text: string; readonly reason: string } | null;
+}
+
+/** Whether a file can be edited inside the pane: its new side is the file in the worktree, which the staged scope's
+ * is not, it is not gone, and its patch is whole text git did not cut. */
+export function editable(file: Pick<DiffFile, "fileDiff" | "patch">, scope: GitDiffScope): boolean {
+  if (scope === "staged" || file.fileDiff.type === "deleted" || file.patch === "") return false;
+  return !/^Binary files /m.test(file.patch) && !file.patch.includes("\nGIT binary patch");
 }
 
 function changeKind(fileDiff: FileDiffMetadata): string {
@@ -58,12 +78,19 @@ export function toDiffModel(reply: GitDiffReply, cacheScope: string): DiffModel 
   if (renderable?.kind === "raw") {
     return { files: [], stat: { additions: 0, deletions: 0 }, changedFiles: [], raw: renderable };
   }
-  const files: DiffFile[] = (renderable?.files ?? []).map(fileDiff => ({
-    fileDiff,
-    filePath: resolveFileDiffPath(fileDiff),
-    fileKey: buildFileDiffIdentityKey(fileDiff),
-    fileVersion: buildFileDiffContentVersion(fileDiff),
-  }));
+  const sent = new Map(reply.files.map(f => [f.path, f]));
+  const files: DiffFile[] = (renderable?.files ?? []).map(fileDiff => {
+    const filePath = resolveFileDiffPath(fileDiff);
+    const from = sent.get(filePath);
+    return {
+      fileDiff,
+      filePath,
+      fileKey: buildFileDiffIdentityKey(fileDiff),
+      fileVersion: buildFileDiffContentVersion(fileDiff),
+      patch: from?.patch ?? "",
+      ...(from?.blob !== undefined ? { blob: from.blob } : {}),
+    };
+  });
   const parsedPaths = new Set(files.map(f => f.filePath));
   const changedFiles: TurnDiffFileChange[] = files.map(f => {
     const stat = getDiffLineStat([f.fileDiff]);

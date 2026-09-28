@@ -9,6 +9,7 @@ import {
   GitPrListReply,
   FsReadReply,
   FsSearchReply,
+  FsWriteReply,
   GitDiffReply,
   GitStatusReply,
   type FsReadEncoding,
@@ -77,8 +78,16 @@ export function gitStatus(wire: TerminalWire, cwd: string): Promise<GitStatusRep
   return call(wire, "git.status", { cwd }, GitStatusReply);
 }
 
-export function gitDiff(wire: TerminalWire, cwd: string, scope: GitDiffScope, path?: string): Promise<GitDiffReply> {
+/** paths names files from the checkout's top; whole gives each patch its whole file in one hunk. */
+export function gitDiff(wire: TerminalWire, cwd: string, scope: GitDiffScope, opts: { path?: string; paths?: readonly string[]; whole?: boolean } = {}): Promise<GitDiffReply> {
   const params: Record<string, unknown> = { cwd, scope };
-  if (path !== undefined) params["path"] = path;
+  if (opts.path !== undefined) params["path"] = opts.path;
+  if (opts.paths !== undefined) params["paths"] = [...opts.paths];
+  if (opts.whole !== undefined) params["whole"] = opts.whole;
   return call(wire, "git.diff", params, GitDiffReply);
+}
+
+/** Replaces an existing file's contents whole, as the pane saves an edit. */
+export function fsWrite(wire: TerminalWire, path: string, contents: string): Promise<FsWriteReply> {
+  return call(wire, "fs.write", { path, contents }, FsWriteReply);
 }

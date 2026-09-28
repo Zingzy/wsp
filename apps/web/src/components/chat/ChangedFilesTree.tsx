@@ -1,5 +1,5 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/ChangedFilesTree.tsx at 57a66608 (MIT).
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { type TurnDiffFileChange, type TurnId } from "./adapt";
 import {
   buildTurnDiffTree,
@@ -138,7 +138,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                   type="button"
                   size="xs"
                   variant="outline"
-                  aria-label="Open diff"
+                  aria-label="Open changes"
                   onClick={() => onOpenTurnDiff(turnId, files[0]?.path)}
                 />
               }
@@ -215,8 +215,12 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  /** What stands before a file row's name, as the Changes pane's commit tick does. */
+  renderFileLead?: ((path: string) => ReactNode) | undefined;
+  /** What stands at a file row's end, as the Changes pane's per-file controls do. */
+  renderFileControls?: ((path: string) => ReactNode) | undefined;
 }) {
-  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId } = props;
+  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId, renderFileLead, renderFileControls } = props;
   const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);
   const directoryPathsKey = useMemo(
     () => collectDirectoryPaths(treeNodes).join("\u0000"),
@@ -295,12 +299,17 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
       );
     }
 
-    return (
+    const slotted = renderFileLead !== undefined || renderFileControls !== undefined;
+    const row = (
       <button
         key={`file:${node.path}`}
         type="button"
-        className="group flex w-full items-center gap-1.5 rounded-xl py-1 pr-3 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        style={{ paddingLeft: `${leftPadding}px` }}
+        {...(slotted ? {} : { "data-changed-file": node.path })}
+        className={cn(
+          "group flex items-center gap-1.5 rounded-xl py-1 pr-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          slotted ? "min-w-0 flex-1" : "w-full hover:bg-accent/60",
+        )}
+        style={{ paddingLeft: slotted ? undefined : `${leftPadding}px` }}
         onClick={() => onOpenTurnDiff(turnId, node.path)}
       >
         {hasDirectoryNodes || depth > 0 ? (
@@ -321,6 +330,15 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
           </span>
         )}
       </button>
+    );
+    if (!slotted) return row;
+    // The row's own controls sit beside its button rather than inside it: a button holds no other button.
+    return (
+      <div key={`file:${node.path}`} data-changed-file={node.path} className="flex items-center gap-1 rounded-xl transition-colors hover:bg-accent/60" style={{ paddingLeft: `${leftPadding}px` }}>
+        {renderFileLead?.(node.path)}
+        {row}
+        {renderFileControls?.(node.path)}
+      </div>
     );
   };
 

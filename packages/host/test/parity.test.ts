@@ -10,7 +10,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { COORDINATOR_HANDOFF, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RUNTIME_OPS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
+import { COORDINATOR_HANDOFF, DaemonRequest, EXIT_CODES, EXIT_WORDS, ExitClass, NOTIFY_CALLER, NOTIFY_WORDS, RUNTIME_OPS, RuntimeRequest, SessionStartOutcome, TURN_END_WORDS, effortsFor, markedDefault, stillWorkingLine, type WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
 import { agentPage, cli, COMMAND_LINES, commandPage, COMMANDS_FOR_HELP, HELP, HOST_FLAG, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, SHARED_FLAGS, type CliIO, type CommandLine } from "../src/cli.js";
 
@@ -211,7 +211,11 @@ export function usageError(argv: readonly string[], lines: readonly CommandLine[
  * each value, or why that command reads the values another way. A flag that takes one value where the wire wants a
  * list sends a string and the start is refused before the thread opens, so a new list input belongs here the day it
  * is added. */
+/** Every frame a daemon takes, off the protocol's own union of them. */
+const DAEMON_FRAME_OPS: readonly string[] = DaemonRequest.options.map(o => o.shape.op.value);
+
 const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
+  "commit files": "--file",
   "threads wait threads": "the threads are the words after the verb",
   "exec argv": "the command is the words after the verb",
   "export agents": "the catalog ids are one comma-joined value of --agents",
@@ -339,6 +343,20 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     };
     expect(RUNTIME_OPS.filter(op => op.startsWith("sessions.") && !verbs.includes(`"${op}"`)).sort()).toEqual(Object.keys(WINDOW_ONLY).sort());
     for (const [op, why] of Object.entries(WINDOW_ONLY)) expect(why, `${op} says why it has no verb`).toMatch(/\S/);
+  });
+
+  it("the Changes pane's own ops that no verb sends say why they stay with the pane", () => {
+    const verbs = readFileSync(new URL("../src/verbs.ts", import.meta.url), "utf8");
+    const PANE_ONLY: Record<string, string> = {
+      "workspaces.checkout": "the branch line a tile and the composer read, which the host pushes on every status; an agent reads its own branch with git in its copy",
+      "workspaces.viewed": "a viewed mark is one person's place in a review; an agent reads the diff whole with git and marks nothing",
+      "fs.write": "the pane's save of an edit made inside the diff; the command line reaches a file through wsp exec",
+    };
+    for (const [op, why] of Object.entries(PANE_ONLY)) {
+      expect([...RUNTIME_OPS, ...DAEMON_FRAME_OPS], `${op} is served`).toContain(op);
+      expect(verbs.includes(`"${op}"`), `${op} is sent by a verb, so it is no longer the pane's alone`).toBe(false);
+      expect(why, `${op} says why it has no verb`).toMatch(/\S/);
+    }
   });
 
   it("every command line is a verb table entry or a command carrying why it has no tool, so a new command sits in neither only by failing here", () => {

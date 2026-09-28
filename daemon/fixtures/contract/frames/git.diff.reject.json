@@ -23,5 +23,19 @@
     "cwd": "/root/repo",
     "scope": "branch",
     "machineId": 1
+  },
+  {
+    "id": 1,
+    "op": "git.diff",
+    "cwd": "repo",
+    "scope": "head",
+    "paths": "src/a.ts"
+  },
+  {
+    "id": 1,
+    "op": "git.diff",
+    "cwd": "repo",
+    "scope": "head",
+    "whole": "yes"
   }
 ]

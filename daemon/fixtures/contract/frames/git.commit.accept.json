@@ -1,0 +1,20 @@
+[
+  {
+    "id": 1,
+    "op": "git.commit",
+    "cwd": "repo",
+    "message": "Round the cart total once\n\nThe total rounded per line.",
+    "paths": [
+      "src/cart.ts",
+      "fresh.txt"
+    ]
+  },
+  {
+    "id": 1,
+    "op": "git.commit",
+    "cwd": "/root/repo",
+    "message": "m",
+    "paths": [],
+    "machineId": "wsp-a"
+  }
+]

@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "op": "fs.write",
+    "path": "repo/a.txt"
+  },
+  {
+    "id": 1,
+    "op": "fs.write",
+    "contents": "x"
+  },
+  {
+    "id": 1,
+    "op": "fs.write",
+    "path": "repo/a.txt",
+    "contents": 3
+  }
+]

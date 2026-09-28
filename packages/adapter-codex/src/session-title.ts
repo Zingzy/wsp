@@ -62,11 +62,47 @@ export function titleForCommand(options: { home: string; prompt: string; model?:
   const env = buildEnv({ base: options.baseEnv, home: options.home });
   const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
   if (options.prompt.split("\n").includes(PROMPT_END)) throw new Error(`the prompt has a line that reads ${PROMPT_END}, which ends the prompt`);
-  const model = options.model === undefined ? "" : ` -m ${slug("model", options.model)}`;
   // The question rides a quoted heredoc on stdin, read by the `-` that ends the flags; the heredoc also closes stdin,
   // which codex exec otherwise waits on when it is not a terminal.
-  const exec = `codex exec --json --skip-git-repo-check -c sandbox_mode='"read-only"' -c approval_policy='"never"'${model} -`;
-  return `export ${exports}; ${inFolder(undefined, `${exec} <<'${PROMPT_END}'\n${options.prompt}\n${PROMPT_END}`)}`;
+  return `export ${exports}; ${inFolder(undefined, `${questionLine(options.model)} <<'${PROMPT_END}'\n${options.prompt}\n${PROMPT_END}`)}`;
+}
+
+/** The one-shot question a title and a draft both ask: read-only, no approval asked, on the question from stdin. */
+const questionLine = (model?: string): string =>
+  `codex exec --json --skip-git-repo-check -c sandbox_mode='"read-only"' -c approval_policy='"never"'${model === undefined ? "" : ` -m ${slug("model", model)}`} -`;
+
+/**
+ * One shell line for the guest that asks the CLI for a commit message: the one-shot turn the title asks, read-only and
+ * under the session's CODEX_HOME, on the question in the file the runtime put on the machine, since a diff is longer
+ * than any command line may be.
+ */
+export function draftForCommand(options: { home: string; promptFile: string; model?: string; baseEnv?: Readonly<Record<string, string | undefined>> }): string {
+  const env = buildEnv({ base: options.baseEnv, home: options.home });
+  const exports = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ");
+  return `export ${exports}; ${inFolder(undefined, `${questionLine(options.model)} < ${shellQuote(options.promptFile)}`)}`;
+}
+
+/** The message out of the turn's events: the last agent message whole; null when the turn failed or said nothing. */
+export function parseDraftFor(stdout: string): string | null {
+  let text: string | undefined;
+  for (const raw of stdout.split("\n")) {
+    const line = raw.trim();
+    if (!line.startsWith("{")) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+    const event = value as Record<string, unknown>;
+    if (event.type !== "item.completed") continue;
+    const item = event.item;
+    if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
+    const row = item as Record<string, unknown>;
+    if (row.type === "agent_message" && typeof row.text === "string") text = row.text;
+  }
+  return text === undefined || text.trim() === "" ? null : text;
 }
 
 /** The title out of the turn's events: the last agent message, sanitized; null when the turn failed, said nothing or

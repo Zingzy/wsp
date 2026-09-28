@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "op": "git.discard",
+    "cwd": "repo"
+  },
+  {
+    "id": 1,
+    "op": "git.discard",
+    "path": "a.txt"
+  },
+  {
+    "id": 1,
+    "op": "git.discard",
+    "cwd": "repo",
+    "path": 3
+  }
+]

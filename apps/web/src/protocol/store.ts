@@ -122,6 +122,8 @@ interface State {
    * opened, which the row's third line reads until another one lands. Nothing is kept for a workspace nobody has
    * brought work back from. */
   broughtBack: Record<string, BringBackResult>;
+  /** Each workspace's viewed marks by path against the blob the file had then, as the host last said them. */
+  viewed: Record<string, Readonly<Record<string, string>>>;
   /** Where a workspace of each project would land, by the project's id: asked once per project, and the one home of
    * the flags a row's words about its copy's ports and its state word are read off. A key with null under it is a
    * project the runtime refused a landing for, which is what keeps that refusal from being asked again on every
@@ -579,6 +581,7 @@ export const useStore = create<State>((set, get) => {
     places: [],
     projects: [],
     broughtBack: {},
+    viewed: {},
     landings: {},
     projectsRead: false,
     placesRead: false,
@@ -1108,6 +1111,9 @@ export const useStore = create<State>((set, get) => {
           return;
         case "workspace.status":
           set(s => ({ statuses: { ...s.statuses, [e.status.id]: e.status } }));
+          return;
+        case "workspace.viewed":
+          set(s => ({ viewed: { ...s.viewed, [e.workspaceId]: e.viewed } }));
           return;
         case "workspace.cost":
           set(s => ({

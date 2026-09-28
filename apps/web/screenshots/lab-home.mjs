@@ -270,6 +270,19 @@ function smallRepo(dest) {
   }
 }
 
+/** A small repository left mid-work: a branch one commit ahead of main, then an edit, a line added to the list and
+ * a file nothing has committed yet, which is three changes and none of them committed. */
+export function leaveMidWork(dest) {
+  const git = args => execFileSync("git", ["-c", "user.name=notes", "-c", "user.email=notes@example.com", "-c", "commit.gpgsign=false", ...args], { cwd: dest, stdio: "ignore" });
+  git(["switch", "-q", "-c", "fix/cart-rounding"]);
+  writeFileSync(join(dest, "todo.md"), "- [x] try the thing\n");
+  git(["commit", "-q", "-am", "Tick the first thing off"]);
+  writeFileSync(join(dest, "README.md"), `# ${dest.split("/").at(-1)}\n\nA small repository to try things in, now with a cart.\n`);
+  writeFileSync(join(dest, "todo.md"), "- [x] try the thing\n- [ ] round the cart total once\n");
+  mkdirSync(join(dest, "src", "cart"), { recursive: true });
+  writeFileSync(join(dest, "src", "cart", "total.ts"), "export function total(lines: { price: number }[]): number {\n  const sum = lines.reduce((at, line) => at + line.price, 0);\n  return Math.round(sum * 100) / 100;\n}\n");
+}
+
 /** The pty wrapper, by its own path: a shell started with nothing in its environment has only the path this lab
  * hands it to find a command on, and that path leads with the lab's own bin. This is the BSD spelling, where the
  * file to keep comes before the command; the one on a Linux box takes -c and would read this line as a file name.
