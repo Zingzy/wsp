@@ -31,6 +31,16 @@
               "label": {
                 "type": "string"
               },
+              "mac": {
+                "type": "string",
+                "enum": [
+                  "macbook",
+                  "imac",
+                  "mac-mini",
+                  "mac-studio",
+                  "mac-pro"
+                ]
+              },
               "default": {
                 "type": "boolean"
               },
@@ -455,6 +465,16 @@
               },
               "label": {
                 "type": "string"
+              },
+              "mac": {
+                "type": "string",
+                "enum": [
+                  "macbook",
+                  "imac",
+                  "mac-mini",
+                  "mac-studio",
+                  "mac-pro"
+                ]
               },
               "default": {
                 "type": "boolean"

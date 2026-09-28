@@ -12,6 +12,7 @@ import { Spaced } from "../components/ui/spaced.js";
 import { SidebarGroup, SidebarGroupContent, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from "../components/ui/sidebar.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { useForwards, useStore } from "../protocol/store.js";
+import { sectionRowId } from "./rowGrammar.js";
 import { SectionRow } from "./SectionRow.js";
 import { compactTimeLabel } from "./workspaceRows.js";
 
@@ -24,7 +25,7 @@ export function ForwardsList() {
   if (forwards.length === 0) return null;
   return (
     <SidebarGroup data-testid="forwards-list" className="pt-0">
-      <SectionRow label="Forwarded ports" count={forwards.length} collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />
+      <SectionRow label="Forwarded ports" count={forwards.length} collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} rowId={sectionRowId("forwards")} />
       {collapsed ? null : (
         <SidebarGroupContent>
           <SidebarMenu>

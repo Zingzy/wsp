@@ -1,58 +1,48 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The one section row the sidebar has, the head over Forwarded ports: a caps
-// mono zone label, the count of what the row hides while it is shut, a
-// chevron that shuts the group, room at the right edge for a group action the
-// caller places, and the section's own menu on a right-click where the caller
-// has one. A row with no group under it to shut is pressed for its own act: it
-// draws no chevron and no count and keeps the label. Projects are rows in the
-// tree, not zones, so none of them wears this.
+// The one section head the sidebar has, over every thread section, Settled and
+// Forwarded ports: the name and its count in parentheses in muted sans, a
+// hairline filling the row and a chevron that folds the section. The hairline
+// is the one divider the sidebar draws (the owner's ruling of 2026-09-28).
 import { ChevronDownIcon } from "lucide-react";
-import type { MouseEvent, ReactNode } from "react";
-import { SidebarMenuButton } from "../components/ui/sidebar.js";
-import { MICRO_LABEL } from "../lib/microLabel.js";
+import type { MouseEvent } from "react";
 import { cn } from "../lib/utils.js";
-import { ROW_META_CLASS, TOP_ROW_CLASS } from "./rowGrammar.js";
 
 export function SectionRow({
   label,
   count,
   collapsed,
   onToggle,
-  onPress,
-  action,
   onContextMenu,
-  k,
+  rowId,
+  head,
 }: {
   label: string;
-  /** What the row hides while it is shut; absent on a row with no group under it. */
-  count?: number;
-  collapsed?: boolean;
-  /** Shuts and opens the group; absent on a row that is pressed for its own act. */
-  onToggle?: (() => void) | undefined;
-  /** The row's own act, where it has one in place of a group to shut. */
-  onPress?: (() => void) | undefined;
-  action?: ReactNode;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
   /** The section's own menu, where the section has one; a row without it keeps the browser's. */
   onContextMenu?: ((event: MouseEvent<HTMLElement>) => void) | undefined;
-  /** What a test and a screenshot step name this row by. */
-  k?: string;
+  /** Where the keyboard's walk over the sidebar's rows stops on this head. */
+  rowId?: string | undefined;
+  /** What a test and a screenshot step name a thread section's head by. */
+  head?: string | undefined;
 }) {
-  const shut = collapsed === true;
   return (
-    <>
-      <SidebarMenuButton
-        {...(onToggle === undefined ? {} : { "aria-expanded": !shut })}
-        aria-label={label}
-        {...(k === undefined ? {} : { "data-k": k })}
-        className={cn(TOP_ROW_CLASS, action !== undefined && "pe-8")}
-        onClick={onToggle ?? onPress}
-        {...(onContextMenu === undefined ? {} : { onContextMenu })}
-      >
-        <span className={MICRO_LABEL}>{label}</span>
-        {shut && count !== undefined ? <span className={ROW_META_CLASS}>{count}</span> : null}
-        {onToggle === undefined ? null : <ChevronDownIcon aria-hidden className={cn("size-4 transition-transform duration-150", shut && "-rotate-90")} />}
-      </SidebarMenuButton>
-      {action}
-    </>
+    <button
+      type="button"
+      {...(rowId === undefined ? {} : { "data-sidebar-row": "", "data-row-id": rowId })}
+      {...(head === undefined ? {} : { "data-section-head": head })}
+      aria-expanded={!collapsed}
+      aria-label={`${label} ${count}`}
+      onClick={onToggle}
+      {...(onContextMenu === undefined ? {} : { onContextMenu })}
+      className="flex h-7 w-full min-w-0 items-center gap-2 rounded-[var(--control-radius)] px-2 text-left text-xs text-sidebar-muted-foreground outline-none transition-colors duration-150 hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <span className="shrink-0 whitespace-nowrap">
+        <span data-group-word>{label}</span> <span data-group-count className="tabular-nums">({count})</span>
+      </span>
+      <span aria-hidden data-section-rule className="h-px min-w-4 flex-1 bg-sidebar-border" />
+      <ChevronDownIcon aria-hidden className={cn("size-3.5 shrink-0 transition-transform duration-150", collapsed && "-rotate-90")} />
+    </button>
   );
 }

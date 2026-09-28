@@ -43,7 +43,8 @@ tile.
 | Grid numbers and versions, mono, right-aligned | 12 | 400 | foreground |
 | Tile rows one and three, row notes | 11 / 14 | 400 | muted |
 | Mono facts and meta | 11 / 16 | 400 | muted |
-| Section header, mono uppercase, tracking 0.12em | 11 | 400 | muted-foreground |
+| Section header on a Settings list, mono uppercase, tracking 0.12em | 11 | 400 | muted-foreground |
+| Sidebar section head, `Needs you (2)`, sans | 12 / 16 | 400 | sidebar-muted-foreground |
 
 No 10px, no 16px, no bold. Something that has to stand out gets weight 500 or
 the foreground ink, not a bigger size.
@@ -91,7 +92,8 @@ under it.
 Sidebar: 8px inset. One-line rows 36px, radius 8, 8px horizontal padding. A
 thread tile is 68px: 8px padding, rows of 14 / 18 / 14 with 3px between, no
 gap and no line between tiles. A child list is 12px in with a 1px rail and a
-4px tick into each tile's first row at 15px. Settled has 12px above it.
+4px tick into each tile's first row at 15px. A section head is 28px, and each
+head after the first, Settled's too, has 12px above it.
 
 Settings: content max 760px, 56px above the title, 32px sides, 40px between
 sections, 4px between a header row and its first row (the 2px list gap plus
@@ -214,10 +216,26 @@ paused machine adds nothing to a tile: no word, no tone, no line. Its thread
 reads Done until opened and its age after; the open thread says Paused, one
 quiet word in the rule line under the last turn, with Wake beside it.
 
+### Sidebar section heads
+
+Every section in the sidebar (Pinned, Needs you, Working, Done, Idle, Settled,
+Forwarded ports) opens with one head, T3's: the name and its count in
+parentheses, `Settled (9)`, 12px sans in the sidebar's muted ink, a 1px
+hairline in `--sidebar-border` filling the rest of the row, and a 14px
+chevron at the end that folds the section. The head is 28px with 8px sides,
+has no fill at rest or on hover (its ink brightens), and keeps its count
+while folded. Each section's fold is remembered in the window on its own;
+live sections start open, Settled starts shut. Folding takes away only the
+section's tiles: the head and everything above it stay where they are.
+
+The hairline is the one divider the app draws inside a list, an exception to
+the no-rule law below that the owner asked for on 2026-09-28. It lives in the
+sidebar's section heads and nowhere else: no rule under a Settings header,
+none between rows or tiles.
+
 ### The Settled fold
 
-The last row of the list: SETTLED in the section caps, the count, the
-chevron. It holds every root whose whole tree a person has read and left
+The last row of the list: the section head `Settled (n)` with its chevron. It holds every root whose whole tree a person has read and left
 quiet two hours, or settled by hand: Settle on a root tile's menu or
 mod+shift+E takes the root and every thread under it, and the fold row's own
 menu holds Settle all read. A Done nobody has opened, any Failed and the
@@ -344,8 +362,8 @@ in place, this list decides.
   mockup's. Tests and screenshots feed real components fixtures, and a zero
   count reads as 0, never a dash.
 - No em dashes, no Title Case sentences, no lowercase state words. Sentence
-  case, capitalised single state words, and section headers as the one caps
-  dress.
+  case, capitalised single state words, and a Settings list's section headers
+  as the one caps dress; the sidebar's section heads are sentence case.
 
 ## Proving a screen matches
 
