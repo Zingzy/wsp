@@ -419,7 +419,7 @@ describe("store creations", () => {
     await flush();
     expect(await useStore.getState().createWorkspace("pr_1", "beta")).toBeNull();
     const failed = useStore.getState().creations[0]!;
-    expect(failed.failed?.title).toBe("Couldn't start beta: the provider has no room to start another now");
+    expect(failed.failed?.title).toBe("Could not start beta: the provider has no room to start another now");
     expect(failed.lines.map(l => l.stage)).toEqual(["fork-requested", "failed"]);
     expect(useStore.getState().selectedId).toBe(failed.key);
 
@@ -432,7 +432,7 @@ describe("store creations", () => {
     api.createWorkspace = async () => { throw new Error("no golden image yet"); };
     await useStore.getState().createWorkspace("pr_1", "gamma");
     const again = useStore.getState().creations[0]!;
-    expect(again.failed).toEqual({ title: "Couldn't start gamma", detail: "no golden image yet" });
+    expect(again.failed).toEqual({ title: "Could not start gamma", detail: "no golden image yet" });
     // No failed stage arrived, so the refusal is the failing line.
     expect(again.lines.map(l => [l.stage, l.message])).toEqual([["failed", "no golden image yet"]]);
     useStore.getState().dismissCreation(again.key);
@@ -471,7 +471,7 @@ describe("store creations", () => {
     expect(useStore.getState().creations).toEqual([expect.objectContaining({ key: "creating:ws_far", name: "far", workspaceId: "ws_far", failed: null })]);
     expect(useStore.getState().creations[0]!.lines).toHaveLength(2);
     emit(stage({ workspaceId: "ws_far", name: "far", stage: "failed", message: "boom" }));
-    expect(useStore.getState().creations[0]!.failed).toEqual({ title: "Couldn't start far", detail: "boom" });
+    expect(useStore.getState().creations[0]!.failed).toEqual({ title: "Could not start far", detail: "boom" });
     emit({ type: "workspace.created", workspace: view("ws_far") });
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().selectedId).toBe("ws_a");
@@ -484,7 +484,7 @@ describe("store creations", () => {
     useStore.getState().bind(api);
     await flush();
     emit(stage({ workspaceId: "ws_far", name: "far", stage: "failed", message: "Snapshot not found" }));
-    expect(useStore.getState().creations[0]!.failed).toEqual({ title: "Couldn't start far", detail: "Snapshot not found" });
+    expect(useStore.getState().creations[0]!.failed).toEqual({ title: "Could not start far", detail: "Snapshot not found" });
     useStore.getState().select("creating:ws_far");
     emit({ type: "workspace.deleted", workspaceId: "ws_far" });
     expect(useStore.getState().creations).toEqual([]);

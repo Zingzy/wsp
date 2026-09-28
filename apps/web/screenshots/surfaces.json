@@ -649,16 +649,68 @@
       "at": "/",
       "fixture": "mac-and-boxes",
       "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
         "k=project-switcher",
         "switcher-option=pr_spoo",
-        "k=new-workspace",
+        "menu:k=project-switcher",
+        "menu-item=new-workspace",
         "type:pricing page",
-        "k=create"
+        "k=create",
+        "390:key:Escape"
       ],
-      "wait": "testid=creation-log",
+      "wait": "testid=workspace-creation",
       "settleMs": 700,
       "widths": [
-        1440
+        1440,
+        390
+      ],
+      "fresh": true
+    },
+    {
+      "name": "creating-refused",
+      "at": "/",
+      "fixture": "ascii-only",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=project-switcher",
+        "switcher-option=pr_api",
+        "menu:k=project-switcher",
+        "menu-item=new-workspace",
+        "type:pricing page",
+        "k=create",
+        "390:key:Escape"
+      ],
+      "wait": "creation-refused",
+      "settleMs": 700,
+      "widths": [
+        1440,
+        390
+      ],
+      "fresh": true
+    },
+    {
+      "name": "creating-refused-steps",
+      "at": "/",
+      "fixture": "ascii-only",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "k=project-switcher",
+        "switcher-option=pr_api",
+        "menu:k=project-switcher",
+        "menu-item=new-workspace",
+        "type:pricing page",
+        "k=create",
+        "390:key:Escape",
+        "k=setting-up"
+      ],
+      "wait": "creation-refused",
+      "settleMs": 700,
+      "widths": [
+        1440,
+        390
       ],
       "fresh": true
     },

@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
+import { applyPreferencesPatch, kindForComputer, threadsFollowed, workspaceAccess, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -21,6 +21,8 @@ import { sameAt, useSettingsStore, type SettingsAt } from "../settings/settingsS
 import { imageBuildFrame } from "../shell/creationLog.js";
 import { requestNewThread } from "../shell/shellRequests.js";
 import { useSignInStore } from "../shell/signInStore.js";
+import { newId, useComposerDraftStore } from "../components/chat/composerDraftStore.js";
+import { useComposerOptionsStore } from "../components/chat/composerOptionsStore.js";
 
 export interface CostTick {
   rateUsdPerHour: number;
@@ -72,7 +74,7 @@ export interface CreateRefusal {
 }
 
 /** A refused create's lead names what was being made rather than a word for the kind of thing it is. */
-const couldNotStart = (name: string): string => `Couldn't start ${name}`;
+const couldNotStart = (name: string): string => `Could not start ${name}`;
 
 export function explainCreateRefusal(error: unknown, name: string): CreateRefusal {
   const message = error instanceof Error ? error.message : String(error);
@@ -322,7 +324,51 @@ function firstRow(s: Pick<State, "workspaces" | "statuses" | "sessions">): strin
   return sidebarWorkspaceOrder(s)[0] ?? null;
 }
 
-let creationSeq = 0;
+/** A creation's page keys its draft, its waiting messages and its picks by the creation's key; the workspace takes
+ * them all, so what waited goes with the agent and the model picked over it. */
+function handOver(key: string, workspaceId: string): void {
+  const drafts = useComposerDraftStore.getState();
+  drafts.rekeyQueue(key, workspaceId);
+  const draft = drafts.drafts[key];
+  if (draft !== undefined) {
+    useComposerDraftStore.setState(s => {
+      const { [key]: _moved, ...rest } = s.drafts;
+      return { drafts: { ...rest, [workspaceId]: draft } };
+    });
+  }
+  useComposerOptionsStore.setState(s => {
+    const picked = s.byWorkspaceId[key];
+    return picked === undefined ? s : { byWorkspaceId: { ...s.byWorkspaceId, [workspaceId]: picked } };
+  });
+  const access = useStore.getState().preferences.access[key];
+  if (access !== undefined) void useStore.getState().setPreferences({ access: { [workspaceId]: access, [key]: null } });
+  // The lists the creation's composer drew stand for the workspace until its machine answers with its own, so the
+  // footer it lands with is the one that was on screen.
+  const s = useStore.getState();
+  const project = s.projects.find(p => p.id === s.creations.find(c => c.key === key)?.project);
+  if (project !== undefined && s.harnessesByWorkspace[workspaceId] === undefined) {
+    const kind = kindForComputer(project.computer);
+    useStore.setState(now => ({ harnessesByWorkspace: { ...now.harnessesByWorkspace, [workspaceId]: now.harnesses.map(c => workspaceAccess(c, kind)) } }));
+  }
+}
+
+/** What waited for a machine that will never come goes with its creation, and so does everything handOver would have
+ * moved, since nothing reads a dead creation's key again. */
+function dropWaiting(key: string): void {
+  const drafts = useComposerDraftStore.getState();
+  for (const row of drafts.queues[key] ?? []) drafts.removeQueued(key, row.id);
+  useComposerDraftStore.setState(s => {
+    if (!(key in s.drafts)) return s;
+    const { [key]: _gone, ...rest } = s.drafts;
+    return { drafts: rest };
+  });
+  useComposerOptionsStore.setState(s => {
+    if (!(key in s.byWorkspaceId)) return s;
+    const { [key]: _gone, ...rest } = s.byWorkspaceId;
+    return { byWorkspaceId: rest };
+  });
+  if (useStore.getState().preferences.access[key] !== undefined) void useStore.getState().setPreferences({ access: { [key]: null } });
+}
 /** Sets on their way to the host. While one is, a reply or a preferences.changed for an earlier set would paint an
  * older record over the one the person sees; the last reply, or the record read after a refusal, settles it. */
 let preferenceSetsInFlight = 0;
@@ -340,12 +386,15 @@ export const useStore = create<State>((set, get) => {
   const patchCreation = (key: string, patch: (c: Creation) => Creation): void => {
     set(s => ({ creations: s.creations.map(c => (c.key === key ? patch(c) : c)) }));
   };
-  /** The row leaves with its workspace in place of it; the selection follows. */
+  /** The row leaves with its workspace in place of it; the selection follows, onto the workspace's next thread,
+   * and what was typed on the creation's page goes with it, the waiting messages to be sent from there. */
   const finishCreation = (key: string, workspaceId: string): void => {
+    handOver(key, workspaceId);
     const opened = get().selectedId === key;
     set(s => ({
       creations: s.creations.filter(c => c.key !== key),
       selectedId: opened ? workspaceId : s.selectedId,
+      freshThread: opened || s.freshThread,
     }));
     if (opened) writeAddress({ workspaceId });
   };
@@ -615,7 +664,8 @@ export const useStore = create<State>((set, get) => {
       // project on a computer with no image is refused by the runtime in its own sentence on the creation view.
       const computer = get().projects.find(p => p.id === project)?.computer;
       if (!get().api) return null;
-      const key = `creating:${++creationSeq}`;
+      // Unique across reloads: a draft or a waiting message persisted under a key must never meet another creation.
+      const key = `${CREATION_PREFIX}${newId()}`;
       set(s => ({
         creations: [
           ...s.creations,
@@ -673,6 +723,7 @@ export const useStore = create<State>((set, get) => {
     dismissCreation(key) {
       // The runtime holds a create that failed with the id its stages carried, so every client's row goes with it.
       const workspaceId = get().creations.find(c => c.key === key)?.workspaceId ?? null;
+      dropWaiting(key);
       const deleting = get().api?.deleteWorkspace;
       if (workspaceId !== null && deleting !== undefined) void deleting(workspaceId).catch((e: unknown) => noticeFailure(e));
       set(s => {
@@ -1023,23 +1074,27 @@ export const useStore = create<State>((set, get) => {
             const own = s.creations.find(c => c.workspaceId === e.workspaceId) ?? s.creations.find(c => c.workspaceId === null && c.name === e.name && c.failed === null);
             const failed = e.stage === "failed" ? { title: couldNotStart(e.name), detail: e.message } : null;
             if (own === undefined) {
-              return { creations: [...s.creations, { key: `creating:${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
+              return { creations: [...s.creations, { key: `${CREATION_PREFIX}${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
             }
             return { creations: s.creations.map(c => (c === own ? { ...c, workspaceId: e.workspaceId, lines: [...c.lines, line], failed: c.failed ?? failed } : c)) };
           });
           return;
         }
-        case "workspace.created":
+        case "workspace.created": {
+          const creation = get().creations.find(c => c.workspaceId === e.workspace.id);
+          if (creation !== undefined) handOver(creation.key, e.workspace.id);
           set(s => {
             const rest = s.workspaces.filter(x => x.id !== e.workspace.id);
-            const creation = s.creations.find(c => c.workspaceId === e.workspace.id);
+            const opened = creation !== undefined && s.selectedId === creation.key;
             return {
               workspaces: [...rest, e.workspace].sort((a, b) => a.id.localeCompare(b.id)),
               creations: s.creations.filter(c => c !== creation),
-              selectedId: creation !== undefined && s.selectedId === creation.key ? e.workspace.id : s.selectedId,
+              selectedId: opened ? e.workspace.id : s.selectedId,
+              freshThread: opened || s.freshThread,
             };
           });
           return;
+        }
         // napped/woken carry only ids; they are also the optimistic toggle's reconcile.
         case "workspace.napped":
           setPhase(e.workspaceId, "napping");
@@ -1231,7 +1286,8 @@ function hostWide(catalogs: HarnessCatalog[]): HarnessCatalog[] {
 /** The one rule for which catalogs answer for a workspace, so a surface reading many workspaces' rows and one
  * reading its own read the same thing. */
 export const catalogsIn = (s: Catalogs, workspaceId: string | null): HarnessCatalog[] =>
-  (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? (workspaceId !== null && isProjectHomeKey(workspaceId) ? s.harnesses : hostWide(s.harnesses));
+  (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ??
+  (workspaceId !== null && (isProjectHomeKey(workspaceId) || isCreationKey(workspaceId)) ? s.harnesses : hostWide(s.harnesses));
 
 /** The key a project's home composer keeps its draft and picks under until its send makes a workspace. A home has
  * no machine of its own, so it reads the host-wide lists whole, access modes included, which is what the workspace
@@ -1239,6 +1295,9 @@ export const catalogsIn = (s: Catalogs, workspaceId: string | null): HarnessCata
 const PROJECT_HOME_PREFIX = "project:";
 export const projectHomeKey = (projectId: string): string => `${PROJECT_HOME_PREFIX}${projectId}`;
 export const isProjectHomeKey = (key: string): boolean => key.startsWith(PROJECT_HOME_PREFIX);
+/** A workspace being made reads the lists as its project's home does, since they are what its workspace is picked from. */
+const CREATION_PREFIX = "creating:";
+export const isCreationKey = (key: string): boolean => key.startsWith(CREATION_PREFIX);
 export const catalogIn = (s: Catalogs, workspaceId: string | null, harness: string): HarnessCatalog | null =>
   catalogsIn(s, workspaceId).find(c => c.harness === harness) ?? null;
 /** The thread the centre shows for a workspace, which is the one the address names: none while the centre is on a
