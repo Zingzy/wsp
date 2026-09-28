@@ -3,9 +3,23 @@
 //! call that answers it through the host. CONTRIBUTING.md in this crate says how one is added.
 
 mod computers;
+mod create;
+mod dropping;
+mod exec;
+mod home;
+mod image;
+mod machine;
+mod named;
+mod projects_change;
+mod recipe;
+mod said;
 mod servers;
 mod skills;
 mod target;
+mod thread;
+mod turn;
+mod wait;
+pub(crate) mod workspace;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -44,6 +58,37 @@ pub const TOOLS: &[Tool] = &[
     servers::DISABLE,
     servers::ENABLE,
     servers::ADD_TOOLS,
+    turn::RUN,
+    turn::SEND,
+    thread::RENAME,
+    thread::FORGET,
+    thread::ALLOW,
+    thread::DENY,
+    wait::WAIT,
+    wait::RESTART,
+    thread::STOP,
+    exec::TOOL,
+    recipe::RECIPE,
+    recipe::SCAN,
+    computers::TOOL,
+    projects_change::ADD,
+    projects_change::REMOVE,
+    create::NEW,
+    machine::AGENTS,
+    machine::RENAME,
+    machine::SNAPSHOT,
+    create::FORK,
+    home::BRING_BACK,
+    machine::PAUSE,
+    machine::WAKE,
+    machine::REBUILD,
+    image::IMAGE,
+    image::BUILD,
+    image::MOVE,
+    image::REMOVE,
+    dropping::FORGET,
+    dropping::DELETE,
+    home::EXPORT,
 ];
 
 /// The tool of that name the state lists, with its entry there; none where that state lists no such tool, which the
@@ -71,21 +116,28 @@ pub fn entry_in(listed: &str, cloud: bool) -> Option<&str> {
     (if cloud { entries.cloud_on } else { entries.cloud_off }).map(RawValue::get)
 }
 
-/// What a tool answers with: the text the agent reads and the same value as the structured copy, compact JSON.
+/// What a tool answers with: the text the agent reads and the same value as the structured copy, compact JSON, and
+/// whether the call is marked an error while still carrying that value.
 pub struct Answer {
     pub text: String,
     pub structured: String,
+    pub error: bool,
 }
 
 impl Answer {
     /// The text is the value as `jsonLine(value, 2)` writes it: asJson in packages/host/src/verbs.ts.
     pub fn json<T: Serialize>(value: &T) -> Answer {
-        Answer { text: js_line(value, true), structured: serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned()) }
+        Answer { text: js_line(value, true), structured: serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned()), error: false }
     }
 
     /// The text is a line of its own and the value rides beside it: asText in packages/host/src/verbs.ts.
     pub fn text<T: Serialize>(text: String, value: &T) -> Answer {
-        Answer { text, structured: serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned()) }
+        Answer { text, structured: serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned()), error: false }
+    }
+
+    /// The same, marked an error: a call that did nothing yet, or half of what it was asked, and says which.
+    pub fn text_error<T: Serialize>(text: String, value: &T) -> Answer {
+        Answer { error: true, ..Answer::text(text, value) }
     }
 }
 
@@ -139,34 +191,51 @@ pub(crate) mod held {
         required
     }
 
-    fn same_shape(side: &str, derived: &Value, listed: &Value) {
-        let (ours, theirs) = (fields(derived), fields(listed));
-        let names = |f: &[(String, Value)]| f.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>();
-        assert_eq!(names(&ours), names(&theirs), "{side}: the fields");
-        assert_eq!(required(derived), required(listed), "{side}: the fields required");
-        for ((name, ours), (_, theirs)) in ours.iter().zip(&theirs) {
-            if let Some(kind) = ours.get("type") {
-                assert_eq!(optional_as_zod(kind), theirs["type"], "{side}.{name}: the type");
+    /// An `Option` field's type less the null schemars adds: a field the input may leave out is zod's optional,
+    /// which takes no null.
+    fn unnulled(typed: &Value, optional: bool) -> Value {
+        match typed.as_array() {
+            Some(types) if optional => {
+                let kept: Vec<&Value> = types.iter().filter(|t| *t != "null").collect();
+                if kept.len() == 1 {
+                    kept[0].clone()
+                } else {
+                    Value::from(kept.into_iter().cloned().collect::<Vec<_>>())
+                }
             }
+            _ => typed.clone(),
         }
     }
 
-    /// An `Option` field derives as its type or null; zod's optional field is its type, left out when absent, which
-    /// is what `skip_serializing_if` writes.
-    fn optional_as_zod(kind: &Value) -> Value {
-        match kind.as_array().map(|kinds| kinds.iter().filter(|k| *k != "null").collect::<Vec<_>>()) {
-            Some(kinds) if kinds.len() == 1 => kinds[0].clone(),
-            _ => kind.clone(),
+    /// The struct's fields are every field some state lists, since a state that leaves one out is never handed it;
+    /// each state's required set and each field's type hold as that state lists them.
+    fn same_shape(side: &str, derived: &Value, listed: &[&Value]) {
+        let ours = fields(derived);
+        let mut theirs: Vec<String> = listed.iter().flat_map(|l| fields(l).into_iter().map(|(k, _)| k)).collect();
+        theirs.sort();
+        theirs.dedup();
+        assert_eq!(ours.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(), theirs, "{side}: the fields");
+        let optional = |name: &str| !required(derived).iter().any(|r| r == name);
+        for listed in listed {
+            assert_eq!(required(derived), required(listed), "{side}: the fields required");
+            for (name, theirs) in fields(listed) {
+                let ours = &ours.iter().find(|(k, _)| *k == name).unwrap().1;
+                if let Some(typed) = ours.get("type") {
+                    assert_eq!(&unnulled(typed, optional(&name)), &theirs["type"], "{side}.{name}: the type");
+                }
+            }
         }
     }
 
     /// Held to the entry of every state that lists the tool.
     pub fn to_the_record<In: JsonSchema, Out: JsonSchema>(listed: &str) {
-        for entry in [false, true].into_iter().filter_map(|cloud| super::entry_in(listed, cloud)) {
-            let entry: Value = serde_json::from_str(entry).unwrap();
-            same_shape("input", &schema_of::<In>(), &entry["inputSchema"]);
-            same_shape("output", &schema_of::<Out>(), &entry["outputSchema"]);
-        }
+        let entries: Vec<Value> = [false, true]
+            .into_iter()
+            .filter_map(|cloud| super::entry_in(listed, cloud))
+            .map(|e| serde_json::from_str(e).unwrap())
+            .collect();
+        same_shape("input", &schema_of::<In>(), &entries.iter().map(|e| &e["inputSchema"]).collect::<Vec<_>>());
+        same_shape("output", &schema_of::<Out>(), &entries.iter().map(|e| &e["outputSchema"]).collect::<Vec<_>>());
     }
 }
 
