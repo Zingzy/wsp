@@ -1,0 +1,28 @@
+{
+  "tool": "rename",
+  "cases": [
+    {
+      "case": "renamed",
+      "arguments": {
+        "workspace": "alpha",
+        "name": "beta \u0085"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "workspaces.rename": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"beta \u0085\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪 is now beta \\u0085 ws-1\"}],\"structuredContent\":{\"was\":\"alpha \\\"one\\\" \\u0085 🧪\",\"workspace\":{\"name\":\"beta \\u0085\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "workspaces.rename",
+          "workspaceId": "ws-1",
+          "name": "beta \u0085"
+        }
+      ]
+    }
+  ]
+}

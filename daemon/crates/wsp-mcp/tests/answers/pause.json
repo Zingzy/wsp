@@ -1,0 +1,58 @@
+{
+  "tool": "pause",
+  "cases": [
+    {
+      "case": "napped",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "workspaces.nap": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"napping\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"workspace\\\": {\\n    \\\"name\\\": \\\"alpha \\\\\\\"one\\\\\\\" \\\\u0085 🧪\\\",\\n    \\\"id\\\": \\\"ws-1\\\",\\n    \\\"machineId\\\": \\\"m-1\\\",\\n    \\\"phase\\\": \\\"napping\\\",\\n    \\\"kind\\\": \\\"cloud\\\",\\n    \\\"golden\\\": \\\"snap-g1\\\",\\n    \\\"createdAt\\\": \\\"2026-09-27T01:02:03.004Z\\\",\\n    \\\"project\\\": {\\n      \\\"id\\\": \\\"proj-1\\\",\\n      \\\"name\\\": \\\"alpha\\\",\\n      \\\"path\\\": \\\"/root/alpha\\\",\\n      \\\"computer\\\": \\\"place-9\\\"\\n    },\\n    \\\"home\\\": \\\"/root\\\",\\n    \\\"theme\\\": {\\n      \\\"dots\\\": [\\n        {\\n          \\\"angle\\\": 12.5,\\n          \\\"radius\\\": 0.30000000000000004\\n        }\\n      ],\\n      \\\"harmony\\\": \\\"single\\\",\\n      \\\"grain\\\": 0.5,\\n      \\\"opacity\\\": 1,\\n      \\\"mode\\\": \\\"auto\\\"\\n    },\\n    \\\"agents\\\": {\\n      \\\"spawn\\\": true,\\n      \\\"maxMachines\\\": 2,\\n      \\\"maxDepth\\\": 1\\n    },\\n    \\\"place\\\": \\\"place-9\\\",\\n    \\\"provider\\\": \\\"solari\\\"\\n  }\\n}\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"napping\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "workspaces.nap",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "other version",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"id\":\"ws-1\"}}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the host answered workspaces.resolve in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up\"}],\"structuredContent\":{\"error\":\"the host answered workspaces.resolve in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        }
+      ]
+    },
+    {
+      "case": "not found",
+      "arguments": {
+        "workspace": "nope"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":false,\"error\":\"no workspace nope; wsp workspaces lists them\",\"kind\":\"not-found\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no workspace nope; wsp workspaces lists them\"}],\"structuredContent\":{\"error\":\"no workspace nope; wsp workspaces lists them\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "nope"
+        }
+      ]
+    }
+  ]
+}

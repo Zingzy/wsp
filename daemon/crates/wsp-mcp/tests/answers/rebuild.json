@@ -1,0 +1,146 @@
+{
+  "tool": "rebuild",
+  "cases": [
+    {
+      "case": "rebuilt",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"gone\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"gone\":\"the provider has no machine m-1 \u009b\"}}",
+        "status.list": "{\"id\":1,\"ok\":true,\"statuses\":[]}",
+        "workspaces.rebuild": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-2\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪 running on m-2\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-2\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "status.list"
+        },
+        {
+          "op": "workspaces.rebuild",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "zombie",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "status.list": "{\"id\":1,\"ok\":true,\"statuses\":[{\"id\":\"ws-1\",\"machineState\":\"running\",\"reach\":{\"state\":\"zombie\"}}]}",
+        "workspaces.rebuild": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"waking\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪 waking on m-1\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"waking\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "status.list"
+        },
+        {
+          "op": "workspaces.rebuild",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "wake refused",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"napping\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"wakeRefused\":\"\"}}",
+        "status.list": "{\"id\":1,\"ok\":true,\"statuses\":[]}",
+        "workspaces.rebuild": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha \\\"one\\\" \\u0085 🧪 running on m-1\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha \\\"one\\\" \\u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "status.list"
+        },
+        {
+          "op": "workspaces.rebuild",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "running",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "status.list": "{\"id\":1,\"ok\":true,\"statuses\":[{\"id\":\"ws-1\",\"machineState\":\"running\",\"reach\":{\"state\":\"ok\"}}]}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"This one is running, so nothing needs rebuilding; the rebuild is offered once a workspace is gone\"}],\"structuredContent\":{\"error\":\"This one is running, so nothing needs rebuilding; the rebuild is offered once a workspace is gone\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "status.list"
+        }
+      ]
+    },
+    {
+      "case": "unreachable",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "status.list": "{\"id\":1,\"ok\":true,\"statuses\":[{\"id\":\"ws-1\",\"machineState\":\"running\",\"reach\":{\"state\":\"unreachable\"}}]}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"This one is not answering yet; the rebuild is offered once it is gone\"}],\"structuredContent\":{\"error\":\"This one is not answering yet; the rebuild is offered once it is gone\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "status.list"
+        }
+      ]
+    },
+    {
+      "case": "paused",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "status.list": "{\"id\":1,\"ok\":true,\"statuses\":[{\"id\":\"ws-1\",\"machineState\":\"paused\",\"reach\":{\"state\":\"ok\"}}]}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"This one is stopped, so nothing needs rebuilding; the rebuild is offered once a workspace is gone\"}],\"structuredContent\":{\"error\":\"This one is stopped, so nothing needs rebuilding; the rebuild is offered once a workspace is gone\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "status.list"
+        }
+      ]
+    }
+  ]
+}
