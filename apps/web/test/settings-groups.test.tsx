@@ -278,7 +278,7 @@ describe("Account", () => {
 });
 
 describe("General", () => {
-  it("offers the editors installed where the host runs, the pick first and the first installed without one, and a pick writes the preference", async () => {
+  it("offers the editors installed where the host runs, each with its mark, the pick first and the first installed without one, and a pick writes the preference", async () => {
     const editors = [{ id: "cursor", name: "Cursor" }, { id: "zed", name: "Zed" }, { id: "finder", name: "Finder" }];
     const { api, sets } = settingsApi({ editorList: async () => editors } as Partial<Api>);
     mountSettings({ api, at: { kind: "group", group: "general" } });
@@ -287,8 +287,16 @@ describe("General", () => {
     expect(descriptionOf("editor")).toBe(GENERAL_WORDS.editorDescription);
     const select = document.querySelector<HTMLElement>("[data-settings-page] [data-k=editor]")!;
     expect(select.textContent).toBe("Cursor");
-    await pickOption(select, "Zed");
+    // Every editor wears its mark, in the pick and in the list, the same marks the Open menu draws.
+    expect(select.querySelector("[data-editor-mark=cursor]")).not.toBeNull();
+    fireEvent.click(select);
+    const options = await screen.findAllByRole("option");
+    expect(options.map(option => option.querySelector("[data-editor-mark]")?.getAttribute("data-editor-mark"))).toEqual(["cursor", "zed", "finder"]);
+    await act(async () => void (await new Promise(r => setTimeout(r, 0))));
+    fireEvent.keyDown(options[1]!, { key: "Enter" });
+    fireEvent.click(options[1]!);
     await waitFor(() => expect(sets).toEqual([{ editor: "zed" }]));
+    await waitFor(() => expect(select.querySelector("[data-editor-mark=zed]")).not.toBeNull());
     // The pick's popup is a portal; unmounted before the page's own teardown empties the body under it.
     cleanup();
   });
