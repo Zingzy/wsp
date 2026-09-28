@@ -524,10 +524,10 @@ function holdAwake(): void {
   }
 }
 
-/** A finish or a prompt said over the system while no window is open to say it; the page says them while it is up. */
+/** A finish, a failure or a prompt said over the system while no window is open to say it; the page says them while it is up. */
 function sayWhileClosed(e: FeedEvent): void {
-  if (win !== undefined || fed === undefined || (e.type !== "session.done" && e.type !== "session.permission")) return;
-  const line = trayNotice(e as Parameters<typeof trayNotice>[0], fed, fed.notifySound);
+  if (win !== undefined || fed === undefined) return;
+  const line = trayNotice(e as unknown as Parameters<typeof trayNotice>[0], fed, fed.notifySound);
   if (line === undefined) return;
   const threadId = typeof e["threadId"] === "string" ? e["threadId"] : undefined;
   sayOutside(line, { focused: () => false, raise: () => void reopen(), open: () => void (threadId !== undefined && fedFrom?.remote !== true && links.open(`wsp://thread/${threadId}`)) }, NOTIFIER);
