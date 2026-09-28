@@ -33,7 +33,10 @@ function untilServing(child: ChildProcess, output: string[]): Promise<number> {
   });
 }
 
+/** How a child ended, read off the child itself where it has already gone: a child that exits between a wait on its
+ * output and this call has no exit event left to hear. */
 function exited(child: ChildProcess): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
   return new Promise(resolve => child.once("exit", (code, signal) => resolve({ code, signal })));
 }
 

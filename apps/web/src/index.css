@@ -1483,26 +1483,6 @@ html.desktop-mac.dark [data-preview-panel-mode="inline"]:has([data-terminal-tran
   --app-chrome-background: var(--material-raised);
 }
 
-/* The agents block's head pins over its rows as the settings page scrolls. At rest it stands on the glass like the
-   cards; pinned, it takes the glass recipe's blur and ground so the rows under it do not show through. */
-.desktop-mac.dark [data-settings-page] [data-agents-top] {
-  container-type: scroll-state;
-
-  &::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-  }
-
-  @container scroll-state(stuck: top) {
-    &::before {
-      background-color: var(--card);
-      @apply glass-backdrop;
-    }
-  }
-}
-
 /* Light mode on the Mac: the sidebar alone stands on the glass, under a veil of its own ground. Over a dark desktop
    the glass reads as mid grey, and Linen's prose, the thinnest of the light sidebar inks, holds AA there only at 99
    percent. */

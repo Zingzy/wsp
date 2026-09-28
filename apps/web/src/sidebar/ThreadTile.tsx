@@ -18,6 +18,7 @@ import type { ThreadStatusInput } from "../components/status/kinds/index.js";
 import { ThreadStatus } from "../components/status/ThreadStatus.js";
 import { threadStatusOf } from "../components/status/threadStatusOf.js";
 import { RESTING } from "../components/status/kinds/resting.js";
+import { STARTING } from "../components/status/kinds/starting.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { ProjectGlyph } from "../projects/look.js";
 import { cn } from "../lib/utils.js";
@@ -285,23 +286,24 @@ export function ThreadLaunchTile({ launch, place, branch }: { launch: Launch; pl
 }
 
 const CREATE_FAILED: ThreadStatusInput = { status: "failed", asking: null, startedAt: null, unread: false };
+const CREATE_RUNNING: ThreadStatusInput = { status: "running", asking: null, startedAt: null, unread: false };
 
-/** A workspace still being made, in the tile's grammar: where it will run, its name, and the step the create is
- * waiting on in row three, with the whole of it on the hover text. A refused create says Failed in the slot. */
+/** A workspace still being made, in the tile's grammar: where it will run with Starting in the slot, its name, and
+ * the step the create is waiting on in row three with the crab at its end. A refused create says Failed instead. */
 export function CreationTile({ rowId, name, place, line, failed, active, onSelect, onContextMenu }: { rowId: string; name: string; place: TilePlace; line: string; failed: boolean; active: boolean; onSelect: () => void; onContextMenu?: (event: MouseEvent<HTMLElement>) => void }) {
   return (
     <SidebarMenuButton size="sm" isActive={active} aria-busy={failed ? undefined : "true"} data-sidebar-row data-row-id={rowId} data-depth={0} title={tileHover(name, place, null, line)} className={TILE_CLASS} onClick={onSelect} onContextMenu={onContextMenu}>
       <TileRows
         place={place}
-        status={failed ? <ThreadStatus thread={CREATE_FAILED} /> : null}
+        status={failed ? <ThreadStatus thread={CREATE_FAILED} /> : <ThreadStatus thread={CREATE_RUNNING} kind={STARTING} />}
         title={<Title text={name} idle={false} active={active} />}
         harness={null}
         third={
-          <span data-creation-line className="min-w-0 truncate">
+          <span data-creation-line className={cn("min-w-0 truncate", failed && "text-status-failed")}>
             {line}
           </span>
         }
-        crab={false}
+        crab={!failed}
       />
     </SidebarMenuButton>
   );

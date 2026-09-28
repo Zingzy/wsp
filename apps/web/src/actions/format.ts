@@ -27,9 +27,6 @@ export const WORKSPACE_WORDS = {
   startDaemon: "Start the daemon",
 } as const;
 
-/** What the creation log and the sidebar's creation row say before the runtime's first stage line lands; one
- * sentence in one place, since both surfaces stand in for the same silence. */
-export const CREATION_ASKED = "Asking wsp to start it.";
 /** The word a creation row's slot carries once the create was refused: the state table's own, so a thread that
  * failed and a create that failed read as one word. */
 export const CREATION_FAILED = threadStateWord("failed");

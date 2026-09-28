@@ -487,6 +487,9 @@ describe("panes on a workspace that is not running", () => {
     act(() => setPane("pausing", { machineState: "running", reach: { state: "napping" } }, wakes));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("paused"));
     expect(overlay()!.textContent).toContain("Pausing. The shell is kept; wake the task to continue");
+    // The veil over the frame stands on the terminal's own solid ground; the page's background is clear in the inline panel.
+    expect(overlay()!.className).toContain("bg-(--terminal-background)/70");
+    expect(overlay()!.className).not.toMatch(/\bbg-background\b/);
     act(() => {
       setPane("napping", { machineState: "paused", reach: { state: "napping" } }, wakes);
       wt.feedStatus("connecting");
@@ -716,6 +719,7 @@ describe("panes on a workspace that is not running", () => {
     act(() => wt.feedStatus("live"));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("shell-gone"));
     expect(overlay()!.textContent).toContain("This shell ended when the daemon holding it stopped");
+    expect(overlay()!.className).toContain("bg-(--terminal-background)/70");
     fireEvent.click(within(overlay()!).getByRole("button", { name: /^New Terminal/ }));
     await waitFor(() => expect(wt.tabs().map(t => t.ptyId)).toEqual(["p1", "p2"]));
     await waitFor(() => expect(overlay()).toBeNull());

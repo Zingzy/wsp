@@ -1714,6 +1714,9 @@ const copyKeyParts = (key: string): { place?: string; name: string } => {
 const recipeKey = (name: string, version: number): string => `${name}@v${version}`;
 const vaultKey = recipeKey;
 const TRANSCRIPTS = "transcripts";
+/** The events of a transcript an older build kept inside the state file that fell outside the byte cap as it moved to
+ * a file of its own: written at the move and never trimmed, so no event the person had is lost. */
+const TRANSCRIPT_HEADS = "transcript-heads";
 /** One document per workspace: the turns sessions.list serves, read back at boot so the rows outlive the process. */
 const SESSIONS = "sessions";
 /** The name a person gave a workspace, keyed by its id, which its machines carry as a label across every rebuild:
@@ -1766,6 +1769,13 @@ const restartCutLine = (elapsedMs: number): string => `cut by a host restart aft
 const DAEMON_TOKEN_MISS_TTL_MS = 60_000;
 /** Events kept per workspace; the oldest fall off so one chatty workspace cannot grow the store forever. */
 const TRANSCRIPT_CAP = 5000;
+/** The bytes of JSON one workspace's transcript keeps, past which its oldest events fall off too: every transcript
+ * is held in memory whole, and a turn's tool calls carry whole files, so the count alone let one workspace hold a
+ * hundred megabytes. */
+export const TRANSCRIPT_BYTES = 4 * 1024 * 1024;
+/** The characters of one tool result a transcript keeps. Every reader of a kept result reads its first line (the
+ * app's row, the terminal's line, a subagent's answer), and the live stream still carries it whole. */
+export const TOOL_RESULT_KEPT = 16 * 1024;
 /** setTimeout's longest wait; a longer one fires at once. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
@@ -2982,6 +2992,54 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
   const transcripts = new Map<string, SessionEvent[]>();
+  /** The bytes each transcript's events come to as JSON, kept beside it so a new event is not a walk of all of them. */
+  const transcriptBytes = new Map<string, number>();
+  const eventBytes = (e: SessionEvent): number => JSON.stringify(e).length;
+  /** Drops a transcript's oldest events until it is inside both caps, in place, since a live turn holds the array. */
+  const trimTranscript = (workspaceId: string, events: SessionEvent[]): void => {
+    let bytes = transcriptBytes.get(workspaceId) ?? events.reduce((n, e) => n + eventBytes(e), 0);
+    let drop = 0;
+    while (drop < events.length - 1 && (events.length - drop > TRANSCRIPT_CAP || bytes > TRANSCRIPT_BYTES)) bytes -= eventBytes(events[drop++]!);
+    if (drop > 0) events.splice(0, drop);
+    transcriptBytes.set(workspaceId, bytes);
+  };
+  /** A workspace's transcript, from its own file beside the state file: kept inside the state file, every turn's
+   * flush rewrote every workspace's transcript with it, and a host whose file had grown to hundreds of megabytes
+   * spent its loop on that for minutes. */
+  const transcriptBlob = (record: TranscriptRecord): Buffer => Buffer.from(JSON.stringify(record));
+  const readTranscript = async (workspaceId: string, collection: string = TRANSCRIPTS): Promise<SessionEvent[] | undefined> => {
+    const bytes = await store.getBlob(collection, workspaceId);
+    if (bytes === undefined) return undefined;
+    try {
+      return (JSON.parse(bytes.toString("utf8")) as TranscriptRecord).events;
+    } catch (e) {
+      console.warn(`the transcript of ${workspaceId} does not read and is left out: ${e instanceof Error ? e.message : String(e)}`);
+      return undefined;
+    }
+  };
+  /** A transcript an older build kept inside the state file, merged into what its files already hold: an older build
+   * run on this state after this one writes its new events there again, and a move cut short by a crash leaves both
+   * copies. Every event is kept once, by its JSON, in the order its stamp says. The tail inside the byte cap is what
+   * this host holds and flushes; everything before it goes to the head file, which nothing trims. */
+  const moveTranscript = async (moving: TranscriptRecord): Promise<void> => {
+    const id = moving.workspaceId;
+    const seen = new Set<string>();
+    const all: SessionEvent[] = [];
+    for (const e of [...((await readTranscript(id, TRANSCRIPT_HEADS)) ?? []), ...((await readTranscript(id)) ?? []), ...moving.events]) {
+      const key = JSON.stringify(e);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      all.push(e);
+    }
+    all.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+    const held = [...all];
+    transcriptBytes.delete(id);
+    trimTranscript(id, held);
+    const head = all.slice(0, all.length - held.length);
+    if (head.length > 0) await store.putBlob(TRANSCRIPT_HEADS, id, transcriptBlob({ workspaceId: id, events: head }));
+    await store.putBlob(TRANSCRIPTS, id, transcriptBlob({ workspaceId: id, events: held }));
+    transcripts.set(id, held);
+  };
   // Puts are chained per workspace so the later snapshot always lands last,
   // whatever order the store finishes in.
   const transcriptFlushes = new Map<string, Promise<void>>();
@@ -3024,7 +3082,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (!events) return transcriptFlushes.get(workspaceId) ?? Promise.resolve();
     const snapshot: TranscriptRecord = { workspaceId, events: [...events] };
     const queued = (transcriptFlushes.get(workspaceId) ?? Promise.resolve())
-      .then(() => store.put(TRANSCRIPTS, workspaceId, snapshot))
+      .then(() => store.putBlob(TRANSCRIPTS, workspaceId, transcriptBlob(snapshot)))
       .catch(() => {});
     transcriptFlushes.set(workspaceId, queued);
     return queued;
@@ -3079,8 +3137,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       events = [];
       transcripts.set(event.workspaceId, events);
     }
-    events.push(event);
-    if (events.length > TRANSCRIPT_CAP) events.splice(0, events.length - TRANSCRIPT_CAP);
+    const kept = event.type === "session.delta" && event.kind === "tool_result" && event.text.length > TOOL_RESULT_KEPT ? { ...event, text: event.text.slice(0, TOOL_RESULT_KEPT) } : event;
+    events.push(kept);
+    const had = transcriptBytes.get(event.workspaceId);
+    if (had !== undefined) transcriptBytes.set(event.workspaceId, had + eventBytes(kept));
+    trimTranscript(event.workspaceId, events);
     if (event.type === "session.end") void flushTranscript(event.workspaceId);
     else if (event.type !== "session.delta" && !transcriptTimers.has(event.workspaceId)) {
       transcriptTimers.set(event.workspaceId, clock.schedule(() => void flushTranscript(event.workspaceId), TRANSCRIPT_FLUSH_MS));
@@ -4426,6 +4487,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     polledReach.delete(id);
     napRefusals.delete(id);
     transcripts.delete(id);
+    transcriptBytes.delete(id);
     daemonNotes.delete(id);
     for (const [handleId, s] of sessions) if (s.view.workspaceId === id) sessions.delete(handleId);
     for (const [threadId, held] of threadRecords) if (held.workspaceId === id) threadRecords.delete(threadId);
@@ -4435,7 +4497,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await indexFlushes.get(id);
     indexFlushes.delete(id);
     await store.delete(WORKSPACES, id);
-    await store.delete(TRANSCRIPTS, id);
+    await store.deleteBlob(TRANSCRIPTS, id);
+    await store.deleteBlob(TRANSCRIPT_HEADS, id);
     await store.delete(WORKSPACE_NAMES, id);
     await store.delete(SESSIONS, id);
     await store.delete(CREATES, `workspace/${id}`);
@@ -4931,9 +4994,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const entry = await hydrateWorkspace(raw);
         if (entry !== undefined) toSync.push(entry);
       }
-      for (const raw of await store.list(TRANSCRIPTS)) {
-        const t = raw as TranscriptRecord;
-        transcripts.set(t.workspaceId, t.events);
+      // A state file an older build wrote holds the transcripts inside it: each is written to its files whole, and
+      // only then is the state file written once without them.
+      const inside = (await store.list(TRANSCRIPTS)) as TranscriptRecord[];
+      for (const t of inside) await moveTranscript(t);
+      await Promise.all(inside.map(t => store.delete(TRANSCRIPTS, t.workspaceId)));
+      for (const id of await store.keys(WORKSPACES)) {
+        if (transcripts.has(id)) continue;
+        const events = await readTranscript(id);
+        if (events === undefined) continue;
+        transcripts.set(id, events);
+        trimTranscript(id, events);
       }
       const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
@@ -7825,6 +7896,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // rows would go to a copy nothing reads.
       const events = transcripts.get(workspaceId) ?? [];
       for (let i = events.length - 1; i >= 0; i--) if (events[i]!.threadId === threadId) events.splice(i, 1);
+      transcriptBytes.delete(workspaceId);
       await persistSessions(workspaceId);
       await flushTranscript(workspaceId);
     },

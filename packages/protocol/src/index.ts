@@ -1964,7 +1964,7 @@ export type ProjectHue = z.infer<typeof ProjectHue>;
 export const ProjectLook = z.object({ icon: ProjectIcon.optional(), hue: ProjectHue.optional() }).strict();
 export type ProjectLook = z.infer<typeof ProjectLook>;
 /** The glyphs a computer can wear on the Computers page; the app maps each word to its drawing. */
-export const ComputerIcon = z.enum(["laptop", "desktop", "server", "cloud", "cpu", "drive", "container", "home"]);
+export const ComputerIcon = z.enum(["laptop", "desktop", "mac-mini", "mac-studio", "tower", "server", "cloud", "cpu", "drive", "container", "home"]);
 export type ComputerIcon = z.infer<typeof ComputerIcon>;
 export const ComputerLook = z.object({ icon: ComputerIcon }).strict();
 export type ComputerLook = z.infer<typeof ComputerLook>;
@@ -3000,6 +3000,10 @@ export type PlaceCap = z.infer<typeof PlaceCap>;
 export const PlaceCapSet = ComputerCap.merge(CloudCap).partial();
 export type PlaceCapSet = z.infer<typeof PlaceCapSet>;
 
+/** The Macs a computer's icon tells apart. */
+export const MacKind = z.enum(["macbook", "imac", "mac-mini", "mac-studio", "mac-pro"]);
+export type MacKind = z.infer<typeof MacKind>;
+
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -3008,6 +3012,8 @@ export const PlaceView = z.object({
   /** The name the person gave this computer, a Mac's own "zingzy's MacBook Pro", drawn where the machine name is
    * not; absent where the computer keeps none. */
   label: z.string().optional(),
+  /** Which Mac this computer is, read off its model where it is one. */
+  mac: MacKind.optional(),
   default: z.boolean(),
   /** A computer: what it reported last. */
   os: z.string().optional(),

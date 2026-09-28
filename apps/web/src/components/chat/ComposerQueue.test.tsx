@@ -10,7 +10,7 @@ const rows = [
 
 function mount(over: Partial<Parameters<typeof ComposerQueue>[0]> = {}) {
   const handlers = { onEdit: vi.fn(), onRemove: vi.fn() };
-  const view = render(<ComposerQueue rows={rows} files={{}} next={null} {...handlers} {...over} />);
+  const view = render(<ComposerQueue rows={rows} files={{}} next={null} waiting={null} {...handlers} {...over} />);
   return { ...handlers, view };
 }
 
@@ -18,7 +18,7 @@ const cards = () => [...document.querySelectorAll<HTMLElement>("[data-queued-id]
 
 describe("ComposerQueue", () => {
   it("renders nothing for an empty queue", () => {
-    const { container } = render(<ComposerQueue rows={[]} files={{}} next={null} onEdit={() => {}} onRemove={() => {}} />);
+    const { container } = render(<ComposerQueue rows={[]} files={{}} next={null} waiting={null} onEdit={() => {}} onRemove={() => {}} />);
     expect(container.innerHTML).toBe("");
   });
 

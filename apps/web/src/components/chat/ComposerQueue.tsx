@@ -23,6 +23,7 @@ export function ComposerQueue({
   rows,
   files,
   next,
+  waiting,
   onEdit,
   onRemove,
 }: {
@@ -31,6 +32,8 @@ export function ComposerQueue({
   files: Readonly<Record<string, ReadonlyArray<ComposerFile>>>;
   /** The card a send-now put at the head while its request is out; null when none. */
   next: string | null;
+  /** Why every card waits while the workspace is still being made, on each card's word; null once it is up. */
+  waiting: string | null;
   onEdit: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
@@ -53,7 +56,9 @@ export function ComposerQueue({
                 </ul>
               ) : null}
             </div>
-            <span className="w-[6ch] shrink-0 select-none py-0.5 text-end text-xs leading-5 text-muted-foreground">{row.id === next ? "Next" : "Queued"}</span>
+            <span title={waiting ?? undefined} data-queued-word className="w-[6ch] shrink-0 select-none py-0.5 text-end text-xs leading-5 text-muted-foreground">
+              {row.id === next ? "Next" : "Queued"}
+            </span>
             <Button size="icon-xs" variant="ghost-muted" aria-label="Edit queued message" title="Edit queued message" onClick={() => onEdit(row.id)}>
               <PencilIcon />
             </Button>

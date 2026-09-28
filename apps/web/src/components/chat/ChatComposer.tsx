@@ -195,9 +195,23 @@ interface StopAttempt {
 }
 
 /** `onStart` takes the first send instead of the runtime: a project's home has no workspace yet, and its send is what
- * makes one. A sentence it answers is why nothing was made: the draft goes back and the sentence is raised as a flyout. */
-export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: string; thread: ChatThreadHandle; onStart?: (prompt: string) => Promise<string | null> }) {
+ * makes one. A sentence it answers is why nothing was made: the draft goes back and the sentence is raised as a flyout.
+ * `waiting` is set while the workspace is still being made: a send joins the queue, whose cards say on their hover
+ * why they wait, and nothing leaves it here, since the queue goes to the workspace once it is up; the folder row
+ * names the copy's folder. */
+export function ChatComposer({
+  workspaceId,
+  thread,
+  onStart,
+  waiting,
+}: {
+  workspaceId: string;
+  thread: ChatThreadHandle;
+  onStart?: (prompt: string) => Promise<string | null>;
+  waiting?: { line: string; folder: string; project: string | null };
+}) {
   const api = useStore(s => s.api);
+  const waits = waiting !== undefined;
   const wake = useStore(s => s.wake);
   const conn = useStore(s => s.conn);
   const sessions = useStore(s => s.sessions[workspaceId]);
@@ -287,7 +301,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const heldForAnswer = blocked === "unreachable";
   // A home's composer has no workspace to be blocked by: its send is what makes one.
   const unavailable =
-    onStart !== undefined || blocked === null || wakesFirst
+    onStart !== undefined || waits || blocked === null || wakesFirst
       ? null
       : heldForAnswer
         ? composerHeldLine(computer)
@@ -414,11 +428,11 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
   const take = useCallback(
     (given: readonly File[]) => {
       // Paste and drop answer to the same state the picker button does: one door open and two shut would take a
-      // file the send could not carry.
-      if (given.length === 0 || shut) return;
+      // file the send could not carry. A waiting card keeps only its words, so a composer that waits takes none.
+      if (given.length === 0 || shut || waits) return;
       void addFiles(workspaceId, given, readsImage ? undefined : noImagesLine(harnessId));
     },
-    [addFiles, harnessId, readsImage, shut, workspaceId],
+    [addFiles, harnessId, readsImage, shut, waits, workspaceId],
   );
 
   const onPaste = useCallback(
@@ -625,6 +639,10 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
         return;
       }
       setDraft(workspaceId, EMPTY_DRAFT);
+      if (waits) {
+        enqueue(threadKey, prompt);
+        return;
+      }
       if (onStart !== undefined) {
         void onStart(prompt).then(refusal => {
           if (refusal === null) return;
@@ -648,18 +666,18 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
       if (now) sendNow({ id, prompt });
       else release(threadKey);
     },
-    [askAside, asides, busy, dismissRefused, dismissTrigger, draft, enqueue, harnessCatalog, held, onStart, queueFiles, release, restoreDraft, runningTurn, sendHeld, sendNow, sending, setDraft, start, threadKey, trigger, workspace, workspaceId],
+    [askAside, asides, busy, dismissRefused, dismissTrigger, draft, enqueue, harnessCatalog, held, onStart, queueFiles, release, restoreDraft, runningTurn, sendHeld, sendNow, sending, setDraft, start, threadKey, trigger, waits, workspace, workspaceId],
   );
 
   // The head row goes as soon as nothing blocks a send; starting flips busy, so the rest wait for the next end.
   const head = queue[0];
   useEffect(() => {
-    if (head === undefined || held || unavailable !== null || busy) return;
+    if (head === undefined || held || unavailable !== null || busy || waits) return;
     removeQueued(threadKey, head.id);
     const prompt = head.prompt.trim();
     if (prompt !== "") start(prompt, () => requeue(threadKey, head), head.id);
     else dropFiles(head.id);
-  }, [busy, dropFiles, head, held, removeQueued, requeue, start, threadKey, unavailable]);
+  }, [busy, dropFiles, head, held, removeQueued, requeue, start, threadKey, unavailable, waits]);
 
   /** A card's edit: its words and files go back in the box, a draft already there kept in front of them. */
   const editCard = useCallback(
@@ -825,7 +843,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
 
   // A home's thread carries a history-unavailable row and no message, so the count is of messages alone.
   const compact = thread.view.running || thread.view.entries.some(entry => entry.kind === "message");
-  const modes = <ComposerModeToggles fast={fastOffered ? { on: fastOn, toggle: () => setFast(threadKey, !fastOn) } : null} tight={compact} />;
+  const modes = <ComposerModeToggles fast={fastOffered ? { on: fastOn, toggle: () => setFast(threadKey, !fastOn) } : null} tight={compact} held={waits} />;
   const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
   const heightRef = useRef<HTMLDivElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -863,7 +881,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
         variant="ghost-muted"
         aria-label="Attach"
         title={`Add a file: paste, drop or pick one, at most ${FILES_MAX}. An image (${IMAGE_TYPE_WORDS}) goes up to ${IMAGE_MAX_WORDS}, any other file up to ${FILE_MAX_WORDS}.`}
-        disabled={shut}
+        disabled={shut || waits}
         onClick={() => pickerRef.current?.click()}
         data-composer-file-picker="true"
       >
@@ -905,7 +923,7 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
 
   return (
     <div className="relative w-full px-3 pt-1.5 pb-4 sm:px-5 sm:pt-2 sm:pb-5" data-chat-composer>
-      <ComposerQueue rows={queue} files={queuedFiles} next={next} onEdit={editCard} onRemove={removeCard} />
+      <ComposerQueue rows={queue} files={queuedFiles} next={next} waiting={waiting?.line ?? null} onEdit={editCard} onRemove={removeCard} />
       <ComposerSurface.Shell contextStrip>
         <ComposerSurface.Host>
           <form
@@ -990,7 +1008,15 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
                           compact && !tall ? "row-start-1" : "row-start-2",
                         )}
                       >
-                        <ComposerOptionPickers compact={compact} workspaceId={workspaceId} thread={thread} onPickAccess={accessPick.pick} accessRefused={accessPick.line} onOtherFolder={openFolderPicker} />
+                        <ComposerOptionPickers
+                          compact={compact}
+                          workspaceId={workspaceId}
+                          thread={thread}
+                          onPickAccess={accessPick.pick}
+                          accessRefused={accessPick.line}
+                          onOtherFolder={openFolderPicker}
+                          {...(waiting?.project != null ? { heldProject: waiting.project } : {})}
+                        />
                         {compact ? null : modes}
                       </div>
                       <div data-chat-composer-actions="right" className={cn("col-start-3 flex shrink-0 items-center justify-self-end", compact && !tall ? "row-start-1" : "row-start-2 self-end")}>
@@ -1005,6 +1031,8 @@ export function ChatComposer({ workspaceId, thread, onStart }: { workspaceId: st
         </ComposerSurface.Host>
         {home !== undefined ? (
           <HomeCheckoutRow path={home.path} branch={home.defaultBranch} />
+        ) : waiting !== undefined ? (
+          <HomeCheckoutRow path={waiting.folder} branch="" />
         ) : (
           <ComposerCheckoutRow
           workspaceId={workspaceId}

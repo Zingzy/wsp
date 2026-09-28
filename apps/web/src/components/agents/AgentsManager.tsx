@@ -436,9 +436,9 @@ export function AgentsManager({ shell, head, report, reading, error = null, on, 
   return (
     // On the page the content stands on the cards' text edge, their hairline and px-5, 5 px past the panel's.
     <section ref={root} data-agents-manager data-shell={shell} aria-label={W.section} onKeyDown={onKeyDown} className={cn("@container flex flex-col", page ? "px-[5px]" : "min-h-0 flex-1")}>
-      {/* The page scrolls as a whole, so its head pins over the list on the page's grained ground; the panel's head
-          stands still and only the list under it scrolls, since the panel's ground is the glass and clear. */}
-      <div data-agents-top className={cn("flex flex-col pb-1", page ? "sticky top-0 z-10 bg-background surface-grain" : "flex-none pt-4")}>
+      {/* On the page the head scrolls with the page on its ground, as every Settings head does: a pinned head needs a
+          ground of its own, a second material over the glass. In the panel only the list under the head scrolls. */}
+      <div data-agents-top className={cn("flex flex-col pb-1", !page && "flex-none pt-4")}>
         {headRow}
         <div className="flex flex-col gap-3">
           {tabs}

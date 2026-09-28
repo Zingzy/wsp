@@ -59,3 +59,5 @@ export const workspaceRowId = (workspaceId: string): string => `ws:${workspaceId
 export const threadRowId = (threadId: string): string => `thread:${threadId}`;
 /** The Settled fold's own row, which the keyboard walks like a tile. */
 export const SETTLED_ROW_ID = "settled";
+/** A live section's head, which the keyboard walks like the Settled row. */
+export const sectionRowId = (section: string): string => `section:${section}`;
