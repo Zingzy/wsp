@@ -232,6 +232,7 @@ describe("computeStableMessagesTimelineRows", () => {
       error: null,
       startedAt,
       completedAt: null,
+      checkpoint: null,
     };
     const input = {
       turns: [runningTurn],

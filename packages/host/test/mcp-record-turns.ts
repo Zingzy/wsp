@@ -274,7 +274,7 @@ export async function turnWords(): Promise<Record<string, unknown>> {
 }
 
 /** One call recorded against a host: the arguments, the frame each op is answered with, the frames the host pushes
- * right behind the reply to an op, the op after whose reply the host lets the socket go as it stops, and the
+ * while an op is under way, before its reply, the op after whose reply the host lets the socket go as it stops, and the
  * environment the server runs in where the tool reads it. */
 export interface TurnCase {
   case: string;
@@ -283,6 +283,8 @@ export interface TurnCase {
   pushed?: Record<string, string[]>;
   closes?: string;
   env?: Record<string, string>;
+  /** Recorded and replayed with the cloud on, which is the only state some tools are served in. */
+  cloud?: true;
 }
 
 const ok = (body: Record<string, unknown>): string => JSON.stringify({ id: 1, ok: true, ...body });

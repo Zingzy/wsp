@@ -5,7 +5,7 @@
 // inks the whole slot; a slot with none keeps the row's own ink.
 import { cn } from "../../lib/utils.js";
 import { Crab } from "./Crab.js";
-import type { ThreadStatusInput } from "./kinds/index.js";
+import type { StatusKind, ThreadStatusInput } from "./kinds/index.js";
 import { RESTING } from "./kinds/resting.js";
 import { threadStatusOf } from "./threadStatusOf.js";
 import { WorkingSince } from "./WorkingSince.js";
@@ -18,6 +18,7 @@ export function ThreadStatus({
   age,
   crab = false,
   settled = false,
+  kind: given,
   className,
 }: {
   thread: ThreadStatusInput;
@@ -28,9 +29,11 @@ export function ThreadStatus({
   /** The thread sits in the Settled fold, where the design's Settled row reads the age in the row's ink whatever the
    * thread's state: the fold holds what a person has put away, so nothing in it calls for them. */
   settled?: boolean;
+  /** A kind no thread reads as, for a tile that holds no thread yet. */
+  kind?: StatusKind;
   className?: string;
 }) {
-  const kind = settled ? RESTING : threadStatusOf(thread);
+  const kind = given ?? (settled ? RESTING : threadStatusOf(thread));
   const Glyph = kind.glyph;
   return (
     <span

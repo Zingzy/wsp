@@ -67,6 +67,11 @@ impl Frames {
     pub async fn next(&mut self) -> Option<String> {
         self.told.recv().await
     }
+
+    /// The next frame already here, without waiting for one.
+    pub fn try_next(&mut self) -> Option<String> {
+        self.told.try_recv().ok()
+    }
 }
 
 impl Drop for Frames {

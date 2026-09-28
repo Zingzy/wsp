@@ -127,7 +127,8 @@ export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle):
   const listed = useHarnessCatalog(harness, workspaceId);
   // A home's lists were read against no machine; the kind of workspace its send makes decides the mode it starts at.
   const homeKind = useStore(s => {
-    const home = s.projects.find(p => projectHomeKey(p.id) === workspaceId);
+    const made = s.creations.find(c => c.key === workspaceId)?.project;
+    const home = s.projects.find(p => projectHomeKey(p.id) === workspaceId || p.id === made);
     return home === undefined ? null : kindForComputer(home.computer);
   });
   const catalog = useMemo(() => (listed === null || homeKind === null ? listed : workspaceAccess(listed, homeKind)), [homeKind, listed]);
@@ -349,6 +350,19 @@ export const OTHER_FOLDER = "other folder";
  * folder's last segment once one is picked. A workspace is one project's copy, so the menu offers that project and
  * other folder, which hands the pick to the folder picker under the box. The button is capped at the row's width,
  * since a folder's name is as long as the person made it. */
+/** The project picker's own face with nothing behind it. */
+function HeldProject({ name }: { name: string }) {
+  return (
+    <Button type="button" variant="ghost" size="xs" disabled className={`${triggerClass} max-w-full`} aria-label={`Project: ${name}`} data-composer-picker="project">
+      <FolderIcon className="size-3.5 shrink-0" aria-hidden />
+      <span data-composer-project-name className="min-w-0 truncate font-mono">
+        {name}
+      </span>
+      <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
+    </Button>
+  );
+}
+
 function ProjectPicker({ workspaceId, projects, onOtherFolder }: { workspaceId: string; projects: readonly ProjectRef[]; onOtherFolder: () => void }) {
   const project = useDefaultProject(workspaceId);
   const chosen = useChosenFolder(workspaceId);
@@ -405,9 +419,12 @@ export function ComposerOptionPickers({
   onPickAccess,
   onOtherFolder,
   compact = false,
+  heldProject,
 }: {
   /** The one-line composer's pickers: the model and the reasoning only, the access having moved under the box. */
   compact?: boolean;
+  /** The project a workspace still being made will run in, drawn where its picker will stand and taking no press. */
+  heldProject?: string;
   workspaceId: string;
   thread: ChatThreadHandle;
   onPickAccess: (mode: string) => void;
@@ -464,7 +481,11 @@ export function ComposerOptionPickers({
           <AccessPicker modes={catalog.permissionModes} picks={picks} returnTo={returnTo} note={thread.view.running ? accessReachLine(movesRunningAccess(catalog)) : null} onPickAccess={onPickAccess} />
         </>
       ) : null}
-      {!compact && projects.length > 0 && canPickFolder(thread) ? <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} /> : null}
+      {compact ? null : heldProject !== undefined ? (
+        <HeldProject name={heldProject} />
+      ) : projects.length > 0 && canPickFolder(thread) ? (
+        <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} />
+      ) : null}
     </>
   );
 }

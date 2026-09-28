@@ -89,16 +89,16 @@ pub struct TurnOut {
 
 /// The model, effort and access mode a start names, as the composer's pickers name them, and whether it runs fast.
 #[derive(Default)]
-struct Picks {
-    model: Option<String>,
-    effort: Option<String>,
-    access: Option<String>,
-    fast: Option<bool>,
+pub(super) struct Picks {
+    pub(super) model: Option<String>,
+    pub(super) effort: Option<String>,
+    pub(super) access: Option<String>,
+    pub(super) fast: Option<bool>,
 }
 
 impl Picks {
     /// As sessions.start carries them: access is the wire's permissionMode.
-    fn wire(&self, into: &mut Map<String, Value>) {
+    pub(super) fn wire(&self, into: &mut Map<String, Value>) {
         for (key, value) in [("model", &self.model), ("effort", &self.effort), ("permissionMode", &self.access)] {
             if let Some(value) = value {
                 into.insert(key.to_owned(), Value::from(value.as_str()));
@@ -210,7 +210,13 @@ fn checked_against(catalog: &Catalog, picks: &Picks) -> Result<(), Unlisted> {
 
 /// Refuses, before a machine is woken for it, what the runtime would refuse once it was there: an empty task, an
 /// agent the host has no adapter for, a pick the agent's catalog does not list.
-async fn checked_start(client: &Client, task: &str, harness: Option<&str>, picks: &Picks, workspace_id: &str) -> Result<(), Failure> {
+pub(super) async fn checked_start(
+    client: &Client,
+    task: &str,
+    harness: Option<&str>,
+    picks: &Picks,
+    workspace_id: &str,
+) -> Result<(), Failure> {
     let words = turns();
     if js_trim(task).is_empty() {
         return Err(Failure::usage(words.empty_task.clone()));
@@ -258,6 +264,32 @@ fn home_shortened(path: &str, home: Option<&str>) -> String {
         }
         _ => path.to_owned(),
     }
+}
+
+/// The start that opens a thread in a workspace. The token of the turn this server runs inside rides it, which is what
+/// the host reads a notify of me against; there is none when the server is not inside a turn.
+pub(super) fn opening(
+    host: &Host,
+    workspace_id: &str,
+    prompt: &str,
+    harness: Option<String>,
+    cwd: Option<&str>,
+    notify: Option<Vec<String>>,
+) -> Map<String, Value> {
+    let mut start = params([("workspaceId", Value::from(workspace_id)), ("prompt", Value::from(prompt))]);
+    if let Some(cwd) = cwd {
+        start.insert("cwd".to_owned(), Value::from(cwd));
+    }
+    if let Some(harness) = harness {
+        start.insert("harness".to_owned(), Value::from(harness));
+    }
+    if let Some(notify) = notify {
+        start.insert("notify".to_owned(), Value::from(notify));
+    }
+    if let Some(token) = host.env().get(&turns().turn_token_env).filter(|t| !t.is_empty()) {
+        start.insert("turnToken".to_owned(), Value::from(token.as_str()));
+    }
+    start
 }
 
 /// Where a thread goes: the workspace named, else the one standing on the project the server's folder is a repo of,
@@ -388,7 +420,7 @@ fn request_id() -> String {
 /// A turn as a caller sees it: the thread it opened or resumed, how the start went, and once it ended the result
 /// and the runtime's reason.
 #[derive(Debug, Clone)]
-struct Turn {
+pub(super) struct Turn {
     thread_id: String,
     workspace_id: String,
     harness: String,
@@ -464,7 +496,12 @@ fn start_wait() -> Duration {
 /// that stops under the follow once the turn is named is dialled again, and the follow goes on from the host that
 /// comes back: an end its transcript already holds is read off it, the rest arrive as they come. `started` holds the
 /// turn from the moment it is named, for a caller whose launch died after it.
-async fn follow(host: &Host, client: Arc<Client>, start: &Map<String, Value>, started: &mut Option<Turn>) -> Result<Turn, Failure> {
+pub(super) async fn follow(
+    host: &Host,
+    client: Arc<Client>,
+    start: &Map<String, Value>,
+    started: &mut Option<Turn>,
+) -> Result<Turn, Failure> {
     let mut socket = client.clone();
     loop {
         let mut frames = socket.frames();
@@ -513,7 +550,7 @@ async fn follow(host: &Host, client: Arc<Client>, start: &Map<String, Value>, st
 }
 
 /// Why the turn did not complete, classed by the cause the agent named: a refusal for want of a sign-in is auth.
-fn turn_refusal(turn: &Turn) -> Option<Failure> {
+pub(super) fn turn_refusal(turn: &Turn) -> Option<Failure> {
     let result = turn.result.as_ref();
     if result.is_some_and(|r| r.status == "completed") {
         return None;
@@ -529,7 +566,7 @@ fn turn_refusal(turn: &Turn) -> Option<Failure> {
     })
 }
 
-fn turn_out(turn: &Turn) -> TurnOut {
+pub(super) fn turn_out(turn: &Turn) -> TurnOut {
     TurnOut {
         thread_id: turn.thread_id.clone(),
         workspace_id: turn.workspace_id.clone(),
@@ -600,7 +637,7 @@ fn with_line(failure: Failure, line: Option<String>) -> Failure {
 }
 
 /// What the notify list names for the runtime: `me` as given, and every other thread by its full id.
-async fn notify_of(client: &Client, named: &[String]) -> Result<Option<Vec<String>>, Failure> {
+pub(super) async fn notify_of(client: &Client, named: &[String]) -> Result<Option<Vec<String>>, Failure> {
     if named.is_empty() {
         return Ok(None);
     }
@@ -635,7 +672,6 @@ fn opened_thread(thread_id: &str, opened: Option<&Opened>) -> String {
 
 async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     let RunIn { workspace, task, agent, model, effort, access, fast, cwd, notify, title, files, detach } = input("run", arguments)?;
-    let words = turns();
     let client = host.client().await?;
     let (found, inferred) = thread_target(&client, workspace.as_deref(), host.cwd()).await?;
     let picks = Picks { model, effort, access, fast };
@@ -646,20 +682,9 @@ async fn run(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     });
     let woken = awake(&client, &found, "send").await?;
     let notify = notify_of(&client, notify.as_deref().unwrap_or_default()).await?;
-    let mut start = params([("workspaceId", Value::from(woken.workspace.id.as_str())), ("prompt", Value::from(task.as_str()))]);
-    if let Some(cwd) = absolute_folder(cwd.as_deref())? {
-        start.insert("cwd".to_owned(), Value::from(cwd));
-    }
+    let folder = absolute_folder(cwd.as_deref())?;
     let attachments = files_from(files.as_deref().unwrap_or_default())?;
-    if let Some(agent) = agent {
-        start.insert("harness".to_owned(), Value::from(agent));
-    }
-    if let Some(notify) = notify {
-        start.insert("notify".to_owned(), Value::from(notify));
-    }
-    if let Some(token) = host.env().get(&words.turn_token_env).filter(|t| !t.is_empty()) {
-        start.insert("turnToken".to_owned(), Value::from(token.as_str()));
-    }
+    let mut start = opening(&host, &woken.workspace.id, &task, agent, folder, notify);
     if let Some(title) = title {
         start.insert("title".to_owned(), Value::from(title));
     }

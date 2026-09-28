@@ -735,12 +735,14 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   let stopCost: (() => void) | undefined;
   let stopPoll: (() => void) | undefined;
   const lastEmitted = new Map<string, string>();
+  // A machine's uptime ticks on every read and no client reads it, so it alone never makes a row new.
+  const rowKey = (status: WorkspaceStatus): string => JSON.stringify(status, (field, value: unknown) => (field === "uptimeMs" ? undefined : value));
   // A status the runtime pushed between polls is a row a client has already been given, so it belongs in the
   // baseline the next poll is held against. Without this a push moves the row and the poll's own word for the same
   // machine reads as a repeat and is dropped: a line the runtime meant to flash once then sat on the row until
   // some other fact about the machine happened to change.
   o.on("workspace.status", e => {
-    if (e.type === "workspace.status") lastEmitted.set(e.status.id, JSON.stringify(e.status));
+    if (e.type === "workspace.status") lastEmitted.set(e.status.id, rowKey(e.status));
   });
 
   /** The timer's tick samples every workspace and always rides the bus. An event's tick is one workspace's: it pins
@@ -803,7 +805,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     o.onPolled?.(statuses.filter(status => now.get(status.id) === built.get(status.id)));
     for (const status of statuses) {
       if (now.get(status.id) !== built.get(status.id)) continue;
-      const key = JSON.stringify(status);
+      const key = rowKey(status);
       if (lastEmitted.get(status.id) === key) continue;
       lastEmitted.set(status.id, key);
       o.emit({ type: "workspace.status", status });

@@ -1,0 +1,93 @@
+{
+  "tool": "projects_add",
+  "cases": [
+    {
+      "case": "added",
+      "arguments": {
+        "source": "dev/alpha",
+        "on": "attic",
+        "base": "main"
+      },
+      "replies": {
+        "projects.add": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic \u0085\",\"default\":false}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha 'quoted' proj-1: dev/alpha on attic \\u0085, at /root/alpha inside a workspace of it\\nmake one with: wsp new 'alpha '\\\\''quoted'\\\\''' \\\"<what you are working on>\\\"\"}],\"structuredContent\":{\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \\u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.add",
+          "source": "dev/alpha",
+          "on": "attic",
+          "base": "main"
+        },
+        {
+          "op": "places.list"
+        }
+      ]
+    },
+    {
+      "case": "notice",
+      "arguments": {
+        "source": "https://example.com/dev/alpha.git",
+        "on": "attic",
+        "name": "alpha"
+      },
+      "replies": {
+        "projects.add": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"git\",\"url\":\"https://example.com/dev/alpha.git\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"},\"notice\":\"the seed left 2 commits behind \u0085\"}",
+        "places.list": "{\"id\":1,\"ok\":false,\"error\":\"not yours to read\",\"kind\":\"auth\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha 'quoted' proj-1: https://example.com/dev/alpha.git on place-9, at /root/alpha inside a workspace of it\\nmake one with: wsp new 'alpha '\\\\''quoted'\\\\''' \\\"<what you are working on>\\\"\\nthe seed left 2 commits behind \\u0085\"}],\"structuredContent\":{\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"git\",\"url\":\"https://example.com/dev/alpha.git\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \\u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"},\"notice\":\"the seed left 2 commits behind \\u0085\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.add",
+          "source": "https://example.com/dev/alpha.git",
+          "on": "attic",
+          "name": "alpha"
+        },
+        {
+          "op": "places.list"
+        }
+      ]
+    },
+    {
+      "case": "cloned into a folder",
+      "arguments": {
+        "source": "https://example.com/dev/alpha.git",
+        "into": "/Users/me/alpha",
+        "base": "main"
+      },
+      "replies": {
+        "projects.add": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "places.list": "{\"id\":1,\"ok\":true,\"places\":[{\"id\":\"place-9\",\"kind\":\"computer\",\"name\":\"attic \u0085\",\"default\":false}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"alpha 'quoted' proj-1: /Users/me/alpha on attic \\u0085, at /root/alpha inside a workspace of it\\nmake one with: wsp new 'alpha '\\\\''quoted'\\\\''' \\\"<what you are working on>\\\"\"}],\"structuredContent\":{\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"folder\",\"path\":\"/Users/me/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \\u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.add",
+          "source": "https://example.com/dev/alpha.git",
+          "base": "main",
+          "into": "/Users/me/alpha"
+        },
+        {
+          "op": "places.list"
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "source": "/nowhere"
+      },
+      "replies": {
+        "projects.add": "{\"id\":1,\"ok\":false,\"error\":\"/nowhere is not a git repo\",\"kind\":\"usage\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"/nowhere is not a git repo\"}],\"structuredContent\":{\"error\":\"/nowhere is not a git repo\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "projects.add",
+          "source": "/nowhere"
+        }
+      ]
+    }
+  ]
+}
