@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Open in editor: a file at its line, or a copy's folder, in the editor the
-// person picked in Settings, on the computer the host runs on. A workspace
+// Open in editor, on a file's tab: the file at its line, in the editor the
+// person picked, on the computer the host runs on. A workspace
 // whose files are on another machine asks nothing of the host: the button
 // gives way to the one sentence naming that machine, and a refusal from the
 // host takes its place the same way.
@@ -14,9 +14,8 @@ import { Button } from "../components/ui/button.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
 
 export const OPEN_IN_EDITOR = "Open in editor";
-export const OPEN_FOLDER_IN_EDITOR = "Open folder in editor";
 
-export function OpenInEditor({ workspaceId, path, line, label = OPEN_IN_EDITOR }: { workspaceId: string; path: string; line?: number | null; label?: string }) {
+export function OpenInEditor({ workspaceId, path, line }: { workspaceId: string; path: string; line?: number | null }) {
   const workspace = useWorkspace(workspaceId);
   const status = useStatus(workspaceId);
   const places = usePlaces();
@@ -39,10 +38,10 @@ export function OpenInEditor({ workspaceId, path, line, label = OPEN_IN_EDITOR }
   };
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-xs" className="shrink-0" aria-label={label} onClick={onClick} data-open-in-editor />}>
+      <TooltipTrigger render={<Button type="button" variant="ghost" size="icon-xs" className="shrink-0" aria-label={OPEN_IN_EDITOR} onClick={onClick} data-open-in-editor />}>
         <SquareArrowOutUpRightIcon />
       </TooltipTrigger>
-      <TooltipPopup>{label}</TooltipPopup>
+      <TooltipPopup>{OPEN_IN_EDITOR}</TooltipPopup>
     </Tooltip>
   );
 }

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { agentMark, BRAND_MARKS, CATALOG_AGENTS, PROVIDER_MARKS, UNMARKED_AGENTS, type AgentMark } from "../src/index.js";
+import { agentMark, BRAND_MARKS, CATALOG_AGENTS, EDITOR_MARKS, PROVIDER_MARKS, UNMARKED_AGENTS, type AgentMark } from "../src/index.js";
 
 const LICENSES = ["MIT", "CC0-1.0", "Apache-2.0"];
 const HEX = /^#[0-9a-f]{6}$/i;
 const MARKED = CATALOG_AGENTS.filter(a => !UNMARKED_AGENTS.includes(a.id));
-const EVERY_MARK: readonly (readonly [string, AgentMark])[] = [...MARKED.map(a => [a.id, a.mark!] as const), ...BRAND_MARKS.map(m => [m.id, m] as const), ...PROVIDER_MARKS.map(m => [m.id, m] as const)];
+const EVERY_MARK: readonly (readonly [string, AgentMark])[] = [...MARKED.map(a => [a.id, a.mark!] as const), ...BRAND_MARKS.map(m => [m.id, m] as const), ...PROVIDER_MARKS.map(m => [m.id, m] as const), ...EDITOR_MARKS.map(m => [`editor ${m.id}`, m] as const)];
 
 describe("agent marks", () => {
   it("every catalog agent but the named exceptions carries its own mark, with where it came from and under what license", () => {
