@@ -410,7 +410,10 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         if (chunk.length > 0) {
           activity.touch(now());
           lines.feed(chunk.toString("utf8"));
-          continue; // there may be more than one chunk waiting
+          // There may be more than one chunk waiting, and a log read from its first byte can be hundreds of them: the
+          // loop turns between two, or a host re-opening a long turn answers nothing until it has read all of it.
+          await new Promise(resolve => setImmediate(resolve));
+          continue;
         }
         if (ended !== undefined && ended !== "") return settle(Number.parseInt(ended, 10));
         // The leader is checked after the exit file: one that finished in between shows as down with no exit yet.
