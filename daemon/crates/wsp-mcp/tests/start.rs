@@ -38,8 +38,15 @@ async fn brings_up_the_wsp_it_was_handed_and_answers_once_that_host_serves() {
     let dir = tempfile::tempdir().unwrap();
     let state = dir.path().join("state").join("state.json");
     let empty = r#"{"id":1,"ok":true,"places":[]}"#.to_owned();
-    let port =
-        common::host("started-token", BTreeMap::from([("places.list".to_owned(), empty.clone()), ("cost.spend".to_owned(), empty)])).await;
+    let port = common::scripted(
+        "started-token",
+        common::Script {
+            replies: BTreeMap::from([("places.list".to_owned(), empty.clone()), ("cost.spend".to_owned(), empty)]),
+            ..common::Script::default()
+        },
+    )
+    .await
+    .0;
     // The host it starts takes the lock under this process's pid, which is alive, and writes its token beside it.
     let lock = json!({ "pid": std::process::id(), "port": port, "startedAt": "2026-09-27T00:00:00.000Z" });
     let folder = state.parent().unwrap().display().to_string();

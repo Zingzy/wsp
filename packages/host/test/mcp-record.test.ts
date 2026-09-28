@@ -26,7 +26,8 @@ import { PROBE_MS } from "../src/service.js";
 import { defaultHomeIn } from "../src/serving-home.js";
 import { addressNotPairedLine, aliasOk, deviceRefusedLine, dialWindowMs, hostsDir, NAME_ONE_HOST, noAnswerRefusal, noAnswerWithin, noSuchHostAmong, READ_THE_HOSTS, severalAccountHostsLine } from "../src/hosts.js";
 import { mcpServer, type Dialer } from "../src/mcp.js";
-import { agentCopyWords, aimedBothLine, aimedUsage, c1Escaped, CLOSE_GRACE_MS, goneFromLine, hostTokenMissingLine, isInAlsoLine, isInLine, noHostServingLine, noSkillHitsLine, notHeaderLine, otherVersion, PLACES_FIX, previewCutLine, projectOffComputerLine, projectScopeLine, projectUnnamedLine, SERVER_TOOL_COLUMNS, SKILL_HIT_COLUMNS, skillsShPlacelessLine, toolLines, toolsAddedLine, toolsProjectBareLine, turnedInLine, turnedLine, UNAUTHORIZED_CLOSE, unsetVariableLine, type HostClient } from "../src/verbs.js";
+import { recipeCases, TURN_ANSWERED, turnWords, type TurnCase } from "./mcp-record-turns.js";
+import { agentCopyWords, aimedBothLine, aimedUsage, c1Escaped, CLOSE_GRACE_MS, goneFromLine, hasTool, hostTokenMissingLine, isInAlsoLine, isInLine, noHostServingLine, noSkillHitsLine, notHeaderLine, otherVersion, PLACES_FIX, previewCutLine, projectOffComputerLine, projectScopeLine, projectUnnamedLine, SERVER_TOOL_COLUMNS, SKILL_HIT_COLUMNS, skillsShPlacelessLine, toolLines, toolName, toolsAddedLine, toolsProjectBareLine, turnedInLine, turnedLine, UNAUTHORIZED_CLOSE, unsetVariableLine, VERBS, type HostClient } from "../src/verbs.js";
 import { VERSION } from "../src/version.js";
 
 const CRATE = fileURLToPath(new URL("../../../daemon/crates/wsp-mcp/", import.meta.url));
@@ -223,31 +224,64 @@ function host(): Record<string, unknown> {
 
 /** A host as far as one tool call asks it: each op answered with the frame a host would send, parsed as the dial
  * parses it, a refusal thrown with its kind as the dial throws it. Each op it is asked lands in `asked` with its
- * fields as they cross the socket. */
-function answeringHost(replies: Record<string, string>, asked: Record<string, unknown>[]): HostClient {
+ * fields as they cross the socket. The frames `pushed` names for an op reach every listener right behind each reply
+ * to it, and after the reply to `closes` the host lets the socket go as it stops. */
+function answeringHost(replies: Record<string, string>, asked: Record<string, unknown>[], pushed: Record<string, string[]> = {}, closes?: string): HostClient & { gone(): boolean } {
+  type Frame = Parameters<Parameters<HostClient["onFrame"]>[0]>[0];
+  const listeners = new Set<(f: Frame) => void>();
+  let code: number | undefined;
+  let close: (code: number) => void = () => {};
+  const closed = new Promise<number>(done => (close = done));
   return {
     request: async <T extends Record<string, unknown>>(op: string, params: Record<string, unknown> = {}): Promise<T> => {
-      asked.push(JSON.parse(JSON.stringify({ op, ...params })) as Record<string, unknown>);
+      const fields = JSON.parse(JSON.stringify({ op, ...params })) as Record<string, unknown>;
+      // A start's request id is minted fresh on every call, so it is noted as the one stand-in both sides write.
+      if ("requestId" in fields) fields["requestId"] = "<request id>";
+      asked.push(fields);
       const frame = JSON.parse(replies[op] ?? JSON.stringify({ ok: false, error: `${op} is not in this record` })) as Record<string, unknown>;
+      for (const f of pushed[op] ?? []) setImmediate(() => listeners.forEach(fn => fn(JSON.parse(f) as Frame)));
+      if (op === closes) {
+        setImmediate(() => {
+          code = HOST_STOPPING_CLOSE;
+          close(HOST_STOPPING_CLOSE);
+        });
+      }
       if (frame["ok"] !== true) throw Object.assign(new Error(String(frame["error"])), typeof frame["kind"] === "string" ? { kind: frame["kind"] } : {});
       return frame as T;
     },
     events: async () => {},
-    onFrame: () => () => {},
-    closed: new Promise(() => {}),
-    closeWords: () => HOST_CLOSED_LINE,
+    onFrame: fn => {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    closed,
+    closeWords: () => (code === HOST_STOPPING_CLOSE ? HOST_STOPPING_LINE : HOST_CLOSED_LINE),
     close: () => {},
     terminate: () => {},
+    gone: () => code !== undefined,
   };
 }
 
 /** The one line this server writes on stdio for one call against that host, through the same escaping the real one
- * writes through, and every op the call asked the host. */
-async function answeredLine(tool: string, args: Record<string, unknown>, replies: Record<string, string>, env: Record<string, string> = {}): Promise<{ line: string; asked: Record<string, unknown>[] }> {
+ * writes through, and every op the call asked the host; a host that went is dialled again as a fresh one. With
+ * `result`, the tool answers that and asks nothing, for a tool whose answer is read off this computer rather than off
+ * a host. */
+async function answeredLine(tool: string, args: Record<string, unknown>, replies: Record<string, string>, extra: Pick<TurnCase, "pushed" | "closes" | "env"> & { result?: Record<string, unknown> } = {}): Promise<{ line: string; asked: Record<string, unknown>[] }> {
   const asked: Record<string, unknown>[] = [];
-  const host = answeringHost(replies, asked);
-  const dial = Object.assign(async () => host, { close: async () => {} }) as Dialer;
-  const server = mcpServer("/nonexistent/state.json", { env, dial });
+  let host = answeringHost(replies, asked, extra.pushed, extra.closes);
+  const dial = Object.assign(
+    async () => {
+      if (host.gone()) host = answeringHost(replies, asked, extra.pushed, extra.closes);
+      return host;
+    },
+    { close: async () => {} },
+  ) as Dialer;
+  const answered = extra.result;
+  const verb = VERBS.filter(hasTool).find(v => toolName(v.name) === tool);
+  const server = mcpServer("/nonexistent/state.json", { env: extra.env ?? {}, dial, ...(answered !== undefined ? { skip: v => v === verb } : {}) });
+  if (answered !== undefined && verb !== undefined) {
+    server.registerTool(tool, { description: verb.tool.description, inputSchema: verb.tool.input, outputSchema: verb.tool.output }, async () => answered as never);
+  }
   const input = new PassThrough();
   const output = new PassThrough();
   let written = "";
@@ -281,9 +315,8 @@ const reply = (body: Record<string, unknown>): string => JSON.stringify({ id: 1,
 
 const refused = (error: string, kind?: string): string => JSON.stringify({ id: 1, ok: false, error, ...(kind !== undefined ? { kind } : {}) });
 
-/** The calls recorded per tool: the arguments, what the host answered each op with, the environment the server runs
- * in where the tool reads it, and a case name. */
-type Answered = Record<string, { case: string; arguments: Record<string, unknown>; replies: Record<string, string>; env?: Record<string, string> }[]>;
+/** The calls recorded per tool, each a case name, the arguments and what the host answered each op with. */
+type Answered = Record<string, TurnCase[]>;
 
 /** A workspace and a computer a tool aims at by name. */
 const WORKSPACE = { id: "ws_1", name: "landing", machineId: "m1", phase: "running", golden: "snap_gold", createdAt: "2026-09-25T00:00:00.000Z", project: { id: "pr_1", name: "api", path: "/root/api", computer: "place-9" } };
@@ -407,6 +440,7 @@ const ANSWERED: Answered = {
     { case: "empty", arguments: {}, replies: { "places.list": reply({ places: [] }), "cost.spend": reply({ places: [] }) } },
     { case: "refused", arguments: {}, replies: { "places.list": JSON.stringify({ id: 1, ok: false, error: "the token this line presented is not one this host holds", kind: "auth" }), "cost.spend": reply({ places: [] }) } },
   ],
+  ...TURN_ANSWERED,
 };
 
 async function regenerated(): Promise<Files> {
@@ -420,9 +454,15 @@ async function regenerated(): Promise<Files> {
   // Each tool as it is listed with the cloud off and on, and null in the state that lists no such tool.
   const entry = (tools: Record<string, unknown>[], name: string): Record<string, unknown> | null => tools.find(t => t["name"] === name) ?? null;
   for (const name of new Set([...off.tools, ...on.tools].map(t => String(t["name"])))) files.set(`record/tools/${name}.json`, fileText({ cloudOff: entry(off.tools, name), cloudOn: entry(on.tools, name) }));
+  files.set("record/turns.json", fileText(await turnWords()));
   for (const [tool, cases] of Object.entries(ANSWERED)) {
     const answered = [];
-    for (const c of cases) answered.push({ ...c, ...(await answeredLine(tool, c.arguments, c.replies, c.env)) });
+    for (const c of cases) answered.push({ ...c, ...(await answeredLine(tool, c.arguments, c.replies, c)) });
+    files.set(`tests/answers/${tool}.json`, fileText({ tool, cases: answered }));
+  }
+  for (const [tool, cases] of Object.entries(recipeCases())) {
+    const answered = [];
+    for (const { result, ...c } of cases) answered.push({ ...c, replies: {}, ...(await answeredLine(tool, c.arguments, {}, result !== undefined ? { result } : {})) });
     files.set(`tests/answers/${tool}.json`, fileText({ tool, cases: answered }));
   }
   return files;

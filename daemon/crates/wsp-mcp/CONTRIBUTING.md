@@ -8,6 +8,8 @@ The tool's entry (name, description, both schemas) is already in `record/tools/<
 
 In `packages/host/test/mcp-record.test.ts`, add the tool to `ANSWERED`: one case per shape worth holding, each with the arguments, the frame the host answers every op the tool asks, and `env` where the tool reads a variable. Put the awkward bytes in the frames (a C1 control, a quote, text past ASCII, a fraction), and include one refusal. The record keeps every op the call asked the host with its fields, and `tests/contract.rs` holds the Rust call to the same asks. Run the test; it fails and prints a folder. Copy it over as it says. `tests/contract.rs` now fails on your tool with `Tool <name> not found`.
 
+A tool that follows events adds `pushed`, the frames the host pushes right behind each reply to an op, and `closes`, the op after whose reply the host lets the socket go as it stops (code 4001, which a follow dials through). A tool that reads this computer rather than a host runs the TypeScript wsp: its case carries `wsp`, the words it must run it with and what that printed, and `result`, the TypeScript tool's answer to the same call, as the recipe tools' cases in `packages/host/test/mcp-record-turns.ts` do; `platform` keeps a case whose text names this computer to the platform it names.
+
 ## 2. Write it
 
 Add `src/tools/<name>.rs` (or one file per group) after `computers.rs`:
@@ -26,7 +28,8 @@ Things that break the byte compare:
 - A number from the host is never `f64`: serde prints `5.0` where JavaScript prints `5`. Pass it raw, or keep it as `serde_json::Number` read off the host's bytes.
 - `Out`'s fields go in the order of the object literal the TypeScript tool builds, and an optional field is `Option<T>` with `#[serde(skip_serializing_if = "Option::is_none")]`, since JavaScript leaves `undefined` out.
 - Arguments are refused before `call` runs, off the recorded input schema, in zod's words (`src/checked.rs`), so a wrongly typed field reads as the TypeScript server words it: `Expected string, received number at workspace`. Your `In` never sees bad input; `input()` failing means `In` disagrees with the schema, which `its_structs_are_the_recorded_schemas` catches first. A schema keyword the checker does not read fails `every_recorded_input_schema_uses_only_the_keywords_this_reads`. Teach it the keyword, and add a case to `REFUSED` in the record test so its words are held.
-- A sentence the tool says is recorded, never written here: add it to `words()` in the record test and a field to `Words` in `src/record.rs`, with `{name}` wherever a value is filled.
+- A sentence the tool says is recorded, never written here: add it to `words()` in the record test and a field to `Words` in `src/record.rs`, with `{name}` wherever a value is filled. The thread and turn tools keep theirs in `record/turns.json`, written by `turnWords()` in `mcp-record-turns.ts` and read by `src/tools/said.rs`. The one place the crate writes its own words is `src/tools/recipe.rs`, for what can go wrong between this server and the TypeScript wsp it runs: started with no wsp to run, a wsp that could not be started, printed nothing, exited without its failure object, or printed an object that does not read. The TypeScript tools run the collector in their own process, so none of these has a TypeScript twin to record.
+- An optional input or output field is `Option<T>`; the schema test takes off the null schemars adds to one, since zod's optional takes no null.
 
 ## 3. Hold it to the command line
 
