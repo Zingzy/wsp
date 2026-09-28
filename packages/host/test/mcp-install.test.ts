@@ -7,7 +7,8 @@ import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CATALOG_AGENTS, parseJsonc } from "@wsp/catalog";
-import { configHardLinkRefusal, mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
+import { BOX_BUDGETS, BOX_RESUME_MS } from "@wsp/engine";
+import { configHardLinkRefusal, mcpServerCommandLine, nextInsideAgentLine, WSP_TOOL_TIMEOUT_SEC } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, JSON_COMMANDS, PROSE_COMMANDS, agentPage, cli, type CliIO } from "../src/cli.js";
 import { SECTION_BEGIN, sectionText } from "../src/agents-md.js";
@@ -134,12 +135,23 @@ describe("installing the MCP server for a local agent", () => {
     expect(mcpServerSpec(statePath, PROC, {}).args).toContain("--state");
   });
 
+  it("gives Codex a tool timeout past the slowest wake a send or run waits through, and past Codex's own default", () => {
+    // A paused Boat's wake is its resume and then its daemon's budget to answer; the reply comes after both.
+    expect(WSP_TOOL_TIMEOUT_SEC * 1000).toBeGreaterThan(2 * (BOX_RESUME_MS + BOX_BUDGETS.daemonAnswersMs));
+    // Codex's default is 300 s since openai/codex#28234 and was 60 s before it.
+    expect(WSP_TOOL_TIMEOUT_SEC).toBeGreaterThan(300);
+    expect(Number.isInteger(WSP_TOOL_TIMEOUT_SEC)).toBe(true);
+  });
+
   it("places the server in the agent's config file under the home, creating the file and its folder, and says where", () => {
     const spec = mcpServerSpec(statePath, PROC);
     expect(installMcp("claude", spec, home)).toEqual({ agent: "Claude Code", path: "~/.claude.json", skill: "~/.claude/skills/wsp/SKILL.md" });
     expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { wsp: { command: spec.command, args: spec.args } } });
     expect(installMcp("codex", spec, home)).toEqual({ agent: "Codex", path: "~/.codex/config.toml", skill: "~/.codex/skills/wsp/SKILL.md" });
-    expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]\n");
+    // Codex's own limit on a tool call is written with the entry, so a send that wakes a paused Boat first still answers.
+    expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toBe(
+      `[mcp_servers.wsp]\ncommand = ${JSON.stringify(spec.command)}\nargs = [${spec.args.map(a => JSON.stringify(a)).join(", ")}]\ntool_timeout_sec = ${WSP_TOOL_TIMEOUT_SEC}\n`,
+    );
     mkdirSync(join(home, ".gemini"), { recursive: true });
     writeFileSync(join(home, ".gemini", "settings.json"), '{ "theme": "dark" }\n');
     installMcp("gemini", spec, home);
