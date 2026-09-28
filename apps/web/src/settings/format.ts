@@ -34,7 +34,7 @@ export const FONT_WORDS = {
   app: "App font",
   appDescription: "The sidebar, replies and every page.",
   code: "Code font",
-  codeDescription: "Code in replies, the diff and files.",
+  codeDescription: "Code in replies, the changes and files.",
   default: "Default",
 } as const;
 
@@ -308,7 +308,7 @@ export const KEYBINDINGS_WORDS = {
   terminal: "Terminal, while it has focus",
   fixed: "Fixed",
   sendMessage: "Send the message",
-  submitComment: "Submit a diff comment",
+  submitComment: "Submit a review comment",
   leaveSettings: "Leave Settings",
 } as const;
 

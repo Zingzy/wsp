@@ -52,10 +52,11 @@ pub use place::{
 pub use place_paths::{place_daemon_paths, place_owned_paths, place_provision_paths, probe_path, PlaceDaemonPaths, PlaceProvisionPaths};
 pub use reply::{
     DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsFilesReply, FsListReply, FsReadReply, FsSearchHit, FsSearchReply,
-    GitBranch, GitCheckpointReply, GitDiffFile, GitDiffReply, GitPrListReply, GitPrReply, GitPrStateReply, GitPushReply, GitRestoreReply,
-    GitStatusEntry, GitStatusReply, HostFolder, HostFolderListing, HostItem, InboxRescanReply, ListeningPort, ManifestEntry,
-    ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply,
-    ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, Reply, True,
+    FsWriteReply, GitBranch, GitCheckpointReply, GitCommitReply, GitDiffFile, GitDiffReply, GitDiscardReply, GitPrListReply, GitPrReply,
+    GitPrStateReply, GitPushReply, GitRestoreReply, GitStatusEntry, GitStatusReply, HostFolder, HostFolderListing, HostItem,
+    InboxRescanReply, ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply,
+    PlaceUpdateReply, PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, Reply,
+    True,
 };
 pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS, GUEST_OPS};
 pub use shell::shell_quote;

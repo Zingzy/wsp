@@ -1204,6 +1204,28 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...brought });
               return;
             }
+            case "workspaces.checkout":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.checkout(msg.workspaceId, origin)) });
+              return;
+            case "workspaces.discard":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.discard({ workspaceId: msg.workspaceId, path: msg.path }, origin)) });
+              return;
+            case "workspaces.commit":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.commit({ workspaceId: msg.workspaceId, message: msg.message, ...(msg.paths !== undefined ? { paths: msg.paths } : {}) }, origin)) });
+              return;
+            case "workspaces.commitDraft":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.commitDraft({ workspaceId: msg.workspaceId, ...(msg.paths !== undefined ? { paths: msg.paths } : {}) }, origin)) });
+              return;
+            case "workspaces.viewed":
+              send({
+                id: msg.id,
+                ok: true,
+                ...(await rt.workspaces.viewed(
+                  { workspaceId: msg.workspaceId, ...(msg.path !== undefined ? { path: msg.path } : {}), ...(msg.blob !== undefined ? { blob: msg.blob } : {}) },
+                  origin,
+                )),
+              });
+              return;
             case "workspaces.delete":
               await rt.workspaces.delete(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });

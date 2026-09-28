@@ -167,7 +167,13 @@ describe("the agent contract on the command line and the tool door", () => {
         send: async frame =>
           frame.op === "git.push"
             ? { id: 1, ok: true, branch: "work", base: "main", remote: "origin", ahead: 1, uncommitted: 0, stat: [" a.ts | 2 +-"] }
-            : prRefusal === undefined
+            : frame.op === "git.commit"
+              ? { id: 1, ok: true, oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4", subject: "Round the cart total once", filesChanged: 1, insertions: 1, deletions: 1 }
+              : frame.op === "git.discard"
+                ? { id: 1, ok: true, path: frame.path }
+                : frame.op === "git.status"
+                  ? { id: 1, ok: true, branch: { oid: "abc", head: "work", ahead: 1, behind: 0 }, entries: [], root: "/root/alpha" }
+                  : prRefusal === undefined
               ? { id: 1, ok: true, pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com" }, created: true }
               : { id: 1, ok: false as const, error: prRefusal },
         close: () => {},
@@ -262,6 +268,14 @@ describe("the agent contract on the command line and the tool door", () => {
       stat: [" a.ts | 2 +-"],
       pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com" },
     });
+    expect(await last("commit", "commit", "alpha", "--message", "Round the cart total once", "--file", "a.ts")).toEqual({
+      oid: "5f1c0e2b9a7d4c3e8f6a1b2c3d4e5f60718293a4",
+      subject: "Round the cart total once",
+      filesChanged: 1,
+      insertions: 1,
+      deletions: 1,
+    });
+    expect(await last("discard", "discard", "alpha", "a.ts")).toEqual({ path: "a.ts" });
     // The route goes again with the guest that answered for it: a machine wearing one has every later verb wait on
     // a daemon that is not there, which is the rest of this run.
     machine.previewUrl = noRoute;

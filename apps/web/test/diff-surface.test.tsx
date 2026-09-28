@@ -6,21 +6,32 @@
 // base is named, and the byte budget cut is announced. The Pierre code view
 // is stubbed to a list of item ids and their collapse, the tooltip skin to
 // its text.
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { REPO_STATE_WORDS } from "@wsp/protocol";
 import type { TerminalWire } from "../src/terminal/link.js";
 
 vi.mock("@pierre/diffs/react", () => ({
-  CodeView: (props: { items: { id: string; collapsed?: boolean }[] }) => (
+  CodeView: (props: {
+    items: { id: string; collapsed?: boolean; edit?: boolean; fileDiff?: unknown }[];
+    renderHeaderPrefix?: (item: unknown) => ReactNode;
+    renderHeaderMetadata?: (item: unknown) => ReactNode;
+    onItemEditChange?: (item: unknown, file: { name: string; contents: string }) => void;
+  }) => (
     <ul data-code-view>
       {props.items.map(item => (
-        <li key={item.id} data-item={item.id} data-collapsed={item.collapsed === true}>{item.id}</li>
+        <li key={item.id} data-item={item.id} data-collapsed={item.collapsed === true} data-edit={item.edit === true}>
+          <span data-header>{props.renderHeaderPrefix?.(item)}</span>
+          <span data-header-end>{props.renderHeaderMetadata?.(item)}</span>
+          {item.id}
+          {item.edit === true ? <textarea data-editor onChange={event => props.onItemEditChange?.(item, { name: item.id, contents: event.target.value })} /> : null}
+        </li>
       ))}
     </ul>
   ),
 }));
+vi.mock("@pierre/diffs/editor", () => ({ Editor: class {} }));
 vi.mock("../src/components/ui/tooltip.js", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ render: element, children }: { render: ReactElement<{ children?: ReactNode }>; children?: ReactNode }) => cloneElement(element, {}, children),
@@ -53,7 +64,7 @@ beforeEach(() => {
 });
 
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 20)));
-const items = (container: HTMLElement) => Array.from(container.querySelectorAll<HTMLElement>("[data-item]")).map(li => [li.dataset["item"], li.dataset["collapsed"]]);
+const items = (container: HTMLElement) => Array.from(container.querySelectorAll<HTMLElement>("[data-item]")).map(li => [li.dataset["item"]!.split("\u0000")[0], li.dataset["collapsed"]]);
 const diffCalls = (wire: { calls: [string, Record<string, unknown>][] }) => wire.calls.filter(([op]) => op === "git.diff").map(([, p]) => p);
 
 describe("diff surface", () => {
@@ -63,22 +74,22 @@ describe("diff surface", () => {
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(items(container)).toHaveLength(2));
     act(() => useDiffRevealStore.getState().request(WS, "/root/docs/notes.md"));
-    await waitFor(() => expect(container.querySelector("[data-diff-reveal-note]")?.textContent).toBe("notes.md has no diff in working tree"));
+    await waitFor(() => expect(container.querySelector("[data-diff-reveal-note]")?.textContent).toBe("notes.md has no uncommitted changes"));
     expect(useDiffRevealStore.getState().pendingByWorkspaceId[WS]).toBeUndefined();
     act(() => useDiffRevealStore.getState().request(WS, "/root/src/a.ts"));
     await waitFor(() => expect(container.querySelector("[data-diff-reveal-note]")).toBeNull());
     expect(useDiffRevealStore.getState().pendingByWorkspaceId[WS]).toBeUndefined();
   });
 
-  it("diffs the working tree at the root first and lists the changed files with a stat", async () => {
+  it("reads what a commit could take at the root first and lists the changed files with a stat", async () => {
     const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS });
     provideDaemonWire(WS, wire);
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     // Before git answers there is no mark at all, rather than an icon with nothing beside it.
     expect(container.querySelector("[data-diff-repo-state]")).toBeNull();
     await waitFor(() => expect(items(container)).toHaveLength(2));
-    expect(diffCalls(wire)).toEqual([{ cwd: "/root", scope: "unstaged" }]);
-    expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-scope")).toBe("unstaged");
+    expect(diffCalls(wire)).toEqual([{ cwd: "/root", scope: "head" }]);
+    expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-scope")).toBe("head");
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe("/root/app"));
     expect(container.querySelector("[data-diff-repo]")?.textContent).toBe("main");
     expect(container.querySelector("[data-diff-repo-state]")?.getAttribute("data-diff-repo-state")).toBe("repo");
@@ -96,11 +107,11 @@ describe("diff surface", () => {
     provideDaemonWire(WS, wire);
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(items(container)).toHaveLength(2));
-    expect(screen.getByRole("button", { name: "Diff scope: Working tree" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Changes scope: Uncommitted" })).toBeTruthy();
 
     act(() => useDiffStore.getState().setScope(WS, "staged"));
     await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "staged" }));
-    expect(screen.getByRole("button", { name: "Diff scope: Staged" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Changes scope: Staged" })).toBeTruthy();
     expect(container.querySelector("[data-diff-base]")).toBeNull();
 
     act(() => useDiffStore.getState().setScope(WS, "branch"));
@@ -116,16 +127,16 @@ describe("diff surface", () => {
     act(() => useRootStore.getState().follow(WS, "/root/app"));
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(items(container)).toHaveLength(2));
-    expect(diffCalls(wire)).toEqual([{ cwd: "/root/app", scope: "unstaged" }]);
+    expect(diffCalls(wire)).toEqual([{ cwd: "/root/app", scope: "head" }]);
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe("/root/app"));
 
     act(() => useRootStore.getState().follow(WS, "/root/other"));
-    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/other", scope: "unstaged" }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/other", scope: "head" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Stay in this folder" }));
     act(() => useRootStore.getState().follow(WS, "/root/third"));
     await settle();
-    expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/other", scope: "unstaged" });
+    expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/other", scope: "head" });
     expect(container.querySelector("[data-diff-surface]")?.getAttribute("data-diff-cwd")).toBe("/root/other");
   });
 
@@ -138,10 +149,10 @@ describe("diff surface", () => {
     });
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(items(container)).toHaveLength(2));
-    expect(diffCalls(wire)).toEqual([{ cwd: "/root", scope: "unstaged" }]);
+    expect(diffCalls(wire)).toEqual([{ cwd: "/root", scope: "head" }]);
 
     act(() => useStore.setState({ workspaces: [imported] }));
-    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: `${PROJECT_DEST}/packages`, scope: "unstaged" }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: `${PROJECT_DEST}/packages`, scope: "head" }));
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe(PROJECT_DEST));
   });
 
@@ -169,7 +180,7 @@ describe("diff surface", () => {
     await waitFor(() => expect(items(container)).toHaveLength(2));
 
     wire.replies["git.diff"] = OUTSIDE_ROOT;
-    fireEvent.click(screen.getByRole("button", { name: "Refresh diff" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh changes" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("outside the browsable roots"));
     expect(items(container)).toHaveLength(2);
     expect(screen.queryByText(REPO_STATE_WORDS.none.pane)).toBeNull();
@@ -206,11 +217,11 @@ describe("diff surface", () => {
     provideDaemonWire(WS, wire);
     act(() => useRootStore.getState().follow(WS, "/root/app"));
     render(<DiffSurface workspaceId={WS} theme="dark" />);
-    const none = await screen.findByText("No changes in working tree at /root/app.");
+    const none = await screen.findByText("No uncommitted changes at /root/app.");
     expect(none.className.split(" ")).toEqual(SENTENCE_CLASSES);
 
     wire.replies["git.diff"] = { base: null, files: [{ path: "huge.log", patch: "" }], truncated: true };
-    fireEvent.click(screen.getByRole("button", { name: "Refresh diff" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh changes" }));
     const over = await screen.findByText("Every changed file was over the patch budget; nothing to render.");
     expect(over.className.split(" ")).toEqual(SENTENCE_CLASSES);
   });
@@ -256,7 +267,7 @@ describe("diff surface", () => {
     const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe("/root/app"));
     // Checked before the replies land: the label must not drop while the same folder's status is in flight.
-    fireEvent.click(screen.getByRole("button", { name: "Refresh diff" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh changes" }));
     expect(container.querySelector("[data-diff-repo]")?.getAttribute("data-diff-repo")).toBe("/root/app");
     act(() => useRootStore.getState().follow(WS, "/root/other"));
     expect(container.querySelector("[data-diff-repo]")).toBeNull();
@@ -275,15 +286,15 @@ describe("diff surface", () => {
     await waitFor(() => expect(container.querySelector("[data-diff-repo]")?.textContent).toBe("main"));
 
     fireEvent.click(screen.getByRole("button", { name: "app" }));
-    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/app", scope: "unstaged" }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root/app", scope: "head" }));
     expect(shownFolder(container)).toBe("/root/app");
 
     fireEvent.keyDown(container.querySelector("[data-diff-surface]")!, { key: "Backspace" });
-    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "unstaged" }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "head" }));
     expect(folderCrumbRow(container)).toEqual([["/root", "/root"]]);
     fireEvent.keyDown(container.querySelector("[data-diff-surface]")!, { key: "Backspace" });
     await settle();
-    expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "unstaged" });
+    expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "head" });
   });
 
   it("draws the root switch as its own button beside the crumb, on the real menu the Files test stands in for", async () => {
@@ -305,7 +316,7 @@ describe("diff surface", () => {
 
     fireEvent.click(crumb);
     await waitFor(() => expect(shownFolder(container)).toBe(PROJECT_DEST));
-    expect(diffCalls(wire).at(-1)).toEqual({ cwd: PROJECT_DEST, scope: "unstaged" });
+    expect(diffCalls(wire).at(-1)).toEqual({ cwd: PROJECT_DEST, scope: "head" });
   });
 
   it("collapses and expands every file", async () => {
@@ -335,5 +346,166 @@ describe("diff surface", () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS, "git.diff": () => { throw new Error("git diff failed (128): fatal: bad revision"); } }));
     render(<DiffSurface workspaceId={WS} theme="dark" />);
     await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("git diff failed (128): fatal: bad revision"));
+  });
+});
+
+/** A client of the host with the Changes pane's own ops, recording what it was asked. */
+function paneApi(o: { draft?: { message: string | null; note?: string } } = {}) {
+  const asked: { op: string; args: unknown[] }[] = [];
+  const api = {
+    discard: async (...args: unknown[]) => (asked.push({ op: "discard", args }), { path: String(args[1]) }),
+    commit: async (...args: unknown[]) => (asked.push({ op: "commit", args }), { oid: "5f1c0e2b9a7d", subject: "Round the cart total once", filesChanged: 1, insertions: 1, deletions: 1 }),
+    commitDraft: async (...args: unknown[]) => (asked.push({ op: "commitDraft", args }), o.draft ?? { message: "Round the cart total once\n\nIt rounded per line." }),
+    viewed: async (...args: unknown[]) => {
+      asked.push({ op: "viewed", args });
+      const mark = args[1] as { path: string; blob: string | null } | undefined;
+      const held = { ...(useStore.getState().viewed[WS] ?? {}) };
+      if (mark !== undefined) {
+        if (mark.blob === null) delete held[mark.path];
+        else held[mark.path] = mark.blob;
+      }
+      return { viewed: held };
+    },
+    workspaceCheckout: async () => ({}),
+  };
+  return { api, asked };
+}
+
+const BLOBBED = { ...DIFF, files: DIFF.files.map((f, i) => ({ ...f, blob: `b${i}` })) };
+const rowOf = (container: HTMLElement, path: string): HTMLElement =>
+  [...container.querySelectorAll<HTMLElement>("[data-changed-file]")].find(row => row.dataset["changedFile"] === path)!;
+
+describe("the Changes pane's writes", () => {
+  it("names itself Changes, never Diff, on every control it carries", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS }));
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+    const labels = [...container.querySelectorAll("[aria-label]")].map(n => n.getAttribute("aria-label") ?? "");
+    expect(labels.filter(l => /diff/i.test(l))).toEqual([]);
+    expect(screen.getByRole("button", { name: "Refresh changes" })).toBeTruthy();
+  });
+
+  it("discards one file after asking, then reads the changes again", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS });
+    provideDaemonWire(WS, wire);
+    const { api, asked } = paneApi();
+    useStore.setState({ api: api as never });
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+    const before = diffCalls(wire).length;
+    fireEvent.click(within(rowOf(container, "src/a.ts")).getByRole("button", { name: "Discard changes to a.ts" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("Discard changes to a.ts?");
+    expect(dialog.textContent).toContain("This cannot be undone.");
+    expect(asked.filter(a => a.op === "discard")).toEqual([]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(asked).toContainEqual({ op: "discard", args: [WS, "src/a.ts"] }));
+    await waitFor(() => expect(diffCalls(wire).length).toBeGreaterThan(before));
+  });
+
+  it("says a file no commit has is deleted, since discarding it leaves nothing behind", async () => {
+    const added = { path: "new.txt", patch: "diff --git a/new.txt b/new.txt\nnew file mode 100644\nindex 0000000..ce01362\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+hello\n" };
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": { ...DIFF, files: [...DIFF.files, added] }, "git.status": STATUS }));
+    const { api } = paneApi();
+    useStore.setState({ api: api as never });
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(3));
+    fireEvent.click(within(rowOf(container, "new.txt")).getByRole("button", { name: "Discard changes to new.txt" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("No commit has new.txt, so discarding deletes it. This cannot be undone.");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    // A file a commit has is put back as that commit has it, and the dialog says only that it cannot be undone.
+    fireEvent.click(within(rowOf(container, "src/a.ts")).getByRole("button", { name: "Discard changes to a.ts" }));
+    expect((await screen.findByRole("alertdialog")).textContent).not.toContain("deletes");
+  });
+
+  it("opens the commit box filled from the draft with every file ticked, and commits the ticked ones", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS });
+    provideDaemonWire(WS, wire);
+    const { api, asked } = paneApi();
+    useStore.setState({ api: api as never });
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+    const header = container.querySelector<HTMLElement>("[data-diff-commit]")!.parentElement!.parentElement!;
+    const shape = () => [...header.querySelectorAll("button, [data-folder-crumbs], [data-diff-repo]")].map(n => n.getAttribute("aria-label") ?? n.textContent);
+    const closed = shape();
+    fireEvent.click(screen.getByRole("button", { name: "Commit" }));
+    const message = await screen.findByRole("textbox", { name: "Commit message" });
+    await waitFor(() => expect((message as HTMLTextAreaElement).value).toBe("Round the cart total once\n\nIt rounded per line."));
+    // Nothing in the header moves while the box is open: Commit stays in its slot, held, and the path stays.
+    expect(shape()).toEqual(closed);
+    expect(container.querySelector("[data-diff-commit]")!.hasAttribute("disabled")).toBe(true);
+    expect(asked.find(a => a.op === "commitDraft")?.args).toEqual([WS, ["src/a.ts", "README.md"]]);
+    const ticks = [...container.querySelectorAll<HTMLElement>("[data-commit-tick]")];
+    expect(ticks.map(t => t.getAttribute("aria-checked"))).toEqual(["true", "true"]);
+    fireEvent.click(within(rowOf(container, "README.md")).getByRole("checkbox", { name: "Commit README.md" }));
+    fireEvent.change(message, { target: { value: "Round the cart total once\n\nOnce, at the end." } });
+    const before = diffCalls(wire).length;
+    fireEvent.click(within(container.querySelector<HTMLElement>("[data-commit-box]")!).getByRole("button", { name: "Commit" }));
+    await waitFor(() => expect(asked.find(a => a.op === "commit")?.args).toEqual([WS, "Round the cart total once\n\nOnce, at the end.", ["src/a.ts"]]));
+    await waitFor(() => expect(container.querySelector("[data-commit-box]")).toBeNull());
+    await waitFor(() => expect(diffCalls(wire).length).toBeGreaterThan(before));
+  });
+
+  it("opens the box empty with the draft's reason when no message came, and says the agent is still working", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS }));
+    const { api } = paneApi({ draft: { message: null, note: "No agent here drafts commit messages; write it yourself." } });
+    useStore.setState({ api: api as never, sessions: { [WS]: [{ id: "s1", workspaceId: WS, harness: "claude", status: "running", threadId: "t1" }] } as never });
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: "Commit" }));
+    await screen.findByText("No agent here drafts commit messages; write it yourself.");
+    expect((screen.getByRole("textbox", { name: "Commit message" }) as HTMLTextAreaElement).value).toBe("");
+    expect(container.querySelector("[data-commit-box]")?.textContent).toContain("The agent is still working");
+  });
+
+  it("edits a file inside the pane: the whole file is read, the new text is written whole, and the changes are read again", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.diff": DIFF, "git.status": STATUS, "fs.write": { bytes: 9 } });
+    provideDaemonWire(WS, wire);
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+    await waitFor(() => expect(container.querySelector("[data-diff-repo]")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Edit README.md" }));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "head", paths: ["README.md"], whole: true }));
+    const editor = await waitFor(() => container.querySelector<HTMLTextAreaElement>("[data-editor]")!);
+    fireEvent.change(editor, { target: { value: "new text\n" } });
+    const before = diffCalls(wire).length;
+    fireEvent.click(screen.getByRole("button", { name: "Save README.md" }));
+    await waitFor(() => expect(wire.calls.find(([op]) => op === "fs.write")?.[1]).toEqual({ path: "/root/app/README.md", contents: "new text\n" }));
+    await waitFor(() => expect(diffCalls(wire).length).toBeGreaterThan(before));
+    await waitFor(() => expect(container.querySelector("[data-editor]")).toBeNull());
+  });
+
+  it("offers no edit on the staged scope, and none on a file whose line endings carry a return", async () => {
+    const crlf = { ...DIFF, files: [{ path: "win.txt", patch: patch("win.txt", "a\r", "b\r") }] };
+    const wire = fakeWire({ "fs.list": LISTING, "git.diff": params => (params["whole"] === true ? crlf : DIFF), "git.status": STATUS });
+    provideDaemonWire(WS, wire);
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+    await waitFor(() => expect(container.querySelector("[data-diff-repo]")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Edit README.md" }));
+    await screen.findByText("This file's line endings are not edited here yet.");
+    expect(container.querySelector("[data-editor]")).toBeNull();
+    act(() => useDiffStore.getState().setScope(WS, "staged"));
+    await waitFor(() => expect(diffCalls(wire).at(-1)).toEqual({ cwd: "/root", scope: "staged" }));
+    expect(screen.queryByRole("button", { name: "Edit README.md" })).toBeNull();
+  });
+
+  it("marks a file viewed against its blob, folds it and counts it, and a new blob takes the mark off", async () => {
+    const wire = fakeWire({ "fs.list": LISTING, "git.diff": BLOBBED, "git.status": STATUS });
+    provideDaemonWire(WS, wire);
+    const { api, asked } = paneApi();
+    useStore.setState({ api: api as never, viewed: {} });
+    const { container } = render(<DiffSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(items(container)).toHaveLength(2));
+    fireEvent.click(within(rowOf(container, "src/a.ts")).getByRole("checkbox", { name: "Viewed a.ts" }));
+    await waitFor(() => expect(asked).toContainEqual({ op: "viewed", args: [WS, { path: "src/a.ts", blob: "b0" }] }));
+    await waitFor(() => expect(items(container)[0]![1]).toBe("true"));
+    expect(container.querySelector("[data-changed-files]")?.textContent).toContain("1 of 2 viewed");
+    wire.replies["git.diff"] = { ...BLOBBED, files: BLOBBED.files.map(f => (f.path === "src/a.ts" ? { ...f, blob: "b9" } : f)) };
+    fireEvent.click(screen.getByRole("button", { name: "Refresh changes" }));
+    await waitFor(() => expect(within(rowOf(container, "src/a.ts")).getByRole("checkbox", { name: "Viewed a.ts" }).getAttribute("aria-checked")).toBe("false"));
+    expect(items(container)[0]![1]).toBe("false");
   });
 });

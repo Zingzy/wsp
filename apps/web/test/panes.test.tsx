@@ -50,7 +50,7 @@ describe("the pane registry", () => {
   it("names every open kind on the tab strip by its label, or by what its tab holds", () => {
     tabs(SURFACES);
     const strip = [...document.querySelectorAll("[data-right-panel-tab-list] [data-active-tab]")].map(t => t.textContent);
-    expect(strip).toEqual(["Browser", "Terminal", "Diff", "Files", "Computer", "Processes", "Agents"]);
+    expect(strip).toEqual(["Browser", "Terminal", "Changes", "Files", "Computer", "Processes", "Agents"]);
   });
 
   it("keeps every kind it holds across a reload of the store", () => {

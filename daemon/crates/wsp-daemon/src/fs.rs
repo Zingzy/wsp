@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use wsp_frames::{
     numbers, words, DaemonErrorCode, FsEntry, FsEntryType, FsListReply, FsReadEncoding, FsReadReply, FsSearchHit, FsSearchMode,
-    FsSearchReply, HostFolder, HostFolderListing,
+    FsSearchReply, FsWriteReply, HostFolder, HostFolderListing,
 };
 
 use crate::git::{run_git, Runs};
@@ -271,6 +271,64 @@ pub(crate) async fn read_file_bounded(file: PathBuf, encoding: FsReadEncoding, c
     .await
 }
 
+/// Replaces the contents of `name` in `dir`, an existing regular file, whole: written beside it under a hidden name
+/// and renamed over it, so a reader never sees half a file, with the old mode and owner kept. The folder is the one
+/// the path resolved to inside a root; the leaf is opened without following a link, so a link standing where the
+/// file should be is refused rather than written through. Refusals name the file as `shown`, the path the frame gave,
+/// never where this computer keeps it.
+pub(crate) async fn write_file(
+    dir: PathBuf,
+    name: std::ffi::OsString,
+    shown: String,
+    contents: String,
+    cap: u64,
+) -> Result<FsWriteReply, OpError> {
+    use std::io::Write;
+    use std::os::unix::fs::MetadataExt;
+    blocking(move || {
+        let target = dir.join(&name);
+        if contents.len() as u64 > cap {
+            return Err(OpError::coded(DaemonErrorCode::BadRequest, words::too_large_to_write(cap)));
+        }
+        let not_a_file = || OpError::coded(DaemonErrorCode::NotAFile, format!("{shown} is not a regular file"));
+        // Non-blocking too, so a fifo standing where the file should be answers at once instead of holding the open.
+        let opened = std::fs::OpenOptions::new().read(true).custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK).open(&target);
+        let held = match opened {
+            Ok(held) => held,
+            Err(e) if e.raw_os_error() == Some(nix::libc::ELOOP) => return Err(not_a_file()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(OpError::coded(DaemonErrorCode::NotFound, format!("{shown} does not exist")))
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let meta = held.metadata()?;
+        if !meta.is_file() {
+            return Err(not_a_file());
+        }
+        let mut seed = [0u8; 6];
+        getrandom::fill(&mut seed).map_err(|e| OpError::plain(e.to_string()))?;
+        let hidden = format!(".{}.wsp-{}", name.to_string_lossy(), seed.iter().map(|b| format!("{b:02x}")).collect::<String>());
+        let beside = dir.join(hidden);
+        let written = (|| -> Result<(), OpError> {
+            let mut out =
+                std::fs::OpenOptions::new().write(true).create_new(true).custom_flags(nix::libc::O_NOFOLLOW).mode(0o600).open(&beside)?;
+            out.set_permissions(meta.permissions())?;
+            // A daemon writing as root into a workspace gives the file back to whoever owned it; one writing as the
+            // person already owns it, and a group it may not take leaves the file in its own.
+            let _ = std::os::unix::fs::fchown(&out, Some(meta.uid()), Some(meta.gid()));
+            out.write_all(contents.as_bytes())?;
+            out.sync_all()?;
+            std::fs::rename(&beside, &target)?;
+            Ok(())
+        })();
+        if written.is_err() {
+            let _ = std::fs::remove_file(&beside);
+        }
+        written.map(|()| FsWriteReply { bytes: contents.len() as u64 })
+    })
+    .await
+}
+
 /// How long one search walks and how many bytes of files it reads in all before it answers what it has: on a
 /// computer somebody joined the daemon reads as root, and a search over a large home must not hold its disk.
 const SEARCH_BUDGET: Duration = Duration::from_secs(5);
@@ -411,6 +469,49 @@ mod tests {
 
     fn names(reply: &FsListReply) -> Vec<&str> {
         reply.entries.iter().map(|e| e.name.as_str()).collect()
+    }
+
+    /// What a folder holds once a write is over, so a case can say no hidden temporary file was left in it.
+    fn listed(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    }
+
+    #[tokio::test]
+    async fn a_write_replaces_the_file_whole_and_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("run.sh");
+        fs::write(&file, "#!/bin/sh\necho old\n").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o751)).unwrap();
+        let wrote = write_file(dir.path().to_path_buf(), "run.sh".into(), "run.sh".to_owned(), "#!/bin/sh\necho new\n".to_owned(), 1024)
+            .await
+            .unwrap();
+        assert_eq!(wrote.bytes, 19);
+        assert_eq!(fs::read_to_string(&file).unwrap(), "#!/bin/sh\necho new\n");
+        assert_eq!(fs::metadata(&file).unwrap().permissions().mode() & 0o7777, 0o751);
+        assert_eq!(listed(dir.path()), vec!["run.sh"]);
+    }
+
+    #[tokio::test]
+    async fn a_write_refuses_a_link_a_missing_file_a_folder_and_more_than_the_cap_and_leaves_nothing_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("real.txt"), "real\n").unwrap();
+        std::os::unix::fs::symlink(dir.path().join("real.txt"), dir.path().join("link.txt")).unwrap();
+        fs::create_dir(dir.path().join("folder")).unwrap();
+        let at = || dir.path().to_path_buf();
+        let link = write_file(at(), "link.txt".into(), "link.txt".to_owned(), "x".to_owned(), 1024).await.unwrap_err();
+        assert_eq!(link.code, Some(DaemonErrorCode::NotAFile), "{}", link.message);
+        let missing = write_file(at(), "none.txt".into(), "none.txt".to_owned(), "x".to_owned(), 1024).await.unwrap_err();
+        assert_eq!(missing.code, Some(DaemonErrorCode::NotFound), "{}", missing.message);
+        let folder = write_file(at(), "folder".into(), "folder".to_owned(), "x".to_owned(), 1024).await.unwrap_err();
+        assert_eq!(folder.code, Some(DaemonErrorCode::NotAFile), "{}", folder.message);
+        let big =
+            write_file(at(), "real.txt".into(), "real.txt".to_owned(), "x".repeat(2 * 1024 * 1024 + 1), 2 * 1024 * 1024).await.unwrap_err();
+        assert_eq!((big.code, big.message), (Some(DaemonErrorCode::BadRequest), words::too_large_to_write(2 * 1024 * 1024)));
+        assert_eq!(fs::read_to_string(dir.path().join("real.txt")).unwrap(), "real\n");
+        assert_eq!(listed(dir.path()), vec!["folder", "link.txt", "real.txt"]);
     }
 
     #[tokio::test]
