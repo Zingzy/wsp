@@ -278,7 +278,7 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of thread tiles laid o
     }
   }, 60_000);
 
-  it("nothing in the sidebar wears caps or letter-spacing but the Settled word, and the head sits in the fixed header outside the scrolling list", async () => {
+  it("nothing in the sidebar wears caps or letter-spacing, and the head sits in the fixed header outside the scrolling list", async () => {
     await open("sidebar", "dark");
     const dressed = await page!.locator("[data-sidebar-search] *, [data-sidebar-tree] *").evaluateAll(els =>
       els
@@ -286,7 +286,7 @@ describe.skipIf(renderSkipped !== undefined)("the sidebar of thread tiles laid o
         .map(el => ({ text: (el.textContent ?? "").trim().slice(0, 20), transform: getComputedStyle(el).textTransform, spacing: getComputedStyle(el).letterSpacing }))
         .filter(read => read.transform !== "none" || read.spacing !== "normal"),
     );
-    expect(dressed.map(read => [read.text, read.transform])).toEqual([["Settled", "uppercase"]]);
+    expect(dressed.map(read => [read.text, read.transform])).toEqual([]);
     expect(await page!.locator("[data-slot=sidebar-content] [data-k=project-switcher]").count()).toBe(0);
     expect(await page!.locator("[data-slot=sidebar] [data-k=project-switcher]").count()).toBe(1);
     expect(await page!.locator("[data-slot=sidebar-content] [data-sidebar-row]").count()).toBeGreaterThan(0);

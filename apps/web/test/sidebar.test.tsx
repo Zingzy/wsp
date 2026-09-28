@@ -150,7 +150,8 @@ async function mount(api: FakeApi, firstName: string) {
 }
 
 const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
-const rowIds = () => Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-row]")).map(r => r.dataset["rowId"]);
+/** The tiles and the Settled row in their order, leaving out the live sections' heads the arrow keys also walk. */
+const rowIds = () => Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-row]")).map(r => r.dataset["rowId"]).filter(id => !id?.startsWith("section:"));
 const statusSlot = (row: HTMLElement): HTMLElement | null => row.querySelector<HTMLElement>("[data-thread-status]");
 /** A thread row's state word, which a toned status slot carries (a working one for screen readers, beside its time);
  * null on a row at rest. */
@@ -425,24 +426,30 @@ describe("the body before the first list has arrived, and on a wsp with no proje
 });
 
 describe("keyboard navigation", () => {
-  it("arrows walk every tile in order from the search row; Enter selects", async () => {
+  it("arrows walk every section head and tile in order from the search row; a press on a tile selects it, and on a head folds its section", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello", startedAt: iso(-60_000) })]), "hello");
     const search = screen.getByRole("button", { name: "Search" });
+    const at = (): string | undefined => (document.activeElement as HTMLElement | null)?.dataset["rowId"];
     act(() => search.focus());
     fireEvent.keyDown(search, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(rowOf("hello"));
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(rowOf("web"));
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
-    expect(document.activeElement).toBe(rowOf("web"));
+    const walked = [at()];
+    for (let i = 0; i < 4; i++) {
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+      walked.push(at());
+    }
+    expect(walked).toEqual(["section:working", rowOf("hello").dataset["rowId"], "section:idle", rowOf("web").dataset["rowId"], rowOf("web").dataset["rowId"]]);
     fireEvent.keyDown(document.activeElement!, { key: "Home" });
-    expect(document.activeElement).toBe(rowOf("hello"));
+    expect(at()).toBe("section:working");
     fireEvent.keyDown(document.activeElement!, { key: "End" });
     expect(document.activeElement).toBe(rowOf("web"));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
     fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
     expect(document.activeElement).toBe(rowOf("hello"));
     fireEvent.click(document.activeElement!);
     expect(useStore.getState().selectedId).toBe("ws_a");
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    fireEvent.click(document.activeElement!);
+    expect(screen.queryByText("hello")).toBeNull();
   });
 
   it("ArrowDown on the head opens the menu and moves no row focus; Escape shuts it and puts focus back on the head", async () => {
