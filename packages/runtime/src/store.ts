@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { STATE_SHAPE, StateShape, stateWriterWords } from "@wsp/protocol";
 import { writeOwn } from "@wsp/own-file";
@@ -121,38 +121,92 @@ export function jsonFileStore(path: string, writer: StateWriter): Store {
   };
   /** One state file, one shape: a file in any other is refused here, before a read answers anything and before a
    * write could put this build's shape over it. A file that is not there is a fresh home and reads empty. */
-  const load = (): Data => {
+  const loadFile = (): Data => {
     const { data, wrote, fresh } = read();
     if (fresh) return data;
     if (wrote === undefined || wrote.shape < STATE_SHAPE) throw new Error(stateWrittenByOlderLine(path, wrote));
     if (wrote.shape > STATE_SHAPE) throw new Error(stateWrittenByNewerLine(path, wrote));
     return data;
   };
+  // The file as this process last read or wrote it, and which file that was. Parsing it whole on every read held a
+  // host's loop for seconds at a time once its transcripts made it hundreds of megabytes; a stat is what tells a
+  // write from another process on this file (the doctor runs a runtime of its own over it) from none.
+  let held: { data: Data; mark: string } | undefined;
+  const markOf = (): string => {
+    try {
+      const st = statSync(path);
+      return `${st.ino}:${st.size}:${st.mtimeMs}`;
+    } catch {
+      return "";
+    }
+  };
+  let saving: Promise<void> | undefined;
+  /** The records changed since the last save, by collection, so a save that finds another process wrote the file
+   * meanwhile writes its own records over that write and keeps the rest of it, as a read-and-rewrite per put did. */
+  const touched: [string, string][] = [];
+  const load = (): Data => {
+    // A save that is still to run holds changes the file does not have yet, and it writes over whatever is there.
+    if (held !== undefined && (saving !== undefined || held.mark === markOf())) return held.data;
+    const mark = markOf();
+    held = { data: loadFile(), mark };
+    return held.data;
+  };
   // The file holds every running turn's token and every unspent pairing code, so it is the owner's: writeOwn says
   // what that means, and its rename is also what keeps a crash mid-write from truncating the store.
   const save = (data: Data): void => {
     writeOwn(dirname(path), basename(path), JSON.stringify({ ...data, [STATE_SHAPE_KEY]: shapeNow(writer) }, null, 2));
+    held = { data, mark: markOf() };
+  };
+  /** Every change made before the loop turns lands in one write, so a burst of puts costs one serialization. */
+  const saveSoon = (collection: string, id: string): Promise<void> => {
+    touched.push([collection, id]);
+    return (saving ??= new Promise<void>((done, fail) =>
+      setImmediate(() => {
+        saving = undefined;
+        const mine = touched.splice(0);
+        try {
+          let data = held!.data;
+          if (held!.mark !== markOf()) {
+            const theirs = loadFile();
+            for (const [c, i] of mine) {
+              const value = data[c]?.[i];
+              if (value === undefined) delete theirs[c]?.[i];
+              else (theirs[c] ??= {})[i] = value;
+            }
+            data = theirs;
+          }
+          save(data);
+          done();
+        } catch (e) {
+          // What this save held never reached the file, so the next read reads the file rather than it.
+          held = undefined;
+          fail(e);
+        }
+      }),
+    ));
   };
   const blobPath = (collection: string, id: string): string => join(dirname(path), "blobs", collection, id);
   return {
+    // Copies, so a caller changing what it read changes nothing the next save writes.
     async get(collection, id) {
-      return load()[collection]?.[id];
+      const value = load()[collection]?.[id];
+      return value === undefined ? undefined : structuredClone(value);
     },
     async put(collection, id, value) {
-      const data = load();
-      (data[collection] ??= {})[id] = value;
-      save(data);
+      // What the file will hold, not the caller's object: the document is kept, and a caller moving its object on
+      // afterwards must not move what the next save writes, nor read back what JSON drops.
+      (load()[collection] ??= {})[id] = value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+      await saveSoon(collection, id);
     },
     async list(collection) {
-      return Object.values(load()[collection] ?? {});
+      return structuredClone(Object.values(load()[collection] ?? {}));
     },
     async keys(collection) {
       return Object.keys(load()[collection] ?? {});
     },
     async delete(collection, id) {
-      const data = load();
-      delete data[collection]?.[id];
-      save(data);
+      delete load()[collection]?.[id];
+      await saveSoon(collection, id);
     },
     async getBlob(collection, id) {
       load();
