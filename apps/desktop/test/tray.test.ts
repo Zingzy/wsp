@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { HERE_PLACE_ID, NEEDS_YOU, type PlaceView, type SessionPermissionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, NEEDS_YOU, type PlaceView, type SessionEvent, type SessionPermissionEvent, type SessionView, type TurnResult, type WorkspaceView } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { QUIT_WORD } from "../src/quit.js";
 import { TRAY_WORDS, trayModel, trayNotice, type TrayInput, type TrayRow } from "../src/tray.js";
@@ -127,11 +127,23 @@ describe("what the menu bar says over the system while no window is open", () =>
     expect(trayNotice({ type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "interrupted" } }, { sessions, workspaces, places }, true)).toBeUndefined();
   });
 
-  it("a turn that failed says the thread stopped with its error in one line, and one that died without a result its exit, with the same sound", () => {
+  it("a turn that failed says the thread stopped with its error in one line, with the same sound", () => {
     const done = { type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result: { status: "failed", error: "API Error: 529\n overloaded" } } as const;
     expect(trayNotice(done, { sessions, workspaces, places }, true)).toEqual({ title: "fix login stopped", body: "API Error: 529 overloaded", sound: true });
-    const died = { type: "session.end", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", exitCode: 137, sawResult: false } as const;
-    expect(trayNotice(died, { sessions, workspaces, places }, false)).toEqual({ title: "fix login stopped", body: "exit 137", sound: false });
+    expect(trayNotice(done, { sessions, workspaces, places }, false)?.sound).toBe(false);
+  });
+
+  // What every adapter sends as its process ends: its own result, a made-up one when the process died first, and
+  // then the end with no result seen.
+  const ending = (result: TurnResult, exitCode: number): SessionEvent[] => [
+    { type: "session.done", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", result },
+    { type: "session.end", workspaceId: "ws_mac", sessionId: "s1", threadId: "t1", exitCode, sawResult: false },
+  ];
+  const said = (events: SessionEvent[]) => events.flatMap(e => trayNotice(e, { sessions, workspaces, places }, true) ?? []);
+
+  it("a process that died says its thread stopped once, and one somebody stopped says nothing", () => {
+    expect(said(ending({ status: "failed", error: "claude exited with code 1" }, 1))).toEqual([{ title: "fix login stopped", body: "claude exited with code 1", sound: true }]);
+    expect(said(ending({ status: "interrupted" }, 143))).toEqual([]);
   });
 
   it("an end the runtime gave its own reason, one that saw a result, an agent's thread and a turn somebody stopped say nothing", () => {

@@ -8,7 +8,7 @@
 // here against a stubbed Notification and a stubbed bridge; nothing real is
 // shown and nothing makes a sound.
 import { act, render } from "@testing-library/react";
-import { DEFAULT_PREFERENCES, NEEDS_YOU, askingLine, initNeedsYouLine, workspaceAwakeLine, type InitNeedsYou, type OutsideLine, type SessionView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, NEEDS_YOU, askingLine, initNeedsYouLine, workspaceAwakeLine, type InitNeedsYou, type OutsideLine, type SessionView, type TurnResult } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -317,11 +317,14 @@ describe("a turn that finished while the person looked away", () => {
     expect(FakeNotification.built).toEqual([]);
   });
 
-  const fail = (emit: (e: ProtocolEvent) => void, o: { error?: string; reason?: string; threadId?: string; result?: boolean } = {}) => {
+  // What every adapter sends as its process ends: its own result, a made-up one when the process died first, and then
+  // the end with no result seen.
+  const ending = (emit: (e: ProtocolEvent) => void, result: TurnResult, o: { exitCode?: number; reason?: string; threadId?: string } = {}) => {
     const threadId = o.threadId ?? "thr_1";
-    if (o.result !== false) emit({ type: "session.done", workspaceId: "ws_1", sessionId: "s1", turnId: `turn_${threadId}`, threadId, result: { status: "failed", ...(o.error !== undefined ? { error: o.error } : {}) } });
-    emit({ type: "session.end", workspaceId: "ws_1", sessionId: "s1", turnId: `turn_${threadId}`, threadId, exitCode: 1, sawResult: o.result !== false, ...(o.reason !== undefined ? { reason: o.reason } : {}) });
+    emit({ type: "session.done", workspaceId: "ws_1", sessionId: "s1", turnId: `turn_${threadId}`, threadId, result });
+    emit({ type: "session.end", workspaceId: "ws_1", sessionId: "s1", turnId: `turn_${threadId}`, threadId, exitCode: o.exitCode ?? 1, sawResult: false, ...(o.reason !== undefined ? { reason: o.reason } : {}) });
   };
+  const fail = (emit: (e: ProtocolEvent) => void, o: { error?: string; reason?: string; threadId?: string } = {}) => ending(emit, { status: "failed", ...(o.error !== undefined ? { error: o.error } : {}) }, o);
 
   it("says a thread that failed stopped, with its error in one line and the same sound switch, and a click opens that thread", () => {
     const emit = bindEvents();
@@ -333,16 +336,25 @@ describe("a turn that finished while the person looked away", () => {
     FakeNotification.last!.onclick!();
     expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_1", "thr_1"]);
     act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, notifySound: false } }));
-    act(() => fail(emit, { result: false }));
+    act(() => fail(emit));
     expect(FakeNotification.built.at(-1)).toEqual({ title: "Fix the redirect stopped", body: "exit 1", silent: true });
+    expect(FakeNotification.built).toHaveLength(2);
     focus.mockRestore();
+  });
+
+  it("says nothing for a turn somebody stopped, whose process the stop killed before it replied", () => {
+    const emit = bindEvents();
+    render(<Harness />);
+    act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn({ status: "interrupted" })] } }));
+    act(() => ending(emit, { status: "interrupted" }, { exitCode: 143 }));
+    expect(FakeNotification.built).toEqual([]);
   });
 
   it("says nothing for a failure the runtime ended itself, for a thread an agent opened, or while the app is in front", () => {
     const emit = bindEvents();
     render(<Harness />);
     act(() => useStore.setState({ workspaces: [WS], sessions: { ws_1: [turn({ status: "failed" }), turn({ id: "s2", threadId: "thr_child", startedBy: "agent", parentThreadId: "thr_1", status: "failed" })] } }));
-    act(() => fail(emit, { result: false, reason: "the machine went away" }));
+    act(() => fail(emit, { reason: "the machine went away" }));
     act(() => fail(emit, { threadId: "thr_child" }));
     hidden = false;
     act(() => fail(emit));

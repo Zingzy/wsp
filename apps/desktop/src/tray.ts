@@ -148,15 +148,14 @@ export function trayModel(input: TrayInput): TrayModel {
 
 /** What the menu bar says over the system while no window is open to say it: a thread a person or a line opened
  * that finished or failed, and a prompt. An agent's own thread reports to that agent. Nothing for anything else. */
-export function trayNotice(event: Extract<SessionEvent, { type: "session.done" | "session.permission" | "session.end" }>, rows: Pick<TrayInput, "sessions" | "workspaces" | "places">, sound: boolean): OutsideLine | undefined {
-  const thread = foldThreads(rows.sessions).find(t => t.id === (event.threadId ?? event.sessionId));
+export function trayNotice(event: SessionEvent, rows: Pick<TrayInput, "sessions" | "workspaces" | "places">, sound: boolean): OutsideLine | undefined {
   if (event.type === "session.permission") return { title: NEEDS_YOU, body: askingLine(event), sound };
+  // Every adapter sends a result before its process ends, a made-up one when the process died first, so the end
+  // after it has nothing to add: a death is said once and a stop not at all.
+  if (event.type !== "session.done") return undefined;
+  const thread = foldThreads(rows.sessions).find(t => t.id === (event.threadId ?? event.sessionId));
   if (thread === undefined || thread.startedBy === "agent") return undefined;
-  const stopped = (error: string | undefined): OutsideLine => ({ title: threadStoppedLine(thread.title), body: error === undefined ? computerOf(rows, event.workspaceId) : oneLine(error), sound });
-  // An end with no result is a process that went before replying, unless the runtime ended it for a reason of its own,
-  // which is its own notice; an end after a result says nothing past what the result already said.
-  if (event.type === "session.end") return event.sawResult || event.reason !== undefined || event.exitCode === 0 ? undefined : stopped(event.exitCode === null ? undefined : `exit ${event.exitCode}`);
-  if (event.result.status === "failed") return stopped(event.result.error);
+  if (event.result.status === "failed") return { title: threadStoppedLine(thread.title), body: event.result.error === undefined ? computerOf(rows, event.workspaceId) : oneLine(event.result.error), sound };
   if (event.result.status !== "completed") return undefined;
   return { title: threadFinishedLine(thread.title), body: computerOf(rows, event.workspaceId), sound };
 }

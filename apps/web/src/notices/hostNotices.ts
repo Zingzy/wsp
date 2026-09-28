@@ -9,7 +9,7 @@
 // on the shell's own road, which speaks only while the app is not in front of
 // the person; the prompt and the finish make a sound unless the person turned
 // it off. The dock's badge counts the threads waiting on the person.
-import { GET_THE_APP_WORD, NEEDS_YOU, NOTIFY_ME, askingLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, oneLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, workspaceAwakeLine, type OutsideLine, type ReleaseView, type TurnResult } from "@wsp/protocol";
+import { GET_THE_APP_WORD, NEEDS_YOU, NOTIFY_ME, askingLine, exitLine, foldThreads, initJobBuilding, initNeedsYouLine, needsYouCount, oneLine, threadFinishedLine, threadKeyOf, threadStoppedLine, titleWithNeed, workspaceAwakeLine, type OutsideLine, type ReleaseView, type TurnResult } from "@wsp/protocol";
 import { useCallback, useEffect, useRef } from "react";
 import type { ProtocolEvent } from "../protocol/client.js";
 import { threadRows, useProtocolEvents, useStore } from "../protocol/store.js";
@@ -41,6 +41,7 @@ export const HOST_NOTICE_WORDS = {
   aThread: "A thread",
   threadStopped: (title: string, said: string | undefined): string => `${title} stopped before it replied${said === undefined ? "" : `: ${said}`}`,
   threadFinished: threadFinishedLine,
+  threadFailed: threadStoppedLine,
   gone: (name: string, reason: string): string => `${name} is gone: ${reason}`,
   imageNotBuilt: (said: string | undefined): string => (said === undefined ? "The image was not built" : `The image was not built: ${said}`),
   imageSealed: (version: number | undefined): string => (version === undefined ? "Image sealed" : `Image v${version} sealed`),
@@ -247,18 +248,17 @@ const RULES: { [T in ProtocolEvent["type"]]?: Rule<T> } = {
       const { workspaceId, threadId } = e;
       sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), threadLine(HOST_NOTICE_WORDS.threadFinished(thread.title), workspaceNamed(workspaceId) ?? ""));
     }
-    // A failure is said the same way, with its error on the line under it: a result that failed, or a process that
-    // went with no result. A reason means the runtime ended it (a pause, a delete, the machine gone, which is its own
-    // notice), and an interrupted turn is one somebody stopped: neither is a failure to say.
-    const failed = e.reason === undefined && (result?.status === "failed" || (result === undefined && !e.sawResult && e.exitCode !== 0));
-    if (failed && thread !== undefined && thread.startedBy !== "agent") {
+    // A failure is said the same way, with its error on the line under it. A reason means the runtime ended it (a
+    // pause, a delete, the machine gone, which is its own notice), and an interrupted turn is one somebody stopped:
+    // neither is a failure to say.
+    if (result?.status === "failed" && e.reason === undefined && thread !== undefined && thread.startedBy !== "agent") {
       const { workspaceId, threadId } = e;
-      const error = result?.error ?? (e.exitCode === null ? undefined : `exit ${e.exitCode}`);
-      sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), threadLine(threadStoppedLine(thread.title), error === undefined ? (workspaceNamed(workspaceId) ?? "") : oneLine(error)));
+      const error = result.error ?? exitLine(e.exitCode);
+      sayOutside(held, () => useStore.getState().select(workspaceId, threadId ?? null), threadLine(HOST_NOTICE_WORDS.threadFailed(thread.title), error === undefined ? (workspaceNamed(workspaceId) ?? "") : oneLine(error)));
     }
     if (e.exitCode === 0 || e.sawResult || e.reason !== undefined || result?.status === "interrupted" || threadOnScreen(e)) return;
     const where = workspaceNamed(e.workspaceId);
-    const said = result?.error ?? (e.exitCode === null ? undefined : `exit ${e.exitCode}`);
+    const said = result?.error ?? exitLine(e.exitCode);
     addNotice({ kind: "error", text: HOST_NOTICE_WORDS.threadStopped(threadTitle(e.workspaceId, e.threadId), said), ...(where === undefined ? {} : { where }), action: openThread(e.workspaceId, e.threadId) });
   },
   "session.permission": (e, held) => {
