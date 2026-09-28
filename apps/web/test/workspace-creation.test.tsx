@@ -180,10 +180,13 @@ describe("the creation page", () => {
     expect(rows.map(r => r.querySelector("[data-step-words]")!.textContent)).toEqual([CREATE_STEP_WORDS["fork-requested"]]);
     expect(rows[0]!.className).toContain("text-status-failed");
     expect(view.querySelector(".text-destructive-foreground")).toBeNull();
-    // What the chevron opens comes under its row: the steps, then the reason and the buttons.
+    // Retry and Dismiss stand on the row, where the time stood, so no log is long enough to scroll them away; what the
+    // chevron opens comes under it: the steps, then the reason.
     const list = within(view).getByRole("list", { name: "Setting up" });
     const refusal = view.querySelector("[data-creation-refusal]")!;
-    expect(list.compareDocumentPosition(refusal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(refusal.parentElement!.contains(fold(view))).toBe(true);
+    expect(refusal.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(list.compareDocumentPosition(view.querySelector("[data-creation-reason]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(refusal.contains(within(view).getByRole("button", { name: "Retry" }))).toBe(true);
     const text = view.textContent!;
     expect(text.split(CREATE_STEP_WORDS.failed)).toHaveLength(2);

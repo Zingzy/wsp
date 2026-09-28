@@ -80,52 +80,63 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
 
 /** The create's steps folded into one row at the top of the column, in the transcript's fold grammar with no rule
  * under it: the crab, the step being waited on, and the time since the create was asked for. A refused create says
- * so in that row's place; under it the steps when unfolded, the step it stopped on in red, then the reason once with
- * Retry and Dismiss, all in the room between the row and the question. */
+ * so in that row's place with Retry and Dismiss where the time stood, so they never scroll; under it the steps when
+ * unfolded, the step it stopped on in red, then the reason once, in the room between the row and the question. */
 function SettingUp({ creation, open, onToggle }: { creation: Creation; open: boolean; onToggle: () => void }) {
-  const { failed, lines } = creation;
+  const retry = useStore(s => s.retryCreation);
+  const dismiss = useStore(s => s.dismissCreation);
+  const { failed } = creation;
   const step = currentStep(creation);
   const Chevron = open ? ChevronDownIcon : ChevronRightIcon;
   return (
     <div className="absolute inset-x-0 top-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem+var(--question-height,8.5rem)+0.75rem)] flex flex-col px-3 pt-3 sm:px-5 sm:pt-4">
       <div className="mx-auto flex min-h-0 w-full min-w-0 max-w-3xl flex-1 flex-col">
-        <button
-          type="button"
-          data-k="setting-up"
-          aria-expanded={open}
-          onClick={onToggle}
-          className="flex w-full min-w-0 shrink-0 cursor-pointer select-none items-center gap-2 rounded-md px-1 text-sm leading-relaxed text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-        >
-          {failed === null ? (
-            <>
-              <Crab className="text-status-working" />
-              <span className="shrink-0 text-foreground">Setting up</span>
-              <span className="min-w-0 truncate">{step === undefined ? CREATE_ASKED : stepWords(step)}</span>
-              <Chevron aria-hidden className="size-3.5 shrink-0" />
-              <span data-step-time className={TIME_CLASS}>
-                <WorkingSince since={new Date(creation.askedAt).toISOString()} format={stepTime} />
-              </span>
-            </>
-          ) : (
-            <>
-              <CircleAlertIcon aria-hidden className="size-4 shrink-0 text-status-failed" />
-              <span className="shrink-0 font-medium text-status-failed">{CREATE_STEP_WORDS.failed}</span>
-              <Chevron aria-hidden className="size-3.5 shrink-0" />
-            </>
-          )}
-        </button>
+        <div className="flex min-w-0 shrink-0 items-center gap-2">
+          <button
+            type="button"
+            data-k="setting-up"
+            aria-expanded={open}
+            onClick={onToggle}
+            className="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-2 rounded-md px-1 text-sm leading-relaxed text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+          >
+            {failed === null ? (
+              <>
+                <Crab className="text-status-working" />
+                <span className="shrink-0 text-foreground">Setting up</span>
+                <span className="min-w-0 truncate">{step === undefined ? CREATE_ASKED : stepWords(step)}</span>
+                <Chevron aria-hidden className="size-3.5 shrink-0" />
+                <span data-step-time className={TIME_CLASS}>
+                  <WorkingSince since={new Date(creation.askedAt).toISOString()} format={stepTime} />
+                </span>
+              </>
+            ) : (
+              <>
+                <CircleAlertIcon aria-hidden className="size-4 shrink-0 text-status-failed" />
+                <span className="shrink-0 font-medium text-status-failed">{CREATE_STEP_WORDS.failed}</span>
+                <Chevron aria-hidden className="size-3.5 shrink-0" />
+              </>
+            )}
+          </button>
+          {failed !== null ? (
+            <div data-creation-refusal className="flex shrink-0 items-center gap-2 pe-1">
+              <Button variant="outline" size="xs" className="h-6" onClick={() => void retry(creation.key)}>
+                Retry
+              </Button>
+              <Button variant="ghost-muted" size="xs" className="h-6" onClick={() => dismiss(creation.key)}>
+                Dismiss
+              </Button>
+            </div>
+          ) : null}
+        </div>
         {open || failed !== null ? <Below creation={creation} open={open} /> : null}
       </div>
     </div>
   );
 }
 
-/** Under the row: the steps when unfolded, then a refusal's reason and its buttons, in a room cut to whole rows of the
- * grid everything here stands on, so no line shows in part. Unfolded, more than fits scrolls from the first step,
- * which is what the chevron asked for. */
+/** Under the row: the steps when unfolded, then a refusal's reason, in a room cut to whole rows of the grid everything
+ * here stands on, so no line shows in part; more than fits scrolls from the first step. */
 function Below({ creation, open }: { creation: Creation; open: boolean }) {
-  const retry = useStore(s => s.retryCreation);
-  const dismiss = useStore(s => s.dismissCreation);
   const { failed, lines } = creation;
   const room = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -146,8 +157,8 @@ function Below({ creation, open }: { creation: Creation; open: boolean }) {
   const taken = lines.filter(line => line.stage !== "failed");
   const last = taken.length - 1;
   return (
-    <div ref={room} className="mt-1 min-h-0 flex-1">
-      <div ref={scroller} className="overflow-y-auto" style={rows === null ? undefined : { maxHeight: rows * STEP_ROW_PX }}>
+    <div ref={room} className="mt-1 flex min-h-0 flex-1 flex-col">
+      <div ref={scroller} className="shrink-0 overflow-y-auto" style={rows === null ? undefined : { maxHeight: rows * STEP_ROW_PX }}>
         {open ? (
           <ol aria-label="Setting up" aria-live="polite" className="flex flex-col">
             {taken.length === 0 ? <StepRow words={CREATE_ASKED} tone={failed === null ? "current" : "failed"} /> : null}
@@ -157,24 +168,15 @@ function Below({ creation, open }: { creation: Creation; open: boolean }) {
           </ol>
         ) : null}
         {failed !== null ? (
-          <div data-creation-refusal className="ps-7 pe-1 text-sm leading-6">
-            {/* Folded, the reason keeps to the rows above its buttons so both stand whole; unfolded it is whole. */}
-            <p
-              title={failed.detail}
-              className={open ? undefined : "overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical]"}
-              style={open ? undefined : { WebkitLineClamp: Math.max(1, (rows ?? 3) - 1) }}
-            >
-              {failed.detail}
-            </p>
-            <div className="flex h-6 items-center gap-2">
-              <Button variant="outline" size="xs" className="h-6" onClick={() => void retry(creation.key)}>
-                Retry
-              </Button>
-              <Button variant="ghost-muted" size="xs" className="h-6" onClick={() => dismiss(creation.key)}>
-                Dismiss
-              </Button>
-            </div>
-          </div>
+          <p
+            data-creation-reason
+            title={failed.detail}
+            className={cn("ps-7 pe-1 text-sm leading-6", !open && "overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical]")}
+            // Folded, the reason keeps to the room's rows so it stands from its first word; unfolded it is whole.
+            style={open ? undefined : { WebkitLineClamp: rows ?? 2 }}
+          >
+            {failed.detail}
+          </p>
         ) : null}
       </div>
     </div>

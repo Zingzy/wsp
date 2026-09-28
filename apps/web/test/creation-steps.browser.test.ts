@@ -37,15 +37,21 @@ describe.skipIf(renderSkipped !== undefined)("the creating page's unfolded steps
           const list = document.querySelector("ol[aria-label='Setting up']")!;
           const question = document.querySelector("[data-testid=workspace-creation] h1");
           return {
-            room: box(list.parentElement!),
-            rows: [...list.querySelectorAll("li"), ...document.querySelectorAll("[data-creation-refusal] button")].map(box),
+            scroller: box(list.parentElement!),
+            room: box(list.parentElement!.parentElement!),
+            steps: [...list.querySelectorAll("li")].map(box),
+            buttons: [...document.querySelectorAll("[data-creation-refusal] button")].map(box),
             questionTop: question === null ? null : box(question.parentElement!).top,
           };
         });
-        const cut = read.rows.filter(r => (r.top < read.room.top - 0.5 && r.bottom > read.room.top + 0.5) || (r.top < read.room.bottom - 0.5 && r.bottom > read.room.bottom + 0.5));
-        const whole = read.rows.filter(r => r.top >= read.room.top - 0.5 && r.bottom <= read.room.bottom + 0.5);
-        expect(cut).toEqual([]);
-        expect(whole.length).toBeGreaterThanOrEqual(3);
+        // A step is seen through the scroller that holds it; a refusal's buttons stand on its row, above the room.
+        const cutBy = (edge: { top: number; bottom: number }) => (r: { top: number; bottom: number }) =>
+          (r.top < edge.top - 0.5 && r.bottom > edge.top + 0.5) || (r.top < edge.bottom - 0.5 && r.bottom > edge.bottom + 0.5);
+        const within = (edge: { top: number; bottom: number }) => (r: { top: number; bottom: number }) => r.top >= edge.top - 0.5 && r.bottom <= edge.bottom + 0.5;
+        expect(read.steps.filter(cutBy(read.scroller))).toEqual([]);
+        expect(read.steps[0]!.top).toBeGreaterThanOrEqual(read.scroller.top - 0.5);
+        for (const b of read.buttons) expect(b.bottom).toBeLessThanOrEqual(read.room.top + 0.5);
+        expect(read.steps.filter(within(read.scroller)).length).toBeGreaterThanOrEqual(3);
         expect(read.questionTop).not.toBeNull();
         expect(read.room.bottom).toBeLessThanOrEqual(read.questionTop!);
         await page.close();
@@ -54,22 +60,59 @@ describe.skipIf(renderSkipped !== undefined)("the creating page's unfolded steps
   }
 
   for (const width of [1440, 390]) {
+    it(`creating-refused at ${width}, unfolded on a five-step log: Retry and Dismiss stand whole on the Could not start row, never scrolled away`, async () => {
+      const page = await browser!.newPage({ viewport: { width, height: width === 390 ? 844 : 900 }, reducedMotion: "reduce" });
+      await page.goto(`${vite!.base}/test/wireframe/index.html?screen=creating-refused&theme=dark`);
+      await page.locator("[data-k=setting-up]").click();
+      const read = await page.evaluate(() => {
+        const box = (el: Element) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; };
+        const list = document.querySelector("ol[aria-label='Setting up']")!;
+        const retry = [...document.querySelectorAll("button")].find(b => b.textContent === "Retry")!;
+        const dismiss = [...document.querySelectorAll("button")].find(b => b.textContent === "Dismiss")!;
+        // Whatever box scrolls the steps, the buttons are seen only where they sit inside it and inside the page.
+        const clip = (el: Element): { top: number; bottom: number } => {
+          let top = -Infinity, bottom = Infinity;
+          for (let at = el.parentElement; at !== null; at = at.parentElement) {
+            const style = getComputedStyle(at);
+            if (style.overflowY !== "visible") { const r = at.getBoundingClientRect(); top = Math.max(top, r.top); bottom = Math.min(bottom, r.bottom); }
+          }
+          return { top, bottom };
+        };
+        const row = document.querySelector("[data-k=setting-up]")!.getBoundingClientRect();
+        return {
+          steps: list.querySelectorAll("li").length,
+          row: (row.top + row.bottom) / 2,
+          buttons: [retry, dismiss].map(b => ({ ...box(b), clip: clip(b) })),
+          questionTop: box(document.querySelector("[data-testid=workspace-creation] h1")!.parentElement!).top,
+        };
+      });
+      expect(read.steps).toBeGreaterThanOrEqual(5);
+      for (const b of read.buttons) {
+        expect(Math.abs((b.top + b.bottom) / 2 - read.row)).toBeLessThanOrEqual(1);
+        expect(b.top).toBeGreaterThanOrEqual(b.clip.top - 0.5);
+        expect(b.bottom).toBeLessThanOrEqual(b.clip.bottom + 0.5);
+        expect(b.bottom).toBeLessThanOrEqual(read.questionTop);
+      }
+      await page.close();
+    });
+
     it(`creating-refused at ${width}, folded: the reason from its first word and both buttons stand whole above the question`, async () => {
       const page = await browser!.newPage({ viewport: { width, height: width === 390 ? 844 : 900 }, reducedMotion: "reduce" });
       await page.goto(`${vite!.base}/test/wireframe/index.html?screen=creating-refused&theme=dark`);
       await page.locator("[data-creation-refusal]").waitFor();
       const read = await page.evaluate(() => {
         const box = (el: Element) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; };
-        const refusal = document.querySelector("[data-creation-refusal]")!;
+        const reason = document.querySelector("[data-creation-reason]")!;
         return {
-          room: box(refusal.parentElement!),
-          reason: box(refusal.querySelector("p")!),
-          buttons: [...refusal.querySelectorAll("button")].map(box),
+          room: box(reason.parentElement!.parentElement!),
+          reason: box(reason),
+          buttons: [...document.querySelectorAll("[data-creation-refusal] button")].map(box),
           questionTop: box(document.querySelector("[data-testid=workspace-creation] h1")!.parentElement!).top,
         };
       });
       expect(read.reason.top).toBeGreaterThanOrEqual(read.room.top - 0.5);
-      for (const b of read.buttons) expect(b.bottom).toBeLessThanOrEqual(read.room.bottom + 0.5);
+      expect(read.reason.bottom).toBeLessThanOrEqual(read.room.bottom + 0.5);
+      for (const b of read.buttons) expect(b.bottom).toBeLessThanOrEqual(read.room.top + 0.5);
       expect(read.room.bottom).toBeLessThanOrEqual(read.questionTop);
       await page.close();
     });
