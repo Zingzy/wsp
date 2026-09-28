@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LAUNCH_ENV, TURN_TOKEN_ENV } from "@wsp/protocol";
+import { HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LAUNCH_ENV, TURN_TOKEN_ENV, WSP_TOOL_TIMEOUT_SEC } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { accessParams, buildCommand, buildEnv } from "../src/command.js";
 import { threadResumeLine, threadStartLine } from "../src/rpc.js";
@@ -55,6 +55,9 @@ describe("buildCommand", () => {
     expect([...LAUNCH_ENV].sort()).toEqual([HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, TURN_TOKEN_ENV].sort());
     expect(command).toContain(`-c mcp_servers.docs.args='["-y","docs-mcp"]'`);
     expect(command).not.toContain("mcp_servers.docs.env_vars");
+    // Codex ends a tool call past its own limit, and a send can wait through a paused Boat's wake before its turn.
+    expect(command).toContain(`-c mcp_servers.wsp.tool_timeout_sec='${WSP_TOOL_TIMEOUT_SEC}'`);
+    expect(command).not.toContain("mcp_servers.docs.tool_timeout_sec");
     expect(command.startsWith("cd ~ && codex app-server -c ")).toBe(true);
   });
 
