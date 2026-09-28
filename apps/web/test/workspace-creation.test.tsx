@@ -11,6 +11,7 @@ import { explainCreateRefusal, useStore, type Creation, type CreationLine } from
 import { CREATE_ASKED, CREATE_STEP_WORDS, stepTime, stepWords } from "../src/shell/creationLog.js";
 import { WorkspaceCreation } from "../src/shell/WorkspaceCreation.js";
 import { press, typeInto } from "./composer-harness.js";
+import { TABLE_CATALOG } from "./agents.js";
 
 beforeEach(() => {
   useStore.setState({ creations: [], workspaces: [], places: [], landings: {}, api: null } as never);
@@ -170,11 +171,20 @@ describe("the creation page", () => {
     expect(fold(view).textContent).toContain(CREATE_STEP_WORDS.failed);
     expect(fold(view).textContent).not.toContain("Setting up");
     expect(fold(view).querySelector("canvas")).toBeNull();
+    // Failed is a glyph and a word in the status red, and no time.
+    expect(fold(view).querySelector("[data-step-time]")).toBeNull();
+    expect(within(fold(view)).getByText(CREATE_STEP_WORDS.failed).className).toContain("text-status-failed");
     fireEvent.click(fold(view));
     const rows = steps(view);
-    // The step it stopped on is the red one; the refusal is not a step of its own.
+    // The step it stopped on is the red one, in the same red; the refusal is not a step of its own.
     expect(rows.map(r => r.querySelector("[data-step-words]")!.textContent)).toEqual([CREATE_STEP_WORDS["fork-requested"]]);
-    expect(rows[0]!.className).toContain("text-destructive-foreground");
+    expect(rows[0]!.className).toContain("text-status-failed");
+    expect(view.querySelector(".text-destructive-foreground")).toBeNull();
+    // What the chevron opens comes under its row: the steps, then the reason and the buttons.
+    const list = within(view).getByRole("list", { name: "Setting up" });
+    const refusal = view.querySelector("[data-creation-refusal]")!;
+    expect(list.compareDocumentPosition(refusal) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(refusal.contains(within(view).getByRole("button", { name: "Retry" }))).toBe(true);
     const text = view.textContent!;
     expect(text.split(CREATE_STEP_WORDS.failed)).toHaveLength(2);
     expect(text).not.toMatch(/Couldn't/);
@@ -183,14 +193,22 @@ describe("the creation page", () => {
     expect(within(view).getByRole("button", { name: "Dismiss" }).className).toContain("border-transparent");
   });
 
-  it("gives the unfolded steps the question's room and puts the question back when they fold", async () => {
+  it("keeps the question and its mark in place when the steps unfold", async () => {
     const view = await mount(making([line("fork-requested", "starting beta on ascii", 0), line("preview-route", "Preview route to the daemon minted.", 3_400)]));
-    expect(within(view).getByRole("heading", { level: 1 })).toBeDefined();
+    const question = within(view).getByRole("heading", { level: 1 });
     fireEvent.click(fold(view));
-    expect(within(view).queryByRole("heading", { level: 1 })).toBeNull();
     expect(steps(view)).toHaveLength(2);
-    fireEvent.click(fold(view));
-    expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("What should we build in beta?");
+    expect(within(view).getByRole("heading", { level: 1 })).toBe(question);
+    expect(question.textContent).toBe("What should we build in beta?");
+  });
+
+  it("draws the thread's footer while it waits, the picks held where they will stand", async () => {
+    const project = { id: "pr_here", name: "spoo", computer: "here", source: { kind: "folder", path: "/Users/dev/spoo" }, path: "/Users/dev/spoo", remote: "", defaultBranch: "main", memoryKey: "-", memoryDir: "/m", createdAt: "t" };
+    act(() => useStore.setState({ projects: [project], harnesses: [TABLE_CATALOG] } as never));
+    const view = await mount(making([], { project: "pr_here" }));
+    const picker = view.querySelector<HTMLButtonElement>('[data-composer-picker="project"]')!;
+    expect(picker.textContent).toContain("spoo");
+    expect(picker.disabled).toBe(true);
   });
 
   it("names the folder the copy is going to under the box, never the project's own", async () => {

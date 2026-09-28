@@ -107,7 +107,7 @@
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
-import { DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, copyFirstLine, hostnameSetLine, type HarnessCatalog, GOLDEN_STAGE_WORDS, MACHINE_ROW_LABEL, STOP_LEFT_MACHINE_LINE, hereWord, startingLine, type AgentsSignInEvent, type Capabilities, type DeviceView, type InitAgent, type InitJob, type InitRow, type InitScreen, type PlaceAddJob, type PlaceAddStep, type PlaceProvision, type PlaceView, type ProjectView, type SealedImage, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { AgentsManager, type AgentsShell } from "../../src/components/agents/AgentsManager";
@@ -124,12 +124,13 @@ import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
 import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
 import { requestNewWorkspace } from "../../src/shell/shellRequests";
 import { RequestError, type Api } from "../../src/protocol/client";
-import { useStore } from "../../src/protocol/store";
+import { useCreation, useStore } from "../../src/protocol/store";
 import { useAdds } from "../../src/settings/adds";
 import { useRightPanelStore } from "../../src/rightPanelStore";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "../fixtures/keyRefusedJob";
 import "../../src/index.css";
 import { imageBuildLine } from "../../src/shell/creationLog";
+import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
 
 const params = new URLSearchParams(window.location.search);
 const screen = params.get("screen") ?? "sidebar";
@@ -494,6 +495,20 @@ const creation = {
   ],
 };
 
+/** One agent as the host lists it, with a model that has a fast mode and the efforts and access modes a turn takes. */
+const CREATING_CATALOG: HarnessCatalog = {
+  harness: "claude",
+  label: "Claude Code",
+  source: "harness",
+  version: "2.1.0",
+  models: [{ value: "opus", label: "Opus 5.5", fast: true, isDefault: true }],
+  efforts: [{ value: "high", label: "High", isDefault: true }],
+  contextWindows: [],
+  permissionModes: [{ value: "bypassPermissions", label: "Bypass", isDefault: true }, { value: "plan", label: "Plan" }],
+  steers: true,
+  renames: true,
+  images: true,
+};
 const creatingScreen = screen === "creating" || screen === "creating-refused";
 const drawsSidebar = !firstRunScreens.includes(screen);
 /** The screens about the sidebar's shape with fewer records: nothing at all, and one project alone. */
@@ -548,7 +563,7 @@ const api = {
   ...(screen === "settings-computers-refused" ? { sshHosts: async () => Promise.reject(new RequestError("~/.ssh/config: permission denied")) } : {}),
   projectsList: async () => (drawsSidebar ? RECORDED : []),
   workspacesLanding: async (project: string) => landings[project] ?? landings["pr_spoo"]!,
-  listHarnesses: async () => [],
+  listHarnesses: async () => (creatingScreen ? [CREATING_CATALOG] : []),
   initGet: async () => ({
     keys: { solari: settings || params.get("fork") === "solari" },
     home: "/Users/dev",
@@ -686,6 +701,18 @@ useStore.setState({
   selectedId: screen === "settings-over-panel" ? "ws_copy" : screen === "panel-agents" ? "ws_box" : creatingScreen ? creation.key : null,
   selectedThreadId: null,
 } as never);
+/** The workspace the create lands as: a copy on the box at the project's own path, where a box mounts it. */
+function landed(): WorkspaceView {
+  const made = onBox(CREATED_ID, creation.name, LANDING, "agent/pricing-page");
+  return { ...made, copy: { ...made.copy!, path: LANDING.path, source: LANDING.path } };
+}
+
+// The creating screens carry the lists a composer reads, so its footer is the one the thread draws, and a hand to
+// land the create the way the host's event does, which the layout test measures the page across.
+if (creatingScreen) {
+  (window as unknown as { landCreate: () => void }).landCreate = () =>
+    useStore.getState().applyEvent({ type: "workspace.created", workspace: landed() } as never);
+}
 // This window watched the add fail: one read off the host at a reload alone leaves the form clean.
 if (screen === "settings-add-computer-failed") useAdds.setState({ jobs: { [FAILED_ADD.addId]: FAILED_ADD } });
 if (screen === "settings-add-joined") useAdds.setState({ jobs: { [JOINED_ADD.addId]: JOINED_ADD }, heard: [JOINED_ADD.addId] });
@@ -775,10 +802,22 @@ function ThemeRule() {
   return null;
 }
 
+/** The centre the app draws for the selected row: the creation while it is one, its workspace's thread once it lands. */
+function CreatingCentre() {
+  const selected = useStore(s => s.selectedId);
+  const made = useCreation(selected);
+  if (made !== null) return <WorkspaceCreation creation={made} />;
+  return selected === null ? null : (
+    <div className="flex min-h-0 flex-1 flex-col" data-terminal-beside>
+      <WorkspaceThread workspaceId={selected} />
+    </div>
+  );
+}
+
 function Centre() {
   // Settings opened from a screen that is not one of its own, as a door into it does, draws it as the app does.
   const settingsOpen = useStore(s => s.settingsOpen);
-  if (creatingScreen) return <WorkspaceCreation creation={creation as never} />;
+  if (creatingScreen) return <CreatingCentre />;
   if (settings || settingsOpen) {
     return (
       <>

@@ -963,12 +963,27 @@ describe("the creation tile", () => {
         creations: [
           { key: "creating:1", name: "beta", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [{ stage: "fork-requested", message: long, at: "t", elapsedMs: 0 }], failed: null },
           { key: "creating:2", name: "gamma", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [], failed: { title: "Could not start gamma", detail: "the disk is full" } },
+          {
+            key: "creating:3",
+            name: "delta",
+            askedAt: Date.now(),
+            project: "pr_1",
+            workspaceId: null,
+            lines: [{ stage: "fork-requested", message: long, at: "t", elapsedMs: 0 }, { stage: "failed", message: "the disk is full", at: "t", elapsedMs: 900 }],
+            failed: { title: "Could not start delta", detail: "the disk is full" },
+          },
         ],
       } as never),
     );
     const beta = rowOf("beta");
     const gamma = rowOf("gamma");
-    expect(rowIds()).toEqual(["ws:ws_a", "creating:1", "creating:2"]);
+    // Each files where a thread in its state does, counted there: Working while it is made, Needs you once refused.
+    expect(rowIds()).toEqual(["creating:2", "creating:3", "creating:1", "ws:ws_a"]);
+    const sectionOf = (row: HTMLElement) => row.closest<HTMLElement>("[data-section]")!;
+    expect(sectionOf(beta).dataset["section"]).toBe("working");
+    expect(sectionOf(gamma).dataset["section"]).toBe("needs-you");
+    expect(sectionOf(beta).querySelector("[data-group-count]")!.textContent).toBe("1");
+    expect(sectionOf(gamma).querySelector("[data-group-count]")!.textContent).toBe("2");
     for (const row of [beta, gamma]) {
       expect(row.className).toBe(rowOf("api").className);
       expect(row.querySelector("[data-tile-where]")!.textContent).toBe(`spoo-landing @ ${BOX_NAME}`);
@@ -990,6 +1005,10 @@ describe("the creation tile", () => {
     expect(gamma.querySelector("[data-crab]")).toBeNull();
     expect(gamma.getAttribute("aria-busy")).toBeNull();
     expect(threadState(gamma)).toBe("Failed");
-    expect(gamma.querySelector("[data-creation-line]")!.textContent).toBe("Could not start gamma");
+    // Refused before any step, row three says so alone, in the status red, and never the name the row above holds.
+    expect(gamma.querySelector("[data-creation-line]")!.textContent).toBe(CREATE_STEP_WORDS.failed);
+    expect(gamma.querySelector("[data-creation-line]")!.className).toContain("text-status-failed");
+    // Refused on a step, row three names that step.
+    expect(rowOf("delta").querySelector("[data-creation-line]")!.textContent).toBe(CREATE_STEP_WORDS["fork-requested"]);
   });
 });

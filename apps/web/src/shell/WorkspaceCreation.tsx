@@ -5,6 +5,7 @@
 // the create's steps and the composer ready under the question. A message sent
 // now waits under the creation and goes to the workspace once it is up.
 import { useLayoutEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ChevronDownIcon, ChevronRightIcon, CircleAlertIcon } from "lucide-react";
 import { ChatComposer } from "../components/chat/ChatComposer.js";
 import { EmptyThread } from "../components/chat/ChatView.js";
@@ -22,25 +23,34 @@ export const creationWaitLine = (name: string): string => `Sends once ${name} is
 
 const TIME_CLASS = "ml-auto shrink-0 font-mono text-xs tabular-nums text-muted-foreground";
 
-/** One step row's height, which the list is cut to a whole number of. */
+/** One step row's height and the grid the room below the row is cut to, so it never shows part of a line. */
 const STEP_ROW_PX = 24;
 
 export function WorkspaceCreation({ creation }: { creation: Creation }) {
   const thread = useChatThread(creation.key, null, true);
   const [open, setOpen] = useState(false);
-  const folder = useStore(s => {
-    const project = s.projects.find(p => p.id === creation.project);
-    return project === undefined ? "" : creationFolder(project, creation.name);
-  });
+  const { folder, project: projectName } = useStore(
+    useShallow(s => {
+      const project = s.projects.find(p => p.id === creation.project);
+      return project === undefined ? { folder: "", project: null } : { folder: creationFolder(project, creation.name), project: project.name };
+    }),
+  );
   const rootRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  // ChatView's own measure, so the question stands over the composer at the height the thread will draw it at.
+  const questionRef = useRef<HTMLDivElement>(null);
+  // ChatView's own measure, so the question stands over the composer at the height the thread will draw it at, and
+  // the question's own, which is where the room for the steps ends.
   useLayoutEffect(() => {
     const root = rootRef.current;
     const composer = composerRef.current;
-    if (root === null || composer === null) return;
-    const observer = new ResizeObserver(() => root.style.setProperty("--chat-composer-inset", `${composer.offsetHeight}px`));
+    const question = questionRef.current;
+    if (root === null || composer === null || question === null) return;
+    const observer = new ResizeObserver(() => {
+      root.style.setProperty("--chat-composer-inset", `${composer.offsetHeight}px`);
+      root.style.setProperty("--question-height", `${question.offsetHeight}px`);
+    });
     observer.observe(composer);
+    observer.observe(question);
     return () => observer.disconnect();
   }, []);
   const project = creation.project === undefined ? {} : { projectId: creation.project };
@@ -55,16 +65,13 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
       <div ref={rootRef} className="relative isolate h-full min-h-0 text-foreground [--empty-lift:calc((100%-var(--chat-composer-inset,0px)-5.5rem)/2)]">
         <div className="absolute inset-0">
           <HeroAtmosphere {...project} />
-          {/* The question gives the unfolded steps its room, and stands again when they fold. */}
-          {open ? null : (
-            <div className="absolute inset-x-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem)]">
-              <EmptyThread workspaceName={creation.name} {...project} />
-            </div>
-          )}
+          <div ref={questionRef} className="absolute inset-x-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem)]">
+            <EmptyThread workspaceName={creation.name} {...project} />
+          </div>
           <SettingUp creation={creation} open={open} onToggle={() => setOpen(o => !o)} />
         </div>
         <div ref={composerRef} data-chat-composer-dock data-centred className="pointer-events-none absolute inset-x-0 bottom-(--empty-lift) z-10 *:pointer-events-auto">
-          <ChatComposer key={creation.key} workspaceId={creation.key} thread={thread} waiting={{ line: creationWaitLine(creation.name), folder }} />
+          <ChatComposer key={creation.key} workspaceId={creation.key} thread={thread} waiting={{ line: creationWaitLine(creation.name), folder, project: projectName }} />
         </div>
       </div>
     </div>
@@ -73,23 +80,14 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
 
 /** The create's steps folded into one row at the top of the column, in the transcript's fold grammar with no rule
  * under it: the crab, the step being waited on, and the time since the create was asked for. A refused create says
- * so in that row's place, gives the reason once under it with Retry and Dismiss, and marks the step it stopped on. */
+ * so in that row's place; under it the steps when unfolded, the step it stopped on in red, then the reason once with
+ * Retry and Dismiss, all in the room between the row and the question. */
 function SettingUp({ creation, open, onToggle }: { creation: Creation; open: boolean; onToggle: () => void }) {
-  const retry = useStore(s => s.retryCreation);
-  const dismiss = useStore(s => s.dismissCreation);
   const { failed, lines } = creation;
   const step = currentStep(creation);
   const Chevron = open ? ChevronDownIcon : ChevronRightIcon;
   return (
-    // Folded, it ends above the question, which is two lines on a phone; unfolded, above the composer.
-    <div
-      className={cn(
-        "absolute inset-x-0 top-0 flex flex-col px-3 pt-3 sm:px-5 sm:pt-4",
-        open
-          ? "bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+1rem)]"
-          : "bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+11.5rem)] sm:bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+10.5rem)]",
-      )}
-    >
+    <div className="absolute inset-x-0 top-0 bottom-[calc(var(--empty-lift)+var(--chat-composer-inset)+2.5rem+var(--question-height,8.5rem)+0.75rem)] flex flex-col px-3 pt-3 sm:px-5 sm:pt-4">
       <div className="mx-auto flex min-h-0 w-full min-w-0 max-w-3xl flex-1 flex-col">
         <button
           type="button"
@@ -103,41 +101,34 @@ function SettingUp({ creation, open, onToggle }: { creation: Creation; open: boo
               <Crab className="text-status-working" />
               <span className="shrink-0 text-foreground">Setting up</span>
               <span className="min-w-0 truncate">{step === undefined ? CREATE_ASKED : stepWords(step)}</span>
+              <Chevron aria-hidden className="size-3.5 shrink-0" />
+              <span data-step-time className={TIME_CLASS}>
+                <WorkingSince since={new Date(creation.askedAt).toISOString()} format={stepTime} />
+              </span>
             </>
           ) : (
             <>
               <CircleAlertIcon aria-hidden className="size-4 shrink-0 text-status-failed" />
-              <span className="shrink-0 text-destructive-foreground">{CREATE_STEP_WORDS.failed}</span>
+              <span className="shrink-0 font-medium text-status-failed">{CREATE_STEP_WORDS.failed}</span>
+              <Chevron aria-hidden className="size-3.5 shrink-0" />
             </>
           )}
-          <Chevron aria-hidden className="size-3.5 shrink-0" />
-          <span data-step-time className={TIME_CLASS}>
-            {failed === null ? <WorkingSince since={new Date(creation.askedAt).toISOString()} format={stepTime} /> : stepTime(lines.at(-1)?.elapsedMs ?? 0)}
-          </span>
         </button>
-        {failed !== null ? (
-          <div className="mt-2 flex shrink-0 flex-col items-start gap-3 ps-7 pe-1 text-sm">
-            <p>{failed.detail}</p>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => void retry(creation.key)}>
-                Retry
-              </Button>
-              <Button variant="ghost-muted" size="sm" onClick={() => dismiss(creation.key)}>
-                Dismiss
-              </Button>
-            </div>
-          </div>
-        ) : null}
-        {open ? <StepList lines={lines} refused={failed !== null} /> : null}
+        {open || failed !== null ? <Below creation={creation} open={open} /> : null}
       </div>
     </div>
   );
 }
 
-/** Every step from the first, cut to the whole rows its room holds, so no row stands half under an edge; more rows
- * than that scroll. The refusal is not a step: the step it stopped on is the red one. */
-function StepList({ lines, refused }: { lines: ReadonlyArray<CreationLine>; refused: boolean }) {
+/** Under the row: the steps when unfolded, then a refusal's reason and its buttons, in a room cut to whole rows of the
+ * grid everything here stands on, so no line shows in part. Unfolded, more than fits scrolls from the first step,
+ * which is what the chevron asked for. */
+function Below({ creation, open }: { creation: Creation; open: boolean }) {
+  const retry = useStore(s => s.retryCreation);
+  const dismiss = useStore(s => s.dismissCreation);
+  const { failed, lines } = creation;
   const room = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
   const [rows, setRows] = useState<number | null>(null);
   useLayoutEffect(() => {
     const at = room.current;
@@ -148,16 +139,44 @@ function StepList({ lines, refused }: { lines: ReadonlyArray<CreationLine>; refu
     observer.observe(at);
     return () => observer.disconnect();
   }, []);
+  useLayoutEffect(() => {
+    const at = scroller.current;
+    if (at !== null) at.scrollTop = 0;
+  }, [failed, open, rows, lines.length]);
   const taken = lines.filter(line => line.stage !== "failed");
   const last = taken.length - 1;
   return (
     <div ref={room} className="mt-1 min-h-0 flex-1">
-      <ol aria-label="Setting up" aria-live="polite" className="flex flex-col overflow-y-auto" style={rows === null ? undefined : { maxHeight: rows * STEP_ROW_PX }}>
-        {taken.length === 0 ? <StepRow words={CREATE_ASKED} tone={refused ? "failed" : "current"} /> : null}
-        {taken.map((line, i) => (
-          <StepRow key={i} words={stepWords(line)} time={stepTime(line.elapsedMs)} tone={i === last ? (refused ? "failed" : "current") : "done"} />
-        ))}
-      </ol>
+      <div ref={scroller} className="overflow-y-auto" style={rows === null ? undefined : { maxHeight: rows * STEP_ROW_PX }}>
+        {open ? (
+          <ol aria-label="Setting up" aria-live="polite" className="flex flex-col">
+            {taken.length === 0 ? <StepRow words={CREATE_ASKED} tone={failed === null ? "current" : "failed"} /> : null}
+            {taken.map((line, i) => (
+              <StepRow key={i} words={stepWords(line)} time={stepTime(line.elapsedMs)} tone={i === last ? (failed === null ? "current" : "failed") : "done"} />
+            ))}
+          </ol>
+        ) : null}
+        {failed !== null ? (
+          <div data-creation-refusal className="ps-7 pe-1 text-sm leading-6">
+            {/* Folded, the reason keeps to the rows above its buttons so both stand whole; unfolded it is whole. */}
+            <p
+              title={failed.detail}
+              className={open ? undefined : "overflow-hidden [display:-webkit-box] [-webkit-box-orient:vertical]"}
+              style={open ? undefined : { WebkitLineClamp: Math.max(1, (rows ?? 3) - 1) }}
+            >
+              {failed.detail}
+            </p>
+            <div className="flex h-6 items-center gap-2">
+              <Button variant="outline" size="xs" className="h-6" onClick={() => void retry(creation.key)}>
+                Retry
+              </Button>
+              <Button variant="ghost-muted" size="xs" className="h-6" onClick={() => dismiss(creation.key)}>
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -166,7 +185,7 @@ function StepList({ lines, refused }: { lines: ReadonlyArray<CreationLine>; refu
 function StepRow({ words, time, tone }: { words: string; time?: string; tone: "done" | "current" | "failed" }) {
   return (
     <li
-      className={cn("flex h-6 min-w-0 shrink-0 items-center gap-3 ps-7 pe-1 text-[13px] leading-5", tone === "failed" ? "text-destructive-foreground" : tone === "current" ? "text-foreground" : "text-muted-foreground")}
+      className={cn("flex h-6 min-w-0 shrink-0 items-center gap-3 ps-7 pe-1 text-[13px] leading-5", tone === "failed" ? "text-status-failed" : tone === "current" ? "text-foreground" : "text-muted-foreground")}
     >
       <span data-step-words className="min-w-0 truncate">
         {words}

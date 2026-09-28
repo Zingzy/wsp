@@ -209,7 +209,7 @@ export function ChatComposer({
   workspaceId: string;
   thread: ChatThreadHandle;
   onStart?: (prompt: string) => Promise<string | null>;
-  waiting?: { line: string; folder: string };
+  waiting?: { line: string; folder: string; project: string | null };
 }) {
   const api = useStore(s => s.api);
   const waits = waiting !== undefined;
@@ -846,9 +846,10 @@ export function ChatComposer({
   const compact = thread.view.running || thread.view.entries.some(entry => entry.kind === "message");
   const modes = (
     <ComposerModeToggles
-      fast={fastOffered && !waits ? { on: fastOn, toggle: () => setFast(threadKey, !fastOn) } : null}
-      plan={planOffered && onStart === undefined && !waits ? { on: planOn, toggle: togglePlan } : null}
+      fast={fastOffered ? { on: fastOn, toggle: () => setFast(threadKey, !fastOn) } : null}
+      plan={planOffered && onStart === undefined ? { on: planOn, toggle: togglePlan } : null}
       tight={compact}
+      held={waits}
     />
   );
   const home = useStore(s => s.projects.find(p => projectHomeKey(p.id) === workspaceId));
@@ -1029,7 +1030,14 @@ export function ChatComposer({
                           compact && !tall ? "row-start-1" : "row-start-2",
                         )}
                       >
-                        <ComposerOptionPickers compact={compact} workspaceId={workspaceId} thread={thread} onPickAccess={pickAccess} onOtherFolder={openFolderPicker} />
+                        <ComposerOptionPickers
+                          compact={compact}
+                          workspaceId={workspaceId}
+                          thread={thread}
+                          onPickAccess={pickAccess}
+                          onOtherFolder={openFolderPicker}
+                          {...(waiting?.project != null ? { heldProject: waiting.project } : {})}
+                        />
                         {compact ? null : modes}
                       </div>
                       <div data-chat-composer-actions="right" className={cn("col-start-3 flex shrink-0 items-center justify-self-end", compact && !tall ? "row-start-1" : "row-start-2 self-end")}>

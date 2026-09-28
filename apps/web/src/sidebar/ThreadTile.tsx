@@ -285,7 +285,7 @@ export function CreationTile({ rowId, name, place, line, failed, active, onSelec
         title={<Title text={name} idle={false} active={active} />}
         harness={null}
         third={
-          <span data-creation-line className="min-w-0 truncate">
+          <span data-creation-line className={cn("min-w-0 truncate", failed && "text-status-failed")}>
             {line}
           </span>
         }

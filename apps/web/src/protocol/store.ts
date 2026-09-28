@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
+import { applyPreferencesPatch, kindForComputer, threadsFollowed, workspaceAccess, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, copyBuildOf, type GoldenStageEvent, type HarnessCatalog, type InitJob, type InitSetup, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type ReleaseView, type SessionView, type ThreadMarks, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, readProjectHome, writeAddress, writeProjectHome } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -342,6 +342,14 @@ function handOver(key: string, workspaceId: string): void {
   });
   const access = useStore.getState().preferences.access[key];
   if (access !== undefined) void useStore.getState().setPreferences({ access: { [workspaceId]: access, [key]: null } });
+  // The lists the creation's composer drew stand for the workspace until its machine answers with its own, so the
+  // footer it lands with is the one that was on screen.
+  const s = useStore.getState();
+  const project = s.projects.find(p => p.id === s.creations.find(c => c.key === key)?.project);
+  if (project !== undefined && s.harnessesByWorkspace[workspaceId] === undefined) {
+    const kind = kindForComputer(project.computer);
+    useStore.setState(now => ({ harnessesByWorkspace: { ...now.harnessesByWorkspace, [workspaceId]: now.harnesses.map(c => workspaceAccess(c, kind)) } }));
+  }
 }
 
 /** What waited for a machine that will never come goes with its creation, and so does everything handOver would have
@@ -657,7 +665,7 @@ export const useStore = create<State>((set, get) => {
       const computer = get().projects.find(p => p.id === project)?.computer;
       if (!get().api) return null;
       // Unique across reloads: a draft or a waiting message persisted under a key must never meet another creation.
-      const key = `creating:${newId()}`;
+      const key = `${CREATION_PREFIX}${newId()}`;
       set(s => ({
         creations: [
           ...s.creations,
@@ -1065,7 +1073,7 @@ export const useStore = create<State>((set, get) => {
             const own = s.creations.find(c => c.workspaceId === e.workspaceId) ?? s.creations.find(c => c.workspaceId === null && c.name === e.name && c.failed === null);
             const failed = e.stage === "failed" ? { title: couldNotStart(e.name), detail: e.message } : null;
             if (own === undefined) {
-              return { creations: [...s.creations, { key: `creating:${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
+              return { creations: [...s.creations, { key: `${CREATION_PREFIX}${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
             }
             return { creations: s.creations.map(c => (c === own ? { ...c, workspaceId: e.workspaceId, lines: [...c.lines, line], failed: c.failed ?? failed } : c)) };
           });
@@ -1277,7 +1285,8 @@ function hostWide(catalogs: HarnessCatalog[]): HarnessCatalog[] {
 /** The one rule for which catalogs answer for a workspace, so a surface reading many workspaces' rows and one
  * reading its own read the same thing. */
 export const catalogsIn = (s: Catalogs, workspaceId: string | null): HarnessCatalog[] =>
-  (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? (workspaceId !== null && isProjectHomeKey(workspaceId) ? s.harnesses : hostWide(s.harnesses));
+  (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ??
+  (workspaceId !== null && (isProjectHomeKey(workspaceId) || isCreationKey(workspaceId)) ? s.harnesses : hostWide(s.harnesses));
 
 /** The key a project's home composer keeps its draft and picks under until its send makes a workspace. A home has
  * no machine of its own, so it reads the host-wide lists whole, access modes included, which is what the workspace
@@ -1285,6 +1294,9 @@ export const catalogsIn = (s: Catalogs, workspaceId: string | null): HarnessCata
 const PROJECT_HOME_PREFIX = "project:";
 export const projectHomeKey = (projectId: string): string => `${PROJECT_HOME_PREFIX}${projectId}`;
 export const isProjectHomeKey = (key: string): boolean => key.startsWith(PROJECT_HOME_PREFIX);
+/** A workspace being made reads the lists as its project's home does, since they are what its workspace is picked from. */
+const CREATION_PREFIX = "creating:";
+export const isCreationKey = (key: string): boolean => key.startsWith(CREATION_PREFIX);
 export const catalogIn = (s: Catalogs, workspaceId: string | null, harness: string): HarnessCatalog | null =>
   catalogsIn(s, workspaceId).find(c => c.harness === harness) ?? null;
 /** The thread the centre shows for a workspace, which is the one the address names: none while the centre is on a

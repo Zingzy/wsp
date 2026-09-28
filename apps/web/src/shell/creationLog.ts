@@ -43,6 +43,10 @@ export function creationFolder(project: Pick<ProjectView, "computer" | "path">, 
 /** The step a creation is on: the last one it waits on, so a note on a step already taken never stands for it. */
 export const currentStep = (creation: Pick<Creation, "lines">): CreationLine | undefined => creation.lines.findLast(l => creationAwaits(l.stage));
 
+/** The step a refused create stopped on: the last it reported before the refusal, which is not a step of its own;
+ * the page marks the same row. */
+export const stoppedStep = (creation: Pick<Creation, "lines">): CreationLine | undefined => creation.lines.findLast(l => l.stage !== "failed");
+
 /** What the log says while the image is built somewhere else, with the stage's own words after it. The build runs
  * before the workspace can start, so the line names the computer rather than the workspace. */
 export const imageBuildLine = (place: string, stage: string): string => `building your image on ${place}: ${stage}`;

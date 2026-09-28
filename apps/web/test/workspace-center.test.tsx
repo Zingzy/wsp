@@ -238,7 +238,7 @@ describe("workspace creation view", () => {
     fireEvent.click(fold);
     const rows = within(within(view).getByRole("list", { name: "Setting up" })).getAllByRole("listitem");
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.className).toContain("text-destructive-foreground");
+    expect(rows[0]!.className).toContain("text-status-failed");
     // The runtime's words are the refusal: they appear once, under the lead.
     expect(view.textContent!.split(CREATE_STEP_WORDS.failed)).toHaveLength(2);
     expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);
