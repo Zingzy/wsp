@@ -147,6 +147,7 @@ export function parseCatalogProbe(stdout: string): HarnessCatalogProbe | null {
     version,
     models,
     efforts: effortChoices(help),
-    permissionModes: ["default", ...listed.filter(mode => mode !== "default")],
+    // wsp offers no plan mode, though the binary lists one.
+    permissionModes: ["default", ...listed.filter(mode => mode !== "default" && mode !== "plan")],
   };
 }

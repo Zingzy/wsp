@@ -2157,9 +2157,9 @@ describe("wsp verbs over the host", () => {
 
   it.runIf(CLOUD_ON)("--model, --effort and --access on run, fork --send and send reach the start as the fields the composer sends; a new thread without them runs the catalog's defaults, the ones the composer shows", async () => {
     await run("new", "alpha");
-    const picked = await run("run", "alpha", "--model", "claude-sonnet-5", "--effort", "low", "--access", "plan", "review it");
+    const picked = await run("run", "alpha", "--model", "claude-sonnet-5", "--effort", "low", "--access", "acceptEdits", "review it");
     expect(picked.code).toBe(0);
-    expect(claude.starts.map(s => [s.model, s.effort, s.permissionMode])).toEqual([["claude-sonnet-5", "low", "plan"]]);
+    expect(claude.starts.map(s => [s.model, s.effort, s.permissionMode])).toEqual([["claude-sonnet-5", "low", "acceptEdits"]]);
 
     const bare = await run("run", "alpha", "hello");
     expect(bare.code).toBe(0);
@@ -2201,9 +2201,13 @@ describe("wsp verbs over the host", () => {
     expect(bare.code).toBe(0);
     // The owner's word for his own computer: a thread here does what a session he starts in his own terminal does.
     expect(claude.starts.at(-1)!.permissionMode).toBe("bypassPermissions");
-    const picked = await run("run", "mac", "--access", "plan", "read the notes");
+    const picked = await run("run", "mac", "--access", "acceptEdits", "edit the notes");
     expect(picked.code).toBe(0);
-    expect(claude.starts.at(-1)!.permissionMode).toBe("plan");
+    expect(claude.starts.at(-1)!.permissionMode).toBe("acceptEdits");
+    const plan = await run("run", "mac", "--access", "plan", "read the notes");
+    expect(plan.code).toBe(3);
+    expect(plan.io.errors[0]).toMatch(/^wsp run: access mode "plan" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), Bypass on this computer \(bypassPermissions\), Auto \(auto\), /);
+    expect(claude.starts.at(-1)!.permissionMode).toBe("acceptEdits");
     // The command line reads it off the same catalog the app's composer draws, so neither holds a default of its own.
     const [mac] = await rt.workspaces.list();
     const shown = (await rt.harnesses.list(mac!.id)).find(c => c.harness === "claude")!;

@@ -212,7 +212,7 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
         <div className="min-w-0 flex-1" {...(m.unlisted === true ? { "data-unlisted-model": "" } : {})}>
           <div className="flex items-center gap-2">
             <span className={cn("truncate text-[15px]", m.unlisted === true && "text-muted-foreground")}>{m.label}</span>
-            {m.isDefault ? <span className="rounded border border-primary/40 bg-primary/10 px-1.5 text-[10px] font-semibold uppercase leading-4 tracking-wide text-primary">default</span> : null}
+            {m.isDefault ? <span className="text-xs leading-4 text-muted-foreground">default</span> : null}
           </div>
           <div className="mt-1 flex items-center gap-1.5 text-[13px] text-muted-foreground">
             <HarnessMark harness={shown.harness} label={shown.label} className="size-3.5" />

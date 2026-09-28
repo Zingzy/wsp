@@ -504,7 +504,7 @@ const CREATING_CATALOG: HarnessCatalog = {
   models: [{ value: "opus", label: "Opus 5.5", fast: true, isDefault: true }],
   efforts: [{ value: "high", label: "High", isDefault: true }],
   contextWindows: [],
-  permissionModes: [{ value: "bypassPermissions", label: "Bypass", isDefault: true }, { value: "plan", label: "Plan" }],
+  permissionModes: [{ value: "bypassPermissions", label: "Bypass", isDefault: true }, { value: "acceptEdits", label: "Accept edits" }],
   steers: true,
   renames: true,
   images: true,

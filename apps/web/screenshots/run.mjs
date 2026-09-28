@@ -176,6 +176,11 @@ async function shoot(context, shot, base, out, token) {
     else if (step.focus !== undefined) await page.locator(step.focus).first().focus({ timeout: 15_000 });
     else if (step.menu !== undefined) await page.locator(step.menu).first().click({ button: "right", timeout: 15_000 });
     else if (step.hover !== undefined) await page.locator(step.hover).first().hover({ timeout: 15_000 });
+    else if (step.file !== undefined) {
+      await page.locator('[data-composer-file-input="true"]').first().setInputFiles({ name: step.file.name, mimeType: "application/octet-stream", buffer: Buffer.alloc(step.file.bytes, 0x61) });
+      // The composer reads a file before it holds it, so the next step waits for the file to stand in the box.
+      await page.locator(`[data-composer-files] [data-chat-file="${step.file.name}"], [data-composer-refused-file="${step.file.name}"]`).first().waitFor({ state: "visible", timeout: 15_000 });
+    }
     else await page.locator(step.click).first().click({ timeout: 15_000 });
   }
   if (shot.wait !== undefined) await page.locator(shot.wait).first().waitFor({ state: "visible", timeout: 15_000 });

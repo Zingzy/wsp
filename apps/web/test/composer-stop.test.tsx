@@ -14,7 +14,9 @@ import { composerEditor, isEditable } from "./composer-harness.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 import { makeApi, ProtocolClient } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { ChatComposer } from "../src/components/chat/ChatComposer.js";
+import { ChatComposer, STOP_WAIT, stopFailureWords } from "../src/components/chat/ChatComposer.js";
+import { COMPOSER_WORDS } from "../src/components/chat/composerWords.js";
+import { clearNotices, lastNotice } from "./notice-text.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
@@ -107,7 +109,7 @@ describe("composer stop", () => {
     rows = [runningRow];
     const { sock, deliver, push } = await setup();
     await streamTurn(push);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(document.querySelector("[data-composer-refusal]")).toBeNull();
     // The runtime answers accepted only after the turn's done and end are on the wire.
     onInterrupt = f => {
       deliver(done("interrupted"));
@@ -119,7 +121,7 @@ describe("composer stop", () => {
     await waitFor(() => expect(footer()).toContain("interrupted"));
     await settle();
     expect(screen.queryByRole("button", { name: /Stop generation|Stopping/ })).toBeNull();
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(document.querySelector("[data-composer-refusal]")).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
     expect(isEditable(composerEditor())).toBe(true);
     expect(sock.frames("sessions.interrupt")).toHaveLength(1);
@@ -138,7 +140,7 @@ describe("composer stop", () => {
     expect(sock.frames("sessions.interrupt")).toHaveLength(1);
     await waitFor(() => expect(footer()).toContain("Worked for"));
     await settle();
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(document.querySelector("[data-composer-refusal]")).toBeNull();
     expect(screen.queryByRole("button", { name: /Stop generation|Stopping/ })).toBeNull();
     expect(sendButton().getAttribute("aria-label")).toBe("Send message");
   });
@@ -167,23 +169,48 @@ describe("composer stop", () => {
     expect(sock.frames("sessions.interrupt")).toHaveLength(1);
   });
 
-  it("not-found shows the reason in the status row and offers stop again; a refused request shows its message; the turn's end clears it", async () => {
+  it("a stop that fails raises a flyout in its own words and offers stop again: a turn wsp no longer knows, then the runtime's refusal", async () => {
     // No row for the turn: the composer falls back to the id the events carry, which the runtime does not key.
     rows = [];
     const { sock, push } = await setup();
     await streamTurn(push);
+    clearNotices();
     onInterrupt = f => ({ id: f["id"], ok: true, outcome: "not-found" });
     fireEvent.click(stopButton());
     expect(sock.frames("sessions.interrupt")).toEqual([{ id: expect.any(Number), op: "sessions.interrupt", sessionId: CLAUDE_SESSION }]);
-    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Could not stop: the runtime does not know this session"));
+    await waitFor(() => expect(lastNotice()).toBe(COMPOSER_WORDS.stopUnknown));
     expect(stopButton().disabled).toBe(false);
     onInterrupt = f => ({ id: f["id"], ok: false, error: "runtime is busy" });
     fireEvent.click(stopButton());
-    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Could not stop: runtime is busy"));
+    await waitFor(() => expect(lastNotice()).toBe(COMPOSER_WORDS.stopRefused("runtime is busy")));
     expect(sock.frames("sessions.interrupt")).toHaveLength(2);
+    expect(document.querySelector("[data-composer-refusal]")).toBeNull();
     push(done("completed"));
     push(end);
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
-    expect(sendButton().getAttribute("aria-label")).toBe("Send message");
+    await waitFor(() => expect(sendButton().getAttribute("aria-label")).toBe("Send message"));
+  });
+
+  it("a stop whose process has not ended past the wait says so in a flyout, and the button offers stop again", async () => {
+    rows = [runningRow];
+    const { push } = await setup();
+    await streamTurn(push);
+    clearNotices();
+    const was = STOP_WAIT.ms;
+    STOP_WAIT.ms = 30;
+    try {
+      onInterrupt = () => undefined;
+      fireEvent.click(stopButton());
+      await waitFor(() => expect(lastNotice()).toBe(COMPOSER_WORDS.stopDidNotEnd));
+      expect(stopButton().disabled).toBe(false);
+    } finally {
+      STOP_WAIT.ms = was;
+    }
+  });
+});
+
+describe("stopFailureWords", () => {
+  it("names the computer when it is not answering, and otherwise gives the runtime's own words", () => {
+    expect(stopFailureWords({ error: "connect ECONNREFUSED", unreachable: true, computer: "old-laptop" })).toBe(COMPOSER_WORDS.stopUnreachable("old-laptop"));
+    expect(stopFailureWords({ error: "runtime is busy", unreachable: false, computer: "old-laptop" })).toBe(COMPOSER_WORDS.stopRefused("runtime is busy"));
   });
 });

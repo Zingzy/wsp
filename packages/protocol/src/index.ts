@@ -1318,10 +1318,6 @@ export interface StartPicks {
   fast?: boolean;
 }
 
-/** The access mode that reads and plans and changes nothing, under the one word every agent's list carries it by:
- * Claude Code's own mode, and on Codex a read-only run told to plan. The composer's plan toggle picks it. */
-export const PLAN_ACCESS = "plan";
-
 /** Why a start asked for fast on a model that has no faster output. */
 export const noFastLine = (model: string): string => `${model} has no fast mode; pick a model that offers it, or send without it`;
 
