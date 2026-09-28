@@ -171,6 +171,45 @@
       "settleMs": 700
     },
     {
+      "name": "composer-stash",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:redirect",
+        "390:key:Escape",
+        "390:key:Escape",
+        "testid=composer-editor",
+        "type:what does ",
+        "type:@red",
+        "composer-item-id=path:apps/api/src/redirect.ts",
+        "type:return on a miss",
+        "key:ControlOrMeta+s",
+        "type:rename the slug column to code",
+        "key:ControlOrMeta+s",
+        "composer-stash-word=true"
+      ],
+      "wait": "composer-stash-drawer",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-modes",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=ws:ws_web",
+        "390:key:Escape",
+        "390:key:Escape",
+        "composer-mode=fast",
+        "composer-mode=plan",
+        "testid=composer-editor",
+        "type:plan the move to the new billing api"
+      ],
+      "wait": "composer-mode=plan",
+      "settleMs": 700
+    },
+    {
       "name": "machine",
       "at": "/",
       "steps": [
@@ -968,6 +1007,71 @@
         1440,
         390
       ],
+      "settleMs": 700
+    },
+    {
+      "name": "timeline-rewind-hover",
+      "at": "/",
+      "fixture": "rewind",
+      "steps": [
+        "row-id=thread:rounding",
+        "hover:message-role=assistant"
+      ],
+      "wait": "k=rewind-to-here",
+      "widths": [1440],
+      "settleMs": 700
+    },
+    {
+      "name": "rewind-dialog",
+      "at": "/",
+      "fixture": "rewind",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:rounding",
+        "390:key:Escape",
+        "390:key:Escape",
+        "hover:message-role=assistant",
+        "k=rewind-to-here"
+      ],
+      "wait": "k=rewind-refusal",
+      "widths": [1440, 390],
+      "settleMs": 700
+    },
+    {
+      "name": "rewind-dialog-refused",
+      "at": "/",
+      "fixture": "rewind",
+      "fresh": true,
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:rounding",
+        "390:key:Escape",
+        "390:key:Escape",
+        "hover:message-role=assistant",
+        "k=rewind-to-here",
+        "k=rewind-confirm"
+      ],
+      "wait": "k=rewind-refusal",
+      "widths": [1440, 390],
+      "settleMs": 1200
+    },
+    {
+      "name": "rewind-dialog-files-only",
+      "at": "/",
+      "fixture": "rewind",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:tax",
+        "390:key:Escape",
+        "390:key:Escape",
+        "hover:message-role=assistant",
+        "k=rewind-to-here"
+      ],
+      "wait": "k=rewind-refusal",
+      "widths": [1440, 390],
       "settleMs": 700
     },
     {

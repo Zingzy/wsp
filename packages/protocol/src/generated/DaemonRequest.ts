@@ -117,6 +117,18 @@ machineId?: string, } | { "op": "git.prList", cwd: string,
 /**
  * The workspace this frame is for, as on fs.list above.
  */
+machineId?: string, } | { "op": "git.checkpoint", cwd: string, thread: string, turn: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.restore", cwd: string, 
+/**
+ * The checkpoint's ref, as a git.checkpoint answer named it.
+ */
+checkpoint: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
 machineId?: string, } | { "op": "fs.folders", dir?: string, hidden?: boolean, 
 /**
  * Every repo under the roots instead of one level.

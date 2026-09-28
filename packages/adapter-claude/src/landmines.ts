@@ -87,6 +87,10 @@ export interface BuildCommandOptions {
   sessionId?: string;
   /** Existing session: passed as --resume instead. */
   resume?: string;
+  /** The uuid of the message a rewind kept, on a resume alone: passed as --resume-session-at, which the CLI keeps out
+   * of --help and loads the session up to (measured on 2.1.283: a resume at a turn's last message answered as if
+   * the turns after it had never run, and its new turn hung off that message in the session file). */
+  resumeAt?: string;
   cwd?: string;
   /** The CLI's own slugs, from the harness catalog; absent leaves the CLI's default in place. */
   model?: string;
@@ -100,6 +104,9 @@ export interface BuildCommandOptions {
   name?: string;
   /** MCP servers this turn gets on top of the config dir's own, by the name each takes in a config. */
   mcpServers?: Readonly<Record<string, McpServerSpec>>;
+  /** The model's faster output. The CLI takes it as the fastMode setting, which --settings carries for this launch
+   * alone; the result's fast_mode_state says whether the account served it (2.1.283, 2026-09-27). */
+  fast?: boolean;
 }
 
 // Model names carry a context suffix like "claude-opus-5[1m]"; nothing else a catalog value needs is outside this set.
@@ -149,7 +156,7 @@ function mcpConfigFlag(servers: Readonly<Record<string, McpServerSpec>> | undefi
  * on that channel, and EOF ends the process after its current turn.
  */
 export function buildCommand(options: BuildCommandOptions): string {
-  const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow, name, mcpServers } = options;
+  const { sessionId, resume, cwd, model, effort, permissionMode, contextWindow, name, mcpServers, fast } = options;
   if ((sessionId === undefined) === (resume === undefined)) {
     throw new Error("buildCommand needs exactly one of sessionId or resume");
   }
@@ -157,7 +164,9 @@ export function buildCommand(options: BuildCommandOptions): string {
   if (!UUID_RE.test(id)) {
     throw new Error(`session identifier must be a UUID, got "${id}"`);
   }
-  const idFlag = sessionId === undefined ? `--resume ${id}` : `--session-id ${id}`;
+  if (options.resumeAt !== undefined && resume === undefined) throw new Error("a cut at a message rides a resume alone");
+  if (options.resumeAt !== undefined && !UUID_RE.test(options.resumeAt)) throw new Error(`a cut must name a message by its UUID, got "${options.resumeAt}"`);
+  const idFlag = sessionId === undefined ? `--resume ${id}${options.resumeAt === undefined ? "" : ` --resume-session-at ${options.resumeAt}`}` : `--session-id ${id}`;
   const claude = [
     "claude -p",
     "--input-format stream-json",
@@ -168,6 +177,7 @@ export function buildCommand(options: BuildCommandOptions): string {
     ...slugFlag("--effort", "effort", effort),
     ...(name === undefined ? [] : [`--name ${shellQuote(name)}`]),
     ...mcpConfigFlag(mcpServers),
+    ...(fast === true ? [`--settings ${shellQuote(JSON.stringify({ fastMode: true }))}`] : []),
     idFlag,
   ].join(" ");
   return inFolder(cwd, claude);

@@ -292,6 +292,31 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
+    /// Records the checkout's whole working tree, untracked files in and ignored ones out, as a commit outside
+    /// every branch, under a ref this daemon names from the checkout's folder, the thread and the turn. HEAD, the
+    /// index and the branch never move and no hook runs.
+    #[serde(rename = "git.checkpoint", rename_all = "camelCase")]
+    GitCheckpoint {
+        cwd: String,
+        thread: String,
+        turn: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// Puts the working tree back to a checkpoint this checkout holds, first recording the tree as it stands under
+    /// a checkpoint of its own, so the restore can itself be undone. The index, HEAD and the branch never move.
+    #[serde(rename = "git.restore", rename_all = "camelCase")]
+    GitRestore {
+        cwd: String,
+        /// The checkpoint's ref, as a git.checkpoint answer named it.
+        checkpoint: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     /// One level of folders under the home of the login this daemon runs as and under each project folder the
     /// host names, for the folder picker of a computer somebody owns: folders only, no file read.
     #[serde(rename = "fs.folders", rename_all = "camelCase")]
@@ -383,7 +408,7 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 44] = [
+pub const DAEMON_OPS: [&str; 46] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -413,6 +438,8 @@ pub const DAEMON_OPS: [&str; 44] = [
     "git.pr",
     "git.prState",
     "git.prList",
+    "git.checkpoint",
+    "git.restore",
     "fs.folders",
     "tunnel.open",
     "tunnel.write",

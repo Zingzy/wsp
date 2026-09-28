@@ -1,0 +1,235 @@
+{
+  "tool": "thread_read",
+  "cases": [
+    {
+      "case": "messages",
+      "arguments": {
+        "thread": "t-1111"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"Fix the flaky \u0085test in the parser module and then tidy the imports around it. Then ship.\",\"startedAt\":1727431200000,\"endedAt\":1727431260000,\"claudeSessionId\":\"c-1\",\"costUsd\":0.1,\"startedBy\":\"agent\",\"parentThreadId\":\"t-0\",\"rootThreadId\":\"t-0\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-2\",\"harness\":\"codex\",\"status\":\"running\",\"prompt\":\"look\",\"startedAt\":1727431300000.25,\"pid\":4242},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"threadId\":\"t-1111aaaa\",\"harnessTitle\":\"  Parser\\n fix  🧪\",\"costUsd\":0.2,\"asking\":\"ask-1\",\"readAt\":1727431270000,\"settledAt\":1727431265000,\"cwd\":\"/w/é\",\"waitingOn\":{\"title\":\"other\",\"threadId\":\"t-2\",\"workspaceId\":\"ws-1\",\"sessionId\":\"s-9\",\"prompt\":{\"askId\":\"a\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]}}},{\"id\":\"s-4\",\"workspaceId\":\"ws-gone\",\"harness\":\"claude\",\"status\":\"failed\",\"threadId\":\"t-4\",\"refusal\":\"sign-in\",\"claudeSessionId\":\"c-4\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.start\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"prompt\":\"Fix the \u0085test\",\"at\":1727431200000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"Looking \",\"messageId\":\"m1\",\"at\":1727431201000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"now.\",\"messageId\":\"m1\",\"at\":1727431201500},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"thinking\",\"text\":\"hmm\",\"at\":1727431201600},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k1\",\"toolName\":\"Read\",\"text\":\"{\\\"file_path\\\":\",\"at\":1727431202000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k1\",\"text\":\"\\\"/src/🧪.ts\\\"}\",\"at\":1727431202100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k1\",\"text\":\"contents\",\"at\":1727431202200},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k2\",\"toolName\":\"Bash\",\"text\":\"{\\\"command\\\":\\\"pnpm  test\\\\n  --run\\\",\\\"description\\\":\\\"tests\\\"}\",\"at\":1727431203000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k2\",\"isError\":true,\"at\":1727431203100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k3\",\"toolName\":\"file_change\",\"text\":\"{\\\"changes\\\":[{\\\"path\\\":\\\"a.ts\\\"},{\\\"path\\\":\\\"b.ts\\\"},{\\\"path\\\":\\\"\\\"}]}\",\"at\":1727431204000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k3\",\"at\":1727431204100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k4\",\"toolName\":\"Grep\",\"text\":\"{\\\"pattern\\\":\\\"TODO\\\\n more\\\"}\",\"at\":1727431204200},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolName\":\"mcp__linear__search\",\"text\":\"{}\",\"at\":1727431204300},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k5\",\"toolName\":\"AskUserQuestion\",\"text\":\"{\\\"questions\\\":[{\\\"question\\\":\\\"No choices?\\\",\\\"options\\\":[]},{\\\"question\\\":\\\"Which one?\\\",\\\"options\\\":[{\\\"label\\\":\\\"A\\\"}]}]}\",\"at\":1727431204400},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k6\",\"toolName\":\"Task\",\"text\":\"{\\\"description\\\":\\\"explore\\\\nthe code\\\"}\",\"at\":1727431204450},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k6\",\"at\":1727431204460},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"\",\"at\":1727431204500},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"Done: \",\"messageId\":\"m2\",\"at\":1727431205000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"fixed \\\"it\\\".\",\"messageId\":\"m3\",\"at\":1727431205100},{\"type\":\"session.permission\",\"threadId\":\"t-1111aaaa\",\"askId\":\"p1\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]},{\"type\":\"session.steer\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"also docs\",\"at\":1727431205200},{\"type\":\"session.delta\",\"threadId\":\"t-other\",\"kind\":\"text\",\"text\":\"not this thread\"},{\"type\":\"session.done\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"at\":1727431206000,\"result\":{\"status\":\"completed\",\"durationMs\":125400,\"waitedMs\":70000,\"costUsd\":0.125,\"text\":\"Done: fixed it.\"}},{\"type\":\"session.end\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"at\":1727431206100},{\"type\":\"session.start\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u2\",\"prompt\":\"and the other\",\"at\":1727431207000},{\"type\":\"session.end\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u2\",\"reason\":\"the machine went away\",\"at\":1727431208000},{\"type\":\"session.start\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u3\",\"at\":1727431209000},{\"type\":\"session.done\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u3\",\"result\":{\"status\":\"completed\",\"durationMs\":800,\"text\":\"  \"}}]}",
+        "sessions.read": "{\"id\":1,\"ok\":true}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"person 10:00:00\\nFix the \\u0085test\\n\\nagent 10:00:01\\nLooking now.\\n\\ntool 10:00:02\\nread /src/🧪.ts\\n\\ntool 10:00:03\\n$ pnpm test\\n\\ntool 10:00:04\\nedited 2 files\\n\\ntool 10:00:04\\nsearching code for TODO\\n\\ntool 10:00:04\\nmcp__linear__search\\n\\ntool 10:00:04\\nasked: Which one?\\n\\ntool 10:00:04\\nagent: explore\\n\\nagent 10:00:05\\nDone: \\n\\nagent 10:00:05\\nfixed \\\"it\\\".\\n\\nperson 10:00:05\\nalso docs\\n\\nturn 10:00:06\\ncompleted  Worked for 55s  waited on you 1m 10s  $0.13\\n\\nperson 10:00:07\\nand the other\\n\\nturn 10:00:08\\nfailed: the machine went away\\n\\nagent\\n  \\n\\nturn\\ncompleted  Worked for 800ms\"}],\"structuredContent\":{\"threadId\":\"t-1111aaaa\",\"messages\":[{\"who\":\"person\",\"at\":1727431200000,\"text\":\"Fix the \\u0085test\"},{\"who\":\"agent\",\"at\":1727431201000,\"text\":\"Looking now.\"},{\"who\":\"tool\",\"at\":1727431202000,\"text\":\"read /src/🧪.ts\"},{\"who\":\"tool\",\"at\":1727431203000,\"text\":\"$ pnpm test\"},{\"who\":\"tool\",\"at\":1727431204000,\"text\":\"edited 2 files\"},{\"who\":\"tool\",\"at\":1727431204200,\"text\":\"searching code for TODO\"},{\"who\":\"tool\",\"at\":1727431204300,\"text\":\"mcp__linear__search\"},{\"who\":\"tool\",\"at\":1727431204400,\"text\":\"asked: Which one?\"},{\"who\":\"tool\",\"at\":1727431204450,\"text\":\"agent: explore\"},{\"who\":\"agent\",\"at\":1727431205000,\"text\":\"Done: \"},{\"who\":\"agent\",\"at\":1727431205100,\"text\":\"fixed \\\"it\\\".\"},{\"who\":\"person\",\"at\":1727431205200,\"text\":\"also docs\"},{\"who\":\"turn\",\"at\":1727431206000,\"text\":\"completed  Worked for 55s  waited on you 1m 10s  $0.13\"},{\"who\":\"person\",\"at\":1727431207000,\"text\":\"and the other\"},{\"who\":\"turn\",\"at\":1727431208000,\"text\":\"failed: the machine went away\"},{\"who\":\"agent\",\"text\":\"  \"},{\"who\":\"turn\",\"text\":\"completed  Worked for 800ms\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.read",
+          "threadId": "t-1111aaaa"
+        }
+      ]
+    },
+    {
+      "case": "last",
+      "arguments": {
+        "thread": "t-1111aaaa",
+        "last": true
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"Fix the flaky \u0085test in the parser module and then tidy the imports around it. Then ship.\",\"startedAt\":1727431200000,\"endedAt\":1727431260000,\"claudeSessionId\":\"c-1\",\"costUsd\":0.1,\"startedBy\":\"agent\",\"parentThreadId\":\"t-0\",\"rootThreadId\":\"t-0\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-2\",\"harness\":\"codex\",\"status\":\"running\",\"prompt\":\"look\",\"startedAt\":1727431300000.25,\"pid\":4242},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"threadId\":\"t-1111aaaa\",\"harnessTitle\":\"  Parser\\n fix  🧪\",\"costUsd\":0.2,\"asking\":\"ask-1\",\"readAt\":1727431270000,\"settledAt\":1727431265000,\"cwd\":\"/w/é\",\"waitingOn\":{\"title\":\"other\",\"threadId\":\"t-2\",\"workspaceId\":\"ws-1\",\"sessionId\":\"s-9\",\"prompt\":{\"askId\":\"a\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]}}},{\"id\":\"s-4\",\"workspaceId\":\"ws-gone\",\"harness\":\"claude\",\"status\":\"failed\",\"threadId\":\"t-4\",\"refusal\":\"sign-in\",\"claudeSessionId\":\"c-4\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.start\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"prompt\":\"Fix the \u0085test\",\"at\":1727431200000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"Looking \",\"messageId\":\"m1\",\"at\":1727431201000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"now.\",\"messageId\":\"m1\",\"at\":1727431201500},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"thinking\",\"text\":\"hmm\",\"at\":1727431201600},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k1\",\"toolName\":\"Read\",\"text\":\"{\\\"file_path\\\":\",\"at\":1727431202000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k1\",\"text\":\"\\\"/src/🧪.ts\\\"}\",\"at\":1727431202100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k1\",\"text\":\"contents\",\"at\":1727431202200},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k2\",\"toolName\":\"Bash\",\"text\":\"{\\\"command\\\":\\\"pnpm  test\\\\n  --run\\\",\\\"description\\\":\\\"tests\\\"}\",\"at\":1727431203000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k2\",\"isError\":true,\"at\":1727431203100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k3\",\"toolName\":\"file_change\",\"text\":\"{\\\"changes\\\":[{\\\"path\\\":\\\"a.ts\\\"},{\\\"path\\\":\\\"b.ts\\\"},{\\\"path\\\":\\\"\\\"}]}\",\"at\":1727431204000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k3\",\"at\":1727431204100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k4\",\"toolName\":\"Grep\",\"text\":\"{\\\"pattern\\\":\\\"TODO\\\\n more\\\"}\",\"at\":1727431204200},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolName\":\"mcp__linear__search\",\"text\":\"{}\",\"at\":1727431204300},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k5\",\"toolName\":\"AskUserQuestion\",\"text\":\"{\\\"questions\\\":[{\\\"question\\\":\\\"No choices?\\\",\\\"options\\\":[]},{\\\"question\\\":\\\"Which one?\\\",\\\"options\\\":[{\\\"label\\\":\\\"A\\\"}]}]}\",\"at\":1727431204400},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k6\",\"toolName\":\"Task\",\"text\":\"{\\\"description\\\":\\\"explore\\\\nthe code\\\"}\",\"at\":1727431204450},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k6\",\"at\":1727431204460},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"\",\"at\":1727431204500},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"Done: \",\"messageId\":\"m2\",\"at\":1727431205000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"fixed \\\"it\\\".\",\"messageId\":\"m3\",\"at\":1727431205100},{\"type\":\"session.permission\",\"threadId\":\"t-1111aaaa\",\"askId\":\"p1\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]},{\"type\":\"session.steer\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"also docs\",\"at\":1727431205200},{\"type\":\"session.delta\",\"threadId\":\"t-other\",\"kind\":\"text\",\"text\":\"not this thread\"},{\"type\":\"session.done\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"at\":1727431206000,\"result\":{\"status\":\"completed\",\"durationMs\":125400,\"waitedMs\":70000,\"costUsd\":0.125,\"text\":\"Done: fixed it.\"}},{\"type\":\"session.end\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"at\":1727431206100}]}",
+        "sessions.read": "{\"id\":1,\"ok\":true}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"agent 10:00:06\\nDone: fixed it.\"}],\"structuredContent\":{\"threadId\":\"t-1111aaaa\",\"messages\":[{\"who\":\"agent\",\"at\":1727431206000,\"text\":\"Done: fixed it.\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.read",
+          "threadId": "t-1111aaaa"
+        }
+      ]
+    },
+    {
+      "case": "last with a newer turn",
+      "arguments": {
+        "thread": "t-1111aaaa",
+        "last": true
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"Fix the flaky \u0085test in the parser module and then tidy the imports around it. Then ship.\",\"startedAt\":1727431200000,\"endedAt\":1727431260000,\"claudeSessionId\":\"c-1\",\"costUsd\":0.1,\"startedBy\":\"agent\",\"parentThreadId\":\"t-0\",\"rootThreadId\":\"t-0\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-2\",\"harness\":\"codex\",\"status\":\"running\",\"prompt\":\"look\",\"startedAt\":1727431300000.25,\"pid\":4242},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"threadId\":\"t-1111aaaa\",\"harnessTitle\":\"  Parser\\n fix  🧪\",\"costUsd\":0.2,\"asking\":\"ask-1\",\"readAt\":1727431270000,\"settledAt\":1727431265000,\"cwd\":\"/w/é\",\"waitingOn\":{\"title\":\"other\",\"threadId\":\"t-2\",\"workspaceId\":\"ws-1\",\"sessionId\":\"s-9\",\"prompt\":{\"askId\":\"a\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]}}},{\"id\":\"s-4\",\"workspaceId\":\"ws-gone\",\"harness\":\"claude\",\"status\":\"failed\",\"threadId\":\"t-4\",\"refusal\":\"sign-in\",\"claudeSessionId\":\"c-4\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.start\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"prompt\":\"Fix the \u0085test\",\"at\":1727431200000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"Looking \",\"messageId\":\"m1\",\"at\":1727431201000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"now.\",\"messageId\":\"m1\",\"at\":1727431201500},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"thinking\",\"text\":\"hmm\",\"at\":1727431201600},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k1\",\"toolName\":\"Read\",\"text\":\"{\\\"file_path\\\":\",\"at\":1727431202000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k1\",\"text\":\"\\\"/src/🧪.ts\\\"}\",\"at\":1727431202100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k1\",\"text\":\"contents\",\"at\":1727431202200},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k2\",\"toolName\":\"Bash\",\"text\":\"{\\\"command\\\":\\\"pnpm  test\\\\n  --run\\\",\\\"description\\\":\\\"tests\\\"}\",\"at\":1727431203000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k2\",\"isError\":true,\"at\":1727431203100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k3\",\"toolName\":\"file_change\",\"text\":\"{\\\"changes\\\":[{\\\"path\\\":\\\"a.ts\\\"},{\\\"path\\\":\\\"b.ts\\\"},{\\\"path\\\":\\\"\\\"}]}\",\"at\":1727431204000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k3\",\"at\":1727431204100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k4\",\"toolName\":\"Grep\",\"text\":\"{\\\"pattern\\\":\\\"TODO\\\\n more\\\"}\",\"at\":1727431204200},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolName\":\"mcp__linear__search\",\"text\":\"{}\",\"at\":1727431204300},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k5\",\"toolName\":\"AskUserQuestion\",\"text\":\"{\\\"questions\\\":[{\\\"question\\\":\\\"No choices?\\\",\\\"options\\\":[]},{\\\"question\\\":\\\"Which one?\\\",\\\"options\\\":[{\\\"label\\\":\\\"A\\\"}]}]}\",\"at\":1727431204400},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k6\",\"toolName\":\"Task\",\"text\":\"{\\\"description\\\":\\\"explore\\\\nthe code\\\"}\",\"at\":1727431204450},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k6\",\"at\":1727431204460},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"\",\"at\":1727431204500},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"Done: \",\"messageId\":\"m2\",\"at\":1727431205000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"fixed \\\"it\\\".\",\"messageId\":\"m3\",\"at\":1727431205100},{\"type\":\"session.permission\",\"threadId\":\"t-1111aaaa\",\"askId\":\"p1\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]},{\"type\":\"session.steer\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"also docs\",\"at\":1727431205200},{\"type\":\"session.delta\",\"threadId\":\"t-other\",\"kind\":\"text\",\"text\":\"not this thread\"},{\"type\":\"session.done\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"at\":1727431206000,\"result\":{\"status\":\"completed\",\"durationMs\":125400,\"waitedMs\":70000,\"costUsd\":0.125,\"text\":\"Done: fixed it.\"}},{\"type\":\"session.end\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"at\":1727431206100},{\"type\":\"session.start\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u2\",\"prompt\":\"and the other\",\"at\":1727431207000}]}",
+        "sessions.read": "{\"id\":1,\"ok\":true}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"agent 10:00:06\\nDone: fixed it.\\n\\nturn\\na newer turn is running; the reply above is the one before it\"}],\"structuredContent\":{\"threadId\":\"t-1111aaaa\",\"messages\":[{\"who\":\"agent\",\"at\":1727431206000,\"text\":\"Done: fixed it.\"},{\"who\":\"turn\",\"text\":\"a newer turn is running; the reply above is the one before it\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.read",
+          "threadId": "t-1111aaaa"
+        }
+      ]
+    },
+    {
+      "case": "last cut by the runtime",
+      "arguments": {
+        "thread": "t-1111aaaa",
+        "last": true
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"Fix the flaky \u0085test in the parser module and then tidy the imports around it. Then ship.\",\"startedAt\":1727431200000,\"endedAt\":1727431260000,\"claudeSessionId\":\"c-1\",\"costUsd\":0.1,\"startedBy\":\"agent\",\"parentThreadId\":\"t-0\",\"rootThreadId\":\"t-0\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-2\",\"harness\":\"codex\",\"status\":\"running\",\"prompt\":\"look\",\"startedAt\":1727431300000.25,\"pid\":4242},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"threadId\":\"t-1111aaaa\",\"harnessTitle\":\"  Parser\\n fix  🧪\",\"costUsd\":0.2,\"asking\":\"ask-1\",\"readAt\":1727431270000,\"settledAt\":1727431265000,\"cwd\":\"/w/é\",\"waitingOn\":{\"title\":\"other\",\"threadId\":\"t-2\",\"workspaceId\":\"ws-1\",\"sessionId\":\"s-9\",\"prompt\":{\"askId\":\"a\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]}}},{\"id\":\"s-4\",\"workspaceId\":\"ws-gone\",\"harness\":\"claude\",\"status\":\"failed\",\"threadId\":\"t-4\",\"refusal\":\"sign-in\",\"claudeSessionId\":\"c-4\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.start\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"prompt\":\"Fix the \u0085test\",\"at\":1727431200000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"Looking \",\"messageId\":\"m1\",\"at\":1727431201000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"now.\",\"messageId\":\"m1\",\"at\":1727431201500},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"thinking\",\"text\":\"hmm\",\"at\":1727431201600},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k1\",\"toolName\":\"Read\",\"text\":\"{\\\"file_path\\\":\",\"at\":1727431202000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k1\",\"text\":\"\\\"/src/🧪.ts\\\"}\",\"at\":1727431202100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k1\",\"text\":\"contents\",\"at\":1727431202200},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k2\",\"toolName\":\"Bash\",\"text\":\"{\\\"command\\\":\\\"pnpm  test\\\\n  --run\\\",\\\"description\\\":\\\"tests\\\"}\",\"at\":1727431203000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k2\",\"isError\":true,\"at\":1727431203100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k3\",\"toolName\":\"file_change\",\"text\":\"{\\\"changes\\\":[{\\\"path\\\":\\\"a.ts\\\"},{\\\"path\\\":\\\"b.ts\\\"},{\\\"path\\\":\\\"\\\"}]}\",\"at\":1727431204000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k3\",\"at\":1727431204100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k4\",\"toolName\":\"Grep\",\"text\":\"{\\\"pattern\\\":\\\"TODO\\\\n more\\\"}\",\"at\":1727431204200},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolName\":\"mcp__linear__search\",\"text\":\"{}\",\"at\":1727431204300},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k5\",\"toolName\":\"AskUserQuestion\",\"text\":\"{\\\"questions\\\":[{\\\"question\\\":\\\"No choices?\\\",\\\"options\\\":[]},{\\\"question\\\":\\\"Which one?\\\",\\\"options\\\":[{\\\"label\\\":\\\"A\\\"}]}]}\",\"at\":1727431204400},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k6\",\"toolName\":\"Task\",\"text\":\"{\\\"description\\\":\\\"explore\\\\nthe code\\\"}\",\"at\":1727431204450},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k6\",\"at\":1727431204460},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"\",\"at\":1727431204500},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"Done: \",\"messageId\":\"m2\",\"at\":1727431205000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"fixed \\\"it\\\".\",\"messageId\":\"m3\",\"at\":1727431205100},{\"type\":\"session.permission\",\"threadId\":\"t-1111aaaa\",\"askId\":\"p1\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]},{\"type\":\"session.steer\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"also docs\",\"at\":1727431205200},{\"type\":\"session.delta\",\"threadId\":\"t-other\",\"kind\":\"text\",\"text\":\"not this thread\"},{\"type\":\"session.done\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"at\":1727431206000,\"result\":{\"status\":\"completed\",\"durationMs\":125400,\"waitedMs\":70000,\"costUsd\":0.125,\"text\":\"Done: fixed it.\"}},{\"type\":\"session.end\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"at\":1727431206100},{\"type\":\"session.start\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u2\",\"prompt\":\"and the other\",\"at\":1727431207000},{\"type\":\"session.end\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u2\",\"reason\":\"the machine went away\",\"at\":1727431208000}]}",
+        "sessions.read": "{\"id\":1,\"ok\":true}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"turn 10:00:08\\nthe machine went away\"}],\"structuredContent\":{\"threadId\":\"t-1111aaaa\",\"messages\":[{\"who\":\"turn\",\"at\":1727431208000,\"text\":\"the machine went away\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.read",
+          "threadId": "t-1111aaaa"
+        }
+      ]
+    },
+    {
+      "case": "last with no words",
+      "arguments": {
+        "thread": "t-1111aaaa",
+        "last": true
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"Fix the flaky \u0085test in the parser module and then tidy the imports around it. Then ship.\",\"startedAt\":1727431200000,\"endedAt\":1727431260000,\"claudeSessionId\":\"c-1\",\"costUsd\":0.1,\"startedBy\":\"agent\",\"parentThreadId\":\"t-0\",\"rootThreadId\":\"t-0\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-2\",\"harness\":\"codex\",\"status\":\"running\",\"prompt\":\"look\",\"startedAt\":1727431300000.25,\"pid\":4242},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"threadId\":\"t-1111aaaa\",\"harnessTitle\":\"  Parser\\n fix  🧪\",\"costUsd\":0.2,\"asking\":\"ask-1\",\"readAt\":1727431270000,\"settledAt\":1727431265000,\"cwd\":\"/w/é\",\"waitingOn\":{\"title\":\"other\",\"threadId\":\"t-2\",\"workspaceId\":\"ws-1\",\"sessionId\":\"s-9\",\"prompt\":{\"askId\":\"a\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]}}},{\"id\":\"s-4\",\"workspaceId\":\"ws-gone\",\"harness\":\"claude\",\"status\":\"failed\",\"threadId\":\"t-4\",\"refusal\":\"sign-in\",\"claudeSessionId\":\"c-4\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.start\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"prompt\":\"Fix the \u0085test\",\"at\":1727431200000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"Looking \",\"messageId\":\"m1\",\"at\":1727431201000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"now.\",\"messageId\":\"m1\",\"at\":1727431201500},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"thinking\",\"text\":\"hmm\",\"at\":1727431201600},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k1\",\"toolName\":\"Read\",\"text\":\"{\\\"file_path\\\":\",\"at\":1727431202000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k1\",\"text\":\"\\\"/src/🧪.ts\\\"}\",\"at\":1727431202100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k1\",\"text\":\"contents\",\"at\":1727431202200},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k2\",\"toolName\":\"Bash\",\"text\":\"{\\\"command\\\":\\\"pnpm  test\\\\n  --run\\\",\\\"description\\\":\\\"tests\\\"}\",\"at\":1727431203000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k2\",\"isError\":true,\"at\":1727431203100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k3\",\"toolName\":\"file_change\",\"text\":\"{\\\"changes\\\":[{\\\"path\\\":\\\"a.ts\\\"},{\\\"path\\\":\\\"b.ts\\\"},{\\\"path\\\":\\\"\\\"}]}\",\"at\":1727431204000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k3\",\"at\":1727431204100},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k4\",\"toolName\":\"Grep\",\"text\":\"{\\\"pattern\\\":\\\"TODO\\\\n more\\\"}\",\"at\":1727431204200},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolName\":\"mcp__linear__search\",\"text\":\"{}\",\"at\":1727431204300},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k5\",\"toolName\":\"AskUserQuestion\",\"text\":\"{\\\"questions\\\":[{\\\"question\\\":\\\"No choices?\\\",\\\"options\\\":[]},{\\\"question\\\":\\\"Which one?\\\",\\\"options\\\":[{\\\"label\\\":\\\"A\\\"}]}]}\",\"at\":1727431204400},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_use\",\"toolUseId\":\"k6\",\"toolName\":\"Task\",\"text\":\"{\\\"description\\\":\\\"explore\\\\nthe code\\\"}\",\"at\":1727431204450},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"tool_result\",\"toolUseId\":\"k6\",\"at\":1727431204460},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"\",\"at\":1727431204500},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"Done: \",\"messageId\":\"m2\",\"at\":1727431205000},{\"type\":\"session.delta\",\"threadId\":\"t-1111aaaa\",\"kind\":\"text\",\"text\":\"fixed \\\"it\\\".\",\"messageId\":\"m3\",\"at\":1727431205100},{\"type\":\"session.permission\",\"threadId\":\"t-1111aaaa\",\"askId\":\"p1\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]},{\"type\":\"session.steer\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"also docs\",\"at\":1727431205200},{\"type\":\"session.delta\",\"threadId\":\"t-other\",\"kind\":\"text\",\"text\":\"not this thread\"},{\"type\":\"session.done\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"at\":1727431206000,\"result\":{\"status\":\"completed\",\"durationMs\":125400,\"waitedMs\":70000,\"costUsd\":0.125,\"text\":\"Done: fixed it.\"}},{\"type\":\"session.end\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u1\",\"at\":1727431206100},{\"type\":\"session.start\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u2\",\"prompt\":\"and the other\",\"at\":1727431207000},{\"type\":\"session.end\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u2\",\"reason\":\"the machine went away\",\"at\":1727431208000},{\"type\":\"session.start\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u3\",\"at\":1727431209000},{\"type\":\"session.done\",\"threadId\":\"t-1111aaaa\",\"turnId\":\"u3\",\"result\":{\"status\":\"completed\",\"durationMs\":800,\"text\":\"  \"}}]}",
+        "sessions.read": "{\"id\":1,\"ok\":true}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"turn\\ncompleted  Worked for 800ms\"}],\"structuredContent\":{\"threadId\":\"t-1111aaaa\",\"messages\":[{\"who\":\"turn\",\"text\":\"completed  Worked for 800ms\"}]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "sessions.read",
+          "threadId": "t-1111aaaa"
+        }
+      ]
+    },
+    {
+      "case": "a thread of no id",
+      "arguments": {
+        "thread": "s-2"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"Fix the flaky \u0085test in the parser module and then tidy the imports around it. Then ship.\",\"startedAt\":1727431200000,\"endedAt\":1727431260000,\"claudeSessionId\":\"c-1\",\"costUsd\":0.1,\"startedBy\":\"agent\",\"parentThreadId\":\"t-0\",\"rootThreadId\":\"t-0\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-2\",\"harness\":\"codex\",\"status\":\"running\",\"prompt\":\"look\",\"startedAt\":1727431300000.25,\"pid\":4242},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"threadId\":\"t-1111aaaa\",\"harnessTitle\":\"  Parser\\n fix  🧪\",\"costUsd\":0.2,\"asking\":\"ask-1\",\"readAt\":1727431270000,\"settledAt\":1727431265000,\"cwd\":\"/w/é\",\"waitingOn\":{\"title\":\"other\",\"threadId\":\"t-2\",\"workspaceId\":\"ws-1\",\"sessionId\":\"s-9\",\"prompt\":{\"askId\":\"a\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]}}},{\"id\":\"s-4\",\"workspaceId\":\"ws-gone\",\"harness\":\"claude\",\"status\":\"failed\",\"threadId\":\"t-4\",\"refusal\":\"sign-in\",\"claudeSessionId\":\"c-4\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[]}",
+        "sessions.read": "{\"id\":1,\"ok\":true}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread s-2 has no messages in the transcript this host holds\"}],\"structuredContent\":{\"threadId\":\"s-2\",\"messages\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-2"
+        },
+        {
+          "op": "sessions.read",
+          "threadId": "s-2"
+        }
+      ]
+    },
+    {
+      "case": "no reply yet",
+      "arguments": {
+        "thread": "s-2",
+        "last": true
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"Fix the flaky \u0085test in the parser module and then tidy the imports around it. Then ship.\",\"startedAt\":1727431200000,\"endedAt\":1727431260000,\"claudeSessionId\":\"c-1\",\"costUsd\":0.1,\"startedBy\":\"agent\",\"parentThreadId\":\"t-0\",\"rootThreadId\":\"t-0\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-2\",\"harness\":\"codex\",\"status\":\"running\",\"prompt\":\"look\",\"startedAt\":1727431300000.25,\"pid\":4242},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"threadId\":\"t-1111aaaa\",\"harnessTitle\":\"  Parser\\n fix  🧪\",\"costUsd\":0.2,\"asking\":\"ask-1\",\"readAt\":1727431270000,\"settledAt\":1727431265000,\"cwd\":\"/w/é\",\"waitingOn\":{\"title\":\"other\",\"threadId\":\"t-2\",\"workspaceId\":\"ws-1\",\"sessionId\":\"s-9\",\"prompt\":{\"askId\":\"a\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]}}},{\"id\":\"s-4\",\"workspaceId\":\"ws-gone\",\"harness\":\"claude\",\"status\":\"failed\",\"threadId\":\"t-4\",\"refusal\":\"sign-in\",\"claudeSessionId\":\"c-4\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":true,\"events\":[{\"type\":\"session.start\",\"threadId\":\"s-2\",\"turnId\":\"x\"}]}",
+        "sessions.read": "{\"id\":1,\"ok\":true}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"thread s-2 has not replied yet\"}],\"structuredContent\":{\"threadId\":\"s-2\",\"messages\":[]}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-2"
+        },
+        {
+          "op": "sessions.read",
+          "threadId": "s-2"
+        }
+      ]
+    },
+    {
+      "case": "no such thread",
+      "arguments": {
+        "thread": "zz"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"Fix the flaky \u0085test in the parser module and then tidy the imports around it. Then ship.\",\"startedAt\":1727431200000,\"endedAt\":1727431260000,\"claudeSessionId\":\"c-1\",\"costUsd\":0.1,\"startedBy\":\"agent\",\"parentThreadId\":\"t-0\",\"rootThreadId\":\"t-0\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-2\",\"harness\":\"codex\",\"status\":\"running\",\"prompt\":\"look\",\"startedAt\":1727431300000.25,\"pid\":4242},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"threadId\":\"t-1111aaaa\",\"harnessTitle\":\"  Parser\\n fix  🧪\",\"costUsd\":0.2,\"asking\":\"ask-1\",\"readAt\":1727431270000,\"settledAt\":1727431265000,\"cwd\":\"/w/é\",\"waitingOn\":{\"title\":\"other\",\"threadId\":\"t-2\",\"workspaceId\":\"ws-1\",\"sessionId\":\"s-9\",\"prompt\":{\"askId\":\"a\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]}}},{\"id\":\"s-4\",\"workspaceId\":\"ws-gone\",\"harness\":\"claude\",\"status\":\"failed\",\"threadId\":\"t-4\",\"refusal\":\"sign-in\",\"claudeSessionId\":\"c-4\"}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no thread zz\"}],\"structuredContent\":{\"error\":\"no thread zz\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        }
+      ]
+    },
+    {
+      "case": "a prefix of two",
+      "arguments": {
+        "thread": "s-"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-2\",\"workspaceId\":\"ws-2\",\"harness\":\"codex\",\"status\":\"running\",\"prompt\":\"look\",\"startedAt\":1727431300000.25,\"pid\":4242},{\"id\":\"s-5\",\"workspaceId\":\"ws-2\",\"harness\":\"codex\",\"status\":\"running\",\"prompt\":\"look\",\"startedAt\":1727431300000.25,\"pid\":4242}]}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"2 threads start with s-; give more of the id\"}],\"structuredContent\":{\"error\":\"2 threads start with s-; give more of the id\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        }
+      ]
+    },
+    {
+      "case": "refused",
+      "arguments": {
+        "thread": "t-1111aaaa"
+      },
+      "replies": {
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1111aaaa\",\"prompt\":\"Fix the flaky \u0085test in the parser module and then tidy the imports around it. Then ship.\",\"startedAt\":1727431200000,\"endedAt\":1727431260000,\"claudeSessionId\":\"c-1\",\"costUsd\":0.1,\"startedBy\":\"agent\",\"parentThreadId\":\"t-0\",\"rootThreadId\":\"t-0\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-2\",\"harness\":\"codex\",\"status\":\"running\",\"prompt\":\"look\",\"startedAt\":1727431300000.25,\"pid\":4242},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"running\",\"threadId\":\"t-1111aaaa\",\"harnessTitle\":\"  Parser\\n fix  🧪\",\"costUsd\":0.2,\"asking\":\"ask-1\",\"readAt\":1727431270000,\"settledAt\":1727431265000,\"cwd\":\"/w/é\",\"waitingOn\":{\"title\":\"other\",\"threadId\":\"t-2\",\"workspaceId\":\"ws-1\",\"sessionId\":\"s-9\",\"prompt\":{\"askId\":\"a\",\"toolName\":\"Bash\",\"input\":\"{}\",\"options\":[]}}},{\"id\":\"s-4\",\"workspaceId\":\"ws-gone\",\"harness\":\"claude\",\"status\":\"failed\",\"threadId\":\"t-4\",\"refusal\":\"sign-in\",\"claudeSessionId\":\"c-4\"}]}",
+        "sessions.history": "{\"id\":1,\"ok\":false,\"error\":\"sessions.history failed\"}"
+      },
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"sessions.history failed\"}],\"structuredContent\":{\"error\":\"sessions.history failed\",\"class\":\"provider\",\"exit\":1},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.history",
+          "workspaceId": "ws-1"
+        }
+      ]
+    }
+  ]
+}

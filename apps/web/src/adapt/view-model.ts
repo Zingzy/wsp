@@ -5,7 +5,7 @@
 // useDiscoveredLocalServers.ts and contracts (commit 57a66608). Fields the
 // wsp wire cannot fill today are kept when a copied component reads them and
 // dropped when nothing does. Everything here is data: no React, no schemas.
-import type { ImageRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadPlacement, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { AttachmentRecord, MachineState, PermissionOption, PermissionOutcome, ReachState, SessionOrigin, SessionStatus, ThreadPlacement, WorkspacePhase, WorkspaceState, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 
 // --- chat -------------------------------------------------------------------
 
@@ -21,7 +21,7 @@ export interface ChatMessage {
   readonly steered?: boolean;
   /** The images the person's message carried, as the runtime kept them: their type, weight and name, never their
    * pixels. Present on the message that opened the turn and only when it carried one. */
-  readonly attachments?: ReadonlyArray<ImageRecord>;
+  readonly attachments?: ReadonlyArray<AttachmentRecord>;
   /** The id the client minted for the send this message opened, echoed by the runtime; the client that made the send
    * still holds those images and draws them from it. */
   readonly requestId?: string;
@@ -161,6 +161,9 @@ export interface TurnSummary {
   readonly error: string | null;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
+  /** What the turn kept to rewind to once it was over: the checkpoint of the files (null where none was taken) and
+   * the harness's anchor for its end (null where it named none). Null until the turn's session.checkpoint lands. */
+  readonly checkpoint: { readonly ref: string | null; readonly anchor: string | null } | null;
 }
 
 export type ToolGroupAction = "read" | "edit" | "command" | "code-search" | "search" | "other" | "update";
@@ -312,6 +315,8 @@ export interface SidebarThreadSnapshot {
   readonly status: SessionStatus;
   /** Whether a turn of this thread ever did work, as the protocol's fold reads the rows. */
   readonly ran: boolean;
+  /** Set while Undo rewind can still put back the files the thread's last rewind replaced. */
+  readonly rewound?: boolean;
   readonly startedAt: string | null;
   readonly endedAt: string | null;
   readonly indicator: StatusIndicator | null;

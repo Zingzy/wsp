@@ -2,9 +2,9 @@
 //! The host the tools speak to: one socket kept across calls, dropped when it closes so the next call dials again,
 //! and the aim read afresh at every dial, as packages/host/src/mcp.ts `dialer` keeps it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
 
@@ -30,6 +30,8 @@ pub struct Host {
     args: Args,
     env: Env,
     home: PathBuf,
+    /// The folder the server runs in, where a thread named with no workspace finds its repo; none finds none.
+    cwd: Option<PathBuf>,
     held: Mutex<Option<Arc<Client>>>,
 }
 
@@ -38,8 +40,8 @@ impl Host {
         cloud_on(&self.env)
     }
 
-    pub fn new(args: &Args, env: &Env) -> Host {
-        Host { args: args.clone(), env: env.clone(), home: aim::wsp_home(env), held: Mutex::new(None) }
+    pub fn new(args: &Args, env: &Env, cwd: Option<PathBuf>) -> Host {
+        Host { args: args.clone(), env: env.clone(), home: aim::wsp_home(env), cwd, held: Mutex::new(None) }
     }
 
     /// The environment the server runs in, which a tool reads a value it sends by name from.
@@ -50,23 +52,53 @@ impl Host {
     /// The socket the last call opened while it is still open; a fresh dial otherwise. Two calls at once share one
     /// dial, since the second waits on the first's.
     pub async fn client(&self) -> Result<Arc<Client>, Failure> {
+        self.held(None).await
+    }
+
+    /// The host that came back after it stopped under a wait, within `window`: dialled until one answers, each dial
+    /// handed what is left as its own deadline and none of them starting a host, as `hostAgain` in
+    /// packages/host/src/verbs.ts dials. Past the window the last dial's refusal says what stands now.
+    pub async fn back_within(&self, window: Duration) -> Result<Arc<Client>, Failure> {
+        let until = Instant::now() + window;
+        loop {
+            let left = until.saturating_duration_since(Instant::now()).max(Duration::from_millis(1));
+            match self.held(Some(left)).await {
+                Ok(client) => return Ok(client),
+                Err(refused) if Instant::now() >= until => return Err(refused),
+                Err(_) => {}
+            }
+            let poll = Duration::from_millis(record::host().poll_ms);
+            tokio::time::sleep(poll.min(until.saturating_duration_since(Instant::now()))).await;
+        }
+    }
+
+    pub fn args(&self) -> &Args {
+        &self.args
+    }
+
+    pub fn cwd(&self) -> Option<&Path> {
+        self.cwd.as_deref()
+    }
+
+    async fn held(&self, again: Option<Duration>) -> Result<Arc<Client>, Failure> {
         let mut held = self.held.lock().await;
         if let Some(open) = held.as_ref().filter(|c| !c.is_closed()) {
             return Ok(open.clone());
         }
-        let dialled = Arc::new(self.dial().await?);
+        let dialled = Arc::new(self.dial(again).await?);
         *held = Some(dialled.clone());
         Ok(dialled)
     }
 
-    async fn dial(&self) -> Result<Client, Failure> {
+    /// `again` is a dial after the host stopped: it starts nothing and is bounded by what the wait has left.
+    async fn dial(&self, again: Option<Duration>) -> Result<Client, Failure> {
         let pick = Pick { host: self.args.host.as_deref(), env: &self.env, home: self.home.clone() };
         let state = &self.args.state;
         let aim = aim::aimed(state, &pick)?;
-        let window = Duration::from_millis(aim::window_ms(&aim));
+        let window = again.unwrap_or_else(|| Duration::from_millis(aim::window_ms(&aim)));
         match &aim {
             Aim::Here => {
-                if aim::serving(state).is_none() && !self.args.wsp.is_empty() {
+                if again.is_none() && aim::serving(state).is_none() && !self.args.wsp.is_empty() {
                     start::started(state, &self.args.wsp, &self.env, &mut |line| eprintln!("{line}")).await?;
                 }
                 let (url, token, at) = aim::here_door(state)?;

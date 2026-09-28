@@ -445,6 +445,28 @@ pub struct GitPrListReply {
     pub no_cli_for: Option<String>,
 }
 
+/// The checkpoint a git.checkpoint took: its ref, the commit it names, and whether the tree differs from the one
+/// that ref named before, which a turn that changed nothing reads as false.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCheckpointReply {
+    #[serde(rename = "ref")]
+    pub checkpoint_ref: String,
+    pub commit: String,
+    pub changed: bool,
+}
+
+/// What a git.restore did: the checkpoint of the tree as it stood just before, which restores it again, and how
+/// many files the restore wrote or removed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRestoreReply {
+    pub before: String,
+    pub files: u64,
+}
+
 /// What a push carried: the branch, the branch it is measured against, the remote it went to, how many commits it
 /// has that the base lacks, how many changes were left uncommitted here and the diffstat of what travelled.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

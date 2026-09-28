@@ -75,7 +75,7 @@ import { AppShell } from "../../src/shell/AppShell";
 import { useShellVersionEffect } from "../../src/shell/shellVersion";
 import { openPanelTerminal } from "../../src/shell/shellCommands";
 import { WorkspaceThread } from "../../src/shell/WorkspaceThread";
-import { useComposerImagesStore } from "../../src/components/chat/composerImages";
+import { useComposerFilesStore } from "../../src/components/chat/composerFiles";
 import { requestProjectTrip } from "../../src/shell/shellRequests";
 import { GhosttyTerminalSurface } from "../../src/terminal/ghostty/surface";
 import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../../src/terminal/link";
@@ -644,7 +644,7 @@ if (params.get("images") !== null) {
     return new File([bytes], `shot-${hue}.png`, { type: "image/png" });
   };
   const count = Number(params.get("images")) || 1;
-  void useComposerImagesStore.getState().add(shown ?? "ws_a", Array.from({ length: count }, (_, i) => swatch(i * 60)));
+  void useComposerFilesStore.getState().add(shown ?? "ws_a", Array.from({ length: count }, (_, i) => swatch(i * 60)));
 }
 if (params.get("oom") === "1") {
   const GiB = 1024 ** 3;

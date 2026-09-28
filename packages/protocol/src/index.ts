@@ -11,12 +11,14 @@ import { z } from "zod";
 import { AgentSignInState, AgentsChangedEvent, AgentsTarget, ServerAdd, ServerAsk } from "./agents-report.js";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { CLOUD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
-import { ImageAttachment, ImageRecord } from "./attachments.js";
+import { Attachment, AttachmentRecord } from "./attachments.js";
 import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import type { FsListReply as WireFsListReply } from "./generated/FsListReply.js";
 import type { FsFilesReply as WireFsFilesReply } from "./generated/FsFilesReply.js";
 import type { GitPrListReply as WireGitPrListReply } from "./generated/GitPrListReply.js";
+import type { GitCheckpointReply as WireGitCheckpointReply } from "./generated/GitCheckpointReply.js";
+import type { GitRestoreReply as WireGitRestoreReply } from "./generated/GitRestoreReply.js";
 import type { FsSearchReply as WireFsSearchReply } from "./generated/FsSearchReply.js";
 import type { GitCommitReply as WireGitCommitReply } from "./generated/GitCommitReply.js";
 import type { GitDiscardReply as WireGitDiscardReply } from "./generated/GitDiscardReply.js";
@@ -932,6 +934,8 @@ export const SessionView = z.object({
   effort: z.string().optional(),
   permissionMode: z.string().optional(),
   contextWindow: z.string().optional(),
+  /** The latest turn asked for the model's faster output; absent on a turn that did not. */
+  fast: z.boolean().optional(),
   /** The lead of the permission prompt this turn has open and nobody has answered, as askingLine writes it;
    * absent on a turn waiting on nobody. The harness is stopped on the question while it stands, so this is the one
    * fact that says a thread is waiting on the person rather than working. */
@@ -963,6 +967,9 @@ export const SessionView = z.object({
   wokeAt: z.number().optional(),
   /** The sidebar section the person dragged the thread into, held only while the thread is still as it was then. */
   section: ThreadPlacement.optional(),
+  /** When the thread was last rewound, while the files that rewind replaced can still be put back: until the
+   * thread's next turn ends. Kept and stamped as readAt is. */
+  rewoundAt: z.number().optional(),
 });
 export type SessionView = z.infer<typeof SessionView>;
 
@@ -1010,6 +1017,11 @@ export const ThreadView = z.object({
   snoozedUntil: z.number().optional(),
   wokeAt: z.number().optional(),
   section: ThreadPlacement.optional(),
+  /** As SessionView.rewoundAt: set while Undo rewind can put the files back. */
+  rewoundAt: z.number().optional(),
+  /** The access and the fast mode the latest turn ran at, as its row carries them. */
+  permissionMode: z.string().optional(),
+  fast: z.boolean().optional(),
 });
 export type ThreadView = z.infer<typeof ThreadView>;
 
@@ -1064,6 +1076,9 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.snoozedUntil !== undefined ? { snoozedUntil: latest.snoozedUntil } : {}),
       ...(latest.wokeAt !== undefined ? { wokeAt: latest.wokeAt } : {}),
       ...(latest.section !== undefined ? { section: latest.section } : {}),
+      ...(latest.rewoundAt !== undefined ? { rewoundAt: latest.rewoundAt } : {}),
+      ...(latest.permissionMode !== undefined ? { permissionMode: latest.permissionMode } : {}),
+      ...(latest.fast === true ? { fast: true } : {}),
       turns: turns.length,
       ran: threadRan(turns),
       ...(first.parentThreadId !== undefined ? { parentThreadId: first.parentThreadId } : {}),
@@ -1107,6 +1122,8 @@ export const HarnessModel = HarnessOption.extend({
    * for the harness; read through effortsFor, which falls back to the catalog's own mark. */
   defaultEffort: z.string().optional(),
   contextWindows: z.array(z.string()).optional(),
+  /** The model has a faster output the CLI turns on per turn; the composer offers Fast only on a model marked so. */
+  fast: z.boolean().optional(),
 });
 export type HarnessModel = z.infer<typeof HarnessModel>;
 
@@ -1168,6 +1185,9 @@ export const HarnessCatalog = z.object({
   /** Whether a person may ask this harness a question beside a thread (sessions.aside), answered on a copy of the
    * thread's session that nothing keeps. The adapter in this host declares it, as with mcpServers; absent is a no. */
   asides: z.boolean().optional(),
+  /** Whether rewinding a thread of this harness cuts its conversation too, in the harness's own history; absent is a
+   * no, and a rewind there puts back the files alone while the harness keeps every turn it ran. */
+  rewindsConversation: z.boolean().optional(),
   /** Set on the harness a start without one runs, so a client can pick its list without the catalog package. */
   isDefault: z.boolean().optional(),
   /** Why the binary described nothing, in its own adapter's words, when it ran and refused for a reason it can name
@@ -1303,7 +1323,15 @@ export interface StartPicks {
   model?: string;
   effort?: string;
   permissionMode?: string;
+  fast?: boolean;
 }
+
+/** The access mode that reads and plans and changes nothing, under the one word every agent's list carries it by:
+ * Claude Code's own mode, and on Codex a read-only run told to plan. The composer's plan toggle picks it. */
+export const PLAN_ACCESS = "plan";
+
+/** Why a start asked for fast on a model that has no faster output. */
+export const noFastLine = (model: string): string => `${model} has no fast mode; pick a model that offers it, or send without it`;
 
 /**
  * A remembered pick read against the list in front of us: the value where that list carries it, nothing where it
@@ -1326,11 +1354,13 @@ function listed(subject: string, word: string, options: ReadonlyArray<HarnessOpt
   throw Object.assign(new Error(said), { offered: options.length });
 }
 
-function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined): void {
+function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: string | undefined, runsOn: string | undefined): void {
   if (catalog.models.length > 0) listed(catalog.harness, "model", catalog.models, picks.model, catalog.legacyModels);
   const chosen = modelOf(catalog, model);
   if (catalog.efforts.length > 0) listed(chosen?.efforts !== undefined ? chosen.label : catalog.harness, "effort", effortsFor(catalog, chosen), picks.effort);
   if (catalog.permissionModes.length > 0) listed(catalog.harness, "access mode", catalog.permissionModes, picks.permissionMode);
+  const fastOn = modelOf(catalog, model ?? runsOn);
+  if (picks.fast === true && fastOn !== null && fastOn.fast !== true) throw Object.assign(new Error(noFastLine(fastOn.label)), { kind: "invalid" });
 }
 
 /** The picks a start runs with, checked against the catalog: a value a list does not carry is refused naming the
@@ -1338,10 +1368,11 @@ function checkedAgainst(catalog: HarnessCatalog, picks: StartPicks, model: strin
  * start that opens a thread without a model runs the one the catalog marks default, and without an effort the one
  * effortsFor marks for that model, so every door runs what the composer shows; a resume keeps the thread's own.
  * Without a catalog (a harness the runtime has no table row for) every value passes and no default is filled. Only
- * the three picks come out, whatever else rides in. */
-export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPicks, opensThread: boolean): StartPicks {
+ * the three picks and fast come out, whatever else rides in; fast only where it was asked for. `runsOn` is the model a
+ * resumed thread already runs on, which a fast asked for with no model named is checked against. */
+export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPicks, opensThread: boolean, runsOn?: string): StartPicks {
   const model = picks.model ?? (opensThread && catalog !== undefined ? markedDefault(catalog.models)?.value : undefined);
-  if (catalog !== undefined) checkedAgainst(catalog, picks, model);
+  if (catalog !== undefined) checkedAgainst(catalog, picks, model, runsOn);
   const effort = picks.effort ?? (opensThread && catalog !== undefined ? markedDefault(effortsFor(catalog, modelOf(catalog, model)))?.value : undefined);
   // The access is filled in like the other two, so what the picker shows is what the CLI is told: an unnamed access
   // used to reach the adapter as nothing, which every adapter here reads as its own skip-everything flag. On a
@@ -1352,6 +1383,7 @@ export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPick
     ...(model !== undefined ? { model } : {}),
     ...(effort !== undefined ? { effort } : {}),
     ...(permissionMode !== undefined ? { permissionMode } : {}),
+    ...(picks.fast === true ? { fast: true } : {}),
   };
 }
 
@@ -1408,9 +1440,9 @@ export const SessionStartEvent = z.object({
   ...sessionScope,
   /** The user's turn; set by the runtime (the adapter never sees it) so a replayed transcript shows it. */
   prompt: z.string().optional(),
-  /** The images the person's message carried, as records: their type, their weight and their name, never their
-   * pixels, which reach the harness and nothing else. Absent on a turn that carried none. */
-  attachments: z.array(ImageRecord).optional(),
+  /** The files the person's message carried, as records: their type, their weight and their name, never their
+   * bytes, which reach the machine and nothing else. Absent on a turn that carried none. */
+  attachments: z.array(AttachmentRecord).optional(),
   /** The id the client minted for the sessions.start that opened this turn, stamped by the runtime; absent when the
    * client sent none. Two clients sending the same text at the same moment are told apart by this, not the prompt. */
   requestId: z.string().optional(),
@@ -1582,6 +1614,18 @@ export const SessionPermissionClosedEvent = z.object({
 });
 export type SessionPermissionClosedEvent = z.infer<typeof SessionPermissionClosedEvent>;
 
+/** What a turn left to rewind to, written once the turn is over: the checkpoint of the copy's files at its end
+ * (absent where none could be taken, a folder that is not a checkout or a daemon that did not answer) and the
+ * harness's own name for the point its conversation ended at (absent where the harness names none). A rewind cuts
+ * the turns after it and puts these back. */
+export const SessionCheckpointEvent = z.object({
+  type: z.literal("session.checkpoint"),
+  ...sessionScope,
+  ref: z.string().optional(),
+  anchor: z.string().optional(),
+});
+export type SessionCheckpointEvent = z.infer<typeof SessionCheckpointEvent>;
+
 /** The events sessions.history replays: what a chat transcript folds. */
 export const SessionEvent = z.discriminatedUnion("type", [
   SessionStartEvent,
@@ -1592,6 +1636,7 @@ export const SessionEvent = z.discriminatedUnion("type", [
   SessionNotifyEvent,
   SessionPermissionEvent,
   SessionPermissionClosedEvent,
+  SessionCheckpointEvent,
 ]);
 export type SessionEvent = z.infer<typeof SessionEvent>;
 
@@ -2096,6 +2141,11 @@ export const serverIconsLeftLine = (folder: string, reason: string): string =>
  * rows are read again to pick it up. */
 export const ThreadMarkedEvent = z.object({ type: z.literal("thread.marked"), workspaceId: z.string(), threadIds: z.array(z.string()) });
 export type ThreadMarkedEvent = z.infer<typeof ThreadMarkedEvent>;
+
+/** A thread was rewound, or a rewind undone: its transcript lost the turns after the one it kept, so every window
+ * holding the thread reads its history and its rows again. */
+export const ThreadRewoundEvent = z.object({ type: z.literal("thread.rewound"), workspaceId: z.string(), threadId: z.string() });
+export type ThreadRewoundEvent = z.infer<typeof ThreadRewoundEvent>;
 
 /** The host's record changed, by any client; every socket gets the whole record. */
 export const PreferencesChangedEvent = z.object({ type: z.literal("preferences.changed"), preferences: Preferences });
@@ -3138,8 +3188,10 @@ export const EventUnion = z.discriminatedUnion("type", [
   SessionNotifyEvent.extend(sequenced),
   SessionPermissionEvent.extend(sequenced),
   SessionPermissionClosedEvent.extend(sequenced),
+  SessionCheckpointEvent.extend(sequenced),
   SessionQueuedEvent.extend(sequenced),
   ThreadMarkedEvent.extend(sequenced),
+  ThreadRewoundEvent.extend(sequenced),
   PortOpenEvent.extend(sequenced),
   PortCloseEvent.extend(sequenced),
   InboxFileEvent.extend(sequenced),
@@ -3242,6 +3294,15 @@ export type HostItem = z.infer<typeof HostItem>;
 export const GitPrListReply = z.object({ items: z.array(HostItem), note: z.string().optional(), noCliFor: z.string().optional() });
 export type GitPrListReply = WireGitPrListReply;
 type GitPrListReplyHeld = Held<Same<z.infer<typeof GitPrListReply>, GitPrListReply>>;
+
+/** A checkpoint's ref, the commit it names, and whether its tree differs from the one that ref named before. */
+export const GitCheckpointReply = z.object({ ref: z.string(), commit: z.string(), changed: z.boolean() });
+export type GitCheckpointReply = WireGitCheckpointReply;
+type GitCheckpointReplyHeld = Held<Same<z.infer<typeof GitCheckpointReply>, GitCheckpointReply>>;
+/** The checkpoint of the tree as it stood before a restore, which restores it again, and how many files moved. */
+export const GitRestoreReply = z.object({ before: z.string(), files: z.number().int() });
+export type GitRestoreReply = WireGitRestoreReply;
+type GitRestoreReplyHeld = Held<Same<z.infer<typeof GitRestoreReply>, GitRestoreReply>>;
 
 export const FsReadEncoding = z.enum(["utf8", "base64"]);
 export type FsReadEncoding = z.infer<typeof FsReadEncoding>;
@@ -3530,6 +3591,13 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** The repository's open pull requests and issues through that same command line, answered as a GitPrListReply.
    * No command line for the host, or one nobody signed in, is an empty list with the note saying so. */
   z.object({ id: reqId, op: z.literal("git.prList"), cwd: z.string(), machineId: z.string().optional() }),
+  /** Records the checkout's whole tree at a turn's end as a commit outside every branch, under the ref the daemon
+   * names from the copy's folder, the thread and the turn, and answers a GitCheckpointReply. HEAD, the index and
+   * the branch never move. */
+  z.object({ id: reqId, op: z.literal("git.checkpoint"), cwd: z.string(), thread: z.string(), turn: z.string(), machineId: z.string().optional() }),
+  /** Puts the tree back to one of this copy's checkpoints, recording the tree as it stood first, and answers a
+   * GitRestoreReply whose before restores it again. */
+  z.object({ id: reqId, op: z.literal("git.restore"), cwd: z.string(), checkpoint: z.string(), machineId: z.string().optional() }),
   /** Replies with a HostFolderListing: one level of folders on the computer this daemon runs on, for the folder
    * picker of a computer somebody owns. The roots are the home of the login the daemon runs as and each of
    * `projects` the home does not hold; `dir` absent lists the home, and so does a folder inside the roots that is
@@ -4188,7 +4256,8 @@ const DAEMON_CONTENTS = [
   "4693a00a74c923f64a9062a65cac539d5ac7621da08fc623c63089a87b8231d7",
   "6064295b774d39defb1ba58ef099812ee1e4662bac2a1525c6d0061128450f2f",
   "12dc3a3741a25239969103531def3c28df0874e9233825d16f7063a84df345c6",
-  "8515409a63d42ad2ba0143de98e5e9ffc64a440f2e171a52c614445c06965c2b",
+  "ca0a7c835985a42469446d3efd1e622568ef0772725ddf4700efc631038f6c1f",
+  "11da9462eb0cc7aa26e3f05feed71e2e27774769026dfa6d7a4f3a08f6511ebb",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4410,7 +4479,10 @@ const DAEMON_CONTENTS = [
  * Version 84 adds fs.files, every file of a checkout git would show, from git ls-files and kept until a folder holding one
  * of them changes, and git.prList, the repository's open pull requests and issues through the host's command line, an
  * empty list with a note where that command line is not there or nobody signed it in.
- * Version 85 writes into a copy: git.commit commits the files named with the message on stdin, git.discard puts one
+ * Version 85 adds git.checkpoint, a turn's whole tree recorded as a commit outside every branch under
+ * refs/wsp/checkpoints/<copy>/<thread>/<turn>, and git.restore, which puts the tree back to one of the copy's own
+ * checkpoints after recording the tree as it stood; a worktree copy's removal deletes its checkpoint refs.
+ * Version 86 writes into a copy: git.commit commits the files named with the message on stdin, git.discard puts one
  * file back as HEAD has it, and fs.write replaces a file's contents whole; git.diff gains the head scope with untracked
  * files as new, paths, whole files in one hunk, and each file's blob id; a discard takes the folders it left empty, and
  * the binary's version verb prints this number. */
@@ -5598,6 +5670,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
     effort: z.string().optional(),
     permissionMode: z.string().optional(),
     contextWindow: z.string().optional(),
+    /** The model's faster output for this turn; refused naming the model where its catalog row offers none. */
+    fast: z.boolean().optional(),
     /** Absent reads as person: the app never sends it, the command line sends cli, the MCP server sends agent. */
     startedBy: SessionOrigin.optional(),
     /** Minted by the client per send and echoed on the turn's session.start, so the client knows which start is its own. */
@@ -5616,9 +5690,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
     /** The name the thread is opened under, as a person's: it stands in every client at once, the harness is told it
      * too so its own UI says the same, and no generated title ever replaces it. Refused when it is blank. */
     title: z.string().optional(),
-    /** The images the message carries, in the order the person added them; refused with imagesRefusal's line over the
-     * caps, and refused naming the agent before the machine is asked when that agent's adapter reads no image. */
-    attachments: z.array(ImageAttachment).optional(),
+    /** The files the message carries, in the order the person added them; refused with filesRefusal's line over the
+     * caps, and refused naming the agent before the machine is asked when an image goes to an agent that reads none.
+     * An image rides its harness's road; any other file lands in the thread's folder and the prompt names it. */
+    attachments: z.array(Attachment).optional(),
   }),
   /** Replies with { harnesses: HarnessCatalog[] }, one per harness the runtime knows. With a workspace, the lists come
    * from the binaries on its machine where they answer; without one, from the runtime's table. */
@@ -5665,6 +5740,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * thread's latest row: its folder, its model and its agent. Replies with a SessionAsideResult. Nothing is recorded:
    * the transcript, the rows and the harness's own session are as they were. Takes any of the thread's session ids. */
   z.object({ id: reqId, op: z.literal("sessions.aside"), sessionId: z.string(), question: z.string() }),
+  /** Rewinds a thread to the end of one of its turns: the turns after it leave the transcript and, where the harness
+   * cuts its own history, the conversation, and with files the copy's tree goes back to that turn's checkpoint after
+   * the tree as it stands is checkpointed. undo instead puts back the files the thread's last rewind replaced. */
+  z.object({ id: reqId, op: z.literal("sessions.rewind"), threadId: z.string(), turnId: z.string().optional(), files: z.boolean().optional(), undo: z.boolean().optional() }),
   z.object({ id: reqId, op: z.literal("golden.get"), name: z.string() }),
   /** Replies with the backend's Capabilities; the UI gates features on these. */
   z.object({ id: reqId, op: z.literal("capabilities.get") }),
@@ -6215,6 +6294,10 @@ export type SessionSearchResult = z.infer<typeof SessionSearchResult>;
 /** The harness's answer to a side question, which the host keeps nowhere. */
 export const SessionAsideResult = z.object({ text: z.string() });
 export type SessionAsideResult = z.infer<typeof SessionAsideResult>;
+/** What a rewind did: how many turns left the conversation, and how many files the copy's tree wrote or removed
+ * where the files went back too. */
+export const SessionRewindResult = z.object({ turns: z.number().int(), files: z.number().int().optional() });
+export type SessionRewindResult = z.infer<typeof SessionRewindResult>;
 
 // --- session start (how the turn the caller asked for came to be) --------------
 
@@ -6317,14 +6400,14 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 export { hereName, isHere, isProviderPlace, placeName, placeOf, workspaceComputerName } from "./place-name.js";
 export { needsYouLine, threadNeedsYou, threadState, threadStateWord, threadUnread, threadUnseenAt, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { CLOUD_CAP_DEFAULT, phaseHoldsSlot, placeAtLimitLine, placeCapOf, placeCapRefusal, placeFullLine, placeRoom, placeSpendLimit, runningOn, THREAD_MEM_MB, threadsAtOnce, workspacePlace, workspacePlaceId, type PlacedThread, type PlacedWorkspace } from "./place-state.js";
-export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
+export { MCP_SERVER_NAME, threadsFollowed, WSP_TOOL_TIMEOUT_SEC } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, type CopyToDelete, deleteCopiesNotice, deleteNotice, onDeleteOf, goneRefusal, COMPUTER_LEFT, pausedOrPausing, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, BACK_OVER_SSH, backUrl, dialsBackWord, linkedOver, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./agents-report.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
 export { compareVersions } from "./semver.mjs";
-export { IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, ImageAttachment, ImageRecord, imageBytes, imageLine, imagePathIn, imageRecord, imageTypeOf, imagesBlocked, imagesRefusal, noImagesLine, notAFileLine, notAnImageLine, threadImagesDir, turnImagesDir } from "./attachments.js";
+export { attachedFilesPrompt, Attachment, attachmentBytes, attachmentLine, AttachmentRecord, attachmentRecord, FILE_MAX_BYTES, FILE_MAX_WORDS, FILES_AFTER_TURN, FILES_DIR, FILES_MAX, filePathIn, filesBlocked, filesNotLandedLine, filesRefusal, IMAGE_MAX_BYTES, IMAGE_MAX_WORDS, IMAGE_TYPES, IMAGE_TYPE_WORDS, imagePathIn, imageTypeOf, isImage, dropFilesLine, landFilesLine, noImagesLine, notAFileLine, safeFileName, sendFilesDir, threadFilesDir, threadImagesDir, turnImagesDir, UNTYPED_FILE } from "./attachments.js";
 export * from "./oom.js";
 export { accruedAt, accruedPast, appendCostPoint, COST_HISTORY_CAP, dayStart, monthStart, rateAt, spentSince } from "./cost-history.js";
 export { leadAsk, openAsk, ThreadMessage, threadMessages, threadReplyRows, threadResult, ThreadVoice } from "./thread-read.js";
@@ -6381,4 +6464,4 @@ export * from "./release.js";
 export * from "./init-job.js";
 export { catalogRefused, endAfterResult, endRun, PERMISSION_ALLOW, PERMISSION_DENY } from "./adapter-port.js";
 export { CLOUD_ENV, LAUNCH_ENV, SCOPED_MCP_ARG, FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, FORWARD_ENV, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, PERSON_HOME_ENV, RELEASE_API_ENV, TURN_TOKEN_ENV, UPDATE_CHECK_ENV, WEB_DIR_ENV } from "./env.js";
-export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage } from "./adapter-port.js";
+export type { AdapterAttachOptions, AdapterEvent, AsideAnswer, AsideQuestion, AttachmentRoad, CommitDrafter, DraftAsk, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, HarnessCatalogModelProbe, HarnessCatalogProbe, HarnessCatalogRefusal, PermissionAsk, SessionAsker, SessionRenameWrite, SessionRenamer, SessionTitleMaker, SessionTitleReader, TitleTurn, TurnImage, SessionReverter } from "./adapter-port.js";

@@ -195,6 +195,8 @@ import type {
   SessionOrigin,
   SessionAsker,
   SessionAsideResult,
+  SessionRewindResult,
+  SessionReverter,
   SessionTitleMaker,
   SessionTitleReader,
   SessionSearchResult,
@@ -203,8 +205,8 @@ import type {
   ThreadMarks,
   TitleSource,
   SnapshotStorage,
-  ImageAttachment,
-  ImageRecord,
+  Attachment,
+  AttachmentRecord,
   McpServerSpec,
   TurnImage,
   TurnResult,
@@ -226,7 +228,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectRemote, projectSource } from "./project-sources.js";
 import { vaultUnlistedRefusal, ThreadPlacement, ThreadScope, WorkspaceOrigin, branchUnreadRefusal, noParentWorkspaceLine, parentProjectRefusal, BringBackResult, GitPrReply, GitPushReply, GitCommitReply, GitDiscardReply, GitDiffReply, GitStatusReply, DRAFT_NOTES, cleanCheckoutLine, commitMessage, cutDiff, draftPrompt, type Checkout, type CheckoutReply, type CommitDraft, type CommitDrafter, type ViewedMarks, agentsFrom, foldThreads, runningOn as runningOnPlace, phaseHoldsSlot, placeAtLimitLine, placeSpendLimit, spendCapRefusal, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadKeyOf, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, SCOPED_MCP_ARG, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnGoldenRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { ASIDE_NO_SESSION_LINE, BLANK_ASIDE_LINE, asideUnsupportedLine, PLACE_WORKSPACE_PATH, THIS_COMPUTER, COPY_BUILD_FIX, copyAsksSignIns, refusal, copyFirstLine, isLocalWorkspace, imageCarriesCheckout, addedProjectOn, addingProjectLine, hereDaemonBehindLine, DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildOf, copyIsCurrent, type CopyBuild, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, serverIconsLeftLine, homeShortened, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, EMPTY_TITLE_LINE, threadRunsOnLine, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, inFolder, labsFromEnv, leadAsk, listedPick, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, napRefusedLine, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, deleteRefusedLine, snapshotRefusedLine, NO_SUCH_TURN, noAdapterLine, noKindLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, GONE_UNCHECKED, goneUnconfirmedLine, type GoneSeenBy, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, cloneFailedLine, cloneIntoNeeded, cloneIntoTakenLine, cloneUrlRefusal, intoIsHereLine, INTO_TAKES_A_REPO_LINE, noComputerForSourceLine, bareNoSuchProjectLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, copiesFolder, copyTakesNone, kindForComputer, DEVICE_OPS, relayedRecordRefusal, relayedRefusal, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeGotLine, sizeRefusal, sizeWord, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, isJoinedComputer, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, noProjectImageLine, projectImageInUseRefusal, projectImageRefusedLine, projectImageStillListedLine, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeBlocked, placeDaemonBehind, placeWatchesItselfLine, forkProcsUnreadLine, forkOpRefusedLine, placeDaemonPaths, placeDialBackLine, placeWentAwayLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, workspaceLands, copyPathFor, folderSlug, type ProjectCopy, REWIND_LATEST_LINE, REWIND_NO_CHECKPOINT_LINE, REWIND_NO_UNDO_LINE, REWIND_OWN_FOLDER_LINE, REWIND_WORKING_LINE, rewindBesideLine, rewindChildrenLine, rewindNoAnchorLine, attachmentRecord, filesBlocked, isImage, sendFilesDir, filePathIn, landFilesLine, filesNotLandedLine, attachedFilesPrompt, dropFilesLine } from "@wsp/protocol";
 import { agentsReads, type AgentsActs, type AgentsReader, type CallbackForwards, type ServerIcons, type ServersActs, type SignInAsk, type SkillAsk, type SkillsActs } from "./agents-read.js";
 import { openDaemonChannel, type DaemonChannel, type DaemonChannelOptions } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -313,12 +315,16 @@ export interface HarnessStartOptions {
   effort?: string;
   permissionMode?: string;
   contextWindow?: string;
+  /** The model's faster output for this turn, where the catalog marks the model as having one. */
+  fast?: boolean;
   /** The name the thread is opened under, for a CLI that takes one at launch; every harness is told it again through
    * renameSession once its session is announced, so an adapter whose CLI cannot take it here need not. */
   title?: string;
   /** The turn's images, each already on the road its adapter declared: bytes for an inline adapter, a path on the
    * machine for a file one. Empty on a turn that carries none. */
   images?: readonly TurnImage[];
+  /** On the first resume after a rewind, on a harness that cuts there: the anchor of the turn the rewind kept. */
+  resumeAt?: string;
   /** MCP servers this turn gets besides the ones the harness's own config on the machine names, by the name each
    * takes in a config; the adapter hands them to its CLI the way that CLI takes one. Absent on a turn that carries
    * none, which is every turn a person sends. */
@@ -360,6 +366,12 @@ export interface HarnessAdapter {
   attach?(options: AdapterAttachOptions): Promise<HarnessSession | "gone">;
   /** Whether this adapter's sessions carry steer; the catalog tells the composer before a turn runs. */
   readonly steers: boolean;
+  /** Whether a rewind of this harness's thread is cut on its next resume, at the anchor the kept turn named; the
+   * runtime holds that anchor on the thread and hands it to that start as resumeAt. */
+  readonly resumesAt?: true;
+  /** Cuts this harness's own history before a turn at once, running no turn; absent where it cuts on its next resume
+   * or keeps its history. */
+  revert?: SessionReverter;
   /** How this harness takes an image with a turn, and that it takes one at all: absent, a turn carrying an image is
    * refused in this agent's name before the machine is asked for anything. */
   readonly attachments?: AttachmentRoad;
@@ -1470,6 +1482,8 @@ export interface Runtime {
         effort?: string;
         permissionMode?: string;
         contextWindow?: string;
+        /** The model's faster output; refused naming the model where its catalog row offers none. */
+        fast?: boolean;
         /** Absent means a person asked. */
         startedBy?: SessionOrigin;
         /** The client's id for this send, stamped on the turn's session.start as sent. */
@@ -1490,7 +1504,7 @@ export interface Runtime {
         title?: string;
         /** The images the message carries. Rejects over the caps, and rejects naming the agent when that agent's
          * adapter reads no image, both before the machine is asked for anything. */
-        attachments?: readonly ImageAttachment[];
+        attachments?: readonly Attachment[];
         /** MCP servers the thread this start opens gets besides the ones the harness's own config names, by the name
          * each takes in a config: what a caller that needs a tool loaded whatever the person's config says hands
          * over (the cloud setup's own thread, which calls the wsp recipe tools). */
@@ -1541,6 +1555,10 @@ export interface Runtime {
     /** Asks the thread's harness a question beside the thread, off the thread's latest row, and records nothing. Takes
      * any of the thread's session ids. Refused where the harness never announced a session or takes no side question. */
     aside(sessionId: string, question: string, origin?: Caller): Promise<SessionAsideResult>;
+    /** Rewinds a thread to the end of one of its turns, or with undo puts back the files its last rewind replaced.
+     * Refused whole, before anything is written, on a working thread, one whose threads under it run, the latest
+     * turn, files a turn kept no checkpoint of, and a workspace that is the person's own folder. */
+    rewind(threadId: string, opts: { turnId?: string; files?: boolean; undo?: boolean }, origin?: Caller): Promise<SessionRewindResult>;
     /** Drops a thread no turn ever ran on, the row a launch that never got going leaves: its rows and its
      * transcript rows go and nothing is asked of the machine. Takes the runtime's thread id, not a session id.
      * Refused (kind conflict) with threadForgetRefusal's sentence once a turn of it did work, which threadRan
@@ -1760,6 +1778,9 @@ const noTitleLogLine = (sessionId: string, workspaceId: string, words: string): 
  * nothing asks again, so this is said once per thread. */
 const noMadeTitleLogLine = (threadId: string, workspaceId: string, words: string): string =>
   `thread ${threadId.slice(0, 8)} on ${workspaceId} keeps its opening words: ${words}`;
+/** The log line for a turn's end whose checkout kept no checkpoint: the turn stands, and only its files cannot be rewound. */
+const noCheckpointLogLine = (threadId: string, workspaceId: string, words: string): string =>
+  `no checkpoint of the files at thread ${threadId.slice(0, 8)}'s turn end on workspace ${workspaceId}: ${words}`;
 /** The host log's one line for a name the harness's own store would not take: the thread carries the name here
  * whatever its harness did with it, so only the harness's own UI is out of step. */
 const noNameWriteLogLine = (sessionId: string, workspaceId: string, words: string): string =>
@@ -1866,6 +1887,14 @@ interface ThreadRecord {
   pinnedAt?: number;
   snoozedUntil?: number;
   section?: ThreadPlacement;
+  /** The anchor a rewind kept, held until the next turn of a harness that cuts on its next resume has taken it. */
+  resumeAt?: string;
+  /** The checkpoint of the files as they stood before the last rewind that moved them, which Undo rewind restores,
+   * held until the thread's next turn ends. */
+  rewound?: { before: string; at: number };
+  /** The folders this thread's attached files landed in, which a forget of the thread or a delete of its workspace
+   * takes them off. */
+  filesIn?: string[];
 }
 
 interface SessionIndexRecord {
@@ -2560,7 +2589,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * roads that launch a process through this runtime read it here, the turn and the exec verb, so the folder a
    * turn opens in and the one a command runs in cannot differ, and the app, the command line and the tool need
    * not restate it. */
-  const threadFolder = async (entry: LiveWorkspace, o: { cwd?: string | undefined }): Promise<string | undefined> => {
+  const threadFolder = async (entry: LiveWorkspace, o: { cwd?: string | undefined }): Promise<string> => {
     return o.cwd ?? moduleOf(entry.record.kind).folder(entry.record) ?? projectHeld(entry.record.project).path;
   };
   /** What a start that opened a thread leaves on the preferences record: the project the thread landed in, by
@@ -3118,7 +3147,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * workspace and drops the oldest finished ones while the transcript keeps the thread, so the events are where a
    * long-lived thread's own facts survive. Nothing from before a fact was recorded, and the start then fills what
    * its catalog marks. */
-  const resumedFact = (workspaceId: string, resume: string, fact: "cwd" | "permissionMode"): string | undefined => {
+  const resumedFact = (workspaceId: string, resume: string, fact: "cwd" | "permissionMode" | "model"): string | undefined => {
     const rows = [...sessions.values()];
     for (let i = rows.length - 1; i >= 0; i--) {
       const view = rows[i]!.view;
@@ -4991,6 +5020,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...(typeof held.pinnedAt === "number" ? { pinnedAt: held.pinnedAt } : {}),
             ...(typeof held.snoozedUntil === "number" ? { snoozedUntil: held.snoozedUntil } : {}),
             ...(placed.success ? { section: placed.data } : {}),
+            ...(typeof held.resumeAt === "string" ? { resumeAt: held.resumeAt } : {}),
+            ...(typeof held.rewound?.before === "string" && typeof held.rewound.at === "number" ? { rewound: { before: held.rewound.before, at: held.rewound.at } } : {}),
           });
           if (typeof held.snoozedUntil === "number") wakeAt(threadId, held.snoozedUntil);
         }
@@ -5881,6 +5912,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         try {
           delete entry.deleteSaid;
           endSessions(id, DELETED_REASON);
+          // Before the machine goes: on a computer somebody owns the folders the files landed in outlive the workspace.
+          await dropThreadFiles(entry, [...threadRecords].flatMap(([threadId, held]) => (held.workspaceId === id ? [threadId] : [])));
           // A machine wsp never forked reads running whatever is asked of it, so only a forked one is read back.
           if (!kindWords(entry.record.kind).driven) {
             await entry.machine.kill().catch((e: unknown) => {
@@ -6165,6 +6198,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(adapter.mcpServers === true ? { mcpServers: true } : {}),
       ...(adapter.movesAccess === true ? { movesAccess: true } : {}),
       ...(adapter.aside !== undefined ? { asides: true } : {}),
+      ...(adapter.resumesAt === true || adapter.revert !== undefined ? { rewindsConversation: true } : {}),
       ...(adapter.screenCommands !== undefined ? { screenCommands: [...adapter.screenCommands] } : {}),
     };
     if (adapter.probeCatalog === undefined) return Promise.resolve(forMachine(known));
@@ -6344,7 +6378,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const markDefault = (c: HarnessCatalog): HarnessCatalog => ({ ...c, ...(c.harness === DEFAULT_AGENT.id ? { isDefault: true } : {}) });
 
   /**
-   * The turn's images on the road its adapter declared, imagesBlocked having already turned away what cannot go. An
+   * The turn's images on the road its adapter declared, filesBlocked having already turned away what cannot go. An
    * inline adapter is handed the bytes and nothing lands anywhere, so there is no folder to answer with. A file
    * adapter is handed paths inside this send's own folder under the thread's images dir: two sends on one thread
    * would otherwise write the same paths and the first turn would be handed the second's picture, since the landing
@@ -6355,13 +6389,49 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     entry: LiveWorkspace,
     road: AttachmentRoad | undefined,
     dir: string,
-    images: readonly ImageAttachment[],
+    images: readonly Attachment[],
   ): Promise<{ images: TurnImage[]; dir?: string }> => {
     if (images.length === 0 || road === undefined) return { images: [] };
     if (road === "inline") return { images: images.map(({ mediaType, bytes }) => ({ mediaType, bytes })) };
     const landed = images.map((image, index) => ({ ...image, path: imagePathIn(dir, index, image.mediaType) }));
     await importInto(entry.machine, tarOf(landed.map(i => ({ path: i.path, mode: 0o600, content: Buffer.from(i.bytes, "base64") }))), "/", { overlay: true });
     return { images: landed.map(({ mediaType, bytes, path }) => ({ mediaType, bytes, path })), dir };
+  };
+
+  /**
+   * The turn's files that are not images, landed in the folder the thread works in, where its agent reads them at
+   * any access and the person's copy holds them: one command readies this send's own folder, then each file goes by
+   * the machine's byte road. Answers the paths, which the agent's prompt names. They stay once the turn ends, since
+   * a later turn of the thread may read them again, and go when the thread is forgotten or its workspace deleted.
+   */
+  const landFiles = async (entry: LiveWorkspace, folder: string, dir: string, files: readonly Attachment[]): Promise<string[]> => {
+    if (files.length === 0) return [];
+    const ready = await entry.machine.exec(landFilesLine(folder, dir), { timeoutMs: INLINE_EXEC_MS });
+    if (ready.exitCode !== 0) throw new Error(filesNotLandedLine(folder));
+    const taken = new Set<string>();
+    const paths: string[] = [];
+    for (const file of files) {
+      const path = filePathIn(dir, file.name, taken);
+      await landBytes(entry.machine, path, Buffer.from(file.bytes, "base64"));
+      paths.push(path);
+    }
+    return paths;
+  };
+
+  /** Takes these threads' attached files off the folders their turns ran in, which are the person's own copy: nothing
+   * reads them once the thread is gone. One command per folder, and a machine that is not running, or does not
+   * answer, keeps them. */
+  const dropThreadFiles = async (entry: LiveWorkspace, threadIds: Iterable<string>): Promise<void> => {
+    if (entry.record.phase !== "running") return;
+    const byFolder = new Map<string, string[]>();
+    for (const threadId of threadIds) {
+      for (const folder of threadRecords.get(threadId)?.filesIn ?? []) byFolder.set(folder, [...(byFolder.get(folder) ?? []), threadId]);
+    }
+    for (const [folder, threads] of byFolder) {
+      await entry.machine.exec(dropFilesLine(folder, threads), { timeoutMs: INLINE_EXEC_MS }).catch((e: unknown) => {
+        console.warn(`attached files of ${threads.join(", ")} not removed from ${folder}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }
   };
 
   /** Takes one send's images off the machine once the turn they were sent for is over, whatever it came to: the
@@ -6642,6 +6712,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (reply === undefined && s.notify !== undefined) notifyEnd(s, s.notify, tellAs(s), { status: "failed", error: cutLine(endedAt) });
     record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined, reason });
   };
+  /** A workspace that is the person's own folder rather than a copy of it: wsp writes nothing into it, so it keeps no
+   * checkpoint and no rewind moves it. */
+  const ownFolder = (r: WorkspaceRecord): boolean => copiesFolder(r.kind) && r.copy === undefined;
+  /** What a rewind to a turn needs, kept once the turn is over: the checkout's tree through the workspace's own
+   * daemon, and the harness's anchor. A checkout the daemon takes none of (not a repo, a daemon too old, a machine
+   * gone) leaves the anchor alone; the turn itself is as it ended either way. */
+  const keepCheckpoint = async (entry: LiveWorkspace, turn: { sessionId: string; threadId: string; turnId: string; anchor?: string }): Promise<void> => {
+    let ref: string | undefined;
+    if (!ownFolder(entry.record)) {
+      try {
+        const taken = await withDaemon(entry, ask => ask({ op: "git.checkpoint", cwd: checkoutOf(entry.record), thread: turn.threadId, turn: turn.turnId }));
+        if (typeof taken["ref"] === "string") ref = taken["ref"];
+      } catch (e) {
+        console.warn(noCheckpointLogLine(turn.threadId, entry.record.id, e instanceof Error ? e.message : String(e)));
+      }
+    }
+    if (ref === undefined && turn.anchor === undefined) return;
+    record({ type: "session.checkpoint", workspaceId: entry.record.id, sessionId: turn.sessionId, turnId: turn.turnId, threadId: turn.threadId, ...(ref !== undefined ? { ref } : {}), ...(turn.anchor !== undefined ? { anchor: turn.anchor } : {}) });
+  };
   /** Recorded once the harness took the line, so the row sits where the turn could first see it. */
   const recordSteer = (s: { view: SessionView; turnId: string }, handleId: string, o: { prompt: string; requestId?: string }): void => {
     record({
@@ -6683,9 +6772,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     scopeDeviceId?: string;
     outcome: SessionStartOutcome;
     /** What this turn's own session.start row carries, for the road that still has to write it. */
-    opening: { prompt: string; requestId?: string; afterCut?: boolean; title?: string; attachments?: readonly ImageRecord[] };
+    opening: { prompt: string; requestId?: string; afterCut?: boolean; title?: string; attachments?: readonly AttachmentRecord[] };
     /** The harness session this turn resumes, so the row it takes over keeps who opened the thread and with what. */
     resume?: string;
+    /** The rewind's anchor this turn was launched to cut at; the thread lets it go once the turn announces itself. */
+    cutAt?: string;
     /** What the row already knows of this turn's reply: a re-opened turn whose result landed before the restart is
      * still working, and reads as such until the run's own result line comes round again. */
     turnLive?: TurnLive;
@@ -6724,6 +6815,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     let deltas = deltasWritten;
     let replaying = deltasWritten;
     let ended = false;
+    /** The harness's own name for where this turn ended, kept with the turn's checkpoint once it is over. */
+    let anchor: string | undefined;
+    let over = false;
+    /** The turn is over however it ended: no rewind in this copy can be undone any more, since an undo would take
+     * this turn's files with it, and what a rewind to this turn needs is kept, off the turn's road so nothing waits
+     * on the machine. */
+    const turnOver = (named: string | undefined): void => {
+      if (over) return;
+      over = true;
+      const undone: string[] = [];
+      for (const [id, held] of threadRecords) {
+        if (held.workspaceId !== workspaceId || held.rewound === undefined) continue;
+        delete held.rewound;
+        undone.push(id);
+      }
+      if (undone.length > 0) {
+        void persistSessions(workspaceId);
+        bus.emit({ type: "thread.marked", workspaceId, threadIds: undone });
+      }
+      void keepCheckpoint(entry, { sessionId: view.claudeSessionId ?? view.id, threadId, turnId, ...(named !== undefined ? { anchor: named } : {}) });
+    };
     // The reply's status, held while the process still runs. Shared with this turn's session-map entry so runningOn
     // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
     // exists) or later from its stream.
@@ -6835,6 +6947,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if (event.cwd !== undefined) view.cwd = event.cwd;
           if (event.model !== undefined) view.model = event.model;
           entry.record.claudeSessionId = sessionId;
+          // The harness loaded the session up to the rewind's anchor, so the thread no longer holds it for a later start.
+          if (t.cutAt !== undefined && threadRecords.get(threadId)?.resumeAt === t.cutAt) delete threadRecords.get(threadId)!.resumeAt;
           void persist(entry.record);
           void persistSessions(workspaceId);
           // The harness keys its store by the id it just announced, so a name given at the start is written now;
@@ -6924,6 +7038,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result });
           return;
         }
+        case "turn.anchor":
+          anchor = event.anchor;
+          return;
         case "turn.tasks":
           // The harness's own word on the work this turn started: while any of it runs the turn is working, whatever
           // its agent has already said, so the idle clock is held the way an open prompt holds it.
@@ -6961,6 +7078,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             exitCode: event.exitCode,
             sawResult: event.sawResult,
           });
+          turnOver(anchor);
           return;
       }
     };
@@ -7025,6 +7143,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       settleCut({ view, turnId, ...(notify !== undefined ? { notify } : {}), ...(notifyBy !== undefined ? { notifyBy } : {}), ...(notifyRoad !== undefined ? { notifyRoad } : {}), turnLive }, reason, () => reason);
       void persistSessions(workspaceId);
       void started.interrupt().catch(() => {});
+      turnOver(anchor);
     };
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
@@ -7309,8 +7428,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         scoped !== undefined && reach?.wsp !== undefined && adapter.mcpServers === true
           ? { [MCP_SERVER_NAME]: reach.wsp, ...o.mcpServers }
           : o.mcpServers;
-      const records = (o.attachments ?? []).map(imageRecord);
-      const blocked = imagesBlocked(records, adapter.attachments, harness) ?? mcpServersBlocked(o.mcpServers, adapter.mcpServers, harness);
+      const records = (o.attachments ?? []).map(attachmentRecord);
+      const blocked = filesBlocked(records, adapter.attachments, harness) ?? mcpServersBlocked(o.mcpServers, adapter.mcpServers, harness);
       if (blocked !== null) {
         dropScope();
         throw new Error(blocked);
@@ -7357,6 +7476,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let outcome: SessionStartOutcome = "started";
       let images: TurnImage[] = [];
       let imagesDir: string | undefined;
+      let filePaths: string[] = [];
+      let filesFolder: string | undefined;
       let landed = (o.attachments?.length ?? 0) === 0;
       // This send's own folder on the machine, named by the request id it minted: the landing runs before any turn is
       // registered, so two sends arriving together both pass the wait, and a folder they shared would leave the first
@@ -7380,7 +7501,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const picked = o.permissionMode === undefined && catalog !== undefined ? await pickedAccess(workspaceId) : undefined;
         const picksFor = (session: string | undefined): StartPicks => {
           const access = o.permissionMode ?? (catalog === undefined ? undefined : listedPick(catalog.permissionModes, accessOf(workspaceId, threadId, session) ?? picked));
-          return startPicks(catalog, { ...o, permissionMode: access }, session === undefined);
+          return startPicks(catalog, { ...o, permissionMode: access }, session === undefined, session === undefined ? undefined : resumedFact(workspaceId, session, "model"));
         };
         // A pick the lists do not carry is refused here, before this send waits on anything; the picks themselves
         // are decided below the loop, against the session this send turns out to resume.
@@ -7414,7 +7535,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             hold();
             if (landed) break;
             landed = true;
-            ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, sendDir, o.attachments ?? []));
+            ({ images, dir: imagesDir } = await landImages(entry, adapter.attachments, sendDir, (o.attachments ?? []).filter(a => isImage(a.mediaType))));
+            const landing = (resume !== undefined ? folderOf(workspaceId, resume) : undefined) ?? folder;
+            filePaths = await landFiles(entry, landing, sendFilesDir(landing, threadId, o.requestId, randomUUID()), (o.attachments ?? []).filter(a => !isImage(a.mediaType)));
+            if (filePaths.length > 0) filesFolder = landing;
             refuse();
             continue;
           }
@@ -7439,6 +7563,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // none of them can be answered from the row they are about. Written before adapter.start, so events that
         // fire synchronously inside start() land on the same view.
         Object.assign(view, picks, cwd !== undefined ? { cwd } : {}, resume !== undefined ? { claudeSessionId: resume } : {});
+        // A rewind's cut rides the first resume after it, on a harness that takes one there.
+        const cutAt = resume !== undefined && adapter.resumesAt === true ? threadRecords.get(threadId)?.resumeAt : undefined;
         const handle = runTurn({
           entry,
           view,
@@ -7453,11 +7579,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
           ...(imagesDir !== undefined ? { imagesDir } : {}),
           ...(resume !== undefined ? { resume } : {}),
+          ...(cutAt !== undefined ? { cutAt } : {}),
           waiting,
           open: onEvent =>
             adapter.start({
-              prompt: o.prompt,
+              prompt: attachedFilesPrompt(o.prompt, filePaths),
               ...(resume !== undefined ? { resume } : {}),
+              ...(cutAt !== undefined ? { resumeAt: cutAt } : {}),
               ...(cwd !== undefined ? { cwd } : {}),
               ...picks,
               ...(o.contextWindow !== undefined ? { contextWindow: o.contextWindow } : {}),
@@ -7473,6 +7601,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // its rows said this turn runs at, so it is read the one way from now on. Persisted with the row as the turn
         // announces itself and at its end.
         if (!threadRecords.has(threadId)) threadRecords.set(threadId, { workspaceId, harness, ...(picks.permissionMode !== undefined ? { permissionMode: picks.permissionMode } : {}) });
+        const record = threadRecords.get(threadId)!;
+        if (filesFolder !== undefined && !(record.filesIn ?? []).includes(filesFolder)) threadRecords.set(threadId, { ...record, filesIn: [...(record.filesIn ?? []), filesFolder] });
         launched();
         // The turn is running; what the record failed to remember must not read as a start that failed.
         await rememberAgent(heldProject, harness).catch((e: unknown) => console.warn(`the agent for ${heldProject.name} was not remembered: ${e instanceof Error ? e.message : String(e)}`));
@@ -7537,6 +7667,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(marks?.pinnedAt !== undefined ? { pinnedAt: marks.pinnedAt } : {}),
           ...(marks?.snoozedUntil === undefined ? {} : marks.snoozedUntil > clock.now() ? { snoozedUntil: marks.snoozedUntil } : { wokeAt: marks.snoozedUntil }),
           ...(marks?.section !== undefined ? { section: marks.section } : {}),
+          ...(marks?.rewound !== undefined ? { rewoundAt: marks.rewound.at } : {}),
         };
       });
     },
@@ -7732,6 +7863,96 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return { text: answer.text };
     },
 
+    async rewind(threadId, opts, origin) {
+      await ready();
+      const rows = [...sessions.values()].filter(s => s.view.threadId === threadId);
+      const held = threadRecords.get(threadId);
+      const workspaceId = rows[0]?.view.workspaceId ?? held?.workspaceId;
+      if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
+      const entry = await entryOfRow({ threadId, workspaceId }, origin);
+      if (entry === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
+      const conflict = (line: string): Error => Object.assign(new Error(line), { kind: "conflict" });
+      // Every refusal comes before anything is written: nothing below this block moves a file or a row.
+      if (rows.some(r => r.view.status === "running")) throw conflict(REWIND_WORKING_LINE);
+      if (ownFolder(entry.record)) throw conflict(REWIND_OWN_FOLDER_LINE);
+      const tree = treeUnder(threadId);
+      const under = foldThreads([...sessions.values()].map(s => s.view).filter(v => v.threadId !== undefined && tree.includes(v.threadId)));
+      const running = under.filter(t => t.status === "running");
+      if (running.length > 0) throw conflict(rewindChildrenLine(running.map(t => t.title)));
+      // The copy is every thread's on the workspace: files moved under one that runs would go back mid-turn.
+      const besideRunning = (): void => {
+        const beside = foldThreads([...sessions.values()].map(s => s.view).filter(v => v.workspaceId === workspaceId && v.threadId !== undefined && v.threadId !== threadId)).find(t => t.status === "running");
+        if (beside !== undefined) throw conflict(rewindBesideLine(beside.title));
+      };
+      const cwd = checkoutOf(entry.record);
+      const restore = (checkpoint: string) => withDaemon(entry, ask => ask({ op: "git.restore", cwd, checkpoint }));
+      const done = async (): Promise<void> => {
+        await persistSessions(workspaceId);
+        await flushTranscript(workspaceId);
+        bus.emit({ type: "thread.rewound", workspaceId, threadId });
+      };
+
+      if (opts.undo === true) {
+        const rewound = held?.rewound;
+        if (rewound === undefined) throw conflict(REWIND_NO_UNDO_LINE);
+        besideRunning();
+        const back = await restore(rewound.before);
+        delete held!.rewound;
+        await done();
+        return { turns: 0, files: Number(back["files"] ?? 0) };
+      }
+
+      const events = transcripts.get(workspaceId) ?? [];
+      const order: string[] = [];
+      for (const e of events) if (e.threadId === threadId && e.turnId !== undefined && !order.includes(e.turnId)) order.push(e.turnId);
+      const at = opts.turnId === undefined ? -1 : order.indexOf(opts.turnId);
+      if (at < 0) throw notFoundRefusal(`no turn ${opts.turnId ?? ""} on thread ${threadWord(threadId)}`);
+      if (at === order.length - 1) throw conflict(REWIND_LATEST_LINE);
+      const cut = order.slice(at + 1);
+      const keptOf = (turnId: string): Extract<SessionEvent, { type: "session.checkpoint" }> | undefined => {
+        for (let i = events.length - 1; i >= 0; i--) {
+          const e = events[i]!;
+          if (e.type === "session.checkpoint" && e.turnId === turnId) return e;
+        }
+        return undefined;
+      };
+      const kept = keptOf(order[at]!);
+      const latest = latestOn(threadId) ?? rows[0]?.view;
+      const { harness, adapter } = adapterFor(entry, latest?.harness ?? held?.harness);
+      const agent = harnessCatalog(harness)?.label ?? harness;
+      const files = opts.files === true;
+      if (files && kept?.ref === undefined) throw conflict(REWIND_NO_CHECKPOINT_LINE);
+      const cutsConversation = adapter.resumesAt === true || adapter.revert !== undefined;
+      const firstCut = adapter.revert !== undefined ? keptOf(cut[0]!)?.anchor : undefined;
+      if (adapter.resumesAt === true && kept?.anchor === undefined) throw conflict(rewindNoAnchorLine(agent));
+      if (adapter.revert !== undefined && firstCut === undefined) throw conflict(rewindNoAnchorLine(agent));
+      if (!cutsConversation && !files) throw conflict(rewindNoAnchorLine(agent));
+      if (files) besideRunning();
+
+      // Files first, since they alone can be put back: a harness that then will not cut has them restored again and
+      // the whole rewind refused, rather than a conversation cut over files that never moved.
+      const moved = files ? await restore(kept!.ref!) : undefined;
+      const before = moved === undefined ? undefined : String(moved["before"]);
+      if (adapter.revert !== undefined && firstCut !== undefined && latest?.claudeSessionId !== undefined) {
+        try {
+          await adapter.revert({ session: latest.claudeSessionId, beforeTurn: firstCut, cwd });
+        } catch (e) {
+          if (before !== undefined) await restore(before).catch((back: unknown) => console.warn(`the files of thread ${threadWord(threadId)} were not put back after a refused rewind: ${back instanceof Error ? back.message : String(back)}`));
+          throw e;
+        }
+      }
+      const record = held ?? { workspaceId, harness };
+      threadRecords.set(threadId, record);
+      if (adapter.resumesAt === true) record.resumeAt = kept!.anchor!;
+      if (before !== undefined) record.rewound = { before, at: clock.now() };
+      if (cutsConversation) {
+        // Spliced rather than replaced, as forget does: a turn of another thread on this workspace holds the array.
+        for (let i = events.length - 1; i >= 0; i--) if (events[i]!.threadId === threadId && cut.includes(events[i]!.turnId ?? "")) events.splice(i, 1);
+      }
+      await done();
+      return { turns: cutsConversation ? cut.length : 0, ...(moved !== undefined ? { files: Number(moved["files"] ?? 0) } : {}) };
+    },
+
     async forget(threadId, origin) {
       await ready();
       const held = [...sessions].filter(([, s]) => s.view.threadId === threadId);
@@ -7740,10 +7961,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       // The same absence a name nothing holds gets: a sentence of its own would tell a thread of another tree that
       // the thread it named is there, and the refusal past this gate says its turn ran.
-      if ((await entryOfRow({ threadId, workspaceId }, origin)) === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
+      const entry = await entryOfRow({ threadId, workspaceId }, origin);
+      if (entry === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       // A record is written once a turn was handed over, so a thread with a record and no row left is one whose
       // turns ran and fell off the index cap; the rows alone would read it as a thread that never ran.
       if (threadRan(held.map(([, s]) => s.view)) || (held.length === 0 && record !== undefined)) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
+      // A launch that never got going can still have landed the files its send carried.
+      await dropThreadFiles(entry, [threadId]);
       for (const [id] of held) sessions.delete(id);
       threadRecords.delete(threadId);
       // Spliced rather than replaced: a turn of another thread on this workspace holds the array itself, and its

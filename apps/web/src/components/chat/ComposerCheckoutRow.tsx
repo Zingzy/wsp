@@ -245,11 +245,14 @@ export function ComposerCheckoutRow({
   pickerOpen,
   onPickerOpenChange,
   access = null,
+  stash = null,
 }: {
   workspaceId: string;
   thread: ChatThreadHandle;
   /** The access picker, which the one-line composer carries here rather than in the box. */
   access?: ReactNode;
+  /** The word that counts the stashed prompts and opens them; nothing while there are none. */
+  stash?: ReactNode;
   /** Whether the folder picker is up; the composer holds it so the footer's other folder row can open it. */
   pickerOpen: boolean;
   onPickerOpenChange: (open: boolean) => void;
@@ -308,6 +311,7 @@ export function ComposerCheckoutRow({
         )}
         {access !== null ? <span className="flex shrink-0 items-center">{access}</span> : null}
       </div>
+      {stash}
       {branch.kind === "repo" ? (
         <Tooltip>
           <TooltipTrigger render={<span className={branchSlotClass} tabIndex={0} data-composer-branch={branch.head} />}>

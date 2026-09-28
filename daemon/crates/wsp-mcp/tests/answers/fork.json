@@ -1,0 +1,953 @@
+{
+  "tool": "fork",
+  "cases": [
+    {
+      "case": "forked",
+      "arguments": {
+        "workspace": "alpha"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"workspace\\\": {\\n    \\\"name\\\": \\\"alpha-fork\\\",\\n    \\\"id\\\": \\\"ws-3\\\",\\n    \\\"machineId\\\": \\\"m-1\\\",\\n    \\\"phase\\\": \\\"running\\\",\\n    \\\"kind\\\": \\\"cloud\\\",\\n    \\\"golden\\\": \\\"snap-g1\\\",\\n    \\\"createdAt\\\": \\\"2026-09-27T01:02:03.004Z\\\",\\n    \\\"project\\\": {\\n      \\\"id\\\": \\\"proj-1\\\",\\n      \\\"name\\\": \\\"alpha\\\",\\n      \\\"path\\\": \\\"/root/alpha\\\",\\n      \\\"computer\\\": \\\"place-9\\\"\\n    },\\n    \\\"home\\\": \\\"/root\\\",\\n    \\\"theme\\\": {\\n      \\\"dots\\\": [\\n        {\\n          \\\"angle\\\": 12.5,\\n          \\\"radius\\\": 0.30000000000000004\\n        }\\n      ],\\n      \\\"harmony\\\": \\\"single\\\",\\n      \\\"grain\\\": 0.5,\\n      \\\"opacity\\\": 1,\\n      \\\"mode\\\": \\\"auto\\\"\\n    },\\n    \\\"agents\\\": {\\n      \\\"spawn\\\": true,\\n      \\\"maxMachines\\\": 2,\\n      \\\"maxDepth\\\": 1\\n    },\\n    \\\"place\\\": \\\"place-9\\\",\\n    \\\"provider\\\": \\\"solari\\\",\\n    \\\"parentWorkspaceId\\\": \\\"ws-1\\\"\\n  }\\n}\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "named and sized",
+      "arguments": {
+        "workspace": "alpha",
+        "name": "beta",
+        "size": "4x8",
+        "spawn": "off"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[{\"cpu\":4,\"memMb\":8192,\"rateUsdPerHour\":0.2}]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"beta\",\"id\":\"ws-4\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"},\"notice\":\"built a copy first\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"workspace\\\": {\\n    \\\"name\\\": \\\"beta\\\",\\n    \\\"id\\\": \\\"ws-4\\\",\\n    \\\"machineId\\\": \\\"m-1\\\",\\n    \\\"phase\\\": \\\"running\\\",\\n    \\\"kind\\\": \\\"cloud\\\",\\n    \\\"golden\\\": \\\"snap-g1\\\",\\n    \\\"createdAt\\\": \\\"2026-09-27T01:02:03.004Z\\\",\\n    \\\"project\\\": {\\n      \\\"id\\\": \\\"proj-1\\\",\\n      \\\"name\\\": \\\"alpha\\\",\\n      \\\"path\\\": \\\"/root/alpha\\\",\\n      \\\"computer\\\": \\\"place-9\\\"\\n    },\\n    \\\"home\\\": \\\"/root\\\",\\n    \\\"theme\\\": {\\n      \\\"dots\\\": [\\n        {\\n          \\\"angle\\\": 12.5,\\n          \\\"radius\\\": 0.30000000000000004\\n        }\\n      ],\\n      \\\"harmony\\\": \\\"single\\\",\\n      \\\"grain\\\": 0.5,\\n      \\\"opacity\\\": 1,\\n      \\\"mode\\\": \\\"auto\\\"\\n    },\\n    \\\"agents\\\": {\\n      \\\"spawn\\\": true,\\n      \\\"maxMachines\\\": 2,\\n      \\\"maxDepth\\\": 1\\n    },\\n    \\\"place\\\": \\\"place-9\\\",\\n    \\\"provider\\\": \\\"solari\\\"\\n  },\\n  \\\"notice\\\": \\\"built a copy first\\\"\\n}\"}],\"structuredContent\":{\"workspace\":{\"name\":\"beta\",\"id\":\"ws-4\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"},\"notice\":\"built a copy first\"}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "beta",
+          "cpu": 4,
+          "memMb": 8192,
+          "agents": {
+            "spawn": false
+          },
+          "parent": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "relative folder",
+      "arguments": {
+        "workspace": "alpha",
+        "cwd": "src \"x\""
+      },
+      "replies": {},
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"--cwd is a path on the machine, absolute, and got \\\"src \\\\\\\"x\\\\\\\"\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\"}],\"structuredContent\":{\"error\":\"--cwd is a path on the machine, absolute, and got \\\"src \\\\\\\"x\\\\\\\"\\\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": []
+    },
+    {
+      "case": "first turn",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go \u0085",
+        "model": "old",
+        "effort": "low",
+        "access": "bypass",
+        "cwd": "/root/alpha",
+        "notify": [
+          "me",
+          "t-1"
+        ]
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"running\"}]}"
+      },
+      "pushed": {
+        "sessions.start": [
+          "{\"workspaceId\":\"ws-3\",\"sessionId\":\"s-9\",\"threadId\":\"t-9\",\"turnId\":\"turn-1\",\"type\":\"session.start\",\"afterCut\":true}",
+          "{\"workspaceId\":\"ws-3\",\"sessionId\":\"s-9\",\"threadId\":\"t-9\",\"turnId\":\"turn-0\",\"type\":\"session.done\",\"result\":{\"status\":\"failed\",\"error\":\"another turn's\"}}",
+          "{\"workspaceId\":\"ws-3\",\"sessionId\":\"s-9\",\"threadId\":\"t-9\",\"turnId\":\"turn-1\",\"type\":\"session.delta\",\"kind\":\"text\",\"text\":\"re\"}",
+          "{\"workspaceId\":\"ws-3\",\"sessionId\":\"s-9\",\"threadId\":\"t-9\",\"turnId\":\"turn-1\",\"type\":\"session.done\",\"result\":{\"status\":\"completed\",\"text\":\"re: go \u0085\",\"costUsd\":0.1}}"
+        ]
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"workspace\\\": {\\n    \\\"name\\\": \\\"alpha-fork\\\",\\n    \\\"id\\\": \\\"ws-3\\\",\\n    \\\"machineId\\\": \\\"m-1\\\",\\n    \\\"phase\\\": \\\"running\\\",\\n    \\\"kind\\\": \\\"cloud\\\",\\n    \\\"golden\\\": \\\"snap-g1\\\",\\n    \\\"createdAt\\\": \\\"2026-09-27T01:02:03.004Z\\\",\\n    \\\"project\\\": {\\n      \\\"id\\\": \\\"proj-1\\\",\\n      \\\"name\\\": \\\"alpha\\\",\\n      \\\"path\\\": \\\"/root/alpha\\\",\\n      \\\"computer\\\": \\\"place-9\\\"\\n    },\\n    \\\"home\\\": \\\"/root\\\",\\n    \\\"theme\\\": {\\n      \\\"dots\\\": [\\n        {\\n          \\\"angle\\\": 12.5,\\n          \\\"radius\\\": 0.30000000000000004\\n        }\\n      ],\\n      \\\"harmony\\\": \\\"single\\\",\\n      \\\"grain\\\": 0.5,\\n      \\\"opacity\\\": 1,\\n      \\\"mode\\\": \\\"auto\\\"\\n    },\\n    \\\"agents\\\": {\\n      \\\"spawn\\\": true,\\n      \\\"maxMachines\\\": 2,\\n      \\\"maxDepth\\\": 1\\n    },\\n    \\\"place\\\": \\\"place-9\\\",\\n    \\\"provider\\\": \\\"solari\\\",\\n    \\\"parentWorkspaceId\\\": \\\"ws-1\\\"\\n  },\\n  \\\"turn\\\": {\\n    \\\"threadId\\\": \\\"t-9\\\",\\n    \\\"workspaceId\\\": \\\"ws-3\\\",\\n    \\\"harness\\\": \\\"claude\\\",\\n    \\\"text\\\": \\\"re: go \\\\u0085\\\",\\n    \\\"outcome\\\": \\\"started\\\",\\n    \\\"afterCut\\\": true\\n  }\\n}\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"turn\":{\"threadId\":\"t-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"text\":\"re: go \\u0085\",\"outcome\":\"started\",\"afterCut\":true}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.list"
+        },
+        {
+          "op": "sessions.start",
+          "workspaceId": "ws-3",
+          "prompt": "go \u0085",
+          "cwd": "/root/alpha",
+          "notify": [
+            "me",
+            "t-1"
+          ],
+          "model": "old",
+          "effort": "low",
+          "permissionMode": "bypass",
+          "startedBy": "agent",
+          "requestId": "<request id>"
+        }
+      ]
+    },
+    {
+      "case": "first turn with no text",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go",
+        "agent": "codex"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "pushed": {
+        "sessions.start": [
+          "{\"workspaceId\":\"ws-3\",\"sessionId\":\"s-9\",\"threadId\":\"t-9\",\"turnId\":\"turn-1\",\"type\":\"session.done\",\"result\":{\"status\":\"completed\"}}"
+        ]
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"workspace\\\": {\\n    \\\"name\\\": \\\"alpha-fork\\\",\\n    \\\"id\\\": \\\"ws-3\\\",\\n    \\\"machineId\\\": \\\"m-1\\\",\\n    \\\"phase\\\": \\\"running\\\",\\n    \\\"kind\\\": \\\"cloud\\\",\\n    \\\"golden\\\": \\\"snap-g1\\\",\\n    \\\"createdAt\\\": \\\"2026-09-27T01:02:03.004Z\\\",\\n    \\\"project\\\": {\\n      \\\"id\\\": \\\"proj-1\\\",\\n      \\\"name\\\": \\\"alpha\\\",\\n      \\\"path\\\": \\\"/root/alpha\\\",\\n      \\\"computer\\\": \\\"place-9\\\"\\n    },\\n    \\\"home\\\": \\\"/root\\\",\\n    \\\"theme\\\": {\\n      \\\"dots\\\": [\\n        {\\n          \\\"angle\\\": 12.5,\\n          \\\"radius\\\": 0.30000000000000004\\n        }\\n      ],\\n      \\\"harmony\\\": \\\"single\\\",\\n      \\\"grain\\\": 0.5,\\n      \\\"opacity\\\": 1,\\n      \\\"mode\\\": \\\"auto\\\"\\n    },\\n    \\\"agents\\\": {\\n      \\\"spawn\\\": true,\\n      \\\"maxMachines\\\": 2,\\n      \\\"maxDepth\\\": 1\\n    },\\n    \\\"place\\\": \\\"place-9\\\",\\n    \\\"provider\\\": \\\"solari\\\",\\n    \\\"parentWorkspaceId\\\": \\\"ws-1\\\"\\n  },\\n  \\\"turn\\\": {\\n    \\\"threadId\\\": \\\"t-9\\\",\\n    \\\"workspaceId\\\": \\\"ws-3\\\",\\n    \\\"harness\\\": \\\"claude\\\",\\n    \\\"text\\\": \\\"\\\",\\n    \\\"outcome\\\": \\\"started\\\"\\n  }\\n}\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"turn\":{\"threadId\":\"t-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"text\":\"\",\"outcome\":\"started\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "workspaceId": "ws-3",
+          "prompt": "go",
+          "harness": "codex",
+          "startedBy": "agent",
+          "requestId": "<request id>"
+        }
+      ]
+    },
+    {
+      "case": "first turn failed",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "pushed": {
+        "sessions.start": [
+          "{\"workspaceId\":\"ws-3\",\"sessionId\":\"s-9\",\"threadId\":\"t-9\",\"turnId\":\"turn-1\",\"type\":\"session.done\",\"result\":{\"status\":\"failed\",\"error\":\"no sign-in for claude \u0085\"}}"
+        ]
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"created alpha-fork ws-3; first turn failed: no sign-in for claude \\u0085\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"failure\":\"no sign-in for claude \\u0085\"},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "workspaceId": "ws-3",
+          "prompt": "go",
+          "startedBy": "agent",
+          "requestId": "<request id>"
+        }
+      ]
+    },
+    {
+      "case": "first turn interrupted",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "pushed": {
+        "sessions.start": [
+          "{\"workspaceId\":\"ws-3\",\"sessionId\":\"s-9\",\"threadId\":\"t-9\",\"turnId\":\"turn-1\",\"type\":\"session.done\",\"result\":{\"status\":\"interrupted\"}}"
+        ]
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"created alpha-fork ws-3; first turn failed: turn interrupted\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"failure\":\"turn interrupted\"},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "workspaceId": "ws-3",
+          "prompt": "go",
+          "startedBy": "agent",
+          "requestId": "<request id>"
+        }
+      ]
+    },
+    {
+      "case": "ended by the runtime",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "pushed": {
+        "sessions.start": [
+          "{\"workspaceId\":\"ws-3\",\"sessionId\":\"s-9\",\"threadId\":\"t-9\",\"turnId\":\"turn-1\",\"type\":\"session.end\",\"reason\":\"the machine stopped answering\"}"
+        ]
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"created alpha-fork ws-3; first turn failed: the machine stopped answering\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"failure\":\"the machine stopped answering\"},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "workspaceId": "ws-3",
+          "prompt": "go",
+          "startedBy": "agent",
+          "requestId": "<request id>"
+        }
+      ]
+    },
+    {
+      "case": "ended with no reason",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "pushed": {
+        "sessions.start": [
+          "{\"workspaceId\":\"ws-3\",\"sessionId\":\"s-9\",\"threadId\":\"t-9\",\"turnId\":\"turn-1\",\"type\":\"session.end\"}"
+        ]
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"created alpha-fork ws-3; first turn failed: turn ended without a result\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"failure\":\"turn ended without a result\"},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "workspaceId": "ws-3",
+          "prompt": "go",
+          "startedBy": "agent",
+          "requestId": "<request id>"
+        }
+      ]
+    },
+    {
+      "case": "start refused",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":false,\"error\":\"the machine refused the start\",\"kind\":\"auth\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"created alpha-fork ws-3; first turn failed: the machine refused the start\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"failure\":\"the machine refused the start\"},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "workspaceId": "ws-3",
+          "prompt": "go",
+          "startedBy": "agent",
+          "requestId": "<request id>"
+        }
+      ]
+    },
+    {
+      "case": "start in another shape",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"sideways\",\"turnId\":\"turn-1\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"created alpha-fork ws-3; first turn failed: the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"failure\":\"the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up\"},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "workspaceId": "ws-3",
+          "prompt": "go",
+          "startedBy": "agent",
+          "requestId": "<request id>"
+        }
+      ]
+    },
+    {
+      "case": "no thread stamped",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\"},\"outcome\":\"queued\",\"turnId\":\"turn-1\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"created alpha-fork ws-3; first turn failed: the runtime stamped no thread on the session\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"failure\":\"the runtime stamped no thread on the session\"},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "workspaceId": "ws-3",
+          "prompt": "go",
+          "startedBy": "agent",
+          "requestId": "<request id>"
+        }
+      ]
+    },
+    {
+      "case": "notify names no thread",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go",
+        "notify": [
+          "zz"
+        ]
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-2\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\",\"threadId\":\"t-1\"},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"running\"}]}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"created alpha-fork ws-3; first turn failed: no thread zz\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"failure\":\"no thread zz\"},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.list"
+        }
+      ]
+    },
+    {
+      "case": "notify names two",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go",
+        "notify": [
+          "s-"
+        ]
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}",
+        "sessions.list": "{\"id\":1,\"ok\":true,\"sessions\":[{\"id\":\"s-1\",\"workspaceId\":\"ws-1\",\"harness\":\"claude\",\"status\":\"completed\"},{\"id\":\"s-3\",\"workspaceId\":\"ws-1\",\"harness\":\"codex\",\"status\":\"running\"}]}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"created alpha-fork ws-3; first turn failed: 2 threads start with s-; give more of the id\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"failure\":\"2 threads start with s-; give more of the id\"},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.list"
+        }
+      ]
+    },
+    {
+      "case": "empty task",
+      "arguments": {
+        "workspace": "alpha",
+        "task": " \n "
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"the task is empty; say what the thread is to do. Put it in quotes after the flags.\"}],\"structuredContent\":{\"error\":\"the task is empty; say what the thread is to do. Put it in quotes after the flags.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        }
+      ]
+    },
+    {
+      "case": "no such agent",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go",
+        "agent": "gemini"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no adapter registered for harness \\\"gemini\\\"; agents on this host: codex, claude. Name one of those with --agent.\"}],\"structuredContent\":{\"error\":\"no adapter registered for harness \\\"gemini\\\"; agents on this host: codex, claude. Name one of those with --agent.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "no agent at all",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go",
+        "agent": "gemini"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"no adapter registered for harness \\\"gemini\\\"; agents on this host: none. Name one of those with --agent.\"}],\"structuredContent\":{\"error\":\"no adapter registered for harness \\\"gemini\\\"; agents on this host: none. Name one of those with --agent.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "model not offered",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go",
+        "model": "opus-9"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"model \\\"opus-9\\\" is not one claude takes; one of: Sonnet (sonnet), Haiku, small (haiku); legacy: Old (old). Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"model \\\"opus-9\\\" is not one claude takes; one of: Sonnet (sonnet), Haiku, small (haiku); legacy: Old (old). Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "effort not offered",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go",
+        "effort": "max"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"effort \\\"max\\\" is not one claude takes; one of: Low (low), High (high). Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"effort \\\"max\\\" is not one claude takes; one of: Low (low), High (high). Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "model takes no effort",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go",
+        "model": "haiku",
+        "effort": "low"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Haiku, small takes no effort. Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"Haiku, small takes no effort. Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "access off the built-in table",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go",
+        "agent": "codex",
+        "access": "yolo"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"access mode \\\"yolo\\\" is not one codex takes; one of: Default (default), Bypass (bypass); that list is wsp's built-in one, since no agent on that workspace described itself, and the agent on its machine may take more. Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"access mode \\\"yolo\\\" is not one codex takes; one of: Default (default), Bypass (bypass); that list is wsp's built-in one, since no agent on that workspace described itself, and the agent on its machine may take more. Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "no effort off the built-in table",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go",
+        "agent": "codex",
+        "model": "haiku",
+        "effort": "low"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]},{\"harness\":\"claude\",\"isDefault\":true,\"source\":\"machine\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Haiku, small takes no effort; wsp's built-in table says so, since no agent on that workspace described itself. Drop the flag, or give it a value the agent offers.\"}],\"structuredContent\":{\"error\":\"Haiku, small takes no effort; wsp's built-in table says so, since no agent on that workspace described itself. Drop the flag, or give it a value the agent offers.\",\"class\":\"usage\",\"exit\":3},\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        }
+      ]
+    },
+    {
+      "case": "no catalog for the agent",
+      "arguments": {
+        "workspace": "alpha",
+        "task": "go",
+        "model": "anything"
+      },
+      "replies": {
+        "workspaces.resolve": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha \\\"one\\\" \u0085 🧪\",\"id\":\"ws-1\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\"}}",
+        "harnesses.list": "{\"id\":1,\"ok\":true,\"harnesses\":[{\"harness\":\"codex\",\"isDefault\":false,\"source\":\"table\",\"models\":[{\"value\":\"sonnet\",\"label\":\"Sonnet\",\"isDefault\":true},{\"value\":\"haiku\",\"label\":\"Haiku, small\",\"efforts\":[]}],\"legacyModels\":[{\"value\":\"old\",\"label\":\"Old\"}],\"efforts\":[{\"value\":\"low\",\"label\":\"Low\"},{\"value\":\"high\",\"label\":\"High\",\"isDefault\":true}],\"permissionModes\":[{\"value\":\"default\",\"label\":\"Default\",\"isDefault\":true},{\"value\":\"bypass\",\"label\":\"Bypass\"}],\"contextWindows\":[]}]}",
+        "projects.resolve": "{\"id\":1,\"ok\":true,\"project\":{\"id\":\"proj-1\",\"name\":\"alpha 'quoted'\",\"computer\":\"place-9\",\"source\":{\"kind\":\"github\",\"repo\":\"dev/alpha\"},\"path\":\"/root/alpha\",\"remote\":\"https://github.com/dev/alpha.git\",\"defaultBranch\":\"main\",\"memoryKey\":\"-root-alpha\",\"memoryDir\":\"/root/.claude/projects/-root-alpha \u0085\",\"createdAt\":\"2026-09-01T00:00:00.000Z\",\"base\":\"main\"}}",
+        "workspaces.landing": "{\"id\":1,\"ok\":true,\"capabilities\":{\"sizes\":[]}}",
+        "workspaces.create": "{\"id\":1,\"ok\":true,\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"}}",
+        "sessions.start": "{\"id\":1,\"ok\":true,\"session\":{\"id\":\"s-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"status\":\"running\",\"startedBy\":\"agent\",\"threadId\":\"t-9\"},\"outcome\":\"started\",\"turnId\":\"turn-1\"}"
+      },
+      "pushed": {
+        "sessions.start": [
+          "{\"workspaceId\":\"ws-3\",\"sessionId\":\"s-9\",\"threadId\":\"t-9\",\"turnId\":\"turn-1\",\"type\":\"session.done\",\"result\":{\"status\":\"completed\",\"text\":\"ok\"}}"
+        ]
+      },
+      "cloud": true,
+      "line": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"workspace\\\": {\\n    \\\"name\\\": \\\"alpha-fork\\\",\\n    \\\"id\\\": \\\"ws-3\\\",\\n    \\\"machineId\\\": \\\"m-1\\\",\\n    \\\"phase\\\": \\\"running\\\",\\n    \\\"kind\\\": \\\"cloud\\\",\\n    \\\"golden\\\": \\\"snap-g1\\\",\\n    \\\"createdAt\\\": \\\"2026-09-27T01:02:03.004Z\\\",\\n    \\\"project\\\": {\\n      \\\"id\\\": \\\"proj-1\\\",\\n      \\\"name\\\": \\\"alpha\\\",\\n      \\\"path\\\": \\\"/root/alpha\\\",\\n      \\\"computer\\\": \\\"place-9\\\"\\n    },\\n    \\\"home\\\": \\\"/root\\\",\\n    \\\"theme\\\": {\\n      \\\"dots\\\": [\\n        {\\n          \\\"angle\\\": 12.5,\\n          \\\"radius\\\": 0.30000000000000004\\n        }\\n      ],\\n      \\\"harmony\\\": \\\"single\\\",\\n      \\\"grain\\\": 0.5,\\n      \\\"opacity\\\": 1,\\n      \\\"mode\\\": \\\"auto\\\"\\n    },\\n    \\\"agents\\\": {\\n      \\\"spawn\\\": true,\\n      \\\"maxMachines\\\": 2,\\n      \\\"maxDepth\\\": 1\\n    },\\n    \\\"place\\\": \\\"place-9\\\",\\n    \\\"provider\\\": \\\"solari\\\",\\n    \\\"parentWorkspaceId\\\": \\\"ws-1\\\"\\n  },\\n  \\\"turn\\\": {\\n    \\\"threadId\\\": \\\"t-9\\\",\\n    \\\"workspaceId\\\": \\\"ws-3\\\",\\n    \\\"harness\\\": \\\"claude\\\",\\n    \\\"text\\\": \\\"ok\\\",\\n    \\\"outcome\\\": \\\"started\\\"\\n  }\\n}\"}],\"structuredContent\":{\"workspace\":{\"name\":\"alpha-fork\",\"id\":\"ws-3\",\"machineId\":\"m-1\",\"phase\":\"running\",\"kind\":\"cloud\",\"golden\":\"snap-g1\",\"createdAt\":\"2026-09-27T01:02:03.004Z\",\"project\":{\"id\":\"proj-1\",\"name\":\"alpha\",\"path\":\"/root/alpha\",\"computer\":\"place-9\"},\"home\":\"/root\",\"theme\":{\"dots\":[{\"angle\":12.5,\"radius\":0.30000000000000004}],\"harmony\":\"single\",\"grain\":0.5,\"opacity\":1,\"mode\":\"auto\"},\"agents\":{\"spawn\":true,\"maxMachines\":2,\"maxDepth\":1},\"place\":\"place-9\",\"provider\":\"solari\",\"parentWorkspaceId\":\"ws-1\"},\"turn\":{\"threadId\":\"t-9\",\"workspaceId\":\"ws-3\",\"harness\":\"claude\",\"text\":\"ok\",\"outcome\":\"started\"}}},\"jsonrpc\":\"2.0\",\"id\":1}",
+      "asked": [
+        {
+          "op": "workspaces.resolve",
+          "ref": "alpha"
+        },
+        {
+          "op": "harnesses.list",
+          "workspaceId": "ws-1"
+        },
+        {
+          "op": "projects.resolve",
+          "ref": "proj-1"
+        },
+        {
+          "op": "workspaces.landing",
+          "project": "proj-1"
+        },
+        {
+          "op": "workspaces.create",
+          "project": "proj-1",
+          "name": "alpha \"one\" \u0085 🧪-fork",
+          "parent": "ws-1"
+        },
+        {
+          "op": "sessions.start",
+          "workspaceId": "ws-3",
+          "prompt": "go",
+          "model": "anything",
+          "startedBy": "agent",
+          "requestId": "<request id>"
+        }
+      ]
+    }
+  ]
+}

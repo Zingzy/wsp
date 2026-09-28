@@ -3213,6 +3213,8 @@ describe("a fork on a computer you joined", () => {
     "fs.folders",
     "git.discard",
     "git.commit",
+    "git.checkpoint",
+    "git.restore",
     "tunnel.open",
     "tunnel.write",
     "tunnel.close",

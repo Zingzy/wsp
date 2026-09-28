@@ -10,7 +10,7 @@ import type { Api, StartSessionOptions } from "../src/protocol/client.js";
 import { projectHomeKey, useStore } from "../src/protocol/store.js";
 import { ProjectHome, noRoomLine } from "../src/shell/ProjectHome.js";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
-import { useComposerImagesStore } from "../src/components/chat/composerImages.js";
+import { useComposerFilesStore } from "../src/components/chat/composerFiles.js";
 import { useMultiPickStore, type ModelPick } from "../src/components/chat/composerMultiPick.js";
 import { useComposerOptionsStore } from "../src/components/chat/composerOptionsStore.js";
 import { composerEditor, press, typeInto } from "./composer-harness.js";
@@ -92,7 +92,7 @@ beforeEach(() => {
   window.localStorage.clear();
   useComposerDraftStore.setState({ drafts: {}, queues: {}, held: {} });
   useComposerOptionsStore.setState({ byWorkspaceId: {}, pickedOn: {} });
-  useComposerImagesStore.setState({ pending: {}, sent: {} });
+  useComposerFilesStore.setState({ pending: {}, sent: {} });
   useMultiPickStore.setState({ byKey: { [HOME]: PICKS } });
 });
 afterEach(cleanup);
@@ -109,7 +109,7 @@ describe("a project's home sending to several models", () => {
   it("makes one copy per model, named by the task and the model, and starts the same message and images in each under one attempt", async () => {
     const { api, created, started } = fakeApi(3);
     const image = { id: "img_1", mediaType: "image/png", name: "shot.png", bytes: "iVBORw0KGgo=", url: "blob:shot", size: 8 };
-    useComposerImagesStore.setState({ pending: { [HOME]: [image] }, sent: {} });
+    useComposerFilesStore.setState({ pending: { [HOME]: [image] }, sent: {} });
     useComposerOptionsStore.setState({ byWorkspaceId: { [HOME]: { effort: "low" } }, pickedOn: {} });
     await mount(api);
     expect(screen.getByRole("button", { name: "Send to 3" })).toBeTruthy();
@@ -132,7 +132,7 @@ describe("a project's home sending to several models", () => {
     for (const s of started) expect(s.attachments).toEqual([{ mediaType: "image/png", bytes: "iVBORw0KGgo=", name: "shot.png" }]);
     // The list and the images went with the send, so the home is empty again.
     expect(useMultiPickStore.getState().byKey[HOME]).toBeUndefined();
-    expect(useComposerImagesStore.getState().pending[HOME]).toBeUndefined();
+    expect(useComposerFilesStore.getState().pending[HOME]).toBeUndefined();
   });
 
   it("refuses in one sentence before any copy is made when the computer has room for fewer threads than the picks, and keeps the draft and the picks", async () => {
