@@ -243,7 +243,7 @@ import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import { makeDevices, type DeviceDoor, type ScopedRoad } from "./devices.js";
 import { makePlaceDoor, PlaceForksNowhereError, PlaceProvisioningError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
-import type { Store } from "./store.js";
+import type { BlobMark, Store } from "./store.js";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "./harness-catalog.js";
 
 // --- adapter port -------------------------------------------------------------
@@ -1804,8 +1804,15 @@ interface TranscriptIndex {
   /** Whether each thread's newest end came with no exit code and no result. */
   cut: Map<string, boolean>;
   /** The folder, access and model each session's newest start that named one named. */
-  facts: Map<string, { cwd?: string; permissionMode?: string; model?: string }>;
+  facts: Map<string, SessionFacts>;
 }
+
+/** A transcript file that is there and did not read: nothing is written over it, since what it holds is still in it. */
+const transcriptUnreadLine = (workspaceId: string, why: string): string => `the transcript of ${workspaceId} does not read (${why}), so nothing is written over it`;
+
+/** What a resumed session's turns carry, read off its newest start that named each. */
+const SESSION_FACTS = ["cwd", "permissionMode", "model"] as const;
+type SessionFacts = Partial<Record<(typeof SESSION_FACTS)[number], string>>;
 
 const emptyIndex = (): TranscriptIndex => ({ words: new Map(), starts: new Map(), cut: new Map(), facts: new Map() });
 
@@ -1816,7 +1823,7 @@ function foldEvent(index: TranscriptIndex, e: SessionEvent): void {
   if (e.type === "session.start") {
     if (e.threadId !== undefined) index.starts.set(e.threadId, e.sessionId);
     const facts = index.facts.get(e.sessionId) ?? {};
-    for (const fact of ["cwd", "permissionMode", "model"] as const) if (e[fact] !== undefined) facts[fact] = e[fact];
+    for (const fact of SESSION_FACTS) if (e[fact] !== undefined) facts[fact] = e[fact];
     index.facts.set(e.sessionId, facts);
   } else if (e.type === "session.end" && e.threadId !== undefined) index.cut.set(e.threadId, e.exitCode === null && !e.sawResult);
   if (e.threadId === undefined) return;
@@ -1839,11 +1846,13 @@ const indexOf = (events: readonly SessionEvent[]): TranscriptIndex => {
   for (const e of events) foldEvent(index, e);
   return index;
 };
-const indexBytes = (index: TranscriptIndex): Buffer =>
-  Buffer.from(JSON.stringify({ words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts] }));
-const indexRead = (bytes: Buffer): TranscriptIndex => {
-  const held = JSON.parse(bytes.toString("utf8")) as { words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, { cwd?: string; permissionMode?: string; model?: string }][] };
-  return { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts) };
+/** An index as its file holds it, with the mark of the transcript file it was read off: an index whose transcript
+ * has been written since (a crash between the two writes, a failed index write) is one boot reads again. */
+const indexBytes = (index: TranscriptIndex, of: BlobMark | undefined): Buffer =>
+  Buffer.from(JSON.stringify({ of, words: [...index.words], starts: [...index.starts], cut: [...index.cut], facts: [...index.facts] }));
+const indexRead = (bytes: Buffer): { index: TranscriptIndex; of?: BlobMark } => {
+  const held = JSON.parse(bytes.toString("utf8")) as { of?: BlobMark; words: [string, ThreadWords][]; starts: [string, string][]; cut: [string, boolean][]; facts: [string, SessionFacts][] };
+  return { index: { words: new Map(held.words), starts: new Map(held.starts), cut: new Map(held.cut), facts: new Map(held.facts) }, ...(held.of !== undefined ? { of: held.of } : {}) };
 };
 
 /** The words around a hit, on one line: a little before it and more after, an ellipsis where the text goes on. */
@@ -3073,15 +3082,24 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * flush rewrote every workspace's transcript with it, and a host whose file had grown to hundreds of megabytes
    * spent its loop on that for minutes. */
   const transcriptBlob = (record: TranscriptRecord): Buffer => Buffer.from(JSON.stringify(record));
+  /** A transcript file's events, nothing where there is no file, and a refusal where there is a file that did not
+   * read: a caller that took the two for one wrote what it held over everything the file had. */
   const readTranscript = async (workspaceId: string, collection: string = TRANSCRIPTS): Promise<SessionEvent[] | undefined> => {
     const bytes = await store.getBlob(collection, workspaceId);
-    if (bytes === undefined) return undefined;
+    if (bytes === undefined) {
+      if ((await store.statBlob(collection, workspaceId)) === undefined) return undefined;
+      throw new Error(transcriptUnreadLine(workspaceId, "the file is there and could not be read"));
+    }
     try {
       return (JSON.parse(bytes.toString("utf8")) as TranscriptRecord).events;
     } catch (e) {
-      console.warn(`the transcript of ${workspaceId} does not read and is left out: ${e instanceof Error ? e.message : String(e)}`);
-      return undefined;
+      throw new Error(transcriptUnreadLine(workspaceId, e instanceof Error ? e.message : String(e)));
     }
+  };
+  /** The index written beside a transcript, marked with the transcript file as it stands now. */
+  const writeIndex = async (workspaceId: string, index: TranscriptIndex): Promise<void> => {
+    const bytes = indexBytes(index, await store.statBlob(TRANSCRIPTS, workspaceId));
+    await store.putBlob(TRANSCRIPT_INDEX, workspaceId, bytes);
   };
   /** A transcript an older build kept inside the state file, merged into what its files already hold: an older build
    * run on this state after this one writes its new events there again, and a move cut short by a crash leaves both
@@ -3105,24 +3123,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await store.putBlob(TRANSCRIPTS, id, transcriptBlob({ workspaceId: id, events: held }));
     const index = indexOf(held);
     transcriptIndex.set(id, index);
-    await store.putBlob(TRANSCRIPT_INDEX, id, indexBytes(index));
+    await writeIndex(id, index);
   };
-  /** The index a workspace's transcript left beside it, or one read off the transcript itself where there is none. */
+  /** The index a workspace's transcript left beside it where it was read off the file as it stands, else one read off
+   * the transcript itself: an index older than its file answers search and a send from before the last turn. */
   const loadIndex = async (workspaceId: string): Promise<void> => {
-    const bytes = await store.getBlob(TRANSCRIPT_INDEX, workspaceId);
-    if (bytes !== undefined) {
-      try {
-        transcriptIndex.set(workspaceId, indexRead(bytes));
+    try {
+      const mark = await store.statBlob(TRANSCRIPTS, workspaceId);
+      if (mark === undefined) return;
+      const bytes = await store.getBlob(TRANSCRIPT_INDEX, workspaceId);
+      const kept = bytes === undefined ? undefined : indexRead(bytes);
+      if (kept?.of !== undefined && kept.of.bytes === mark.bytes && kept.of.at === mark.at) {
+        transcriptIndex.set(workspaceId, kept.index);
         return;
-      } catch (e) {
-        console.warn(`the transcript index of ${workspaceId} does not read and is made again: ${e instanceof Error ? e.message : String(e)}`);
       }
+      const index = indexOf((await readTranscript(workspaceId)) ?? []);
+      transcriptIndex.set(workspaceId, index);
+      await writeIndex(workspaceId, index);
+    } catch (e) {
+      console.warn(`the transcript index of ${workspaceId} was not read: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const events = await readTranscript(workspaceId);
-    if (events === undefined) return;
-    const index = indexOf(events);
-    transcriptIndex.set(workspaceId, index);
-    await store.putBlob(TRANSCRIPT_INDEX, workspaceId, indexBytes(index));
   };
   // Every read and write of one workspace's transcript file takes its turn here, so the later snapshot always lands
   // last whatever order the store finishes in, and a read never lands between a flush's write and the moment the
@@ -3133,25 +3153,61 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     transcriptQueue.set(workspaceId, run.then(() => {}, () => {}));
     return run;
   };
-  /** A workspace's transcript whole: held already, or its file and what was written since, read on demand and held
-   * as the one opened last. */
-  const openTranscript = async (workspaceId: string): Promise<SessionEvent[]> => {
+  /** A workspace's transcript whole: held already, or its file and what was written since, read on demand. The copy
+   * this answers is the one to use: another open can let it go from the held ones at any await, so a caller never
+   * looks it up again. */
+  const openTranscript = (workspaceId: string): Promise<SessionEvent[]> => {
     const held = transcripts.get(workspaceId);
     if (held !== undefined) {
       holdTranscript(workspaceId, held);
-      return held;
+      return Promise.resolve(held);
     }
-    return onTranscriptQueue(workspaceId, async () => {
-      const landed = transcripts.get(workspaceId);
-      if (landed !== undefined) return landed;
-      const events = (await readTranscript(workspaceId)) ?? [];
-      events.push(...(pendingEvents.get(workspaceId) ?? []));
-      transcriptBytes.delete(workspaceId);
-      trimTranscript(workspaceId, events);
-      holdTranscript(workspaceId, events);
-      return events;
-    });
+    return onTranscriptQueue(workspaceId, () => openInQueue(workspaceId));
   };
+  /** The open itself, run inside the queue. A transcript that exists is held as the one opened last; one with no file
+   * and nothing written, or of a workspace deleted meanwhile, is answered and not held. */
+  const openInQueue = async (workspaceId: string): Promise<SessionEvent[]> => {
+    const landed = transcripts.get(workspaceId);
+    if (landed !== undefined) return landed;
+    const read = await readTranscript(workspaceId);
+    const events = [...(read ?? []), ...(pendingEvents.get(workspaceId) ?? [])];
+    const bytes = dropOldest(events);
+    if (events.length > 0 && transcriptIndex.has(workspaceId)) {
+      holdTranscript(workspaceId, events);
+      transcriptBytes.set(workspaceId, bytes);
+    }
+    return events;
+  };
+  /** Inside the queue: `events` written as the transcript, the first `took` events written since the last flush
+   * cleared the moment the file has them, and the index made again off what was written. */
+  const writeTranscript = async (workspaceId: string, events: SessionEvent[], took: number): Promise<void> => {
+    await store.putBlob(TRANSCRIPTS, workspaceId, transcriptBlob({ workspaceId, events }));
+    // Before the index is written, so an index write that fails cannot leave these to be written a second time.
+    const pending = pendingEvents.get(workspaceId);
+    pending?.splice(0, took);
+    if (pending !== undefined && pending.length === 0) {
+      pendingEvents.delete(workspaceId);
+      pendingBytes.delete(workspaceId);
+    } else if (pending !== undefined) pendingBytes.set(workspaceId, pending.reduce((n, e) => n + eventBytes(e), 0));
+    const index = indexOf(events);
+    // An index that did not land keeps its old mark, and boot reads that transcript again.
+    await writeIndex(workspaceId, index).catch((e: unknown) => console.warn(`the transcript index of ${workspaceId} was not written: ${e instanceof Error ? e.message : String(e)}`));
+    // What arrived during the writes is folded on after them, as record folded it on the index this replaces.
+    for (const e of pendingEvents.get(workspaceId) ?? []) foldEvent(index, e);
+    if (transcriptIndex.has(workspaceId)) transcriptIndex.set(workspaceId, index);
+  };
+  /** Takes the events `drops` names out of a transcript, the file and what was written since alike, and writes it: one
+   * turn of the queue on the copy the open answered, so nothing can let that copy go between the change and the
+   * write, and no flush runs between them. */
+  const dropFromTranscript = (workspaceId: string, drops: (e: SessionEvent) => boolean): Promise<void> =>
+    onTranscriptQueue(workspaceId, async () => {
+      const events = await openInQueue(workspaceId);
+      for (let i = events.length - 1; i >= 0; i--) if (drops(events[i]!)) events.splice(i, 1);
+      transcriptBytes.delete(workspaceId);
+      const pending = pendingEvents.get(workspaceId) ?? [];
+      for (let i = pending.length - 1; i >= 0; i--) if (drops(pending[i]!)) pending.splice(i, 1);
+      await writeTranscript(workspaceId, [...events], pending.length);
+    });
   const transcriptTimers = new Map<string, () => void>();
   // One token per machine, written to a guest the first time a client asks to reach its daemon; the file the
   // guest carried before (the golden's, or an earlier run's) stops working then. Per machine and not per process:
@@ -3185,6 +3241,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The flushes queued and not yet begun, so a burst of asks is one write. */
   const flushesQueued = new Map<string, Promise<void>>();
+  /** The transcripts whose file did not read at their last flush, so the refusal is said once. */
+  const unreadSaid = new Set<string>();
   // The copy is taken when the flush's turn comes, not per event: a store may serialise after it returns, and the
   // events keep arriving under it. A transcript not held is its file with what was written since appended.
   const flushTranscript = (workspaceId: string): Promise<void> => {
@@ -3198,23 +3256,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let events: SessionEvent[];
       if (held !== undefined) events = [...held];
       else {
-        events = (await readTranscript(workspaceId)) ?? [];
-        events.push(...(pendingEvents.get(workspaceId) ?? []));
+        let read: SessionEvent[] | undefined;
+        try {
+          read = await readTranscript(workspaceId);
+        } catch (e) {
+          // What was written since stays unwritten for the next flush, and the file keeps what it has. Said once
+          // until a flush lands, since every event past the threshold asks again.
+          if (!unreadSaid.has(workspaceId)) console.warn(`${e instanceof Error ? e.message : String(e)}; its newest events wait for the next flush`);
+          unreadSaid.add(workspaceId);
+          return;
+        }
+        events = [...(read ?? []), ...(pendingEvents.get(workspaceId) ?? [])];
         dropOldest(events);
       }
-      const took = pendingEvents.get(workspaceId)?.length ?? 0;
-      await store.putBlob(TRANSCRIPTS, workspaceId, transcriptBlob({ workspaceId, events }));
-      const written = indexOf(events);
-      await store.putBlob(TRANSCRIPT_INDEX, workspaceId, indexBytes(written));
-      pendingEvents.get(workspaceId)?.splice(0, took);
-      const after = pendingEvents.get(workspaceId) ?? [];
-      if (after.length === 0) {
-        pendingEvents.delete(workspaceId);
-        pendingBytes.delete(workspaceId);
-      } else pendingBytes.set(workspaceId, after.reduce((n, e) => n + eventBytes(e), 0));
-      // The index is the written transcript's, cap and all, with what arrived during the write folded on.
-      for (const e of after) foldEvent(written, e);
-      if (transcriptIndex.has(workspaceId)) transcriptIndex.set(workspaceId, written);
+      unreadSaid.delete(workspaceId);
+      await writeTranscript(workspaceId, events, pendingEvents.get(workspaceId)?.length ?? 0);
     });
     const settled = flush.catch(() => {});
     flushesQueued.set(workspaceId, settled);
@@ -5121,8 +5177,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A state file an older build wrote holds the transcripts inside it: each is written to its files whole, and
       // only then is the state file written once without them.
       const inside = (await store.list(TRANSCRIPTS)) as TranscriptRecord[];
-      for (const t of inside) await moveTranscript(t);
-      await Promise.all(inside.map(t => store.delete(TRANSCRIPTS, t.workspaceId)));
+      // One whose files did not read stays in the state file, whole, for the next boot to move.
+      const moved: string[] = [];
+      for (const t of inside) {
+        try {
+          await moveTranscript(t);
+          moved.push(t.workspaceId);
+        } catch (e) {
+          console.warn(`the transcript of ${t.workspaceId} stays in the state file: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      await Promise.all(moved.map(id => store.delete(TRANSCRIPTS, id)));
       for (const id of await store.keys(WORKSPACES)) if (!transcriptIndex.has(id)) await loadIndex(id);
       const left: { view: SessionView; turnId: string; notify?: readonly string[]; notifyBy?: ThreadScope; notifyRoad?: WorkspaceOrigin; turnLive?: TurnLive; run?: string; turnToken?: string; scopeDeviceId?: string }[] = [];
       for (const raw of await store.list(SESSIONS)) {
@@ -6796,6 +6861,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const runTurn = (t: {
     entry: LiveWorkspace;
     view: SessionView;
+    /** The workspace's transcript as its open answered it, for a turn re-opened after a restart: how much of itself
+     * that turn has written is read off it. A new turn has written nothing. */
+    written?: readonly SessionEvent[];
     /** The thread this turn runs on, which every row the runtime writes carries. */
     threadId: string;
     turnId: string;
@@ -6834,7 +6902,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   }): SessionHandle => {
     const { entry, view, threadId, turnId, opening, outcome, notify, notifyBy, notifyRoad, turnToken, scopeDeviceId } = t;
     const workspaceId = entry.record.id;
-    const written = transcripts.get(workspaceId) ?? [];
+    const written = t.written ?? [];
     /** The last row this turn wrote of a kind: the transcript holds every workspace's rows in the order they were
      * written, so a live turn's are at its tail. */
     const lastOf = <T extends SessionEvent["type"]>(type: T): Extract<SessionEvent, { type: T }> | undefined => {
@@ -7302,12 +7370,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return "unreached";
     }
     if (opened === "gone") return "gone";
-    // The turn reads how much of itself is written off the transcript, which only a transcript held whole answers.
-    await openTranscript(view.workspaceId);
+    // The turn reads how much of itself is written off the transcript it is handed, the copy this open answers. A file
+    // that did not read says nothing about the run, so the row is left running as it was.
+    let written: SessionEvent[];
+    try {
+      written = await openTranscript(view.workspaceId);
+    } catch (e: unknown) {
+      console.warn(`thread ${threadId.slice(0, 8)} on ${view.workspaceId} was left running: ${e instanceof Error ? e.message : String(e)}`);
+      return "unreached";
+    }
     try {
       runTurn({
         entry,
         view,
+        written,
         threadId,
         turnId: s.turnId,
         ...(s.notify !== undefined ? { notify: s.notify } : {}),
@@ -7945,7 +8021,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return { turns: 0, files: Number(back["files"] ?? 0) };
       }
 
-      const events = transcripts.get(workspaceId) ?? [];
+      // A copy, read for the turns and their checkpoints alone: the cut below takes its own copy inside the queue.
+      const events = [...(await openTranscript(workspaceId))];
       const order: string[] = [];
       for (const e of events) if (e.threadId === threadId && e.turnId !== undefined && !order.includes(e.turnId)) order.push(e.turnId);
       const at = opts.turnId === undefined ? -1 : order.indexOf(opts.turnId);
@@ -7988,10 +8065,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       threadRecords.set(threadId, record);
       if (adapter.resumesAt === true) record.resumeAt = kept!.anchor!;
       if (before !== undefined) record.rewound = { before, at: clock.now() };
-      if (cutsConversation) {
-        // Spliced rather than replaced, as forget does: a turn of another thread on this workspace holds the array.
-        for (let i = events.length - 1; i >= 0; i--) if (events[i]!.threadId === threadId && cut.includes(events[i]!.turnId ?? "")) events.splice(i, 1);
-      }
+      if (cutsConversation) await dropFromTranscript(workspaceId, e => e.threadId === threadId && cut.includes(e.turnId ?? ""));
       await done();
       return { turns: cutsConversation ? cut.length : 0, ...(moved !== undefined ? { files: Number(moved["files"] ?? 0) } : {}) };
     },
@@ -8013,16 +8087,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await dropThreadFiles(entry, [threadId]);
       for (const [id] of held) sessions.delete(id);
       threadRecords.delete(threadId);
-      // Spliced rather than replaced: a turn of another thread on this workspace holds the array itself, and its
-      // rows would go to a copy nothing reads.
-      const events = await openTranscript(workspaceId);
-      for (let i = events.length - 1; i >= 0; i--) if (events[i]!.threadId === threadId) events.splice(i, 1);
-      transcriptBytes.delete(workspaceId);
-      // And out of what its file does not have yet, or a flush after the held copy is let go would write them back.
-      const unwritten = pendingEvents.get(workspaceId);
-      if (unwritten !== undefined) for (let i = unwritten.length - 1; i >= 0; i--) if (unwritten[i]!.threadId === threadId) unwritten.splice(i, 1);
+      await dropFromTranscript(workspaceId, e => e.threadId === threadId);
       await persistSessions(workspaceId);
-      await flushTranscript(workspaceId);
     },
   };
 

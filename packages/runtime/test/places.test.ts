@@ -252,6 +252,7 @@ function yielding(inner: Store): Store {
     getBlob: async (c, id) => (await soon(), inner.getBlob(c, id)),
     putBlob: async (c, id, b) => (await soon(), inner.putBlob(c, id, b)),
     deleteBlob: async (c, id) => (await soon(), inner.deleteBlob(c, id)),
+    statBlob: async (c, id) => (await soon(), inner.statBlob(c, id)),
   };
 }
 

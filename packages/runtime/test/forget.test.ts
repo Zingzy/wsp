@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { codexNotSignedInLine, foldThreads, forgetUndrivenRefusal, HERE_PLACE_ID, THIS_COMPUTER, signInRefusalLine, threadForgetRefusal, type EventUnion, type TurnResult } from "@wsp/protocol";
-import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
-import { memoryStore } from "../src/store.js";
+import { TRANSCRIPTS_HELD, createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
+import { memoryStore, type Store } from "../src/store.js";
 import { answersGoneOnce, fakeLocal, stubBackend, createOn, projectOn } from "./stub-backend.js";
 
 describe("workspaces.forget", () => {
@@ -175,6 +175,54 @@ describe("sessions.forget", () => {
     expect(stored.sessions.map(s => s.threadId)).toEqual([kept]);
     const transcript = JSON.parse((await store.getBlob("transcripts", ws.id))!.toString("utf8")) as { events: { threadId?: string }[] };
     expect(transcript.events.every(e => e.threadId === kept)).toBe(true);
+  });
+
+  it("drops a thread's rows for good when other transcripts open while it writes the thread's row away", async () => {
+    // The forget took the thread out of the held copy, waited on its session index, and flushed: four opens in that
+    // wait let the copy go, and the flush wrote the file back as it was, the thread's rows in it.
+    const inner = memoryStore();
+    let gated = false;
+    let reached: () => void = () => {};
+    const atGate = new Promise<void>(r => (reached = r));
+    let open: () => void = () => {};
+    const gate = new Promise<void>(r => (open = r));
+    const store: Store = {
+      ...inner,
+      put: async (collection, id, value) => {
+        if (gated && collection === "sessions") {
+          reached();
+          await gate;
+        }
+        return inner.put(collection, id, value);
+      },
+    };
+    const backend = stubBackend();
+    const rt = createRuntime({ backend, store, adapters: { claude: working, codex: dying } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "build it" })).finished;
+    const junk = await rt.sessions.start(ws.id, { prompt: "build it", harness: "codex" });
+    await junk.finished.catch(() => {});
+    const going = junk.view().threadId!;
+    const others = [];
+    for (let n = 0; n < TRANSCRIPTS_HELD; n++) {
+      const other = await createOn(rt, { golden: "snap_g", name: `other ${n}` });
+      await (await rt.sessions.start(other.id, { prompt: "elsewhere" })).finished;
+      others.push(other);
+    }
+    await rt.close();
+
+    const after = createRuntime({ backend, store, adapters: { claude: working, codex: dying } });
+    await after.sessions.history(ws.id);
+    gated = true;
+    const forgetting = after.sessions.forget(going);
+    await atGate;
+    for (const other of others) await after.sessions.history(other.id);
+    open();
+    await forgetting;
+    expect((await after.sessions.history(ws.id)).some(e => e.threadId === going)).toBe(false);
+    await after.close();
+    const transcript = JSON.parse((await store.getBlob("transcripts", ws.id))!.toString("utf8")) as { events: { threadId?: string }[] };
+    expect(transcript.events.some(e => e.threadId === going)).toBe(false);
   });
 
   it("refuses a thread whose turn did work, in one sentence, and keeps its row and its transcript whole", async () => {

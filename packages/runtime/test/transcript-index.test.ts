@@ -4,10 +4,13 @@
 // its last flush. Opening one reads its file, the last few opened stay held,
 // and search and a resume read the index alone.
 import { randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
-import type { AdapterEvent, TurnResult } from "@wsp/protocol";
+import { mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { DAEMON_VERSION, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { TRANSCRIPTS_HELD, createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
-import { memoryStore, type Store } from "../src/store.js";
+import { jsonFileStore, memoryStore, type Store } from "../src/store.js";
 import { createOn, stubBackend } from "./stub-backend.js";
 
 /** A memory store that counts the transcript files read. */
@@ -196,6 +199,95 @@ describe("a send read off the index", () => {
     await (await after.sessions.start(ws.id, { prompt: "more", thread: threadId })).finished;
     expect(next.starts[0]).toMatchObject({ resume: session, cwd: "/root/app/sub" });
     expect(atStart).toBe(before);
+    await after.close();
+  });
+});
+
+describe("a transcript file that did not read", () => {
+  it("is never written over: the flush waits, says so once, and writes everything once the file reads again", async () => {
+    // One failed read of the file, taken for no file at all, had the flush write the newest turn over every turn before.
+    const home = mkdtempSync(join(tmpdir(), "wsp-unread-"));
+    const statePath = join(home, "state.json");
+    const writer = { wsp: "test", daemon: DAEMON_VERSION, bin: "/usr/local/bin/wsp" };
+    const { adapter } = replying(p => `reply to ${p}`);
+    const rt = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
+    await rt.close();
+
+    // A file there that no read answers: a directory where the file was reads as EISDIR, for root as for anybody.
+    const file = join(home, "blobs", "transcripts", ws.id);
+    renameSync(file, `${file}.aside`);
+    mkdirSync(file);
+    const warned: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(line => void warned.push(String(line)));
+    const after = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: { claude: adapter } });
+    try {
+      await (await after.sessions.start(ws.id, { prompt: "two" })).finished;
+      await (await after.sessions.start(ws.id, { prompt: "three" })).finished;
+      await new Promise(r => setTimeout(r, 50));
+      expect(warned.filter(line => line.startsWith(`the transcript of ${ws.id} does not read`) && line.endsWith("its newest events wait for the next flush"))).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+    rmSync(file, { recursive: true });
+    renameSync(`${file}.aside`, file);
+    await after.close();
+
+    const third = createRuntime({ backend: stubBackend(), store: jsonFileStore(statePath, writer), adapters: {} });
+    const replies = (await third.sessions.history(ws.id)).flatMap(e => (e.type === "session.delta" && e.kind === "text" ? [e.text] : []));
+    expect(replies.join("")).toBe("reply to onereply to tworeply to three");
+    await third.close();
+    rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe("an index write", () => {
+  it("that fails leaves nothing to be written twice, and boot reads that transcript again", async () => {
+    const inner = memoryStore();
+    let failIndex = false;
+    const store: Store = {
+      ...inner,
+      putBlob: async (collection, id, bytes) => {
+        if (collection === "transcript-index" && failIndex) {
+          failIndex = false;
+          throw new Error("disk full");
+        }
+        return inner.putBlob(collection, id, bytes);
+      },
+    };
+    const { adapter } = replying(p => `reply to ${p}`);
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    failIndex = true;
+    await (await rt.sessions.start(ws.id, { prompt: "two" })).finished;
+    await new Promise(r => setTimeout(r, 20));
+    warn.mockRestore();
+    await rt.close();
+    const texts = async (runtime: typeof rt): Promise<string[]> => (await runtime.sessions.history(ws.id)).flatMap(e => (e.type === "session.delta" && e.kind === "text" ? [e.text] : []));
+
+    const after = createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter } });
+    await (await after.sessions.start(ws.id, { prompt: "three" })).finished;
+    expect((await texts(after)).join("")).toBe("reply to onereply to tworeply to three");
+    await after.close();
+  });
+
+  it("left older than its transcript, as a crash between the two writes leaves it, is made again at boot", async () => {
+    const { store } = countingStore();
+    const { adapter } = replying(p => (p === "one" ? "an ordinary answer" : "a marmalade answer"));
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const first = await rt.sessions.start(ws.id, { prompt: "one" });
+    await first.finished;
+    const stale = await store.getBlob("transcript-index", ws.id);
+    await (await rt.sessions.start(ws.id, { prompt: "two" })).finished;
+    await rt.close();
+    await store.putBlob("transcript-index", ws.id, stale!);
+
+    const after = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    expect((await after.sessions.search("marmalade")).hits).toHaveLength(1);
     await after.close();
   });
 });
