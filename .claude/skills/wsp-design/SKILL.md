@@ -233,6 +233,13 @@ the no-rule law below that the owner asked for on 2026-09-28. It lives in the
 sidebar's section heads and nowhere else: no rule under a Settings header,
 none between rows or tiles.
 
+### The sidebar's corner
+
+The sidebar ends in one row at its bottom left: ghost icon buttons, 28px,
+Settings first, its chord on the tooltip, the gear on the same left edge as
+the search row's glyph. The row takes more icon buttons as they come; it holds
+no words and no computer picker (the menu bar's Hosts menu switches hosts).
+
 ### The Settled fold
 
 The last row of the list: the section head `Settled (n)` with its chevron. It holds every root whose whole tree a person has read and left

@@ -7,7 +7,7 @@
 // alone; no host, or a host that cannot answer, leaves the defaults.
 import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { TerminalConfig } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type TerminalConfig } from "@wsp/protocol";
 import { TerminalViewport } from "../src/components/ThreadTerminalDrawer.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -30,7 +30,7 @@ const FILE: TerminalConfig = {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  useStore.setState({ api: null, conn: "connecting" });
+  useStore.setState({ api: null, conn: "connecting", preferences: { ...DEFAULT_PREFERENCES } });
   document.documentElement.classList.remove("dark");
   document.body.innerHTML = "";
 });
@@ -65,6 +65,21 @@ describe("the viewport with the person's Ghostty config", () => {
     expect(options.backgroundOpacity).toBe(0.85);
     await vi.waitFor(() => expect(mount.hasAttribute("data-terminal-translucent")).toBe(true));
     expect(mount.className).not.toContain("bg-[var(--terminal-background)]");
+  });
+
+  it("with Transparency off draws the terminal opaque whatever the file's opacity, and turns translucent again when it is back on", async () => {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, transparency: false } });
+    const { options, surface, mount } = await open(async () => FILE);
+    expect(options.backgroundOpacity).toBe(1);
+    expect(mount.hasAttribute("data-terminal-translucent")).toBe(false);
+    expect(mount.className).toContain("bg-[var(--terminal-background)]");
+    const opacity = vi.spyOn(surface, "setBackgroundOpacity");
+    useStore.setState(s => ({ preferences: { ...s.preferences, transparency: true } }));
+    await vi.waitFor(() => expect(opacity).toHaveBeenLastCalledWith(0.85));
+    await vi.waitFor(() => expect(mount.hasAttribute("data-terminal-translucent")).toBe(true));
+    useStore.setState(s => ({ preferences: { ...s.preferences, transparency: false } }));
+    await vi.waitFor(() => expect(opacity).toHaveBeenLastCalledWith(1));
+    await vi.waitFor(() => expect(mount.hasAttribute("data-terminal-translucent")).toBe(false));
   });
 
   it("a file naming a size draws at the app's own text size while the preference says the app's; with the file as the source the pane takes the file's, and the flip reaches the surface without a remount", async () => {

@@ -164,6 +164,37 @@ describe("index.css", () => {
         background-color: color-mix(in srgb, var(--sidebar) var(--sidebar-veil), transparent);
       }
 
+      /* Transparency off in Appearance, or the computer's Reduce transparency on: every glass takes its solid ground, each
+         region its theme's material at full share. The doubled root outweighs the Mac's dark block above. */
+      :root:root.solid {
+        --glass-opacity: 100%;
+        --material-centre: 100%;
+        --material-panel: 100%;
+        --material-sidebar: 100%;
+        --sidebar-veil: 100%;
+      }
+
+      /* The composer sets its glass on itself, so its solid ground is set there too: the theme's card, whole. */
+      :root:root.solid [data-slot="composer-shell"] {
+        --chat-composer-glass-surface: var(--card);
+        --chat-composer-glass-opacity: 100%;
+      }
+
+      @media (prefers-reduced-transparency: reduce) {
+        :root:root {
+          --glass-opacity: 100%;
+          --material-centre: 100%;
+          --material-panel: 100%;
+          --material-sidebar: 100%;
+          --sidebar-veil: 100%;
+        }
+
+        :root:root [data-slot="composer-shell"] {
+          --chat-composer-glass-surface: var(--card);
+          --chat-composer-glass-opacity: 100%;
+        }
+      }
+
       /* The window paints the glass behind the page, so the page's own canvas is
          clear and only the main column paints a background. The frame row's toggle
          sits one header gap after the third traffic light, centre to centre: with

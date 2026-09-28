@@ -449,6 +449,21 @@ describe("the sidebar's list of thread tiles", () => {
     expect(scroller.className).not.toMatch(/mask-/);
   });
 
+  it("ends in the corner row alone: no computer picker at the foot, even in the desktop shell where the menu bar holds the hosts", async () => {
+    (window as unknown as { wsp?: unknown }).wsp = { hosts: async () => ({ here: "This Mac", current: null, hosts: [] }), contextMenu: async () => null };
+    try {
+      mount({ projects: [project("pr_1", "spoo")], workspaces: [workspace("ws_a", "pricing page", "pr_1")] });
+      await waitFor(() => expect(document.querySelector("[data-sidebar-corner]")).not.toBeNull());
+      await act(async () => {});
+      expect(document.querySelector("[data-host-foot]")).toBeNull();
+      expect(screen.queryByText("This Mac")).toBeNull();
+      expect(document.querySelector("[data-slot=sidebar-footer] svg.lucide-chevrons-up-down")).toBeNull();
+      expect(screen.getByRole("button", { name: "Settings" }).closest("[data-slot=sidebar-footer]")).not.toBeNull();
+    } finally {
+      delete (window as unknown as { wsp?: unknown }).wsp;
+    }
+  });
+
   describe("the sections, the marks and the drag", () => {
     const heads = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-section-head]")].map(head => head.dataset["sectionHead"] ?? "");
     const drag = (tile: HTMLElement, onto: HTMLElement): void => {

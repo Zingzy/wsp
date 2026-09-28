@@ -19,19 +19,22 @@ export interface ThreadRowItem {
   readonly place: string;
 }
 
-export function ThreadRows({ label, rows, className }: { label: string; rows: ReadonlyArray<ThreadRowItem>; className?: string }) {
+/** The label is the list's caps head, left out where the list stands under a head of its own, as in a Settings card. */
+export function ThreadRows({ label, rows, className }: { label?: string; rows: ReadonlyArray<ThreadRowItem>; className?: string }) {
   return (
     <div data-thread-rows className={cn("flex flex-col", className)}>
-      <span data-thread-rows-head className={cn(MICRO_LABEL, "flex h-8 items-center px-2 text-muted-foreground")}>
-        {label}
-      </span>
+      {label === undefined ? null : (
+        <span data-thread-rows-head className={cn(MICRO_LABEL, "flex h-8 items-center px-2 text-muted-foreground")}>
+          {label}
+        </span>
+      )}
       {rows.map(({ thread, place }) => (
         <div
           key={thread.id}
           data-thread-row={thread.id}
           className="flex h-9 min-w-0 items-center gap-2.5 rounded-[var(--control-radius)] px-2 text-sm transition-colors duration-150 hover:bg-accent"
         >
-          <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-[13px] shrink-0 text-muted-foreground" />
+          <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-[13px] shrink-0" />
           <ThreadLink thread={thread} className="min-w-0 flex-1 truncate text-foreground" />
           {place === "" ? null : (
             <span data-thread-place className="max-w-[220px] shrink-0 truncate text-muted-foreground text-xs">

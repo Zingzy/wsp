@@ -2043,6 +2043,9 @@ export const Preferences = z.object({
   /** Whether the desktop app keeps this computer from sleeping on its own while a thread works on it. On unless the
    * person turns it off; defaulted so a record from a host older than the switch reads as on. */
   keepAwake: z.boolean().default(true),
+  /** Whether the app's glass shows what is behind it. Off, every glass takes its solid ground; on by default, and
+   * defaulted so a record from a host older than the switch reads as on. */
+  transparency: z.boolean().default(true),
   /** The order the person dragged the projects into, by id; a project it does not name follows in the host's order. */
   projectOrder: z.array(z.string()),
   /** The person's own chord for a command, by command id, in the app's chord spelling (mod+shift+b): it replaces every
@@ -2082,7 +2085,7 @@ export const PreferencesPatch = Preferences.omit({ labs: true })
   .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, keepAwake: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", ...THEME_PICK_DEFAULTS, sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, projectLook: {}, computerLook: {}, serverIcons: true, agentVersions: true, notifySound: true, keepAwake: true, transparency: true, projectOrder: [], keybindings: {}, appFont: "", codeFont: "", labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -2118,6 +2121,7 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     agentVersions: patch.agentVersions ?? current.agentVersions,
     notifySound: patch.notifySound ?? current.notifySound,
     keepAwake: patch.keepAwake ?? current.keepAwake,
+    transparency: patch.transparency ?? current.transparency,
     projectOrder: patch.projectOrder ?? current.projectOrder,
     keybindings: perWorkspace(current.keybindings, patch.keybindings),
     appFont: patch.appFont ?? current.appFont,

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings > Appearance: the theme picker, the side and each side's theme, and
-// the app and code fonts, and whether a notification makes a sound. The
+// the app and code fonts, whether the glass shows through, and whether a
+// notification makes a sound. The
 // terminal draws with the person's Ghostty font and takes neither font.
 import { DEFAULT_PREFERENCES, type Preferences, type PreferencesPatch } from "@wsp/protocol";
 import { Switch } from "../components/ui/switch.js";
 import { FontPicker } from "./FontPicker.js";
-import { FONT_WORDS, NOTIFY_WORDS, SETTINGS_WORDS } from "./format.js";
+import { FONT_WORDS, NOTIFY_WORDS, SETTINGS_WORDS, TRANSPARENCY_WORDS } from "./format.js";
 import type { SettingsCardData } from "./rows.js";
 import type { SettingsContext } from "./settingsContext.js";
 import { ThemePicker } from "./ThemePicker.js";
@@ -18,6 +19,7 @@ export const APPEARANCE_DEFAULTS: PreferencesPatch = {
   darkTheme: DEFAULT_PREFERENCES.darkTheme,
   appFont: DEFAULT_PREFERENCES.appFont,
   codeFont: DEFAULT_PREFERENCES.codeFont,
+  transparency: DEFAULT_PREFERENCES.transparency,
   notifySound: DEFAULT_PREFERENCES.notifySound,
 };
 
@@ -28,6 +30,7 @@ export const appearanceOffDefaults = (p: Preferences): boolean =>
   p.darkTheme !== DEFAULT_PREFERENCES.darkTheme ||
   p.appFont !== DEFAULT_PREFERENCES.appFont ||
   p.codeFont !== DEFAULT_PREFERENCES.codeFont ||
+  p.transparency !== DEFAULT_PREFERENCES.transparency ||
   p.notifySound !== DEFAULT_PREFERENCES.notifySound;
 
 export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
@@ -36,7 +39,15 @@ export function appearanceCards(ctx: SettingsContext): SettingsCardData[] {
     {
       id: "theme",
       head: SETTINGS_WORDS.theme,
-      items: [],
+      items: [
+        {
+          kind: "row",
+          id: "transparency",
+          title: TRANSPARENCY_WORDS.title,
+          description: TRANSPARENCY_WORDS.description,
+          control: <Switch data-k="transparency" aria-label={TRANSPARENCY_WORDS.title} checked={preferences.transparency} onCheckedChange={transparency => setPreferences({ transparency })} />,
+        },
+      ],
       body: <ThemePicker picks={preferences} onChange={setPreferences} />,
     },
     {
