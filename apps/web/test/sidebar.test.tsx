@@ -962,7 +962,7 @@ describe("the creation tile", () => {
       useStore.setState({
         creations: [
           { key: "creating:1", name: "beta", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [{ stage: "fork-requested", message: long, at: "t", elapsedMs: 0 }], failed: null },
-          { key: "creating:2", name: "gamma", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [], failed: { title: "Couldn't start gamma", detail: "the disk is full" } },
+          { key: "creating:2", name: "gamma", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [], failed: { title: "Could not start gamma", detail: "the disk is full" } },
         ],
       } as never),
     );
@@ -990,6 +990,6 @@ describe("the creation tile", () => {
     expect(gamma.querySelector("[data-crab]")).toBeNull();
     expect(gamma.getAttribute("aria-busy")).toBeNull();
     expect(threadState(gamma)).toBe("Failed");
-    expect(gamma.querySelector("[data-creation-line]")!.textContent).toBe("Couldn't start gamma");
+    expect(gamma.querySelector("[data-creation-line]")!.textContent).toBe("Could not start gamma");
   });
 });

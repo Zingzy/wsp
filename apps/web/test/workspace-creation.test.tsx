@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HOSTNAME_KEPT, WorkspaceCreateStage } from "@wsp/protocol";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { explainCreateRefusal, useStore, type Creation, type CreationLine } from "../src/protocol/store.js";
-import { CREATE_ASKED, CREATE_STEP_WORDS, stepWords } from "../src/shell/creationLog.js";
+import { CREATE_ASKED, CREATE_STEP_WORDS, stepTime, stepWords } from "../src/shell/creationLog.js";
 import { WorkspaceCreation } from "../src/shell/WorkspaceCreation.js";
 import { press, typeInto } from "./composer-harness.js";
 
@@ -46,7 +46,9 @@ const mount = async (creation: Creation) => {
   return screen.getByTestId("workspace-creation");
 };
 
-const fold = (view: HTMLElement) => within(view).getByRole("button", { name: /^Setting up/ });
+const fold = (view: HTMLElement) => view.querySelector<HTMLElement>("[data-k=setting-up]")!;
+/** Every hover text on the page, where no runtime sentence may stand either. */
+const hovers = (view: HTMLElement) => [...view.querySelectorAll("[title]")].map(n => n.getAttribute("title")).join("\n");
 const steps = (view: HTMLElement) => within(within(view).getByRole("list", { name: "Setting up" })).getAllByRole("listitem");
 
 describe("the step words", () => {
@@ -57,6 +59,10 @@ describe("the step words", () => {
       expect(words.charAt(0)).toBe(words.charAt(0).toUpperCase());
       expect(words).not.toMatch(/\.$/);
     }
+  });
+
+  it("read a step's time in seconds under a minute and in minutes and seconds after", () => {
+    expect([0, 59_900, 60_000, 65_000, 3_725_000].map(stepTime)).toEqual(["0s", "59s", "1:00", "1:05", "62:05"]);
   });
 
   it("word an image build's line as its own sentence, capitalised, since the protocol's stage words are already in it", () => {
@@ -114,17 +120,17 @@ describe("the creation page", () => {
       CREATE_STEP_WORDS["preview-route"],
       CREATE_STEP_WORDS["daemon-answering"],
     ]);
-    expect(rows.map(r => r.querySelector("[data-step-time]")!.textContent)).toEqual(["0s", "6s", "7s", "1m"]);
+    // Seconds under a minute and minutes with seconds after, so rows a second apart never read alike.
+    expect(rows.map(r => r.querySelector("[data-step-time]")!.textContent)).toEqual(["0s", "6s", "7s", "1:05"]);
     for (const r of rows) {
       expect(r.querySelector("[data-step-words]")!.className).not.toMatch(/font-mono/);
       expect(r.querySelector("[data-step-time]")!.className).toMatch(/font-mono.*tabular-nums|tabular-nums.*font-mono/);
       expect(r.querySelector("[data-step-time]")!.className).toMatch(/ml-auto/);
     }
     expect(rows.map(r => r.className.includes("text-foreground"))).toEqual([false, false, false, true]);
-    // The runtime's sentence, the guest's refusal and a step's notice ride the row's hover, never a line of their own.
-    expect(rows[1]!.getAttribute("title")).toContain(refusal);
-    expect(rows[3]!.getAttribute("title")).toContain("the daemon took two tries");
-    expect(view.textContent).not.toMatch(/sethostname|two tries|Daemon answered/);
+    // The step words are all a person reads here, on the page and on its hovers: no runtime sentence stands anywhere.
+    expect(rows.some(r => r.hasAttribute("title"))).toBe(false);
+    expect(`${view.textContent}\n${hovers(view)}`).not.toMatch(/sethostname|two tries|Daemon answered|minted|starting beta|hostname/i);
   });
 
   it("says it is asking before the runtime reports a step", async () => {
@@ -149,27 +155,52 @@ describe("the creation page", () => {
       "Building your image on Boat: taking the snapshot",
       CREATE_STEP_WORDS["fork-requested"],
     ]);
-    expect(steps(view).map(r => r.querySelector("[data-step-time]")!.textContent)).toEqual(["1m", "2m", "3m"]);
+    expect(steps(view).map(r => r.querySelector("[data-step-time]")!.textContent)).toEqual(["1:48", "2:10", "3:10"]);
+    expect(hovers(view)).not.toMatch(/4\.2 GB/);
   });
 
-  it("a refusal: the failing step in red, the lead in red with the runtime's words once, Retry tactile and Dismiss as text", async () => {
+  it("a refusal says so once, in one spelling, in place of Setting up, marks the step it stopped on, and gives the reason once", async () => {
     const view = await mount(
       making([line("fork-requested", "starting beta on ascii", 0), line("failed", CAP_LINE, 800)], {
-        failed: { title: "Couldn't start beta: the provider has no room to start another now", detail: CAP_LINE },
+        failed: explainCreateRefusal(Object.assign(new Error(CAP_LINE)), "beta"),
       }),
     );
     expect(view.getAttribute("aria-busy")).toBe("false");
+    expect(view.hasAttribute("data-creation-refused")).toBe(true);
     expect(fold(view).textContent).toContain(CREATE_STEP_WORDS.failed);
+    expect(fold(view).textContent).not.toContain("Setting up");
     expect(fold(view).querySelector("canvas")).toBeNull();
     fireEvent.click(fold(view));
     const rows = steps(view);
-    expect(rows[1]!.className).toContain("text-destructive-foreground");
-    expect(rows[0]!.className).not.toContain("text-destructive-foreground");
-    const lead = within(view).getByText("Couldn't start beta: the provider has no room to start another now");
-    expect(lead.className).toContain("text-destructive-foreground");
-    expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);
+    // The step it stopped on is the red one; the refusal is not a step of its own.
+    expect(rows.map(r => r.querySelector("[data-step-words]")!.textContent)).toEqual([CREATE_STEP_WORDS["fork-requested"]]);
+    expect(rows[0]!.className).toContain("text-destructive-foreground");
+    const text = view.textContent!;
+    expect(text.split(CREATE_STEP_WORDS.failed)).toHaveLength(2);
+    expect(text).not.toMatch(/Couldn't/);
+    expect(text.split(CAP_LINE)).toHaveLength(2);
     expect(within(view).getByRole("button", { name: "Retry" }).className).toContain("bg-popover");
     expect(within(view).getByRole("button", { name: "Dismiss" }).className).toContain("border-transparent");
+  });
+
+  it("gives the unfolded steps the question's room and puts the question back when they fold", async () => {
+    const view = await mount(making([line("fork-requested", "starting beta on ascii", 0), line("preview-route", "Preview route to the daemon minted.", 3_400)]));
+    expect(within(view).getByRole("heading", { level: 1 })).toBeDefined();
+    fireEvent.click(fold(view));
+    expect(within(view).queryByRole("heading", { level: 1 })).toBeNull();
+    expect(steps(view)).toHaveLength(2);
+    fireEvent.click(fold(view));
+    expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("What should we build in beta?");
+  });
+
+  it("names the folder the copy is going to under the box, never the project's own", async () => {
+    const project = (id: string, computer: string, path: string) => ({ id, name: "spoo", computer, source: { kind: "folder", path }, path, remote: "", defaultBranch: "main", memoryKey: "-", memoryDir: "/m", createdAt: "t" });
+    act(() => useStore.setState({ projects: [project("pr_here", "here", "/Users/dev/spoo"), project("pr_box", "p_box", "/root/spoo")] } as never));
+    let view = await mount(making([], { name: "pricing page", project: "pr_here" }));
+    expect(view.querySelector("[data-composer-folder]")!.getAttribute("data-composer-folder")).toBe("/Users/dev/spoo-pricing-page");
+    cleanup();
+    view = await mount(making([], { name: "pricing page", project: "pr_box" }));
+    expect(view.querySelector("[data-composer-folder]")!.getAttribute("data-composer-folder")).toBe("/root/spoo");
   });
 
   it("names what it is making, in flight and refused, and never says task or workspace", async () => {
@@ -177,7 +208,8 @@ describe("the creation page", () => {
     expect(view.textContent).not.toMatch(/\b(tasks?|workspaces?)\b/i);
     cleanup();
     view = await mount(making([], { workspaceId: null, failed: explainCreateRefusal(new Error("Snapshot not found"), "beta") }));
-    expect(view.textContent).toContain("Couldn't start beta");
+    expect(view.textContent).toContain(CREATE_STEP_WORDS.failed);
+    expect(view.textContent).toContain("Snapshot not found");
     expect(view.textContent).not.toMatch(/\b(tasks?|workspaces?)\b/i);
   });
 

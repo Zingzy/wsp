@@ -137,7 +137,8 @@ describe("workspace creation view", () => {
     // The compose glyph stays and is held: a creation is not yet a workspace to open a thread in.
     expect(screen.getByRole("button", { name: "New thread" }).getAttribute("aria-disabled")).toBe("true");
     expect(within(view).queryByRole("progressbar")).toBeNull();
-    const fold = within(view).getByRole("button", { name: /^Setting up/ });
+    const fold = view.querySelector<HTMLElement>("[data-k=setting-up]")!;
+    expect(fold.textContent).toContain("Setting up");
     expect(fold.textContent).toContain(CREATE_ASKED);
 
     emit(stage({}));
@@ -232,15 +233,14 @@ describe("workspace creation view", () => {
     await act(() => useStore.getState().createWorkspace("pr_1", "beta"));
     const view = await screen.findByTestId("workspace-creation");
     expect(view.getAttribute("aria-busy")).toBe("false");
-    const fold = within(view).getByRole("button", { name: /^Setting up/ });
+    const fold = view.querySelector<HTMLElement>("[data-k=setting-up]")!;
     expect(fold.textContent).toContain(CREATE_STEP_WORDS.failed);
     fireEvent.click(fold);
     const rows = within(within(view).getByRole("list", { name: "Setting up" })).getAllByRole("listitem");
-    expect(rows).toHaveLength(2);
-    expect(rows[1]!.className).toContain("text-destructive-foreground");
-    expect(rows[0]!.className).not.toContain("text-destructive-foreground");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.className).toContain("text-destructive-foreground");
     // The runtime's words are the refusal: they appear once, under the lead.
-    within(view).getByText("Couldn't start beta: the provider has no room to start another now");
+    expect(view.textContent!.split(CREATE_STEP_WORDS.failed)).toHaveLength(2);
     expect(view.textContent!.split(CAP_LINE)).toHaveLength(2);
 
     fireEvent.click(within(view).getByRole("button", { name: "Retry" }));
@@ -260,12 +260,20 @@ describe("workspace creation view", () => {
     await act(() => useStore.getState().createWorkspace("pr_1", "beta"));
     const view = await screen.findByTestId("workspace-creation");
     expect(view.textContent).toContain("no golden image yet");
-    act(() => useComposerDraftStore.getState().enqueue(useStore.getState().selectedId!, "add a LICENSE file"));
+    const key = useStore.getState().selectedId!;
+    act(() => {
+      useComposerDraftStore.getState().enqueue(key, "add a LICENSE file");
+      useComposerDraftStore.getState().setDraft(key, { prompt: "and a README", cursor: 12 });
+      useComposerOptionsStore.getState().pick(key, "effort", "low");
+    });
     fireEvent.click(within(view).getByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(screen.queryByTestId("workspace-creation")).toBeNull());
     expect(useStore.getState().selectedId).toBe(WS);
     // What waited for a machine that will never come goes with it, rather than into a thread nobody asked for.
     expect(useComposerDraftStore.getState().queues).toEqual({});
+    // And so does everything else kept under the creation's key, which nothing would ever read again.
+    expect(useComposerDraftStore.getState().drafts[key]).toBeUndefined();
+    expect(useComposerOptionsStore.getState().byWorkspaceId[key]).toBeUndefined();
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toContain("api");
   });
 });

@@ -481,7 +481,7 @@ const creation = {
   project: LANDING.id,
   where: "p_spoo",
   workspaceId: CREATED_ID,
-  failed: screen === "creating-refused" ? { title: "Couldn't start pricing page: spoo has no room for another machine", detail: "spoo is running 4 of 4 machines. Pause one or wait for a nap." } : null,
+  failed: screen === "creating-refused" ? { title: "Could not start pricing page: spoo has no room for another machine", detail: "spoo is running 4 of 4 machines. Pause one or wait for a nap." } : null,
   lines: [
     madeLine("fork-requested", copyFirstLine("spoo", "pricing page", 0), 0),
     madeLine("image", imageBuildLine("spoo", "installing agents"), 48_000),

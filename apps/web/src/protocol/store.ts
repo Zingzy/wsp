@@ -74,7 +74,7 @@ export interface CreateRefusal {
 }
 
 /** A refused create's lead names what was being made rather than a word for the kind of thing it is. */
-const couldNotStart = (name: string): string => `Couldn't start ${name}`;
+const couldNotStart = (name: string): string => `Could not start ${name}`;
 
 export function explainCreateRefusal(error: unknown, name: string): CreateRefusal {
   const message = error instanceof Error ? error.message : String(error);
@@ -344,10 +344,22 @@ function handOver(key: string, workspaceId: string): void {
   if (access !== undefined) void useStore.getState().setPreferences({ access: { [workspaceId]: access, [key]: null } });
 }
 
-/** What waited for a machine that will never come goes with its creation. */
+/** What waited for a machine that will never come goes with its creation, and so does everything handOver would have
+ * moved, since nothing reads a dead creation's key again. */
 function dropWaiting(key: string): void {
   const drafts = useComposerDraftStore.getState();
   for (const row of drafts.queues[key] ?? []) drafts.removeQueued(key, row.id);
+  useComposerDraftStore.setState(s => {
+    if (!(key in s.drafts)) return s;
+    const { [key]: _gone, ...rest } = s.drafts;
+    return { drafts: rest };
+  });
+  useComposerOptionsStore.setState(s => {
+    if (!(key in s.byWorkspaceId)) return s;
+    const { [key]: _gone, ...rest } = s.byWorkspaceId;
+    return { byWorkspaceId: rest };
+  });
+  if (useStore.getState().preferences.access[key] !== undefined) void useStore.getState().setPreferences({ access: { [key]: null } });
 }
 /** Sets on their way to the host. While one is, a reply or a preferences.changed for an earlier set would paint an
  * older record over the one the person sees; the last reply, or the record read after a refusal, settles it. */

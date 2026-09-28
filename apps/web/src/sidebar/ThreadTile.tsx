@@ -272,6 +272,7 @@ export function ThreadLaunchTile({ launch, place, branch }: { launch: Launch; pl
 }
 
 const CREATE_FAILED: ThreadStatusInput = { status: "failed", asking: null, startedAt: null, unread: false };
+const CREATE_RUNNING: ThreadStatusInput = { status: "running", asking: null, startedAt: null, unread: false };
 
 /** A workspace still being made, in the tile's grammar: where it will run with Starting in the slot, its name, and
  * the step the create is waiting on in row three with the crab at its end. A refused create says Failed instead. */
@@ -280,7 +281,7 @@ export function CreationTile({ rowId, name, place, line, failed, active, onSelec
     <SidebarMenuButton size="sm" isActive={active} aria-busy={failed ? undefined : "true"} data-sidebar-row data-row-id={rowId} data-depth={0} title={tileHover(name, place, null, line)} className={TILE_CLASS} onClick={onSelect} onContextMenu={onContextMenu}>
       <TileRows
         place={place}
-        status={<ThreadStatus thread={CREATE_FAILED} {...(failed ? {} : { kind: STARTING })} />}
+        status={failed ? <ThreadStatus thread={CREATE_FAILED} /> : <ThreadStatus thread={CREATE_RUNNING} kind={STARTING} />}
         title={<Title text={name} idle={false} active={active} />}
         harness={null}
         third={

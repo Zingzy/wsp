@@ -155,13 +155,13 @@ describe("new workspace helpers", () => {
   it("a concurrency refusal keeps the runtime's words, which name the machines holding the slots, under the cap title", () => {
     const line = "both machine slots are in use: first, t-cap. Pause one or wait for a nap.";
     const explained = explainCreateRefusal(new RequestError(line, "concurrency"), "beta");
-    expect(explained.title).toBe("Couldn't start beta: the provider has no room to start another now");
+    expect(explained.title).toBe("Could not start beta: the provider has no room to start another now");
     expect(explained.detail).toBe(line);
   });
 
   it("other failures keep their message under a plain title", () => {
     expect(explainCreateRefusal(new Error("no golden image yet"), "beta")).toEqual({
-      title: "Couldn't start beta",
+      title: "Could not start beta",
       detail: "no golden image yet",
     });
     expect(explainCreateRefusal("boom", "beta").detail).toBe("boom");
