@@ -21,7 +21,7 @@
 // no chip is cut. One height per card otherwise, nothing cut.
 import { Chips, type ChipItem } from "../components/ui/chips.js";
 import { ChevronRightIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { Children, type ReactNode } from "react";
 import { Kbd, KbdGroup } from "../components/ui/kbd.js";
 import { Spaced } from "../components/ui/spaced.js";
 import { cn } from "../lib/utils.js";
@@ -135,7 +135,8 @@ export function Card({ id, head, lede, under, body, children }: { id: string; he
           )}
         </div>
       )}
-      {body ?? <div className={cn(CARD_SURFACE, "flex flex-col divide-y divide-border")}>{children}</div>}
+      {body}
+      {body !== undefined && Children.count(children) === 0 ? null : <div className={cn(CARD_SURFACE, "flex flex-col divide-y divide-border")}>{children}</div>}
       {under === undefined ? null : <div className="flex gap-2">{under}</div>}
     </section>
   );

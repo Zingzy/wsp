@@ -256,6 +256,11 @@ export function TerminalViewport({
   // The person's Ghostty config, as the host read it when this viewport opened; null until then and when no host answers.
   const fileRef = useRef<TerminalConfig | null>(null);
   const [translucent, setTranslucent] = useState(false);
+  // With Transparency off every glass is solid, the terminal too, whatever the Ghostty file's opacity says.
+  const transparency = useStore(s => s.preferences.transparency);
+  const transparencyRef = useRef(transparency);
+  transparencyRef.current = transparency;
+  const opacityOf = (fileOpacity: number): number => (transparencyRef.current ? fileOpacity : 1);
   const readHostConfig = useStore(s => s.api?.hostTerminalConfig);
   const live = useStore(s => s.conn === "live" && s.api !== null);
   const activateLink = useEffectEvent((text: string) => (isTerminalUrl(text) ? openInNewTab(text) : config.onPathActivate?.(text)));
@@ -296,13 +301,20 @@ export function TerminalViewport({
       terminal.setTheme(settings.theme);
       void terminal.setFont(settings.font);
       terminal.setPadding(settings.padding);
-      terminal.setBackgroundOpacity(settings.backgroundOpacity);
+      terminal.setBackgroundOpacity(opacityOf(settings.backgroundOpacity));
       setTranslucent(terminal.translucent);
     });
     return () => {
       stale = true;
     };
   }, [live, readHostConfig]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (terminal === null) return;
+    terminal.setBackgroundOpacity(opacityOf(fileRef.current?.backgroundOpacity ?? 1));
+    setTranslucent(terminal.translucent);
+  }, [transparency]);
 
   useEffect(() => {
     const mount = containerRef.current;
@@ -328,7 +340,7 @@ export function TerminalViewport({
         font: settings.font,
         ...(settings.cursor ? { cursor: settings.cursor } : {}),
         padding: settings.padding,
-        backgroundOpacity: settings.backgroundOpacity,
+        backgroundOpacity: opacityOf(settings.backgroundOpacity),
         onData: (data) => {
           const refusal = inputRefusal();
           if (refusal !== null) onInputRefused(refusal);

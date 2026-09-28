@@ -236,6 +236,12 @@ export const NOTIFY_WORDS = {
   soundDescription: "A finished turn and a permission prompt make a sound while wsp is not in front.",
 } as const;
 
+/** Settings > Appearance's switch over the app's glass. */
+export const TRANSPARENCY_WORDS = {
+  title: "Transparency",
+  description: "Glass shows what is behind the window. Off, every surface is solid.",
+} as const;
+
 /** Settings > General's switch over the desktop app keeping this computer awake. */
 export const AWAKE_WORDS = {
   keepAwake: (here: string): string => `Keep ${here === "" ? "this computer" : here} awake`,
