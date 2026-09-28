@@ -135,10 +135,26 @@ function doorsIn(cloud: boolean): Promise<{ cli: typeof cli; mcpServer: typeof m
   return cloudDoors;
 }
 
+/** A Ghostty config over three files: an include beside it, a theme per scheme in its themes folder, and lines each
+ * key reads as it is set, set again, dropped and refused. */
+const GHOSTTY: Record<string, string> = {
+  ".config/ghostty/config.ghostty": "\uFEFFfont-family = \"Berkeley Mono\"\nfont-family = Symbols 🧪\ntheme = light:Day, dark:Night\ncursor-style-blink = true\npalette = 0x3=#ffffff\nwindow-padding-x = 4,6\nconfig-file = ?extra.conf\nbackground-opacity = 1.5\ncursor-style-blink =\ncursor-style = bogus\n",
+  ".config/ghostty/extra.conf": "font-size = 13.5\nwindow-padding-y = 2\nbackground-blur = macos-glass-regular\ncursor-style-blink = false\n",
+  ".config/ghostty/themes/Night": "background = #0a0b0c\npalette = 15=#123456\ntheme = Day\n",
+  ".config/ghostty/themes/Day": "background = fafafa\nselection-background = #aabbcc\n",
+};
+
 /** Every tool the binary serves, called against the host as the command line runs its verb. A tool the binary takes
  * on adds its row here; a refused row is called with nothing on the host to act on. */
 const CALLED: readonly Called[] = [
   { tool: "computers", argv: ["computers"], arguments: {} },
+  { tool: "workspaces", argv: ["workspaces"], arguments: {} },
+  { tool: "projects", argv: ["projects"], arguments: {} },
+  { tool: "threads", argv: ["threads"], arguments: {} },
+  { tool: "setup", argv: ["setup"], arguments: {} },
+  { tool: "terminal_config", argv: ["terminal", "config"], arguments: {}, text: "prose" },
+  { tool: "terminal_config", argv: ["terminal", "config"], arguments: {}, files: GHOSTTY, text: "prose" },
+  { tool: "terminal_config", argv: ["terminal", "config", "--scheme", "light"], arguments: { scheme: "light" }, files: GHOSTTY, text: "prose" },
   { tool: "skills_search", argv: ["skills", "search", "memo"], arguments: { query: "memo" }, text: "prose" },
   { tool: "skills_show", argv: ["skills", "show", "acme/skills/memo"], arguments: { skill: "acme/skills/memo" }, text: "prose" },
   { tool: "skills_add", argv: ["skills", "add", "acme/skills/memo"], arguments: { skill: "acme/skills/note" }, twin: ["memo", "note"] },
@@ -239,7 +255,7 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
     dir = mkdtempSync(join(tmpdir(), "wsp-mcp-binary-"));
     statePath = join(dir, "state", "state.json");
     // A home of this case's own, so no host record on the computer running the suite aims a line anywhere.
-    env = { ...ownEnv(), HOME: join(dir, "user"), WSP_HOME: join(dir, "home") };
+    env = { ...ownEnv(), HOME: join(dir, "user"), XDG_CONFIG_HOME: join(dir, "user", ".config"), WSP_HOME: join(dir, "home") };
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
@@ -291,6 +307,7 @@ suite(`the tool server in the daemon binary${MCP_BIN === undefined ? " (set WSP_
       mkdirSync(join(dir, "user"), { recursive: true });
       writeFileSync(join(webDir, "index.html"), PAGE);
       vi.stubEnv("HOME", env["HOME"]!);
+      vi.stubEnv("XDG_CONFIG_HOME", env["XDG_CONFIG_HOME"]!);
       vi.stubEnv("WSP_HOME", env["WSP_HOME"]!);
       const store = memoryStore();
       await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);

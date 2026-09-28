@@ -2,24 +2,31 @@
 //! Every tool this server serves: its entry as the TypeScript server lists it, recorded under record/tools, and the
 //! call that answers it through the host. CONTRIBUTING.md in this crate says how one is added.
 
+mod agents;
 mod computers;
 mod create;
 mod dropping;
 mod exec;
+mod folders;
 mod home;
 mod image;
 mod machine;
 mod named;
+mod projects;
 mod projects_change;
 mod recipe;
 mod said;
 mod servers;
+mod setup;
 mod skills;
 mod target;
+mod terminal_config;
 mod thread;
+mod threads;
 mod turn;
 mod wait;
 pub(crate) mod workspace;
+mod workspaces;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -70,7 +77,6 @@ pub const TOOLS: &[Tool] = &[
     exec::TOOL,
     recipe::RECIPE,
     recipe::SCAN,
-    computers::TOOL,
     projects_change::ADD,
     projects_change::REMOVE,
     create::NEW,
@@ -89,6 +95,16 @@ pub const TOOLS: &[Tool] = &[
     dropping::FORGET,
     dropping::DELETE,
     home::EXPORT,
+    agents::AGENTS,
+    agents::SKILLS,
+    agents::SERVERS,
+    workspaces::TOOL,
+    projects::TOOL,
+    threads::THREADS,
+    threads::THREAD_READ,
+    folders::TOOL,
+    setup::TOOL,
+    terminal_config::TOOL,
 ];
 
 /// The tool of that name the state lists, with its entry there; none where that state lists no such tool, which the
@@ -207,22 +223,52 @@ pub(crate) mod held {
         }
     }
 
-    /// The struct's fields are every field some state lists, since a state that leaves one out is never handed it;
-    /// each state's required set and each field's type hold as that state lists them.
-    fn same_shape(side: &str, derived: &Value, listed: &[&Value]) {
-        let ours = fields(derived);
-        let mut theirs: Vec<String> = listed.iter().flat_map(|l| fields(l).into_iter().map(|(k, _)| k)).collect();
-        theirs.sort();
-        theirs.dedup();
-        assert_eq!(ours.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(), theirs, "{side}: the fields");
-        let optional = |name: &str| !required(derived).iter().any(|r| r == name);
-        for listed in listed {
-            assert_eq!(required(derived), required(listed), "{side}: the fields required");
-            for (name, theirs) in fields(listed) {
-                let ours = &ours.iter().find(|(k, _)| *k == name).unwrap().1;
-                if let Some(typed) = ours.get("type") {
-                    assert_eq!(&unnulled(typed, optional(&name)), &theirs["type"], "{side}.{name}: the type");
-                }
+    /// The schema a `$ref` points at, as a JSON pointer from the root it sits in: schemars refers to its definitions,
+    /// the recorded entries to the first place a shape appeared.
+    fn resolved<'a>(root: &'a Value, mut node: &'a Value) -> &'a Value {
+        while let Some(pointer) = node.get("$ref").and_then(Value::as_str) {
+            node = root.pointer(pointer.trim_start_matches('#')).unwrap_or_else(|| panic!("{pointer} points at nothing"));
+        }
+        node
+    }
+
+    /// An Option of a struct without the null branch schemars adds beside it.
+    fn without_null_branch(node: &Value) -> &Value {
+        match node["anyOf"].as_array().map(|b| b.iter().filter(|b| b["type"] != "null").collect::<Vec<_>>()) {
+            Some(one) if one.len() == 1 => one[0],
+            _ => node,
+        }
+    }
+
+    /// The same fields, required set and types, and the same again inside every array item and nested object the
+    /// struct types itself; a view passed through types nothing, so nothing under it is compared. A struct holds every
+    /// field some state lists, since a state that leaves one out is never handed it, and each state's required set
+    /// and types hold as that state lists them.
+    fn same_shape(side: &str, (droot, derived): (&Value, &Value), listed: &[(&Value, &Value)], optional: bool) {
+        let derived = without_null_branch(resolved(droot, derived));
+        let listed: Vec<(&Value, &Value)> = listed.iter().map(|(root, node)| (*root, resolved(root, node))).collect();
+        if derived.get("properties").is_some() {
+            let ours = fields(derived);
+            let mut theirs: Vec<String> = listed.iter().flat_map(|(_, l)| fields(l).into_iter().map(|(k, _)| k)).collect();
+            theirs.sort();
+            theirs.dedup();
+            assert_eq!(ours.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>(), theirs, "{side}: the fields");
+            for (_, listed) in &listed {
+                assert_eq!(required(derived), required(listed), "{side}: the fields required");
+            }
+            for (name, _) in &ours {
+                let under: Vec<(&Value, &Value)> =
+                    listed.iter().filter_map(|(root, l)| l["properties"].get(name).map(|node| (*root, node))).collect();
+                let optional = !required(derived).iter().any(|r| r == name);
+                same_shape(&format!("{side}.{name}"), (droot, &derived["properties"][name]), &under, optional);
+            }
+        } else if let Some(typed) = derived.get("type") {
+            for (_, listed) in &listed {
+                assert_eq!(&unnulled(typed, optional), &listed["type"], "{side}: the type");
+            }
+            if derived.get("items").is_some() {
+                let items: Vec<(&Value, &Value)> = listed.iter().map(|(root, l)| (*root, &l["items"])).collect();
+                same_shape(&format!("{side}[]"), (droot, &derived["items"]), &items, false);
             }
         }
     }
@@ -234,8 +280,10 @@ pub(crate) mod held {
             .filter_map(|cloud| super::entry_in(listed, cloud))
             .map(|e| serde_json::from_str(e).unwrap())
             .collect();
-        same_shape("input", &schema_of::<In>(), &entries.iter().map(|e| &e["inputSchema"]).collect::<Vec<_>>());
-        same_shape("output", &schema_of::<Out>(), &entries.iter().map(|e| &e["outputSchema"]).collect::<Vec<_>>());
+        let (input, output) = (schema_of::<In>(), schema_of::<Out>());
+        let of = |key: &str| entries.iter().map(|e| (&e[key], &e[key])).collect::<Vec<_>>();
+        same_shape("input", (&input, &input), &of("inputSchema"), false);
+        same_shape("output", (&output, &output), &of("outputSchema"), false);
     }
 }
 
