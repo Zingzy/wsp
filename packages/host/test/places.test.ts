@@ -73,6 +73,8 @@ import {
   leaveCommand,
   leavePlace,
   placeHere,
+  macKindOf,
+  productNameOf,
   placeNameHere,
   placeStanding,
   removeCommand,
@@ -669,6 +671,27 @@ describe("what this computer says about itself", () => {
       for (const pid of pidsIn()) if (alive(pid)) process.kill(pid, "SIGKILL");
     }
   }, 30_000);
+
+  it("reads which Mac this is off its product name, or off its model identifier where the registry names none", () => {
+    expect(macKindOf("MacBook Pro (14-inch, M5)")).toBe("macbook");
+    expect(macKindOf("MacBook Air (13-inch, M4)")).toBe("macbook");
+    expect(macKindOf("iMac (24-inch, 2024)")).toBe("imac");
+    expect(macKindOf("Mac mini (2024)")).toBe("mac-mini");
+    expect(macKindOf("Mac Studio (2025)")).toBe("mac-studio");
+    expect(macKindOf("Mac Pro (2023)")).toBe("mac-pro");
+    expect(macKindOf("MacBookPro16,1")).toBe("macbook");
+    expect(macKindOf("MacBookAir10,1")).toBe("macbook");
+    expect(macKindOf("iMacPro1,1")).toBe("imac");
+    expect(macKindOf("Macmini9,1")).toBe("mac-mini");
+    expect(macKindOf("MacPro7,1")).toBe("mac-pro");
+    // Apple silicon's identifiers since 2022 name no family, so the product name is what says it.
+    expect(macKindOf("Mac17,2")).toBeUndefined();
+    expect(macKindOf("")).toBeUndefined();
+    const said = Buffer.from("MacBook Pro (14-inch, M5)\0").toString("base64");
+    const ioreg = `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<array>\n\t<dict>\n\t\t<key>compatible</key>\n\t\t<data>\n\t\tTWFjMTcsMgA=\n\t\t</data>\n\t\t<key>product-name</key>\n\t\t<data>\n\t\t${said}\n\t\t</data>\n\t</dict>\n</array>\n</plist>\n`;
+    expect(productNameOf(ioreg)).toBe("MacBook Pro (14-inch, M5)");
+    expect(productNameOf("<plist><array/></plist>")).toBeUndefined();
+  });
 
   it("draws this computer's own row without starting a login shell, which the report alone reads", async () => {
     const home = tmp("report-row");

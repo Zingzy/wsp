@@ -724,7 +724,7 @@ describe("the computer switcher", () => {
       expect(row.querySelector("[data-computer-glyph]")).not.toBeNull();
       expect(row.querySelector("[data-k=computer-settings]")!.getAttribute("aria-label")).toBe(COMPUTER_SWITCHER_WORDS.settingsOf(placeName(place)));
     }
-    expect(list.getByRole("option", { name: new RegExp(`^${BOX_NAME}`) }).querySelector("svg.lucide-cloud")).not.toBeNull();
+    expect(list.getByRole("option", { name: new RegExp(`^${BOX_NAME}`) }).querySelector("[data-brand-mark=boat]")).not.toBeNull();
     const field = list.getByLabelText(COMPUTER_SWITCHER_WORDS.search) as HTMLInputElement;
     expect(field.placeholder).toBe(COMPUTER_SWITCHER_WORDS.search);
     fireEvent.change(field, { target: { value: BOX_NAME.toUpperCase() } });
@@ -739,7 +739,7 @@ describe("the computer switcher", () => {
     pickComputer(new RegExp(`^${BOX_NAME}`));
     expect(computerMenu()).toBeNull();
     expect(computerHead().textContent).toBe(BOX_NAME);
-    expect(computerHead().querySelector("svg.lucide-cloud")).not.toBeNull();
+    expect(computerHead().querySelector("[data-brand-mark=boat]")).not.toBeNull();
     // The picked head takes the row's own ink, as a picked project's head does, where the menu's rows stay muted.
     expect(computerHead().querySelector("[data-computer-glyph]")!.getAttribute("class")).not.toContain("text-muted-foreground");
     fireEvent.click(computerHead());
