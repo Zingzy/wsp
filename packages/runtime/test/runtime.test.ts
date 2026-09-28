@@ -13,7 +13,7 @@ import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, daemonTokenFor, rotateDaemonTokenScript } from "../src/daemon-token.js";
 import { writeDaemonRootsScript } from "../src/daemon-roots.js";
 import { harnessCatalog } from "../src/harness-catalog.js";
-import { copyKey, CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TRANSCRIPT_FLUSH_MS, createRuntime, wiredPlace, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
+import { copyKey, CATALOG_TTL_MS, DAEMON_REVIVE_AGAIN_MS, GRACE_MS, GUEST_LOGIN_ENV, PORT_PROBE_BODY_CAP, TOOL_RESULT_KEPT, TRANSCRIPT_BYTES, TRANSCRIPT_FLUSH_MS, createRuntime, wiredPlace, type GoldenExec, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions } from "../src/runtime.js";
 import { POLL_INTERVAL_MS } from "../src/status.js";
 import { machineExecStream } from "../src/machine-exec.js";
 import { serveRuntime } from "../src/serve.js";
@@ -572,7 +572,7 @@ describe("runtime session history", () => {
     expect(await rt2.sessions.history(a.id)).toEqual(history);
     await rt2.workspaces.delete(a.id);
     await expect(rt2.sessions.history(a.id)).rejects.toThrow("no such workspace");
-    expect(await store.list("transcripts")).toEqual([]);
+    expect(await store.getBlob("transcripts", a.id)).toBeUndefined();
   });
 
   /** An adapter the test drives by hand, so turn boundaries can arrive without a session.end behind them. */
@@ -1212,12 +1212,15 @@ describe("runtime session history", () => {
     let holdFirst = false;
     const store = {
       ...inner,
-      put: async (collection: string, id: string, value: unknown) => {
+      putBlob: async (collection: string, id: string, bytes: Buffer) => {
         if (collection === "transcripts" && puts++ === 0 && holdFirst) await gate;
-        await inner.put(collection, id, value);
+        await inner.putBlob(collection, id, bytes);
       },
     };
-    const stored = async (id: string) => ((await inner.get("transcripts", id)) as { events: { type: string; prompt?: string }[] } | undefined)?.events ?? [];
+    const stored = async (id: string): Promise<{ type: string; prompt?: string }[]> => {
+      const bytes = await inner.getBlob("transcripts", id);
+      return bytes === undefined ? [] : (JSON.parse(bytes.toString("utf8")) as { events: { type: string; prompt?: string }[] }).events;
+    };
     return { store, stored, puts: () => puts, holdFirstPut: () => (holdFirst = true), releaseFirstPut: () => release!() };
   };
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -1330,6 +1333,141 @@ describe("runtime session history", () => {
     const persisted = await stored(ws.id);
     expect(persisted.length).toBeLessThanOrEqual(5000);
     expect(persisted.some(e => e.type === "session.start" && e.prompt === "t1299")).toBe(true);
+  });
+
+  /** A turn that calls one tool with `input` and gets `output` back, the way a harness reports a file written and read. */
+  const tooled = (input: string, output: string): HarnessAdapterFactory => () => ({
+    steers: false,
+    start: ({ onEvent }) => {
+      const sessionId = "44444444-4444-4444-8444-444444444444";
+      const result: TurnResult = { status: "completed", text: "done" };
+      const finished = (async () => {
+        const feed: AdapterEvent[] = [
+          { type: "session.start", sessionId },
+          { type: "turn.delta", sessionId, kind: "tool_use", text: input, toolName: "Write", toolUseId: "tu_1" },
+          { type: "turn.delta", sessionId, kind: "tool_result", text: output, toolUseId: "tu_1" },
+          { type: "turn.done", sessionId, result },
+          { type: "session.end", sessionId, exitCode: 0, sawResult: true },
+        ];
+        for (const e of feed) onEvent(e);
+        return result;
+      })();
+      return { localId: sessionId, finished, interrupt: async () => {} };
+    },
+  });
+  const jsonBytes = (events: readonly unknown[]): number => events.reduce<number>((n, e) => n + JSON.stringify(e).length, 0);
+
+  it("caps a transcript in bytes as well as in events, so one workspace's tool calls cannot fill the host's memory", async () => {
+    const { store, stored } = countingStore();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: tooled("w".repeat(256 * 1024), "ok") } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    for (let i = 0; i < 40; i++) await (await rt.sessions.start(ws.id, { prompt: `t${i}` })).finished;
+    const history = await rt.sessions.history(ws.id);
+    expect(jsonBytes(history)).toBeLessThanOrEqual(TRANSCRIPT_BYTES);
+    expect(history.some(e => e.type === "session.start" && e.prompt === "t39")).toBe(true);
+    expect(history.some(e => e.type === "session.start" && e.prompt === "t0")).toBe(false);
+    await rt.close();
+    const persisted = await stored(ws.id);
+    expect(jsonBytes(persisted)).toBeLessThanOrEqual(TRANSCRIPT_BYTES);
+    // A runtime reading the file back holds the same events, not more.
+    const again = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    expect(await again.sessions.history(ws.id)).toHaveLength(history.length);
+    await again.close();
+  });
+
+  it("keeps a tool result's opening characters in the transcript and hands the live stream all of it", async () => {
+    const output = `first line\n${"r".repeat(TOOL_RESULT_KEPT * 4)}`;
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: tooled("{}", output) } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const live: string[] = [];
+    rt.events.on("*", e => {
+      if (e.type === "session.delta" && e.kind === "tool_result") live.push(e.text);
+    });
+    await (await rt.sessions.start(ws.id, { prompt: "read it" })).finished;
+    expect(live).toEqual([output]);
+    const kept = (await rt.sessions.history(ws.id)).flatMap(e => (e.type === "session.delta" && e.kind === "tool_result" ? [e.text] : []));
+    expect(kept).toEqual([output.slice(0, TOOL_RESULT_KEPT)]);
+    await rt.close();
+  });
+
+  it("moves the transcripts an older build kept inside the state file into files of their own", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    await rt.close();
+    const events = [
+      { type: "session.start", workspaceId: ws.id, sessionId: "s1", threadId: "thr_1", prompt: "go", at: 1 },
+      { type: "session.end", workspaceId: ws.id, sessionId: "s1", threadId: "thr_1", exitCode: 0, sawResult: true, at: 2 },
+    ];
+    await store.put("transcripts", ws.id, { workspaceId: ws.id, events });
+
+    const after = createRuntime({ backend, store, adapters: {} });
+    expect(await after.sessions.history(ws.id)).toEqual(events);
+    expect(await store.list("transcripts")).toEqual([]);
+    expect(JSON.parse((await store.getBlob("transcripts", ws.id))!.toString("utf8"))).toEqual({ workspaceId: ws.id, events });
+    await after.close();
+  });
+
+  /** Every event a workspace's transcript files hold, the head written at a move and the tail the host flushes. */
+  const onDisk = async (store: Store, id: string): Promise<unknown[]> => {
+    const read = async (collection: string): Promise<unknown[]> => {
+      const bytes = await store.getBlob(collection, id);
+      return bytes === undefined ? [] : (JSON.parse(bytes.toString("utf8")) as { events: unknown[] }).events;
+    };
+    return [...(await read("transcript-heads")), ...(await read("transcripts"))];
+  };
+  const delta = (workspaceId: string, i: number, text: string) => ({ type: "session.delta", workspaceId, sessionId: "s1", threadId: "thr_1", kind: "tool_use", text, toolUseId: `u${i}`, at: i });
+
+  it("moves every event of a transcript past the byte cap to its files, and holds only the tail", async () => {
+    // The owner's state held 36194 events, and trimming them at the move would have dropped 2395 for good.
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    await rt.close();
+    const events = Array.from({ length: 1000 }, (_, i) => delta(ws.id, i + 1, "k".repeat(8 * 1024)));
+    await store.put("transcripts", ws.id, { workspaceId: ws.id, events });
+
+    const after = createRuntime({ backend, store, adapters: {} });
+    const history = await after.sessions.history(ws.id);
+    expect(jsonBytes(history)).toBeLessThanOrEqual(TRANSCRIPT_BYTES);
+    expect(history.at(-1)).toEqual(events.at(-1));
+    expect(await onDisk(store, ws.id)).toEqual(events);
+    // A turn after the move rewrites the tail and leaves the head as the move wrote it.
+    await after.close();
+    const again = createRuntime({ backend, store, adapters: { claude: scripted("more") } });
+    await (await again.sessions.start(ws.id, { prompt: "more" })).finished;
+    await again.close();
+    const kept = await onDisk(store, ws.id);
+    expect(kept.slice(0, events.length - history.length)).toEqual(events.slice(0, events.length - history.length));
+    expect(kept.some(e => (e as { prompt?: string }).prompt === "more")).toBe(true);
+  });
+
+  it("merges a transcript an older build wrote back into the state file with what its files hold, and never duplicates", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {} });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    await rt.close();
+    const first = Array.from({ length: 3000 }, (_, i) => delta(ws.id, i + 1, "a"));
+    await store.put("transcripts", ws.id, { workspaceId: ws.id, events: first });
+    const moved = createRuntime({ backend, store, adapters: {} });
+    expect(await moved.sessions.history(ws.id)).toHaveLength(first.length);
+    await moved.close();
+    // An older build on the same state finds no transcript in it and writes the two events it recorded there.
+    const older = [delta(ws.id, 5001, "b"), delta(ws.id, 5002, "c")];
+    await store.put("transcripts", ws.id, { workspaceId: ws.id, events: older });
+
+    const after = createRuntime({ backend, store, adapters: {} });
+    expect(await after.sessions.history(ws.id)).toEqual([...first, ...older]);
+    await after.close();
+    // A move cut short after its files were written leaves the same events in both places: they are kept once.
+    await store.put("transcripts", ws.id, { workspaceId: ws.id, events: [...first, ...older] });
+    const redone = createRuntime({ backend, store, adapters: {} });
+    expect(await redone.sessions.history(ws.id)).toEqual([...first, ...older]);
+    expect(await onDisk(store, ws.id)).toEqual([...first, ...older]);
+    await redone.close();
   });
 });
 
@@ -1857,7 +1995,7 @@ describe("runtime session index", () => {
     const [first] = await rt1.sessions.list(ws.id);
     await rt1.close();
     // the transcript is gone but the index survives: the thread still folds
-    await store.delete("transcripts", ws.id);
+    await store.deleteBlob("transcripts", ws.id);
 
     const t = turns();
     const rt2 = createRuntime({ backend, store, adapters: { claude: t.adapter } });

@@ -24,7 +24,7 @@ describe("workspaces.forget", () => {
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     const ws = await createOn(rt, { golden: "snap_g", name: "first" });
-    await store.put("transcripts", ws.id, { events: [{ type: "session.start", sessionId: "s1" }] });
+    await store.putBlob("transcripts", ws.id, Buffer.from(JSON.stringify({ workspaceId: ws.id, events: [{ type: "session.start", sessionId: "s1" }] })));
     await store.put("sessions", ws.id, { rows: [{ id: "s1", workspaceId: ws.id, harness: "claude", status: "completed" }] });
     backend.machines[0]!.killed = true;
 
@@ -33,7 +33,7 @@ describe("workspaces.forget", () => {
     expect(await rt.workspaces.list()).toEqual([]);
     await expect(rt.workspaces.get(ws.id)).rejects.toThrow(`no such workspace: ${ws.id}`);
     expect(await store.get("workspaces", ws.id)).toBeUndefined();
-    expect(await store.get("transcripts", ws.id)).toBeUndefined();
+    expect(await store.getBlob("transcripts", ws.id)).toBeUndefined();
     expect(await store.get("sessions", ws.id)).toBeUndefined();
     expect(events.filter(e => e.type === "workspace.deleted")).toMatchObject([{ type: "workspace.deleted", workspaceId: ws.id }]);
   });
@@ -173,7 +173,7 @@ describe("sessions.forget", () => {
     await rt.close();
     const stored = (await store.get("sessions", ws.id)) as { sessions: { threadId?: string }[] };
     expect(stored.sessions.map(s => s.threadId)).toEqual([kept]);
-    const transcript = (await store.get("transcripts", ws.id)) as { events: { threadId?: string }[] };
+    const transcript = JSON.parse((await store.getBlob("transcripts", ws.id))!.toString("utf8")) as { events: { threadId?: string }[] };
     expect(transcript.events.every(e => e.threadId === kept)).toBe(true);
   });
 
@@ -216,7 +216,7 @@ describe("sessions.forget", () => {
 
     expect((await after.sessions.history(ws.id)).map(e => [e.threadId, e.type])).toEqual([[thread, "session.start"], [thread, "session.done"], [thread, "session.end"]]);
     await after.close();
-    const transcript = (await store.get("transcripts", ws.id)) as { events: unknown[] };
+    const transcript = JSON.parse((await store.getBlob("transcripts", ws.id))!.toString("utf8")) as { events: unknown[] };
     expect(transcript.events).toHaveLength(3);
   });
 });
