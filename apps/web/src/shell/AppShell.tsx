@@ -5,6 +5,7 @@
 import { useEffect, type ReactNode } from "react";
 import { ContextMenuHost } from "../actions/ContextMenuHost.js";
 import { CommandPalette } from "../components/palette/CommandPalette.js";
+import { RewindDialogHost } from "../components/chat/RewindDialog.js";
 import { FileFinder } from "../files/FileFinder.js";
 import { WorkspaceSwitcher } from "../components/switcher/WorkspaceSwitcher.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
@@ -86,6 +87,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <CommandPalette />
       <FileFinder />
       <ContextMenuHost />
+      <RewindDialogHost />
       <WorkspaceSwitcher />
       <Sidebar
         side="left"

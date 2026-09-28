@@ -6,11 +6,11 @@
 // restore take a root thread with every thread under it; a pin and a snooze
 // mark the root alone, which carries its tree with it. Keep this one, on a
 // thread one send to several models opened, deletes the copies the others run in.
-import { AlarmClockIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, LinkIcon, PencilIcon, PinIcon, PinOffIcon, SquareIcon, Trash2Icon } from "lucide-react";
+import { AlarmClockIcon, ArchiveIcon, ArchiveRestoreIcon, CheckIcon, LinkIcon, PencilIcon, PinIcon, PinOffIcon, SquareIcon, Trash2Icon, Undo2Icon } from "lucide-react";
 import type { HarnessCatalog, SessionStatus, ThreadMarks, WorkspaceState } from "@wsp/protocol";
 import type { SidebarThreadSnapshot } from "../adapt/index.js";
 import { addressLink } from "../protocol/address.js";
-import { CLIENT_CANNOT_DELETE, CLIENT_CANNOT_MARK, CLIENT_CANNOT_RESTORE, CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal } from "./format.js";
+import { CLIENT_CANNOT_REWIND, CLIENT_CANNOT_DELETE, CLIENT_CANNOT_MARK, CLIENT_CANNOT_RESTORE, CLIENT_CANNOT_SETTLE, CLIENT_CANNOT_STOP, NOTHING_READ_TO_SETTLE, THREAD_HAS_NO_ID, THREAD_NOT_RUNNING, THREAD_TREE_WORKING, THREAD_WORDS, threadForgetRefusalFor, threadRenameRefusal } from "./format.js";
 import type { ActionEntry } from "./registry.js";
 
 export interface ThreadTarget {
@@ -42,6 +42,8 @@ export interface ThreadTarget {
   /** The workspaces the other threads of this thread's send to several models run in, which Keep this one deletes;
    * empty on a thread opened alone. */
   readonly others: ReadonlyArray<string>;
+  /** Set while Undo rewind can still put back the files the thread's last rewind replaced. */
+  readonly rewound?: boolean;
 }
 
 export interface RootTree {
@@ -73,6 +75,7 @@ export function threadTarget(
     ...(machine.goneWords !== undefined ? { goneWords: machine.goneWords } : {}),
     root,
     others,
+    ...(thread.rewound ? { rewound: true } : {}),
   };
 }
 
@@ -97,6 +100,8 @@ export interface ThreadVerbs {
   /** Asks to delete these workspaces, the copies with them: the surface that draws the rows puts its confirmation
    * here, as it does the rename's opener, and a client with no road to the op leaves it out. */
   readonly keep?: ((workspaceIds: ReadonlyArray<string>) => void) | undefined;
+  /** Asks to put back the files the thread's last rewind replaced: the surface puts its confirmation here. */
+  readonly undoRewind?: ((thread: { threadId: string; workspaceId: string }) => void) | undefined;
   readonly copyText: (text: string) => Promise<void>;
 }
 
@@ -140,6 +145,15 @@ export const threadActions: ReadonlyArray<ActionEntry<ThreadTarget, ThreadVerbs>
     refusal: (target, verbs) =>
       threadRenameRefusal({ catalog: target.catalog, harness: target.harness, state: target.state, goneWords: target.goneWords, hasVerb: verbs.rename !== undefined }),
     run: (target, verbs) => verbs.rename?.(target.id),
+  },
+  {
+    id: "undo-rewind",
+    group: "edit",
+    icon: () => Undo2Icon,
+    applies: target => target.rewound === true && target.threadId !== null,
+    title: () => THREAD_WORDS.undoRewind,
+    refusal: (_target, verbs) => (verbs.undoRewind === undefined ? CLIENT_CANNOT_REWIND : null),
+    run: (target, verbs) => (target.threadId === null ? undefined : verbs.undoRewind?.({ threadId: target.threadId, workspaceId: target.workspaceId })),
   },
   {
     id: "pin",

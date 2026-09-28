@@ -81,6 +81,14 @@ pub fn input_schema(listed: &str) -> Schema {
 }
 
 /// Every issue with these arguments, in the order zod finds them; none when the tool takes them.
+/// The arguments with every key the schema does not list taken out, as zod's object parse takes them out before a
+/// TypeScript tool runs: a field the entry leaves out in this state of WSP_CLOUD reaches no tool.
+pub fn known(schema: &Schema, arguments: Value) -> Value {
+    let Value::Object(mut given) = arguments else { return arguments };
+    given.retain(|key, _| schema.properties.0.iter().any(|(name, _)| name == key));
+    Value::Object(given)
+}
+
 pub fn issues(schema: &Schema, arguments: &Value) -> Vec<String> {
     let mut said = Vec::new();
     check(schema, arguments, &mut Vec::new(), &mut said);

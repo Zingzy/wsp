@@ -1,0 +1,171 @@
+{
+  "severalThreads": "{count} threads start with {ref}; give more of the id",
+  "noThread": "no thread {ref}",
+  "otherVersion": "the host answered {op} in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up",
+  "gone": "{name}'s machine is gone with its disk, so work that was not pushed is lost; rebuild it to {action}, which brings back its home folder from the last saved nap",
+  "goneWith": "{name}'s machine is gone with its disk, so work that was not pushed is lost; rebuild it to {action}, which brings back its home folder from the last saved nap ({words})",
+  "stopped": {
+    "accepted": "thread {thread} stopped",
+    "not-running": "thread {thread} not running",
+    "not-found": "thread {thread} not found by the host"
+  },
+  "stopUnderOne": ", and with it 1 thread its agents spawned: {under}",
+  "stopUnderSome": ", and with it {count} threads its agents spawned: {under}",
+  "renamed": {
+    "renamed": "thread {thread} named {title}, in {agent} too",
+    "unsupported": "thread {thread} not named: {agent} keeps no name of a person's for a session",
+    "no-session": "thread {thread} not named: {agent} on the machine has no such session",
+    "failed": "thread {thread} not named: {error}",
+    "not-found": "thread {thread} not found by the host"
+  },
+  "renameFailedSilent": "thread {thread} not named: the machine said nothing about the write",
+  "agents": {
+    "claude": "Claude Code",
+    "codex": "Codex",
+    "gemini": "Gemini CLI",
+    "opencode": "OpenCode",
+    "pi": "Pi",
+    "hermes": "Hermes Agent",
+    "crush": "Crush",
+    "qwen": "Qwen Code",
+    "goose": "Goose",
+    "amp": "Amp",
+    "cursor": "Cursor"
+  },
+  "threadWithoutId": "{row} is a turn from before threads and carries no thread id of its own; no forget can name it",
+  "threadForgot": "forgot thread {thread}: no turn ever ran on it, so nothing of its work is gone",
+  "noOpenAsk": "thread {thread} is waiting on no prompt; wsp threads says which threads need you",
+  "answerRoads": [
+    {
+      "verb": "allow",
+      "effect": "allow",
+      "said": "allowed",
+      "noSuchAnswer": "the prompt thread {thread} is stopped on takes no allow; wsp thread read shows what it asks"
+    },
+    {
+      "verb": "deny",
+      "effect": "deny",
+      "said": "denied",
+      "noSuchAnswer": "the prompt thread {thread} is stopped on takes no deny; wsp thread read shows what it asks"
+    }
+  ],
+  "answered": "{said} on thread {thread}: {ask}",
+  "answerWords": {
+    "gone": "the prompt closed before the answer reached it",
+    "unsupported": "this thread's agent raises no prompt this host can answer",
+    "not-found": "this host holds no turn of that thread",
+    "no-option": "the prompt carries no option by that id"
+  },
+  "asks": {
+    "command": "Run: {command}",
+    "skill": "Run the skill {skill}",
+    "server": "Use the {server} tools: {tool}",
+    "plain": "Permission for {tool}",
+    "plainDetail": "Permission for {tool}: {detail}",
+    "write": "Write {name}",
+    "writeIn": " in {folder}",
+    "writeSize": " ({size})"
+  },
+  "finished": "thread {thread} finished ({facts}): {body}",
+  "finishedBare": "thread {thread} finished ({facts})",
+  "timedOutOne": "thread {thread} still running after {after}",
+  "timedOutSome": "{count} threads still running after {after}",
+  "restarted": {
+    "none": "the host restarted and serves again; no thread is running on it",
+    "one": "the host restarted and serves again; 1 thread is still running on it: {ids}",
+    "some": "the host restarted and serves again; {count} threads are still running on it: {ids}"
+  },
+  "hostDidNotStop": "the host took the restart and was still serving after 20s",
+  "cwdNotAbsolute": "--cwd is a path on the machine, absolute, and got \"{path}\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.",
+  "emptyTask": "the task is empty; say what the thread is to do. Put it in quotes after the flags.",
+  "noAdapter": "no adapter registered for harness \"{agent}\"; agents on this host: {agents}. Name one of those with --agent.",
+  "noAdapterNone": "no adapter registered for harness \"{agent}\"; agents on this host: none. Name one of those with --agent.",
+  "picks": {
+    "notOne": {
+      "model": "model \"{value}\" is not one {subject} takes; one of: {options}",
+      "effort": "effort \"{value}\" is not one {subject} takes; one of: {options}",
+      "access": "access mode \"{value}\" is not one {subject} takes; one of: {options}"
+    },
+    "legacy": "; legacy: {legacy}",
+    "takesNoEffort": "{subject} takes no effort",
+    "noFast": "{model} has no fast mode; pick a model that offers it, or send without it",
+    "refused": "{said}. Drop the flag, or give it a value the agent offers.",
+    "builtInList": "; that list is wsp's built-in one, since no agent on that workspace described itself, and the agent on its machine may take more",
+    "builtInTable": "; wsp's built-in table says so, since no agent on that workspace described itself"
+  },
+  "noThreadTarget": "workspace is needed outside a repo: run from inside a repo one of the workspaces holds, or name the workspace. Run wsp workspaces to read the names.",
+  "noWorkspaceForFolder": "no workspace holds a project for {folder}; name one with workspace, or wsp add '{folder}' records it as a project here",
+  "threadOpened": "thread {thread} on {workspace} in {folder}",
+  "openedThread": "thread {thread}",
+  "noResult": "turn ended without a result",
+  "noThreadStamped": "the runtime stamped no thread on the session",
+  "turnFailed": "turn {status}",
+  "turnNoResult": "turn ended without a result",
+  "afterCut": "previous turn was cut; resuming",
+  "asleepAgain": "{name} is asleep again",
+  "staysAwake": "{name} stays awake",
+  "staysAwakeNaps": "{name} stays awake, naps in {naps}",
+  "files": {
+    "notAFile": "there is no file at {path} on this computer. Name a file that is already here.",
+    "refused": "{refusal}. Drop that one and send the rest.",
+    "tooMany": "only 5 files fit one message; this one carries {count}",
+    "empty": "{name} is empty",
+    "imageTooBig": "{name} is {size}, over the 10 MB an image may be",
+    "fileTooBig": "{name} is {size}, over the 10 MB a file may be",
+    "untyped": "application/octet-stream",
+    "imageMaxBytes": 10485760,
+    "fileMaxBytes": 10485760,
+    "max": 5
+  },
+  "turnTokenEnv": "WSP_TURN",
+  "notifyMe": "me",
+  "recipe": {
+    "outNotAbsolute": "out is a path on this computer, absolute, and got \"{path}\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.",
+    "projectNotAbsolute": "project is a folder on this computer, absolute, and got \"{path}\". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.",
+    "agentsTitle": "Agents",
+    "toolsTitle": "Tools",
+    "tickOn": "●",
+    "tickOff": "○",
+    "gutter": "  ",
+    "groupLabels": {
+      "Always on the image": "base",
+      "Your project needs": "project",
+      "You use these": "used",
+      "Installed here, never used": "installed",
+      "Added by your agent": "added",
+      "Also in the catalog": "catalog"
+    },
+    "floorLine": "on when used in 2 sessions and 5 commands; heavy rows 3 and 20",
+    "floorApplies": {
+      "used": true,
+      "installed": false,
+      "default": false,
+      "none": true
+    },
+    "unknownSize": "size unknown",
+    "totals": "On: {on}, {bytes}",
+    "totalsUnknown": ", {unknown} of unknown size",
+    "pinLatest": "{tag}, installs latest",
+    "installsLatest": "installs latest",
+    "commandsTitle": "Commands your agents ran that the catalog does not carry:",
+    "commandsShown": 12,
+    "commandsHead": [
+      "command",
+      "calls",
+      "sessions"
+    ],
+    "none": "  none",
+    "more": "  and {count} more",
+    "notScanned": "nothing looked for them here",
+    "signInsTitle": "Sign-ins the ticked rows bring:",
+    "signInsHead": [
+      "id",
+      "sign in",
+      "do"
+    ],
+    "alsoTitle": {
+      "darwin": "Also on this Mac",
+      "linux": "Also on this computer"
+    }
+  }
+}

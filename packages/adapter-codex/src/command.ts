@@ -5,7 +5,7 @@
 // so the line carries only the folder and the MCP servers' config overrides.
 // No listener is ever named: stdio is the server's default transport, and a
 // socket would let anything on the machine drive the agent.
-import { inFolder, LAUNCH_ENV, MCP_SERVER_NAME, PLAN_ACCESS, shellQuote, type McpServerSpec } from "@wsp/protocol";
+import { inFolder, LAUNCH_ENV, MCP_SERVER_NAME, PLAN_ACCESS, shellQuote, WSP_TOOL_TIMEOUT_SEC, type McpServerSpec } from "@wsp/protocol";
 import { CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS } from "./plan-mode.js";
 
 const SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -65,7 +65,7 @@ function serverFlags(servers: Readonly<Record<string, McpServerSpec>>): string[]
       configRaw(`${at}.args`, JSON.stringify(spec.args)),
       // Codex hands a server only its own short list of variables (codex-rs/rmcp-client/src/utils.rs at
       // rust-v0.155.1), so the launch's are named for the wsp one: names only, the values stay in the environment.
-      ...(name === MCP_SERVER_NAME ? [configRaw(`${at}.env_vars`, JSON.stringify(LAUNCH_ENV))] : []),
+      ...(name === MCP_SERVER_NAME ? [configRaw(`${at}.env_vars`, JSON.stringify(LAUNCH_ENV)), configRaw(`${at}.tool_timeout_sec`, String(WSP_TOOL_TIMEOUT_SEC))] : []),
     ];
   });
 }
