@@ -72,6 +72,14 @@ describe("a reply block's run, as this window drives it", () => {
     expect(steps).toEqual([]);
   });
 
+  it("lets go of the pty it made when the host will not record the run, and says why", async () => {
+    const t = fakeTerminals();
+    const api = { recordRun: async (): Promise<SessionRunEvent> => Promise.reject(new Error("unknown op sessions.run")) };
+    const deps: RunDeps = { terminals: () => t.wt as never, version: () => PTY_RUN_DAEMON_VERSION, runId: () => "run-x" };
+    await expect(startRun(api, TARGET, deps)).rejects.toThrow("unknown op sessions.run");
+    expect(t.forgotten).toEqual(["pty_1"]);
+  });
+
   it("moved to a terminal tab, it is recorded moved, opens that tab, and its end is the tab's, never recorded here", async () => {
     const t = fakeTerminals();
     const { api, steps } = recorder();

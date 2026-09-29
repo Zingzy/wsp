@@ -64,9 +64,15 @@ export async function startRun(api: Recorder, t: RunTarget, deps: RunDeps = WIND
   if (version === null || version < PTY_RUN_DAEMON_VERSION) throw new Error(runDaemonBehindLine(version));
   const runId = deps.runId();
   const ptyId = await wt.run({ command: t.command, ...(t.cwd !== undefined ? { cwd: t.cwd } : {}) });
-  watching.set(runId, { ptyId, moved: false });
   const step = stepOf(t, runId);
-  await record({ ...step, state: "running", ptyId });
+  try {
+    await record({ ...step, state: "running", ptyId });
+  } catch (cause) {
+    // A run no thread records is one no block can draw or end: the command goes with the refusal.
+    await wt.forgetRun(ptyId);
+    throw cause;
+  }
+  watching.set(runId, { ptyId, moved: false });
   void watch(record, wt, step, ptyId);
   return runId;
 }
