@@ -9,7 +9,7 @@
 // is a declaration through the seam or an internal of this file.
 
 import { createHash, randomBytes } from "node:crypto";
-import { moveTimedOutLine, providerKeyName, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
+import { DAEMON_UNIT, moveTimedOutLine, providerKeyName, providerRoadRetryLine, shellQuote, type Capabilities } from "@wsp/protocol";
 import { GuestUnusableError, MoveUnansweredError, ROAD_TRIES, abort, backoffMs, classify, isMissing, realRetryClock, roadBackoffMs, roadCode, shouldRetry, type RetryClock, type WspError } from "./errors.js";
 import { DAEMON_ENV_FILE, DEADLINE_EXIT, INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
 import { EXEC_ENV } from "./golden-import.js";
@@ -687,6 +687,12 @@ export class BoxMachine implements Machine {
     // The detached road's own execs ask for the inline span, so they stay on the road above and nothing recurses.
     if (timeoutMs > BOX_INLINE_MAX_MS) return execDetached(this, cmd, { deadlineMs: timeoutMs, pollMs: this.backend.budgets.pollMs });
     return this.execInline(cmd, timeoutMs);
+  }
+
+  /** Boat starts a box's restored services itself once its restore is done, and on bx_z4284vcx (2026-09-29) never did:
+   * the unit sat enabled and dead 49 minutes after boot, and a start by hand listened a second later. */
+  startDaemon(): Promise<ExecResult> {
+    return this.exec(`systemctl start ${DAEMON_UNIT}`);
   }
 
   /** One command on the sync endpoint, with the two readings that make a guest nothing can run the provider's fault.

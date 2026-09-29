@@ -4037,7 +4037,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * is not that computer would fail this check on a live guest, which on a backend whose wake takes one attempt
    * throws the container away and forks the golden again. A machine with neither road has nothing to ask, so the
    * check falls back to the shape comparison. */
-  const pingDaemon = async (entry: LiveWorkspace): Promise<string | undefined> => {
+  const daemonAnswer = async (entry: LiveWorkspace): Promise<string | undefined> => {
     const machine = entry.machine;
     const answersMs = lifecycleOf(entry).budgets.daemonAnswersMs;
     // The person's stop on a wake ends the wait here too: the budget runs to minutes, and the row's toggle waits for
@@ -4085,6 +4085,49 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return `daemon on ${machine.id} did not answer within ${answersMs} ms (${e instanceof Error ? e.message : String(e)})`;
     } finally {
       link?.close();
+    }
+  };
+
+  /** How long a wait on a daemon runs before a machine that can start its own daemon is asked to, for a provider that
+   * can leave it down after a restore however long the wait, and how long after a start that failed it is asked
+   * again: a command on a box whose disk is still streaming in can outlast its own timeout. Each start is one more
+   * try inside the same budget, which stays the outer cut. */
+  const START_DAEMON_AFTER_MS = 60_000;
+
+  const pingDaemon = async (entry: LiveWorkspace): Promise<string | undefined> => {
+    const machine = entry.machine;
+    if (machine.startDaemon === undefined) return daemonAnswer(entry);
+    const start = machine.startDaemon.bind(machine);
+    const began = clock.now();
+    let over = false;
+    let cancel = (): void => {};
+    const arm = (): void => {
+      cancel = clock.schedule(
+        () => {
+          const late = `daemon on ${machine.id} (workspace ${entry.record.id}) had not answered ${Math.round((clock.now() - began) / 1000)} s into the wait, so wsp started it`;
+          const again = (): void => (over ? undefined : arm());
+          void start().then(
+            r => {
+              const tail = r.exitCode === 0 ? "" : r.stderr.trim().slice(-200);
+              console.warn(`${late} (exit ${r.exitCode}${tail === "" ? "" : `: ${tail}`})`);
+              if (r.exitCode !== 0) again();
+            },
+            (e: unknown) => {
+              console.warn(`${late}, and the start failed (${e instanceof Error ? e.message : String(e)})`);
+              again();
+            },
+          );
+        },
+        START_DAEMON_AFTER_MS,
+        { unref: true },
+      );
+    };
+    arm();
+    try {
+      return await daemonAnswer(entry);
+    } finally {
+      over = true;
+      cancel();
     }
   };
 
