@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LAUNCHD_PATH, computerNameHere, placeWiring, serve, serviceManagerFor, servingHost, shimPath, startHost, stopService, systemRunner, workspaceAsset, type CliIO, type HostHandle, type InstallReport } from "@wsp/host";
-import { DAEMON_VERSION, GET_THE_APP_WORD, HOST_WORDS, STATE_SHAPE } from "@wsp/protocol";
+import { DAEMON_VERSION, GET_THE_APP_WORD, HOST_WORDS, LAUNCH_ENV, STATE_SHAPE } from "@wsp/protocol";
 import { createRuntime, memoryStore, STATE_SHAPE_KEY, tokenDigest, type Runtime } from "@wsp/runtime";
 import { _electron as electron, type ElectronApplication, type Frame, type Page } from "playwright";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -27,6 +27,10 @@ import { TRAY_WORDS, type TrayAct, type TrayModel } from "../src/tray.js";
 import { writeStub } from "../../../packages/protocol/test/stub-script.js";
 
 const SMOKE = process.env["WSP_DESKTOP_SMOKE"] === "1";
+// Every app and wsp this file starts inherits this process's environment, so a smoke run from inside a wsp thread
+// would dial the host that thread runs on as that thread, and one run from an Electron process would start the app
+// as node. The smoke runs as a person at a terminal.
+for (const name of [...LAUNCH_ENV, "ELECTRON_RUN_AS_NODE"]) delete process.env[name];
 const FAKE_SOLARI = "slr_live_fake_desktop_smoke";
 /** What the loopback page carries of the host's token: its sha256, hex. The token itself is in no page. */
 const DIGEST = /^[0-9a-f]{64}$/;
