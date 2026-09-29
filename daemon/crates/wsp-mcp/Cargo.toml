@@ -15,9 +15,13 @@ tokio-tungstenite.workspace = true
 rustls.workspace = true
 futures-util.workspace = true
 libc = "0.2"
+wsp-frames = { path = "../wsp-frames" }
+wsp-seal = { path = "../wsp-seal" }
+getrandom = "0.4"
 
 [dev-dependencies]
 # A tool's input and output structs derive their JSON Schema in the test build alone, where it is held to the schema
 # the TypeScript server lists; the binary serves that recorded schema and carries none of this.
 schemars = "1"
 tempfile = "3"
+ed25519-dalek = { version = "3", features = ["pem"] }

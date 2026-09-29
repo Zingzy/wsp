@@ -2385,7 +2385,6 @@ dependencies = [
  "nix 0.31.3",
  "notify",
  "portable-pty",
- "ring",
  "rustls",
  "serde",
  "serde_json",
@@ -2396,6 +2395,7 @@ dependencies = [
  "tokio-tungstenite",
  "wsp-frames",
  "wsp-runtime",
+ "wsp-seal",
 ]
 
 [[package]]
@@ -2445,7 +2445,9 @@ dependencies = [
 name = "wsp-mcp"
 version = "0.1.0"
 dependencies = [
+ "ed25519-dalek",
  "futures-util",
+ "getrandom 0.4.3",
  "libc",
  "rustls",
  "schemars",
@@ -2454,6 +2456,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+ "wsp-frames",
+ "wsp-seal",
 ]
 
 [[package]]
@@ -2477,6 +2481,17 @@ dependencies = [
  "tokio",
  "wsp-frames",
  "xattr",
+]
+
+[[package]]
+name = "wsp-seal"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "ed25519-dalek",
+ "ring",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
