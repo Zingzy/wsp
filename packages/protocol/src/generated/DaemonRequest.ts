@@ -160,6 +160,18 @@ base?: string,
 /**
  * The workspace this frame is for, as on fs.list above.
  */
+machineId?: string, } | { "op": "git.startOn", cwd: string, branch: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
+machineId?: string, } | { "op": "git.branchCompare", cwd: string, remote: string, base: string, head: string, } | { "op": "git.mergeIn", cwd: string, branch: string, 
+/**
+ * A checkout's folder on this computer to fetch from in place of the remote; refused on any other daemon.
+ */
+from?: string, 
+/**
+ * The workspace this frame is for, as on fs.list above.
+ */
 machineId?: string, } | { "op": "git.prList", cwd: string, 
 /**
  * The workspace this frame is for, as on fs.list above.

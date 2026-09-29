@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "op": "git.startOn",
+    "cwd": "repo"
+  },
+  {
+    "id": 1,
+    "op": "git.startOn",
+    "branch": "tree/lead"
+  },
+  {
+    "id": 1,
+    "op": "git.startOn",
+    "cwd": "repo",
+    "branch": 3
+  }
+]

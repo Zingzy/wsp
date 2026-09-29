@@ -284,6 +284,10 @@ import {
   committedLine,
   discardedLine,
   FixResult,
+  FIX_CHECK_OR_CHILD,
+  MergeInResult,
+  fixMergeChildLine,
+  mergeInLine,
   GitUpdateReply,
   MergeMethod,
   MergeResult,
@@ -1335,14 +1339,22 @@ async function committed(client: HostClient, workspaceId: string, message: strin
 }
 
 /** A fix asked of the host, one road for the command line and the tool. */
-async function askedToFix(client: HostClient, workspaceId: string, check: string | undefined): Promise<FixResult> {
-  return FixResult.parse(await client.request("workspaces.fix", { workspaceId, ...(check !== undefined ? { check } : {}) }));
+async function askedToFix(client: HostClient, workspaceId: string, check: string | undefined, child?: string): Promise<FixResult> {
+  return FixResult.parse(await client.request("workspaces.fix", { workspaceId, ...(check !== undefined ? { check } : {}), ...(child !== undefined ? { child } : {}) }));
+}
+
+/** A merge of a child into its lead asked of the host, the lead woken first; one road for the command line and the tool. */
+async function mergedIn(client: HostClient, leadRef: string, child: string, said: (line: string) => void): Promise<MergeInResult> {
+  const lead = await workspaceOf(client, leadRef);
+  const { workspace: awoken } = await awake(client, lead, "merge in", said);
+  return MergeInResult.parse(await client.request("workspaces.mergeIn", { workspaceId: awoken.id, child }));
 }
 
 /** What a fix reads as: which agent was asked to fix what, or that the update left nothing to fix. */
 function fixLine(workspace: string, asked: FixResult): string {
   if (asked.outcome === "updated") return fixNothingLine(workspace, asked.base);
   const agent = agentName(asked.agent ?? DEFAULT_AGENT.id);
+  if (asked.child !== undefined) return fixMergeChildLine(workspace, agent, asked.child);
   return asked.check !== undefined ? fixAskedLine(workspace, agent, asked.check) : fixConflictsLine(workspace, agent, asked.base);
 }
 
@@ -4232,18 +4244,20 @@ export const ALL_VERBS: readonly Verb[] = [
   },
   {
     name: "fix",
-    usage: 'wsp fix <workspace> [--check "<name>"]',
-    about: "asks the workspace's agent to fix a failed check, or updates it from its base and asks it to fix what conflicts",
+    usage: 'wsp fix <workspace> [--check "<name>" | --child <workspace>]',
+    about: "asks the workspace's agent to fix a failed check or merge a child, or updates it from its base and asks it to fix what conflicts",
     page: "agent",
-    options: { check: { type: "string" } },
+    options: { check: { type: "string" }, child: { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp fix takes one workspace.", usageIs(ctx));
+      const check = flag(ctx.flags, "check");
+      const child = flag(ctx.flags, "child");
+      if (check !== undefined && child !== undefined) throw usageRefusal(FIX_CHECK_OR_CHILD, usageIs(ctx));
       const client = await ctx.client();
       const workspace = await workspaceOf(client, ref);
-      const check = flag(ctx.flags, "check");
       const { workspace: at } = check === undefined ? await awake(client, workspace, "fix", line => ctx.io.error(line)) : { workspace };
-      const asked = await askedToFix(client, at.id, check);
+      const asked = await askedToFix(client, at.id, check, child);
       ctx.out.emit({ ...asked }, fixLine(at.name, asked));
       return 0;
     },
@@ -4253,14 +4267,46 @@ export const ALL_VERBS: readonly Verb[] = [
       input: {
         workspace: WorkspaceIn,
         check: z.string().optional().describe("the failed check's name as the pull request lists it; without it the copy is updated from its base and any conflict is sent"),
+        child: z
+          .string()
+          .optional()
+          .describe("a child of this workspace whose merge into it stopped on conflicts: its agent is asked to fetch the child's branch, merge it with a merge commit and resolve them; never with check"),
       },
       output: FixResult.shape,
-      call: async ({ workspace: ref, check }, deps) => {
+      call: async ({ workspace: ref, check, child }, deps) => {
+        if (check !== undefined && child !== undefined) throw new Error(FIX_CHECK_OR_CHILD);
         const client = await deps.client();
         const workspace = await workspaceOf(client, ref);
         const { workspace: at } = check === undefined ? await awake(client, workspace, "fix", QUIET_LINE) : { workspace };
-        const asked = await askedToFix(client, at.id, check);
+        const asked = await askedToFix(client, at.id, check, child);
         return asText(fixLine(at.name, asked), { ...asked });
+      },
+    }),
+  },
+  {
+    name: "merge in",
+    usage: "wsp merge in <lead> <child>",
+    about: "merges a child's branch into its lead's with a merge commit, or names the files that conflict",
+    page: "agent",
+    options: {},
+    run: async ctx => {
+      const [lead, child] = ctx.args;
+      if (lead === undefined || child === undefined || ctx.args.length !== 2) throw usageRefusal("wsp merge in takes a lead and one of its children.", usageIs(ctx));
+      const done = await mergedIn(await ctx.client(), lead, child, line => ctx.io.error(line));
+      ctx.out.emit({ ...done }, mergeInLine(done));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Merges a child workspace's branch into its lead's copy with a merge commit, so the lead's history shows each child landing: fetched from the project's remote, or from the child's own folder where the project has none and both copies sit on this computer. The lead is woken first where it sleeps. A lead with changes no commit holds is refused first with the files named, and a merge that conflicts is taken back at once and answered with the files, the lead's copy left exactly as it was; fix with child hands those to the lead's agent. Refused, naming the thread, while a turn runs on the lead in any thread but the asking one (a lead's thread merges from inside its own turn), for a workspace that is not the lead's child, and for a thread merging into any workspace but its own. Nothing is pushed.",
+      input: {
+        lead: WorkspaceIn,
+        child: z.string().describe("the child workspace whose branch is merged in, by name or id"),
+      },
+      output: MergeInResult.shape,
+      call: async ({ lead, child }, deps) => {
+        const done = await mergedIn(await deps.client(), lead, child, QUIET_LINE);
+        return asText(mergeInLine(done), { ...done });
       },
     }),
   },
@@ -5145,6 +5191,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   "commit message": "the commit message, a subject line, a blank line, then the body, -m for short; the workspace's agent drafts it without one",
   "commit file": "a file to commit, by path from the checkout's top, once per file; every changed file without one",
   "fix check": "the failed check to send, by its name on the pull request; without it the copy is updated from its base and a conflict is sent",
+  "fix child": "a child of the workspace whose merge into it stopped on conflicts, by name or id; its agent is asked to merge it and resolve them, and nothing is updated",
   "merge method": "merge, squash or rebase; the repository's own default without one",
   "merge when-checks-pass": "merge once the checks pass rather than now, where the repository allows it",
   tree: "indent the threads an agent opened under the one that opened them",

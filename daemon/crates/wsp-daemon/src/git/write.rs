@@ -6,7 +6,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use wsp_frames::{words, GitCommitReply, GitDiscardReply, GitStatusEntry, GitUpdateReply};
+use wsp_frames::{
+    words, DaemonErrorCode, GitCommitReply, GitDiscardReply, GitMergeInReply, GitStartOnReply, GitStatusEntry, GitUpdateReply,
+};
 
 use super::{check, parse_porcelain_v2, run_git, stdout_text, GitResult, Runs};
 use crate::paths::OpError;
@@ -142,60 +144,214 @@ pub(crate) async fn commit<R: Runs>(runner: &R, cwd: &Path, message: &str, paths
 pub(crate) async fn update<R: Runs>(runner: &R, cwd: &Path, named_base: Option<&str>) -> Result<GitUpdateReply, OpError> {
     let (remote, _) = crate::bring_back::remote_url(runner, cwd).await?;
     let base = crate::bring_back::base_of(runner, cwd, &remote, named_base).await?;
+    Ok(match merge_remote(runner, cwd, From::Remote(&remote), &base, false, &UPDATING).await? {
+        Merge::Took { commits, .. } => GitUpdateReply { base, merged: true, commits, conflicts: Vec::new() },
+        Merge::Conflicts(conflicts) => GitUpdateReply { base, merged: false, commits: 0, conflicts },
+    })
+}
+
+/// Merges a child's branch into the branch the checkout is on, always with a merge commit, so the lead's history
+/// shows each child landing: from the remote, or from the child's own folder where the project has none and both
+/// copies sit on this computer. The same refusals and the same taking back as an update.
+pub(crate) async fn merge_in<R: Runs>(runner: &R, cwd: &Path, branch: &str, from: Option<&str>) -> Result<GitMergeInReply, OpError> {
+    let remote;
+    let source = match from {
+        Some(path) => From::Folder(path),
+        None => {
+            remote = crate::bring_back::remote_url(runner, cwd).await?.0;
+            From::Remote(&remote)
+        }
+    };
+    Ok(match merge_remote(runner, cwd, source, branch, true, &MERGING).await? {
+        Merge::Took { commits, oid, head } => {
+            GitMergeInReply { branch: branch.to_owned(), merged: true, commits, oid: Some(oid), head: Some(head), conflicts: Vec::new() }
+        }
+        Merge::Conflicts(conflicts) => {
+            GitMergeInReply { branch: branch.to_owned(), merged: false, commits: 0, oid: None, head: None, conflicts }
+        }
+    })
+}
+
+/// Puts the checkout on a branch as the remote holds it, as a copy is made: fetched, the branch reset to the remote's
+/// commit with its upstream set, and every untracked file dropped, while what git ignores stays.
+pub(crate) async fn start_on<R: Runs>(runner: &R, cwd: &Path, branch: &str) -> Result<GitStartOnReply, OpError> {
+    let (remote, _) = crate::bring_back::remote_url(runner, cwd).await?;
+    let fetched = run_git(runner, cwd, &["fetch", "--no-tags", "--", &remote, branch], None, None).await?;
+    if fetched.code != Some(0) {
+        if let Some(refusal) = crate::bring_back::no_credential(runner, cwd, &remote, &fetched.stderr, words::no_start_credential).await? {
+            return Err(OpError::coded(DaemonErrorCode::NoGitCredential, refusal));
+        }
+        if fetched.stderr.contains("couldn't find remote ref") {
+            return Err(OpError::plain(words::start_on_no_branch(branch)));
+        }
+        return Err(OpError::plain(words::start_on_refused(branch, &last_line(&fetched))));
+    }
+    // Asked of git outright rather than left to checkout, which on some versions moves a branch another worktree holds.
+    let worktrees = run_git(runner, cwd, &["worktree", "list", "--porcelain"], None, None).await?;
+    check(&worktrees, "worktree list")?;
+    let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
+    check(&top, "rev-parse")?;
+    if let Some(held) = held_elsewhere(&stdout_text(&worktrees), stdout_text(&top).trim(), branch) {
+        return Err(OpError::plain(words::start_on_refused(branch, &format!("it is already checked out at {held}"))));
+    }
+    let theirs = format!("{remote}/{branch}");
+    let put = run_git(runner, cwd, &["checkout", "-q", "-f", "-B", branch, &theirs], None, None).await?;
+    if put.code != Some(0) {
+        return Err(OpError::plain(words::start_on_refused(branch, &last_line(&put))));
+    }
+    let cleaned = run_git(runner, cwd, &["clean", "-fdq"], None, None).await?;
+    if cleaned.code != Some(0) {
+        return Err(OpError::plain(words::start_on_refused(branch, &last_line(&cleaned))));
+    }
+    let head = run_git(runner, cwd, &["rev-parse", "HEAD"], None, None).await?;
+    check(&head, "rev-parse")?;
+    Ok(GitStartOnReply { branch: branch.to_owned(), oid: stdout_text(&head).trim().to_owned() })
+}
+
+/// The worktree other than this one that has the branch checked out, off `worktree list --porcelain`.
+fn held_elsewhere(listing: &str, here: &str, branch: &str) -> Option<String> {
+    let wanted = format!("branch refs/heads/{branch}");
+    listing.split("\n\n").find_map(|block| {
+        let path = block.lines().find_map(|l| l.strip_prefix("worktree "))?;
+        (path != here && block.lines().any(|l| l == wanted)).then(|| path.to_owned())
+    })
+}
+
+/// Where a merge's other side is fetched from.
+enum From<'a> {
+    Remote(&'a str),
+    /// A checkout's folder on this computer, which is an agent's repository: the fetch runs its upload-pack under
+    /// overrides that neither repository's config can move.
+    Folder(&'a str),
+}
+
+/// What a merge came to: taken, with the commits it brought, the commit it left and the other side's commit it took;
+/// or taken back, with the files.
+enum Merge {
+    Took { commits: u64, oid: String, head: String },
+    Conflicts(Vec<String>),
+}
+
+/// The sentences one kind of merge is refused with.
+struct MergeWords {
+    dirty: fn(&[String]) -> String,
+    credential: fn(&str, Option<&str>) -> String,
+    refused: fn(&str) -> String,
+}
+
+const UPDATING: MergeWords =
+    MergeWords { dirty: words::update_dirty, credential: words::no_fetch_credential, refused: words::update_refused };
+const MERGING: MergeWords =
+    MergeWords { dirty: words::merge_in_dirty, credential: words::no_merge_credential, refused: words::merge_refused };
+
+/// The one merge every git road takes: a checkout with changes no commit holds refused by name before anything
+/// moves, the other side fetched, merged with a merge commit, and a merge that stopped taken back before anything
+/// is answered. The two overrides stop a command a repository's config names from running on the fetch: the
+/// served folder's pack-objects hook, which git reads only from protected config anyway, and the alternate refs
+/// command, which git runs from the fetching checkout's own config once it has alternates. The upload-pack program
+/// is named, so nothing configured picks it, and lazy fetching is off whatever the daemon's environment says, since a
+/// served partial clone fetches what it lacks through the upload-pack its own remote's config names.
+async fn merge_remote<R: Runs>(
+    runner: &R,
+    cwd: &Path,
+    from: From<'_>,
+    branch: &str,
+    no_ff: bool,
+    said: &MergeWords,
+) -> Result<Merge, OpError> {
     let (root, entries) = changes(runner, cwd).await?;
     let copy = named(&root).to_owned();
     let top = Path::new(&root);
     let dirty: Vec<String> = entries.iter().filter(|e| e.xy != "??" && e.xy != "!!").map(|e| e.path.clone()).collect();
     if !dirty.is_empty() {
-        return Err(OpError::plain(words::update_dirty(&dirty)));
+        return Err(OpError::plain((said.dirty)(&dirty)));
     }
-    let fetched = run_git(runner, top, &["fetch", "--no-tags", &remote, &base], None, None).await?;
+    let (fetch, theirs): (Vec<&str>, String) = match from {
+        From::Remote(remote) => (vec!["fetch", "--no-tags", "--", remote, branch], format!("{remote}/{branch}")),
+        From::Folder(path) => (
+            vec![
+                "GIT_NO_LAZY_FETCH=1",
+                "git",
+                "-c",
+                "uploadpack.packObjectsHook=",
+                "-c",
+                "core.alternateRefsCommand=",
+                "fetch",
+                "--no-tags",
+                "--upload-pack=git-upload-pack",
+                "--",
+                path,
+                branch,
+            ],
+            "FETCH_HEAD".to_owned(),
+        ),
+    };
+    let fetched = match from {
+        From::Remote(_) => run_git(runner, top, &fetch, None, None).await?,
+        From::Folder(_) => runner.run(top, "env", &fetch, None, None).await?,
+    };
     if fetched.code != Some(0) {
-        if let Some(refusal) = crate::bring_back::no_credential(runner, top, &remote, &fetched.stderr, words::no_fetch_credential).await? {
-            return Err(OpError::plain(refusal));
+        if let From::Remote(remote) = from {
+            if let Some(refusal) = crate::bring_back::no_credential(runner, top, remote, &fetched.stderr, said.credential).await? {
+                return Err(OpError::coded(DaemonErrorCode::NoGitCredential, refusal));
+            }
         }
-        return Err(update_refusal(&fetched, &copy));
+        return Err(refusal_as(&fetched, &copy, said.refused));
     }
     let before = run_git(runner, top, &["rev-parse", "HEAD"], None, None).await?;
     check(&before, "rev-parse")?;
     let before = stdout_text(&before).trim().to_owned();
-    let theirs = format!("{remote}/{base}");
-    let merged = run_git(runner, top, &["merge", "--no-edit", &theirs], None, None).await?;
+    let mut merge = vec!["merge", "--no-edit"];
+    if no_ff {
+        merge.push("--no-ff");
+    }
+    merge.push(&theirs);
+    let merged = run_git(runner, top, &merge, None, None).await?;
     if merged.code == Some(0) {
         let counted = run_git(runner, top, &["rev-list", "--count", &format!("{before}..{theirs}")], None, None).await?;
         check(&counted, "rev-list")?;
-        return Ok(GitUpdateReply {
-            base,
-            merged: true,
+        let after = run_git(runner, top, &["rev-parse", "HEAD"], None, None).await?;
+        check(&after, "rev-parse")?;
+        let took = run_git(runner, top, &["rev-parse", "--verify", &format!("{theirs}^{{commit}}")], None, None).await?;
+        check(&took, "rev-parse")?;
+        return Ok(Merge::Took {
             commits: stdout_text(&counted).trim().parse().unwrap_or(0),
-            conflicts: Vec::new(),
+            oid: stdout_text(&after).trim().to_owned(),
+            head: stdout_text(&took).trim().to_owned(),
         });
     }
     // Whatever stopped the merge, one in progress is taken back before anything is answered.
     let underway = run_git(runner, top, &["rev-parse", "-q", "--verify", "MERGE_HEAD"], None, None).await?;
     if underway.code != Some(0) {
-        return Err(update_refusal(&merged, &copy));
+        return Err(refusal_as(&merged, &copy, said.refused));
     }
     let listed = run_git(runner, top, &["diff", "--name-only", "--diff-filter=U", "-z"], None, None).await?;
     let conflicts: Vec<String> = stdout_text(&listed).split('\0').filter(|p| !p.is_empty()).map(str::to_owned).collect();
     let aborted = run_git(runner, top, &["merge", "--abort"], None, None).await?;
     check(&aborted, "merge --abort")?;
     if conflicts.is_empty() {
-        return Err(update_refusal(&merged, &copy));
+        return Err(refusal_as(&merged, &copy, said.refused));
     }
-    Ok(GitUpdateReply { base, merged: false, commits: 0, conflicts })
+    Ok(Merge::Conflicts(conflicts))
 }
 
-/// Why git refused an update, as one sentence: a held index, a copy with no author for the merge commit, or git's own
-/// last line.
-fn update_refusal(res: &GitResult, copy: &str) -> OpError {
-    let refused = refusal_of(res, copy);
+/// git's own last line that is not blank, off stderr before stdout.
+fn last_line(res: &GitResult) -> String {
     let out = stdout_text(res);
     let said =
         [res.stderr.as_str(), out.as_str()].into_iter().flat_map(|text| text.lines().rev()).map(str::trim).find(|line| !line.is_empty());
-    match said {
-        Some(said) if refused.message == words::commit_refused(said) => OpError::plain(words::update_refused(said)),
-        _ => refused,
+    said.unwrap_or("git gave no reason").to_owned()
+}
+
+/// Why git refused a merge, as one sentence: a held index, a copy with no author for the merge commit, or git's own
+/// last line in the words of the merge asked for.
+fn refusal_as(res: &GitResult, copy: &str, refused_with: fn(&str) -> String) -> OpError {
+    let refused = refusal_of(res, copy);
+    let said = last_line(res);
+    if refused.message == words::commit_refused(&said) {
+        OpError::plain(refused_with(&said))
+    } else {
+        refused
     }
 }
 
@@ -474,6 +630,23 @@ mod tests {
             git(&other, &["push", "-q", "origin", "main"]);
         }
 
+        /// Somebody else pushes a branch cut from the remote's `from`, with one commit writing this file.
+        fn other_pushes(&self, branch: &str, from: &str, file: &str, text: &str) {
+            let other = self.dir.path().join("other");
+            git(&other, &["fetch", "-q", "origin", from]);
+            git(&other, &["checkout", "-q", "-B", branch, &format!("origin/{from}")]);
+            std::fs::write(other.join(file), text).unwrap();
+            git(&other, &["add", "-A"]);
+            git(&other, &["commit", "-q", "-m", &format!("{branch} writes {file}")]);
+            git(&other, &["push", "-q", "origin", branch]);
+        }
+
+        /// Every entry the index stages, with its mode, its blob and its stage, beside what looks shows: a merge taken
+        /// back must leave it as it was. The stat data git keeps beside them is rewritten by any index write.
+        fn index(&self) -> String {
+            git(&self.work(), &["ls-files", "--stage"])
+        }
+
         /// Everything a person could see of the checkout: HEAD, git's status, and every file's bytes.
         fn looks(&self) -> (String, String, Vec<(String, Vec<u8>)>) {
             let at = self.work();
@@ -542,6 +715,287 @@ mod tests {
     async fn an_update_in_a_checkout_with_no_remote_is_refused_as_a_push_is() {
         let repo = Repo::with(&["a.txt"]);
         assert_eq!(update(&Here::new(), &repo.at(), Some("main")).await.unwrap_err().message, words::NO_REMOTE);
+    }
+
+    #[tokio::test]
+    async fn a_copy_started_on_a_pushed_branch_stands_at_the_remotes_commit_with_nothing_untracked_left() {
+        let repo = Pushed::new();
+        git(&repo.work(), &["push", "-q", "origin", "work"]);
+        repo.other_pushes("tree/lead", "work", "lead.txt", "the lead's\n");
+        let child = repo.dir.path().join("child");
+        git(repo.dir.path(), &["clone", "-q", repo.dir.path().join("origin.git").to_str().unwrap(), "child"]);
+        std::fs::write(child.join("loose.txt"), "left by the copy\n").unwrap();
+        let done = start_on(&Here::new(), &child, "tree/lead").await.unwrap();
+        let tip = git(&repo.dir.path().join("other"), &["rev-parse", "HEAD"]);
+        assert_eq!(done, GitStartOnReply { branch: "tree/lead".to_owned(), oid: tip.trim().to_owned() });
+        assert_eq!(git(&child, &["rev-parse", "--abbrev-ref", "HEAD"]).trim(), "tree/lead");
+        assert_eq!(git(&child, &["rev-parse", "--abbrev-ref", "@{upstream}"]).trim(), "origin/tree/lead");
+        assert_eq!(std::fs::read_to_string(child.join("lead.txt")).unwrap(), "the lead's\n");
+        assert!(!child.join("loose.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_copy_is_not_started_on_a_branch_the_remote_lacks_or_one_another_worktree_holds() {
+        let repo = Pushed::new();
+        let err = start_on(&Here::new(), &repo.work(), "tree/nowhere").await.unwrap_err();
+        assert_eq!(err.message, words::start_on_no_branch("tree/nowhere"));
+        git(&repo.work(), &["push", "-q", "origin", "work"]);
+        let beside = repo.dir.path().join("beside");
+        git(&repo.work(), &["worktree", "add", "-q", "--detach", beside.to_str().unwrap()]);
+        let err = start_on(&Here::new(), &beside, "work").await.unwrap_err();
+        assert!(err.message.starts_with("the copy could not be put on work: "), "{}", err.message);
+        assert!(err.message.contains("work"), "{}", err.message);
+    }
+
+    #[tokio::test]
+    async fn a_child_merged_in_takes_a_merge_commit_even_where_it_could_fast_forward() {
+        let repo = Pushed::new();
+        git(&repo.work(), &["push", "-q", "origin", "work"]);
+        repo.other_pushes("child/one", "work", "one.txt", "the child's\n");
+        let done = merge_in(&Here::new(), &repo.work(), "child/one", None).await.unwrap();
+        let head = git(&repo.work(), &["rev-parse", "HEAD"]).trim().to_owned();
+        let took = git(&repo.work(), &["rev-parse", "origin/child/one"]).trim().to_owned();
+        assert_eq!(
+            done,
+            GitMergeInReply {
+                branch: "child/one".to_owned(),
+                merged: true,
+                commits: 1,
+                oid: Some(head),
+                head: Some(took),
+                conflicts: Vec::new()
+            }
+        );
+        assert_eq!(git(&repo.work(), &["log", "-1", "--format=%s"]).trim(), "Merge remote-tracking branch 'origin/child/one' into work");
+        assert_eq!(git(&repo.work(), &["rev-list", "--parents", "-1", "HEAD"]).split_whitespace().count(), 3);
+        assert_eq!(std::fs::read_to_string(repo.work().join("one.txt")).unwrap(), "the child's\n");
+        // A child already in the lead merges nothing and says so with a zero.
+        let again = merge_in(&Here::new(), &repo.work(), "child/one", None).await.unwrap();
+        assert_eq!((again.merged, again.commits, again.conflicts.len()), (true, 0, 0));
+        assert_eq!(git(&repo.work(), &["rev-parse", "HEAD"]).trim(), done.oid.unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_child_that_conflicts_names_the_files_and_leaves_head_the_index_and_the_status_as_they_were() {
+        let repo = Pushed::new();
+        git(&repo.work(), &["push", "-q", "origin", "work"]);
+        repo.other_pushes("child/two", "work", "README.md", "line one, the child's\nline two\n");
+        std::fs::write(repo.work().join("README.md"), "line one, the lead's\nline two\n").unwrap();
+        git(&repo.work(), &["commit", "-q", "-am", "the lead on line one"]);
+        std::fs::write(repo.work().join("scratch.txt"), "not tracked\n").unwrap();
+        let (before, index) = (repo.looks(), repo.index());
+        let done = merge_in(&Here::new(), &repo.work(), "child/two", None).await.unwrap();
+        assert_eq!(
+            done,
+            GitMergeInReply {
+                branch: "child/two".to_owned(),
+                merged: false,
+                commits: 0,
+                oid: None,
+                head: None,
+                conflicts: vec!["README.md".to_owned()]
+            }
+        );
+        assert_eq!((repo.looks(), repo.index()), (before, index));
+        assert!(!repo.work().join(".git/MERGE_HEAD").exists());
+    }
+
+    #[tokio::test]
+    async fn a_lead_with_changes_no_commit_holds_is_refused_by_name_before_anything_is_fetched() {
+        let repo = Pushed::new();
+        git(&repo.work(), &["push", "-q", "origin", "work"]);
+        repo.other_pushes("child/three", "work", "three.txt", "x\n");
+        std::fs::write(repo.work().join("work.txt"), "edited\n").unwrap();
+        let err = merge_in(&Here::new(), &repo.work(), "child/three", None).await.unwrap_err();
+        assert_eq!(err.message, words::merge_in_dirty(&["work.txt".to_owned()]));
+        assert!(git(&repo.work(), &["branch", "-r"]).lines().all(|l| !l.contains("child/three")));
+    }
+
+    #[tokio::test]
+    async fn a_merge_from_a_folder_names_the_overrides_and_the_pinned_upload_pack_before_fetch_and_merges_fetch_head() {
+        // status, the top, the fetch, HEAD before, the merge, the count, HEAD after, the commit taken.
+        let runner = crate::git::recorded::Recorded::new(&[]).answering(vec![
+            (0, ""),
+            (0, "/lead\n"),
+            (0, ""),
+            (0, "aaa\n"),
+            (0, ""),
+            (0, "1\n"),
+            (0, "bbb\n"),
+            (0, "ccc\n"),
+        ]);
+        let done = merge_in(&runner, Path::new("/lead"), "child/one", Some("/copies/child one")).await.unwrap();
+        assert_eq!((done.merged, done.commits, done.oid.as_deref(), done.head.as_deref()), (true, 1, Some("bbb"), Some("ccc")));
+        let calls = runner.asked();
+        assert!(calls.iter().any(|c| c.program == "env" && c.args.contains(&"fetch".to_owned())));
+        let asked: Vec<Vec<String>> = calls.into_iter().map(|c| c.args).collect();
+        let fetch = asked.iter().find(|a| a.contains(&"fetch".to_owned())).unwrap();
+        assert_eq!(
+            fetch,
+            &[
+                "GIT_NO_LAZY_FETCH=1",
+                "git",
+                "-c",
+                "uploadpack.packObjectsHook=",
+                "-c",
+                "core.alternateRefsCommand=",
+                "fetch",
+                "--no-tags",
+                "--upload-pack=git-upload-pack",
+                "--",
+                "/copies/child one",
+                "child/one"
+            ]
+            .map(str::to_owned)
+        );
+        assert!(asked.iter().any(|a| a == &["merge", "--no-edit", "--no-ff", "FETCH_HEAD"].map(str::to_owned)), "{asked:?}");
+    }
+
+    /// Every key a served repository's config can set that names a command, and every hook, each writing a marker
+    /// of its own name when run; the fetch of a merge from that repository's folder runs none of them. The hooks are
+    /// shown live first by a checkout in the served repository itself, so a marker that never appears is a hook not
+    /// run rather than one that could not run. The fetching checkout's own alternateRefsCommand, which git runs from
+    /// the fetching side's config once it has alternates, is the one a plain fetch does run.
+    #[tokio::test]
+    async fn a_merge_from_a_folder_runs_nothing_either_repository_configures() {
+        let repo = Pushed::new();
+        let at = repo.dir.path();
+        let marks = at.join("marks");
+        std::fs::create_dir(&marks).unwrap();
+        let mark = |name: &str| format!("touch {}/{name}; true", marks.display());
+        let child = at.join("child");
+        git(at, &["clone", "-q", at.join("origin.git").to_str().unwrap(), "child"]);
+        git(&child, &["checkout", "-q", "-b", "child/one"]);
+        std::fs::write(child.join("one.txt"), "one\n").unwrap();
+        git(&child, &["add", "-A"]);
+        git(&child, &["commit", "-q", "-m", "one"]);
+        let third = at.join("third");
+        git(at, &["init", "-q", "-b", "main", third.to_str().unwrap()]);
+        git(&third, &["commit", "-q", "--allow-empty", "-m", "third"]);
+        std::fs::write(child.join(".git/objects/info/alternates"), format!("{}\n", third.join(".git/objects").display())).unwrap();
+        let keys = [
+            "uploadpack.packObjectsHook",
+            "core.alternateRefsCommand",
+            "core.fsmonitor",
+            "core.sshCommand",
+            "core.gitProxy",
+            "core.askPass",
+            "credential.helper",
+            "core.pager",
+            "pager.upload-pack",
+            "uploadpack.hideRefsCommand",
+            "core.editor",
+            "sequence.editor",
+            "gpg.program",
+            "diff.external",
+            "receive.procReceiveRefs",
+            "remote.origin.uploadpack",
+            "remote.origin.receivepack",
+            "protocol.ext.allow",
+        ];
+        for key in keys {
+            git(&child, &["config", key, &mark(key)]);
+        }
+        let hooks = at.join("hooks");
+        std::fs::create_dir(&hooks).unwrap();
+        for hook in [
+            "pre-upload-pack",
+            "post-upload-pack",
+            "reference-transaction",
+            "post-checkout",
+            "pre-auto-gc",
+            "fsmonitor-watchman",
+            "post-index-change",
+            "push-to-checkout",
+            "proc-receive",
+        ] {
+            let script = format!("#!/bin/sh\n{}\n", mark(&format!("hook-{hook}")));
+            for dir in [hooks.clone(), child.join(".git/hooks")] {
+                let file = dir.join(hook);
+                std::fs::write(&file, &script).unwrap();
+                std::fs::set_permissions(&file, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+            }
+        }
+        git(&child, &["config", "core.hooksPath", hooks.to_str().unwrap()]);
+        // Live: a checkout in the served repository runs its post-checkout hook.
+        git(&child, &["-c", "core.fsmonitor=", "checkout", "-q", "child/one"]);
+        assert!(marks.join("hook-post-checkout").exists());
+        for e in std::fs::read_dir(&marks).unwrap() {
+            std::fs::remove_file(e.unwrap().path()).unwrap();
+        }
+        // The fetching checkout's own key, which a plain fetch runs.
+        std::fs::write(repo.work().join(".git/objects/info/alternates"), format!("{}\n", third.join(".git/objects").display())).unwrap();
+        git(&repo.work(), &["config", "core.alternateRefsCommand", &mark("lead-alternateRefsCommand")]);
+        let done = merge_in(&Here::new(), &repo.work(), "child/one", Some(child.to_str().unwrap())).await.unwrap();
+        assert_eq!((done.merged, done.commits), (true, 1));
+        let ran: Vec<String> = std::fs::read_dir(&marks).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(ran, Vec::<String>::new());
+        // What the override is for: the same fetch without it runs the fetching side's command.
+        git(&repo.work(), &["fetch", "-q", "--no-tags", child.to_str().unwrap(), "child/one"]);
+        assert!(marks.join("lead-alternateRefsCommand").exists());
+    }
+
+    /// Git as the daemon runs it, under an environment that turns lazy fetching back on.
+    struct LazyOn;
+
+    impl Runs for LazyOn {
+        async fn run(
+            &self,
+            cwd: &Path,
+            program: &str,
+            args: &[&str],
+            input: Option<&[u8]>,
+            max_bytes: Option<usize>,
+        ) -> Result<GitResult, OpError> {
+            let mut all = vec!["GIT_NO_LAZY_FETCH=0", program];
+            all.extend_from_slice(args);
+            Here::new().run(cwd, "env", &all, input, max_bytes).await
+        }
+
+        async fn on_path(&self, program: &str) -> Result<bool, OpError> {
+            Here::new().on_path(program).await
+        }
+
+        fn on_this_side(&self, folder: &Path) -> Option<crate::git::OnThisSide> {
+            Here::new().on_this_side(folder)
+        }
+    }
+
+    /// A served repository that is a partial clone asks its promisor remote for an object it lacks through the
+    /// upload-pack that remote's config names, which is the one command upload-pack itself runs. The merge's fetch
+    /// keeps that off whatever the daemon's own environment says.
+    #[tokio::test]
+    async fn a_merge_from_a_partial_clone_fetches_nothing_lazily_whatever_the_environment_says() {
+        let repo = Pushed::new();
+        let at = repo.dir.path();
+        let origin = at.join("origin.git");
+        let other = at.join("other");
+        git(&other, &["checkout", "-q", "-b", "extra"]);
+        std::fs::write(other.join("extra.txt"), "a blob the lead has never seen\n").unwrap();
+        git(&other, &["add", "-A"]);
+        git(&other, &["commit", "-q", "-m", "extra"]);
+        git(&other, &["push", "-q", "origin", "extra"]);
+        git(&origin, &["config", "uploadpack.allowFilter", "true"]);
+        let child = at.join("child");
+        git(at, &["clone", "-q", "--no-checkout", "--filter=blob:none", &format!("file://{}", origin.display()), "child"]);
+        git(&child, &["branch", "child/one", "origin/extra"]);
+        let marker = at.join("lazy");
+        git(&child, &["config", "remote.origin.uploadpack", &format!("touch {}; git-upload-pack", marker.display())]);
+        let _ = merge_in(&LazyOn, &repo.work(), "child/one", Some(child.to_str().unwrap())).await;
+        assert!(!marker.exists(), "the served repository's promisor upload-pack ran");
+    }
+
+    /// A branch is an agent's to name, and git reads options after the remote: one named as an option is a branch
+    /// on every fetch, so its upload-pack never runs.
+    #[tokio::test]
+    async fn a_branch_named_as_an_option_is_never_read_as_one_by_a_fetch() {
+        let repo = Pushed::new();
+        let marker = repo.dir.path().join("ran");
+        let branch = format!("--upload-pack=touch${{IFS}}{};git-upload-pack", marker.display());
+        let _ = merge_in(&Here::new(), &repo.work(), &branch, None).await;
+        assert!(!marker.exists(), "merge_in's fetch read the branch as an option");
+        let _ = start_on(&Here::new(), &repo.work(), &branch).await;
+        assert!(!marker.exists(), "start_on's fetch read the branch as an option");
     }
 
     #[test]

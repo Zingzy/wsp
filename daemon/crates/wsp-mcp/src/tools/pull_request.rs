@@ -9,6 +9,7 @@ use serde_json::{Number, Value};
 use super::said::turns;
 use super::workspace::{self, awake, counted_number, params, read, workspace_of};
 use super::{input, Answer, Refused, Tool};
+use crate::failure::Failure;
 use crate::host::Host;
 use crate::record::fill;
 
@@ -20,6 +21,8 @@ pub struct FixIn {
     pub workspace: String,
     #[serde(default)]
     pub check: Option<String>,
+    #[serde(default)]
+    pub child: Option<String>,
 }
 
 /// packages/protocol's FixResult, in its order.
@@ -32,6 +35,8 @@ pub struct FixOut {
     thread_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     check: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    child: Option<String>,
     base: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent: Option<String>,
@@ -96,7 +101,10 @@ pub const UPDATE: Tool =
 /// A named check is read off the pull request as it stands, so the copy is not woken for it; without one the host
 /// updates the copy from its base first, which needs its machine.
 async fn fix(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
-    let FixIn { workspace, check } = input(FIX_NAME, arguments)?;
+    let FixIn { workspace, check, child } = input(FIX_NAME, arguments)?;
+    if check.is_some() && child.is_some() {
+        return Err(Failure::new(workspace::words().fix_check_or_child.clone()).into());
+    }
     let client = host.client().await?;
     let source = workspace_of(&client, &workspace).await?;
     let (id, name) = if check.is_none() {
@@ -109,6 +117,9 @@ async fn fix(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     if let Some(check) = check {
         asked.insert("check".to_owned(), Value::from(check));
     }
+    if let Some(child) = child {
+        asked.insert("child".to_owned(), Value::from(child));
+    }
     let done: FixOut = client.request("workspaces.fix", asked).await?;
     let words = workspace::words();
     let agent = match &done.agent {
@@ -117,6 +128,8 @@ async fn fix(host: Arc<Host>, arguments: Value) -> Result<Answer, Refused> {
     };
     let said = if done.outcome == "updated" {
         fill(&words.fix_nothing, &[("name", &name), ("base", &done.base)])
+    } else if let Some(child) = &done.child {
+        fill(&words.fix_merge_child, &[("name", &name), ("agent", &agent), ("child", child)])
     } else if let Some(check) = &done.check {
         fill(&words.fix_asked, &[("name", &name), ("agent", &agent), ("check", check)])
     } else {

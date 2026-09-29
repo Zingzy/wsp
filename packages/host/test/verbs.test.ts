@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { type fakeCopier, NapRefusedError, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { AGENTS_ON, agentsWord, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine, shellLine } from "@wsp/protocol";
+import { AGENTS_ON, agentsWord, childStartedLine, type ProjectView, type DaemonErrorCode, noProjectImageLine, projectImageInUseRefusal, projectImageRemoveNotice, projectImageRemovedLine, DAEMON_TOKEN_PATH, noHostCliLine, napRefusedLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_KEY_ENV, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, UP_RESTART_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, copyTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, type PlaceView, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, MEMORY_KEPT_CLAUSE, projectRemovedOnComputerLine, type HarnessCatalogAnswer, noFastLine, shellLine } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type DaemonChannel, type HarnessAdapterFactory, type HostSsh, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -31,7 +31,7 @@ import { TEST_ENV } from "../../../vitest.env.js";
 import { writeStub } from "../../protocol/test/stub-script.js";
 import { runningWsp } from "../src/mcp-install.js";
 import { wspArgvOf } from "../src/place-report.js";
-import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
+import { guestAnswer, stubBackend, withDaemonRoads, type StubBackend } from "./stub-backend.js";
 import { copyingFake, createOn, fakeDaemonStart, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, lastingAgent, launchedScript, launchedScripts, projectBundler, sayingAgent, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 import { CLOUD_ON } from "../src/cloud.js";
@@ -48,7 +48,11 @@ function fakeGitDaemon(): { open: () => Promise<DaemonChannel>; pr: { refuse?: {
   return {
     pr: state,
     open: async () => ({
-      send: async (frame: { op: string }) => {
+      send: async (frame: { op: string; branch?: string }) => {
+        // A source a fork is made from reads as on its own branch, tracked and level with the remote, and the fork's copy is
+        // put on it.
+        if (frame.op === "git.status") return { id: 1, ok: true, branch: { oid: "abc", head: "work", upstream: "origin/work", ahead: 0, behind: 0 }, entries: [], root: "/root/stub" };
+        if (frame.op === "git.startOn") return { id: 1, ok: true, branch: frame.branch, oid: "c0ffee" };
         if (frame.op === "git.push") {
           return { id: 1, ok: true, branch: "pricing-page", base: "main", remote: "origin", ahead: 2, uncommitted: 1, stat: [" src/page.tsx | 4 ++--", " 1 file changed, 2 insertions(+), 2 deletions(-)"] };
         }
@@ -187,7 +191,7 @@ describe("wsp verbs over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends, wired: MachineBackend = backend, restart?: RestartRoad): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), ...(places !== undefined ? { places } : {}) });
+    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, fakeDaemonStart, undefined, copier), placeLinks: placeWiring(statePath), daemonChannel: daemon.open, ...(places !== undefined ? { places } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
     handle = await serve(captured(), { port: 0, statePath, webDir: join(dir, "web"), runtime: rt, ...(restart !== undefined ? { restart } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -222,6 +226,7 @@ describe("wsp verbs over the host", () => {
     const [status] = await rt.status.list();
     expect(status).toMatchObject({ name: "big", size: { cpu: 2, memMb: 8192 } });
 
+    withDaemonRoads(backend);
     const forked = await run("fork", "big", "--name", "wide", "--size", "4x8");
     expect(forked.code).toBe(0);
     expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 4, memMb: 8192 });
@@ -266,6 +271,7 @@ describe("wsp verbs over the host", () => {
       if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
       return create(spec);
     };
+    withDaemonRoads(backend);
     const refused = await run("fork", "first", "--name", "f2");
     expect(refused.code).toBe(1);
     expect(refused.io.errors).toEqual(["wsp fork: both machine slots are in use: first, t-cap. Pause one or wait for a nap."]);
@@ -541,6 +547,7 @@ describe("wsp verbs over the host", () => {
   it.runIf(CLOUD_ON)("fork makes a sibling from the source's own golden version, by name or id, and --send opens its first thread", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
+    withDaemonRoads(backend);
     const plain = await run("fork", "alpha");
     expect(plain.code).toBe(0);
     const forks = (await rt.workspaces.list()).filter(w => w.id !== alpha!.id);
@@ -548,14 +555,15 @@ describe("wsp verbs over the host", () => {
     // A fork is a child of the workspace it was forked from: the record says so, and a bring back from it reads
     // that parent's own branch as the base its work lands in.
     expect(forks[0]!.parentWorkspaceId).toBe(alpha!.id);
-    expect(plain.io.lines).toEqual([`created alpha-fork ${forks[0]!.id}, a copy of ${forks[0]!.project.name} at ${forks[0]!.project.path}`]);
+    // The fork's copy is put on the branch its source is on, and the line says so.
+    expect(plain.io.lines).toEqual([`created alpha-fork ${forks[0]!.id}, a copy of ${forks[0]!.project.name} at ${forks[0]!.project.path}\n${childStartedLine("alpha-fork", "work")}`]);
 
     const sent = await run("fork", alpha!.id, "--name", "worker", "--send", "build it");
     expect(sent.code).toBe(0);
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     const [thread] = await rt.sessions.list(worker.id);
     expect(thread).toMatchObject({ harness: "claude", startedBy: "cli", prompt: "build it", status: "completed" });
-    expect(sent.io.lines).toEqual([`created worker ${worker.id}, a copy of ${worker.project.name} at ${worker.project.path}`, `thread ${thread!.threadId}  ${THREAD_PREFIX_WORD}`, "re: build it"]);
+    expect(sent.io.lines).toEqual([`created worker ${worker.id}, a copy of ${worker.project.name} at ${worker.project.path}\n${childStartedLine("worker", "work")}`, `thread ${thread!.threadId}  ${THREAD_PREFIX_WORD}`, "re: build it"]);
     expect(sent.io.streamed.endsWith("ready\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
   });
 
@@ -617,6 +625,7 @@ describe("wsp verbs over the host", () => {
     await restartHost({ claude: claude.adapter });
     const words = (await rt.workspaces.get(alpha!.id)).gone!;
     expect(words).toMatch(new RegExp(`^machine ${alpha!.machineId} is gone at the provider: the record load found it gone at \\S+Z \\(404 gone\\)$`));
+    withDaemonRoads(backend);
     const forked = await run("fork", "alpha");
     expect(forked.code).toBe(1);
     expect(forked.io.errors).toEqual([`wsp fork: alpha's machine is gone with its disk, so work that was not pushed is lost; rebuild it to fork, which brings back its home folder from the last saved nap (${words})`]);
@@ -1790,6 +1799,7 @@ describe("wsp verbs over the host", () => {
 
   it.runIf(CLOUD_ON)("fork --send under an agent the host has no adapter for is refused naming the agents it has, and no machine is minted", async () => {
     await run("new", "alpha");
+    withDaemonRoads(backend);
     const refused = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--agent", "gemini");
     expect(refused.code).toBe(3);
     expect(refused.io.errors).toEqual(['wsp fork: no adapter registered for harness "gemini"; agents on this host: claude, codex. Name one of those with --agent.']);
@@ -1807,6 +1817,7 @@ describe("wsp verbs over the host", () => {
       const opened = await run("run", "alpha", task);
       expect(opened.code).toBe(3);
       expect(opened.io.errors).toEqual([`wsp run: ${EMPTY_TASK_LINE}. Put it in quotes after the flags.`]);
+      withDaemonRoads(backend);
       const forked = await run("fork", "alpha", "--name", "worker", "--send", task);
       expect(forked.code).toBe(3);
       expect(forked.io.errors).toEqual([`wsp fork: ${EMPTY_TASK_LINE}. Put it in quotes after the flags.`]);
@@ -2239,6 +2250,7 @@ describe("wsp verbs over the host", () => {
   it.runIf(CLOUD_ON)("fork --send --cwd starts the first thread in that folder; without it, in the project the fork holds", async () => {
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
+    withDaemonRoads(backend);
     const picked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--cwd", "/root/work/site");
     expect(picked.code).toBe(0);
     expect(claude.starts.map(s => s.cwd)).toEqual(["/root/work/site"]);
@@ -2286,6 +2298,7 @@ describe("wsp verbs over the host", () => {
     expect(named.code).toBe(3);
     expect(named.io.errors).toEqual(['--access belongs to wsp fork and wsp run; wsp send does not read it. usage: wsp send <thread> [--model, --effort <value>] [--fast] [--file <path>] [--detach] "<message>"']);
 
+    withDaemonRoads(backend);
     const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--model", "claude-sonnet-5", "--access", "bypassPermissions");
     expect(forked.code).toBe(0);
     expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions", effort: level });
@@ -2318,6 +2331,7 @@ describe("wsp verbs over the host", () => {
     const effort = await run("run", "alpha", "--effort", "ultra", "review it");
     expect(effort.code).toBe(3);
     expect(effort.io.errors).toEqual([`wsp run: effort "ultra" is not one Opus 5.5 takes; one of: Low (low), Medium (medium), High (high), Extra high (xhigh), Max (max)${BUILT_IN_LIST_CLAUSE}. Drop the flag, or give it a value the agent offers.`]);
+    withDaemonRoads(backend);
     const access = await run("fork", "alpha", "--send", "build it", "--access", "yolo");
     expect(access.code).toBe(3);
     expect(access.io.errors[0]).toMatch(/^wsp fork: access mode "yolo" is not one claude takes; one of: Default \(default\), Accept edits \(acceptEdits\), /);
@@ -2392,6 +2406,7 @@ describe("wsp verbs over the host", () => {
     expect(codex.starts.at(-1)).toMatchObject({ model: "anthropic/claude-sonnet-4.5", effort: "high" });
     // The same list refuses a table model that machine does not have, naming the machine's own, and a fork checks
     // the workspace it forks from, whose golden the new machine comes from.
+    withDaemonRoads(backend);
     const forked = await run("fork", "alpha", "--send", "go", "--agent", "codex", "--model", "gpt-5.5");
     expect(forked.code).toBe(3);
     expect(forked.io.errors).toEqual(['wsp fork: model "gpt-5.5" is not one codex takes; one of: anthropic/claude-sonnet-4.5 (anthropic/claude-sonnet-4.5). Drop the flag, or give it a value the agent offers.']);
@@ -2404,6 +2419,7 @@ describe("wsp verbs over the host", () => {
     expect(relative.code).toBe(3);
     // The usage the refusal carries is the verb's own, whatever its groups are; the words before it are the rule.
     expect(relative.io.errors).toEqual([`--cwd is a path on the machine, absolute, and got "packages/host". Give a path that opens with /, since whoever reads it works in a folder this line cannot see. usage: ${CLI_VERBS.find(v => v.name === "run")!.usage}`]);
+    withDaemonRoads(backend);
     const forked = await run("fork", "alpha", "--send", "build it", "--cwd", "packages/host");
     expect(forked.code).toBe(3);
     expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute, and got "packages\/host"\..* usage: wsp fork /);
@@ -2776,11 +2792,12 @@ describe("wsp verbs over the host", () => {
 
   it.runIf(CLOUD_ON)("fork --send --notify me prints the first turn's end on stderr as run does; a bad --notify fails before any machine is minted", async () => {
     await run("new", "alpha");
+    withDaemonRoads(backend);
     const { code, io } = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--notify", "me");
     expect(code).toBe(0);
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     const [row] = await rt.sessions.list(worker.id);
-    expect(io.lines).toEqual([`created worker ${worker.id}, a copy of ${worker.project.name} at ${worker.project.path}`, `thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "re: build it"]);
+    expect(io.lines).toEqual([`created worker ${worker.id}, a copy of ${worker.project.name} at ${worker.project.path}\n${childStartedLine("worker", "work")}`, `thread ${row!.threadId}  ${THREAD_PREFIX_WORD}`, "re: build it"]);
     expect(io.errors).toEqual([`thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it`]);
 
     const bad = await run("fork", "alpha", "--name", "never", "--send", "build it", "--notify", "nope");
@@ -3192,6 +3209,7 @@ describe("wsp verbs over the host", () => {
     const sent = await run("send", row!.threadId!, "second", "--json");
     expect(sent.code).toBe(0);
     expect((json(sent.io) as { type: string }[]).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", undefined]);
+    withDaemonRoads(backend);
     const forked = await run("fork", "alpha", "--name", "worker", "--send", "third");
     expect(forked.code).toBe(0);
     expect(forked.io.lines.slice(1)).toEqual([expect.stringMatching(/^thread /), "re: third"]);

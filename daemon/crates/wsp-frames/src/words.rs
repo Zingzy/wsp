@@ -232,8 +232,13 @@ pub fn no_host_cli(host: &str) -> String {
 /// What an update's fetch git refused for want of an https credential is refused with: nothing was fetched and the
 /// branch is as it was, and the fix is the host module's to name, as for a push.
 pub fn no_fetch_credential(host: &str, fix: Option<&str>) -> String {
+    nothing_fetched(host, fix, "update")
+}
+
+/// The one sentence a fetch refused for want of a credential is, with the act to run again once signed in.
+fn nothing_fetched(host: &str, fix: Option<&str>, again: &str) -> String {
     let said = match fix {
-        Some(fix) => format!("; {fix}, then update again"),
+        Some(fix) => format!("; {fix}, then {again} again"),
         None => String::new(),
     };
     format!("this computer has no git credential for {host}, so nothing was fetched{said}")
@@ -242,11 +247,50 @@ pub fn no_fetch_credential(host: &str, fix: Option<&str>) -> String {
 /// What an update is refused with while the checkout holds changes no commit has: a merge over them could lose them,
 /// so the files are named and nothing is fetched.
 pub fn update_dirty(files: &[String]) -> String {
+    format!("commit or discard the changes in {} before updating", files_named(files))
+}
+
+/// The same for a merge of a child's branch into its lead's checkout.
+pub fn merge_in_dirty(files: &[String]) -> String {
+    format!("commit or discard the changes in {} before merging", files_named(files))
+}
+
+/// The first five files, then how many more.
+fn files_named(files: &[String]) -> String {
     const NAMED: usize = 5;
     let shown = files.iter().take(NAMED).map(String::as_str).collect::<Vec<_>>().join(", ");
     let more = if files.len() > NAMED { format!(" and {} more", files.len() - NAMED) } else { String::new() };
-    format!("commit or discard the changes in {shown}{more} before updating")
+    format!("{shown}{more}")
 }
+
+/// What a merge's fetch git refused for want of an https credential is refused with, as an update's is.
+pub fn no_merge_credential(host: &str, fix: Option<&str>) -> String {
+    nothing_fetched(host, fix, "merge")
+}
+
+/// What a copy put on a pushed branch is refused with where git had no credential to fetch it.
+pub fn no_start_credential(host: &str, fix: Option<&str>) -> String {
+    let said = match fix {
+        Some(fix) => format!("; {fix}, then start it again"),
+        None => String::new(),
+    };
+    format!("this computer has no git credential for {host}, so the branch to start on was not fetched{said}")
+}
+
+/// What a copy is refused with where the remote holds no branch of the name it was to start on.
+pub fn start_on_no_branch(branch: &str) -> String {
+    format!("the remote has no branch {branch} to start from")
+}
+
+/// What a copy git would not put on the branch is refused with: git's own last line, which names a worktree already
+/// holding the branch.
+pub fn start_on_refused(branch: &str, said: &str) -> String {
+    format!("the copy could not be put on {branch}: {said}")
+}
+
+/// Why a merge from a copy's folder is refused anywhere but the computer both copies sit on.
+pub const MERGE_FROM_HERE_ONLY: &str =
+    "a merge from a copy's folder runs only on the computer the copies sit on; merge from the remote here";
 
 /// What an update git refused for any other reason is refused with: git's own last line.
 pub fn update_refused(said: &str) -> String {

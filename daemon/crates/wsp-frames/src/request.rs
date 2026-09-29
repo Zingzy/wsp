@@ -398,6 +398,38 @@ pub enum DaemonOp {
         #[ts(optional)]
         machine_id: Option<String>,
     },
+    /// Puts the checkout on a branch as the remote holds it: fetched, the branch reset to the remote's commit and every
+    /// untracked file dropped, as a copy is made. What a child's copy starts on, the branch its lead pushed.
+    #[serde(rename = "git.startOn", rename_all = "camelCase")]
+    GitStartOn {
+        cwd: String,
+        branch: String,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
+    /// How far one branch is from a base, a branch or a commit, as the git host holds them, read through the host's
+    /// command line on this computer with the repository named off the remote given. A head the host lacks answers
+    /// not pushed.
+    #[serde(rename = "git.branchCompare", rename_all = "camelCase")]
+    GitBranchCompare { cwd: String, remote: String, base: String, head: String },
+    /// Merges another branch into the one the checkout is on with a merge commit: fetched from the remote, or from
+    /// a copy's folder on this computer where the project has no remote. Refused over changes no commit holds; a merge
+    /// that conflicts is taken back at once and answered with the files.
+    #[serde(rename = "git.mergeIn", rename_all = "camelCase")]
+    GitMergeIn {
+        cwd: String,
+        branch: String,
+        /// A checkout's folder on this computer to fetch from in place of the remote; refused on any other daemon.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        from: Option<String>,
+        /// The workspace this frame is for, as on fs.list above.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        machine_id: Option<String>,
+    },
     /// The repository's open pull requests and issues, read through that same command line.
     #[serde(rename = "git.prList", rename_all = "camelCase")]
     GitPrList {
@@ -544,7 +576,7 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 55] = [
+pub const DAEMON_OPS: [&str; 58] = [
     "pty.create",
     "pty.attach",
     "pty.detach",
@@ -600,6 +632,9 @@ pub const DAEMON_OPS: [&str; 55] = [
     "git.repoRead",
     "git.update",
     "pty.tab",
+    "git.startOn",
+    "git.branchCompare",
+    "git.mergeIn",
 ];
 
 /// The five of those that belong to the road a client of this machine dials in on: a guest process's two and the

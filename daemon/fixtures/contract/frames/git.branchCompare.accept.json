@@ -1,0 +1,10 @@
+[
+  {
+    "id": 1,
+    "op": "git.branchCompare",
+    "cwd": "/Users/p",
+    "remote": "git@github.com:o/r.git",
+    "base": "tree/lead",
+    "head": "child/one"
+  }
+]
