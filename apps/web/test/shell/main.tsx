@@ -4,8 +4,7 @@
 // (?theme=light, each side's theme by id with ?lightTheme= and ?darkTheme=), with a toast over the centre pane (?toast=...) and with the
 // runtime replacing the first machine's helper (?helper=1) or the first
 // machine's link dropped after a near-full memory sample (?oom=1) or the
-// napping machine's last vault refused for its size (?vault=1) or every
-// probe failing before it left this computer (?offline=1), so a test
+// napping machine's last vault refused for its size (?vault=1), so a test
 // can measure the chrome's geometry, which jsdom cannot lay out. With
 // ?ws=<id> the centre holds that workspace's thread and composer, so the
 // refusal line above the box can be measured for the running, paused and gone
@@ -410,7 +409,7 @@ const api: Api = {
         ? statusOf(w, { kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, facts: { os: "macOS 15.5", uptimeMs: 3 * 86_400_000 + 4 * 3_600_000, folder: "/Users/zingzy/wsp" } })
         : params.get("silent") === "1" && w.phase !== "gone"
           ? statusOf(w, { reach: { state: "no-daemon" } })
-          : statusOf(w, params.get("offline") === "1" ? { reach: { state: statusOf(w).reach.state, offline: true } } : w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
+          : statusOf(w, w.id !== "ws_a" ? {} : params.get("helper") === "1" ? { daemonNote: DAEMON_UPDATING } : params.get("oom") === "1" ? { reach: { state: "unreachable" } } : { idleAt: Date.now() + 15.5 * 60_000 }),
     ),
   forget: async () => {},
   nap: async id => workspaces.find(w => w.id === id)!,

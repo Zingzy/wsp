@@ -144,6 +144,9 @@ export interface AgentEntry extends EntryBase {
   /** The first thing to type inside the agent once it has the wsp tools, in its own words: a slash form where the
    * agent has one for a skill, else the sentence that reaches the skill by its description. */
   firstMove: string;
+  /** The agent's own way of running a command in the background that it tracks and wakes the agent from when the
+   * command ends, in the words the agent is told; absent where none was measured, and the machine context names none. */
+  backgroundRoad?: string;
 }
 
 export interface ToolEntry extends EntryBase {

@@ -1043,7 +1043,7 @@ function RewindButton({ messageId }: { messageId: MessageId }) {
   if (activity.isWorking) return null;
   return (
     <Tooltip>
-      <TooltipTrigger render={<Button type="button" size="xs" variant="ghost" onClick={() => ctx.onRewind(messageId)} aria-label="Rewind to here" data-k="rewind-to-here" />}>
+      <TooltipTrigger render={<Button type="button" size="icon-xs" variant="ghost" onClick={() => ctx.onRewind(messageId)} aria-label="Rewind to here" data-k="rewind-to-here" />}>
         <Undo2Icon className="size-3.5" />
       </TooltipTrigger>
       <TooltipPopup side="top">Rewind to here</TooltipPopup>
@@ -1095,8 +1095,10 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         />
         {row.showAssistantMeta ? (
           <div className="mt-1.5 flex items-center gap-3.5 text-[13px] tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
-            <AssistantCopyButton row={row} />
-            {ctx.rewindableMessageIds.has(row.message.id) ? <RewindButton messageId={row.message.id} /> : null}
+            <span className="flex items-center gap-0.5">
+              <AssistantCopyButton row={row} />
+              {ctx.rewindableMessageIds.has(row.message.id) ? <RewindButton messageId={row.message.id} /> : null}
+            </span>
             {!row.message.streaming && (
               <Tooltip>
                 <TooltipTrigger

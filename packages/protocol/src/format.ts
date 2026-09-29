@@ -1370,11 +1370,6 @@ export const IDLE_REASON = {
   windowIn: (reason: string | undefined): string | undefined => (reason === undefined ? undefined : (/^idle (\d+ min)$/.exec(reason)?.[1] ?? undefined)),
 } as const;
 
-/** The one line the sidebar puts above the rows while a probe fails before leaving this computer; the rows keep
- * their last word. It names neither the computer nor a provider: the road out can be up while one machine's name
- * does not resolve (measured 2026-09-07), and the probe knows the machine it asked and nothing else. */
-export const MACHINE_UNREACHED_LINE = "A machine cannot be reached from this computer";
-
 /** What a window on another computer says while the wsp it shows has gone quiet: the computer that host runs on is
  * asleep or off, and the workspaces on every other computer keep working. It reads as a fact in the sidebar's own
  * prose line and as the send's reason, never as an alert: nothing is broken and nothing is lost. */
@@ -1401,6 +1396,20 @@ export function snapshotListedRefusedLine(snapshotId: string, waitedMs: number):
  * descriptions, the command line's help and the machine's own context. The reply comes back at once from a follow;
  * the row settles only at the process exit, since a harness can keep working after it answers. */
 export const TURN_END_WORDS = "A turn ends when the agent process exits, not at its reply, and the thread reads running until then";
+
+/** What another agent is, quoted whole by every door an agent reads before it picks a tool: the launch context, the
+ * tool server's instructions, the run tool and the skill. An agent's own subagent tool answers inside its turn and
+ * never reaches the sidebar, so the person asking for a second model or harness would see nothing of it. */
+export const ANOTHER_AGENT_WORDS =
+  "When the person asks for another agent, on another model or another harness, start it as a wsp thread with run, so it shows in their sidebar; your own subagent tool is for your own sub-steps";
+
+/** How an agent starts work it wants to hear back from, quoted whole by the skill's rules and the machine's context:
+ * the harness tracks its own background road and wakes the agent when it ends, and nothing tracks a shell `&`. The
+ * machine context names the road by the agent's catalog entry where it carries one; the skill, read by every agent,
+ * names none. */
+export const backgroundWorkWords = (road?: string): string =>
+  `Start long work with ${road ?? "your harness's own background road"}, which wakes you when it ends, and never with a shell &, which nothing tracks and which wakes nobody when it ends`;
+export const BACKGROUND_WORK_WORDS = backgroundWorkWords();
 
 /** When the notify line goes, quoted the same way: with the reply, once, never again at the exit. A reply the agent
  * gave while work it started was still running is delivered when that work is done, and the line goes with it. */
@@ -2584,7 +2593,14 @@ export function agentsOffRefusal(workspace: string, act: SpawnAct): string {
  * person's shell or a `wsp exec` on the machine. The switch may well be on, so the sentence names the missing
  * identity and never tells anyone to turn it on. */
 export function guestNoTokenRefusal(workspace: string): string {
-  return `this line came from no thread's turn on ${workspace}, so it carries no thread's token; wsp hands one only to a turn it starts on a workspace whose agents may spawn`;
+  return `this line came from no thread's turn on ${workspace}, so it carries no thread's token; wsp hands one to each turn it starts`;
+}
+
+/** The sentence the guest door refuses a turn's line that carries no thread's token with: every turn is launched
+ * with one whatever the switch says, so this turn was launched by a host that minted it none, and the switch is not
+ * what would change it. */
+export function guestTurnNoTokenRefusal(workspace: string): string {
+  return `this line came from a turn on ${workspace} that was launched without a thread's token; a turn started now carries one`;
 }
 
 /** The one word the socket door closes a socket whose token names nobody with, and the one the guest door refuses a
@@ -2740,8 +2756,8 @@ export function idPrefixRefusal(ref: string, ids: readonly string[]): string {
   return `${ids.length} workspaces start with ${ref} (${ids.join(", ")}); give more of the id`;
 }
 
-/** The workspace table's cell for the switch: empty where agents spawn nothing, which is nearly every row, so the
- * column is quiet until a workspace has one. */
+/** The workspace table's cell for the switch: the machines a root thread there may hold, and empty where a person
+ * turned it off. */
 export function agentsWord(agents: { spawn: boolean; maxMachines: number } | undefined): string {
   return agents?.spawn !== true ? "" : `${agents.maxMachines} ${agents.maxMachines === 1 ? "machine" : "machines"}`;
 }

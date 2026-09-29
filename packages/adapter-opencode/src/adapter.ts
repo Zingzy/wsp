@@ -268,7 +268,7 @@ export function createOpenCodeAdapter(deps: OpenCodeAdapterDeps): OpenCodeAdapte
     ...(attach !== undefined
       ? {
           attach: async (options: AdapterAttachOptions) => {
-            const stream = await attach(options.run, { input: false });
+            const stream = await attach(options.run, { input: false, startedAt: options.startedAt });
             return stream === "gone"
               ? "gone"
               : follow({

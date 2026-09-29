@@ -6,8 +6,8 @@ import { thisComputerLine } from "@wsp/protocol";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
-import { INSTRUCTIONS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, WSP_SKILL, agentsLine, instructionsOf, skillFor } from "../src/skill.js";
+import { ANOTHER_AGENT_WORDS, BACKGROUND_WORK_WORDS, COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
+import { INSTRUCTIONS, INSTRUCTIONS_KEPT, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, WSP_SKILL, agentsLine, instructionsOf, skillFor } from "../src/skill.js";
 import { CLOUD_ON } from "../src/cloud.js";
 import { hasTool, CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
 import { SERVICE_MANAGERS } from "../src/service.js";
@@ -72,7 +72,13 @@ describe("the wsp skill", () => {
     expect(loop).not.toContain("threads wait");
     expect(loop).not.toContain("nohup wsp run");
     // The MCP instructions carry both roads, since an agent holding only the tools reads nothing else.
-    for (const words of [NOTIFY_CALLER, COORDINATOR_HANDOFF]) expect(INSTRUCTIONS, words.slice(0, 40)).toContain(words);
+    for (const words of [NOTIFY_CALLER, COORDINATOR_HANDOFF, BACKGROUND_WORK_WORDS]) expect(INSTRUCTIONS, words.slice(0, 40)).toContain(words);
+  });
+
+  it("opens the instructions with what another agent is, inside the part an agent keeps of them", () => {
+    expect(INSTRUCTIONS.length).toBeGreaterThan(INSTRUCTIONS_KEPT);
+    expect(INSTRUCTIONS.slice(0, INSTRUCTIONS_KEPT)).toContain(`${ANOTHER_AGENT_WORDS}.`);
+    expect(INSTRUCTIONS.startsWith(`${ANOTHER_AGENT_WORDS}.`)).toBe(true);
   });
 
   it("says a send is never refused for meeting a turn, and names the steer, the queue and the reply tail in the runtime's own words", () => {
@@ -242,9 +248,9 @@ describe("the wsp skill", () => {
     expect(setup.trimEnd().endsWith("that thread shows in the person's sidebar.")).toBe(true);
   });
 
-  it("the MCP instructions are the skill's opening paragraph, the walkthrough's, the line pointing back at the skill and the command line, and the rules", () => {
+  it("the MCP instructions are what another agent is, the skill's opening paragraph, the walkthrough's, the line pointing back at the skill and the command line, and the rules", () => {
     const skill = `---\nname: x\ndescription: y\n---\n\n# x\n\nOne.\nTwo.\n\n${SETUP_HEADING}\n\nThree.\n\n1. Not this.\n\n${RULES_HEADING}\n\nFour.\n\n- A rule.\n\n## Later\n\nNor this.\n`;
-    expect(instructionsOf(skill, ["claude"]).startsWith(`One. Two. Three. ${agentsLine(["claude"])} The steps, with the exact line to run`)).toBe(true);
+    expect(instructionsOf(skill, ["claude"]).startsWith(`${ANOTHER_AGENT_WORDS}. One. Two. Three. ${agentsLine(["claude"])} The steps, with the exact line to run`)).toBe(true);
     expect(instructionsOf(skill, ["claude"]).endsWith("Four.\n- A rule.")).toBe(true);
     expect(instructionsOf(skill, ["claude"])).not.toContain("Not this.");
     expect(() => instructionsOf("---\nname: x\n", ["claude"])).toThrow("never closes");
@@ -253,7 +259,7 @@ describe("the wsp skill", () => {
     expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n`, ["claude"])).toThrow(`the skill has no ${RULES_HEADING} section`);
     expect(() => instructionsOf(`# x\n\nOne.\n\n${SETUP_HEADING}\n\nThree.\n\n${RULES_HEADING}\n\nFour.\n`, ["claude"])).toThrow(`${RULES_HEADING} has no rules`);
     expect(INSTRUCTIONS).toBe(instructionsOf(WSP_SKILL, THREAD_AGENTS));
-    expect(INSTRUCTIONS.startsWith(CLOUD_ON ? "wsp runs cloud machines called workspaces" : "wsp runs machines called workspaces")).toBe(true);
+    expect(INSTRUCTIONS.startsWith(`${ANOTHER_AGENT_WORDS}. ${CLOUD_ON ? "wsp runs cloud machines called workspaces" : "wsp runs machines called workspaces"}`)).toBe(true);
     // A caller holding only the tools reads the whole sequence here or nowhere: health check, the recipe from what
     // their agents used, the question about the heavy rows, the person's init line, then the host started here.
     expect(INSTRUCTIONS).toContain("The road is a health check");
@@ -273,15 +279,17 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).not.toContain("## ");
   });
 
-  it("the rules for running work on a machine are ten lines stated as facts about machines, nine with no cloud, and the instructions carry the same lines", () => {
+  it("the rules for running work on a machine are twelve lines stated as facts about machines, eleven with no cloud, and the instructions carry the same lines", () => {
     const from = WSP_SKILL.indexOf(`\n${RULES_HEADING}\n`);
     expect(from, RULES_HEADING).toBeGreaterThan(-1);
     const section = WSP_SKILL.slice(from, WSP_SKILL.indexOf("\n## ", from + 1));
     const rules = section.split("\n").filter(line => line.startsWith("- "));
-    expect(rules).toHaveLength(CLOUD_ON ? 10 : 9);
+    expect(rules).toHaveLength(CLOUD_ON ? 12 : 11);
     // The two roads to a child's end open the section: which one holds is the first thing a caller has to decide.
     expect(rules[0]).toContain(NOTIFY_CALLER);
     expect(rules[1]).toContain(COORDINATOR_HANDOFF);
+    // Then what another agent is, before any rule that starts one.
+    expect(rules[2]).toBe(`- ${ANOTHER_AGENT_WORDS}.`);
     // The one home: the instructions end on the same lines, so neither door can state a rule the other does not.
     expect(INSTRUCTIONS.split("\n").slice(1)).toEqual(rules);
     // Whole sentences a reader with no history can act on: no ticket number, no date, nothing that happened once.
@@ -289,8 +297,8 @@ describe("the wsp skill", () => {
       expect(rule, rule.slice(0, 40)).toMatch(/\.$/);
       expect(rule, rule.slice(0, 40)).not.toMatch(/#\d|\bticket\b|\b20\d\d\b/);
     }
-    // The ten, each by the fact it turns on: the two roads to a child's end, which kind of workspace the work goes
-    // on, the golden, the count, the worktree, the send, the restart, the pause, the person reading along.
+    // The rest, each by the fact it turns on: which kind of workspace the work goes on, the golden, the count, the
+    // worktree, long work in the background, the send, the restart, the pause, the person reading along.
     expect(section).toContain("the one `wsp add <folder>` and `wsp new \"<what you are working on>\"` make");
     expect(section).toContain("a quick subtask or a second harness");
     if (CLOUD_ON) {
@@ -305,6 +313,7 @@ describe("the wsp skill", () => {
     expect(section).toContain("on 2 vCPU and 4 GB one thread runs tests or a build at a time");
     expect(section).toContain("its own git worktree");
     expect(section).toContain("`pnpm install --offline`");
+    expect(section).toContain(BACKGROUND_WORK_WORDS);
     expect(section).toContain("a send into a thread whose turn is still running opens no second turn");
     expect(section).toContain("Restarting the host cuts every turn running on every workspace");
     expect(section).toContain("`wsp pause <workspace>`");

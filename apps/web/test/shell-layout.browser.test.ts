@@ -26,7 +26,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, ConsoleMessage, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ACCESS_REFUSED_LINE, accessReachLine, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, MACHINE_UNREACHED_LINE, sendRefusal, SIDE_INK, THEME_PRESETS, themeInk, themeScheme, type Rgb } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, sendRefusal, SIDE_INK, THEME_PRESETS, themeInk, themeScheme, type Rgb } from "@wsp/protocol";
 import { WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { textContrast } from "./contrast";
@@ -1049,19 +1049,6 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       await page!.waitForSelector("[data-row-name-input]", { state: "detached" });
       expect((await titleSlot()).text).toBe(titled.text);
       await page!.waitForSelector("[data-context-menu]", { state: "detached" });
-    }
-  }, 60_000);
-
-  // A sentence drawn in the whisper tier would sit under AA on the light glass: the offline line under the search
-  // row takes the prose ink, which clears it on both surfaces.
-  it("the offline sentence under the search row takes the prose ink and reads at AA in both themes", async () => {
-    for (const theme of ["dark", "light"] as const) {
-      await page!.goto(`${base}?theme=${theme}&offline=1`);
-      await page!.waitForSelector("[data-sidebar-offline]");
-      const prose = await textContrast(page!, "[data-sidebar-offline]");
-      console.info(`${theme}: the offline sentence reads at ${prose.map(r => r.toFixed(2)).join(", ")} to 1`);
-      expect(prose.length).toBeGreaterThan(0);
-      for (const ratio of prose) expect(ratio, `the offline sentence reads at ${ratio} in ${theme}`).toBeGreaterThanOrEqual(4.5);
     }
   }, 60_000);
 

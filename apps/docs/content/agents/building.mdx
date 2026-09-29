@@ -25,6 +25,7 @@ This is how wsp gets built: tickets go out as threads on workspaces, opened by a
 - **Snapshot after the install.** Once a project's dependencies are installed on a workspace, `wsp snapshot <workspace>` keeps that disk as a project golden, and `wsp new <name> --from <that golden>` starts every later workspace with the install already there. No thread installs the same dependencies twice.
 - **One heavy thread per machine.** One thread runs tests or a build at a time; a second thread is a light send. Three test runs at once starve the machine and every turn in flight fails.
 - **Make the worktree cheap, not skipped.** pnpm's side-effects cache compiles a native module once per machine, and the checkout's `node_modules` hardlinked into the new worktree before `pnpm install --offline` leaves only a verify. A worktree set up from scratch relinks thousands of files and rebuilds native modules, minutes on 2 vCPU.
+- **Start long work in the harness's own background.** `run_in_background` in Claude Code wakes the agent when the work ends; a shell `&` is tracked by nothing and wakes nobody.
 - **Send only into a thread that has replied.** A send into a running turn opens no second turn. Wait for the turn to end, or `wsp stop <thread>` first.
 - **Finish turns before restarting the host.** `wsp down` and `wsp up` cut every turn running on every workspace.
 - **Pause what nobody uses.** `wsp pause <workspace>` costs nothing beyond the disk and gives back one of the two machines the account runs at once. The next thread or command wakes it.

@@ -5,6 +5,7 @@
 /// <reference path="./markdown.d.ts" />
 import text from "../../../skills/wsp/SKILL.md";
 import { THREAD_AGENTS, WSP_SKILL_NAME } from "@wsp/catalog";
+import { ANOTHER_AGENT_WORDS } from "@wsp/protocol";
 import { CLOUD_ON } from "./cloud.js";
 
 export const SKILL_NAME = WSP_SKILL_NAME;
@@ -99,9 +100,15 @@ export function agentsLine(agents: readonly string[]): string {
   return `The agents this host runs threads on, the only values ${CLOUD_ON ? "run and fork take" : "run takes"} as agent: ${agents.join(", ")}.`;
 }
 
-/** The MCP server's instructions: the skill's opening paragraph, then the setup walkthrough's, the agents the host
- * has adapters for, the line that points back at the skill and the command line, and the rules for running work on
- * a machine, one line each as the skill writes them. The frontmatter and the title line are not part of it. */
+/** How much of a server's instructions an agent keeps: Claude Code cuts them to this many characters and drops the
+ * rest (measured on 2.1.284, "Server instructions truncated from 7992 to 2048 chars"). */
+export const INSTRUCTIONS_KEPT = 2048;
+
+/** The MCP server's instructions: what another agent is, since it is the one fact an agent acts on before it has read
+ * anything else and it has to land inside what the agent keeps, then the skill's opening paragraph, the setup
+ * walkthrough's, the agents the host has adapters for, the line that points back at the skill and the command line,
+ * and the rules for running work on a machine, one line each as the skill writes them. The frontmatter and the title
+ * line are not part of it. */
 export function instructionsOf(skill: string, agents: readonly string[]): string {
   const lines = skill.split("\n");
   let start = 0;
@@ -121,7 +128,7 @@ export function instructionsOf(skill: string, agents: readonly string[]): string
   const lead = paragraph(lines, rules + 1);
   const written = bullets(lines, rules + 1);
   if (lead === "" || written.length === 0) throw new Error(`${RULES_HEADING} has no rules`);
-  return [[opening, walkthrough, agentsLine(agents), BEYOND_THE_TOOLS, lead].join(" "), ...written].join("\n");
+  return [[`${ANOTHER_AGENT_WORDS}.`, opening, walkthrough, agentsLine(agents), BEYOND_THE_TOOLS, lead].join(" "), ...written].join("\n");
 }
 
 export const INSTRUCTIONS: string = instructionsOf(WSP_SKILL, THREAD_AGENTS);

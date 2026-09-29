@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import { isCancel } from "@clack/prompts";
@@ -103,7 +103,8 @@ import { serversActs } from "./servers-acts.js";
 import { hostActs } from "./agents-signin.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
 import { choosePorts, type PortProbes, type PortsPicked } from "./ports.js";
-import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, type RunningWsp } from "./mcp-install.js";
+import { writeThreadWsp } from "./shim.js";
+import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, skillsRefreshedLine, wspCommand, type RunningWsp } from "./mcp-install.js";
 import { CLI_VERBS, cloudLineOf, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, hereDoor, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { installedVersion, stateWriterHere, VERSION } from "./version.js";
 import { latestWords, releaseReading, releaseWatch } from "./release.js";
@@ -527,6 +528,9 @@ export function localWiring(
   /** Where the daemon's own stderr goes as it starts. A serving host's stderr is its log, which is where those
    * lines belong; a line at a terminal asked a question of its own and hands a sink that keeps none. */
   say: (line: string) => void = line => void process.stderr.write(`${line}\n`),
+  /** The folder holding this host's own wsp, first on the PATH of everything this wiring starts; absent on a line
+   * that serves no turn. */
+  threadBin?: string,
 ): LocalWiring {
   const root = localWorkFolder(home);
   const runDir = hostRunDir(statePath);
@@ -559,7 +563,11 @@ export function localWiring(
     // without its binary runs beside an older one, which knows none of this wsp's verbs.
     hereDaemon: { version: async () => (await daemon.get()).version, fix: daemonFixLine(runningWsp()) },
     platform: hostPlatform(),
-    env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),
+    env: () => ({
+      ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)),
+      HOME: person,
+      ...(threadBin !== undefined ? { PATH: env["PATH"] === undefined || env["PATH"] === "" ? threadBin : `${threadBin}${delimiter}${env["PATH"]}` } : {}),
+    }),
     sysSamples: async fn => (await daemon.get()).sysSamples(fn),
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
@@ -716,6 +724,18 @@ export function swapProvider(rt: Runtime, keys: Readonly<Record<string, string |
   }
 }
 
+/** This computer's wiring for a runtime that builds its own: a host that turns can reach writes its own wsp beside
+ * the state file and puts it first on their PATH, the same command their wsp tools run. */
+export function servingWiring(
+  statePath: string,
+  agents: { run?: RunningWsp; here?: HereAt } | undefined,
+  home: string = homedir(),
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): LocalWiring {
+  const threadBin = agents?.here === undefined ? undefined : writeThreadWsp(statePath, wspCommand(agents.run ?? runningWsp()));
+  return localWiring(home, env, undefined, statePath, undefined, undefined, threadBin);
+}
+
 export function makeRuntime(
   keys: Keys,
   statePath: string,
@@ -724,7 +744,7 @@ export function makeRuntime(
   agents?: { advertise?: string; run?: RunningWsp; here?: HereAt },
   /** This computer as a workspace, where the caller built the wiring itself and holds a reader off it: the doctor
    * reads the daemon beside this host through the same wiring the copy road runs it from. */
-  local: LocalWiring = localWiring(homedir(), process.env, undefined, statePath),
+  local: LocalWiring = servingWiring(statePath, agents),
   /** The links this host holds to the computers a person joined, and the one planner the recipe on this computer
    * is read through. Built here for a caller that needs none of it back; handed in by one that reads the recipe
    * off the same planner, so the doctor and the recipe job cannot read this computer two ways. */

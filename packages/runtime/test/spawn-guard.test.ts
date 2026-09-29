@@ -140,12 +140,22 @@ describe("agents spawning agents", () => {
   /** A caller that is a thread on a machine, as the door builds one off a scoped device token. */
   const asThread = (scope: ThreadScope): Caller => ({ origin: "relayed", by: scope });
 
-  it("a workspace with no switch lets its agents open nothing and fork nothing", async () => {
+  it("a workspace nobody set the switch on lets its agents spawn under the default caps, and one turned off opens nothing and forks nothing", async () => {
     const rt = runtimeWith({ claude: heldAdapter().factory });
-    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
+    const open = await createOn(rt, { golden: "snap_g", name: "b0" });
+    expect(open.agents).toEqual(AGENTS_ON);
+    const opened = await rt.sessions.start(open.id, { prompt: "hi" }, asThread({ kind: "thread", threadId: "t_open", workspaceId: open.id, rootThreadId: "t_open" }));
+    expect(opened.view().parentThreadId).toBe("t_open");
+    // A record written before the default moved carries no switch at all, and reads the same.
+    const stored = (await store.get("workspaces", open.id)) as Record<string, unknown>;
+    expect(stored["agents"]).toBeUndefined();
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1", agents: { spawn: false } });
+    expect(ws.agents).toEqual({ ...AGENTS_ON, spawn: false });
     const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: ws.id, rootThreadId: "t_root" };
     await expect(rt.sessions.start(ws.id, { prompt: "hi" }, asThread(scope))).rejects.toThrow(agentsOffRefusal("b1", "thread_new"));
     await expect(createOn(rt, { name: "b2" }, asThread(scope))).rejects.toThrow(agentsOffRefusal("b1", "fork"));
+    // Turned back on with no numbers, it keeps the caps it held rather than none.
+    expect((await rt.workspaces.agents(ws.id, { spawn: true })).agents).toEqual(AGENTS_ON);
     await rt.close();
   });
 
@@ -527,15 +537,35 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("a workspace with the switch off hands out no token either", async () => {
-    const held = heldAdapter();
-    const rt = runtimeWith({ claude: held.factory });
-    const ws = await createOn(rt, { golden: "snap_g", name: "quiet" });
-    const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
-    expect(await rt.devices.list()).toEqual([]);
-    expect(held.launches[0]!.env[HOST_URL_ENV]).toBeUndefined();
+  it("a turn on a workspace with the switch off still carries its own token and the wsp tools, and the switch refuses what it refuses", async () => {
+    const held = heldAdapter({ takesMcpServers: true });
+    const wspMcp = { command: "node", args: ["/opt/wsp/dist/bin.js", "mcp"] };
+    const rt = runtimeWith({ claude: held.factory }, { here: { url: "http://127.0.0.1:4801" }, wspMcp });
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", agents: { spawn: false } });
+    const quiet = await createOn(rt, { golden: "snap_g", name: "quiet", agents: { spawn: false } });
+    const onMac = await rt.sessions.start(mac.id, { prompt: "hi" });
+    const onQuiet = await rt.sessions.start(quiet.id, { prompt: "hi" });
+    const [macLaunch, quietLaunch] = held.launches;
+    // Without a server of its own named wsp, the agent loads the person's, which acts as the person: children land
+    // outside the thread's tree and the switch is never read.
+    expect(macLaunch!.env[HOST_URL_ENV]).toBe("http://127.0.0.1:4801");
+    expect(macLaunch!.env[HOST_TOKEN_ENV]).toMatch(/\S/);
+    expect(macLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ ...wspMcp, args: [...wspMcp.args, SCOPED_MCP_ARG] });
+    expect(quietLaunch!.env[HOST_TOKEN_ENV]).toMatch(/\S/);
+    expect(quietLaunch!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ command: "wsp", args: ["mcp"] });
+    const macThread = onMac.view().threadId!;
+    const scope = (await rt.devices.list()).find(d => d.scope?.threadId === macThread)?.scope;
+    expect(scope).toEqual({ kind: "thread", threadId: macThread, workspaceId: mac.id, rootThreadId: macThread });
+    const asMacThread: Caller = { origin: "here", by: scope! };
+    await expect(rt.sessions.start(mac.id, { prompt: "a sonnet agent" }, asMacThread)).rejects.toThrow(agentsOffRefusal("mac", "thread_new"));
+    // What it may read is its own tree, which is the thread itself.
+    expect((await rt.sessions.list(undefined, asMacThread)).map(s => s.threadId)).toEqual([macThread]);
     held.end(0);
-    await handle.finished;
+    held.end(1);
+    await onMac.finished;
+    await onQuiet.finished;
+    await gone(rt);
+    expect(await rt.devices.list()).toEqual([]);
     await rt.close();
   });
 
@@ -986,7 +1016,7 @@ describe("agents spawning agents", () => {
     // A child copy starts on the branch its parent's checkout is on, so the folder needs a commit to name one.
     const repo = tempRepo();
     execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "first"]);
-    const mac = await createOn(first, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(first, HERE_PLACE_ID, repo)).id });
+    const mac = await createOn(first, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(first, HERE_PLACE_ID, repo)).id, agents: { spawn: false } });
     const stored = (await store.get("workspaces", mac.id)) as Record<string, unknown>;
     await first.close();
     const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: mac.id, rootThreadId: "t_root" };

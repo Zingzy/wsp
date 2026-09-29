@@ -8,7 +8,7 @@
 // through a hook per agent without any file of the person's being touched. A
 // hook the person's own file already claims is left alone and named in the result.
 import { BREW_PREFIX, CATALOG_AGENTS, CONTEXT_MARKER, MODE, SKILL_NAME, agentName, type AgentContext, type AgentEntry, type ContextHooks, type ContextOutcomeKind, type GuestFile, type GuestRoots } from "@wsp/catalog";
-import { TURN_END_WORDS, TURN_WALL_MS, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
+import { ANOTHER_AGENT_WORDS, backgroundWorkWords, TURN_END_WORDS, TURN_WALL_MS, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { SHELL_READ } from "./machine-facts.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
@@ -36,7 +36,8 @@ export const GUEST_ROOTS: GuestRoots = { etc: "/etc", home: "/root" };
 /** The harness keeps a command the agent ran in the background alive past the agent's reply and says when it ends,
  * so the turn is held open until it does and the agent is handed its result there; nothing else wakes the agent, and
  * a turn cut before that (the wall) takes the command with it. */
-const TURN_FACT = `- ${TURN_END_WORDS}; a command you run in the background holds the turn open until it finishes, up to the ${TURN_WALL_MS / 3_600_000} hour cap on one turn, and its result reaches you there. Nothing else wakes you, so a command whose output you want in the same breath runs in the foreground and you wait for it. Only a server you mean to keep serving is detached with setsid nohup, and that one holds nothing open.`;
+const turnFact = (agent: ContextAgent | undefined): string =>
+  `- ${TURN_END_WORDS}; a command you run in the background holds the turn open until it finishes, up to the ${TURN_WALL_MS / 3_600_000} hour cap on one turn, and its result reaches you there. ${backgroundWorkWords(agent?.backgroundRoad)}. Nothing else wakes you, so a command whose output you want in the same breath runs in the foreground and you wait for it. Only a server you mean to keep serving is detached with setsid nohup, and that one holds nothing open.`;
 
 /** The short, always-loaded text; the skill beside it carries the full document. */
 export const contextPath = (roots: GuestRoots = GUEST_ROOTS): string => `${roots.etc}/wsp/machine-context.md`;
@@ -341,8 +342,8 @@ export function renderMachineContext(input: ContextInput): string {
   else if (containers.length === 0) machine.push("- Docker and Podman are not installed.");
   machine.push(`- wsp-daemon listens on 0.0.0.0:${DAEMON_PORT} with its own token. Do not stop it and do not bind port ${DAEMON_PORT}.`);
   machine.push("- wsp on this machine's PATH drives the person's host as this thread; wsp --help agent lists its verbs.");
-  machine.push("- A background process started with a plain & inside a tool call dies when that tool call ends.");
-  machine.push(TURN_FACT);
+  machine.push(turnFact(input.agent));
+  machine.push(`- ${ANOTHER_AGENT_WORDS}.`);
   machine.push(cdFact(input.agent));
   machine.push("- A server listening on a port shows in the app as a server the person can open. A loopback-only bind (127.0.0.1) is unreachable through the preview edge; bind 0.0.0.0. Ports below 1024 are not forwarded.");
   if (shim) machine.push(`- Sign-ins go through wsp: BROWSER is ${BROWSER_SHIM_PATH} and xdg-open is the same shim. The page opens on the person's computer and the callback port is tunnelled back here.`);
@@ -401,8 +402,9 @@ export function renderShortContext(input: ContextInput): string {
     "",
     `This is a Linux machine in the cloud that wsp set up from the recipe of the person's computer; it is not that computer. The ${SKILL_NAME} skill has the full picture: what did not install, the secret names, the aliases whose commands are missing, and how the common things are done here.`,
     "",
-    `- A background process started with a plain & inside a tool call dies when that tool call ends. Detach it: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &${tmux ? ", or tmux new -d -s <name> '<cmd>'" : ""}.`,
-    TURN_FACT,
+    `- Keep a server alive: setsid nohup <cmd> > /tmp/<name>.log 2>&1 < /dev/null &${tmux ? ", or tmux new -d -s <name> '<cmd>'" : ""}.`,
+    turnFact(input.agent),
+    `- ${ANOTHER_AGENT_WORDS}.`,
     cdFact(input.agent),
     "- A server listening on a port shows in the app for the person to open; bind 0.0.0.0, not 127.0.0.1. A printed http://localhost:<port> link has its port forwarded to their computer. Ports below 1024 are not forwarded.",
   ];

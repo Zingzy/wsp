@@ -119,7 +119,7 @@ setInterval(() => {}, 60_000);
 const nextHostScript = (home: string, statePath: string, run: string): string => `
 import { localWiring } from ${JSON.stringify(DIST)};
 const wiring = localWiring(${JSON.stringify(home)}, process.env, undefined, ${JSON.stringify(statePath)});
-const stream = await wiring.execStream().attach(${JSON.stringify(run)}, { input: false });
+const stream = await wiring.execStream().attach(${JSON.stringify(run)}, { input: false, startedAt: Date.now() });
 if (stream === "gone") { console.log("GONE"); process.exit(0); }
 for await (const line of stream.lines) {
   console.log("LINE " + line);
