@@ -21,8 +21,7 @@ import { hostFolders } from "./host-folders.js";
 import { projectBundler } from "./project-bundle.js";
 import { imageExporter } from "./image.js";
 import { projectLander } from "./project-export.js";
-import { guestCli } from "./guest-cli.js";
-import { guestMcp } from "./guest-mcp.js";
+import { guestKinds } from "./guest-tools.js";
 import { guestDoor } from "./guest.js";
 import { runningWsp } from "./mcp-install.js";
 import { wspArgvOf } from "./place-report.js";
@@ -420,7 +419,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       : guestDoor({
           authorize: token => rtServer.authorize(token),
           hostUrl: () => binding.then(() => here.url),
-          kinds: { mcp: guestMcp(statePath), cli: guestCli(statePath, runningWsp()) },
+          kinds: guestKinds(statePath),
         });
   // Before the runtime socket: the app lists and stops the relay's forwards through it.
   const relay = startCallbackRelay({

@@ -25,6 +25,10 @@ pub fn cloud_on(env: &Env) -> bool {
 
 pub struct Host {
     args: Args,
+    /// The environment the server runs in, which the dial, the aim and the cloud flag read.
+    process_env: Env,
+    /// What a tool reads a value it sends by name from: the whole environment, and for a guest the pair its launch
+    /// carries and the turn's token alone, as the TypeScript server's guest tools read them.
     env: Env,
     home: PathBuf,
     /// The folder the server runs in, where a thread named with no workspace finds its repo; none finds none.
@@ -34,14 +38,20 @@ pub struct Host {
 
 impl Host {
     pub fn cloud(&self) -> bool {
-        cloud_on(&self.env)
+        cloud_on(&self.process_env)
     }
 
     pub fn new(args: &Args, env: &Env, cwd: Option<PathBuf>) -> Host {
-        Host { args: args.clone(), env: env.clone(), home: aim::wsp_home(env), cwd, held: Mutex::new(None) }
+        let readable: Env = if args.guest {
+            let names = [&record::host().env.url, &record::host().env.token, crate::tools::turn_token_env()];
+            env.iter().filter(|(name, _)| names.contains(name)).map(|(k, v)| (k.clone(), v.clone())).collect()
+        } else {
+            env.clone()
+        };
+        Host { args: args.clone(), process_env: env.clone(), env: readable, home: aim::wsp_home(env), cwd, held: Mutex::new(None) }
     }
 
-    /// The environment the server runs in, which a tool reads a value it sends by name from.
+    /// The environment a tool reads a value it sends by name from.
     pub fn env(&self) -> &Env {
         &self.env
     }
@@ -89,14 +99,14 @@ impl Host {
 
     /// `again` is a dial after the host stopped: it starts nothing and is bounded by what the wait has left.
     async fn dial(&self, again: Option<Duration>) -> Result<Client, Failure> {
-        let pick = Pick { host: self.args.host.as_deref(), env: &self.env, home: self.home.clone() };
+        let pick = Pick { host: self.args.host.as_deref(), env: &self.process_env, home: self.home.clone() };
         let state = &self.args.state;
         let aim = aim::aimed(state, &pick)?;
         let window = again.unwrap_or_else(|| Duration::from_millis(aim::window_ms(&aim)));
         match &aim {
             Aim::Here => {
                 if again.is_none() && aim::serving(state).is_none() && !self.args.wsp.is_empty() {
-                    start::started(state, &self.args.wsp, &self.env, &mut |line| eprintln!("{line}")).await?;
+                    start::started(state, &self.args.wsp, &self.process_env, &mut |line| eprintln!("{line}")).await?;
                 }
                 let (url, token, at) = aim::here_door(state)?;
                 let to = Dial { url: &url, at: &at, window, pinned: None, alias: None };
@@ -173,5 +183,21 @@ mod tests {
             assert_eq!(cloud_on(&env), want, "WSP_CLOUD={word:?}");
         }
         assert!(!cloud_on(&Env::new()));
+    }
+
+    #[test]
+    fn a_guest_reads_no_value_by_name_but_its_launch_pair_and_turn() {
+        let env: Env =
+            [("WSP_HOST_URL", "u"), ("WSP_HOST_TOKEN", "t"), ("WSP_TURN", "turn"), ("TZ", "UTC"), ("WSP_CLOUD", "1"), ("KEY", "k")]
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .into_iter()
+                .collect();
+        let guest = Host::new(&Args { guest: true, ..Args::default() }, &env, None);
+        let mut read: Vec<&str> = guest.env().keys().map(String::as_str).collect();
+        read.sort_unstable();
+        assert_eq!(read, ["WSP_HOST_TOKEN", "WSP_HOST_URL", "WSP_TURN"]);
+        // The cloud's state is still the host's to say.
+        assert!(guest.cloud());
+        assert_eq!(Host::new(&Args::default(), &env, None).env().len(), env.len());
     }
 }

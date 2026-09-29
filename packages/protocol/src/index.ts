@@ -4427,6 +4427,7 @@ const DAEMON_CONTENTS = [
   "eb62eb296316d8c81da569e60be2c5db173b00f00a2ef7f562db39265db49423",
   "4d9cc489a1a3cbd2b502fa2f899bfddd5bf206ae00f1a2a76b9fa8dd7aef5f60",
   "5bc5f0d1888a8f254ffffa1bee6b77a302bf5c1164f520e5255b2f6c4a83a252",
+  "db97f7d2dba5d48e19188ea89555803e76332015c7c2daf27a3a6c42d7f49cce",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -4688,7 +4689,10 @@ const DAEMON_CONTENTS = [
  * Version 96 reads every worktree file git.diff answers for itself, from the folder the caller may read down with no
  * link followed: an untracked file's patch and every file's blob id come from that read, and a tracked file's hunk is
  * diffed from the base object and the blob hashed off that read, so no content byte comes from a path a link could
- * have redirected after git listed it. */
+ * have redirected after git listed it.
+ * Version 97 changes nothing a guest runs: where this computer's binary carries the tool server, the host runs it for
+ * each guest session as the thread's scoped server under --guest, which refuses a file or an unnamed workspace and
+ * leaves the tools that read this computer off its list. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

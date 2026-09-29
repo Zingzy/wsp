@@ -94,6 +94,7 @@
     "builtInTable": "; wsp's built-in table says so, since no agent on that workspace described itself"
   },
   "noThreadTarget": "workspace is needed outside a repo: run from inside a repo one of the workspaces holds, or name the workspace. Run wsp workspaces to read the names.",
+  "guestNamesWorkspace": "a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read. Name the workspace on the line.",
   "noWorkspaceForFolder": "no workspace holds a project for {folder}; name one with workspace, or wsp add '{folder}' records it as a project here",
   "threadOpened": "thread {thread} on {workspace} in {folder}",
   "openedThread": "thread {thread}",
@@ -107,6 +108,7 @@
   "staysAwakeNaps": "{name} stays awake, naps in {naps}",
   "files": {
     "notAFile": "there is no file at {path} on this computer. Name a file that is already here.",
+    "guest": "a path on this line would be read on the person's computer, not on the machine the line was typed on. Name a file on the machine the line runs on, or none.",
     "refused": "{refusal}. Drop that one and send the rest.",
     "tooMany": "only 5 files fit one message; this one carries {count}",
     "empty": "{name} is empty",

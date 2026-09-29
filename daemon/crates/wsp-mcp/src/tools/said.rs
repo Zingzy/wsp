@@ -41,6 +41,7 @@ pub struct Turns {
     pub no_adapter_none: String,
     pub picks: Picks,
     pub no_thread_target: String,
+    pub guest_names_workspace: String,
     pub no_workspace_for_folder: String,
     pub thread_opened: String,
     pub opened_thread: String,
@@ -102,6 +103,7 @@ pub struct Picks {
 #[serde(rename_all = "camelCase")]
 pub struct Files {
     pub not_a_file: String,
+    pub guest: String,
     pub refused: String,
     pub too_many: String,
     pub empty: String,
