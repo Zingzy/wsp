@@ -10,15 +10,15 @@ import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import { DAEMON_TOKEN_PATH, WAKE_STOPPED } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
+import { memoryStore, type Store } from "../src/store.js";
+import { fakeClock } from "./fake-clock.js";
+import { droppingPort } from "./held-port.js";
+import { createOn, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
 
 // The daemon link redials on the process's own timers while a wake's budget runs on the test's clock, which the
 // pump moves half a second a few turns of the loop at a time: a redial here waits for no time at all, or the budget
 // would run out between two dials.
 vi.mock("@wsp/protocol", async importOriginal => ({ ...(await importOriginal<typeof import("@wsp/protocol")>()), linkBackoffMs: () => 0 }));
-import { memoryStore, type Store } from "../src/store.js";
-import { fakeClock } from "./fake-clock.js";
-import { droppingPort } from "./held-port.js";
-import { createOn, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
 
 /** A stub whose guest answers what the vault road asks of it: the listing of the home it would archive and the
  * size of the archive it wrote. Every tar and untar is recorded by machine, so a nap that took the vault road is

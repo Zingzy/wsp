@@ -85,8 +85,7 @@ export const BOX_CREATE_MS = 10 * 60_000;
 export const BOX_SNAPSHOT_MS = 10 * 60_000;
 export const BOX_POLL_MS = 2_000;
 /** How long a box that reads ready may go on refusing commands with box_restoring or box_starting before the refusal
- * is the caller's: the restored disk streams in behind a ready box, and the daemon's unit came back 14 to 85 s
- * after ready on every measured fork and resume (2026-09-11). */
+ * is the caller's: the restored disk streams in behind a ready box. */
 export const BOX_RESTORE_MS = 120_000;
 
 /** How much later than the last instant sent a backstop instant has to be before it is worth a call: the runtime
