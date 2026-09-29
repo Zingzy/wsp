@@ -60,6 +60,8 @@ function buildRepo(): void {
   mkdirSync(join(repo, "node_modules", "pkg"), { recursive: true });
   writeFileSync(join(repo, "node_modules", "pkg", "index.js"), "module.exports = 1;\n");
   writeFileSync(join(outside, "secret.txt"), "secret\n");
+  // What a no-index diff against /dev/null would read through the link, taking the folder for a directory.
+  writeFileSync(join(outside, "null"), "secret\n");
   symlinkSync(outside, join(repo, "escape"));
   symlinkSync(join(repo, "docs.md"), join(repo, "docs-link.md"));
   mkdirSync(join(deep, "src"), { recursive: true });
@@ -331,8 +333,18 @@ describe("git.diff", () => {
   it("branch: everything since the merge-base with the default branch", async () => {
     const res = await c.request("git.diff", { cwd: "repo", scope: "branch" });
     expect(res["base"]).toBe("main");
-    expect(paths(res)).toEqual(["docs.md", "feature.txt", "src/index.ts", "staged.txt"]);
+    expect(paths(res)).toEqual(["docs-link.md", "docs.md", "escape", "feature.txt", "src/index.ts", "staged.txt", "untracked.txt"]);
     expect(patchOf(res, "feature.txt")).toContain("+feature");
+  });
+
+  it("lists a file git does not track yet as new from any folder, and a link without reading through it", async () => {
+    for (const [cwd, scope] of [["repo", "head"], ["repo", "branch"], ["repo/src", "head"], ["repo/src", "branch"]]) {
+      const res = await c.request("git.diff", { cwd, scope });
+      expect(patchOf(res, "untracked.txt")).toContain("new file mode 100644");
+      expect(patchOf(res, "untracked.txt")).toContain("+untracked");
+      expect([patchOf(res, "escape"), patchOf(res, "docs-link.md")]).toEqual(["", ""]);
+      expect(JSON.stringify(res)).not.toContain("secret");
+    }
   });
 
   it("narrows to a path", async () => {

@@ -250,11 +250,17 @@ const WHOLE: &str = "-U999999";
 /// One name-status pass picks the files (so renames stay renames), then one diff per file spends a shared byte
 /// budget; a file past the budget is still listed with an empty patch so the client knows it changed. path narrows
 /// relative to cwd and paths names files from the top; per-file pathspecs use :(top) because git reports names from
-/// the repo root whatever cwd is. The head scope adds every untracked file as a new one, and each file that still has
-/// contents carries the blob id they hash to, one hash-object for them all.
+/// the repo root whatever cwd is. The head and branch scopes add every untracked file as a new one, over the whole
+/// repository as the listing is unless narrowed, and each file that still has contents carries the blob id they hash
+/// to, one hash-object for them all. An untracked link is listed with no patch and no blob: a diff against /dev/null
+/// takes a link to a folder for the folder and reads <folder>/null through it, and hash-object refuses one outright.
+/// A repository whose top sits above bound, the folder the caller may read, answers for the files inside bound alone:
+/// both listings take bound as their pathspec, and whatever a narrowing names outside it is dropped.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn git_diff<R: Runs>(
     runner: &R,
     cwd: &Path,
+    bound: &Path,
     scope: GitDiffScope,
     path: Option<&str>,
     paths: &[String],
@@ -279,11 +285,22 @@ pub(crate) async fn git_diff<R: Runs>(
         GitDiffScope::Unstaged => {}
         GitDiffScope::Head => args.push(if rev_exists(runner, cwd, "HEAD").await? { "HEAD" } else { EMPTY_TREE }.to_owned()),
     }
+    let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
+    check(&top, "rev-parse")?;
+    let top = PathBuf::from(stdout_text(&top).trim());
+    // Bound's own path from the top where the top sits above it: the prefix every answered path must carry.
+    let within = match bound.strip_prefix(&top) {
+        _ if crate::paths::is_inside(bound, &top) => None,
+        Ok(rel) => Some(rel.to_string_lossy().into_owned()),
+        Err(_) => return Err(crate::paths::outside_root(&cwd.to_string_lossy())),
+    };
+    let inside = |p: &str| within.as_deref().is_none_or(|w| p.strip_prefix(w).is_some_and(|rest| rest.starts_with('/')));
+    let whole_bound = within.as_ref().map(|w| format!(":(top,literal){w}"));
     let named: Vec<String> = paths.iter().map(|p| format!(":(top,literal){p}")).collect();
     let narrowed: Vec<&str> = match path {
         _ if !named.is_empty() => named.iter().map(String::as_str).collect(),
         Some(path) => vec![path],
-        None => Vec::new(),
+        None => whole_bound.iter().map(String::as_str).collect(),
     };
     let mut list_args: Vec<&str> = vec!["diff"];
     list_args.extend(args.iter().map(String::as_str));
@@ -297,41 +314,58 @@ pub(crate) async fn git_diff<R: Runs>(
     if listed.code != Some(0) {
         return Err(OpError::plain(format!("git diff --name-status failed: {}", listed.stderr.trim())));
     }
-    let mut listed_files: Vec<(ListedFile, bool)> = parse_name_status(&stdout_text(&listed)).into_iter().map(|f| (f, false)).collect();
-    let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
-    check(&top, "rev-parse")?;
-    let top = PathBuf::from(stdout_text(&top).trim());
-    if scope == GitDiffScope::Head {
-        let mut others = vec!["ls-files", "--others", "--exclude-standard", "--full-name", "-z"];
-        if !narrowed.is_empty() {
-            others.push("--");
-            others.extend(&narrowed);
-        }
+    let mut listed_files: Vec<(ListedFile, Untracked)> = parse_name_status(&stdout_text(&listed))
+        .into_iter()
+        .filter(|f| inside(&f.path))
+        .map(|f| (ListedFile { orig_path: f.orig_path.filter(|o| inside(o)), ..f }, Untracked::No))
+        .collect();
+    if matches!(scope, GitDiffScope::Head | GitDiffScope::Branch) {
+        let mut others = vec!["ls-files", "--others", "--exclude-standard", "--eol", "--full-name", "-z", "--"];
+        others.extend(if narrowed.is_empty() { vec![":/"] } else { narrowed.clone() });
         let untracked = run_git(runner, cwd, &others, None, None).await?;
         check(&untracked, "ls-files")?;
+        // `--eol` leaves the worktree column, `w/`, empty for anything that is not a regular file.
         let text = stdout_text(&untracked);
-        listed_files.extend(
-            text.split('\0').filter(|p| !p.is_empty()).map(|p| (ListedFile { path: p.to_owned(), orig_path: None, gone: false }, true)),
-        );
+        listed_files.extend(text.split('\0').filter_map(|row| row.split_once('\t')).filter(|(_, p)| inside(p)).map(|(eol, p)| {
+            let regular = eol.split_whitespace().any(|w| w.starts_with("w/") && w.len() > 2);
+            (ListedFile { path: p.to_owned(), orig_path: None, gone: false }, if regular { Untracked::File } else { Untracked::NotRegular })
+        }));
     }
-    let blobs = blobs_of(runner, &top, listed_files.iter().filter(|(f, _)| !f.gone).map(|(f, _)| f.path.as_str()).collect()).await?;
+    let blobs = blobs_of(
+        runner,
+        &top,
+        listed_files.iter().filter(|(f, u)| !f.gone && *u != Untracked::NotRegular).map(|(f, _)| f.path.as_str()).collect(),
+    )
+    .await?;
     let mut files = Vec::new();
     let mut remaining = cap;
     let mut truncated = false;
     for (file, untracked) in listed_files {
         let blob = blobs.get(&file.path).cloned();
+        if untracked == Untracked::NotRegular {
+            files.push(GitDiffFile { path: file.path, patch: String::new(), blob });
+            continue;
+        }
         if remaining == 0 {
             truncated = true;
             files.push(GitDiffFile { path: file.path, patch: String::new(), blob });
             continue;
         }
-        let res = if untracked {
+        let res = if untracked == Untracked::File {
             let mut diff_args = vec!["diff", "--no-index", "--no-color", "--no-ext-diff"];
             if whole {
                 diff_args.push(WHOLE);
             }
             diff_args.extend(["--", "/dev/null", file.path.as_str()]);
-            run_git(runner, &top, &diff_args, None, Some(remaining)).await?
+            let res = run_git(runner, &top, &diff_args, None, Some(remaining)).await?;
+            // A file swapped for a link to a folder since the listing is read as <folder>/null, which the patch's
+            // own name then says; what git read is checked rather than what the listing saw.
+            let read_through = format!("{}/null", file.path);
+            if stdout_text(&res).lines().any(|l| l.starts_with("+++ ") && l.trim_end_matches('"').ends_with(&read_through)) {
+                files.push(GitDiffFile { path: file.path, patch: String::new(), blob: None });
+                continue;
+            }
+            res
         } else {
             let specs: Vec<String> = file.orig_path.iter().chain([&file.path]).map(|p| format!(":(top,literal){p}")).collect();
             let mut diff_args: Vec<&str> = vec!["diff"];
@@ -356,6 +390,15 @@ pub(crate) async fn git_diff<R: Runs>(
         files.push(GitDiffFile { path: file.path, patch: utf8_text(bytes, true), blob });
     }
     Ok(GitDiffReply { base, files, truncated })
+}
+
+/// Whether a listed file is one git does not track yet, and if so whether it is a regular file or something else.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Untracked {
+    No,
+    File,
+    /// A link, or a nested repository's folder: anything `--eol` reads no worktree contents for.
+    NotRegular,
 }
 
 /// The blob id each file's worktree contents hash to, by path from the top, one hash-object for them all. A name
@@ -609,6 +652,21 @@ mod tests {
     const CAP: usize = 1024 * 1024;
 
     #[tokio::test]
+    async fn an_untracked_file_swapped_for_a_linked_folder_after_the_listing_is_answered_with_no_patch() {
+        let runner = super::recorded::Recorded::new(&[]).answering(vec![
+            (0, ""),
+            (0, "/repo\n"),
+            (0, ""),
+            (0, "i/      w/lf    attr/                 \tnotes\0"),
+            (0, "abc\n"),
+            (1, "diff --git a/notes/null b/notes/null\nnew file mode 100644\n--- /dev/null\n+++ b/notes/null\n@@ -0,0 +1 @@\n+secret\n"),
+        ]);
+        let reply = git_diff(&runner, Path::new("/repo"), Path::new("/"), GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
+        assert_eq!(reply.files, vec![GitDiffFile { path: "notes".to_owned(), patch: String::new(), blob: None }]);
+        assert!(runner.asked().last().unwrap().args.contains(&"--no-index".to_owned()));
+    }
+
+    #[tokio::test]
     async fn the_head_scope_folds_staged_and_unstaged_edits_and_lists_each_untracked_file_as_new() {
         let dir = committed(&["a.txt", "b.txt"]);
         std::fs::write(dir.path().join("a.txt"), "staged\n").unwrap();
@@ -616,7 +674,7 @@ mod tests {
         std::fs::write(dir.path().join("b.txt"), "unstaged\n").unwrap();
         std::fs::create_dir_all(dir.path().join("new/deep")).unwrap();
         std::fs::write(dir.path().join("new/deep/c.txt"), "fresh\n").unwrap();
-        let reply = git_diff(&here(), &dir.path().join("new"), GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
+        let reply = git_diff(&here(), &dir.path().join("new"), Path::new("/"), GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
         assert_eq!(paths_of(&reply), vec!["a.txt", "b.txt", "new/deep/c.txt"]);
         assert!(reply.files[0].patch.contains("+staged"), "{}", reply.files[0].patch);
         assert!(reply.files[1].patch.contains("+unstaged"), "{}", reply.files[1].patch);
@@ -632,7 +690,7 @@ mod tests {
         }
         std::fs::write(dir.path().join("loose.txt"), "untracked\n").unwrap();
         let named = vec!["a*b.txt".to_owned(), "loose.txt".to_owned()];
-        let reply = git_diff(&here(), dir.path(), GitDiffScope::Head, None, &named, false, CAP).await.unwrap();
+        let reply = git_diff(&here(), dir.path(), Path::new("/"), GitDiffScope::Head, None, &named, false, CAP).await.unwrap();
         assert_eq!(paths_of(&reply), vec!["a*b.txt", "loose.txt"]);
     }
 
@@ -643,9 +701,9 @@ mod tests {
         lines[1] = "second changed".to_owned();
         lines[28] = "twenty-ninth changed".to_owned();
         std::fs::write(dir.path().join("long.txt"), lines.join("\n") + "\n").unwrap();
-        let split = git_diff(&here(), dir.path(), GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
+        let split = git_diff(&here(), dir.path(), Path::new("/"), GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
         assert_eq!(split.files[0].patch.matches("\n@@ ").count(), 2, "{}", split.files[0].patch);
-        let whole = git_diff(&here(), dir.path(), GitDiffScope::Head, None, &[], true, CAP).await.unwrap();
+        let whole = git_diff(&here(), dir.path(), Path::new("/"), GitDiffScope::Head, None, &[], true, CAP).await.unwrap();
         assert_eq!(whole.files[0].patch.matches("\n@@ ").count(), 1, "{}", whole.files[0].patch);
         assert!(whole.files[0].patch.contains(" long.txt 15\n"), "{}", whole.files[0].patch);
     }
@@ -656,7 +714,7 @@ mod tests {
         std::fs::write(dir.path().join("kept.txt"), "changed\n").unwrap();
         std::fs::remove_file(dir.path().join("gone.txt")).unwrap();
         std::fs::write(dir.path().join("loose.txt"), "untracked\n").unwrap();
-        let reply = git_diff(&here(), dir.path(), GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
+        let reply = git_diff(&here(), dir.path(), Path::new("/"), GitDiffScope::Head, None, &[], false, CAP).await.unwrap();
         let blob = |name: &str| reply.files.iter().find(|f| f.path == name).unwrap().blob.clone();
         let hashed = |name: &str| Some(git_in(dir.path(), &["hash-object", name]).trim().to_owned());
         assert_eq!(blob("kept.txt"), hashed("kept.txt"));

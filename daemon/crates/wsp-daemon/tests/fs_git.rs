@@ -90,6 +90,8 @@ fn build() -> Tree {
     fs::create_dir_all(repo.join("node_modules/pkg")).unwrap();
     fs::write(repo.join("node_modules/pkg/index.js"), "module.exports = 1;\n").unwrap();
     fs::write(t.outside().join("secret.txt"), "secret\n").unwrap();
+    // What a no-index diff against /dev/null would read through the link, taking the folder for a directory.
+    fs::write(t.outside().join("null"), "secret\n").unwrap();
     symlink(t.outside(), repo.join("escape")).unwrap();
     symlink(repo.join("docs.md"), repo.join("docs-link.md")).unwrap();
     let deep = t.root().join("deep");
@@ -535,8 +537,61 @@ async fn git_diff_branch_is_everything_since_the_merge_base_with_the_default_bra
     let (_t, _d, mut c) = bench().await;
     let res = c.request("git.diff", json!({ "cwd": "repo", "scope": "branch" })).await;
     assert_eq!(res["base"], "main");
-    assert_eq!(paths(&res), ["docs.md", "feature.txt", "src/index.ts", "staged.txt"]);
+    assert_eq!(paths(&res), ["docs-link.md", "docs.md", "escape", "feature.txt", "src/index.ts", "staged.txt", "untracked.txt"]);
     assert!(patch_of(&res, "feature.txt").unwrap().contains("+feature"));
+}
+
+#[tokio::test]
+async fn git_diff_lists_a_file_git_does_not_track_yet_as_new_from_any_folder_and_a_link_without_reading_through_it() {
+    let (_t, _d, mut c) = bench().await;
+    for (cwd, scope) in [("repo", "head"), ("repo", "branch"), ("repo/src", "head"), ("repo/src", "branch")] {
+        let res = c.request("git.diff", json!({ "cwd": cwd, "scope": scope })).await;
+        let fresh = patch_of(&res, "untracked.txt").unwrap_or_else(|| panic!("{cwd} {scope}: {res}"));
+        assert!(fresh.contains("new file mode 100644") && fresh.contains("+untracked"), "{fresh}");
+        assert_eq!((patch_of(&res, "escape"), patch_of(&res, "docs-link.md")), (Some(""), Some("")), "{cwd} {scope}: {res}");
+        assert!(!res.to_string().contains("secret"), "{cwd} {scope}: {res}");
+        let blob =
+            |p: &str| res["files"].as_array().unwrap().iter().find(|f| f["path"] == p).and_then(|f| f["blob"].as_str().map(str::to_owned));
+        assert!(blob("untracked.txt").is_some() && blob("src/index.ts").is_some(), "{cwd} {scope}: {res}");
+    }
+}
+
+/// A root one folder deep in a larger repository, as a project inside a monorepo is: the repository's top sits
+/// above it, with a tracked file and an untracked one there that fs.read refuses.
+#[tokio::test]
+async fn git_diff_holds_to_the_root_when_the_repository_top_sits_above_it() {
+    let mono = tempfile::Builder::new().prefix("wsp-fsgit-mono-").tempdir().unwrap();
+    let elsewhere = tempfile::Builder::new().prefix("wsp-fsgit-roots-").tempdir().unwrap();
+    let top = mono.path();
+    let root = top.join("apps/web");
+    fs::create_dir_all(&root).unwrap();
+    git(top, &["init", "-q", "-b", "main"]);
+    fs::write(top.join("tracked-top.txt"), "top\n").unwrap();
+    fs::write(root.join("app.ts"), "export const a = 1;\n").unwrap();
+    git(top, &["add", "-A"]);
+    git(top, &["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    fs::write(top.join("tracked-top.txt"), "TRACKED-OUTSIDE-ROOT\n").unwrap();
+    fs::write(top.join("sibling-notes.txt"), "OUTSIDE-ROOT-CONTENT\n").unwrap();
+    fs::write(root.join("app.ts"), "export const a = 2;\n").unwrap();
+    fs::write(root.join("fresh.ts"), "export {};\n").unwrap();
+    let d = start(&root, &elsewhere.path().join("roots")).await;
+    let mut c = Client::connect(d.addr).await;
+    refused(&c.request("fs.read", json!({ "path": "../../sibling-notes.txt" })).await, "outside-root");
+    let asks = [
+        json!({ "cwd": ".", "scope": "head" }),
+        json!({ "cwd": ".", "scope": "branch" }),
+        json!({ "cwd": ".", "scope": "unstaged" }),
+        json!({ "cwd": ".", "scope": "head", "path": "../.." }),
+        json!({ "cwd": ".", "scope": "head", "paths": ["sibling-notes.txt", "tracked-top.txt"], "whole": true }),
+    ];
+    for ask in asks {
+        let res = c.request("git.diff", ask.clone()).await;
+        assert_eq!(res["ok"], true, "{ask}: {res}");
+        assert!(!res.to_string().contains("OUTSIDE-ROOT"), "{ask}: {res}");
+        assert!(paths(&res).iter().all(|p| p.starts_with("apps/web/")), "{ask}: {res}");
+    }
+    let head = c.request("git.diff", json!({ "cwd": ".", "scope": "head" })).await;
+    assert_eq!(paths(&head), ["apps/web/app.ts", "apps/web/fresh.ts"]);
 }
 
 #[tokio::test]
