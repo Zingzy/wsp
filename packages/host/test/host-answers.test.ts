@@ -17,9 +17,9 @@ import { DIST, describeWithDists, distOf } from "./built-bin.js";
  * a window reads a host that answers later than this as a host that has stopped. */
 const LOOP_STALL_CAP_MS = 1_000;
 
-/** What the host may still hold once it goes quiet: the day of agents memory.test.ts measures, plus every
- * transcript here at its byte cap. */
-const HELD_CAP_MB = 96;
+/** What the host may still hold once it goes quiet: the day of agents memory.test.ts measures, plus each transcript's
+ * index and the few opened last. Holding every transcript up to its byte cap came to 54 MB here. */
+const HELD_CAP_MB = 48;
 
 /** The workspaces the state file already holds, the bytes of one tool result in their transcripts, and the new work
  * made on top: two workspaces, and turns carrying a file's worth of tool output each. */
