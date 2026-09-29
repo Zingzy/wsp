@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The tool server kind of a guest session: the same server the command line
-// serves on stdio for an agent on this computer, on a transport whose frames
-// ride a guest session instead. Two roads open one. A process inside a machine
-// opens it over that machine's daemon, and its tools dial this host's own
-// socket door with the thread's token off the session's environment, so what a
-// fork's agent may do is exactly what that token may do. The wsp command's
-// forwarder on this computer opens it on this host's own socket, under this
-// host's own token, so an agent here has every tool without a process of its
-// own holding the server.
+// The tool server kind of a guest session: the TypeScript tool server, on a
+// transport whose frames ride a guest session. A process inside a machine opens
+// it over that machine's daemon, and its tools dial this host's own socket door
+// with the thread's token off the session's environment, so what a fork's agent
+// may do is exactly what that token may do.
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
@@ -25,20 +21,6 @@ export function guestMcp(statePath: string): GuestKindModule {
         // one level down, for the flags and inputs of the verbs that do pass: a path this session names is on its
         // own machine, and the rules that would resolve one here refuse it.
         return { dial, server: mcpServer(statePath, { dial, cwd: o.cwd, env: o.env, elsewhere: true, skip: verb => readsHere(verb) !== undefined }) };
-      });
-    },
-  };
-}
-
-/** The server `wsp mcp` serves on stdio, served here for the forwarder on this computer: every tool, in the folder
- * the line was typed in, with the environment it was typed in for the tools that read a value off it by name. The
- * tools dial this host, which the socket's own token already named, whatever that environment says of hosts. */
-export function hereMcp(statePath: string, alsoHere?: VerbDeps["alsoHere"]): GuestKindModule {
-  return {
-    open(o) {
-      return served(o, ({ dialer, mcpServer }) => {
-        const dial = dialer(statePath, { env: o.env, aim: { kind: "here" } });
-        return { dial, server: mcpServer(statePath, { dial, cwd: o.cwd, env: o.env, ...(alsoHere !== undefined ? { alsoHere } : {}) }) };
       });
     },
   };

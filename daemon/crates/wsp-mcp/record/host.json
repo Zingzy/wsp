@@ -32,6 +32,13 @@
   "unauthorizedClose": 4401,
   "stoppingClose": 4001,
   "startWaitMs": 20000,
+  "upArgs": [
+    "up",
+    "--state",
+    "{state}",
+    "--port",
+    "0"
+  ],
   "pollMs": 200,
   "probeMs": 2000,
   "loopback": "127.0.0.1",

@@ -8,7 +8,7 @@ mod cli;
 mod here;
 mod mcp;
 
-pub use here::{forward, run_here, Forwarded};
+pub use here::run_here;
 
 use std::net::SocketAddr;
 use std::path::Path;
@@ -102,7 +102,7 @@ async fn speak<S: AsyncRead + AsyncWrite + Unpin>(
     streams: &mut Streams<'_>,
 ) -> i32 {
     let kind = if line == [MCP_WORD] { GuestKind::Mcp } else { GuestKind::Cli };
-    if let Err(error) = open(&mut ws, kind, line, env, None).await {
+    if let Err(error) = open(&mut ws, kind, line, env).await {
         let said = error.unwrap_or_else(|| words::guest_no_daemon_line(daemon.port()));
         return refused(streams, &said).await;
     }
@@ -122,7 +122,6 @@ pub(crate) async fn open<S: AsyncRead + AsyncWrite + Unpin>(
     kind: GuestKind,
     line: &[String],
     env: &dyn Fn(&str) -> Option<String>,
-    typed_in: Option<&[(String, String)]>,
 ) -> Result<(), Option<String>> {
     let cwd = std::env::current_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
     let mut open = json!({
@@ -137,9 +136,6 @@ pub(crate) async fn open<S: AsyncRead + AsyncWrite + Unpin>(
     });
     if let Some(turn) = env(TURN_TOKEN_ENV).filter(|t| !t.is_empty()) {
         open["turnToken"] = Value::String(turn);
-    }
-    if let Some(vars) = typed_in {
-        open["env"] = Value::Object(vars.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect());
     }
     if ws.send(Message::text(open.to_string())).await.is_err() {
         return Err(None);

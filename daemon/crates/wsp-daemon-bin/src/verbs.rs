@@ -35,9 +35,10 @@ pub(crate) enum Verb {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         line: Vec<String>,
     },
-    /// The wsp command on the computer the host runs on: a `wsp mcp` line is served by the host already serving it
-    /// rather than by a process of its own, and every other line runs as the wsp the words after --wsp-argv name,
-    /// which is also what is asked where the host is. The line follows `--`, whole.
+    /// The wsp command on the computer the host runs on: a `wsp mcp` line that names its state is served by this
+    /// binary's own tool server where it carries one, and every other line runs as the wsp the words after
+    /// --wsp-argv name, which is also the wsp the tool server brings a host up with and runs the recipe tools as.
+    /// The line follows `--`, whole.
     #[command(disable_help_flag = true)]
     Forward {
         #[arg(long = "wsp-argv", value_name = "word", required = true, action = clap::ArgAction::Append, allow_hyphen_values = true)]
@@ -47,7 +48,8 @@ pub(crate) enum Verb {
     },
     /// The wsp tools for an agent on this computer: an MCP server on stdio, dialling the host the state file names as
     /// the command line does. The state is named on purpose, since which file a bare wsp works on is the command
-    /// line's rule; the words after --wsp-argv are the wsp that brings a host up when none serves it.
+    /// line's rule, and a host or a thread's scope still needs it: the recipe tools run the wsp on it. The words
+    /// after --wsp-argv are the wsp that brings a host up when none serves it.
     #[cfg(feature = "mcp")]
     Mcp {
         #[arg(long, value_name = "file")]
@@ -221,9 +223,41 @@ pub(crate) fn run(verb: Verb) -> i32 {
                 Path::new(numbers::GUEST_DAEMON_SOCKET_PATH),
             )
         }
-        Verb::Forward { wsp_argv, line } => wsp_guest::run_here(&line, &wsp_argv),
+        Verb::Forward { wsp_argv, line } => {
+            #[cfg(feature = "mcp")]
+            if let Some(served) = served_here(&line, &wsp_argv) {
+                return wsp_mcp::run(&served);
+            }
+            wsp_guest::run_here(&line, &wsp_argv)
+        }
         #[cfg(feature = "mcp")]
         Verb::Mcp { state, host, scoped, json, wsp_argv } => wsp_mcp::run(&wsp_mcp::Args { state, host, scoped, json, wsp: wsp_argv }),
+    }
+}
+
+/// A forwarded line read as this binary's own verbs read it.
+#[cfg(feature = "mcp")]
+#[derive(clap::Parser)]
+#[command(no_binary_name = true)]
+struct Forwarded {
+    #[command(subcommand)]
+    verb: Verb,
+}
+
+/// A `wsp mcp` line that names its state, as every config wsp writes does, served from this binary's own tool server
+/// with the wsp this forwarder was handed, so no process of the wsp's stays up for the session. Any other mcp line
+/// (no state named, install, help, a flag the tool server does not take) is the command line's, which resolves the
+/// state and answers in its own words.
+#[cfg(feature = "mcp")]
+fn served_here(line: &[String], wsp: &[String]) -> Option<wsp_mcp::Args> {
+    if line.first().map(String::as_str) != Some("mcp") {
+        return None;
+    }
+    match <Forwarded as clap::Parser>::try_parse_from(line).ok()?.verb {
+        Verb::Mcp { state, host, scoped, json, wsp_argv } if wsp_argv.is_empty() => {
+            Some(wsp_mcp::Args { state, host, scoped, json, wsp: wsp.to_vec() })
+        }
+        _ => None,
     }
 }
 

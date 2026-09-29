@@ -169,6 +169,8 @@ pub struct Host {
     pub unauthorized_close: u16,
     pub stopping_close: u16,
     pub start_wait_ms: u64,
+    /// The words after the wsp that bring a host up, with `{state}` where the state file goes.
+    pub up_args: Vec<String>,
     pub poll_ms: u64,
     pub probe_ms: u64,
     /// What a tool dials in place of the wildcard a host bound.
