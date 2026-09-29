@@ -29,7 +29,7 @@ pub struct Words {
     pub agents_off: String,
     pub agents_one: String,
     pub agents_many: String,
-    pub caps_without_spawn: String,
+    pub agents_nothing: String,
     pub forgot_one: String,
     pub forgot_many: String,
     pub on_delete: HashMap<String, OnDelete>,
@@ -258,27 +258,23 @@ pub async fn thread_count(client: &Client, workspace_id: &str) -> Result<u64, Fa
     Ok(threads.len() as u64)
 }
 
-/// What the agents arguments ask of the host: nothing when no switch was named, and caps named without the switch
-/// refused rather than read as on. The schema has already held the caps to whole numbers at their least.
-pub fn agents_asked(
-    spawn: Option<&str>,
-    max_machines: Option<&Number>,
-    max_depth: Option<&Number>,
-) -> Result<Option<Map<String, Value>>, Failure> {
-    let Some(spawn) = spawn else {
-        return match (max_machines, max_depth) {
-            (None, None) => Ok(None),
-            _ => Err(Failure::usage(words().caps_without_spawn)),
-        };
-    };
-    let mut asked = params([("spawn", Value::from(spawn == "on"))]);
+/// What the agents arguments ask of the host: nothing when none was named, and a cap named alone tightens the switch
+/// as it stands. The schema has already held the caps to whole numbers at their least.
+pub fn agents_asked(spawn: Option<&str>, max_machines: Option<&Number>, max_depth: Option<&Number>) -> Option<Map<String, Value>> {
+    if spawn.is_none() && max_machines.is_none() && max_depth.is_none() {
+        return None;
+    }
+    let mut asked = Map::new();
+    if let Some(spawn) = spawn {
+        asked.insert("spawn".to_owned(), Value::from(spawn == "on"));
+    }
     if let Some(n) = max_machines {
         asked.insert("maxMachines".to_owned(), Value::Number(n.clone()));
     }
     if let Some(n) = max_depth {
         asked.insert("maxDepth".to_owned(), Value::Number(n.clone()));
     }
-    Ok(Some(asked))
+    Some(asked)
 }
 
 /// The switch as one line: off, or on with the machines it may hold.

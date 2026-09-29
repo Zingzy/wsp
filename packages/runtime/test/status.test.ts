@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer, type Server } from "node:http";
-import { CLOUD_CAP_DEFAULT, EventUnion, PLACES_TICKET_REFUSAL, dayStart, THREAD_OPS, computerOffline, machineUnreachableLine, sendRefusal, workspaceState, workspaceWord, type PlaceView, type WorkspaceStatus } from "@wsp/protocol";
+import { CLOUD_CAP_DEFAULT, EventUnion, PLACES_TICKET_REFUSAL, dayStart, THREAD_OPS, machineUnreachableLine, sendRefusal, workspaceState, workspaceWord, type PlaceView, type WorkspaceStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { roadFailed, type ExecResult } from "@wsp/engine";
 import { createRuntime, type Runtime } from "../src/runtime.js";
@@ -1771,7 +1771,7 @@ describe("the reach word a row shows", () => {
     let rows = await poll();
     expect(wordOf(rows["alpha"]!)).toBe("Running");
     expect(wordOf(rows["beta"]!)).toBe("Unreachable");
-    expect(computerOffline(Object.values(rows))).toBe(false);
+    expect(Object.values(rows).some(r => r.reach.offline === true)).toBe(false);
     const asked = calls().state;
     const polled = alpha.hits() + beta.hits();
 
@@ -1783,7 +1783,7 @@ describe("the reach word a row shows", () => {
           expect(rows["beta"]!.reach, road).toMatchObject({ state: "unreachable", offline: true });
           expect(wordOf(rows["alpha"]!)).toBe("Running");
           expect(wordOf(rows["beta"]!)).toBe("Unreachable");
-          expect(computerOffline(Object.values(rows))).toBe(true);
+          expect(Object.values(rows).some(r => r.reach.offline === true)).toBe(true);
         }
       });
     }
@@ -1797,7 +1797,7 @@ describe("the reach word a row shows", () => {
     expect(rows["alpha"]!.reach).toEqual(expect.not.objectContaining({ offline: true }));
     expect(wordOf(rows["alpha"]!)).toBe("Running");
     expect(wordOf(rows["beta"]!)).toBe("Running");
-    expect(computerOffline(Object.values(rows))).toBe(false);
+    expect(Object.values(rows).some(r => r.reach.offline === true)).toBe(false);
 
     // One miss, the computer offline, then a miss: two misses in a row for the machine, so the word turns.
     alpha.mode.answer = false;

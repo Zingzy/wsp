@@ -58,6 +58,7 @@ import {
   NOTIFY_CALLER,
   NOTIFY_ME,
   NOTIFY_WORDS,
+  ANOTHER_AGENT_WORDS,
   PLACE_LINK_NONCE_BYTES,
   SEAL_CLIENT,
   SealOpenReply,
@@ -233,6 +234,7 @@ import {
   threadWithoutIdRefusal,
   threadWord,
   workspaceForFolder,
+  workspaceOfCopy,
   ProjectView,
   addedProjectLine,
   computerNamed,
@@ -1674,18 +1676,15 @@ async function projectsHere(client: HostClient): Promise<Pick<ProjectView, "id" 
   return [...byId.values()];
 }
 
-/** What a --spawn line asks for, the one reading of it: nothing when nobody named a switch, so a workspace made
- * without one is off, and a cap named without --spawn on is refused rather than quietly turning it on. */
-export function agentsAsked(spawn: string | boolean | undefined, maxMachines?: string | number, maxDepth?: string | number): (Partial<WorkspaceAgents> & { spawn: boolean }) | undefined {
+/** What a --spawn line and its caps ask for, the one reading of them: nothing when none was named, so a workspace
+ * made without them takes the default, and a cap named alone tightens the switch as it stands, on or off. */
+export function agentsAsked(spawn: string | boolean | undefined, maxMachines?: string | number, maxDepth?: string | number): Partial<WorkspaceAgents> | undefined {
   const on = typeof spawn === "string" ? onOffWord(spawn) : spawn;
   const machines = maxMachines === undefined ? undefined : countAsked("--max-machines", maxMachines, 0);
   // One level is the least a switch that is on can mean; none of them is what --spawn off already says.
   const depth = maxDepth === undefined ? undefined : countAsked("--max-depth", maxDepth, 1);
-  if (on === undefined) {
-    if (machines === undefined && depth === undefined) return undefined;
-    throw usageRefusal("--max-machines and --max-depth say how far agents may go, so they need --spawn on beside them.", "Add --spawn on, or drop them.");
-  }
-  return { spawn: on, ...(machines !== undefined ? { maxMachines: machines } : {}), ...(depth !== undefined ? { maxDepth: depth } : {}) };
+  if (on === undefined && machines === undefined && depth === undefined) return undefined;
+  return { ...(on !== undefined ? { spawn: on } : {}), ...(machines !== undefined ? { maxMachines: machines } : {}), ...(depth !== undefined ? { maxDepth: depth } : {}) };
 }
 
 function onOffWord(word: string): boolean {
@@ -1902,9 +1901,9 @@ export async function threadTarget(client: HostClient, ref: string | undefined, 
   if (elsewhere) throw usageRefusal(guestNamesWorkspaceLine, "Name the workspace on the line.");
   const root = cwd === undefined ? undefined : gitRootOf(cwd);
   if (root === undefined) throw usageRefusal(noThreadTargetLine(named), "Run wsp workspaces to read the names.");
-  const held = workspaceForFolder(await workspaces(client), await projectsOf(client), root);
-  if (held === null) throw new Error(noWorkspaceForFolderLine(root, named));
-  const { workspace } = held;
+  const listed = await workspaces(client);
+  const workspace = workspaceOfCopy(listed, root) ?? workspaceForFolder(listed, await projectsOf(client), root)?.workspace;
+  if (workspace === undefined) throw new Error(noWorkspaceForFolderLine(root, named));
   return { workspace, opened: (threadId, folder) => threadOpenedLine(threadId, workspace.name, homeShortened(folder, workspace.home)) };
 }
 
@@ -2806,9 +2805,12 @@ const PICK_INPUTS = {
 const SEND_INPUTS = { model: PICK_INPUTS.model, effort: PICK_INPUTS.effort };
 /** The same word on new and fork; the refusal for a size the provider does not offer names the ones it does. */
 const SizeIn = z.string().optional().describe("the machine size as <cpu>x<memGb>, like 2x4; absent takes the image's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered");
-const SpawnIn = z.enum(["on", "off"]).optional().describe("whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is off, which is what every workspace made without it reads as");
-const MaxMachinesIn = z.number().int().min(0).optional().describe("how many machines may stand at once under one root thread when spawn is on; needs spawn on beside it, and defaults to 3");
-const MaxDepthIn = z.number().int().min(1).optional().describe("how many levels deep the tree under a root thread may go when spawn is on; 1 is the root's own children and no further, which is the default, and it needs spawn on beside it");
+const SpawnIn = z.enum(["on", "off"]).optional().describe("whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is on under the default caps, which is what every workspace made without it reads as");
+const MaxMachinesIn = z.number().int().min(0).optional().describe("how many machines may stand at once under one root thread while spawn is on; defaults to 3");
+const MaxDepthIn = z.number().int().min(1).optional().describe("how many levels deep the tree under a root thread may go while spawn is on; 1 is the root's own children and no further, which is the default");
+/** What the agents verb says when it was named nothing to change, on the line and on the tool. */
+export const AGENTS_ASKED_NOTHING_LINE = "wsp workspaces agents takes --spawn on or off, --max-machines or --max-depth.";
+export const agentsToolAskedNothing = (): Error => usageRefusal("workspaces_agents takes spawn, max_machines or max_depth.", "Name at least one; with none of them there is nothing to change.");
 
 const PROJECT_FOLDERS = z.array(z.string()).optional().describe("folders on this computer, absolute, to weigh the histories by: only sessions that ran in one of them or under it count");
 /** The same folders on the write verb, where naming them is also naming a rule input, so it re-decides the ticks. */
@@ -3939,26 +3941,28 @@ export const ALL_VERBS: readonly Verb[] = [
   },
   {
     name: "workspaces agents",
-    usage: "wsp workspaces agents <workspace> --spawn on|off [--max-machines <n>] [--max-depth <n>]",
-    about: "what the agents inside the workspace may ask of this host: off, or threads and machines under the thread they run in, capped",
+    usage: "wsp workspaces agents <workspace> [--spawn on|off] [--max-machines <n>] [--max-depth <n>]",
+    about: "what the agents inside the workspace may ask of this host: threads and machines under the thread they run in, capped, which is the default, or off",
     page: "agent",
     options: { spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp workspaces agents takes one workspace.", usageIs(ctx));
       const asked = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"));
-      if (asked === undefined) throw usageRefusal("wsp workspaces agents takes --spawn on or --spawn off.", usageIs(ctx));
+      if (asked === undefined) throw usageRefusal(AGENTS_ASKED_NOTHING_LINE, usageIs(ctx));
       const workspace = await setAgents(await ctx.client(), ref, asked);
       ctx.out.emit({ workspace }, `${workspace.name}: ${agentsLine(workspace.agents)}`);
       return 0;
     },
     tool: tool({
       description:
-        "Turns the workspace's agents switch on or off and names its caps. With it on, a turn on this workspace is launched with a token into this host scoped to its own thread: that thread may open threads and fork machines under itself, up to maxMachines machines at once under one root thread and maxDepth levels deep, and may touch no other workspace, delete nothing, pause nothing and pair no computer. On this Mac the token is identity, not confinement: a thread there runs as the person and can read the host's own token file. Off, which is what every workspace reads as until this is called, its agents reach this host not at all. A caller that is itself a thread on a machine is refused: what agents may do is the person's to decide.",
-      input: { workspace: WorkspaceIn, spawn: z.enum(["on", "off"]), max_machines: MaxMachinesIn, max_depth: MaxDepthIn },
+        "Turns the workspace's agents switch on or off, names its caps, or both; a cap named alone tightens the switch as it stands. Every turn on a workspace is launched with a token into this host scoped to its own thread. With the switch on, which is what every workspace reads as until it is turned off, that thread may open threads and fork machines under itself, up to maxMachines machines at once under one root thread and maxDepth levels deep, and may touch no other workspace, delete nothing, pause nothing and pair no computer. On this Mac the token is identity, not confinement: a thread there runs as the person and can read the host's own token file. Off, each of those acts is refused in one line. A caller that is itself a thread on a machine is refused: what agents may do is the person's to decide.",
+      input: { workspace: WorkspaceIn, spawn: SpawnIn, max_machines: MaxMachinesIn, max_depth: MaxDepthIn },
       output: { workspace: WorkspaceOut },
       call: async ({ workspace: ref, spawn, max_machines: maxMachines, max_depth: maxDepth }, deps) => {
-        const workspace = await setAgents(await deps.client(), ref, agentsAsked(spawn, maxMachines, maxDepth)!);
+        const asked = agentsAsked(spawn, maxMachines, maxDepth);
+        if (asked === undefined) throw agentsToolAskedNothing();
+        const workspace = await setAgents(await deps.client(), ref, asked);
         return asText(`${workspace.name}: ${agentsLine(workspace.agents)}`, { workspace });
       },
     }),
@@ -4458,7 +4462,7 @@ export const ALL_VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names, else the workspace's own project, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. ${NOTIFY_WORDS}. ${NOTIFY_CALLER}.`,
+      description: `Opens a thread in the workspace under the named agent, on the model, effort and access mode named or the catalog's defaults (a cheaper model for a review, say), in the folder cwd names, else the workspace's own project, and follows its first turn; returns the reply text as soon as it is complete, with the thread id for send. With detach true it returns the thread id the moment the turn is started, without the reply: the road for a turn that runs for minutes or an hour. ${TURN_END_WORDS}. With notify, each turn of the thread sends one line (outcome, duration, cost, and the reply whole into a thread or its last line to the person) to every target named, so a caller need not wait here or poll. ${NOTIFY_WORDS}. ${NOTIFY_CALLER}. ${ANOTHER_AGENT_WORDS}.`,
       input: { workspace: ThreadWorkspaceIn, task: z.string(), agent: AgentIn, ...PICK_INPUTS, fast: FastIn, cwd: CwdIn, notify: NotifyIn, title: TitleIn, files: FilesIn, detach: DetachIn },
       output: TurnOut.shape,
       call: async ({ workspace: ref, task, agent: harness, cwd: folder, notify: tell, title, files, detach, ...input }, deps) => {
@@ -4933,8 +4937,8 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   fast: "run the turn in the agent's fast mode, on a model that offers one; refused naming the model otherwise",
   file: "a file on this computer to send with the message: an image goes as an image, any other file lands in the thread's folder and the message names its path; repeats",
   last: "the final reply alone, the whole message the thread's finished line carries",
-  "max-depth": "how many levels of threads may stand under the root thread; needs --spawn on, and defaults to 1",
-  "max-machines": "how many machines may stand at once under one root thread; needs --spawn on, and defaults to 3",
+  "max-depth": "how many levels of threads may stand under the root thread while spawning is on; defaults to 1",
+  "max-machines": "how many machines may stand at once under one root thread while spawning is on; defaults to 3",
   model: "the model the turn runs on, by the agent's own slug (claude-sonnet-5); the thread's own without it",
   name: "what to call the new workspace; <source>-fork without it",
   "new from": "a project image to start from, by its project's name or its snapshot id, as wsp snapshot returns them",
@@ -4948,7 +4952,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   set: "<id>=on|off flipping one row of the recipe by its id; repeats",
   signin: `<id>=${LOGIN_CHOICES.join("|")} answering one sign-in by catalog id; repeats`,
   size: "the machine size as <cpu>x<memGb>, like 2x4; a size the provider does not offer is refused naming the ones it does",
-  spawn: "on lets the agents there open threads and fork machines of their own, capped; off is what a workspace made without it is",
+  spawn: "on lets the agents there open threads and fork machines of their own, capped, and is what a workspace made without it is; off refuses them",
   "threads wait tail": "print the reply's last line alone, the line a notify sends, rather than the whole reply",
   tick: `the rule that decides every tick: ${RECIPE_TICKS.join(", ")}`,
   timeout: "how long to wait before answering that they are still running",

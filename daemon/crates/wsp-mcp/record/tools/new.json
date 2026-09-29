@@ -27,17 +27,17 @@
             "on",
             "off"
           ],
-          "description": "whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is off, which is what every workspace made without it reads as"
+          "description": "whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is on under the default caps, which is what every workspace made without it reads as"
         },
         "max_machines": {
           "type": "integer",
           "minimum": 0,
-          "description": "how many machines may stand at once under one root thread when spawn is on; needs spawn on beside it, and defaults to 3"
+          "description": "how many machines may stand at once under one root thread while spawn is on; defaults to 3"
         },
         "max_depth": {
           "type": "integer",
           "minimum": 1,
-          "description": "how many levels deep the tree under a root thread may go when spawn is on; 1 is the root's own children and no further, which is the default, and it needs spawn on beside it"
+          "description": "how many levels deep the tree under a root thread may go while spawn is on; 1 is the root's own children and no further, which is the default"
         }
       },
       "required": [
@@ -391,17 +391,17 @@
             "on",
             "off"
           ],
-          "description": "whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is off, which is what every workspace made without it reads as"
+          "description": "whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is on under the default caps, which is what every workspace made without it reads as"
         },
         "max_machines": {
           "type": "integer",
           "minimum": 0,
-          "description": "how many machines may stand at once under one root thread when spawn is on; needs spawn on beside it, and defaults to 3"
+          "description": "how many machines may stand at once under one root thread while spawn is on; defaults to 3"
         },
         "max_depth": {
           "type": "integer",
           "minimum": 1,
-          "description": "how many levels deep the tree under a root thread may go when spawn is on; 1 is the root's own children and no further, which is the default, and it needs spawn on beside it"
+          "description": "how many levels deep the tree under a root thread may go while spawn is on; 1 is the root's own children and no further, which is the default"
         }
       },
       "required": [
