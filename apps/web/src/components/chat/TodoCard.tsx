@@ -5,6 +5,7 @@
 import { memo } from "react";
 import { CircleCheckIcon } from "lucide-react";
 import type { PlanStep } from "@wsp/protocol";
+import { GROUP_LABEL } from "../../lib/microLabel";
 import { cn } from "../../lib/utils";
 
 export const TodoCard = memo(function TodoCard({ steps }: { steps: ReadonlyArray<PlanStep> }) {
@@ -12,7 +13,7 @@ export const TodoCard = memo(function TodoCard({ steps }: { steps: ReadonlyArray
   return (
     <div className="flex flex-col gap-0.5" data-todo-card>
       <div className="flex h-6 items-center gap-3" data-todo-header>
-        <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Steps</span>
+        <span className={cn(GROUP_LABEL, "text-muted-foreground")}>Steps</span>
         <span className="font-mono text-xs tabular-nums text-muted-foreground">
           {done} of {steps.length} done
         </span>

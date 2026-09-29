@@ -2,7 +2,7 @@
 // useDiscoveredLocalServers is the `servers` prop; threadRef, environmentId and configuredUrls dropped.
 import type { PreviewableServer } from "../../adapt/view-model";
 import { relativeLabel, type BrowserHistoryEntry } from "../../browser/recents";
-import { MICRO_LABEL } from "../../lib/microLabel";
+import { GROUP_LABEL } from "../../lib/microLabel";
 import { cn } from "../../lib/utils";
 import { Empty, EmptyTitle } from "../ui/empty";
 
@@ -12,7 +12,7 @@ import { PreviewRecentUrlCard } from "./PreviewRecentUrlCard";
 /** What the tab says while nothing has listened and nothing was opened: one quiet sentence. */
 export const PREVIEW_EMPTY = "No preview yet. Type a port above or run a dev script, and servers listening on this task show up here.";
 
-const GROUP_LABEL = cn(MICRO_LABEL, "px-1 text-muted-foreground");
+const HEADING = cn(GROUP_LABEL, "px-1 text-muted-foreground");
 const ROWS = "-mx-1 flex flex-col gap-0.5";
 
 interface Props {
@@ -39,7 +39,7 @@ export function PreviewEmptyState({ servers, recentEntries, onRemoveRecent, onOp
       <div className="mx-auto flex w-full max-w-xl flex-col gap-6">
         {recents.length > 0 ? (
           <div className="flex flex-col gap-2">
-            <h2 className={GROUP_LABEL}>Recently used</h2>
+            <h2 className={HEADING}>Recently used</h2>
             <div className={ROWS}>
               {recents.map((entry) => (
                 <PreviewRecentUrlCard
@@ -55,7 +55,7 @@ export function PreviewEmptyState({ servers, recentEntries, onRemoveRecent, onOp
         ) : null}
         {servers.length > 0 ? (
           <div className="flex flex-col gap-2">
-            <h2 className={GROUP_LABEL}>Local servers</h2>
+            <h2 className={HEADING}>Local servers</h2>
             <div className={ROWS}>
               {servers.map((server) => (
                 <PreviewLocalServerCard

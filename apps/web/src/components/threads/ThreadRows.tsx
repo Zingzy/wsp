@@ -6,7 +6,7 @@
 // running there are the same list; the caller names the place each row shows.
 import { agentName } from "@wsp/catalog";
 import type { SidebarThreadSnapshot } from "../../adapt/index.js";
-import { MICRO_LABEL } from "../../lib/microLabel.js";
+import { GROUP_LABEL } from "../../lib/microLabel.js";
 import { cn } from "../../lib/utils.js";
 import { HarnessMark } from "../chat/HarnessMark.js";
 import { restingAge } from "../status/restingAge.js";
@@ -24,7 +24,7 @@ export function ThreadRows({ label, rows, className }: { label?: string; rows: R
   return (
     <div data-thread-rows className={cn("flex flex-col", className)}>
       {label === undefined ? null : (
-        <span data-thread-rows-head className={cn(MICRO_LABEL, "flex h-8 items-center px-2 text-muted-foreground")}>
+        <span data-thread-rows-head className={cn(GROUP_LABEL, "flex h-8 items-center px-2 text-muted-foreground")}>
           {label}
         </span>
       )}

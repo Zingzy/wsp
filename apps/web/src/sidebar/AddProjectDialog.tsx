@@ -16,7 +16,7 @@ import { Dialog, DialogPopup, DialogTitle } from "../components/ui/dialog.js";
 import { Kbd } from "../components/ui/kbd.js";
 import { baseName } from "../files/entries.js";
 import { desktopBridge } from "../lib/desktopShell.js";
-import { MICRO_LABEL } from "../lib/microLabel.js";
+import { GROUP_LABEL } from "../lib/microLabel.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { isProviderPlace, placeName, placeTakesWorkspaces } from "../settings/places.js";
@@ -296,12 +296,12 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
         <div className="grid h-[400px] grid-cols-[minmax(0,1fr)_210px] max-sm:grid-cols-1">
           <div className="flex min-h-0 flex-col">
             <div className="flex h-10 shrink-0 items-center px-5 text-muted-foreground">
-              {path !== null ? <span className="truncate font-mono text-xs">{tilde(path.dir, home)}</span> : here ? <span className={cn(MICRO_LABEL, "truncate")}>{ADD_PROJECT_WORDS.reposOn(computer === undefined ? "" : placeName(computer))}</span> : null}
+              {path !== null ? <span className="truncate font-mono text-xs">{tilde(path.dir, home)}</span> : here ? <span className={cn(GROUP_LABEL, "truncate")}>{ADD_PROJECT_WORDS.reposOn(computer === undefined ? "" : placeName(computer))}</span> : null}
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{listBody}</div>
           </div>
           <aside className="flex min-h-0 flex-col overflow-y-auto p-2 pt-0 max-sm:hidden">
-            <span className={cn(MICRO_LABEL, "flex h-10 shrink-0 items-center px-2.5 text-muted-foreground")}>{ADD_PROJECT_WORDS.computers}</span>
+            <span className={cn(GROUP_LABEL, "flex h-10 shrink-0 items-center px-2.5 text-muted-foreground")}>{ADD_PROJECT_WORDS.computers}</span>
             {computers.map((place, at) => {
               const Glyph = glyphOf(place, at);
               return (
@@ -315,7 +315,7 @@ export function AddProjectDialog({ onClose }: { onClose: () => void }) {
               <PlusIcon aria-hidden className="size-4 shrink-0" />
               <span className="truncate">{ADD_PROJECT_WORDS.addComputer}</span>
             </button>
-            <span className={cn(MICRO_LABEL, "mt-4 flex h-10 shrink-0 items-center px-2.5 text-muted-foreground")}>{ADD_PROJECT_WORDS.look}</span>
+            <span className={cn(GROUP_LABEL, "mt-4 flex h-10 shrink-0 items-center px-2.5 text-muted-foreground")}>{ADD_PROJECT_WORDS.look}</span>
             <div className="flex flex-col gap-2 px-2.5" data-k="new-project-look">
               <IconSelect icon={icon} hue={hue} onChange={setIcon} className="w-full" />
               <HueSelect hue={hue} onChange={setHue} className="w-full" />

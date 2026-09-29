@@ -2,6 +2,7 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { TodoCard } from "../src/components/chat/TodoCard.js";
+import { GROUP_LABEL } from "../src/lib/microLabel.js";
 
 const steps = [
   { text: "Read the ticket", state: "done" as const },
@@ -12,12 +13,14 @@ const steps = [
 ];
 
 describe("the step list", () => {
-  it("heads the list in the section caps with the count done, one 14px row per step, and no tone", () => {
+  it("heads the list as a group heading with the count done, one 14px row per step, and no tone", () => {
     const { container } = render(<TodoCard steps={steps} />);
     const header = container.querySelector<HTMLElement>("[data-todo-header]")!;
     expect([...header.children].map(c => c.textContent)).toEqual(["Steps", "2 of 5 done"]);
-    const caps = header.children[0] as HTMLElement;
-    for (const word of ["font-mono", "uppercase", "text-[11px]", "tracking-[0.12em]", "text-muted-foreground"]) expect(caps.className).toContain(word);
+    const head = header.children[0] as HTMLElement;
+    for (const word of GROUP_LABEL.split(" ")) expect(head.className).toContain(word);
+    expect(head.className).toContain("text-muted-foreground");
+    expect(head.className).not.toMatch(/uppercase|font-mono/);
     const rows = [...container.querySelectorAll<HTMLElement>("[data-todo-step]")];
     expect(rows.map(r => [r.textContent, r.dataset["todoStep"]])).toEqual(steps.map(s => [s.text, s.state]));
     for (const row of rows) expect(row.className).toContain("text-sm");
